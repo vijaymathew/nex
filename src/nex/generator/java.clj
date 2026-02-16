@@ -540,6 +540,13 @@
 ;; Main Translation Function
 ;;
 
+(defn generate-import
+  "Generate a Java import statement"
+  [{:keys [qualified-name source]}]
+  ;; Only generate Java imports (those without a 'source' field)
+  (when-not source
+    (str "import " qualified-name ";")))
+
 (defn translate-ast
   "Translate a Nex AST to Java code
 
@@ -548,9 +555,12 @@
                       and class invariants from generated code (useful for production)"
   ([ast] (translate-ast ast {}))
   ([ast opts]
-   (let [classes (:classes ast)
-         java-classes (map #(generate-class % opts) classes)]
-     (str/join "\n\n" java-classes))))
+   (let [imports (:imports ast)
+         classes (:classes ast)
+         java-imports (keep generate-import imports)
+         java-classes (map #(generate-class % opts) classes)
+         parts (concat java-imports [""] java-classes)] ; Empty string adds blank line after imports
+     (str/join "\n" (remove empty? parts)))))
 
 (defn translate
   "Translate Nex source code to Java

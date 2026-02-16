@@ -7,8 +7,12 @@ grammar nexlang;
  */
 
 program
-    : (internStmt | classDecl)+ EOF
+    : (importStmt | internStmt | classDecl)+ EOF
     | methodCall+ EOF
+    ;
+
+importStmt
+    : IMPORT IDENTIFIER ('.' IDENTIFIER)* (FROM STRING)?
     ;
 
 internStmt
@@ -61,7 +65,7 @@ featureSection
 
 visibilityModifier
     : PRIVATE
-    | '[' IDENTIFIER (',' IDENTIFIER)* ']'
+    | '{' IDENTIFIER (',' IDENTIFIER)* '}'
     ;
 
 constructorSection
@@ -299,6 +303,7 @@ END          : 'end';
 LET          : 'let';
 CREATE       : 'create';
 INTERN       : 'intern';
+IMPORT       : 'import';
 IF           : 'if';
 THEN         : 'then';
 ELSE         : 'else';
@@ -400,6 +405,7 @@ CHAR_LITERAL
  */
 STRING
     : '"' (~["\\] | '\\' .)* '"'
+    | '\'' (~['\\] | '\\' .)* '\''
     ;
 
 /*

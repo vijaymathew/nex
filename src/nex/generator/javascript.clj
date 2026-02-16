@@ -550,6 +550,18 @@
 ;; Main Translation Function
 ;;
 
+(defn generate-import
+  "Generate a JavaScript import statement"
+  [{:keys [qualified-name source]}]
+  ;; Only generate JS imports (those with a 'source' field)
+  (when source
+    ;; Remove quotes from source string
+    (let [clean-source (if (and (string? source)
+                               (or (.startsWith source "\"") (.startsWith source "'")))
+                        (subs source 1 (dec (count source)))
+                        source)]
+      (str "import " qualified-name " from '" clean-source "';"))))
+
 (defn translate-ast
   "Translate a Nex AST to JavaScript code
 
@@ -558,9 +570,12 @@
                       and class invariants from generated code (useful for production)"
   ([ast] (translate-ast ast {}))
   ([ast opts]
-   (let [classes (:classes ast)
-         js-classes (map #(generate-class % opts) classes)]
-     (str/join "\n\n" js-classes))))
+   (let [imports (:imports ast)
+         classes (:classes ast)
+         js-imports (keep generate-import imports)
+         js-classes (map #(generate-class % opts) classes)
+         parts (concat js-imports [""] js-classes)] ; Empty string adds blank line after imports
+     (str/join "\n" (remove empty? parts)))))
 
 (defn translate
   "Translate Nex source code to JavaScript

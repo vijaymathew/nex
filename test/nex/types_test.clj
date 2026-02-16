@@ -210,7 +210,7 @@ end"
     (let [code "class Test
   private feature
     secret: Integer
-  [Friend] feature
+  {Friend} feature
     shared: Decimal
 end"
           java-code (java/translate code)]

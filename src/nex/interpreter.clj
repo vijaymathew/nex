@@ -45,7 +45,7 @@
 ;; Runtime Context (holds classes, globals, current environment)
 ;;
 
-(defrecord Context [classes globals current-env output])
+(defrecord Context [classes globals current-env output imports])
 
 (defn make-context
   "Create a new runtime context."
@@ -55,7 +55,8 @@
      (atom {})           ; classes registry
      globals             ; global environment
      globals             ; current environment starts as global
-     (atom []))))        ; output accumulator
+     (atom [])           ; output accumulator
+     (atom []))))        ; imports registry
 
 (defn register-class
   "Register a class definition in the context."
@@ -305,19 +306,26 @@
     intern-name))
 
 (defmethod eval-node :program
-  [ctx {:keys [interns classes]}]
-  ;; First, process all intern statements
+  [ctx {:keys [imports interns classes calls]}]
+  ;; First, store all import statements (for code generation)
+  (doseq [import-node imports]
+    (when (map? import-node)
+      (swap! (:imports ctx) conj import-node)))
+
+  ;; Then, process all intern statements
   (doseq [intern-node interns]
     (when (map? intern-node)
       (process-intern ctx intern-node)))
 
-  ;; Then, register all class definitions
+  ;; Register all class definitions
   (doseq [class-node classes]
     (when (map? class-node)
-      (case (:type class-node)
-        :class (register-class ctx class-node)
-        :call (eval-node ctx class-node) ; Top-level method calls
-        nil)))
+      (register-class ctx class-node)))
+
+  ;; Finally, execute any top-level method calls
+  (doseq [call-node calls]
+    (when (map? call-node)
+      (eval-node ctx call-node)))
 
   ;; Return the context for inspection
   ctx)
@@ -639,11 +647,11 @@
     obj))
 
 (defmethod eval-node :literal
-  [ctx node]
-  ;; Handle string literals that might be passed directly
+  [_ctx node]
+  ;; Handle literal values that might be passed directly
   (cond
     (string? node) node
-    (map? node) (eval-node ctx node)
+    (map? node) (:value node)
     :else node))
 
 (defmethod eval-node :old

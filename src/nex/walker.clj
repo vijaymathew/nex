@@ -66,10 +66,14 @@
      (let [cleaned-nodes (remove string? nodes) ; Filter out "<EOF>" token
            transformed (mapv transform-node cleaned-nodes)
            classes (filter #(= :class (:type %)) transformed)
-           interns (filter #(= :intern (:type %)) transformed)]
+           interns (filter #(= :intern (:type %)) transformed)
+           imports (filter #(= :import (:type %)) transformed)
+           calls (filter #(= :call (:type %)) transformed)]
        {:type :program
+        :imports (vec imports)
         :interns (vec interns)
-        :classes (vec classes)}))
+        :classes (vec classes)
+        :calls (vec calls)}))
 
    :internStmt
    (fn [[_ _intern-kw & tokens]]
@@ -94,6 +98,27 @@
         :path path
         :class-name class-name
         :alias alias}))
+
+   :importStmt
+   (fn [[_ _import-kw & tokens]]
+     ;; Parse tokens: package.name.Class [from 'path']
+     (let [;; Check if "from" keyword exists
+           has-from? (some #(= "from" %) tokens)
+           ;; Split into qualified name and optional source path
+           main-parts (if has-from?
+                       (take-while #(not= "from" %) tokens)
+                       tokens)
+           source (when has-from? (last tokens))
+           ;; Remove dot separators from main parts
+           name-parts (remove #(= "." %) main-parts)
+           ;; For JS imports: first part is the identifier, rest is ignored
+           ;; For Java imports: join all parts with dots
+           qualified-name (if has-from?
+                           (first name-parts)  ; JS: just the identifier
+                           (clojure.string/join "." name-parts))] ; Java: full qualified name
+       {:type :import
+        :qualified-name qualified-name
+        :source source}))
 
    :classDecl
    (fn [[_ _class-kw name & rest]]
@@ -167,10 +192,10 @@
                        (let [modifier first-elem]
                          (if (= "private" (token-text (second modifier)))
                            {:type :private}
-                           ;; Selective visibility: extract class names from (:visibilityModifier "[" "Friend" "," "Helper" "]")
-                           ;; Filter out brackets and commas, keep only identifiers
+                           ;; Selective visibility: extract class names from (:visibilityModifier "{" "Friend" "," "Helper" "}")
+                           ;; Filter out braces and commas, keep only identifiers
                            (let [class-names (filter #(and (string? %)
-                                                          (not (#{"[" "]" ","} %)))
+                                                          (not (#{"{"  "}" ","} %)))
                                                     (rest modifier))]
                              {:type :selective
                               :classes (vec class-names)}))))

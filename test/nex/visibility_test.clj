@@ -38,7 +38,7 @@ end"
 (deftest selective-feature-parsing-test
   (testing "Parse selective visibility feature"
     (let [code "class Test
-  [Friend, Helper] feature
+  {Friend, Helper} feature
     x: Integer
     restricted() do
       print(x)
@@ -63,7 +63,7 @@ end"
       print(internal_balance)
     end
 
-  [Bank, Auditor] feature
+  {Bank, Auditor} feature
     audit_log: String
     get_audit() do
       print(audit_log)
@@ -107,7 +107,7 @@ end"
 (deftest selective-java-generation-test
   (testing "Generate Java code with selective visibility"
     (let [code "class Test
-  [Friend, Helper] feature
+  {Friend, Helper} feature
     x: Integer
     restricted() do
       print(x)
@@ -132,7 +132,7 @@ end"
       print(internal_id)
     end
 
-  [Bank, Auditor] feature
+  {Bank, Auditor} feature
     audit_log: String
     log_transaction() do
       print(audit_log)
@@ -152,10 +152,10 @@ end"
 (deftest multiple-selective-sections-test
   (testing "Multiple selective visibility sections with different classes"
     (let [code "class System
-  [Admin] feature
+  {Admin} feature
     admin_only: Integer
 
-  [User, Guest] feature
+  {User, Guest} feature
     user_visible: String
 end"
           ast (p/ast code)
@@ -188,7 +188,7 @@ end"
 (deftest single-class-selective-test
   (testing "Selective visibility with single class"
     (let [code "class Test
-  [Friend] feature
+  {Friend} feature
     helper() do
       print(42)
     end
