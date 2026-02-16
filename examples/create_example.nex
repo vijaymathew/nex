@@ -1,0 +1,84 @@
+-- Object Creation Example
+-- Demonstrates the use of the 'create' keyword
+
+class Point
+  feature
+    x: Integer
+    y: Integer
+
+    distance_from_origin() do
+      print(x * x + y * y)
+    end
+end
+
+class Account
+  constructors
+    with_balance(initial: Integer)
+      require
+        non_negative: initial >= 0
+      do
+        let balance := initial
+      ensure
+        balance_set: balance = initial
+      end
+
+    with_owner(owner_name: String, initial: Integer)
+      require
+        non_negative: initial >= 0
+        has_name: owner_name /= ""
+      do
+        let owner := owner_name
+        let balance := initial
+      ensure
+        owner_set: owner = owner_name
+        balance_set: balance = initial
+      end
+
+  feature
+    balance: Integer
+    owner: String
+
+    deposit(amount: Integer)
+      require
+        positive: amount > 0
+      do
+        let balance := balance + amount
+      ensure
+        increased: balance >= 0
+      end
+
+    show() do
+      print("Account(owner=")
+      print(owner)
+      print(", balance=")
+      print(balance)
+      print(")")
+    end
+end
+
+class Rectangle
+  constructors
+    make(w, h: Integer)
+      require
+        positive_width: w > 0
+        positive_height: h > 0
+      do
+        let width := w
+        let height := h
+      ensure
+        width_set: width = w
+        height_set: height = h
+      end
+
+  feature
+    width: Integer
+    height: Integer
+
+    area() do
+      print(width * height)
+    end
+
+    perimeter() do
+      print(2 * (width + height))
+    end
+end

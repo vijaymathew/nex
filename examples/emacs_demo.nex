@@ -1,0 +1,103 @@
+-- This file demonstrates nex-mode.el syntax highlighting in Emacs
+-- Open this file in Emacs with nex-mode enabled to see the colors!
+
+-- Keywords are highlighted: class, feature, do, end, if, then, else, etc.
+class DemoClass
+  -- Type names are highlighted: Integer, String, Boolean, Real
+  feature
+    count: Integer
+    name: String
+    active: Boolean
+    rate: Real
+
+  -- Method names are highlighted
+  feature
+    -- Contract keywords: require, ensure, invariant, variant
+    process(value: Integer)
+      require
+        -- Contract labels like 'positive:' are highlighted
+        positive: value > 0
+        not_too_large: value < 1000
+      do
+        -- 'let' and ':=' are highlighted as keywords
+        let temp := value * 2
+
+        -- Control flow keywords: if, then, else
+        if temp > 100 then
+          -- Built-in functions like 'print' are highlighted
+          print("Large value:", temp)
+        else
+          print("Small value:", temp)
+        end
+      ensure
+        -- Old values in contracts
+        value_unchanged: value = old value
+      end
+
+    -- Loop constructs with contracts
+    count_down(from_n: Integer) do
+      from
+        let i := from_n
+      invariant
+        in_range: i >= 0 and i <= from_n
+      variant
+        i
+      until
+        i = 0
+      do
+        print(i)
+        let i := i - 1
+      end
+    end
+
+    -- Boolean operators: and, or, not
+    check_conditions(a, b, c: Integer) do
+      if (a > 0 and b > 0) or not (c < 0) then
+        print("Condition met")
+      end
+    end
+
+  -- Class invariants
+  invariant
+    valid_count: count >= 0
+    valid_rate: rate >= 0 and rate <= 1
+end
+
+-- Inheritance with rename and redefine
+class ExtendedDemo
+  inherit
+    DemoClass
+      rename
+        process as parent_process
+      redefine
+        count_down
+      end
+  feature
+    extra_field: String
+
+  constructors
+    make(initial: Integer) do
+      let count := initial
+      let name := "demo"
+      let active := true
+    end
+
+  feature
+    count_down(from_n: Integer) do
+      print("Extended count down")
+      -- Now counting
+      let i := from_n
+    end
+end
+
+-- Numbers are highlighted: 42, 3.14
+-- Strings are highlighted: "hello", 'world'
+-- Comments like this one are highlighted
+-- Operators are recognized: +, -, *, /, =, /=, <, >, <=, >=, :=
+
+-- Try these in Emacs:
+-- 1. C-c C-z to start REPL
+-- 2. C-c C-c to evaluate this buffer
+-- 3. C-M-a / C-M-e to jump between defuns
+-- 4. M-x imenu to navigate classes and methods
+-- 5. TAB to auto-indent lines

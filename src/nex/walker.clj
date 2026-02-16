@@ -1,235 +1,589 @@
 (ns nex.walker
-  (:require [clj-antlr.core :as antlr]))
+  (:require [clojure.walk :as walk]))
 
 ;;
-;; Utility
+;; Utilities
 ;;
 
-(defn token-text [node]
-  (when (string? node)
-    node))
+(defn token-text
+  "Extract text from a token node (strings pass through)."
+  [node]
+  (when (string? node) node))
 
-(defn numeric? [s]
-  (re-matches #"-?\d+(\.\d+)?([eE][+-]?\d+)?" s))
+;; Forward declaration for mutual recursion
+(declare transform-node)
 
-;;
-;; AST Builders
-;;
-
-(defmulti walk-node first)
-
-;;
-;; Program
-;;
-
-(defmethod walk-node :program [[_ & classes]]
-  {:type :program
-   :classes (map walk-node classes)})
+(defn walk-children
+  "Walk all children of a node, skipping the node type tag."
+  [node]
+  (mapv transform-node (rest node)))
 
 ;;
-;; Class
+;; Reusable transformation functions
 ;;
 
-(defmethod walk-node :classDecl [[_ name body _end]]
-  {:type :class
-   :name (token-text name)
-   :body (map walk-node (rest body))})
+(defn make-binary-op-handler
+  "Creates a handler for binary operators that handles operator precedence.
+   For nodes with fixed operators (like 'and', 'or'), pass the operator string.
+   For nodes with variable operators, pass nil."
+  [fixed-operator]
+  (fn [[_ left & rest]]
+    (if (empty? rest)
+      (transform-node left)
+      (reduce
+       (fn [acc item]
+         (let [[op rhs] (if fixed-operator
+                          [fixed-operator item]
+                          [item (second (drop (.indexOf rest item) rest))])]
+           {:type :binary
+            :operator op
+            :left acc
+            :right (transform-node rhs)}))
+       (transform-node left)
+       (if fixed-operator
+         ;; Filter out the operator keywords (like "and", "or") from rest
+         (remove string? rest)
+         (take-nth 2 rest))))))
+
+(defn make-simple-container-handler
+  "Creates a handler that wraps children in a typed map."
+  [type-keyword children-key]
+  (fn [[_ & children]]
+    {type-keyword (mapv transform-node children)}))
 
 ;;
-;; Feature Section
+;; Node handlers map (data-driven transformations)
 ;;
 
-(defmethod walk-node :featureSection [[_ & members]]
-  {:type :feature-section
-   :members (map walk-node members)})
+(def node-handlers
+  {:program
+   (fn [[_ & nodes]]
+     {:type :program
+      :classes (->> nodes
+                    (remove string?) ; Filter out "<EOF>" token
+                    (mapv transform-node))})
+
+   :classDecl
+   (fn [[_ _class-kw name & rest]]
+     (let [;; Filter out "end" keyword
+           cleaned (remove #(= "end" %) rest)
+           ;; Find different clauses
+           generic-params (first (filter #(and (sequential? %)
+                                              (= :genericParams (first %)))
+                                        cleaned))
+           inherit-clause (first (filter #(and (sequential? %)
+                                               (= :inheritClause (first %)))
+                                        cleaned))
+           class-body (first (filter #(and (sequential? %)
+                                          (= :classBody (first %)))
+                                    cleaned))
+           invariant-clause (first (filter #(and (sequential? %)
+                                                  (= :invariantClause (first %)))
+                                          cleaned))]
+       {:type :class
+        :name (token-text name)
+        :generic-params (when generic-params (transform-node generic-params))
+        :parents (when inherit-clause (transform-node inherit-clause))
+        :body (walk-children class-body)
+        :invariant (when invariant-clause (transform-node invariant-clause))}))
+
+   :inheritClause
+   (fn [[_ _inherit-kw & entries]]
+     (->> entries
+          (remove #(= "," %))
+          (mapv transform-node)))
+
+   :inheritEntry
+   (fn [[_ parent-name & clauses]]
+     (let [;; Filter out "end" keyword
+           cleaned (remove #(= "end" %) clauses)
+           rename-clause (first (filter #(and (sequential? %)
+                                             (= :renameClause (first %)))
+                                       cleaned))
+           redefine-clause (first (filter #(and (sequential? %)
+                                               (= :redefineClause (first %)))
+                                         cleaned))]
+       {:parent (token-text parent-name)
+        :renames (when rename-clause (transform-node rename-clause))
+        :redefines (when redefine-clause (transform-node redefine-clause))}))
+
+   :renameClause
+   (fn [[_ _rename-kw & mappings]]
+     (mapv transform-node mappings))
+
+   :renameMapping
+   (fn [[_ old-name _as new-name]]
+     {:old-name (token-text old-name)
+      :new-name (token-text new-name)})
+
+   :redefineClause
+   (fn [[_ _redefine-kw & method-names]]
+     (mapv token-text method-names))
+
+   :visibilityModifier
+   (fn [node]
+     ;; Return the node as-is, will be processed by featureSection
+     node)
+
+   :featureSection
+   (fn [[_ first-elem & remaining]]
+     ;; Structure: (:featureSection <visibility-modifier>? "feature" member*)
+     ;; Check if first element is a visibility modifier or feature keyword
+     (let [has-visibility? (and (sequential? first-elem)
+                                (= :visibilityModifier (first first-elem)))
+           visibility (when has-visibility?
+                       (let [modifier first-elem]
+                         (if (= "private" (token-text (second modifier)))
+                           {:type :private}
+                           ;; Selective visibility: extract class names from (:visibilityModifier "[" "Friend" "," "Helper" "]")
+                           ;; Filter out brackets and commas, keep only identifiers
+                           (let [class-names (filter #(and (string? %)
+                                                          (not (#{"[" "]" ","} %)))
+                                                    (rest modifier))]
+                             {:type :selective
+                              :classes (vec class-names)}))))
+           ;; If has visibility: remaining = ("feature" member1 member2...)
+           ;; If no visibility: remaining = (member1 member2...), first-elem = "feature"
+           ;; In either case, we need to skip the "feature" keyword
+           members-list (if has-visibility?
+                         (drop 1 remaining)  ; Skip "feature" keyword
+                         remaining)]          ; Already past "feature"
+       {:type :feature-section
+        :visibility (or visibility {:type :public})
+        :members (mapv transform-node members-list)}))
+
+   :featureMember
+   (fn [[_ member]]
+     (transform-node member))
+
+   :constructorSection
+   (fn [[_ _constructors-kw & ctors]]
+     {:type :constructors
+      :constructors (mapv transform-node ctors)})
+
+   :fieldDecl
+   (fn [[_ name _colon type]]
+     {:type :field
+      :name (token-text name)
+      :field-type (transform-node type)})
+
+   :constructorDecl
+   (fn [[_ name & rest]]
+     (let [;; Filter out punctuation tokens
+           cleaned (remove #(#{"(" ")" "do" "end"} %) rest)
+           ;; Separate params, require, ensure, and block
+           params (first (filter #(and (sequential? %)
+                                       (= :paramList (first %)))
+                                cleaned))
+           require-clause (first (filter #(and (sequential? %)
+                                               (= :requireClause (first %)))
+                                        cleaned))
+           ensure-clause (first (filter #(and (sequential? %)
+                                              (= :ensureClause (first %)))
+                                       cleaned))
+           block (first (filter #(and (sequential? %)
+                                      (= :block (first %)))
+                               cleaned))]
+       {:type :constructor
+        :name (token-text name)
+        :params (when params (transform-node params))
+        :require (when require-clause (transform-node require-clause))
+        :body (transform-node block)
+        :ensure (when ensure-clause (transform-node ensure-clause))}))
+
+   :methodDecl
+   (fn [[_ name & rest]]
+     (let [;; Filter out punctuation tokens
+           cleaned (remove #(#{"(" ")" "do" "end"} %) rest)
+           ;; Separate params, require, ensure, and block
+           params (first (filter #(and (sequential? %)
+                                       (= :paramList (first %)))
+                                cleaned))
+           require-clause (first (filter #(and (sequential? %)
+                                               (= :requireClause (first %)))
+                                        cleaned))
+           ensure-clause (first (filter #(and (sequential? %)
+                                              (= :ensureClause (first %)))
+                                       cleaned))
+           block (first (filter #(and (sequential? %)
+                                      (= :block (first %)))
+                               cleaned))]
+       {:type :method
+        :name (token-text name)
+        :params (when params (transform-node params))
+        :require (when require-clause (transform-node require-clause))
+        :body (transform-node block)
+        :ensure (when ensure-clause (transform-node ensure-clause))}))
+
+   :paramList
+   (fn [[_ & params]]
+     (->> params
+          (remove #(= "," %))
+          (mapv transform-node)
+          (apply concat)  ; Flatten since each param can now return multiple entries
+          (vec)))
+
+   :param
+   (fn [[_ & parts]]
+     ;; Parts can be: name1 "," name2 ":" type
+     ;; or just: name ":" type
+     (let [;; Find type node (it's a sequential node)
+           type-node (first (filter sequential? parts))
+           ;; Everything before the colon is identifiers (filter out commas)
+           identifiers (->> parts
+                           (take-while #(not= ":" %))
+                           (filter string?)
+                           (remove #(= "," %)))
+           param-type (transform-node type-node)]
+       ;; Return a vector of parameter maps, one for each identifier
+       (mapv (fn [name]
+               {:name (token-text name)
+                :type param-type})
+             identifiers)))
+
+   :genericParams
+   (fn [[_ _open-bracket & params]]
+     ;; Filter out brackets and commas
+     (let [param-nodes (filter #(and (sequential? %)
+                                    (= :genericParam (first %)))
+                              params)]
+       (mapv transform-node param-nodes)))
+
+   :genericParam
+   (fn [[_ param-name & rest]]
+     ;; Structure: param-name (ARROW constraint)?
+     (let [has-constraint? (some #(= "->" %) rest)
+           constraint (when has-constraint?
+                       ;; Get all elements after the arrow, filter for string identifiers
+                       (let [after-arrow (drop-while #(not= "->" %) rest)]
+                         (first (filter #(and (string? %)
+                                            (not= "->" %))
+                                       after-arrow))))]
+       {:name (token-text param-name)
+        :constraint constraint}))
+
+   :type
+   (fn [[_ type-name & rest]]
+     ;; Check if there are type arguments
+     (let [type-args-node (first (filter #(and (sequential? %)
+                                               (= :typeArgs (first %)))
+                                        rest))]
+       (if type-args-node
+         {:base-type (token-text type-name)
+          :type-args (transform-node type-args-node)}
+         (token-text type-name))))
+
+   :typeArgs
+   (fn [[_ _open-bracket & args]]
+     ;; Filter out brackets and commas, get type nodes
+     (let [type-nodes (filter #(and (sequential? %)
+                                   (= :type (first %)))
+                             args)]
+       (mapv transform-node type-nodes)))
+
+   :block
+   (fn [[_ & statements]]
+     (mapv transform-node statements))
+
+   :statement
+   (fn [[_ stmt]]
+     (transform-node stmt))
+
+   :scopedBlock
+   (fn [[_ _do-kw block _end-kw]]
+     {:type :scoped-block
+      :body (transform-node block)})
+
+   :ifStatement
+   (fn [[_ _if-kw condition _then-kw then-block _else-kw else-block _end-kw]]
+     {:type :if
+      :condition (transform-node condition)
+      :then (transform-node then-block)
+      :else (transform-node else-block)})
+
+   :loopStatement
+   (fn [[_ _from-kw init-block & rest]]
+     (let [;; Filter out keywords
+           cleaned (remove #(#{"until" "do" "end"} %) rest)
+           ;; Find optional clauses
+           invariant-clause (first (filter #(and (sequential? %)
+                                                  (= :invariantClause (first %)))
+                                          cleaned))
+           variant-clause (first (filter #(and (sequential? %)
+                                               (= :variantClause (first %)))
+                                        cleaned))
+           ;; Find until condition and body
+           until-expr (first (filter #(and (sequential? %)
+                                          (= :expression (first %)))
+                                    cleaned))
+           body-block (first (filter #(and (sequential? %)
+                                          (= :block (first %)))
+                                    cleaned))]
+       {:type :loop
+        :init (transform-node init-block)
+        :invariant (when invariant-clause (transform-node invariant-clause))
+        :variant (when variant-clause (transform-node variant-clause))
+        :until (transform-node until-expr)
+        :body (transform-node body-block)}))
+
+   :variantClause
+   (fn [[_ _variant-kw expr]]
+     (transform-node expr))
+
+   :requireClause
+   (fn [[_ _require-kw & assertions]]
+     (mapv transform-node assertions))
+
+   :ensureClause
+   (fn [[_ _ensure-kw & assertions]]
+     (mapv transform-node assertions))
+
+   :invariantClause
+   (fn [[_ _invariant-kw & assertions]]
+     (mapv transform-node assertions))
+
+   :assertion
+   (fn [[_ label _colon expr]]
+     {:label (token-text label)
+      :condition (transform-node expr)})
+
+   :assignment
+   (fn [[_ name _assign expr]]
+     {:type :assign
+      :target (token-text name)
+      :value (transform-node expr)})
+
+   :localVarDecl
+   (fn [[_ _let name & rest]]
+     ;; Handle optional type: "let x: Integer := 10" or "let x := 10"
+     (let [has-type? (and (>= (count rest) 4)
+                          (= ":" (first rest)))
+           ;; Extract and transform type node if present
+           var-type (when has-type?
+                     (let [type-node (second rest)]
+                       (if (sequential? type-node)
+                         ;; Transform the type node (handles both simple and parameterized types)
+                         (transform-node type-node)
+                         type-node)))
+           assign-idx (if has-type? 2 0)
+           expr (nth rest (inc assign-idx))]
+       {:type :let
+        :name (token-text name)
+        :var-type var-type
+        :value (transform-node expr)}))
+
+   :methodCall
+   (fn [[_ & parts]]
+     (let [;; Remove punctuation tokens
+           cleaned (remove #(#{"." "(" ")"} %) parts)
+           ;; Check if there's a target (obj.method vs just method)
+           has-target? (and (>= (count cleaned) 2)
+                           (string? (first cleaned))
+                           (string? (second cleaned)))
+           [target method args] (if has-target?
+                                  [(first cleaned) (second cleaned) (drop 2 cleaned)]
+                                  [nil (first cleaned) (rest cleaned)])]
+       {:type :call
+        :target target
+        :method method
+        :args (->> args
+                   (filter sequential?) ; Only process argument list nodes
+                   (mapcat transform-node))}))
+
+   :argumentList
+   (fn [[_ & args]]
+     (->> args
+          (remove #(= "," %))
+          (mapv transform-node)))
+
+   :expression
+   (fn [[_ expr]]
+     (transform-node expr))
+
+   ;; Binary operators (using our reusable handler)
+   :addition (make-binary-op-handler nil)
+   :multiplication (make-binary-op-handler nil)
+   :comparison (make-binary-op-handler nil)
+   :equality (make-binary-op-handler nil)
+   :logicalAnd (make-binary-op-handler "and")
+   :logicalOr (make-binary-op-handler "or")
+
+   ;; Unary operators
+   :unary
+   (fn [[_ first-child & rest-children]]
+     (if (= first-child "-")
+       ;; This is a unary minus
+       {:type :unary
+        :operator "-"
+        :expr (transform-node (first rest-children))}
+       ;; Just a wrapper node, pass through
+       (transform-node first-child)))
+
+   :unaryMinus
+   (fn [[_ _minus expr]]
+     {:type :unary
+      :operator "-"
+      :expr (transform-node expr)})
+
+   :postfixExpr
+   (fn [[_ postfix]]
+     (transform-node postfix))
+
+   :postfix
+   (fn [[_ primary-node & subscripts]]
+     ;; Structure: primary ('[' expression ']')*
+     (let [base (transform-node primary-node)
+           ;; Filter to get only expression nodes (ignore brackets)
+           indices (filter #(and (sequential? %)
+                                (= :expression (first %)))
+                          subscripts)]
+       (if (empty? indices)
+         ;; No subscripts, just return the base
+         base
+         ;; Build nested subscript operations
+         (reduce (fn [acc idx-node]
+                  {:type :subscript
+                   :target acc
+                   :index (transform-node idx-node)})
+                base
+                indices))))
+
+   :primaryExpr
+   (fn [[_ primary]]
+     (transform-node primary))
+
+   ;; Literals
+   :integerLiteral
+   (fn [[_ value]]
+     {:type :integer
+      :value (Long/parseLong value)})
+
+   :realLiteral
+   (fn [[_ value]]
+     {:type :real
+      :value (Double/parseDouble value)})
+
+   :booleanLiteral
+   (fn [[_ value]]
+     {:type :boolean
+      :value (= value "true")})
+
+   :charLiteral
+   (fn [[_ value]]
+     (let [v (subs value 1)]
+       {:type :char
+        :value (if (re-matches #"\d+" v)
+                 (char (Integer/parseInt v))
+                 (first v))}))
+
+   :arrayLiteral
+   (fn [[_ _open-bracket & elements]]
+     ;; Filter out brackets and commas, get expression nodes
+     (let [expr-nodes (filter #(and (sequential? %)
+                                   (= :expression (first %)))
+                             elements)]
+       {:type :array-literal
+        :elements (mapv transform-node expr-nodes)}))
+
+   :mapLiteral
+   (fn [[_ _open-brace & entries]]
+     ;; Filter out braces and commas, get mapEntry nodes
+     (let [entry-nodes (filter #(and (sequential? %)
+                                    (= :mapEntry (first %)))
+                              entries)]
+       {:type :map-literal
+        :entries (mapv transform-node entry-nodes)}))
+
+   :mapEntry
+   (fn [[_ key _colon value]]
+     {:key (if (string? key)
+            ;; String or identifier key
+            (if (.startsWith key "\"")
+              {:type :string :value (subs key 1 (dec (count key)))}
+              {:type :string :value key})
+            (transform-node key))
+      :value (transform-node value)})
+
+   :literal
+   (fn [[_ lit]]
+     (if (string? lit)
+       ;; Handle string literals directly (they start with ")
+       (if (.startsWith lit "\"")
+         {:type :string
+          :value (subs lit 1 (dec (count lit)))} ; Remove quotes
+         (transform-node lit))
+       (transform-node lit)))
+
+   :primary
+   (fn [[_ & children]]
+     (if (= 1 (count children))
+       (let [child (first children)]
+         (if (and (string? child) (not (.startsWith child "\"")))
+           ;; It's an identifier (not a string literal)
+           {:type :identifier :name child}
+           ;; Otherwise, transform normally
+           (transform-node child)))
+       ;; Handle parenthesized expressions
+       (transform-node (second children))))
+
+   :createExpression
+   (fn [[_ _create-kw class-name & rest]]
+     ;; Structure: "create" ClassName ("." ConstructorName "(" argumentList? ")")?
+     (let [;; Remove punctuation tokens
+           cleaned (remove #(#{"." "(" ")"} %) rest)
+           ;; Check if there's a constructor call
+           has-constructor? (seq cleaned)
+           constructor-name (when has-constructor? (first cleaned))
+           ;; Find argument list if present
+           args-node (first (filter #(and (sequential? %)
+                                          (= :argumentList (first %)))
+                                   rest))]
+       {:type :create
+        :class-name (token-text class-name)
+        :constructor (when has-constructor? constructor-name)
+        :args (if args-node
+               (transform-node args-node)
+               [])}))})
 
 ;;
-;; Constructor Section
+;; Core transformation function (defined after node-handlers)
 ;;
 
-(defmethod walk-node :constructorSection [[_ & ctors]]
-  {:type :constructors
-   :constructors (map walk-node ctors)})
+(defn transform-node
+  "Main tree transformation dispatcher. Uses a data-driven approach
+   with the node-handlers map for transformation."
+  [node]
+  (cond
+    ;; Leaf nodes (strings, numbers, etc.)
+    (not (sequential? node))
+    node
+
+    ;; Empty nodes
+    (empty? node)
+    nil
+
+    ;; Dispatch based on node type
+    :else
+    (let [node-type (first node)
+          handler (get node-handlers node-type)]
+      (if handler
+        (handler node)
+        (throw (ex-info (str "Unhandled node type: " node-type)
+                        {:node-type node-type
+                         :node node}))))))
 
 ;;
-;; Field
+;; Public API
 ;;
 
-(defmethod walk-node :fieldDecl [[_ name _colon type]]
-  {:type :field
-   :name (token-text name)
-   :field-type (token-text type)})
-
-;;
-;; Constructor
-;;
-
-(defmethod walk-node :constructorDecl
-  [[_ name params _do block _end]]
-  {:type :constructor
-   :name (token-text name)
-   :params (when params (walk-node params))
-   :body (walk-node block)})
-
-;;
-;; Method
-;;
-
-(defmethod walk-node :methodDecl
-  [[_ name params _do block _end]]
-  {:type :method
-   :name (token-text name)
-   :params (when params (walk-node params))
-   :body (walk-node block)})
-
-;;
-;; Parameters
-;;
-
-(defmethod walk-node :paramList [[_ & params]]
-  (map walk-node params))
-
-(defmethod walk-node :param [[_ name _colon type]]
-  {:name (token-text name)
-   :type (token-text type)})
-
-;;
-;; Block
-;;
-
-(defmethod walk-node :block [[_ & statements]]
-  (map walk-node statements))
-
-;;
-;; Assignment
-;;
-
-(defmethod walk-node :assignment [[_ name _assign expr]]
-  {:type :assign
-   :target (token-text name)
-   :value (walk-node expr)})
-
-;;
-;; Method Call
-;;
-
-(defmethod walk-node :methodCall [[_ & parts]]
-  (let [parts (remove #(= "." %) parts)
-        [target method _ & args] parts]
-    {:type :call
-     :target (when (and target (not (vector? target)))
-               (token-text target))
-     :method (token-text method)
-     :args (map walk-node args)}))
-
-(defmethod walk-node :argumentList [[_ & parts]]
-  (let [parts (remove #(= "," %) parts)]
-    (map walk-node parts)))
-
-(defmethod walk-node :expression [[_ & parts]]
-  (map walk-node parts))
-
-;;
-;; Expressions (binary ops already structured by grammar)
-;;
-
-(defmethod walk-node :addition [[_ left & rest]]
-  (reduce
-   (fn [acc [op rhs]]
-     {:type :binary
-      :operator op
-      :left acc
-      :right (walk-node rhs)})
-   (walk-node left)
-   (partition 2 rest)))
-
-(defmethod walk-node :multiplication [[_ left & rest]]
-  (reduce
-   (fn [acc [op rhs]]
-     {:type :binary
-      :operator op
-      :left acc
-      :right (walk-node rhs)})
-   (walk-node left)
-   (partition 2 rest)))
-
-(defmethod walk-node :comparison [[_ left & rest]]
-  (reduce
-   (fn [acc [op rhs]]
-     {:type :binary
-      :operator op
-      :left acc
-      :right (walk-node rhs)})
-   (walk-node left)
-   (partition 2 rest)))
-
-(defmethod walk-node :equality [[_ left & rest]]
-  (reduce
-   (fn [acc [op rhs]]
-     {:type :binary
-      :operator op
-      :left acc
-      :right (walk-node rhs)})
-   (walk-node left)
-   (partition 2 rest)))
-
-(defmethod walk-node :logicalAnd [[_ left & rest]]
-  (reduce
-   (fn [acc rhs]
-     {:type :binary
-      :operator "and"
-      :left acc
-      :right (walk-node rhs)})
-   (walk-node left)
-   rest))
-
-(defmethod walk-node :logicalOr [[_ left & rest]]
-  (reduce
-   (fn [acc rhs]
-     {:type :binary
-      :operator "or"
-      :left acc
-      :right (walk-node rhs)})
-   (walk-node left)
-   rest))
-
-;;
-;; Unary minus
-;;
-
-(defmethod walk-node :unaryMinus [[_ _ expr]]
-  {:type :unary
-   :operator "-"
-   :expr (walk-node expr)})
-
-;;
-;; Literals
-;;
-
-(defmethod walk-node :integerLiteral [[_ value]]
-  {:type :integer
-   :value (Long/parseLong value)})
-
-(defmethod walk-node :realLiteral [[_ value]]
-  {:type :real
-   :value (Double/parseDouble value)})
-
-(defmethod walk-node :booleanLiteral [[_ value]]
-  {:type :boolean
-   :value (= value "true")})
-
-(defmethod walk-node :charLiteral [[_ value]]
-  (let [v (subs value 1)]
-    {:type :char
-     :value (if (re-matches #"\d+" v)
-              (char (Integer/parseInt v))
-              (first v))}))
-
-;;
-;; Default
-;;
-
-(defmethod walk-node :default [node]
-  (if (vector? node)
-    (map walk-node (rest node))
-    node))
+(defn walk-node
+  "Transform an ANTLR parse tree into a clean AST.
+   This is the main entry point for tree transformation."
+  [parse-tree]
+  (try
+    (transform-node parse-tree)
+    (catch Exception e
+      (throw (ex-info "Failed to transform parse tree"
+                      {:parse-tree parse-tree
+                       :cause (.getMessage e)}
+                      e)))))

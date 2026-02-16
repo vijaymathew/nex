@@ -1,0 +1,138 @@
+-- Parameterless Method Calls Example
+-- Demonstrates calling methods without parentheses when they have no parameters
+
+class Point
+  private feature
+    x: Integer
+    y: Integer
+
+  constructors
+    make(newx, newy: Integer) do
+      x := newx
+      y := newy
+    end
+
+  feature
+    -- Method declarations always need parentheses
+    show() do
+      print("Point: ")
+      print(x)
+      print(", ")
+      print(y)
+    end
+
+    reset() do
+      x := 0
+      y := 0
+    end
+
+    get_x() do
+      print(x)
+    end
+
+    get_y() do
+      print(y)
+    end
+end
+
+class Counter
+  feature
+    count: Integer
+
+  constructors
+    make() do
+      count := 0
+    end
+
+  feature
+    increment() do
+      count := count + 1
+    end
+
+    decrement() do
+      count := count - 1
+    end
+
+    display() do
+      print("Count: ")
+      print(count)
+    end
+
+    reset() do
+      count := 0
+    end
+end
+
+class Account
+  feature
+    balance: Integer
+    name: String
+
+  constructors
+    make(owner: String, initial: Integer) do
+      name := owner
+      balance := initial
+    end
+
+  feature
+    show_balance() do
+      print("Balance: ")
+      print(balance)
+    end
+
+    show_name() do
+      print("Owner: ")
+      print(name)
+    end
+
+    show_all() do
+      show_name
+      show_balance
+    end
+
+    deposit(amount: Integer)
+      require
+        positive: amount > 0
+      do
+        balance := balance + amount
+      ensure
+        increased: balance > 0
+      end
+
+    withdraw(amount: Integer)
+      require
+        positive: amount > 0
+        sufficient: balance >= amount
+      do
+        balance := balance - amount
+      ensure
+        decreased: balance >= 0
+      end
+end
+
+class Calculator
+  feature
+    result: Integer
+
+  feature
+    clear() do
+      result := 0
+    end
+
+    show() do
+      print("Result: ")
+      print(result)
+    end
+
+    add(x: Integer) do
+      result := result + x
+    end
+
+    subtract(x: Integer) do
+      result := result - x
+    end
+
+    multiply(x: Integer) do
+      result := result * x
+    end
+end

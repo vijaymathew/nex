@@ -1,0 +1,165 @@
+-- Generic Types Example
+-- Demonstrates parameterized classes with and without constraints
+
+-- Simple generic class
+class Box [T]
+  constructors
+    make(initial: T) do
+      let value := initial
+    end
+
+  feature
+    value: T
+
+    get() do
+      print(value)
+    end
+
+    set(new_value: T) do
+      let value := new_value
+    end
+end
+
+-- Generic stack with operations
+class Stack [G]
+  constructors
+    make() do
+      let count := 0
+    end
+
+  feature
+    top: G
+    count: Integer
+    max_size: Integer
+
+    push(item: G)
+      require
+        not_full: count < max_size
+      do
+        let top := item
+        let count := count + 1
+      ensure
+        pushed: count > 0
+      end
+
+    pop()
+      require
+        not_empty: count > 0
+      do
+        let count := count - 1
+      ensure
+        decreased: count >= 0
+      end
+
+    peek() do
+      print(top)
+    end
+
+    is_empty() do
+      if count = 0 then
+        print(true)
+      else
+        print(false)
+      end
+    end
+end
+
+-- Constrained generic - requires Comparable
+class Sorted_List [G -> Comparable]
+  feature
+    item: G
+    count: Integer
+
+    insert(new_item: G)
+      require
+        not_null: new_item /= 0
+      do
+        let item := new_item
+        let count := count + 1
+      ensure
+        inserted: count > 0
+      end
+
+    max() do
+      print(item)
+    end
+end
+
+-- Multiple type parameters
+class Pair [F, S]
+  constructors
+    make(first_val: F, second_val: S) do
+      let first := first_val
+      let second := second_val
+    end
+
+  feature
+    first: F
+    second: S
+
+    get_first() do
+      print(first)
+    end
+
+    get_second() do
+      print(second)
+    end
+
+    swap() do
+      let temp := first
+      let first := second
+    end
+end
+
+-- Multiple parameters with constraints
+class Dictionary [K -> Hashable, V]
+  feature
+    key: K
+    value: V
+    size: Integer
+
+    put(k: K, v: V)
+      require
+        valid_key: k /= 0
+      do
+        let key := k
+        let value := v
+        let size := size + 1
+      ensure
+        stored: size > 0
+      end
+
+    get(k: K) do
+      if key = k then
+        print(value)
+      else
+        print("Not found")
+      end
+    end
+
+    has_key(k: K) do
+      if key = k then
+        print(true)
+      else
+        print(false)
+      end
+    end
+end
+
+-- Hash table with two constrained parameters
+class Hash_Table [K -> Hashable, V -> Comparable]
+  feature
+    key: K
+    value: V
+    count: Integer
+
+    put(k: K, v: V) do
+      let key := k
+      let value := v
+      let count := count + 1
+    end
+
+    get(k: K) do
+      print(value)
+    end
+end

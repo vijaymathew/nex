@@ -1,0 +1,213 @@
+-- Arrays and Maps Example
+-- Demonstrates collection types with subscript access
+
+class NumberList
+  feature
+    numbers: Array [Integer]
+
+  constructors
+    make() do
+      numbers := [1, 2, 3, 4, 5]
+    end
+
+  feature
+    get_first() do
+      print(numbers[0])
+    end
+
+    get_at(index: Integer) do
+      print(numbers[index])
+    end
+
+    show_all() do
+      let i := 0
+      from
+        i := 0
+      until
+        i >= 5
+      do
+        print(numbers[i])
+        i := i + 1
+      end
+    end
+end
+
+class PriceList
+  feature
+    prices: Map [String, Decimal]
+
+  constructors
+    make() do
+      prices := {
+        "apple": 1.50,
+        "banana": 0.75,
+        "orange": 1.25
+      }
+    end
+
+  feature
+    get_price(item: String) do
+      print(prices[item])
+    end
+
+    show_all() do
+      print("Apple: ")
+      print(prices["apple"])
+      print("Banana: ")
+      print(prices["banana"])
+      print("Orange: ")
+      print(prices["orange"])
+    end
+end
+
+class Store
+  feature
+    items: Array [String]
+    prices: Map [String, Decimal]
+    inventory: Map [String, Integer]
+
+  constructors
+    make() do
+      items := ["apple", "banana", "orange"]
+      prices := {"apple": 1.50, "banana": 0.75, "orange": 1.25}
+      inventory := {"apple": 10, "banana": 15, "orange": 8}
+    end
+
+  feature
+    show_inventory() do
+      let i := 0
+      from
+        i := 0
+      until
+        i >= 3
+      do
+        let item := items[i]
+        let price := prices[item]
+        let count := inventory[item]
+        print(item)
+        print(": $")
+        print(price)
+        print(" (")
+        print(count)
+        print(" in stock)")
+        i := i + 1
+      end
+    end
+
+    get_total_value() do
+      let total := 0.0
+      let i := 0
+      from
+        i := 0
+      until
+        i >= 3
+      do
+        let item := items[i]
+        let price := prices[item]
+        let count := inventory[item]
+        total := total + (price * count)
+        i := i + 1
+      end
+      print("Total inventory value: $")
+      print(total)
+    end
+end
+
+class Grid
+  feature
+    matrix: Array [Array [Integer]]
+
+  constructors
+    make() do
+      matrix := [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9]
+      ]
+    end
+
+  feature
+    get_cell(row, col: Integer) do
+      print(matrix[row][col])
+    end
+
+    show_row(row: Integer) do
+      print(matrix[row][0])
+      print(matrix[row][1])
+      print(matrix[row][2])
+    end
+end
+
+class StudentGrades
+  feature
+    grades: Map [String, Array [Integer]]
+
+  constructors
+    make() do
+      grades := {
+        "Alice": [95, 87, 92],
+        "Bob": [78, 85, 90],
+        "Charlie": [88, 91, 85]
+      }
+    end
+
+  feature
+    get_grade(student: String, test: Integer) do
+      print(grades[student][test])
+    end
+
+    show_student(student: String) do
+      let tests := grades[student]
+      print(student)
+      print(": ")
+      print(tests[0])
+      print(", ")
+      print(tests[1])
+      print(", ")
+      print(tests[2])
+    end
+end
+
+class Categories
+  feature
+    items: Map [String, Array [String]]
+
+  constructors
+    make() do
+      items := {
+        "fruits": ["apple", "banana", "orange"],
+        "vegetables": ["carrot", "broccoli", "spinach"],
+        "grains": ["rice", "wheat", "oats"]
+      }
+    end
+
+  feature
+    get_category(name: String) do
+      let category := items[name]
+      print(category)
+    end
+
+    get_item(category: String, index: Integer) do
+      print(items[category][index])
+    end
+
+    show_category(name: String) do
+      let category := items[name]
+      let i := 0
+      print(name)
+      print(": ")
+      from
+        i := 0
+      until
+        i >= 3
+      do
+        print(category[i])
+        if i < 2 then
+          print(", ")
+        else
+          print("")
+        end
+        i := i + 1
+      end
+    end
+end

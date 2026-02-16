@@ -1,0 +1,5 @@
+#!/bin/bash
+# Nex REPL launcher script
+
+cd "$(dirname "$0")"
+exec clojure -M:repl

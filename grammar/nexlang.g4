@@ -12,17 +12,52 @@ program
     ;
 
 classDecl
-    : CLASS IDENTIFIER
+    : CLASS IDENTIFIER genericParams?
+      inheritClause?
       classBody
+      invariantClause?
       END
+    ;
+
+genericParams
+    : '[' genericParam (',' genericParam)* ']'
+    ;
+
+genericParam
+    : IDENTIFIER (ARROW IDENTIFIER)?
     ;
 
 classBody
     : (featureSection | constructorSection)*
     ;
 
+inheritClause
+    : INHERIT inheritEntry (',' inheritEntry)*
+    ;
+
+inheritEntry
+    : IDENTIFIER renameClause? redefineClause? END
+    ;
+
+renameClause
+    : RENAME renameMapping+
+    ;
+
+renameMapping
+    : IDENTIFIER AS IDENTIFIER
+    ;
+
+redefineClause
+    : REDEFINE IDENTIFIER+
+    ;
+
 featureSection
-    : FEATURE featureMember+
+    : visibilityModifier? FEATURE featureMember+
+    ;
+
+visibilityModifier
+    : PRIVATE
+    | '[' IDENTIFIER (',' IDENTIFIER)* ']'
     ;
 
 constructorSection
@@ -39,11 +74,11 @@ fieldDecl
     ;
 
 constructorDecl
-    : IDENTIFIER '(' paramList? ')' DO block END
+    : IDENTIFIER '(' paramList? ')' requireClause? DO block ensureClause? END
     ;
 
 methodDecl
-    : IDENTIFIER '(' paramList? ')' DO block END
+    : IDENTIFIER '(' paramList? ')' requireClause? DO block ensureClause? END
     ;
 
 paramList
@@ -51,12 +86,38 @@ paramList
     ;
 
 param
-    : IDENTIFIER ':' type
+    : IDENTIFIER (',' IDENTIFIER)* ':' type
     ;
 
 type
-    : IDENTIFIER
-    | BOOLEAN
+    : INTEGER_TYPE
+    | INTEGER64_TYPE
+    | REAL_TYPE
+    | DECIMAL_TYPE
+    | CHAR_TYPE
+    | BOOLEAN_TYPE
+    | STRING_TYPE
+    | IDENTIFIER typeArgs?
+    ;
+
+typeArgs
+    : '[' type (',' type)* ']'
+    ;
+
+requireClause
+    : REQUIRE assertion+
+    ;
+
+ensureClause
+    : ENSURE assertion+
+    ;
+
+assertion
+    : IDENTIFIER ':' expression
+    ;
+
+invariantClause
+    : INVARIANT assertion+
     ;
 
 /*
@@ -72,14 +133,38 @@ block
 statement
     : assignment
     | methodCall
+    | localVarDecl
+    | scopedBlock
+    | ifStatement
+    | loopStatement
+    ;
+
+scopedBlock
+    : DO block END
+    ;
+
+ifStatement
+    : IF expression THEN block ELSE block END
+    ;
+
+loopStatement
+    : FROM block invariantClause? variantClause? UNTIL expression DO block END
+    ;
+
+variantClause
+    : VARIANT expression
     ;
 
 assignment
     : IDENTIFIER ASSIGN expression
     ;
 
+localVarDecl
+    : LET IDENTIFIER (':' type)? ASSIGN expression
+    ;
+
 methodCall
-    : (IDENTIFIER '.')? IDENTIFIER '(' argumentList? ')'
+    : (IDENTIFIER '.')? IDENTIFIER ('(' argumentList? ')')?
     ;
 
 argumentList
@@ -122,14 +207,23 @@ multiplication
 
 unary
     : MINUS unary          # unaryMinus
-    | primary              # primaryExpr
+    | postfix              # postfixExpr
+    ;
+
+postfix
+    : primary ('[' expression ']')*
     ;
 
 primary
     : literal
+    | createExpression
     | IDENTIFIER
     | methodCall
     | '(' expression ')'
+    ;
+
+createExpression
+    : CREATE IDENTIFIER ('.' IDENTIFIER '(' argumentList? ')')?
     ;
 
 literal
@@ -185,18 +279,42 @@ mapEntry
 
 CLASS        : 'class';
 FEATURE      : 'feature';
+PRIVATE      : 'private';
 CONSTRUCTORS : 'constructors';
+INHERIT      : 'inherit';
+RENAME       : 'rename';
+REDEFINE     : 'redefine';
+AS           : 'as';
 DO           : 'do';
 END          : 'end';
+LET          : 'let';
+CREATE       : 'create';
+IF           : 'if';
+THEN         : 'then';
+ELSE         : 'else';
+FROM         : 'from';
+UNTIL        : 'until';
+VARIANT      : 'variant';
+REQUIRE      : 'require';
+ENSURE       : 'ensure';
+INVARIANT    : 'invariant';
 AND          : 'and';
 OR           : 'or';
 
-BOOLEAN      : 'Boolean';
+// Type keywords
+INTEGER_TYPE   : 'Integer';
+INTEGER64_TYPE : 'Integer64';
+REAL_TYPE      : 'Real';
+DECIMAL_TYPE   : 'Decimal';
+CHAR_TYPE      : 'Char';
+BOOLEAN_TYPE   : 'Boolean';
+STRING_TYPE    : 'String';
 
 TRUE         : 'true';
 FALSE        : 'false';
 
 ASSIGN       : ':=';
+ARROW        : '->';
 
 PLUS         : '+';
 MINUS        : '-';
