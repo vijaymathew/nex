@@ -198,7 +198,11 @@
   "Apply a binary operator to two values."
   [op left right]
   (case op
-    "+" (+ left right)
+    "+" (if (or (string? left) (string? right))
+          ;; String concatenation
+          (str left right)
+          ;; Numeric addition
+          (+ left right))
     "-" (- left right)
     "*" (* left right)
     "/" (if (zero? right)
@@ -222,6 +226,31 @@
     "-" (- value)
     (throw (ex-info (str "Unknown unary operator: " op)
                     {:operator op}))))
+
+(defn get-default-field-value
+  "Get default value for a field type"
+  [field-type]
+  (cond
+    ;; Handle parameterized types
+    (map? field-type)
+    (case (:base-type field-type)
+      "Array" []
+      "Map" {}
+      nil)
+
+    ;; Handle simple types
+    (string? field-type)
+    (case field-type
+      "Integer" 0
+      "Integer64" 0
+      "Real" 0.0
+      "Decimal" 0.0
+      "Char" \0
+      "Boolean" false
+      "String" ""
+      nil)
+
+    :else nil))
 
 ;;
 ;; Node Evaluators
@@ -278,12 +307,21 @@
                       ;; Bind fields as local variables
                       _ (doseq [[field-name field-val] (:fields obj)]
                           (env-define method-env (name field-name) field-val))
+                      ;; Initialize implicit 'result' variable
+                      return-type (:return-type method-def)
+                      default-result (if return-type
+                                      (get-default-field-value return-type)
+                                      nil)
+                      _ (env-define method-env "result" default-result)
                       new-ctx (assoc ctx :current-env method-env)
                       ;; Check pre-conditions
                       _ (when-let [require-assertions (:require method-def)]
                           (check-assertions new-ctx require-assertions "Precondition"))
                       ;; Execute method body
-                      result (last (map #(eval-node new-ctx %) (:body method-def)))
+                      _ (doseq [stmt (:body method-def)]
+                          (eval-node new-ctx stmt))
+                      ;; Get the final value of 'result'
+                      result (env-lookup method-env "result")
                       ;; Check post-conditions
                       _ (when-let [ensure-assertions (:ensure method-def)]
                           (check-assertions new-ctx ensure-assertions "Postcondition"))
@@ -516,8 +554,13 @@
         ;; Create the final object
         obj (make-object class-name final-field-map)]
 
-    ;; Check class invariant
-    (check-class-invariant ctx class-def)
+    ;; Check class invariant with object fields in scope
+    (when-let [invariant (:invariant class-def)]
+      (let [inv-env (make-env (:current-env ctx))
+            _ (doseq [[field-name field-val] final-field-map]
+                (env-define inv-env (name field-name) field-val))
+            inv-ctx (assoc ctx :current-env inv-env)]
+        (check-class-invariant inv-ctx class-def)))
 
     ;; Return the object
     obj))

@@ -78,7 +78,7 @@ constructorDecl
     ;
 
 methodDecl
-    : IDENTIFIER '(' paramList? ')' requireClause? DO block ensureClause? END
+    : IDENTIFIER ('(' paramList? ')')? (':' type)? requireClause? DO block ensureClause? END
     ;
 
 paramList

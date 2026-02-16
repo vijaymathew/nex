@@ -160,5 +160,5 @@ end"
             ctx-with-env (assoc ctx :current-env method-env)]
         (doseq [stmt (:body method-def)]
           (interp/eval-node ctx-with-env stmt))
-        (is (= ["50"] @(:output ctx-with-env)))))))
+        (is (= ["60"] @(:output ctx-with-env)))))))
 

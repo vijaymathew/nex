@@ -327,15 +327,24 @@
         vis (if visibility
              (visibility-to-java visibility)
              "public")
+        ;; Initialize result variable if method has return type
+        result-init (when return-type
+                     [(indent (+ level 1)
+                             (str java-return " result = " (default-value return-type) ";"))])
         preconditions (generate-assertions (+ level 1) require "Precondition" opts)
         statements (map #(generate-statement (+ level 1) %) body)
-        postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)]
+        postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)
+        ;; Add return statement if method has return type
+        return-stmt (when return-type
+                     [(indent (+ level 1) "return result;")])]
     (str/join "\n"
               (concat
                [(indent level (str vis " " java-return " " name "(" params-code ") {"))]
+               result-init
                preconditions
                statements
                postconditions
+               return-stmt
                [(indent level "}")]))))
 
 ;;

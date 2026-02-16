@@ -302,9 +302,16 @@
         method-name (if visibility
                      (visibility-to-js visibility name)
                      name)
+        ;; Initialize result variable if method has return type
+        result-init (when return-type
+                     [(indent (+ level 1)
+                             (str "let result = " (default-value return-type) ";"))])
         preconditions (generate-assertions (+ level 1) require "Precondition" opts)
         statements (map #(generate-statement (+ level 1) %) body)
         postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)
+        ;; Add return statement if method has return type
+        return-stmt (when return-type
+                     [(indent (+ level 1) "return result;")])
         ;; Generate JSDoc comment for type information
         jsdoc (when (or (seq params) return-type)
                 (let [param-docs (map (fn [{:keys [name type]}]
@@ -322,9 +329,11 @@
               (concat
                (when jsdoc [jsdoc])
                [(indent level (str method-name "(" params-code ") {"))]
+               result-init
                preconditions
                statements
                postconditions
+               return-stmt
                [(indent level "}")]))))
 
 ;;

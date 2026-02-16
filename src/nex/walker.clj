@@ -30,20 +30,25 @@
   (fn [[_ left & rest]]
     (if (empty? rest)
       (transform-node left)
-      (reduce
-       (fn [acc item]
-         (let [[op rhs] (if fixed-operator
-                          [fixed-operator item]
-                          [item (second (drop (.indexOf rest item) rest))])]
+      (if fixed-operator
+        ;; Fixed operator: rest is [operand1 operand2 ...], operator is constant
+        (reduce
+         (fn [acc operand]
+           {:type :binary
+            :operator fixed-operator
+            :left acc
+            :right (transform-node operand)})
+         (transform-node left)
+         (remove string? rest))  ; Filter out operator keywords
+        ;; Variable operator: rest is [op1 operand1 op2 operand2 ...]
+        (reduce
+         (fn [acc [op operand]]
            {:type :binary
             :operator op
             :left acc
-            :right (transform-node rhs)}))
-       (transform-node left)
-       (if fixed-operator
-         ;; Filter out the operator keywords (like "and", "or") from rest
-         (remove string? rest)
-         (take-nth 2 rest))))))
+            :right (transform-node operand)})
+         (transform-node left)
+         (partition 2 rest))))))
 
 (defn make-simple-container-handler
   "Creates a handler that wraps children in a typed map."
@@ -194,11 +199,14 @@
    :methodDecl
    (fn [[_ name & rest]]
      (let [;; Filter out punctuation tokens
-           cleaned (remove #(#{"(" ")" "do" "end"} %) rest)
-           ;; Separate params, require, ensure, and block
+           cleaned (remove #(#{"(" ")" "do" "end" ":"} %) rest)
+           ;; Separate params, return type, require, ensure, and block
            params (first (filter #(and (sequential? %)
                                        (= :paramList (first %)))
                                 cleaned))
+           return-type (first (filter #(and (sequential? %)
+                                           (= :type (first %)))
+                                     cleaned))
            require-clause (first (filter #(and (sequential? %)
                                                (= :requireClause (first %)))
                                         cleaned))
@@ -211,6 +219,7 @@
        {:type :method
         :name (token-text name)
         :params (when params (transform-node params))
+        :return-type (when return-type (transform-node return-type))
         :require (when require-clause (transform-node require-clause))
         :body (transform-node block)
         :ensure (when ensure-clause (transform-node ensure-clause))}))
