@@ -264,9 +264,54 @@
       (map? node) (:type node)
       :else :literal)))
 
+(defn find-intern-file
+  "Search for an intern file in the specified locations.
+   Returns the absolute path if found, otherwise throws an exception."
+  [path class-name]
+  (let [filename (str class-name ".nex")
+        ;; Search locations in order
+        locations [(str "./" filename)                                          ; 1. Current directory
+                   (str "./libs/" path "/src/" filename)                        ; 2. ./libs/path/src/
+                   (str (System/getProperty "user.home") "/.nex/deps/"
+                        path "/src/" filename)]                                 ; 3. ~/.nex/deps/path/src/
+        found (first (filter #(-> % clojure.java.io/file .exists) locations))]
+    (if found
+      found
+      (throw (ex-info (str "Cannot find intern file for " path "/" class-name)
+                     {:path path
+                      :class-name class-name
+                      :searched-locations locations})))))
+
+(defn process-intern
+  "Load and interpret an external file, then register the class with the given alias."
+  [ctx {:keys [path class-name alias]}]
+  (let [file-path (find-intern-file path class-name)
+        ;; Load and parse the external file
+        file-content (slurp file-path)
+        file-ast ((requiring-resolve 'nex.parser/ast) file-content)
+        ;; Interpret the file to register its classes
+        _ (eval-node ctx file-ast)
+        ;; Look up the class that was registered
+        registered-class (get @(:classes ctx) class-name)
+        ;; Determine the name to use (alias or original)
+        intern-name (or alias class-name)]
+    (when-not registered-class
+      (throw (ex-info (str "Class " class-name " not found in file " file-path)
+                     {:file file-path :class-name class-name})))
+    ;; Register the class under the new name (if alias is provided)
+    (when alias
+      (swap! (:classes ctx) assoc alias registered-class))
+    ;; Return the class name that was registered
+    intern-name))
+
 (defmethod eval-node :program
-  [ctx {:keys [classes]}]
-  ;; Register all class definitions
+  [ctx {:keys [interns classes]}]
+  ;; First, process all intern statements
+  (doseq [intern-node interns]
+    (when (map? intern-node)
+      (process-intern ctx intern-node)))
+
+  ;; Then, register all class definitions
   (doseq [class-node classes]
     (when (map? class-node)
       (case (:type class-node)

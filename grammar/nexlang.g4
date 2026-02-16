@@ -7,8 +7,12 @@ grammar nexlang;
  */
 
 program
-    : classDecl+ EOF
+    : (internStmt | classDecl)+ EOF
     | methodCall+ EOF
+    ;
+
+internStmt
+    : INTERN IDENTIFIER ('/' IDENTIFIER)* (AS IDENTIFIER)?
     ;
 
 classDecl
@@ -294,6 +298,7 @@ DO           : 'do';
 END          : 'end';
 LET          : 'let';
 CREATE       : 'create';
+INTERN       : 'intern';
 IF           : 'if';
 THEN         : 'then';
 ELSE         : 'else';

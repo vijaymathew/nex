@@ -63,10 +63,37 @@
 (def node-handlers
   {:program
    (fn [[_ & nodes]]
-     {:type :program
-      :classes (->> nodes
-                    (remove string?) ; Filter out "<EOF>" token
-                    (mapv transform-node))})
+     (let [cleaned-nodes (remove string? nodes) ; Filter out "<EOF>" token
+           transformed (mapv transform-node cleaned-nodes)
+           classes (filter #(= :class (:type %)) transformed)
+           interns (filter #(= :intern (:type %)) transformed)]
+       {:type :program
+        :interns (vec interns)
+        :classes (vec classes)}))
+
+   :internStmt
+   (fn [[_ _intern-kw & tokens]]
+     ;; Parse tokens: path1 / path2 / ClassName [as Alias]
+     (let [;; Remove slash separators
+           parts (remove #(= "/" %) tokens)
+           ;; Check if "as" keyword exists
+           has-alias? (some #(= "as" %) parts)
+           ;; Split into path/class-name and optional alias
+           main-parts (if has-alias?
+                       (take-while #(not= "as" %) parts)
+                       parts)
+           alias (when has-alias?
+                  (last parts))
+           ;; Last part of main-parts is the class name
+           class-name (last main-parts)
+           ;; Everything before class name is the path
+           path-parts (butlast main-parts)
+           path (when (seq path-parts)
+                 (clojure.string/join "/" path-parts))]
+       {:type :intern
+        :path path
+        :class-name class-name
+        :alias alias}))
 
    :classDecl
    (fn [[_ _class-kw name & rest]]
