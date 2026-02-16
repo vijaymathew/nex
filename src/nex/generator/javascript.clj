@@ -1,7 +1,8 @@
 (ns nex.generator.javascript
   "Translates Nex (Eiffel-based) code to JavaScript (ES6+)"
   (:require [nex.parser :as p]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clojure.set :as set]))
 
 ;;
 ;; Type Mapping
@@ -128,13 +129,24 @@
              operator)]
     (str op operand-code)))
 
+(defn map-builtin-function
+  "Map Nex built-in functions to JavaScript equivalents"
+  [method args-code]
+  (case method
+    "print" (str "console.log(" args-code ")")
+    "println" (str "console.log(" args-code ")")
+    ;; Default: use as-is
+    (str method "(" args-code ")")))
+
 (defn generate-call-expr
   "Generate JavaScript code for method call"
   [{:keys [target method args]}]
   (let [args-code (str/join ", " (map generate-expression args))]
     (if target
+      ;; Object method call: always use target.method(args)
       (str target "." method "(" args-code ")")
-      (str method "(" args-code ")"))))
+      ;; Global function call: map builtins
+      (map-builtin-function method args-code))))
 
 (defn generate-create-expr
   "Generate JavaScript code for create expression"
@@ -187,6 +199,7 @@
     :subscript (generate-subscript-expr expr)
     :array-literal (generate-array-literal (:elements expr))
     :map-literal (generate-map-literal (:entries expr))
+    :old (str "old_" (generate-expression (:expr expr)))
     (str "/* Unknown expression: " (:type expr) " */")))
 
 ;;
@@ -201,39 +214,58 @@
   (str target " = " (generate-expression value) ";"))
 
 (defn generate-let
-  "Generate JavaScript code for let (local variable declaration)"
-  [{:keys [name var-type value]}]
-  ;; Always use 'let' in JavaScript (no type annotations in vanilla JS)
-  (str "let " name " = " (generate-expression value) ";"))
+  "Generate JavaScript code for let (local variable declaration).
+   If var-names is provided and contains the variable name, generates assignment instead."
+  ([let-node] (generate-let let-node #{}))
+  ([{:keys [name var-type value]} var-names]
+   (if (contains? var-names name)
+     ;; Variable already declared in outer scope - generate assignment
+     (str name " = " (generate-expression value) ";")
+     ;; New variable - generate declaration
+     (str "let " name " = " (generate-expression value) ";"))))
 
 (defn generate-if
   "Generate JavaScript code for if-then-else"
-  [level {:keys [condition then else]}]
-  (let [cond-code (generate-expression condition)
-        then-code (map #(generate-statement (+ level 1) %) then)
-        else-code (map #(generate-statement (+ level 1) %) else)]
-    (str/join "\n"
-              [(indent level (str "if (" cond-code ") {"))
-               (str/join "\n" then-code)
-               (indent level "} else {")
-               (str/join "\n" else-code)
-               (indent level "}")])))
+  ([level node] (generate-if level node #{}))
+  ([level {:keys [condition then else]} var-names]
+   (let [cond-code (generate-expression condition)
+         then-code (map #(generate-statement (+ level 1) % var-names) then)
+         else-code (map #(generate-statement (+ level 1) % var-names) else)]
+     (str/join "\n"
+               [(indent level (str "if (" cond-code ") {"))
+                (str/join "\n" then-code)
+                (indent level "} else {")
+                (str/join "\n" else-code)
+                (indent level "}")]))))
 
 (defn generate-scoped-block
   "Generate JavaScript code for scoped block"
-  [level {:keys [body]}]
-  (let [statements (map #(generate-statement (+ level 1) %) body)]
-    (str/join "\n"
-              [(indent level "{")
-               (str/join "\n" statements)
-               (indent level "}")])))
+  ([level node] (generate-scoped-block level node #{}))
+  ([level {:keys [body]} var-names]
+   (let [statements (map #(generate-statement (+ level 1) % var-names) body)]
+     (str/join "\n"
+               [(indent level "{")
+                (str/join "\n" statements)
+                (indent level "}")]))))
+
+(defn extract-var-names-js
+  "Extract variable names from let statements"
+  [stmts]
+  (set (keep (fn [stmt]
+               (when (= (:type stmt) :let)
+                 (:name stmt)))
+             stmts)))
 
 (defn generate-loop
   "Generate JavaScript code for from-until-do loop"
   [level {:keys [init invariant variant until body]}]
-  (let [init-stmts (map #(generate-statement level %) init)
+  (let [;; Extract variable names declared in init
+        loop-vars (extract-var-names-js init)
+        ;; Generate init statements
+        init-stmts (map #(generate-statement level % #{}) init)
         cond-code (str "!(" (generate-expression until) ")")
-        body-stmts (map #(generate-statement (+ level 1) %) body)
+        ;; Generate body statements with loop variables in scope
+        body-stmts (map #(generate-statement (+ level 1) % loop-vars) body)
         invariant-comment (when invariant
                            (indent (+ level 1)
                                    (str "// Invariant: "
@@ -253,15 +285,16 @@
 
 (defn generate-statement
   "Generate JavaScript code for a statement"
-  [level stmt]
-  (case (:type stmt)
-    :assign (indent level (generate-assignment stmt))
-    :call (indent level (str (generate-call-expr stmt) ";"))
-    :let (indent level (generate-let stmt))
-    :if (generate-if level stmt)
-    :scoped-block (generate-scoped-block level stmt)
-    :loop (generate-loop level stmt)
-    (indent level (str "/* Unknown statement: " (:type stmt) " */"))))
+  ([level stmt] (generate-statement level stmt #{}))
+  ([level stmt var-names]
+   (case (:type stmt)
+     :assign (indent level (generate-assignment stmt))
+     :call (indent level (str (generate-call-expr stmt) ";"))
+     :let (indent level (generate-let stmt var-names))
+     :if (generate-if level stmt var-names)
+     :scoped-block (generate-scoped-block level stmt var-names)
+     :loop (generate-loop level stmt)
+     (indent level (str "/* Unknown statement: " (:type stmt) " */")))))
 
 ;;
 ;; Contract Generation
@@ -294,6 +327,30 @@
 ;; Method Generation
 ;;
 
+(defn extract-old-references
+  "Extract field names referenced with 'old' in assertions"
+  [assertions]
+  (let [extract-from-expr (fn extract [expr]
+                            (cond
+                              (nil? expr) #{}
+                              (map? expr)
+                              (case (:type expr)
+                                :old (if (and (map? (:expr expr))
+                                            (= :identifier (:type (:expr expr))))
+                                      #{(:name (:expr expr))}
+                                      #{})
+                                :binary (set/union (extract (:left expr))
+                                                  (extract (:right expr)))
+                                :unary (extract (:operand expr))
+                                :call (reduce set/union #{}
+                                            (map extract (:args expr)))
+                                #{})
+                              :else #{}))]
+    (reduce set/union #{}
+            (map (fn [{:keys [condition]}]
+                   (extract-from-expr condition))
+                 assertions))))
+
 (defn generate-method
   "Generate JavaScript code for a method"
   [level {:keys [name params return-type body require ensure visibility]} opts]
@@ -306,6 +363,13 @@
         result-init (when return-type
                      [(indent (+ level 1)
                              (str "let result = " (default-value return-type) ";"))])
+        ;; Extract old references and generate capture statements
+        old-refs (when ensure (extract-old-references ensure))
+        old-captures (when (seq old-refs)
+                      (map (fn [field-name]
+                            (indent (+ level 1)
+                                   (str "let old_" field-name " = this." field-name ";")))
+                          old-refs))
         preconditions (generate-assertions (+ level 1) require "Precondition" opts)
         statements (map #(generate-statement (+ level 1) %) body)
         postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)
@@ -330,6 +394,7 @@
                (when jsdoc [jsdoc])
                [(indent level (str method-name "(" params-code ") {"))]
                result-init
+               old-captures
                preconditions
                statements
                postconditions
@@ -596,3 +661,4 @@
       end
   end")
   )
+

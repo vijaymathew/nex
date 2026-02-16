@@ -217,9 +217,14 @@ postfix
 primary
     : literal
     | createExpression
+    | oldExpression
     | IDENTIFIER
     | methodCall
     | '(' expression ')'
+    ;
+
+oldExpression
+    : OLD primary
     ;
 
 createExpression
@@ -298,6 +303,7 @@ VARIANT      : 'variant';
 REQUIRE      : 'require';
 ENSURE       : 'ensure';
 INVARIANT    : 'invariant';
+OLD          : 'old';
 AND          : 'and';
 OR           : 'or';
 

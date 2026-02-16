@@ -552,7 +552,12 @@
         :constructor (when has-constructor? constructor-name)
         :args (if args-node
                (transform-node args-node)
-               [])}))})
+               [])}))
+
+   :oldExpression
+   (fn [[_ _old-kw expr]]
+     {:type :old
+      :expr (transform-node expr)})})
 
 ;;
 ;; Core transformation function (defined after node-handlers)

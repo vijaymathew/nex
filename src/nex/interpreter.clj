@@ -90,6 +90,7 @@
 ;;
 
 (declare eval-node)
+(declare get-all-fields)
 
 ;;
 ;; Contract Checking
@@ -296,7 +297,11 @@
                 method-lookup (lookup-method-with-inheritance ctx class-def method)]
             (if method-lookup
               (let [method-def (:method method-lookup)
-                    source-class (:source-class method-lookup)]
+                    source-class (:source-class method-lookup)
+                    all-fields (get-all-fields ctx class-def)
+                    has-postconditions? (seq (:ensure method-def))
+                    ;; Snapshot old field values if postconditions exist
+                    old-values (when has-postconditions? (:fields obj))]
                 ;; Execute method with object context
                 (let [method-env (make-env (:current-env ctx))
                       ;; Bind parameters
@@ -313,21 +318,44 @@
                                       (get-default-field-value return-type)
                                       nil)
                       _ (env-define method-env "result" default-result)
-                      new-ctx (assoc ctx :current-env method-env)
+                      new-ctx (-> ctx
+                                 (assoc :current-env method-env)
+                                 (assoc :old-values old-values))
                       ;; Check pre-conditions
                       _ (when-let [require-assertions (:require method-def)]
                           (check-assertions new-ctx require-assertions "Precondition"))
                       ;; Execute method body
                       _ (doseq [stmt (:body method-def)]
                           (eval-node new-ctx stmt))
+                      ;; Update object fields from modified environment
+                      updated-fields (reduce (fn [m field]
+                                              (let [field-name (:name field)
+                                                    field-key (keyword field-name)]
+                                                (if-let [val (try
+                                                              (env-lookup method-env field-name)
+                                                              (catch Exception _ nil))]
+                                                  (assoc m field-key val)
+                                                  m)))
+                                            (:fields obj)
+                                            all-fields)
+                      ;; Create updated object
+                      updated-obj (make-object (:class-name obj) updated-fields)
                       ;; Get the final value of 'result'
-                      result (env-lookup method-env "result")
-                      ;; Check post-conditions
-                      _ (when-let [ensure-assertions (:ensure method-def)]
-                          (check-assertions new-ctx ensure-assertions "Postcondition"))
-                      ;; Check class invariant
-                      _ (check-class-invariant new-ctx class-def)]
-                  result))
+                      result (env-lookup method-env "result")]
+                  ;; Check post-conditions and invariant with rollback support
+                  (try
+                    ;; Check post-conditions
+                    (when-let [ensure-assertions (:ensure method-def)]
+                      (check-assertions new-ctx ensure-assertions "Postcondition"))
+                    ;; Check class invariant
+                    (check-class-invariant new-ctx class-def)
+                    ;; Success: update object in parent environment
+                    (env-set! (:current-env ctx) target updated-obj)
+                    result
+                    (catch Exception e
+                      ;; Postcondition or invariant failed: restore original object
+                      (env-set! (:current-env ctx) target obj)
+                      (throw e)))))
               (throw (ex-info (str "Method not found: " method)
                               {:object obj :method method}))))
           (throw (ex-info (str "Cannot call method on non-object: " target)
@@ -572,6 +600,26 @@
     (string? node) node
     (map? node) (eval-node ctx node)
     :else node))
+
+(defmethod eval-node :old
+  [ctx {:keys [expr]}]
+  ;; Look up the value from the old-values snapshot
+  (if-let [old-values (:old-values ctx)]
+    (if (and (map? expr) (= (:type expr) :identifier))
+      ;; Simple identifier: look up in old values
+      (let [var-name (:name expr)]
+        (if (contains? old-values (keyword var-name))
+          (get old-values (keyword var-name))
+          (throw (ex-info (str "'old' can only be used on object fields in postconditions")
+                         {:variable var-name}))))
+      ;; More complex expression: evaluate it in an environment with old values
+      (let [old-env (make-env (:current-env ctx))
+            _ (doseq [[field-name field-val] old-values]
+                (env-define old-env (name field-name) field-val))
+            old-ctx (assoc ctx :current-env old-env)]
+        (eval-node old-ctx expr)))
+    (throw (ex-info "'old' can only be used in postconditions"
+                   {:expr expr}))))
 
 (defmethod eval-node :default
   [ctx node]
