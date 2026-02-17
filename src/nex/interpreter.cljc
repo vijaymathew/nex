@@ -567,6 +567,25 @@
   [_ctx {:keys [value]}]
   value)
 
+(defmethod eval-node :array-literal
+  [ctx {:keys [elements]}]
+  ;; Evaluate all elements and return as a vector
+  (vec (map #(eval-node ctx %) elements)))
+
+(defmethod eval-node :map-literal
+  [ctx {:keys [entries]}]
+  ;; Evaluate all key-value pairs and return as a hash-map
+  (into {} (map (fn [{:keys [key value]}]
+                  [(eval-node ctx key) (eval-node ctx value)])
+                entries)))
+
+(defmethod eval-node :subscript
+  [ctx {:keys [target index]}]
+  ;; Evaluate target (array or map) and index, then access element
+  (let [coll (eval-node ctx target)
+        idx (eval-node ctx index)]
+    (get coll idx)))
+
 (defmethod eval-node :identifier
   [ctx {:keys [name]}]
   (env-lookup (:current-env ctx) name))

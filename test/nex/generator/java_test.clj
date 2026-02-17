@@ -12,7 +12,7 @@
 end"
           java-code (java/translate nex-code)]
       (is (str/includes? java-code "public class Person"))
-      (is (str/includes? java-code "private String name = null"))
+      (is (str/includes? java-code "private String name = \"\""))
       (is (str/includes? java-code "private int age = 0")))))
 
 (deftest constructor-test

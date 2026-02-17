@@ -29,8 +29,8 @@ A complete translator from Nex source code to modern JavaScript (ES6+) has been 
 
 - **Default Values**:
   - Numbers: `0` or `0.0`
-  - Strings: `null`
-  - Characters: `'\0'`
+  - Strings: `""`
+  - Characters: `#0`
   - Booleans: `false`
   - Arrays: `[]`
   - Maps: `new Map()`

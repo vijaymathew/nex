@@ -12,7 +12,7 @@
 end"
           js-code (js/translate nex-code)]
       (is (str/includes? js-code "class Person"))
-      (is (str/includes? js-code "this.name = null"))
+      (is (str/includes? js-code "this.name = \"\""))
       (is (str/includes? js-code "this.age = 0")))))
 
 (deftest constructor-test
@@ -352,7 +352,7 @@ end"
     (is (= "0.0" (js/default-value "Real")))
     (is (= "0.0" (js/default-value "Decimal")))
     (is (= "false" (js/default-value "Boolean")))
-    (is (= "null" (js/default-value "String")))
+    (is (= "\"\"" (js/default-value "String")))
     (is (= "[]" (js/default-value "Array")))
     (is (= "new Map()" (js/default-value "Map")))))
 

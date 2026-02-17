@@ -72,9 +72,9 @@ clojure examples/demo_nex_to_javascript.clj
 | `Integer64`  | `number`        | `number`   | `0`           |
 | `Real`       | `number`        | `number`   | `0.0`         |
 | `Decimal`    | `number`        | `number`   | `0.0`         |
-| `Char`       | `string`        | `string`   | `'\0'`        |
+| `Char`       | `string`        | `string`   | `#0`          |
 | `Boolean`    | `boolean`       | `boolean`  | `false`       |
-| `String`     | `string`        | `string`   | `null`        |
+| `String`     | `string`        | `string`   | `""`          |
 
 ### Collection Types
 

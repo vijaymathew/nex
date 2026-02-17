@@ -177,7 +177,7 @@ end"
       (is (str/includes? java-code "private double d = 0.0;"))
       (is (str/includes? java-code "private char c = '\\0';"))
       (is (str/includes? java-code "private boolean b = false;"))
-      (is (str/includes? java-code "private String s = null;")))))
+      (is (str/includes? java-code "private String s = \"\";")))))
 
 (deftest create-without-type-annotation-java-test
   (testing "Java generation without type annotation"

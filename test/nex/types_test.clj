@@ -91,7 +91,7 @@ end"
     name: String
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private String name = null;")))))
+      (is (str/includes? java-code "private String name = \"\";")))))
 
 (deftest all-types-default-values-test
   (testing "Generate Java with all types and their default values"
@@ -112,7 +112,7 @@ end"
       (is (str/includes? java-code "private double d = 0.0;"))
       (is (str/includes? java-code "private char c = '\\0';"))
       (is (str/includes? java-code "private boolean b = false;"))
-      (is (str/includes? java-code "private String s = null;")))))
+      (is (str/includes? java-code "private String s = \"\";")))))
 
 (deftest method-with-typed-parameters-test
   (testing "Methods with all basic types as parameters"
@@ -157,7 +157,7 @@ end"
       (is (str/includes? java-code "private double balance = 0.0;"))
       (is (str/includes? java-code "private long transactions = 0L;"))
       (is (str/includes? java-code "private boolean active = false;"))
-      (is (str/includes? java-code "private String owner = null;"))
+      (is (str/includes? java-code "private String owner = \"\";"))
       (is (str/includes? java-code "public void deposit(double amount)")))))
 
 (deftest char-type-parsing-test

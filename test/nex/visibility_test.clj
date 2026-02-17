@@ -143,10 +143,10 @@ end"
       (is (str/includes? java-code "private int balance = 0;"))
       (is (str/includes? java-code "public void deposit(int amount)"))
       ;; Private members
-      (is (str/includes? java-code "private String internal_id = null;"))
+      (is (str/includes? java-code "private String internal_id = \"\";"))
       (is (str/includes? java-code "private void generate_id()"))
       ;; Selective visibility
-      (is (str/includes? java-code "/* Visible to: Bank, Auditor */ String audit_log = null;"))
+      (is (str/includes? java-code "/* Visible to: Bank, Auditor */ String audit_log = \"\";"))
       (is (str/includes? java-code "/* Visible to: Bank, Auditor */ void log_transaction()")))))
 
 (deftest multiple-selective-sections-test

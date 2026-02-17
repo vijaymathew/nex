@@ -10,9 +10,9 @@ Nex provides a comprehensive set of basic types with automatic default initializ
 | **Integer64** | 64-bit | `long` | Signed 64-bit integer | `0L` |
 | **Real** | 32-bit | `float` | Single-precision floating-point | `0.0f` |
 | **Decimal** | 64-bit | `double` | Double-precision floating-point | `0.0` |
-| **Char** | 8-bit | `char` | Single character | `'\0'` |
+| **Char** | 8-bit | `char` | Single character | `#0` |
 | **Boolean** | - | `boolean` | true or false | `false` |
-| **String** | - | `String` | Text string | `null` |
+| **String** | - | `String` | Text string | `""` |
 
 ## Automatic Initialization
 
@@ -81,7 +81,7 @@ class Demo
     example() do
       let count: Integer := 42
       let price: Decimal := 99.99
-      let code: Char := 'A'
+      let code: Char := #A
       let enabled: Boolean := true
       print(count)
     end
@@ -174,7 +174,7 @@ class AllTypes
     demonstrate() do
       let x: Integer := 42
       let y: Decimal := 3.14159
-      let c: Char := 'A'
+      let c: Char := #A
       let flag: Boolean := true
 
       print("Integer:", x)

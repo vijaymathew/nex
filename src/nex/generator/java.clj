@@ -86,7 +86,7 @@
       "Decimal" "0.0"
       "Char" "'\\0'"
       "Boolean" "false"
-      "String" "null"
+      "String" "\"\""
       "Array" "new ArrayList<>()"
       "Map" "new HashMap<>()"
       "null")
