@@ -399,6 +399,15 @@
         :until (transform-node until-expr)
         :body (transform-node body-block)}))
 
+   :withStatement
+   (fn [[_ _with-kw target-string _do-kw body-block _end-kw]]
+     (let [;; Extract target string, removing quotes
+           target (let [s (token-text target-string)]
+                   (subs s 1 (dec (count s))))]
+       {:type :with
+        :target target
+        :body (transform-node body-block)}))
+
    :variantClause
    (fn [[_ _variant-kw expr]]
      (transform-node expr))

@@ -674,6 +674,12 @@
     (throw (ex-info "'old' can only be used in postconditions"
                    {:expr expr}))))
 
+(defmethod eval-node :with
+  [ctx {:keys [target body]}]
+  ;; With statements are for code generation only, skip in interpreter
+  ;; Could optionally evaluate for a specific target if needed
+  nil)
+
 (defmethod eval-node :default
   [ctx node]
   ;; If it's a plain string (identifier), look it up

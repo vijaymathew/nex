@@ -102,6 +102,10 @@
                          (str (indent (inc level)) "do")
                          (str/join "\n" (map #(format-statement % (+ level 2)) (:body stmt)))
                          (str ind "end")])
+        :with (str/join "\n"
+                        [(str ind "with \"" (:target stmt) "\" do")
+                         (str/join "\n" (map #(format-statement % (inc level)) (:body stmt)))
+                         (str ind "end")])
         :scoped-block (str/join "\n"
                                 [(str ind "do")
                                  (str/join "\n" (map #(format-statement % (inc level)) (:body stmt)))

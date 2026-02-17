@@ -323,6 +323,9 @@
      :if (generate-if level stmt var-names)
      :scoped-block (generate-scoped-block level stmt var-names)
      :loop (generate-loop level stmt)
+     :with (when (= (:target stmt) "java")
+             ;; Only include this block if target is "java"
+             (str/join "\n" (map #(generate-statement level % var-names) (:body stmt))))
      (indent level (str "/* Unknown statement: " (:type stmt) " */")))))
 
 ;;

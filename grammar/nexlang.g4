@@ -150,6 +150,7 @@ statement
     | scopedBlock
     | ifStatement
     | loopStatement
+    | withStatement
     ;
 
 scopedBlock
@@ -162,6 +163,10 @@ ifStatement
 
 loopStatement
     : FROM block invariantClause? variantClause? UNTIL expression DO block END
+    ;
+
+withStatement
+    : WITH STRING DO block END
     ;
 
 variantClause
@@ -320,6 +325,7 @@ ENSURE       : 'ensure';
 INVARIANT    : 'invariant';
 OLD          : 'old';
 NOTE         : 'note';
+WITH         : 'with';
 AND          : 'and';
 OR           : 'or';
 
