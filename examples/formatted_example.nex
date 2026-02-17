@@ -2,27 +2,23 @@ class BankAccount
 feature
   balance: Integer
   owner: String
-
   get_balance(): Integer do
-      balance
+      balance()
   end
-
   deposit(amount: Integer) do
       let balance := balance + amount
   end
 
 private feature
   internal_id: String
-
   generate_id() do
       print("Generating ID")
   end
 
 -> Bank, Auditor feature
   audit_log: String
-
   get_audit(): String do
-      audit_log
+      audit_log()
   end
 
 constructors
@@ -32,8 +28,7 @@ constructors
       let internal_id := "ID-001"
       let audit_log := "Created"
   end
-
 invariant
-  positive_balance: balance >= 0
-  has_owner: owner /= ""
+  positive_balance: nil
+  has_owner: nil
 end

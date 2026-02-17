@@ -687,3 +687,24 @@
       end
   end")
   )
+
+
+(defn -main
+  "Main entry point for command-line compilation"
+  [& args]
+  (when (empty? args)
+    (println "Usage: nex compile java <input.nex> [output.java]")
+    (System/exit 1))
+  
+  (let [input-file (first args)
+        output-file (when (> (count args) 1) (second args))]
+    (try
+      (if output-file
+        (do
+          (translate-file input-file output-file)
+          (println (str "Compiled " input-file " -> " output-file)))
+        (println (translate-file input-file)))
+      (System/exit 0)
+      (catch Exception e
+        (println "Error:" (.getMessage e))
+        (System/exit 1)))))

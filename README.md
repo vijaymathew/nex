@@ -35,13 +35,35 @@ Nex is an Eiffel-inspired programming language that combines elegant, English-li
 
 ### Installation
 
+**Automatic Installation** (installs Java & Clojure if needed):
+
 ```bash
 # Clone the repository
 git clone https://github.com/vijaymathew/nex.git
 cd nex
 
+# One-line install with automatic dependencies
+./install.sh jvm --install-deps
+
+# Or interactive install (asks before installing dependencies)
+./install.sh
+
 # Verify installation
+nex help
+```
+
+**Supported Platforms:** Ubuntu, Debian, Fedora, CentOS, RHEL, Arch, Manjaro, macOS
+
+For detailed installation instructions, see [INSTALL.md](INSTALL.md) or [Quick Start Guide](docs/QUICK_START.md).
+
+**Development Setup (without installation):**
+
+```bash
+# Verify Clojure is installed
 clojure -M -e '(println "Nex is ready!")'
+
+# Set NEX_HOME for local development
+export NEX_HOME=$(pwd)
 ```
 
 ## Usage
@@ -51,10 +73,10 @@ clojure -M -e '(println "Nex is ready!")'
 The easiest way to get started is with the Nex REPL:
 
 ```bash
-# Option 1: Using the launcher script
-./nex-repl
+# After installation
+nex
 
-# Option 2: Using Clojure CLI
+# Or without installation (from project directory)
 clojure -M:repl
 ```
 
