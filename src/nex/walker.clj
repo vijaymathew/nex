@@ -128,6 +128,9 @@
            generic-params (first (filter #(and (sequential? %)
                                               (= :genericParams (first %)))
                                         cleaned))
+           note-clause (first (filter #(and (sequential? %)
+                                            (= :noteClause (first %)))
+                                     cleaned))
            inherit-clause (first (filter #(and (sequential? %)
                                                (= :inheritClause (first %)))
                                         cleaned))
@@ -140,6 +143,7 @@
        {:type :class
         :name (token-text name)
         :generic-params (when generic-params (transform-node generic-params))
+        :note (when note-clause (transform-node note-clause))
         :parents (when inherit-clause (transform-node inherit-clause))
         :body (walk-children class-body)
         :invariant (when invariant-clause (transform-node invariant-clause))}))
@@ -219,10 +223,14 @@
       :constructors (mapv transform-node ctors)})
 
    :fieldDecl
-   (fn [[_ name _colon type]]
-     {:type :field
-      :name (token-text name)
-      :field-type (transform-node type)})
+   (fn [[_ name _colon type & rest]]
+     (let [note-clause (first (filter #(and (sequential? %)
+                                            (= :noteClause (first %)))
+                                     rest))]
+       {:type :field
+        :name (token-text name)
+        :field-type (transform-node type)
+        :note (when note-clause (transform-node note-clause))}))
 
    :constructorDecl
    (fn [[_ name & rest]]
@@ -252,12 +260,15 @@
    (fn [[_ name & rest]]
      (let [;; Filter out punctuation tokens
            cleaned (remove #(#{"(" ")" "do" "end" ":"} %) rest)
-           ;; Separate params, return type, require, ensure, and block
+           ;; Separate params, return type, note, require, ensure, and block
            params (first (filter #(and (sequential? %)
                                        (= :paramList (first %)))
                                 cleaned))
            return-type (first (filter #(and (sequential? %)
                                            (= :type (first %)))
+                                     cleaned))
+           note-clause (first (filter #(and (sequential? %)
+                                            (= :noteClause (first %)))
                                      cleaned))
            require-clause (first (filter #(and (sequential? %)
                                                (= :requireClause (first %)))
@@ -272,6 +283,7 @@
         :name (token-text name)
         :params (when params (transform-node params))
         :return-type (when return-type (transform-node return-type))
+        :note (when note-clause (transform-node note-clause))
         :require (when require-clause (transform-node require-clause))
         :body (transform-node block)
         :ensure (when ensure-clause (transform-node ensure-clause))}))
@@ -402,6 +414,12 @@
    :invariantClause
    (fn [[_ _invariant-kw & assertions]]
      (mapv transform-node assertions))
+
+   :noteClause
+   (fn [[_ _note-kw string-literal]]
+     ;; Extract the string content, removing quotes
+     (let [s (token-text string-literal)]
+       (subs s 1 (dec (count s)))))
 
    :assertion
    (fn [[_ label _colon expr]]

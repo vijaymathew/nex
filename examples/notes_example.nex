@@ -1,0 +1,36 @@
+class BankAccount
+  note "A bank account with balance tracking and transaction management"
+
+feature
+  balance: Integer note "Current account balance in cents"
+  owner: String note "Account owner name"
+
+  get_balance(): Integer
+    note "Returns the current balance"
+  do
+      balance
+  end
+
+  deposit(amount: Integer)
+    note "Deposit money into the account"
+    require
+      positive: amount > 0
+    do
+      let balance := balance + amount
+    ensure
+      increased: balance = old balance + amount
+    end
+
+private feature
+  internal_id: String note "Internal tracking identifier"
+
+constructors
+  make(initial: Integer, name: String) do
+      let balance := initial
+      let owner := name
+      let internal_id := "ACC-001"
+  end
+
+invariant
+  non_negative: balance >= 0
+end

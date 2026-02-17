@@ -108,6 +108,16 @@
   [level lines]
   (str/join "\n" (map #(indent level %) lines)))
 
+(defn generate-javadoc
+  "Generate Javadoc comment for a note"
+  [level note]
+  (when note
+    (str (indent level "/**")
+         "\n"
+         (indent level (str " * " note))
+         "\n"
+         (indent level " */"))))
+
 ;;
 ;; Expression Generation
 ;;
@@ -372,7 +382,7 @@
 
 (defn generate-method
   "Generate Java code for a method"
-  [level {:keys [name params return-type body require ensure visibility]} opts]
+  [level {:keys [name params return-type body require ensure visibility note]} opts]
   (let [java-return (if return-type
                       (nex-type-to-java return-type)
                       "void")
@@ -383,6 +393,9 @@
         vis (if visibility
              (visibility-to-java visibility)
              "public")
+        ;; Generate Javadoc if note present
+        javadoc (when note
+                 [(generate-javadoc level note)])
         ;; Initialize result variable if method has return type
         result-init (when return-type
                      [(indent (+ level 1)
@@ -402,6 +415,7 @@
                      [(indent (+ level 1) "return result;")])]
     (str/join "\n"
               (concat
+               javadoc
                [(indent level (str vis " " java-return " " name "(" params-code ") {"))]
                result-init
                old-captures
@@ -417,14 +431,19 @@
 
 (defn generate-field
   "Generate Java code for a field with default initialization"
-  [level {:keys [name field-type visibility]}]
+  [level {:keys [name field-type visibility note]}]
   (let [;; Default fields to private, unless explicitly marked otherwise
         vis (if (and visibility (not= (:type visibility) :public))
              (visibility-to-java visibility)
              "private")
         java-type (nex-type-to-java field-type)
-        init-value (default-value field-type)]
-    (indent level (str vis " " java-type " " name " = " init-value ";"))))
+        init-value (default-value field-type)
+        ;; Generate Javadoc if note present
+        javadoc (when note
+                 (generate-javadoc level note))]
+    (if javadoc
+      (str javadoc "\n" (indent level (str vis " " java-type " " name " = " init-value ";")))
+      (indent level (str vis " " java-type " " name " = " init-value ";")))))
 
 ;;
 ;; Constructor Generation
@@ -516,8 +535,11 @@
 (defn generate-class
   "Generate Java code for a Nex class"
   ([class-def] (generate-class class-def {}))
-  ([{:keys [name generic-params parents body invariant]} opts]
+  ([{:keys [name generic-params parents body invariant note]} opts]
    (let [{:keys [fields methods constructors]} (extract-members body)
+         ;; Generate class Javadoc if note present
+         class-javadoc (when note
+                        [(generate-javadoc 0 note)])
          class-header (generate-class-header name generic-params parents)
          invariant-comment (when (and invariant (not (:skip-contracts opts)))
                             (indent 1 (str "// Class invariant: "
@@ -527,6 +549,7 @@
          methods-code (map #(generate-method 1 % opts) methods)]
      (str/join "\n"
                (concat
+                class-javadoc
                 [class-header]
                 (when invariant-comment [invariant-comment ""])
                 fields-code

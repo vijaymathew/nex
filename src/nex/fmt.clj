@@ -125,28 +125,31 @@
 
 (defn format-method
   "Format a method declaration"
-  [{:keys [name params return-type require body ensure]} level]
+  [{:keys [name params return-type note require body ensure]} level]
   (let [ind (indent level)
         ;; Methods without params don't have parentheses, with params they do
         param-str (cond
                     (nil? params) "()"
                     (empty? params) "()"
                     :else (str "(" (str/join ", " (map format-param params)) ")"))
-        ;; If there are contracts, do goes on separate line; otherwise same line
-        has-contracts? (or require ensure)
+        ;; If there are contracts or notes, do goes on separate line; otherwise same line
+        has-contracts-or-note? (or note require ensure)
         signature (str ind name param-str
                        (when return-type (str ": " (format-type return-type))))
-        do-line (if has-contracts?
+        note-line (when note
+                    (str (indent (inc level)) "note \"" note "\""))
+        do-line (if has-contracts-or-note?
                   (str (indent (inc level)) "do")
                   (str signature " do"))
-        first-line (if has-contracts? signature do-line)]
+        first-line (if has-contracts-or-note? signature do-line)]
     (str/join "\n"
               (remove empty?
                       [first-line
+                       note-line
                        (when require
                          (str (indent (inc level)) "require\n"
                               (str/join "\n" (map #(format-assertion % (+ level 2)) require))))
-                       (when has-contracts?
+                       (when has-contracts-or-note?
                          (str (indent (inc level)) "do"))
                        (str/join "\n" (map #(format-statement % (+ level 2)) body))
                        (when ensure
@@ -156,8 +159,9 @@
 
 (defn format-field
   "Format a field declaration"
-  [{:keys [name field-type]} level]
-  (str (indent level) name ": " (format-type field-type)))
+  [{:keys [name field-type note]} level]
+  (str (indent level) name ": " (format-type field-type)
+       (when note (str " note \"" note "\""))))
 
 (defn format-constructor
   "Format a constructor declaration"
@@ -238,15 +242,17 @@
 
 (defn format-class
   "Format a class declaration"
-  [{:keys [name generic-params parents body invariant]}]
+  [{:keys [name generic-params note parents body invariant]}]
   (let [generic-str (when generic-params
                       (str " [" (str/join ", " (map format-generic-param generic-params)) "]"))
+        note-str (when note
+                   (str "\n  note \"" note "\""))
         parent-str (when parents
                      (str "\ninherit\n"
                           (str/join "\n\n" (map #(format-inherit-entry % 0) parents))))]
     (str/join "\n"
               (remove empty?
-                      [(str "class " name generic-str)
+                      [(str "class " name generic-str note-str)
                        parent-str
                        (str/join "\n\n"
                                  (map (fn [section]

@@ -21,6 +21,7 @@ internStmt
 
 classDecl
     : CLASS IDENTIFIER genericParams?
+      noteClause?
       inheritClause?
       classBody
       invariantClause?
@@ -78,7 +79,7 @@ featureMember
     ;
 
 fieldDecl
-    : IDENTIFIER ':' type
+    : IDENTIFIER ':' type noteClause?
     ;
 
 constructorDecl
@@ -86,7 +87,7 @@ constructorDecl
     ;
 
 methodDecl
-    : IDENTIFIER ('(' paramList? ')')? (':' type)? requireClause? DO block ensureClause? END
+    : IDENTIFIER ('(' paramList? ')')? (':' type)? noteClause? requireClause? DO block ensureClause? END
     ;
 
 paramList
@@ -126,6 +127,10 @@ assertion
 
 invariantClause
     : INVARIANT assertion+
+    ;
+
+noteClause
+    : NOTE STRING
     ;
 
 /*
@@ -314,6 +319,7 @@ REQUIRE      : 'require';
 ENSURE       : 'ensure';
 INVARIANT    : 'invariant';
 OLD          : 'old';
+NOTE         : 'note';
 AND          : 'and';
 OR           : 'or';
 

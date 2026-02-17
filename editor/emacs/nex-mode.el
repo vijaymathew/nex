@@ -108,7 +108,7 @@
   '("class" "feature" "inherit" "end" "do" "if" "then" "else"
     "from" "until" "invariant" "variant" "require" "ensure"
     "let" "constructors" "rename" "redefine" "as" "and" "or" "not"
-    "old" "create" "private")
+    "old" "create" "private" "note")
   "Nex language keywords.")
 
 (defconst nex-types

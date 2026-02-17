@@ -87,6 +87,16 @@
   [level lines]
   (str/join "\n" (map #(indent level %) lines)))
 
+(defn generate-jsdoc
+  "Generate JSDoc comment for a note"
+  [level note]
+  (when note
+    (str (indent level "/**")
+         "\n"
+         (indent level (str " * " note))
+         "\n"
+         (indent level " */"))))
+
 ;;
 ;; Expression Generation
 ;;
@@ -353,7 +363,7 @@
 
 (defn generate-method
   "Generate JavaScript code for a method"
-  [level {:keys [name params return-type body require ensure visibility]} opts]
+  [level {:keys [name params return-type body require ensure visibility note]} opts]
   (let [params-code (str/join ", " (map :name params))
         ;; Apply visibility naming convention
         method-name (if visibility
@@ -376,9 +386,10 @@
         ;; Add return statement if method has return type
         return-stmt (when return-type
                      [(indent (+ level 1) "return result;")])
-        ;; Generate JSDoc comment for type information
-        jsdoc (when (or (seq params) return-type)
-                (let [param-docs (map (fn [{:keys [name type]}]
+        ;; Generate JSDoc comment for type information and note
+        jsdoc (when (or note (seq params) return-type)
+                (let [note-line (when note [(str "   * " note)])
+                      param-docs (map (fn [{:keys [name type]}]
                                        (str "   * @param {" (nex-type-to-js type) "} " name))
                                      params)
                       return-doc (when return-type
@@ -386,6 +397,7 @@
                   (str/join "\n"
                            (concat
                             [(indent level "/**")]
+                            note-line
                             param-docs
                             return-doc
                             [(indent level "   */")]))))]
@@ -498,8 +510,11 @@
 (defn generate-class
   "Generate JavaScript code for a Nex class"
   ([class-def] (generate-class class-def {}))
-  ([{:keys [name generic-params parents body invariant]} opts]
+  ([{:keys [name generic-params parents body invariant note]} opts]
    (let [{:keys [fields methods constructors]} (extract-members body)
+         ;; Generate class JSDoc if note present
+         class-jsdoc (when note
+                      [(generate-jsdoc 0 note)])
          generic-comment (generate-generic-comment generic-params)
          class-header (generate-class-header name generic-params parents)
          invariant-comment (when (and invariant (not (:skip-contracts opts)))
@@ -536,6 +551,7 @@
          methods-code (map #(generate-method 1 % opts) methods)]
      (str/join "\n"
                (concat
+                class-jsdoc
                 (when generic-comment [generic-comment])
                 [class-header]
                 (when invariant-comment [invariant-comment ""])
