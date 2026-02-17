@@ -309,17 +309,25 @@
         ;; If it's a program, handle it based on content
         (= (:type ast) :program)
         (let [classes (:classes ast)
+              calls (:calls ast)
               real-class-names (filter #(not= % "__ReplTemp__")
                                       (map :name (filter map? classes)))]
+          ;; Evaluate the program
           (interp/eval-node ctx ast)
-          ;; Show any output
-          (let [output @(:output ctx)]
+          ;; If there are calls/expressions and no classes, evaluate them to get result
+          (let [result (when (and (seq calls) (empty? real-class-names))
+                        (last (map #(interp/eval-node ctx %) calls)))
+                output @(:output ctx)]
+            ;; Show any output
             (when (seq output)
               (doseq [line output]
-                (println line))))
-          ;; Only show "Class registered" message if there are real classes
-          (when (and (seq real-class-names) (not (every? str/blank? real-class-names)))
-            (println "Class(es) registered:" (str/join ", " real-class-names)))
+                (println line)))
+            ;; Show result if it's not nil, not from a print, and no classes were defined
+            (when (and result (empty? output) (empty? real-class-names))
+              (println (format-value result)))
+            ;; Only show "Class registered" message if there are real classes
+            (when (and (seq real-class-names) (not (every? str/blank? real-class-names)))
+              (println "Class(es) registered:" (str/join ", " real-class-names))))
           ctx)
 
         ;; Single expression or statement

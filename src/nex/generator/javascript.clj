@@ -148,13 +148,94 @@
     ;; Default: use as-is
     (str method "(" args-code ")")))
 
+(def builtin-method-mappings
+  "Map Nex built-in type methods to JavaScript equivalents"
+  {"String"
+   {"length"      (fn [target _] (str target ".length"))
+    "index_of"    (fn [target args] (str target ".indexOf(" args ")"))
+    "substring"   (fn [target args] (str target ".substring(" args ")"))
+    "to_upper"    (fn [target _] (str target ".toUpperCase()"))
+    "to_lower"    (fn [target _] (str target ".toLowerCase()"))
+    "contains"    (fn [target args] (str target ".includes(" args ")"))
+    "starts_with" (fn [target args] (str target ".startsWith(" args ")"))
+    "ends_with"   (fn [target args] (str target ".endsWith(" args ")"))
+    "trim"        (fn [target _] (str target ".trim()"))
+    "replace"     (fn [target args] (str target ".replace(" args ")"))
+    "char_at"     (fn [target args] (str target ".charAt(" args ")"))
+    "split"       (fn [target args] (str target ".split(" args ")"))
+    ;; String operators
+    "plus"        (fn [target args] (str "(" target " + " args ")"))
+    "equals"      (fn [target args] (str "(" target " === " args ")"))
+    "not_equals"  (fn [target args] (str "(" target " !== " args ")"))
+    "less_than"   (fn [target args] (str "(" target ".localeCompare(" args ") < 0)"))
+    "less_than_or_equal" (fn [target args] (str "(" target ".localeCompare(" args ") <= 0)"))
+    "greater_than" (fn [target args] (str "(" target ".localeCompare(" args ") > 0)"))
+    "greater_than_or_equal" (fn [target args] (str "(" target ".localeCompare(" args ") >= 0)"))}
+
+   "Integer"
+   {"to_string" (fn [target _] (str target ".toString()"))
+    "abs"       (fn [target _] (str "Math.abs(" target ")"))
+    "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
+    "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
+    ;; Arithmetic operators
+    "plus"      (fn [target args] (str "(" target " + " args ")"))
+    "minus"     (fn [target args] (str "(" target " - " args ")"))
+    "times"     (fn [target args] (str "(" target " * " args ")"))
+    "divided_by" (fn [target args] (str "(" target " / " args ")"))
+    ;; Comparison operators
+    "equals"    (fn [target args] (str "(" target " === " args ")"))
+    "not_equals" (fn [target args] (str "(" target " !== " args ")"))
+    "less_than" (fn [target args] (str "(" target " < " args ")"))
+    "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
+    "greater_than" (fn [target args] (str "(" target " > " args ")"))
+    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
+
+   "Array"
+   {"length"    (fn [target _] (str target ".length"))
+    "is_empty"  (fn [target _] (str "(" target ".length === 0)"))
+    "contains"  (fn [target args] (str target ".includes(" args ")"))
+    "index_of"  (fn [target args] (str target ".indexOf(" args ")"))
+    "first"     (fn [target _] (str target "[0]"))
+    "last"      (fn [target _] (str target "[" target ".length - 1]"))
+    "append"    (fn [target args] (str "(" target ".push(" args "), " target ")"))
+    "remove"    (fn [target args] (str "(" target ".splice(" args ", 1), " target ")"))
+    "reverse"   (fn [target _] (str "[..." target "].reverse()"))
+    "sort"      (fn [target _] (str "[..." target "].sort()"))
+    "slice"     (fn [target args] (str target ".slice(" args ")"))}
+
+   "Map"
+   {"size"         (fn [target _] (str target ".size"))
+    "is_empty"     (fn [target _] (str "(" target ".size === 0)"))
+    "contains_key" (fn [target args] (str target ".has(" args ")"))
+    "keys"         (fn [target _] (str "Array.from(" target ".keys())"))
+    "values"       (fn [target _] (str "Array.from(" target ".values())"))
+    "put"          (fn [target args] (str "(" target ".set(" args "), " target ")"))
+    "remove"       (fn [target args] (str "(" target ".delete(" args "), " target ")"))}})
 (defn generate-call-expr
-  "Generate JavaScript code for method call"
+  "Generate JavaScript code for method call.
+   NOTE: For operator methods (plus, less_than, etc.) that exist on multiple types,
+   we try Integer methods first since numeric operations are more common.
+   For string operations, use string literals or string-specific methods."
   [{:keys [target method args]}]
   (let [args-code (str/join ", " (map generate-expression args))]
     (if target
-      ;; Object method call: always use target.method(args)
-      (str target "." method "(" args-code ")")
+      ;; Object method call
+      (let [target-code (if (string? target) target (generate-expression {:type :identifier :name target}))]
+        (or
+         ;; Try Integer methods first (for operators, numeric is more common)
+         (when-let [method-fn (get-in builtin-method-mappings ["Integer" method])]
+           (method-fn target-code args-code))
+         ;; Try String methods
+         (when-let [method-fn (get-in builtin-method-mappings ["String" method])]
+           (method-fn target-code args-code))
+         ;; Try Array methods
+         (when-let [method-fn (get-in builtin-method-mappings ["Array" method])]
+           (method-fn target-code args-code))
+         ;; Try Map methods
+         (when-let [method-fn (get-in builtin-method-mappings ["Map" method])]
+           (method-fn target-code args-code))
+         ;; Default: regular method call
+         (str target-code "." method "(" args-code ")")))
       ;; Global function call: map builtins
       (map-builtin-function method args-code))))
 

@@ -28,3 +28,5 @@ src/nex/parser_js/
 # Temporary files
 tmp/
 temp/
+*.orig
+*.rej

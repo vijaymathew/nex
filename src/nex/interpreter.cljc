@@ -256,6 +256,171 @@
     :else nil))
 
 ;;
+;; Built-in Type Methods
+;;
+
+(def builtin-type-methods
+  "Methods available on built-in types"
+  {"String"
+   {"length"      (fn [s & _] (count s))
+    "index_of"    (fn [s ch & _]
+                    (let [idx (str/index-of s (str ch))]
+                      (if idx idx -1)))
+    "substring"   (fn [s start end & _] (subs s start end))
+    "to_upper"    (fn [s & _] (str/upper-case s))
+    "to_lower"    (fn [s & _] (str/lower-case s))
+    "contains"    (fn [s substr & _] (str/includes? s substr))
+    "starts_with" (fn [s prefix & _] (str/starts-with? s prefix))
+    "ends_with"   (fn [s suffix & _] (str/ends-with? s suffix))
+    "trim"        (fn [s & _] (str/trim s))
+    "replace"     (fn [s old new & _] (str/replace s old new))
+    "char_at"     (fn [s idx & _] (get s idx))
+    "split"       (fn [s delim & _] (vec (str/split s (re-pattern delim))))
+    ;; String operator methods
+    "plus"        (fn [s other & _] (str s other))
+    "equals"      (fn [s other & _] (= s other))
+    "not_equals"  (fn [s other & _] (not= s other))
+    "less_than"   (fn [s other & _] (neg? (compare s other)))
+    "less_than_or_equal" (fn [s other & _] (<= (compare s other) 0))
+    "greater_than" (fn [s other & _] (pos? (compare s other)))
+    "greater_than_or_equal" (fn [s other & _] (>= (compare s other) 0))}
+
+   "Integer"
+   {"to_string"         (fn [n & _] (str n))
+    "abs"               (fn [n & _] (Math/abs (int n)))
+    "min"               (fn [n other & _] (min n other))
+    "max"               (fn [n other & _] (max n other))
+    ;; Arithmetic operator methods
+    "plus"              (fn [n other & _] (+ n other))
+    "minus"             (fn [n other & _] (- n other))
+    "times"             (fn [n other & _] (* n other))
+    "divided_by"        (fn [n other & _] (/ n other))
+    ;; Comparison operator methods
+    "equals"            (fn [n other & _] (= n other))
+    "not_equals"        (fn [n other & _] (not= n other))
+    "less_than"         (fn [n other & _] (< n other))
+    "less_than_or_equal" (fn [n other & _] (<= n other))
+    "greater_than"      (fn [n other & _] (> n other))
+    "greater_than_or_equal" (fn [n other & _] (>= n other))}
+
+   "Integer64"
+   {"to_string"         (fn [n & _] (str n))
+    "abs"               (fn [n & _] (Math/abs (long n)))
+    "min"               (fn [n other & _] (min n other))
+    "max"               (fn [n other & _] (max n other))
+    ;; Arithmetic operator methods
+    "plus"              (fn [n other & _] (+ n other))
+    "minus"             (fn [n other & _] (- n other))
+    "times"             (fn [n other & _] (* n other))
+    "divided_by"        (fn [n other & _] (/ n other))
+    ;; Comparison operator methods
+    "equals"            (fn [n other & _] (= n other))
+    "not_equals"        (fn [n other & _] (not= n other))
+    "less_than"         (fn [n other & _] (< n other))
+    "less_than_or_equal" (fn [n other & _] (<= n other))
+    "greater_than"      (fn [n other & _] (> n other))
+    "greater_than_or_equal" (fn [n other & _] (>= n other))}
+
+   "Real"
+   {"to_string"         (fn [n & _] (str n))
+    "abs"               (fn [n & _] (Math/abs (double n)))
+    "min"               (fn [n other & _] (min n other))
+    "max"               (fn [n other & _] (max n other))
+    "round"             (fn [n & _] (Math/round (double n)))
+    ;; Arithmetic operator methods
+    "plus"              (fn [n other & _] (+ n other))
+    "minus"             (fn [n other & _] (- n other))
+    "times"             (fn [n other & _] (* n other))
+    "divided_by"        (fn [n other & _] (/ n other))
+    ;; Comparison operator methods
+    "equals"            (fn [n other & _] (= n other))
+    "not_equals"        (fn [n other & _] (not= n other))
+    "less_than"         (fn [n other & _] (< n other))
+    "less_than_or_equal" (fn [n other & _] (<= n other))
+    "greater_than"      (fn [n other & _] (> n other))
+    "greater_than_or_equal" (fn [n other & _] (>= n other))}
+
+   "Decimal"
+   {"to_string"         (fn [n & _] (str n))
+    "abs"               (fn [n & _] (Math/abs (double n)))
+    "min"               (fn [n other & _] (min n other))
+    "max"               (fn [n other & _] (max n other))
+    "round"             (fn [n & _] (Math/round (double n)))
+    ;; Arithmetic operator methods
+    "plus"              (fn [n other & _] (+ n other))
+    "minus"             (fn [n other & _] (- n other))
+    "times"             (fn [n other & _] (* n other))
+    "divided_by"        (fn [n other & _] (/ n other))
+    ;; Comparison operator methods
+    "equals"            (fn [n other & _] (= n other))
+    "not_equals"        (fn [n other & _] (not= n other))
+    "less_than"         (fn [n other & _] (< n other))
+    "less_than_or_equal" (fn [n other & _] (<= n other))
+    "greater_than"      (fn [n other & _] (> n other))
+    "greater_than_or_equal" (fn [n other & _] (>= n other))}
+
+   "Char"
+   {"to_string"   (fn [c & _] (str c))
+    "to_upper"    (fn [c & _] (str/upper-case (str c)))
+    "to_lower"    (fn [c & _] (str/lower-case (str c)))}
+
+   "Boolean"
+   {"to_string"   (fn [b & _] (str b))
+    ;; Boolean operator methods
+    "and"         (fn [b other & _] (and b other))
+    "or"          (fn [b other & _] (or b other))
+    "not"         (fn [b & _] (not b))
+    "equals"      (fn [b other & _] (= b other))
+    "not_equals"  (fn [b other & _] (not= b other))}
+
+   "Array"
+   {"length"      (fn [arr & _] (count arr))
+    "is_empty"    (fn [arr & _] (empty? arr))
+    "contains"    (fn [arr elem & _] (boolean (some #(= % elem) arr)))
+    "index_of"    (fn [arr elem & _]
+                    (let [idx (.indexOf arr elem)]
+                      (if (>= idx 0) idx -1)))
+    "first"       (fn [arr & _] (first arr))
+    "last"        (fn [arr & _] (last arr))
+    "append"      (fn [arr elem & _] (conj arr elem))
+    "remove"      (fn [arr idx & _] (vec (concat (subvec arr 0 idx)
+                                                  (subvec arr (inc idx)))))
+    "reverse"     (fn [arr & _] (vec (reverse arr)))
+    "sort"        (fn [arr & _] (vec (sort arr)))
+    "slice"       (fn [arr start end & _] (subvec arr start end))}
+
+   "Map"
+   {"size"         (fn [m & _] (count m))
+    "is_empty"     (fn [m & _] (empty? m))
+    "contains_key" (fn [m key & _] (contains? m key))
+    "keys"         (fn [m & _] (vec (keys m)))
+    "values"       (fn [m & _] (vec (vals m)))
+    "put"          (fn [m key val & _] (assoc m key val))
+    "remove"       (fn [m key & _] (dissoc m key))}})
+
+(defn get-type-name
+  "Get the type name for a value"
+  [value]
+  (cond
+    (string? value) "String"
+    (integer? value) "Integer"
+    (float? value) "Real"
+    (double? value) "Decimal"
+    (char? value) "Char"
+    (boolean? value) "Boolean"
+    (vector? value) "Array"
+    (map? value) "Map"
+    :else nil))
+
+(defn call-builtin-method
+  "Call a built-in method on a primitive value"
+  [value method-name args]
+  (when-let [type-name (get-type-name value)]
+    (when-let [methods (get builtin-type-methods type-name)]
+      (when-let [method-fn (get methods method-name)]
+        (apply method-fn value args)))))
+
+;;
 ;; Node Evaluators
 ;;
 
@@ -440,8 +605,11 @@
                       (throw e)))))
               (throw (ex-info (str "Method not found: " method)
                               {:object obj :method method}))))
-          (throw (ex-info (str "Cannot call method on non-object: " target)
-                          {:target target :value obj}))))
+          ;; Not a NexObject - check if it's a primitive type with built-in methods
+          (if-let [result (call-builtin-method obj method arg-values)]
+            result
+            (throw (ex-info (str "Method not found on type: " method)
+                            {:target target :value obj :method method})))))
 
       ;; Global function call: method(args)
       (if-let [builtin (get builtins method)]
