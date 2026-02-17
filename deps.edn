@@ -1,6 +1,8 @@
 {:paths ["src"]
  :deps
- {clojure.java-time/clojure.java-time {:mvn/version "1.4.3"}
+ {org.clojure/clojure {:mvn/version "1.11.1"}
+  org.clojure/clojurescript {:mvn/version "1.11.60"}
+  clojure.java-time/clojure.java-time {:mvn/version "1.4.3"}
   clj-antlr/clj-antlr {:mvn/version "0.2.14"}}
  :aliases
  {:test {:extra-paths ["test"]
@@ -9,4 +11,6 @@
               :extra-paths ["test"]}
   :repl {:main-opts ["-m" "nex.repl"]}
   :fmt {:main-opts ["-m" "nex.fmt"]}
-  :docgen {:main-opts ["-m" "nex.docgen"]}}}
+  :docgen {:main-opts ["-m" "nex.docgen"]}
+  :cljs {:extra-deps {thheller/shadow-cljs {:mvn/version "2.26.2"}}
+         :main-opts ["-m" "shadow.cljs.devtools.cli"]}}}

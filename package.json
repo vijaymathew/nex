@@ -1,0 +1,20 @@
+{
+  "name": "nex-lang",
+  "version": "0.1.0",
+  "description": "Nex Programming Language - ClojureScript Runtime",
+  "main": "nex-wrapper.js",
+  "dependencies": {
+    "antlr4": "^4.13.1"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "npm run test:cljs && npm run test:wrapper",
+    "test:cljs": "node test/js/test_cljs.js",
+    "test:wrapper": "node test/js/test_wrapper.js",
+    "test:debug": "node test/js/test_cljs2.js",
+    "test:cljs-unit": "node target/test.js"
+  },
+  "keywords": ["nex", "programming-language", "design-by-contract"],
+  "author": "",
+  "license": "MIT"
+}

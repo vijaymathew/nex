@@ -1,5 +1,6 @@
 (ns nex.interpreter
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            #?(:clj [nex.parser :as parser])))
 
 ;;
 ;; Runtime Environment
@@ -265,45 +266,73 @@
       (map? node) (:type node)
       :else :literal)))
 
-(defn find-intern-file
-  "Search for an intern file in the specified locations.
-   Returns the absolute path if found, otherwise throws an exception."
-  [path class-name]
-  (let [filename (str class-name ".nex")
-        ;; Search locations in order
-        locations [(str "./" filename)                                          ; 1. Current directory
-                   (str "./libs/" path "/src/" filename)                        ; 2. ./libs/path/src/
-                   (str (System/getProperty "user.home") "/.nex/deps/"
-                        path "/src/" filename)]                                 ; 3. ~/.nex/deps/path/src/
-        found (first (filter #(-> % clojure.java.io/file .exists) locations))]
-    (if found
-      found
-      (throw (ex-info (str "Cannot find intern file for " path "/" class-name)
-                     {:path path
-                      :class-name class-name
-                      :searched-locations locations})))))
+#?(:clj
+   (defn find-intern-file
+     "Search for an intern file in the specified locations.
+      Returns the absolute path if found, otherwise throws an exception."
+     [path class-name]
+     (let [filename (str class-name ".nex")
+           ;; Search locations in order
+           locations [(str "./" filename)                                          ; 1. Current directory
+                      (str "./libs/" path "/src/" filename)                        ; 2. ./libs/path/src/
+                      (str (System/getProperty "user.home") "/.nex/deps/"
+                           path "/src/" filename)]                                 ; 3. ~/.nex/deps/path/src/
+           found (first (filter #(-> % clojure.java.io/file .exists) locations))]
+       (if found
+         found
+         (throw (ex-info (str "Cannot find intern file for " path "/" class-name)
+                        {:path path
+                         :class-name class-name
+                         :searched-locations locations})))))
+   :cljs
+   (defn find-intern-file
+     "Search for an intern file in the specified locations.
+      Returns the absolute path if found, otherwise throws an exception."
+     [path class-name]
+     (let [fs (js/require "fs")
+           path-module (js/require "path")
+           filename (str class-name ".nex")
+           home (or (.-HOME js/process.env) (.-USERPROFILE js/process.env) ".")
+           ;; Search locations in order
+           locations [(str "./" filename)
+                      (str "./libs/" path "/src/" filename)
+                      (str home "/.nex/deps/" path "/src/" filename)]
+           found (first (filter #(.existsSync fs %) locations))]
+       (if found
+         found
+         (throw (ex-info (str "Cannot find intern file for " path "/" class-name)
+                        {:path path
+                         :class-name class-name
+                         :searched-locations locations}))))))
 
-(defn process-intern
-  "Load and interpret an external file, then register the class with the given alias."
-  [ctx {:keys [path class-name alias]}]
-  (let [file-path (find-intern-file path class-name)
-        ;; Load and parse the external file
-        file-content (slurp file-path)
-        file-ast ((requiring-resolve 'nex.parser/ast) file-content)
-        ;; Interpret the file to register its classes
-        _ (eval-node ctx file-ast)
-        ;; Look up the class that was registered
-        registered-class (get @(:classes ctx) class-name)
-        ;; Determine the name to use (alias or original)
-        intern-name (or alias class-name)]
-    (when-not registered-class
-      (throw (ex-info (str "Class " class-name " not found in file " file-path)
-                     {:file file-path :class-name class-name})))
-    ;; Register the class under the new name (if alias is provided)
-    (when alias
-      (swap! (:classes ctx) assoc alias registered-class))
-    ;; Return the class name that was registered
-    intern-name))
+#?(:clj
+   (defn process-intern
+     "Load and interpret an external file, then register the class with the given alias."
+     [ctx {:keys [path class-name alias]}]
+     (let [file-path (find-intern-file path class-name)
+           ;; Load and parse the external file
+           file-content (slurp file-path)
+           file-ast (parser/ast file-content)
+           ;; Interpret the file to register its classes
+           _ (eval-node ctx file-ast)
+           ;; Look up the class that was registered
+           registered-class (get @(:classes ctx) class-name)
+           ;; Determine the name to use (alias or original)
+           intern-name (or alias class-name)]
+       (when-not registered-class
+         (throw (ex-info (str "Class " class-name " not found in file " file-path)
+                        {:file file-path :class-name class-name})))
+       ;; Register the class under the new name (if alias is provided)
+       (when alias
+         (swap! (:classes ctx) assoc alias registered-class))
+       ;; Return the class name that was registered
+       intern-name))
+   :cljs
+   (defn process-intern
+     "In ClojureScript, intern is not supported. Use registerClass instead."
+     [ctx {:keys [path class-name alias]}]
+     (throw (ex-info "intern is not supported in ClojureScript. Parse on the JVM and send the AST, or use registerClass to manually register classes."
+                    {:path path :class-name class-name :alias alias}))))
 
 (defmethod eval-node :program
   [ctx {:keys [imports interns classes calls]}]
@@ -386,7 +415,7 @@
                                                     field-key (keyword field-name)]
                                                 (if-let [val (try
                                                               (env-lookup method-env field-name)
-                                                              (catch Exception _ nil))]
+                                                              (catch #?(:clj Exception :cljs :default) _ nil))]
                                                   (assoc m field-key val)
                                                   m)))
                                             (:fields obj)
@@ -405,7 +434,7 @@
                     ;; Success: update object in parent environment
                     (env-set! (:current-env ctx) target updated-obj)
                     result
-                    (catch Exception e
+                    (catch #?(:clj Exception :cljs :default) e
                       ;; Postcondition or invariant failed: restore original object
                       (env-set! (:current-env ctx) target obj)
                       (throw e)))))
@@ -426,7 +455,7 @@
     ;; Try to set if exists, otherwise define in current scope
     (try
       (env-set! (:current-env ctx) target val)
-      (catch Exception _
+      (catch #?(:clj Exception :cljs :default) _
         (env-define (:current-env ctx) target val)))
     val))
 
@@ -540,19 +569,6 @@
   [ctx {:keys [name]}]
   (env-lookup (:current-env ctx) name))
 
-(defn get-default-field-value
-  "Get default value for a field type"
-  [field-type]
-  (case field-type
-    "Integer" 0
-    "Integer64" 0
-    "Real" 0.0
-    "Decimal" 0.0
-    "Char" \0
-    "Boolean" false
-    "String" ""
-    nil))
-
 (defn get-all-fields
   "Get all fields from a class and its parents"
   [ctx class-def]
@@ -621,7 +637,7 @@
                                                                field-key (keyword field-name)]
                                                            (if-let [val (try
                                                                          (env-lookup ctor-env field-name)
-                                                                         (catch Exception _ nil))]
+                                                                         (catch #?(:clj Exception :cljs :default) _ nil))]
                                                              (assoc m field-key val)
                                                              m)))
                                                        initial-field-map

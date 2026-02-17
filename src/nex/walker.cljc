@@ -544,12 +544,14 @@
    :integerLiteral
    (fn [[_ value]]
      {:type :integer
-      :value (Long/parseLong value)})
+      :value #?(:clj (Long/parseLong value)
+                :cljs (js/parseInt value))})
 
    :realLiteral
    (fn [[_ value]]
      {:type :real
-      :value (Double/parseDouble value)})
+      :value #?(:clj (Double/parseDouble value)
+                :cljs (js/parseFloat value))})
 
    :booleanLiteral
    (fn [[_ value]]
@@ -561,7 +563,8 @@
      (let [v (subs value 1)]
        {:type :char
         :value (if (re-matches #"\d+" v)
-                 (char (Integer/parseInt v))
+                 #?(:clj (char (Integer/parseInt v))
+                    :cljs (.fromCharCode js/String (js/parseInt v)))
                  (first v))}))
 
    :arrayLiteral
@@ -675,8 +678,9 @@
   [parse-tree]
   (try
     (transform-node parse-tree)
-    (catch Exception e
+    (catch #?(:clj Exception :cljs :default) e
       (throw (ex-info "Failed to transform parse tree"
                       {:parse-tree parse-tree
-                       :cause (.getMessage e)}
+                       :cause #?(:clj (.getMessage e)
+                                :cljs (.-message e))}
                       e)))))

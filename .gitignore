@@ -1,0 +1,30 @@
+# Build outputs
+target/
+.shadow-cljs/
+.cpcache/
+*.class
+
+# Node.js
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# ANTLR
+antlr-*.jar
+
+# Generated parser files
+src/nex/parser_js/
+
+# Editor/IDE
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/

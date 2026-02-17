@@ -1,0 +1,20 @@
+{:source-paths ["src"]
+ :dependencies []
+ :builds
+ {:node
+  {:target :node-library
+   :output-to "target/nex.js"
+   :exports {:evalNode nex.interpreter/eval-node
+             :makeContext nex.interpreter/make-context
+             :registerClass nex.interpreter/register-class}}
+
+  :test
+  {:target :node-test
+   :output-to "target/test.js"
+   :autorun true}
+
+  :browser
+  {:target :browser
+   :output-dir "target/public/js"
+   :asset-path "/js"
+   :modules {:main {:init-fn nex.core/init}}}}}
