@@ -192,10 +192,10 @@
                        (let [modifier first-elem]
                          (if (= "private" (token-text (second modifier)))
                            {:type :private}
-                           ;; Selective visibility: extract class names from (:visibilityModifier "{" "Friend" "," "Helper" "}")
-                           ;; Filter out braces and commas, keep only identifiers
+                           ;; Selective visibility: extract class names from (:visibilityModifier "->" "Friend" "," "Helper")
+                           ;; Filter out arrow and commas, keep only identifiers
                            (let [class-names (filter #(and (string? %)
-                                                          (not (#{"{"  "}" ","} %)))
+                                                          (not (#{"->" ","} %)))
                                                     (rest modifier))]
                              {:type :selective
                               :classes (vec class-names)}))))

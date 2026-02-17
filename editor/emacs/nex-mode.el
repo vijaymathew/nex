@@ -88,11 +88,13 @@
     (modify-syntax-entry ?& "." table)
     (modify-syntax-entry ?| "." table)
 
-    ;; Parentheses and brackets
+    ;; Parentheses, brackets, and braces
     (modify-syntax-entry ?\( "()" table)
     (modify-syntax-entry ?\) ")(" table)
     (modify-syntax-entry ?\[ "(]" table)
     (modify-syntax-entry ?\] ")[" table)
+    (modify-syntax-entry ?\{ "(}" table)
+    (modify-syntax-entry ?\} "){" table)
 
     ;; Identifier characters
     (modify-syntax-entry ?_ "_" table)
