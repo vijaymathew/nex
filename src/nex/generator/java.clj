@@ -1,6 +1,7 @@
 (ns nex.generator.java
   "Translates Nex (Eiffel-based) code to Java"
   (:require [nex.parser :as p]
+            [nex.typechecker :as tc]
             [clojure.string :as str]
             [clojure.set :as set]))
 
@@ -701,13 +702,20 @@
   Options:
     :skip-contracts - When true, omits all preconditions, postconditions,
                       and class invariants from generated code (useful for production)
+    :skip-type-check - When true, skips static type checking (not recommended)
 
   Examples:
-    (translate nex-code)                           ; With contracts
+    (translate nex-code)                           ; With contracts and type checking
     (translate nex-code {:skip-contracts true})    ; Without contracts (production)"
   ([nex-code] (translate nex-code {}))
   ([nex-code opts]
    (let [ast (p/ast nex-code)]
+     ;; Run type checker unless explicitly skipped
+     (when-not (:skip-type-check opts)
+       (let [result (tc/type-check ast)]
+         (when-not (:success result)
+           (throw (ex-info "Type checking failed"
+                           {:errors (map tc/format-type-error (:errors result))})))))
      (translate-ast ast opts))))
 
 (defn translate-file
