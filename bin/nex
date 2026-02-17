@@ -1,0 +1,213 @@
+#!/bin/bash
+# Nex Language Command-Line Interface (JVM)
+
+VERSION="0.1.0"
+NEX_HOME="${NEX_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+
+# Helper functions
+show_help() {
+    cat <<'EOF'
+Nex Language v0.1.0 - A high-level language for design and implementation
+
+USAGE:
+    nex [COMMAND] [OPTIONS]
+
+COMMANDS:
+    (no command)              Start the Nex REPL
+    compile <target> <file>   Compile a Nex file to target language
+    format <file|dir>         Format Nex source files
+    doc <file|dir> [output]   Generate documentation from Nex files
+    eval <code>               Evaluate a Nex code snippet
+    help                      Show this help message
+
+COMPILE TARGETS:
+    java                      Generate Java source code
+    javascript                Generate JavaScript source code
+    js                        Alias for javascript
+
+EXAMPLES:
+    nex                                      # Start REPL
+    nex compile java MyClass.nex             # Compile to Java
+    nex compile js MyClass.nex               # Compile to JavaScript
+    nex format src/                          # Format all files in directory
+    nex format MyClass.nex                   # Format single file
+    nex doc MyClass.nex MyClass.md           # Generate documentation
+    nex doc src/ docs/                       # Generate docs for directory
+    nex eval 'print("Hello, World!")'        # Evaluate code
+
+ENVIRONMENT VARIABLES:
+    NEX_HOME                  Nex installation directory (default: auto-detected)
+
+For more information, visit: https://github.com/your-repo/nex
+EOF
+}
+
+show_version() {
+    echo "Nex Language v$VERSION (JVM)"
+}
+
+# Command implementations
+cmd_repl() {
+    cd "$NEX_HOME" && clojure -M:repl
+}
+
+cmd_compile() {
+    local target="$1"
+    local file="$2"
+
+    if [[ -z "$target" || -z "$file" ]]; then
+        echo "Error: compile requires target and file arguments"
+        echo "Usage: nex compile <target> <file>"
+        echo "Targets: java, javascript (or js)"
+        exit 1
+    fi
+
+    # Normalize target
+    if [[ "$target" == "js" ]]; then
+        target="javascript"
+    fi
+
+    if [[ "$target" != "java" && "$target" != "javascript" ]]; then
+        echo "Error: Invalid target '$target'. Must be 'java' or 'javascript'"
+        exit 1
+    fi
+
+    if [[ ! -f "$file" ]]; then
+        echo "Error: File not found: $file"
+        exit 1
+    fi
+
+    # Use absolute path for file
+    file="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
+
+    cd "$NEX_HOME" && clojure -M -m nex.generator.$target "$file"
+}
+
+cmd_format() {
+    local path="$1"
+
+    if [[ -z "$path" ]]; then
+        echo "Error: format requires a file or directory argument"
+        echo "Usage: nex format <file|dir>"
+        exit 1
+    fi
+
+    if [[ ! -e "$path" ]]; then
+        echo "Error: Path not found: $path"
+        exit 1
+    fi
+
+    # Use absolute path
+    path="$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
+
+    if [[ -d "$path" ]]; then
+        # Format all .nex files in directory
+        find "$path" -name "*.nex" -type f | while read -r file; do
+            echo "Formatting: $file"
+            cd "$NEX_HOME" && clojure -M:fmt "$file"
+        done
+    else
+        cd "$NEX_HOME" && clojure -M:fmt "$path"
+    fi
+}
+
+cmd_doc() {
+    local input="$1"
+    local output="$2"
+
+    if [[ -z "$input" ]]; then
+        echo "Error: doc requires an input file or directory"
+        echo "Usage: nex doc <file|dir> [output]"
+        exit 1
+    fi
+
+    if [[ ! -e "$input" ]]; then
+        echo "Error: Path not found: $input"
+        exit 1
+    fi
+
+    # Use absolute path
+    input="$(cd "$(dirname "$input")" && pwd)/$(basename "$input")"
+
+    if [[ -d "$input" ]]; then
+        # Generate docs for all .nex files in directory
+        local output_dir="${output:-.}"
+        mkdir -p "$output_dir"
+        output_dir="$(cd "$output_dir" && pwd)"
+
+        find "$input" -name "*.nex" -type f | while read -r file; do
+            local basename="$(basename "$file" .nex)"
+            local output_file="$output_dir/${basename}.md"
+            echo "Generating docs: $file -> $output_file"
+            cd "$NEX_HOME" && clojure -M:docgen "$file" "$output_file"
+        done
+    else
+        if [[ -z "$output" ]]; then
+            # Output to stdout
+            cd "$NEX_HOME" && clojure -M:docgen "$input"
+        else
+            # Output to file
+            cd "$NEX_HOME" && clojure -M:docgen "$input" "$output"
+        fi
+    fi
+}
+
+cmd_eval() {
+    local code="$1"
+
+    if [[ -z "$code" ]]; then
+        echo "Error: eval requires a code argument"
+        echo "Usage: nex eval '<code>'"
+        exit 1
+    fi
+
+    # Create temporary file with the code
+    local tmpfile=$(mktemp /tmp/nex.XXXXXX.nex)
+    echo "$code" > "$tmpfile"
+
+    # Parse and evaluate
+    cd "$NEX_HOME" && clojure -M -m nex.eval "$tmpfile"
+
+    # Clean up
+    rm -f "$tmpfile"
+}
+
+# Main command dispatcher
+main() {
+    local command="${1:-repl}"
+
+    case "$command" in
+        repl)
+            cmd_repl
+            ;;
+        compile)
+            shift
+            cmd_compile "$@"
+            ;;
+        format)
+            shift
+            cmd_format "$@"
+            ;;
+        doc)
+            shift
+            cmd_doc "$@"
+            ;;
+        eval)
+            shift
+            cmd_eval "$@"
+            ;;
+        help|--help|-h)
+            show_help
+            ;;
+        version|--version|-v)
+            show_version
+            ;;
+        *)
+            echo "Error: Unknown command '$command'"
+            echo "Run 'nex help' for usage information."
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
