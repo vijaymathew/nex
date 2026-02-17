@@ -175,9 +175,13 @@
           (setq indent-col 0)
         (let ((prev-indent (nex-previous-line-indent))
               (should-increase (nex-should-increase-indent))
-              (should-decrease (nex-should-decrease-indent)))
+              (should-decrease (nex-should-decrease-indent))
+              (is-class-level (nex-is-class-level-keyword)))
           (setq indent-col
                 (cond
+                 ;; Class-level keywords: align with class (usually 0)
+                 (is-class-level
+                  (nex-find-class-indent))
                  ;; Closing keywords: decrease indent
                  (should-decrease
                   (max 0 (- prev-indent nex-indent-offset)))
@@ -223,6 +227,25 @@
     (beginning-of-line)
     (skip-chars-forward " \t")
     (looking-at (regexp-opt '("end" "else") 'words))))
+
+(defun nex-is-class-level-keyword ()
+  "Return t if the current line starts with a class-level keyword.
+Class-level keywords should align with 'class' at column 0."
+  (save-excursion
+    (beginning-of-line)
+    (skip-chars-forward " \t")
+    (looking-at (regexp-opt '("feature" "constructors" "inherit" "invariant") 'words))))
+
+(defun nex-find-class-indent ()
+  "Find the indentation level of the enclosing class.
+Returns 0 if at top level or inside a class."
+  (save-excursion
+    (beginning-of-line)
+    (if (re-search-backward "^\\s-*class\\s-+" nil t)
+        ;; Found a class, return its indentation
+        (current-indentation)
+      ;; No class found, return 0 (top level)
+      0)))
 
 ;;;; Navigation
 
@@ -362,6 +385,7 @@ Nex is an Eiffel-inspired language with Design by Contract features.
   ;; Indentation
   (setq-local indent-line-function 'nex-indent-line)
   (setq-local tab-width nex-indent-offset)
+  (setq-local indent-tabs-mode nil)  ; Use spaces, not tabs
 
   ;; Navigation
   (setq-local beginning-of-defun-function 'nex-beginning-of-defun)
