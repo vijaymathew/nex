@@ -94,9 +94,14 @@
   (println "  • Built-in functions: print(), println()")
   (println)
   (println "Examples:")
-  (println "  print(42)")
-  (println "  let x := 10")
-  (println "  if x > 5 then print(\"big\") else print(\"small\") end")
+  (println "  42                    # Expressions are automatically displayed")
+  (println "  1 + 2                 # Arithmetic")
+  (println "  \"hello\"               # Strings")
+  (println "  1 < 2                 # Comparisons (shows true/false)")
+  (println "  let x := 10           # Define variables")
+  (println "  x + 5                 # Use variables in expressions")
+  (println "  print(x)              # Print variable values")
+  (println "  :vars                 # List all variables and their values")
   (println)
   (println "Multi-line input:")
   (println "  Start a class definition and press Enter")
@@ -159,15 +164,60 @@
 ;; Code Evaluation
 ;;
 
+
 (defn wrap-as-method
   "Wrap code in a temporary class and method structure for parsing"
   [code]
+  ;; For expressions, we need to use them as the result value
   (str "class __ReplTemp__\n"
        "  feature\n"
        "    __eval__() do\n"
        "      " code "\n"
        "    end\n"
        "end"))
+
+(defn wrap-expression
+  "Wrap an expression so it can be evaluated and its result returned"
+  [expr]
+  ;; Directly wrap in print() - this handles both expressions and identifiers
+  (str "class __ReplTemp__\n"
+       "  feature\n"
+       "    __eval__() do\n"
+       "      print(" expr ")\n"
+       "    end\n"
+       "end"))
+
+(defn format-value
+  "Format a value for REPL display"
+  [value]
+  (cond
+    ;; Nex objects
+    (instance? nex.interpreter.NexObject value)
+    (str "#<" (:class-name value) " object>")
+
+    ;; Strings - show without quotes for direct display
+    (string? value)
+    value
+
+    ;; Numbers
+    (number? value)
+    (str value)
+
+    ;; Booleans
+    (boolean? value)
+    (str value)
+
+    ;; Nil
+    (nil? value)
+    "nil"
+
+    ;; Collections
+    (coll? value)
+    (pr-str value)
+
+    ;; Everything else
+    :else
+    (pr-str value)))
 
 (defn looks-like-class?
   "Check if input looks like a class definition"
@@ -181,6 +231,19 @@
       (re-find #"^\s*if\s+" input)
       (re-find #"^\s*from\s+" input)
       (re-find #"^\s*do\s+" input)))
+
+(defn looks-like-identifier?
+  "Check if input is a simple identifier (variable name)"
+  [input]
+  (re-matches #"^\s*[a-zA-Z_][a-zA-Z0-9_]*\s*$" input))
+
+(defn looks-like-expression?
+  "Check if input looks like a simple expression (not a statement)"
+  [input]
+  (not (or (looks-like-statement? input)
+           (looks-like-class? input)
+           (re-find #"^\s*print\(" input)
+           (re-find #"^\s*create\s+" input))))
 
 (defn eval-code [ctx input]
   (try
@@ -202,13 +265,24 @@
                           input)
 
           ;; Try to parse, track if we wrapped
-          [ast was-wrapped?] (try
-                               [(p/ast code-to-parse) (not= code-to-parse input)]
-                               (catch Exception e
-                                 ;; If parsing failed and we haven't wrapped yet, try wrapping
-                                 (if (= code-to-parse input)
-                                   [(p/ast (wrap-as-method input)) true]
-                                   (throw e))))]
+          [ast was-wrapped? is-expression?] (try
+                                              [(p/ast code-to-parse) (not= code-to-parse input) false]
+                                              (catch Exception e
+                                                ;; If parsing failed and we haven't wrapped yet, try wrapping
+                                                (if (= code-to-parse input)
+                                                  (cond
+                                                    ;; Check if it's a bare identifier - wrap in print
+                                                    (looks-like-identifier? input)
+                                                    [(p/ast (wrap-expression input)) true true]
+
+                                                    ;; Try wrapping as expression
+                                                    :else
+                                                    (try
+                                                      [(p/ast (wrap-expression input)) true true]
+                                                      (catch Exception e2
+                                                        ;; If expression wrapping fails, try as statement
+                                                        [(p/ast (wrap-as-method input)) true false])))
+                                                  (throw e))))]
 
       ;; Evaluate based on type
       (cond
@@ -224,8 +298,8 @@
             (doseq [line output]
               (println line)))
           ;; Show result if it's not nil and not from a print
-          (when (and result (empty? output) (not= result nil))
-            (println "=>" (pr-str result)))
+          (when (and result (empty? output))
+            (println (format-value result)))
           ;; Don't say "Class registered" for wrapped code
           ctx)
 
@@ -255,7 +329,7 @@
               (println line)))
           ;; Show result if it's not nil and not from a print
           (when (and result (empty? output))
-            (println "=>" (pr-str result)))
+            (println (format-value result)))
           ctx)))
 
     (catch clojure.lang.ExceptionInfo e

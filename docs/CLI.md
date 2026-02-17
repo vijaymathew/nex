@@ -21,17 +21,42 @@ nex
 nex> print("Hello, World!")
 Hello, World!
 
+nex> 42
+42
+
+nex> 1 + 2
+3
+
+nex> 1 < 2
+true
+
+nex> "hello, world"
+hello, world
+
 nex> let x := 42
 42
 
-nex> print(x + 10)
+nex> x + 10
 52
+
+nex> print(x)
+42
+
+nex> :vars
+Defined variables:
+  • x = 42
 
 nex>
 nex> # Empty lines are ignored - press Enter to continue
 nex> :quit
 Goodbye!
 ```
+
+**Expression Evaluation:**
+- Literals and expressions are automatically evaluated and displayed
+- Examples: `42`, `1 + 2`, `"hello"`, `1 < 2`
+- Variables in expressions work: `x + 10`
+- To see a variable's value alone, use: `print(x)` or `:vars`
 
 **Exit the REPL:**
 - Type `:quit`, `:q`, or `:exit`
