@@ -442,35 +442,6 @@ let current: Integer := int_box.value  -- Returns 100
 let text: String := str_box.value      -- Returns "world"
 ```
 
-**Another example - Generic Stack:**
-
-```nex
-class Stack [G]
-  feature
-    top: G
-
-    push(item: G) do
-      let top := item
-    end
-
-    pop() do
-      print(top)
-    end
-end
-
--- Usage:
-let int_stack: Stack [Integer] := create Stack
-int_stack.push(10)
-int_stack.push(20)
-int_stack.pop()        -- Prints: 20
-let value := int_stack.top  -- Returns 20
-
-let str_stack: Stack [String] := create Stack
-str_stack.push("hello")
-str_stack.push("world")
-str_stack.pop()        -- Prints: "world"
-```
-
 ## Language Features
 
 ### Design by Contract

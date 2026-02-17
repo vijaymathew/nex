@@ -22,6 +22,15 @@ This directory contains example programs demonstrating various features of the N
   - Rename and redefine clauses
   - Method overriding
 
+### Data Structures
+
+- **stack.nex** - Complete generic stack implementation
+  - Generic type parameters (`Stack [G]`)
+  - Array-based implementation using `at()` and `set()` methods
+  - Design by Contract (preconditions, postconditions, invariants)
+  - Core stack operations: push, pop, peek, clear
+  - Query operations: is_empty, is_full, size
+
 ### Specific Features
 
 - **demo_gcd.clj** - GCD algorithm with loop contracts
@@ -64,6 +73,8 @@ clojure examples/demo_nex_to_java.clj
 - ✓ Single and multiple inheritance
 - ✓ Method renaming and redefinition
 - ✓ Design by Contract (preconditions, postconditions, invariants)
+- ✓ Generic type parameters (`Stack [G]`, `Array [T]`)
+- ✓ Array operations with `at()` and `set()` methods
 - ✓ Local variables (`let`)
 - ✓ Control flow (if-then-else, loops, scoped blocks)
 - ✓ Grouped parameter syntax

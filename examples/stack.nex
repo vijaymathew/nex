@@ -1,0 +1,78 @@
+-- Generic Stack Implementation
+--
+-- A complete, array-based stack data structure demonstrating:
+-- - Generic type parameters for type safety
+-- - Design by Contract (preconditions, postconditions, invariants)
+-- - Element access using at() and set() methods
+--
+-- Usage:
+--   let stack := create Stack.make(10)
+--   stack.push(42)
+--   stack.push(100)
+--   let top := stack.pop()   -- Returns 100
+--   let next := stack.peek()  -- Returns 42 without removing
+
+class Stack [G]
+  constructors
+    make(capacity: Integer) do
+      items := []
+      max_size := capacity
+      top_index := -1
+    end
+
+  feature
+    items: Array [G]
+    max_size: Integer
+    top_index: Integer
+
+    is_empty(): Boolean
+    do
+      result := top_index = -1
+    end
+
+    is_full(): Boolean
+    do
+      result := top_index >= max_size - 1
+    end
+
+    size(): Integer
+    do
+      result := top_index + 1
+    end
+
+    peek(): G
+      require
+        not_empty: top_index >= 0
+      do
+        result := items.at(top_index)
+      end
+
+    push(item: G)
+      require
+        not_full: top_index < max_size - 1
+      do
+        top_index := top_index + 1
+        items := items.set(top_index, item)
+      ensure
+        size_increased: top_index = old top_index + 1
+      end
+
+    pop(): G
+      require
+        not_empty: top_index >= 0
+      do
+        result := items.at(top_index)
+        top_index := top_index - 1
+      ensure
+        size_decreased: top_index = old top_index - 1
+      end
+
+    clear()
+    do
+      top_index := -1
+    end
+
+  invariant
+    valid_top: top_index >= -1 and top_index < max_size
+    positive_capacity: max_size > 0
+end
