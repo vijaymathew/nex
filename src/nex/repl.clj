@@ -78,10 +78,12 @@
   (println)
   (println "REPL Commands:")
   (println "  :help, :h, :?     - Show this help message")
-  (println "  :quit, :q, :exit  - Exit the REPL")
+  (println "  :quit, :q, :exit  - Exit the REPL (or press Ctrl+D)")
   (println "  :clear, :reset    - Clear all definitions and reset context")
   (println "  :classes          - List all defined classes")
   (println "  :vars             - List all defined variables")
+  (println)
+  (println "Note: Empty lines are ignored. Press Enter on empty prompt to continue.")
   (println)
   (println "Language Features:")
   (println "  • Define classes with 'class ClassName ... end'")
@@ -284,14 +286,23 @@
   "Main REPL loop"
   []
   (loop [ctx (init-repl-context)]
-    (when-let [input (read-input)]
+    (if-let [input (read-input)]
+      ;; Got input (could be empty line, command, or code)
       (let [trimmed (str/trim input)]
-        (when-not (str/blank? trimmed)
+        (if (str/blank? trimmed)
+          ;; Empty line - just continue the loop
+          (recur ctx)
+          ;; Non-empty input - process it
           (let [new-ctx (if (str/starts-with? trimmed ":")
                          (handle-command ctx trimmed)
                          (eval-code ctx trimmed))]
-            (when-not (= new-ctx :quit)
-              (recur new-ctx))))))))
+            (if (= new-ctx :quit)
+              ;; Exit requested via :quit command
+              nil
+              ;; Continue with new context
+              (recur new-ctx)))))
+      ;; Got nil (EOF/Ctrl+D) - exit gracefully
+      nil)))
 
 (defn start-repl
   "Start the Nex REPL"

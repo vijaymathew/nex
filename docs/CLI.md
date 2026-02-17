@@ -27,9 +27,17 @@ nex> let x := 42
 nex> print(x + 10)
 52
 
+nex>
+nex> # Empty lines are ignored - press Enter to continue
 nex> :quit
 Goodbye!
 ```
+
+**Exit the REPL:**
+- Type `:quit`, `:q`, or `:exit`
+- Press Ctrl+D (EOF)
+
+**Note:** Empty lines do not exit the REPL - they are simply ignored.
 
 ### Compile
 
