@@ -2,4 +2,4 @@
 # Nex REPL launcher script
 
 cd "$(dirname "$0")"
-exec clojure -M:repl
+exec clojure -J--enable-native-access=ALL-UNNAMED -M:repl

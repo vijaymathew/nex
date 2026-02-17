@@ -30,3 +30,6 @@ tmp/
 temp/
 *.orig
 *.rej
+
+# REPL history
+.nex_history

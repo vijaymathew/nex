@@ -2,7 +2,12 @@
   "Interactive REPL for the Nex programming language"
   (:require [nex.parser :as p]
             [nex.interpreter :as interp]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [clojure.java.io :as io])
+  (:import [org.jline.reader LineReaderBuilder LineReader LineReader$Option]
+           [org.jline.terminal TerminalBuilder]
+           [org.jline.reader.impl.history DefaultHistory]
+           [java.io EOFException])
   (:gen-class))
 
 ;;
@@ -20,16 +25,38 @@
 ;; Input Reading
 ;;
 
-(defn prompt [text]
-  (print text)
-  (flush))
+(defn create-line-reader
+  "Create a JLine LineReader with history support"
+  []
+  (let [terminal (-> (TerminalBuilder/builder)
+                     (.system true)
+                     (.build))
+        history-file (io/file (System/getProperty "user.home") ".nex_history")]
+    (-> (LineReaderBuilder/builder)
+        (.terminal terminal)
+        (.variable LineReader/HISTORY_FILE (.getAbsolutePath history-file))
+        (.option LineReader$Option/DISABLE_EVENT_EXPANSION true)
+        (.build))))
+
+(defonce ^:dynamic *line-reader* nil)
 
 (defn read-line-safe
-  "Read a line, returning nil on EOF"
-  []
+  "Read a line using JLine, returning nil on EOF"
+  [prompt-text]
   (try
-    (read-line)
-    (catch Exception _
+    (when-not *line-reader*
+      (throw (IllegalStateException. "Line reader not initialized")))
+    (.readLine *line-reader* prompt-text)
+    (catch EOFException _
+      nil)
+    (catch org.jline.reader.UserInterruptException _
+      ;; Ctrl+C - return empty string to continue
+      "")
+    (catch org.jline.reader.EndOfFileException _
+      ;; Ctrl+D - return nil to exit
+      nil)
+    (catch Exception e
+      (println "Error reading input:" (.getMessage e))
       nil)))
 
 (defn continue-reading?
@@ -54,20 +81,17 @@
 (defn read-input
   "Read potentially multi-line input from the user"
   []
-  (prompt "nex> ")
-  (when-let [first-line (read-line-safe)]
+  (when-let [first-line (read-line-safe "nex> ")]
     (if (str/starts-with? first-line ":")
       ;; REPL command - single line
       first-line
       ;; Code input - may be multi-line
       (loop [lines [first-line]]
         (if (continue-reading? lines)
-          (do
-            (prompt "...  ")
-            (if-let [next-line (read-line-safe)]
-              (recur (conj lines next-line))
-              ;; EOF during multi-line - return what we have
-              (str/join "\n" lines)))
+          (if-let [next-line (read-line-safe "...  ")]
+            (recur (conj lines next-line))
+            ;; EOF during multi-line - return what we have
+            (str/join "\n" lines))
           (str/join "\n" lines))))))
 
 ;;
@@ -86,7 +110,13 @@
   (println "  :classes          - List all defined classes")
   (println "  :vars             - List all defined variables")
   (println)
-  (println "Note: Empty lines are ignored. Press Enter on empty prompt to continue.")
+  (println "Navigation:")
+  (println "  Up/Down arrows    - Navigate command history")
+  (println "  Ctrl+R            - Search command history")
+  (println "  Ctrl+C            - Cancel current input")
+  (println "  Ctrl+D            - Exit the REPL")
+  (println)
+  (println "Note: Command history is saved to ~/.nex_history")
   (println)
   (println "Language Features:")
   (println "  • Define classes with 'class ClassName ... end'")
@@ -393,8 +423,9 @@
   "Start the Nex REPL"
   []
   (show-banner)
-  (repl-loop)
-  (println "\nGoodbye!"))
+  (binding [*line-reader* (create-line-reader)]
+    (repl-loop)
+    (println "\nGoodbye!")))
 
 (defn -main
   "Entry point for standalone REPL"
