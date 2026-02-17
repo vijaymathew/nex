@@ -71,7 +71,7 @@ end")
       require
         valid_hour: a_hour >= 0 and a_hour <= 23
       do
-        let hour := a_hour
+        hour := a_hour
       ensure
         hour_set: hour = a_hour
       end

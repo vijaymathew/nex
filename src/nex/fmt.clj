@@ -124,8 +124,10 @@
 
 (defn format-assertion
   "Format an assertion"
-  [{:keys [label expr]} level]
-  (str (indent level) label ": " (format-expression expr)))
+  [{:keys [label expr condition]} level]
+  ;; Parser uses :condition, but some code might use :expr
+  (let [cond-expr (or condition expr)]
+    (str (indent level) label ": " (format-expression cond-expr))))
 
 (defn format-method
   "Format a method declaration"
@@ -140,10 +142,12 @@
         has-contracts-or-note? (or note require ensure)
         signature (str ind name param-str
                        (when return-type (str ": " (format-type return-type))))
+        ;; Note is indented one level deeper than method name
         note-line (when note
                     (str (indent (inc level)) "note \"" note "\""))
         do-line (if has-contracts-or-note?
-                  (str (indent (inc level)) "do")
+                  ;; do aligns with method name, not with note
+                  (str ind "do")
                   (str signature " do"))
         first-line (if has-contracts-or-note? signature do-line)]
     (str/join "\n"
@@ -151,14 +155,18 @@
                       [first-line
                        note-line
                        (when require
-                         (str (indent (inc level)) "require\n"
-                              (str/join "\n" (map #(format-assertion % (+ level 2)) require))))
+                         ;; require aligns with method name, conditions indented under it
+                         (str ind "require\n"
+                              (str/join "\n" (map #(format-assertion % (inc level)) require))))
                        (when has-contracts-or-note?
-                         (str (indent (inc level)) "do"))
-                       (str/join "\n" (map #(format-statement % (+ level 2)) body))
+                         ;; do aligns with method name
+                         (str ind "do"))
+                       ;; Body indented under do
+                       (str/join "\n" (map #(format-statement % (inc level)) body))
                        (when ensure
-                         (str (indent (inc level)) "ensure\n"
-                              (str/join "\n" (map #(format-assertion % (+ level 2)) ensure))))
+                         ;; ensure aligns with method name, conditions indented under it
+                         (str ind "ensure\n"
+                              (str/join "\n" (map #(format-assertion % (inc level)) ensure))))
                        (str ind "end")]))))
 
 (defn format-field
@@ -179,21 +187,26 @@
         has-contracts? (or require ensure)
         signature (str ind name "(" param-str ")")
         do-line (if has-contracts?
-                  (str (indent (inc level)) "do")
+                  ;; do aligns with constructor name
+                  (str ind "do")
                   (str signature " do"))
         first-line (if has-contracts? signature do-line)]
     (str/join "\n"
               (remove empty?
                       [first-line
                        (when require
-                         (str (indent (inc level)) "require\n"
-                              (str/join "\n" (map #(format-assertion % (+ level 2)) require))))
+                         ;; require aligns with constructor name, conditions indented under it
+                         (str ind "require\n"
+                              (str/join "\n" (map #(format-assertion % (inc level)) require))))
                        (when has-contracts?
-                         (str (indent (inc level)) "do"))
-                       (str/join "\n" (map #(format-statement % (+ level 2)) body))
+                         ;; do aligns with constructor name
+                         (str ind "do"))
+                       ;; Body indented under do
+                       (str/join "\n" (map #(format-statement % (inc level)) body))
                        (when ensure
-                         (str (indent (inc level)) "ensure\n"
-                              (str/join "\n" (map #(format-assertion % (+ level 2)) ensure))))
+                         ;; ensure aligns with constructor name, conditions indented under it
+                         (str ind "ensure\n"
+                              (str/join "\n" (map #(format-assertion % (inc level)) ensure))))
                        (str ind "end")]))))
 
 (defn format-feature-section

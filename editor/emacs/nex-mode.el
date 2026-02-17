@@ -108,7 +108,7 @@
   '("class" "feature" "inherit" "end" "do" "if" "then" "else"
     "from" "until" "invariant" "variant" "require" "ensure"
     "let" "constructors" "rename" "redefine" "as" "and" "or" "not"
-    "old" "create" "private" "note" "with")
+    "old" "create" "private" "note" "with" "import" "intern")
   "Nex language keywords.")
 
 (defconst nex-types
@@ -178,12 +178,20 @@
         (let ((prev-indent (nex-previous-line-indent))
               (should-increase (nex-should-increase-indent))
               (should-decrease (nex-should-decrease-indent))
-              (is-class-level (nex-is-class-level-keyword)))
+              (is-class-level (nex-is-class-level-keyword))
+              (is-note-after-method (nex-is-note-after-method))
+              (is-contract-after-method (nex-is-contract-after-method)))
           (setq indent-col
                 (cond
                  ;; Class-level keywords: align with class (usually 0)
                  (is-class-level
                   (nex-find-class-indent))
+                 ;; 'note' after method name: indent extra level
+                 (is-note-after-method
+                  (+ prev-indent nex-indent-offset))
+                 ;; require/ensure/do after method: align with method
+                 (is-contract-after-method
+                  (nex-find-method-indent))
                  ;; Closing keywords: decrease indent
                  (should-decrease
                   (max 0 (- prev-indent nex-indent-offset)))
@@ -215,20 +223,51 @@
     (forward-line -1)
     (end-of-line)
     (skip-chars-backward " \t")
-    (looking-back
-     (regexp-opt '("class" "feature" "do" "then" "else"
-                   "from" "until" "inherit" "require" "ensure"
-                   "invariant" "variant" "constructors"
-                   "rename" "redefine")
-                 'words)
-     (line-beginning-position))))
+    (or
+     ;; Keywords that start indented blocks
+     (looking-back
+      (regexp-opt '("class" "do" "then" "else" "require" "ensure"
+                    "from" "until" "inherit" "invariant" "variant"
+                    "rename" "redefine")
+                  'words)
+      (line-beginning-position))
+     ;; Section keywords that contain items (feature, constructors)
+     (looking-back
+      (regexp-opt '("feature" "constructors") 'words)
+      (line-beginning-position))
+     ;; Handle "private feature" specially
+     (looking-back "\\bprivate\\s-+feature\\b" (line-beginning-position)))))
+
+(defun nex-in-contract-block-p ()
+  "Return t if point is in a contract block (after require/ensure)."
+  (save-excursion
+    (beginning-of-line)
+    ;; Search backward for require/ensure or do/end
+    (let ((start-pos (point)))
+      (catch 'result
+        (while (re-search-backward "\\b\\(require\\|ensure\\|do\\|end\\)\\b" nil t)
+          (let ((keyword (match-string 1)))
+            (cond
+             ;; Found require or ensure before do - we're in contract block
+             ((or (string= keyword "require") (string= keyword "ensure"))
+              (throw 'result t))
+             ;; Found do or end first - not in contract block
+             ((or (string= keyword "do") (string= keyword "end"))
+              (throw 'result nil)))))
+        ;; Didn't find anything
+        nil))))
 
 (defun nex-should-decrease-indent ()
   "Return t if the current line should decrease indentation."
   (save-excursion
     (beginning-of-line)
     (skip-chars-forward " \t")
-    (looking-at (regexp-opt '("end" "else") 'words))))
+    (or
+     ;; 'end' and 'else' close blocks
+     (looking-at (regexp-opt '("end" "else") 'words))
+     ;; 'do' aligns with require/ensure if inside contract block
+     (and (looking-at "\\bdo\\b")
+          (nex-in-contract-block-p)))))
 
 (defun nex-is-class-level-keyword ()
   "Return t if the current line starts with a class-level keyword.
@@ -236,6 +275,9 @@ Class-level keywords should align with 'class' at column 0."
   (save-excursion
     (beginning-of-line)
     (skip-chars-forward " \t")
+    ;; Skip 'private' if present
+    (when (looking-at "\\bprivate\\s-+")
+      (goto-char (match-end 0)))
     (looking-at (regexp-opt '("feature" "constructors" "inherit" "invariant") 'words))))
 
 (defun nex-find-class-indent ()
@@ -248,6 +290,65 @@ Returns 0 if at top level or inside a class."
         (current-indentation)
       ;; No class found, return 0 (top level)
       0)))
+
+(defun nex-is-note-after-method ()
+  "Return t if current line is 'note' after a method name."
+  (save-excursion
+    (beginning-of-line)
+    (skip-chars-forward " \t")
+    (when (looking-at "\\bnote\\b")
+      ;; Check if previous non-empty line is a method name
+      (forward-line -1)
+      (while (and (not (bobp)) (looking-at "^\\s-*$"))
+        (forward-line -1))
+      (end-of-line)
+      (skip-chars-backward " \t")
+      ;; Method name: lowercase identifier with optional parens
+      (looking-back "\\b[a-z_][a-z0-9_]*\\s-*\\(([^)]*)\\)?\\s-*$"
+                    (line-beginning-position)))))
+
+(defun nex-is-contract-after-method ()
+  "Return t if current line is require/ensure/do after a method name."
+  (save-excursion
+    (beginning-of-line)
+    (skip-chars-forward " \t")
+    (when (looking-at "\\b\\(require\\|ensure\\|do\\)\\b")
+      ;; Search backward for method name, skipping note, empty lines, and body statements
+      (forward-line -1)
+      (while (and (not (bobp))
+                  (progn
+                    (beginning-of-line)
+                    (skip-chars-forward " \t")
+                    (or (looking-at "^\\s-*$")
+                        (looking-at "\\bnote\\b")
+                        ;; Skip body statements (assignments, calls, etc) when looking for method
+                        (and (not (looking-at "\\b\\(do\\|require\\|ensure\\|feature\\|constructors\\|class\\|end\\)\\b"))
+                             (not (looking-at "\\b[a-z_][a-z0-9_]*\\s-*\\(([^)]*)\\)?\\s-*$"))))))
+        (forward-line -1))
+      ;; Check if we found a method/constructor name or another contract keyword
+      (beginning-of-line)
+      (skip-chars-forward " \t")
+      (or (looking-at "\\b[a-z_][a-z0-9_]*\\s-*\\(([^)]*)\\)?\\s-*$")
+          (looking-at "\\b\\(do\\|require\\)\\b")))))
+
+(defun nex-find-method-indent ()
+  "Find the indentation of the method that owns the current contract."
+  (save-excursion
+    (beginning-of-line)
+    ;; Search backward for method name, skipping note, empty lines, and body statements
+    (forward-line -1)
+    (while (and (not (bobp))
+                (progn
+                  (beginning-of-line)
+                  (skip-chars-forward " \t")
+                  (or (looking-at "^\\s-*$")
+                      (looking-at "\\bnote\\b")
+                      ;; Skip body statements when looking for method indent
+                      (and (not (looking-at "\\b\\(do\\|require\\|ensure\\|feature\\|constructors\\|class\\|end\\)\\b"))
+                           (not (looking-at "\\b[a-z_][a-z0-9_]*\\s-*\\(([^)]*)\\)?\\s-*$"))))))
+      (forward-line -1))
+    ;; Should be at method name or contract keyword line now
+    (current-indentation)))
 
 ;;;; Navigation
 

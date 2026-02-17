@@ -342,8 +342,9 @@
               calls (:calls ast)
               real-class-names (filter #(not= % "__ReplTemp__")
                                       (map :name (filter map? classes)))]
-          ;; Evaluate the program
-          (interp/eval-node ctx ast)
+          ;; If there are classes, evaluate the program to register them
+          (when (seq real-class-names)
+            (interp/eval-node ctx ast))
           ;; If there are calls/expressions and no classes, evaluate them to get result
           (let [result (when (and (seq calls) (empty? real-class-names))
                         (last (map #(interp/eval-node ctx %) calls)))

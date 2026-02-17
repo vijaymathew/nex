@@ -46,9 +46,11 @@ show_version() {
     echo "Nex Language v$VERSION (JVM)"
 }
 
+J_OPTIONS="-J--enable-native-access=ALL-UNNAMED"
+
 # Command implementations
 cmd_repl() {
-    cd "$NEX_HOME" && clojure -M:repl
+    cd "$NEX_HOME" && clojure ${J_OPTIONS} -M:repl
 }
 
 cmd_compile() {
@@ -80,7 +82,7 @@ cmd_compile() {
     # Use absolute path for file
     file="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
 
-    cd "$NEX_HOME" && clojure -M -m nex.generator.$target "$file"
+    cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.generator.$target "$file"
 }
 
 cmd_format() {
@@ -104,10 +106,10 @@ cmd_format() {
         # Format all .nex files in directory
         find "$path" -name "*.nex" -type f | while read -r file; do
             echo "Formatting: $file"
-            cd "$NEX_HOME" && clojure -M:fmt "$file"
+            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M:fmt "$file"
         done
     else
-        cd "$NEX_HOME" && clojure -M:fmt "$path"
+        cd "$NEX_HOME" && clojure ${J_OPTIONS} -M:fmt "$path"
     fi
 }
 
@@ -139,15 +141,15 @@ cmd_doc() {
             local basename="$(basename "$file" .nex)"
             local output_file="$output_dir/${basename}.md"
             echo "Generating docs: $file -> $output_file"
-            cd "$NEX_HOME" && clojure -M:docgen "$file" "$output_file"
+            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M:docgen "$file" "$output_file"
         done
     else
         if [[ -z "$output" ]]; then
             # Output to stdout
-            cd "$NEX_HOME" && clojure -M:docgen "$input"
+            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M:docgen "$input"
         else
             # Output to file
-            cd "$NEX_HOME" && clojure -M:docgen "$input" "$output"
+            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M:docgen "$input" "$output"
         fi
     fi
 }
@@ -166,7 +168,7 @@ cmd_eval() {
     echo "$code" > "$tmpfile"
 
     # Parse and evaluate
-    cd "$NEX_HOME" && clojure -M -m nex.eval "$tmpfile"
+    cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.eval "$tmpfile"
 
     # Clean up
     rm -f "$tmpfile"
