@@ -1,13 +1,14 @@
 # Arrays and Maps in Nex
 
-Nex provides built-in support for arrays and maps (dictionaries/hash tables) as parameterized generic types with convenient syntax for access and initialization.
+Nex provides built-in support for arrays and maps (dictionaries/hash tables) as parameterized generic types with convenient method-based syntax for access and initialization.
 
 ## Table of Contents
 
 - [Arrays](#arrays)
 - [Maps](#maps)
-- [Subscript Access](#subscript-access)
+- [Element Access](#element-access)
 - [Default Values](#default-values)
+- [Built-in Methods](#built-in-methods)
 - [Java Translation](#java-translation)
 - [Examples](#examples)
 
@@ -61,7 +62,7 @@ end
 
 ### Accessing Elements
 
-Use subscript notation with square brackets:
+Use the `at` method to read elements and `set` method to update them:
 
 ```nex
 class Demo
@@ -69,9 +70,13 @@ class Demo
     items: Array [Integer]
 
     demo() do
-      let first := items[0]          -- Get first element
-      let second := items[1]         -- Get second element
-      let last := items[items.size - 1]  -- Last element
+      let first := items.at(0)              -- Get first element
+      let second := items.at(1)             -- Get second element
+      let last := items.at(items.length - 1) -- Last element
+
+      -- Update elements (returns new array)
+      items := items.set(0, 99)             -- Set first element to 99
+      items := items.set(1, 77)             -- Set second element to 77
     end
 end
 ```
@@ -131,7 +136,7 @@ end
 
 ### Accessing Entries
 
-Use subscript notation with square brackets:
+Use the `at` method to read entries and `set` method to update them:
 
 ```nex
 class Demo
@@ -139,22 +144,30 @@ class Demo
     prices: Map [String, Decimal]
 
     demo() do
-      let applePrice := prices["apple"]
-      let orangePrice := prices["orange"]
+      let applePrice := prices.at("apple")
+      let orangePrice := prices.at("orange")
+
+      -- Update entries (returns new map)
+      prices := prices.set("apple", 1.99)
+      prices := prices.set("banana", 0.59)
     end
 end
 ```
 
-## Subscript Access
+## Element Access
 
-Both arrays and maps use the same subscript syntax `obj[key]` for element access.
+Both arrays and maps use method calls for element access: `at` for reading and `set` for writing.
 
-### Array Subscript
+### Array Access Methods
 
 ```nex
 let items: Array [String] := ["a", "b", "c"]
-let x := items[0]       -- Access by index
-let y := items[i]       -- Variable index
+let x := items.at(0)        -- Access by index
+let y := items.at(i)        -- Variable index
+
+-- Update array (returns new array)
+items := items.set(0, "z")  -- Set first element
+items := items.set(i, "x")  -- Set element at index i
 ```
 
 **Generated Java:**
@@ -162,14 +175,20 @@ let y := items[i]       -- Variable index
 ArrayList<String> items = new ArrayList<>(Arrays.asList("a", "b", "c"));
 x = items.get(0);
 y = items.get(i);
+items.set(0, "z");
+items.set(i, "x");
 ```
 
-### Map Subscript
+### Map Access Methods
 
 ```nex
 let data: Map [String, Integer] := {"a": 1, "b": 2}
-let x := data["a"]      -- Access by key
-let y := data[key]      -- Variable key
+let x := data.at("a")          -- Access by key
+let y := data.at(key)          -- Variable key
+
+-- Update map (returns new map)
+data := data.set("a", 99)      -- Set value for key "a"
+data := data.set(key, value)   -- Set value for variable key
 ```
 
 **Generated Java:**
@@ -177,11 +196,13 @@ let y := data[key]      -- Variable key
 HashMap<String, Integer> data = new HashMap<>() {{ put("a", 1); put("b", 2); }};
 x = data.get("a");
 y = data.get(key);
+data.put("a", 99);
+data.put(key, value);
 ```
 
 ### Nested Access
 
-You can chain subscript operations:
+You can chain method calls for nested structures:
 
 ```nex
 class Grid
@@ -189,7 +210,7 @@ class Grid
     matrix: Array [Array [Integer]]
 
     demo() do
-      let cell := matrix[0][1]  -- Access nested array
+      let cell := matrix.at(0).at(1)  -- Access nested array
     end
 end
 ```
@@ -254,18 +275,22 @@ let ages := {"Alice": 30, "Bob": 25}
 ages = new HashMap<>() {{ put("Alice", 30); put("Bob", 25); }};
 ```
 
-### Subscript Translation
+### Access Method Translation
 
 **Nex:**
 ```nex
-let x := arr[0]
-let y := map["key"]
+let x := arr.at(0)
+let y := map.at("key")
+arr := arr.set(0, 99)
+map := map.set("key", 42)
 ```
 
 **Java:**
 ```java
 x = arr.get(0);
 y = map.get("key");
+arr.set(0, 99);
+map.put("key", 42);
 ```
 
 ## Examples
@@ -284,11 +309,15 @@ class NumberList
 
   feature
     get_first() do
-      print(numbers[0])
+      print(numbers.at(0))
     end
 
     get_at(index: Integer) do
-      print(numbers[index])
+      print(numbers.at(index))
+    end
+
+    set_at(index: Integer, value: Integer) do
+      numbers := numbers.set(index, value)
     end
 end
 ```
@@ -309,6 +338,10 @@ public class NumberList {
     public void get_at(int index) {
         System.out.println(numbers.get(index));
     }
+
+    public void set_at(int index, int value) {
+        numbers.set(index, value);
+    }
 }
 ```
 
@@ -326,7 +359,11 @@ class PriceList
 
   feature
     get_price(item: String) do
-      print(prices[item])
+      print(prices.at(item))
+    end
+
+    update_price(item: String, new_price: Decimal) do
+      prices := prices.set(item, new_price)
     end
 end
 ```
@@ -342,6 +379,10 @@ public class PriceList {
 
     public void get_price(String item) {
         System.out.println(prices.get(item));
+    }
+
+    public void update_price(String item, double new_price) {
+        prices.put(item, new_price);
     }
 }
 ```
@@ -366,10 +407,10 @@ class Store
       from
         i := 0
       until
-        i >= items.size
+        i >= items.length
       do
-        let item := items[i]
-        let price := prices[item]
+        let item := items.at(i)
+        let price := prices.at(item)
         print(item)
         print(": ")
         print(price)
@@ -393,7 +434,13 @@ class Grid
 
   feature
     get_cell(row, col: Integer) do
-      print(matrix[row][col])
+      print(matrix.at(row).at(col))
+    end
+
+    set_cell(row, col, value: Integer) do
+      let row_arr := matrix.at(row)
+      let updated_row := row_arr.set(col, value)
+      matrix := matrix.set(row, updated_row)
     end
 end
 ```
@@ -415,12 +462,12 @@ class Categories
 
   feature
     get_category(name: String) do
-      let category := items[name]
+      let category := items.at(name)
       print(category)
     end
 
     get_item(category: String, index: Integer) do
-      print(items[category][index])
+      print(items.at(category).at(index))
     end
 end
 ```
@@ -447,11 +494,15 @@ class Classroom
 
   feature
     add_student(s: Student) do
-      -- students.add(s) would be added in a real implementation
+      students := students.append(s)
     end
 
     get_grade(name: String) do
-      print(grades[name])
+      print(grades.at(name))
+    end
+
+    set_grade(name: String, grade: Integer) do
+      grades := grades.set(name, grade)
     end
 end
 ```
@@ -464,12 +515,12 @@ Arrays and maps can be used as method parameter types:
 class Processor
   feature
     process_list(items: Array [String]) do
-      let first := items[0]
+      let first := items.at(0)
       print(first)
     end
 
     process_map(data: Map [String, Integer]) do
-      let value := data["key"]
+      let value := data.at("key")
       print(value)
     end
 end
@@ -484,8 +535,12 @@ class Demo
       let items: Array [String] := ["a", "b", "c"]
       let data: Map [String, Integer] := {"x": 1, "y": 2}
 
-      let x := items[0]
-      let y := data["x"]
+      let x := items.at(0)
+      let y := data.at("x")
+
+      -- Update collections
+      items := items.set(0, "z")
+      data := data.set("x", 99)
     end
 end
 ```
@@ -534,11 +589,33 @@ let grid: Array [Array [Integer]]
 let lookup: Map [String, Array [Student]]
 ```
 
+## Built-in Methods
+
+### Array Methods
+
+- `at(index)` - Get element at index
+- `set(index, value)` - Set element at index (returns new array)
+- `length` - Number of elements
+- `append(elem)` - Add element to end
+- `is_empty()` - Check if array is empty
+- `first()` - Get first element
+- `last()` - Get last element
+
+### Map Methods
+
+- `at(key)` - Get value for key
+- `set(key, value)` - Set value for key (returns new map)
+- `size()` - Number of entries
+- `contains_key(key)` - Check if key exists
+- `keys()` - Get array of all keys
+- `values()` - Get array of all values
+- `is_empty()` - Check if map is empty
+
 ## Limitations
 
-1. **Bounds Checking**: Subscript access does not include automatic bounds checking in the generated code
-2. **Immutability**: Arrays and maps are mutable by default
-3. **No Slicing**: No built-in slice syntax like `arr[1:3]`
+1. **Bounds Checking**: Element access does not include automatic bounds checking in the generated code
+2. **Immutability**: Arrays and maps are mutable in the underlying implementation
+3. **No Slicing**: No built-in slice syntax like `arr.slice(1, 3)` (though a `slice` method exists)
 
 ## See Also
 

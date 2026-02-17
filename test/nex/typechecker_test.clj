@@ -198,3 +198,56 @@
           result (tc/type-check ast)]
       (is (not (:success result)))
       (is (seq (:errors result))))))
+
+(deftest test-undefined-parent-class
+  (testing "Inheriting from undefined parent class should fail"
+    (let [code "class Savings_Account
+                inherit
+                  Account
+                    rename
+                      deposit as account_deposit
+                    redefine
+                      deposit
+                    end
+                feature
+                  balance: Integer
+                end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (seq (:errors result)))
+      (is (some #(re-find #"Undefined parent class" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-valid-inheritance
+  (testing "Inheriting from defined parent class should succeed"
+    (let [code "class Account
+                  feature
+                    balance: Integer
+
+                    deposit(amount: Integer)
+                    do
+                      let balance := balance + amount
+                    end
+                  end
+
+                class Savings_Account
+                inherit
+                  Account
+                    rename
+                      deposit as account_deposit
+                    redefine
+                      deposit
+                    end
+                feature
+                  interest_rate: Real
+
+                  deposit(amount: Integer)
+                  do
+                    let balance := balance + amount
+                  end
+                end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))

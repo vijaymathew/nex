@@ -2,6 +2,7 @@
   "Interactive REPL for the Nex programming language"
   (:require [nex.parser :as p]
             [nex.interpreter :as interp]
+            [nex.typechecker :as tc]
             [clojure.string :as str]
             [clojure.java.io :as io])
   (:import [org.jline.reader LineReaderBuilder LineReader LineReader$Option]
@@ -15,6 +16,7 @@
 ;;
 
 (defonce ^:dynamic *repl-context* nil)
+(defonce ^:dynamic *type-checking-enabled* (atom false))
 
 (defn init-repl-context
   "Initialize or reset the REPL context"
@@ -109,6 +111,9 @@
   (println "  :clear, :reset    - Clear all definitions and reset context")
   (println "  :classes          - List all defined classes")
   (println "  :vars             - List all defined variables")
+  (println "  :typecheck on     - Enable type checking (validates code before execution)")
+  (println "  :typecheck off    - Disable type checking (default)")
+  (println "  :typecheck status - Show current type checking status")
   (println)
   (println "Navigation:")
   (println "  Up/Down arrows    - Navigate command history")
@@ -169,29 +174,55 @@
             (println (str "  • " var-name " = " value-str))))))))
 
 (defn handle-command [ctx input]
-  (case (str/lower-case input)
-    (":help" ":h" ":?")
-    (do (show-help) ctx)
+  (let [input-lower (str/lower-case input)]
+    (cond
+      ;; Help command
+      (contains? #{":help" ":h" ":?"} input-lower)
+      (do (show-help) ctx)
 
-    (":quit" ":q" ":exit")
-    :quit
+      ;; Quit command
+      (contains? #{":quit" ":q" ":exit"} input-lower)
+      :quit
 
-    (":clear" ":reset")
-    (do
-      (println "Context cleared.")
-      (init-repl-context))
+      ;; Clear command
+      (contains? #{":clear" ":reset"} input-lower)
+      (do
+        (println "Context cleared.")
+        (init-repl-context))
 
-    ":classes"
-    (do (show-classes ctx) ctx)
+      ;; Classes command
+      (= input-lower ":classes")
+      (do (show-classes ctx) ctx)
 
-    ":vars"
-    (do (show-vars ctx) ctx)
+      ;; Vars command
+      (= input-lower ":vars")
+      (do (show-vars ctx) ctx)
 
-    ;; Unknown command
-    (do
-      (println (str "Unknown command: " input))
-      (println "Type :help for available commands")
-      ctx)))
+      ;; Typecheck commands
+      (= input-lower ":typecheck on")
+      (do
+        (reset! *type-checking-enabled* true)
+        (println "Type checking enabled. Code will be validated before execution.")
+        ctx)
+
+      (= input-lower ":typecheck off")
+      (do
+        (reset! *type-checking-enabled* false)
+        (println "Type checking disabled.")
+        ctx)
+
+      (or (= input-lower ":typecheck") (= input-lower ":typecheck status"))
+      (do
+        (println (str "Type checking is currently: "
+                     (if @*type-checking-enabled* "ENABLED" "DISABLED")))
+        ctx)
+
+      ;; Unknown command
+      :else
+      (do
+        (println (str "Unknown command: " input))
+        (println "Type :help for available commands")
+        ctx))))
 
 ;;
 ;; Code Evaluation
@@ -316,6 +347,21 @@
                                                         ;; If expression wrapping fails, try as statement
                                                         [(p/ast (wrap-as-method input)) true false])))
                                                   (throw e))))]
+
+      ;; Type check if enabled (only for non-wrapped code with classes)
+      (when (and @*type-checking-enabled*
+                 (not was-wrapped?)
+                 (= (:type ast) :program)
+                 (seq (:classes ast)))
+        ;; Create an augmented AST that includes previously defined classes
+        ;; so the type checker knows about them
+        (let [prev-classes (vals @(:classes ctx))
+              augmented-ast (assoc ast :classes (concat prev-classes (:classes ast)))
+              result (tc/type-check augmented-ast)]
+          (when-not (:success result)
+            (doseq [error (:errors result)]
+              (println "Type error:" (tc/format-type-error error)))
+            (throw (ex-info "Type checking failed" {:errors (:errors result)})))))
 
       ;; Evaluate based on type
       (cond

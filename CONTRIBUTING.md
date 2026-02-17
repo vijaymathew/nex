@@ -132,7 +132,7 @@ Example:
 
 - **Indentation**: 2 spaces
 - **Naming**:
-  - Classes: `PascalCase`
+  - Classes: `Snake_Case`
   - Methods/variables: `snake_case`
   - Constants: `UPPER_CASE`
 - **Contracts**: Include `require` and `ensure` for public methods

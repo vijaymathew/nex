@@ -374,7 +374,9 @@
     "not_equals"  (fn [b other & _] (not= b other))}
 
    "Array"
-   {"length"      (fn [arr & _] (count arr))
+   {"at"          (fn [arr index & _] (nth arr index))
+    "set"         (fn [arr index value & _] (assoc arr index value))
+    "length"      (fn [arr & _] (count arr))
     "is_empty"    (fn [arr & _] (empty? arr))
     "contains"    (fn [arr elem & _] (boolean (some #(= % elem) arr)))
     "index_of"    (fn [arr elem & _]
@@ -390,7 +392,9 @@
     "slice"       (fn [arr start end & _] (subvec arr start end))}
 
    "Map"
-   {"size"         (fn [m & _] (count m))
+   {"at"           (fn [m key & _] (get m key))
+    "set"          (fn [m key val & _] (assoc m key val))
+    "size"         (fn [m & _] (count m))
     "is_empty"     (fn [m & _] (empty? m))
     "contains_key" (fn [m key & _] (contains? m key))
     "keys"         (fn [m & _] (vec (keys m)))
@@ -565,8 +569,12 @@
                                       (get-default-field-value return-type)
                                       nil)
                       _ (env-define method-env "result" default-result)
+                      ;; Bind "Current" to the current object for self-calls
+                      _ (env-define method-env "Current" obj)
                       new-ctx (-> ctx
                                  (assoc :current-env method-env)
+                                 (assoc :current-object obj)
+                                 (assoc :current-target target)
                                  (assoc :old-values old-values))
                       ;; Check pre-conditions
                       _ (when-let [require-assertions (:require method-def)]
@@ -603,19 +611,67 @@
                       ;; Postcondition or invariant failed: restore original object
                       (env-set! (:current-env ctx) target obj)
                       (throw e)))))
-              (throw (ex-info (str "Method not found: " method)
-                              {:object obj :method method}))))
+              ;; Method not found - check if it's a field (query access)
+              (let [all-fields (get-all-fields ctx class-def)
+                    field (first (filter #(= (:name %) method) all-fields))]
+                (if (and field (empty? arg-values))
+                  ;; Field access as query (uniform access principle)
+                  (get (:fields obj) (keyword method))
+                  ;; Not a field or has arguments
+                  (throw (ex-info (str "Method not found: " method)
+                                  {:object obj :method method}))))))
           ;; Not a NexObject - check if it's a primitive type with built-in methods
           (if-let [result (call-builtin-method obj method arg-values)]
             result
             (throw (ex-info (str "Method not found on type: " method)
                             {:target target :value obj :method method})))))
 
-      ;; Global function call: method(args)
-      (if-let [builtin (get builtins method)]
-        (apply builtin ctx arg-values)
-        (throw (ex-info (str "Undefined function: " method)
-                        {:function method}))))))
+      ;; Method call without target: method(args)
+      ;; First check if we're inside an object method (self-call)
+      (if-let [current-obj (:current-object ctx)]
+        ;; We're inside a method - call on current object
+        (let [class-def (lookup-class ctx (:class-name current-obj))
+              method-lookup (lookup-method-with-inheritance ctx class-def method)]
+          (if method-lookup
+            ;; Before making self-call, update object with current field values
+            ;; so the called method sees the changes
+            (let [all-fields (get-all-fields ctx class-def)
+                  current-env (:current-env ctx)
+                  ;; Read current field values from the environment
+                  updated-fields (reduce (fn [m field]
+                                          (let [field-name (:name field)
+                                                field-key (keyword field-name)]
+                                            (if-let [val (try
+                                                          (env-lookup current-env field-name)
+                                                          (catch #?(:clj Exception :cljs :default) _ nil))]
+                                              (assoc m field-key val)
+                                              m)))
+                                        (:fields current-obj)
+                                        all-fields)
+                  ;; Create updated object
+                  updated-obj (make-object (:class-name current-obj) updated-fields)
+                  ;; Update in parent context
+                  _ (env-set! (-> ctx :current-env :parent) (:current-target ctx) updated-obj)
+                  ;; Make the method call
+                  result (eval-node ctx {:type :call
+                                        :target (:current-target ctx)
+                                        :method method
+                                        :args args})
+                  ;; After call, read updated field values back
+                  called-obj (env-lookup (-> ctx :current-env :parent) (:current-target ctx))
+                  _ (doseq [[field-name field-val] (:fields called-obj)]
+                      (env-set! current-env (name field-name) field-val))]
+              result)
+            ;; Method not found on current object - try builtin
+            (if-let [builtin (get builtins method)]
+              (apply builtin ctx arg-values)
+              (throw (ex-info (str "Undefined method: " method)
+                              {:function method :object current-obj})))))
+        ;; Not inside a method - check for global function/builtin
+        (if-let [builtin (get builtins method)]
+          (apply builtin ctx arg-values)
+          (throw (ex-info (str "Undefined function: " method)
+                          {:function method})))))))
 
 (defmethod eval-node :assign
   [ctx {:keys [target value]}]

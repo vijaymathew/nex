@@ -18,7 +18,7 @@ Nex is an Eiffel-inspired programming language that combines elegant, English-li
 
 ### 💎 Modern Language Features
 - **Generic Types**: Parameterized classes with constraints (`List [G]`, `Map [K -> Hashable, V]`)
-- **Arrays & Maps**: Built-in collections with subscript access (`arr[0]`, `map["key"]`)
+- **Arrays & Maps**: Built-in collections with method access (`arr.at(0)`, `map.at("key")`, `arr.set(0, value)`)
 - **Multiple Inheritance**: With rename and redefine clauses
 - **Lexical Scoping**: Scoped blocks with variable shadowing
 - **Loop Contracts**: Invariants and variants for verified iteration
@@ -224,17 +224,17 @@ clojure -M
 (def nex-code "
 class Account
   feature
-    balance: Integer
+    balance: Real
 
-    deposit(amount: Integer)
+    deposit(amount: Real)
       require
-        positive: amount > 0
+        positive: amount > 0.0
       do
         balance := balance + amount
       ensure
-        increased: balance >= 0
+        increased: balance >= 0.0
       end
-end")
+end   ")
 
 ;; Generate JavaScript code (with contracts for development)
 (println (js/translate nex-code))
@@ -336,7 +336,7 @@ clojure examples/demo_let.clj
 ### Example: Bank Account with Design by Contract
 
 ```nex
-class SavingsAccount
+class Savings_Account
 inherit
   Account
     rename
@@ -344,29 +344,32 @@ inherit
     redefine
       deposit
     end
+constructors
+   make(opening_balance: Real, current_interest_rate: Real) do
+       balance := opening_balance
+       interest_rate := current_interest_rate
+   end
 feature
-  balance: Integer
   interest_rate: Real
 
-  deposit(amount: Integer)
+  deposit(amount: Real)
     require
-      positive_amount: amount > 0
+      positive_amount: amount > 0.0
     do
-      let balance := balance + amount
+      balance := balance + amount
       update_interest()
     ensure
-      balance_increased: balance >= old_balance
-      amount_recorded: balance = old_balance + amount
+      balance_increased: balance >= old balance
     end
 
   update_interest() do
     let interest := balance * interest_rate
-    let balance := balance + interest
+    balance := balance + interest
   end
 
 invariant
-  valid_balance: balance >= 0
-  valid_rate: interest_rate >= 0 and interest_rate <= 1
+  valid_balance: balance >= 0.0
+  valid_rate: interest_rate >= 0.0 and interest_rate <= 1.0
 end
 ```
 
@@ -376,9 +379,11 @@ end
 class Math
   feature
     gcd(a, b: Integer) do
+      let x: Integer := 0
+      let y: Integer := 0
       from
-        let x := a
-        let y := b
+        x := a
+        y := b
       invariant
         x_positive: x > 0
         y_positive: y > 0
@@ -388,14 +393,82 @@ class Math
         x = y
       do
         if x > y then
-          let x := x - y
+          x := x - y
         else
-          let y := y - x
+          y := y - x
         end
       end
       print(x)
     end
 end
+```
+
+### Example: Generic Container with Type Safety
+
+```nex
+class Box [T]
+  constructors
+    make(initial: T) do
+      let value := initial
+    end
+
+  feature
+    value: T
+
+    set(new_value: T)
+    do
+      let value := new_value
+    end
+
+    print_value()
+    do
+      print(value)
+    end
+end
+
+-- Usage with different types:
+let int_box: Box [Integer] := create Box.make(42)
+int_box.print_value()  -- Prints: 42
+int_box.set(100)
+int_box.print_value()  -- Prints: 100
+
+let str_box: Box [String] := create Box.make("hello")
+str_box.print_value()  -- Prints: hello
+str_box.set("world")
+str_box.print_value()  -- Prints: world
+
+-- Access fields as queries (uniform access):
+let current: Integer := int_box.value  -- Returns 100
+let text: String := str_box.value      -- Returns "world"
+```
+
+**Another example - Generic Stack:**
+
+```nex
+class Stack [G]
+  feature
+    top: G
+
+    push(item: G) do
+      let top := item
+    end
+
+    pop() do
+      print(top)
+    end
+end
+
+-- Usage:
+let int_stack: Stack [Integer] := create Stack
+int_stack.push(10)
+int_stack.push(20)
+int_stack.pop()        -- Prints: 20
+let value := int_stack.top  -- Returns 20
+
+let str_stack: Stack [String] := create Stack
+str_stack.push("hello")
+str_stack.push("world")
+str_stack.pop()        -- Prints: "world"
 ```
 
 ## Language Features
@@ -422,13 +495,16 @@ end
 
 ### Type System
 - **Basic Types**: Integer, String, Boolean, Real
+- **Generic Types**: Parameterized classes (`Stack [G]`, `Map [K, V]`)
 - **Type Annotations**: Explicit parameter and field types
 - **Grouped Parameters**: `method(a, b, c: Integer)`
+- **Type Constraints**: Generic constraints with `->` operator
 
 ### Modern Features
 - **Local Variables**: `let x := value` or `let x: Type := value` (optional type annotations)
 - **Variable Shadowing**: Inner scopes can shadow outer variables
 - **Method Calls**: `object.method(args)`
+- **Field Access as Queries**: Uniform access principle (`obj.field` works like a method)
 - **Expressions**: Full support for arithmetic, logical, and comparison operators
 
 ## Project Structure

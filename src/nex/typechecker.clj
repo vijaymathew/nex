@@ -521,9 +521,31 @@
                        {:params (:params ctor)
                         :return-type name})))))
 
+(defn check-inheritance
+  "Check that inheritance declarations are valid"
+  [env class-name parents]
+  (doseq [{:keys [parent renames redefines]} parents]
+    ;; Check that parent class exists
+    (when-not (or (env-lookup-class env parent) (builtin-type? parent))
+      (throw (ex-info (str "Parent class " parent " not found for class " class-name)
+                      {:error (type-error
+                               (str "Undefined parent class: " parent))})))
+
+    ;; Check that renamed methods exist in parent (if we have parent info)
+    ;; Note: For now we skip this validation since we don't have full parent method info
+    ;; in the type environment. This could be enhanced later.
+
+    ;; Check that redefined methods exist in parent
+    ;; Note: Similarly skipped for now
+    ))
+
 (defn check-class
   "Check a class definition"
-  [env {:keys [name body invariant] :as class-def}]
+  [env {:keys [name body invariant parents] :as class-def}]
+  ;; Check inheritance
+  (when parents
+    (check-inheritance env name parents))
+
   ;; Check invariants
   (doseq [assertion invariant]
     (when (and assertion (:expr assertion))
