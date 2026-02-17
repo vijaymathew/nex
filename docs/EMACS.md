@@ -69,11 +69,11 @@ If you use `use-package`:
 ;; Set indentation offset (default: 2)
 (setq nex-indent-offset 2)
 
-;; REPL program (default: "clojure")
-(setq nex-repl-program "clojure")
+;; REPL program (default: "nex")
+(setq nex-repl-program "nex")
 
-;; REPL arguments (default: '("-M:repl"))
-(setq nex-repl-arguments '("-M:repl"))
+;; REPL arguments (default: '())
+(setq nex-repl-arguments '())
 ```
 
 ### Custom Key Bindings
@@ -265,15 +265,41 @@ end
 
 ### REPL doesn't start
 
-Make sure Clojure is installed and `clojure` is in your PATH:
+Make sure Nex is installed and `nex` is in your PATH:
 ```bash
-which clojure
+which nex
 ```
 
-If Clojure is in a different location, set:
+If Nex is in a different location, set:
 ```elisp
-(setq nex-repl-program "/full/path/to/clojure")
+(setq nex-repl-program "/full/path/to/nex")
 ```
+
+### Keybindings don't work (C-c C-c invokes Clojure REPL instead)
+
+This happens when another mode (like clojure-mode) is activated for .nex files instead of nex-mode. To fix:
+
+1. **Check which mode is active**: In your .nex file, check the mode line at the bottom of Emacs. It should say "Nex", not "Clojure" or something else.
+
+2. **Ensure nex-mode is loaded**: Add this to your `~/.emacs.d/init.el`:
+   ```elisp
+   (load-file "/path/to/nex/editor/emacs/nex-mode.el")
+   ```
+
+3. **Force .nex files to use nex-mode**: Add this after loading nex-mode:
+   ```elisp
+   (add-to-list 'auto-mode-alist '("\\.nex\\'" . nex-mode))
+   ```
+
+4. **If clojure-mode is overriding**: Remove .nex from clojure-mode's file associations:
+   ```elisp
+   (setq auto-mode-alist
+         (remove '("\\.nex\\'" . clojure-mode) auto-mode-alist))
+   ```
+
+5. **Reload Emacs configuration**: Either restart Emacs or run `M-x eval-buffer` in your init.el
+
+6. **Verify**: Open a .nex file and check the mode line shows "Nex", then try `C-c C-z` to start the REPL.
 
 ### Indentation is wrong
 

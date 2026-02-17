@@ -552,7 +552,7 @@ Editor support for VS Code, Vim, and other editors is planned. Contributions wel
 
 ## Contributing
 
-Contributions are welcome! Please read our contributing guidelines and submit pull requests.
+Contributions are welcome! Please read our **[Contributing Guidelines](CONTRIBUTING.md)** and submit pull requests.
 
 ## License
 

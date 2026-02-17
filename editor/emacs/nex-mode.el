@@ -50,12 +50,12 @@
   :prefix "nex-"
   :group 'languages)
 
-(defcustom nex-repl-program "clojure"
+(defcustom nex-repl-program "nex"
   "Program to run for Nex REPL."
   :type 'string
   :group 'nex)
 
-(defcustom nex-repl-arguments '("-M:repl")
+(defcustom nex-repl-arguments '()
   "Arguments to pass to Nex REPL."
   :type '(repeat string)
   :group 'nex)
@@ -63,6 +63,15 @@
 (defcustom nex-indent-offset 2
   "Number of spaces for each indentation level in Nex mode."
   :type 'integer
+  :group 'nex)
+
+;;;; Faces
+
+(defface nex-comment-face
+  '((((background light)) :foreground "gray50" :slant italic)
+    (((background dark)) :foreground "gray70" :slant italic)
+    (t :foreground "gray60" :slant italic))
+  "Face for comments in Nex code."
   :group 'nex)
 
 ;;;; Syntax Table
@@ -126,6 +135,9 @@
 
 (defvar nex-font-lock-keywords
   `(
+    ;; Comments (must come first for proper precedence)
+    ("--.*$" . 'nex-comment-face)
+
     ;; Contract labels (e.g., "positive:" in require clause)
     ("\\b\\([a-z_][a-z0-9_]*\\):" 1 font-lock-constant-face)
 
@@ -505,6 +517,60 @@ Nex is an Eiffel-inspired language with Design by Contract features.
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.nex\\'" . nex-mode))
+
+;;;; Diagnostics
+
+(defun nex-diagnose ()
+  "Diagnose common issues with nex-mode setup."
+  (interactive)
+  (with-output-to-temp-buffer "*Nex Diagnostics*"
+    (princ "=== Nex Mode Diagnostics ===\n\n")
+
+    ;; Check current mode
+    (princ (format "Current major mode: %s\n" major-mode))
+    (princ (format "Expected: nex-mode\n\n"))
+
+    ;; Check if nex-mode is loaded
+    (princ (format "nex-mode loaded: %s\n" (featurep 'nex-mode)))
+
+    ;; Check auto-mode-alist
+    (princ "\nAuto-mode-alist entries for .nex:\n")
+    (dolist (entry auto-mode-alist)
+      (when (and (stringp (car entry))
+                 (string-match-p "\\.nex" (car entry)))
+        (princ (format "  %s -> %s\n" (car entry) (cdr entry)))))
+
+    ;; Check keybinding
+    (princ "\nKey binding for C-c C-c:\n")
+    (princ (format "  Global: %s\n" (key-binding (kbd "C-c C-c"))))
+    (princ (format "  Local: %s\n" (local-key-binding (kbd "C-c C-c"))))
+
+    ;; Check REPL configuration
+    (princ "\nREPL Configuration:\n")
+    (princ (format "  Program: %s\n" nex-repl-program))
+    (princ (format "  Arguments: %s\n" nex-repl-arguments))
+
+    ;; Check if nex is in PATH
+    (princ "\nNex executable:\n")
+    (let ((nex-path (executable-find "nex")))
+      (if nex-path
+          (princ (format "  Found: %s\n" nex-path))
+        (princ "  NOT FOUND - nex is not in your PATH!\n")))
+
+    (princ "\n=== Recommendations ===\n\n")
+    (unless (eq major-mode 'nex-mode)
+      (princ "❌ Current mode is not nex-mode!\n")
+      (princ "   Solution: Run M-x nex-mode to switch to nex-mode\n\n"))
+
+    (unless (executable-find "nex")
+      (princ "❌ nex executable not found in PATH!\n")
+      (princ "   Solution: Install nex or add it to your PATH\n\n"))
+
+    (when (eq major-mode 'nex-mode)
+      (princ "✅ nex-mode is active\n"))
+
+    (when (executable-find "nex")
+      (princ "✅ nex executable found\n"))))
 
 ;;;; Footer
 
