@@ -428,7 +428,7 @@ end
 ### Modern Features
 - **Local Variables**: `let x := value` or `let x: Type := value` (optional type annotations)
 - **Variable Shadowing**: Inner scopes can shadow outer variables
-- **Method Calls**: `object.method(args)` or `method(args)`
+- **Method Calls**: `object.method(args)`
 - **Expressions**: Full support for arithmetic, logical, and comparison operators
 
 ## Project Structure
