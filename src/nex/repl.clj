@@ -43,8 +43,11 @@
         from-count (count (re-seq #"\bfrom\b" text))
         if-count (count (re-seq #"\bif\b" text))
         end-count (count (re-seq #"\bend\b" text))
+        ;; In loops, 'do' is part of 'from...until...do...end', not a separate block
+        ;; So subtract 'from-count' from 'do-count' to avoid double-counting
+        standalone-do-count (max 0 (- do-count from-count))
         ;; Total blocks that need closing
-        open-blocks (+ class-count do-count from-count if-count)]
+        open-blocks (+ class-count standalone-do-count from-count if-count)]
     ;; Continue if we have more opens than closes
     (> open-blocks end-count)))
 

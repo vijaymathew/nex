@@ -16,7 +16,7 @@ class Box [T]
     end
 
     set(new_value: T) do
-      let value := new_value
+      value := new_value
     end
 end
 
@@ -36,8 +36,8 @@ class Stack [G]
       require
         not_full: count < max_size
       do
-        let top := item
-        let count := count + 1
+        top := item
+        count := count + 1
       ensure
         pushed: count > 0
       end
@@ -46,7 +46,7 @@ class Stack [G]
       require
         not_empty: count > 0
       do
-        let count := count - 1
+        count := count - 1
       ensure
         decreased: count >= 0
       end
@@ -74,8 +74,8 @@ class Sorted_List [G -> Comparable]
       require
         not_null: new_item /= 0
       do
-        let item := new_item
-        let count := count + 1
+        item := new_item
+        count := count + 1
       ensure
         inserted: count > 0
       end
@@ -107,7 +107,7 @@ class Pair [F, S]
 
     swap() do
       let temp := first
-      let first := second
+      first := second
     end
 end
 
@@ -122,9 +122,9 @@ class Dictionary [K -> Hashable, V]
       require
         valid_key: k /= 0
       do
-        let key := k
-        let value := v
-        let size := size + 1
+        key := k
+        value := v
+        size := size + 1
       ensure
         stored: size > 0
       end
@@ -154,9 +154,9 @@ class Hash_Table [K -> Hashable, V -> Comparable]
     count: Integer
 
     put(k: K, v: V) do
-      let key := k
-      let value := v
-      let count := count + 1
+      key := k
+      value := v
+      count := count + 1
     end
 
     get(k: K) do

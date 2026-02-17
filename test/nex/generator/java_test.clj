@@ -126,7 +126,7 @@ end"
         i > n
       do
         print(i)
-        let i := i + 1
+        i := i + 1
       end
     end
 end"

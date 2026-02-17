@@ -452,11 +452,9 @@
 (defmethod eval-node :assign
   [ctx {:keys [target value]}]
   (let [val (eval-node ctx value)]
-    ;; Try to set if exists, otherwise define in current scope
-    (try
-      (env-set! (:current-env ctx) target val)
-      (catch #?(:clj Exception :cljs :default) _
-        (env-define (:current-env ctx) target val)))
+    ;; Assignment (without let) ONLY updates existing variables
+    ;; It should fail if the variable doesn't exist
+    (env-set! (:current-env ctx) target val)
     val))
 
 (defmethod eval-node :let
@@ -519,8 +517,12 @@
                                      :previous-variant prev-variant
                                      :current-variant curr-variant}))))
 
-              ;; Execute loop body
-              result (last (map #(eval-node ctx %) body))]
+              ;; Execute loop body in a NEW scope each iteration
+              ;; This ensures 'let' creates shadowed variables that don't persist
+              ;; while plain ':=' can still update variables in parent scopes
+              body-env (make-env (:current-env ctx))
+              body-ctx (assoc ctx :current-env body-env)
+              result (last (map #(eval-node body-ctx %) body))]
 
           ;; Check invariant after iteration (if present)
           (when invariant

@@ -9,7 +9,7 @@ class Account
       require
         positive: amount > 0
       do
-        let balance := balance + amount
+        balance := balance + amount
       ensure
         increased: balance >= 0
       end
@@ -19,7 +19,7 @@ class Account
         sufficient: balance >= amount
         positive: amount > 0
       do
-        let balance := balance - amount
+        balance := balance - amount
       ensure
         valid: balance >= 0
       end

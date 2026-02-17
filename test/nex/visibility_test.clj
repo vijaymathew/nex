@@ -123,7 +123,7 @@ end"
   feature
     balance: Integer
     deposit(amount: Integer) do
-      let balance := balance + amount
+      balance := balance + amount
     end
 
   private feature

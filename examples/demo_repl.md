@@ -43,13 +43,15 @@ nex> if x > 5 then print("big") else print("small") end
 ### Loops
 
 ```nex
-nex> from let i := 1 until i > 5 do print(i) let i := i + 1 end
+nex> from let i := 1 until i > 5 do print(i) i := i + 1 end
 1
 2
 3
 4
 5
 ```
+
+**Note:** `let` declares a NEW variable. Use plain `:=` to reassign an existing variable.
 
 ### Defining Classes
 
@@ -77,7 +79,7 @@ nex> class BankAccount
 ...        require
 ...          sufficient: balance >= amount
 ...        do
-...          let balance := balance - amount
+...          balance := balance - amount
 ...        ensure
 ...          decreased: balance >= 0
 ...        end
@@ -137,9 +139,9 @@ nex> class Math
 ...          x = y
 ...        do
 ...          if x > y then
-...            let x := x - y
+...            x := x - y
 ...          else
-...            let y := y - x
+...            y := y - x
 ...          end
 ...        end
 ...        print(x)

@@ -29,9 +29,9 @@
         x = y
       do
         if x > y then
-          let x := x - y
+          x := x - y
         else
-          let y := y - x
+          y := y - x
         end
       end
       print(x)

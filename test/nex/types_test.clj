@@ -149,7 +149,7 @@ end"
     owner: String
 
     deposit(amount: Decimal) do
-      let balance := balance + amount
+      balance := balance + amount
       let transactions := transactions + 1
     end
 end"

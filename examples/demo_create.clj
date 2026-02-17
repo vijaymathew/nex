@@ -51,7 +51,7 @@ end")
       require
         positive: amount > 0
       do
-        let balance := balance + amount
+        balance := balance + amount
       end
 end")
 

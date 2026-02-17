@@ -46,7 +46,7 @@ end")
     item: G
 
     insert(new_item: G) do
-      let item := new_item
+      item := new_item
     end
 end")
 
@@ -100,8 +100,8 @@ end")
     value: V
 
     put(k: K, v: V) do
-      let key := k
-      let value := v
+      key := k
+      value := v
     end
 
     get(k: K) do
@@ -129,7 +129,7 @@ end")
     count: Integer
 
     push(item: G) do
-      let top := item
+      top := item
     end
 end
 
@@ -185,8 +185,8 @@ end")
         not_full: count < max_size
         not_null: item /= 0
       do
-        let top := item
-        let count := count + 1
+        top := item
+        count := count + 1
       ensure
         pushed: count > 0
       end
@@ -195,7 +195,7 @@ end")
       require
         not_empty: count > 0
       do
-        let count := count - 1
+        count := count - 1
       ensure
         decreased: count >= 0
       end

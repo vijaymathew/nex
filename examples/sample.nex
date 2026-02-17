@@ -30,7 +30,7 @@ class BankAccount
         positive_amount: amount > 0
         account_active: is_active
       do
-        let balance := balance + amount
+        balance := balance + amount
         print("Deposited:", amount)
         print("New balance:", balance)
       ensure
@@ -45,7 +45,7 @@ class BankAccount
         positive_amount: amount > 0
         account_active: is_active
       do
-        let balance := balance - amount
+        balance := balance - amount
         print("Withdrawn:", amount)
         print("New balance:", balance)
       ensure
@@ -56,7 +56,7 @@ class BankAccount
     -- Apply interest to account
     apply_interest() do
       let interest := balance * interest_rate
-      let balance := balance + interest
+      balance := balance + interest
       print("Interest applied:", interest)
     end
 
@@ -76,9 +76,9 @@ class BankAccount
         until
           year > years
         do
-          let projected := projected * (1 + interest_rate)
+          projected := projected * (1 + interest_rate)
           print("Year", year, ":", projected)
-          let year := year + 1
+          year := year + 1
         end
       end
 
@@ -130,7 +130,7 @@ class SavingsAccount
       require
         maintain_minimum: balance - amount >= minimum_balance
       do
-        let balance := balance - amount
+        balance := balance - amount
       ensure
         above_minimum: balance >= minimum_balance
       end

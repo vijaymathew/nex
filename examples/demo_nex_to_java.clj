@@ -112,7 +112,7 @@ end")
       require
         positive: amount > 0
       do
-        let balance := balance + amount
+        balance := balance + amount
       ensure
         increased: balance >= 0
       end
@@ -122,7 +122,7 @@ end")
         sufficient: balance >= amount
         positive: amount > 0
       do
-        let balance := balance - amount
+        balance := balance - amount
       ensure
         decreased: balance >= 0
       end
@@ -160,7 +160,7 @@ end")
         i > n
       do
         let result := result + i
-        let i := i + 1
+        i := i + 1
       end
       print(result)
     end
@@ -204,9 +204,9 @@ end")
         x = y
       do
         if x > y then
-          let x := x - y
+          x := x - y
         else
-          let y := y - x
+          y := y - x
         end
       end
       print(x)

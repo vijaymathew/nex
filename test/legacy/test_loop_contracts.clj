@@ -40,7 +40,7 @@
         x = 0
       do
         print(x)
-        let x := x - 1
+        x := x - 1
       end
     end
 end")
@@ -62,7 +62,7 @@ end")
         i > 3
       do
         print(i)
-        let i := i + 1
+        i := i + 1
       end
     end
 end")
@@ -85,7 +85,7 @@ end")
         x = 1
       do
         print(x)
-        let x := x - 1
+        x := x - 1
       end
     end
 end")
@@ -106,7 +106,7 @@ end")
       until
         x = 0
       do
-        let x := x - 1
+        x := x - 1
       end
     end
 end")

@@ -42,7 +42,7 @@
         i > 5
       do
         print(i)
-        let i := i + 1
+        i := i + 1
       end
     end
 end"
@@ -61,9 +61,9 @@ end"
         x = y
       do
         if x > y then
-          let x := x - y
+          x := x - y
         else
-          let y := y - x
+          y := y - x
         end
       end
       print(x)
@@ -86,7 +86,7 @@ end"
         x = 1
       do
         print(x)
-        let x := x - 1
+        x := x - 1
       end
       print(x)
     end
@@ -108,7 +108,7 @@ end"
         n = 0
       do
         print(n)
-        let n := n - 1
+        n := n - 1
       end
     end
 end"
@@ -132,9 +132,9 @@ end"
         x = y
       do
         if x > y then
-          let x := x - y
+          x := x - y
         else
-          let y := y - x
+          y := y - x
         end
       end
       print(x)
@@ -161,9 +161,9 @@ end"
           j > 3
         do
           print(i, j)
-          let j := j + 1
+          j := j + 1
         end
-        let i := i + 1
+        i := i + 1
       end
     end
 end"
@@ -183,8 +183,8 @@ end"
       until
         i > 10
       do
-        let sum := sum + i
-        let i := i + 1
+        sum := sum + i
+        i := i + 1
       end
       print(sum)
     end

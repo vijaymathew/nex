@@ -145,7 +145,7 @@ end"
         i > 5
       do
         print(i)
-        let i: Integer := i + 1
+        i := i + 1
       end
     end
 end"
