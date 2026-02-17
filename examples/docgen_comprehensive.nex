@@ -1,0 +1,66 @@
+class Stack [T]
+  note "A generic stack data structure with Design by Contract"
+
+feature
+  items: Array [T] note "Internal storage for stack items"
+  capacity: Integer note "Maximum number of items"
+
+  push(item: T)
+    note "Add an item to the top of the stack"
+    require
+      not_full: count() < capacity
+    do
+      print("push")
+    ensure
+      added: count() = old count() + 1
+    end
+
+  pop(): T
+    note "Remove and return the top item"
+    require
+      not_empty: count() > 0
+    do
+      let result := items
+    ensure
+      removed: count() = old count() - 1
+    end
+
+  count(): Integer
+    note "Return the number of items in the stack"
+  do
+      let result := 0
+      result
+  end
+
+private feature
+  internal_capacity: Integer note "Internal capacity tracker"
+
+  resize()
+    note "Resize the internal storage"
+  do
+      print("resize")
+  end
+
+-> StackDebugger feature
+  debug_info: String note "Debug information for stack"
+
+  dump_state()
+    note "Dump stack state for debugging"
+  do
+      print("dump")
+  end
+
+constructors
+  make(max_size: Integer)
+    require
+      positive_size: max_size > 0
+    do
+      let capacity := max_size
+    ensure
+      capacity_set: capacity = max_size
+    end
+
+invariant
+  valid_capacity: capacity > 0
+  items_within_capacity: count() <= capacity
+end

@@ -8,4 +8,5 @@
   :run-tests {:exec-fn clojure.test/run-all-tests
               :extra-paths ["test"]}
   :repl {:main-opts ["-m" "nex.repl"]}
-  :fmt {:main-opts ["-m" "nex.fmt"]}}}
+  :fmt {:main-opts ["-m" "nex.fmt"]}
+  :docgen {:main-opts ["-m" "nex.docgen"]}}}
