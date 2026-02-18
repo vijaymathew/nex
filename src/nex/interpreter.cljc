@@ -247,7 +247,7 @@
     ;; Handle parameterized types
     (map? field-type)
     (case (:base-type field-type)
-      "Array" (java.util.Vector.)
+      "Array" (java.util.ArrayList.)
       "Map" (java.util.HashMap.)
       nil)
 
@@ -271,7 +271,7 @@
 
 (def builtin-type-methods
   "Methods available on built-in types"
-  {"String"
+  {:String
    {"length"      (fn [s & _] (count s))
     "index_of"    (fn [s ch & _]
                     (let [idx (str/index-of s (str ch))]
@@ -295,7 +295,7 @@
     "greater_than" (fn [s other & _] (pos? (compare s other)))
     "greater_than_or_equal" (fn [s other & _] (>= (compare s other) 0))}
 
-   "Integer"
+   :Integer
    {"to_string"         (fn [n & _] (str n))
     "abs"               (fn [n & _] (Math/abs (int n)))
     "min"               (fn [n other & _] (min n other))
@@ -313,7 +313,7 @@
     "greater_than"      (fn [n other & _] (> n other))
     "greater_than_or_equal" (fn [n other & _] (>= n other))}
 
-   "Integer64"
+   :Integer64
    {"to_string"         (fn [n & _] (str n))
     "abs"               (fn [n & _] (Math/abs (long n)))
     "min"               (fn [n other & _] (min n other))
@@ -331,7 +331,7 @@
     "greater_than"      (fn [n other & _] (> n other))
     "greater_than_or_equal" (fn [n other & _] (>= n other))}
 
-   "Real"
+   :Real
    {"to_string"         (fn [n & _] (str n))
     "abs"               (fn [n & _] (Math/abs (double n)))
     "min"               (fn [n other & _] (min n other))
@@ -350,7 +350,7 @@
     "greater_than"      (fn [n other & _] (> n other))
     "greater_than_or_equal" (fn [n other & _] (>= n other))}
 
-   "Decimal"
+   :Decimal
    {"to_string"         (fn [n & _] (str n))
     "abs"               (fn [n & _] (Math/abs (double n)))
     "min"               (fn [n other & _] (min n other))
@@ -369,12 +369,12 @@
     "greater_than"      (fn [n other & _] (> n other))
     "greater_than_or_equal" (fn [n other & _] (>= n other))}
 
-   "Char"
+   :Char
    {"to_string"   (fn [c & _] (str c))
     "to_upper"    (fn [c & _] (str/upper-case (str c)))
     "to_lower"    (fn [c & _] (str/lower-case (str c)))}
 
-   "Boolean"
+   :Boolean
    {"to_string"   (fn [b & _] (str b))
     ;; Boolean operator methods
     "and"         (fn [b other & _] (and b other))
@@ -383,25 +383,23 @@
     "equals"      (fn [b other & _] (= b other))
     "not_equals"  (fn [b other & _] (not= b other))}
 
-   "Array"
-   {"at"          (fn [arr index & _] (nth arr index))
-    "set"         (fn [arr index value & _] (assoc arr index value))
-    "length"      (fn [arr & _] (count arr))
-    "is_empty"    (fn [arr & _] (empty? arr))
-    "contains"    (fn [arr elem & _] (boolean (some #(= % elem) arr)))
+   :Array
+   {"get"         (fn [arr index & _] (.get arr index))
+    "add"         (fn [arr value & _] (.add arr value))
+    "at"          (fn [arr index value & _] (.add arr index value))
+    "set"         (fn [arr index value & _] (.set arr index value))
+    "length"      (fn [arr & _] (.size arr))
+    "is_empty"    (fn [arr & _] (.isEmpty arr))
+    "contains"    (fn [arr elem & _] (.contains arr elem))
     "index_of"    (fn [arr elem & _]
                     (let [idx (.indexOf arr elem)]
                       (if (>= idx 0) idx -1)))
-    "first"       (fn [arr & _] (first arr))
-    "last"        (fn [arr & _] (last arr))
-    "append"      (fn [arr elem & _] (conj arr elem))
-    "remove"      (fn [arr idx & _] (vec (concat (subvec arr 0 idx)
-                                                  (subvec arr (inc idx)))))
-    "reverse"     (fn [arr & _] (vec (reverse arr)))
-    "sort"        (fn [arr & _] (vec (sort arr)))
-    "slice"       (fn [arr start end & _] (subvec arr start end))}
+    "remove"      (fn [arr ^Integer idx & _] (.remove arr idx))
+    "reverse"     (fn [arr _] (java.util.ArrayList. (.reversed(arr))))
+    "sort"        (fn [arr & _] (.sort arr nil))
+    "slice"       (fn [arr start end & _] (.subList arr start end))}
 
-   "Map"
+   :Map
    {"get"         (fn [m key & _]
                     (let [v (.get m key)]
                       (if (nil? v)
@@ -412,7 +410,7 @@
                       (if (nil? v)
                         default
                         v)))
-    "set"          (fn [m key val & _] (.put m key val))
+    "at"           (fn [m key val & _] (.put m key val))
     "size"         (fn [m & _] (.size m))
     "is_empty"     (fn [m & _] (.isEmpty m))
     "contains_key" (fn [m key & _] (.containsKey m key))
@@ -424,14 +422,14 @@
   "Get the type name for a value"
   [value]
   (cond
-    (string? value) "String"
-    (integer? value) "Integer"
-    (float? value) "Real"
-    (double? value) "Decimal"
-    (char? value) "Char"
-    (boolean? value) "Boolean"
-    (vector? value) "Array"
-    (instance? java.util.HashMap value) "Map"
+    (string? value) :String
+    (integer? value) :Integer
+    (float? value) :Real
+    (double? value) :Decimal
+    (char? value) :Char
+    (boolean? value) :Boolean
+    (instance? java.util.ArrayList value) :Array
+    (instance? java.util.HashMap value) :Map
     :else nil))
 
 (defn call-builtin-method
@@ -811,7 +809,7 @@
 (defmethod eval-node :array-literal
   [ctx {:keys [elements]}]
   ;; Evaluate all elements and return as a vector
-  (vec (map #(eval-node ctx %) elements)))
+  (java.util.ArrayList. (mapv #(eval-node ctx %) elements)))
 
 (defmethod eval-node :map-literal
   [ctx {:keys [entries]}]
@@ -825,7 +823,7 @@
   ;; Evaluate target (array or map) and index, then access element
   (let [coll (eval-node ctx target)
         idx (eval-node ctx index)]
-    (get coll idx)))
+    (.get coll idx)))
 
 (defmethod eval-node :identifier
   [ctx {:keys [name]}]

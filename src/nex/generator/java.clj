@@ -172,7 +172,7 @@
 
 (def builtin-method-mappings
   "Map Nex built-in type methods to Java equivalents"
-  {"String"
+  {:String
    {"length"      (fn [target _] (str target ".length()"))
     "index_of"    (fn [target args] (str target ".indexOf(" args ")"))
     "substring"   (fn [target args] (str target ".substring(" args ")"))
@@ -194,7 +194,7 @@
     "greater_than" (fn [target args] (str "(" target ".compareTo(" args ") > 0)"))
     "greater_than_or_equal" (fn [target args] (str "(" target ".compareTo(" args ") >= 0)"))}
 
-   "Integer"
+   :Integer
    {"to_string" (fn [target _] (str "String.valueOf(" target ")"))
     "abs"       (fn [target _] (str "Math.abs(" target ")"))
     "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
@@ -212,52 +212,30 @@
     "greater_than" (fn [target args] (str "(" target " > " args ")"))
     "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
 
-   "Array"
+   :Array
    {"length"    (fn [target _] (str target ".size()"))
     "is_empty"  (fn [target _] (str target ".isEmpty()"))
+    "get"       (fn [target args] (str target ".get(" args ")"))
+    "add"       (fn [target args] (str target ".add(" args ")"))
+    "at"        (fn [target args] (str target ".add(" args ")"))
+    "set"       (fn [target args] (str target ".set(" args ")"))
     "contains"  (fn [target args] (str target ".contains(" args ")"))
     "index_of"  (fn [target args] (str target ".indexOf(" args ")"))
-    "first"     (fn [target _] (str target ".get(0)"))
-    "last"      (fn [target _] (str target ".get(" target ".size() - 1)"))
-    "append"    (fn [target args] (str "(" target ".add(" args "), " target ")"))
     "remove"    (fn [target args] (str "(" target ".remove((int)" args "), " target ")"))
     "reverse"   (fn [target _] (str "new ArrayList<>(" target ".reversed())"))
     "sort"      (fn [target _] (str "(Collections.sort(" target "), " target ")"))
     "slice"     (fn [target args] (str "new ArrayList<>(" target ".subList(" args "))"))}
 
-   "Map"
-   {"size"         (fn [target _] (str target ".size()"))
+   :Map
+   {"get"          (fn [target args] (str target ".get(" args ")"))
+    "try_get"      (fn [target args] (str target ".get(" args ")"))
+    "at"           (fn [target args] (str "(" target ".put(" args "), " target ")"))
+    "size"         (fn [target _] (str target ".size()"))
     "is_empty"     (fn [target _] (str target ".isEmpty()"))
     "contains_key" (fn [target args] (str target ".containsKey(" args ")"))
     "keys"         (fn [target _] (str "new ArrayList<>(" target ".keySet())"))
     "values"       (fn [target _] (str "new ArrayList<>(" target ".values())"))
-    "set"          (fn [target args] (str "(" target ".put(" args "), " target ")"))
     "remove"       (fn [target args] (str "(" target ".remove(" args "), " target ")"))}})
-(defn is-builtin-method?
-  "Check if a method call is on a built-in type by looking at the target expression"
-  [target method expr-context]
-  ;; For now, we'll detect based on the expression type
-  ;; This is a simplified approach - in a full implementation we'd need type inference
-  (when target
-    (let [target-expr (get expr-context target)]
-      (cond
-        ;; String literals
-        (and (map? target-expr) (= (:type target-expr) :string))
-        "String"
-
-        ;; Array literals
-        (and (map? target-expr) (= (:type target-expr) :array-literal))
-        "Array"
-
-        ;; Map literals
-        (and (map? target-expr) (= (:type target-expr) :map-literal))
-        "Map"
-
-        ;; Integer literals
-        (and (map? target-expr) (= (:type target-expr) :integer))
-        "Integer"
-
-        :else nil))))
 
 (defn generate-call-expr
   "Generate Java code for method call.
@@ -271,16 +249,16 @@
       (let [target-code (if (string? target) target (generate-expression {:type :identifier :name target}))]
         (or
          ;; Try Integer methods first (for operators, numeric is more common)
-         (when-let [method-fn (get-in builtin-method-mappings ["Integer" method])]
+         (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
            (method-fn target-code args-code))
          ;; Try String methods
-         (when-let [method-fn (get-in builtin-method-mappings ["String" method])]
+         (when-let [method-fn (get-in builtin-method-mappings [:String method])]
            (method-fn target-code args-code))
          ;; Try Array methods (ArrayList in Java)
-         (when-let [method-fn (get-in builtin-method-mappings ["Array" method])]
+         (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
            (method-fn target-code args-code))
          ;; Try Map methods
-         (when-let [method-fn (get-in builtin-method-mappings ["Map" method])]
+         (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
            (method-fn target-code args-code))
          ;; Default: regular method call
          (str target-code "." method "(" args-code ")")))

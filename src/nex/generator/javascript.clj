@@ -151,7 +151,7 @@
 
 (def builtin-method-mappings
   "Map Nex built-in type methods to JavaScript equivalents"
-  {"String"
+  {:String
    {"length"      (fn [target _] (str target ".length"))
     "index_of"    (fn [target args] (str target ".indexOf(" args ")"))
     "substring"   (fn [target args] (str target ".substring(" args ")"))
@@ -173,7 +173,7 @@
     "greater_than" (fn [target args] (str "(" target ".localeCompare(" args ") > 0)"))
     "greater_than_or_equal" (fn [target args] (str "(" target ".localeCompare(" args ") >= 0)"))}
 
-   "Integer"
+   :Integer
    {"to_string" (fn [target _] (str target ".toString()"))
     "abs"       (fn [target _] (str "Math.abs(" target ")"))
     "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
@@ -191,26 +191,29 @@
     "greater_than" (fn [target args] (str "(" target " > " args ")"))
     "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
 
-   "Array"
+   :Array
    {"length"    (fn [target _] (str target ".length"))
+    "get"       (fn [target args] (str target "[" args "]"))
+    "at"        (fn [target args] (str target ".set(" args ")"))
+    "add"       (fn [target args] (str target ".push(" args ")"))
+    "set"       (fn [target args] (str target ".set(" args ")"))
     "is_empty"  (fn [target _] (str "(" target ".length === 0)"))
     "contains"  (fn [target args] (str target ".includes(" args ")"))
     "index_of"  (fn [target args] (str target ".indexOf(" args ")"))
-    "first"     (fn [target _] (str target "[0]"))
-    "last"      (fn [target _] (str target "[" target ".length - 1]"))
-    "append"    (fn [target args] (str "(" target ".push(" args "), " target ")"))
     "remove"    (fn [target args] (str "(" target ".splice(" args ", 1), " target ")"))
     "reverse"   (fn [target _] (str "[..." target "].reverse()"))
     "sort"      (fn [target _] (str "[..." target "].sort()"))
     "slice"     (fn [target args] (str target ".slice(" args ")"))}
 
-   "Map"
+   :Map
    {"size"         (fn [target _] (str target ".size"))
     "is_empty"     (fn [target _] (str "(" target ".size === 0)"))
+    "get"          (fn [target args] (str target ".get(" args ")"))
+    "try_get"      (fn [target args] (str target ".get(" args ")"))
+    "at"           (fn [target args] (str "(" target ".set(" args "), " target ")"))
     "contains_key" (fn [target args] (str target ".has(" args ")"))
     "keys"         (fn [target _] (str "Array.from(" target ".keys())"))
     "values"       (fn [target _] (str "Array.from(" target ".values())"))
-    "put"          (fn [target args] (str "(" target ".set(" args "), " target ")"))
     "remove"       (fn [target args] (str "(" target ".delete(" args "), " target ")"))}})
 (defn generate-call-expr
   "Generate JavaScript code for method call.
@@ -224,16 +227,16 @@
       (let [target-code (if (string? target) target (generate-expression {:type :identifier :name target}))]
         (or
          ;; Try Integer methods first (for operators, numeric is more common)
-         (when-let [method-fn (get-in builtin-method-mappings ["Integer" method])]
+         (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
            (method-fn target-code args-code))
          ;; Try String methods
-         (when-let [method-fn (get-in builtin-method-mappings ["String" method])]
+         (when-let [method-fn (get-in builtin-method-mappings [:String method])]
            (method-fn target-code args-code))
          ;; Try Array methods
-         (when-let [method-fn (get-in builtin-method-mappings ["Array" method])]
+         (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
            (method-fn target-code args-code))
          ;; Try Map methods
-         (when-let [method-fn (get-in builtin-method-mappings ["Map" method])]
+         (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
            (method-fn target-code args-code))
          ;; Default: regular method call
          (str target-code "." method "(" args-code ")")))
