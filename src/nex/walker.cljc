@@ -619,14 +619,9 @@
 
    :createExpression
    (fn [[_ _create-kw class-name & rest]]
-     ;; Structure: "create" ClassName genericArgs? ("." ConstructorName "(" argumentList? ")")?
+     ;; Structure: "create" ClassName ("." ConstructorName "(" argumentList? ")")?
      (let [;; Remove punctuation tokens
            cleaned (remove #(#{"." "(" ")"} %) rest)
-           ;; Check for generic arguments
-           generic-args-node (first (filter #(and (sequential? %)
-                                                  (= :genericArgs (first %)))
-                                            rest))
-           generic-args (when generic-args-node (transform-node generic-args-node))
            ;; Check if there's a constructor call
            has-constructor? (seq cleaned)
            constructor-name (when has-constructor? (first cleaned))
@@ -636,7 +631,6 @@
                                    rest))]
        {:type :create
         :class-name (token-text class-name)
-        :generic-args generic-args
         :constructor (when has-constructor? constructor-name)
         :args (if args-node
                (transform-node args-node)
