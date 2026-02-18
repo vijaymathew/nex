@@ -8,7 +8,9 @@
        (antlr/parser "grammar/nexlang.g4"))
 
      (defn parse [input]
-       (antlr/parse parser input))
+       (let [parsed (antlr/parse parser input)]
+         ;; Ensure genericArgs are included in the AST
+         (assoc parsed :generic-args (get-in parsed [:genericArgs]))))
 
      (defn ast [input]
        (-> input

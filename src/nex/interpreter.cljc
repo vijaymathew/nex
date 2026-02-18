@@ -856,9 +856,12 @@
        first))
 
 (defmethod eval-node :create
-  [ctx {:keys [class-name constructor args]}]
+  [ctx {:keys [class-name generic-args constructor args]}]
   ;; Get class definition
   (let [class-def (lookup-class ctx class-name)
+        ;; Handle generic arguments if present
+        _ (when generic-args
+            (println "Generic arguments:" generic-args))
         ;; Get all fields (including inherited)
         all-fields (get-all-fields ctx class-def)
         ;; Initialize fields with default values
