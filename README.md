@@ -344,7 +344,7 @@ inherit
     redefine
       deposit
     end
-constructors
+create
    make(opening_balance: Real, current_interest_rate: Real) do
        balance := opening_balance
        interest_rate := current_interest_rate
@@ -407,7 +407,7 @@ end
 
 ```nex
 class Box [T]
-  constructors
+  create
     make(initial: T) do
       let value := initial
     end

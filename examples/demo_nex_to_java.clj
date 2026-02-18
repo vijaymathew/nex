@@ -42,7 +42,7 @@ end")
 (println)
 
 (def example2 "class Point
-  constructors
+  create
     make(x, y: Integer) do
       let x := x
       let y := y

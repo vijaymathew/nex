@@ -76,7 +76,7 @@ feature
     print("!")
   end
 
-constructors
+create
   make(n: String) do
     let name := n
   end
@@ -277,7 +277,7 @@ feature
   x: Integer
   y: Integer
 
-constructors
+create
   make(a: Integer, b: Integer)
     do
       let x := a

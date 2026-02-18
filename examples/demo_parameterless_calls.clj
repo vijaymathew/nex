@@ -48,7 +48,7 @@ end")
     x: Integer
     y: Integer
 
-  constructors
+  create
     make(newx, newy: Integer) do
       x := newx
       y := newy
@@ -203,7 +203,7 @@ end")
     x: Integer
     y: Integer
 
-  constructors
+  create
     make(newx, newy: Integer) do
       x := newx
       y := newy

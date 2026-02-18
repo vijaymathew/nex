@@ -62,7 +62,7 @@
   feature
     x: Integer
     y: Integer
-  constructors
+  create
     make(px: Integer, py: Integer) do
       x := px
       y := py

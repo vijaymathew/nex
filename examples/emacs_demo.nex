@@ -75,7 +75,7 @@ class ExtendedDemo
   feature
     extra_field: String
 
-  constructors
+  create
     make(initial: Integer) do
       let count := initial
       let name := "demo"

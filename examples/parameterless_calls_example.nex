@@ -6,7 +6,7 @@ class Point
     x: Integer
     y: Integer
 
-  constructors
+  create
     make(newx, newy: Integer) do
       x := newx
       y := newy
@@ -39,7 +39,7 @@ class Counter
   feature
     count: Integer
 
-  constructors
+  create
     make() do
       count := 0
     end
@@ -68,7 +68,7 @@ class Account
     balance: Integer
     name: String
 
-  constructors
+  create
     make(owner: String, initial: Integer) do
       name := owner
       balance := initial

@@ -21,7 +21,7 @@ private feature
       audit_log()
   end
 
-constructors
+create
   make(initial: Integer, name: String) do
       let balance := initial
       let owner := name

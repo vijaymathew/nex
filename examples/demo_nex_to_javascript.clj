@@ -38,7 +38,7 @@ end")
 
 (def example2
   "class Point
-  constructors
+  create
     make(newx, newy: Integer) do
       x := newx
       y := newy
@@ -229,7 +229,7 @@ end")
     items: Array [String]
     prices: Map [String, Decimal]
 
-  constructors
+  create
     make() do
       items := [\"apple\", \"banana\", \"orange\"]
       prices := {\"apple\": 1.50, \"banana\": 0.75, \"orange\": 1.25}
@@ -264,7 +264,7 @@ end")
 
 (def example8
   "class Point
-  constructors
+  create
     make(x, y: Integer) do
       print(x)
       print(y)

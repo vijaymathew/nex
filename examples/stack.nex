@@ -13,7 +13,7 @@
 --   let next := stack.peek()  -- Returns 42 without removing
 
 class Stack [G]
-  constructors
+  create
     make(capacity: Integer) do
       items := []
       max_size := capacity

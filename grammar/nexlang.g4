@@ -70,7 +70,7 @@ visibilityModifier
     ;
 
 constructorSection
-    : CONSTRUCTORS constructorDecl+
+    : CREATE constructorDecl+
     ;
 
 featureMember

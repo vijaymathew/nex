@@ -230,7 +230,7 @@ class DataStore
     items: Array [String]           -- Automatically []
     lookup: Map [String, Integer]   -- Automatically {}
 
-  constructors
+  create
     make() do
       -- Fields already initialized!
       print(items)   -- Prints empty array
@@ -302,7 +302,7 @@ class NumberList
   feature
     numbers: Array [Integer]
 
-  constructors
+  create
     make() do
       numbers := [1, 2, 3, 4, 5]
     end
@@ -352,7 +352,7 @@ class PriceList
   feature
     prices: Map [String, Decimal]
 
-  constructors
+  create
     make() do
       prices := {"apple": 1.50, "banana": 0.75}
     end
@@ -395,7 +395,7 @@ class Store
     items: Array [String]
     prices: Map [String, Decimal]
 
-  constructors
+  create
     make() do
       items := ["apple", "banana", "orange"]
       prices := {"apple": 1.50, "banana": 0.75, "orange": 1.25}
@@ -427,7 +427,7 @@ class Grid
   feature
     matrix: Array [Array [Integer]]
 
-  constructors
+  create
     make() do
       matrix := [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
     end
@@ -452,7 +452,7 @@ class Categories
   feature
     items: Map [String, Array [String]]
 
-  constructors
+  create
     make() do
       items := {
         fruits: ["apple", "banana"],
@@ -486,7 +486,7 @@ class Classroom
     students: Array [Student]
     grades: Map [String, Integer]
 
-  constructors
+  create
     make() do
       students := []
       grades := {}
@@ -564,7 +564,7 @@ class Store
   feature
     items: Array [String]
 
-  constructors
+  create
     make() do
       items := []  -- Initialize to empty
     end

@@ -116,7 +116,7 @@
 (defconst nex-keywords
   '("class" "feature" "inherit" "end" "do" "if" "then" "else"
     "from" "until" "invariant" "variant" "require" "ensure"
-    "let" "constructors" "rename" "redefine" "as" "and" "or" "not"
+    "let" "rename" "redefine" "as" "and" "or" "not"
     "old" "create" "private" "note" "with" "import" "intern")
   "Nex language keywords.")
 
@@ -243,9 +243,9 @@
                     "rename" "redefine")
                   'words)
       (line-beginning-position))
-     ;; Section keywords that contain items (feature, constructors)
+     ;; Section keywords that contain items (feature, create)
      (looking-back
-      (regexp-opt '("feature" "constructors") 'words)
+      (regexp-opt '("feature" "create") 'words)
       (line-beginning-position))
      ;; Handle "private feature" specially
      (looking-back "\\bprivate\\s-+feature\\b" (line-beginning-position)))))
@@ -290,7 +290,7 @@ Class-level keywords should align with 'class' at column 0."
     ;; Skip 'private' if present
     (when (looking-at "\\bprivate\\s-+")
       (goto-char (match-end 0)))
-    (looking-at (regexp-opt '("feature" "constructors" "inherit" "invariant") 'words))))
+    (looking-at (regexp-opt '("feature" "create" "inherit" "invariant") 'words))))
 
 (defun nex-find-class-indent ()
   "Find the indentation level of the enclosing class.
@@ -334,7 +334,7 @@ Returns 0 if at top level or inside a class."
                     (or (looking-at "^\\s-*$")
                         (looking-at "\\bnote\\b")
                         ;; Skip body statements (assignments, calls, etc) when looking for method
-                        (and (not (looking-at "\\b\\(do\\|require\\|ensure\\|feature\\|constructors\\|class\\|end\\)\\b"))
+                        (and (not (looking-at "\\b\\(do\\|require\\|ensure\\|feature\\|create\\|class\\|end\\)\\b"))
                              (not (looking-at "\\b[a-z_][a-z0-9_]*\\s-*\\(([^)]*)\\)?\\s-*$"))))))
         (forward-line -1))
       ;; Check if we found a method/constructor name or another contract keyword
@@ -356,7 +356,7 @@ Returns 0 if at top level or inside a class."
                   (or (looking-at "^\\s-*$")
                       (looking-at "\\bnote\\b")
                       ;; Skip body statements when looking for method indent
-                      (and (not (looking-at "\\b\\(do\\|require\\|ensure\\|feature\\|constructors\\|class\\|end\\)\\b"))
+                      (and (not (looking-at "\\b\\(do\\|require\\|ensure\\|feature\\|create\\|class\\|end\\)\\b"))
                            (not (looking-at "\\b[a-z_][a-z0-9_]*\\s-*\\(([^)]*)\\)?\\s-*$"))))))
       (forward-line -1))
     ;; Should be at method name or contract keyword line now

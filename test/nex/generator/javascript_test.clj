@@ -18,7 +18,7 @@ end"
 (deftest constructor-test
   (testing "Class with constructor"
     (let [nex-code "class Point
-  constructors
+  create
     make(x, y: Integer) do
       let x := x
     end
@@ -289,7 +289,7 @@ end"
 (deftest create-expression-test
   (testing "Create expression translation"
     (let [nex-code "class Point
-  constructors
+  create
     make(x, y: Integer) do
       print(x)
     end
@@ -362,7 +362,7 @@ end"
   feature
     data: Array [Array [Integer]]
 
-  constructors
+  create
     make() do
       data := [[1, 2], [3, 4]]
     end
@@ -376,7 +376,7 @@ end"
   feature
     items: Map [String, Array [String]]
 
-  constructors
+  create
     make() do
       items := {\"fruits\": [\"apple\", \"banana\"]}
     end

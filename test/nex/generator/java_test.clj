@@ -18,7 +18,7 @@ end"
 (deftest constructor-test
   (testing "Class with constructor"
     (let [nex-code "class Point
-  constructors
+  create
     make(x, y: Integer) do
       let x := x
     end

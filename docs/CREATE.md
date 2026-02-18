@@ -66,7 +66,7 @@ public class Main {
 
 ```nex
 class Account
-  constructors
+  create
     with_balance(initial: Integer) do
       let balance := initial
     end
@@ -123,7 +123,7 @@ Constructors can have preconditions and postconditions:
 
 ```nex
 class Rectangle
-  constructors
+  create
     make(w, h: Integer)
       require
         positive_width: w > 0
@@ -199,7 +199,7 @@ Constructors can accept multiple parameters with different types:
 
 ```nex
 class Employee
-  constructors
+  create
     make(name: String, age: Integer, salary: Decimal, active: Boolean) do
       let name := name
       let age := age
@@ -235,7 +235,7 @@ Constructor names should be descriptive and follow these conventions:
 
 ```nex
 class Date
-  constructors
+  create
     -- Basic constructor
     make(d, m, y: Integer) do
       let day := d
@@ -289,7 +289,7 @@ The `create` expression can be used anywhere an expression is expected:
 
 ```nex
 class Node
-  constructors
+  create
     make(val: Integer) do
       let value := val
     end
@@ -355,7 +355,7 @@ create acc.make_with_balance(1000)
 
 3. **Use contracts to enforce creation invariants:**
    ```nex
-   constructors
+   create
      with_balance(initial: Integer)
        require
          non_negative: initial >= 0
@@ -366,7 +366,7 @@ create acc.make_with_balance(1000)
 
 4. **Initialize all fields in constructors:**
    ```nex
-   constructors
+   create
      make(x, y: Integer) do
        let x := x
        let y := y

@@ -57,7 +57,7 @@ All operators respect proper precedence and associativity as defined in the gram
 ### Classes
 Classes can be defined with:
 - **Fields**: Typed attributes (`x: Integer`)
-- **Constructors**: Named initialization methods
+- **Constructors**: Named initialization methods (under the `create` section)
 - **Methods**: Instance methods that can access fields
 
 Example:
@@ -66,7 +66,7 @@ class Point
   feature
     x: Integer
     y: Integer
-  constructors
+  create
     make(px: Integer, py: Integer) do
       x := px
       y := py

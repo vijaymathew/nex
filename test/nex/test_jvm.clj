@@ -5,7 +5,7 @@
 feature
   x: Integer
   y: Integer
-constructors
+create
   make(a: Integer, b: Integer)
     do
       let x := a

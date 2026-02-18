@@ -58,7 +58,7 @@ feature
 private feature
   internal_id: String note "Internal identifier"
 
-constructors
+create
   make(initial: Integer, name: String) do
       let balance := initial
       let owner := name

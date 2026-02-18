@@ -14,7 +14,7 @@
 
 (def example1
   "class Box [T]
-  constructors
+  create
     make(initial: T) do
       let value := initial
     end
@@ -65,7 +65,7 @@ end")
 
 (def example3
   "class Pair [F, S]
-  constructors
+  create
     make(first: F, second: S) do
       let first := first
       let second := second

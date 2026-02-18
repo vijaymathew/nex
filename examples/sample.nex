@@ -15,7 +15,7 @@ class BankAccount
     interest_rate: Real
     is_active: Boolean
 
-  constructors
+  create
     make(initial_balance: Integer, number: String) do
       let balance := initial_balance
       let account_number := number
@@ -117,7 +117,7 @@ class SavingsAccount
   feature
     minimum_balance: Integer
 
-  constructors
+  create
     make(initial: Integer, number: String, min_balance: Integer) do
       let balance := initial
       let account_number := number

@@ -17,7 +17,7 @@
 
 ;; Complete Date class
 (def date-class "class Date
-  constructors
+  create
     make(a_day: Integer, a_hour: Integer)
       require
         valid_day: a_day >= 1 and a_day <= 31
@@ -80,10 +80,10 @@ end")
   (println "Features:")
   (doseq [section (:body class-def)]
     (case (:type section)
-      :constructors
+      :create
       (do
         (println "  Constructors:")
-        (doseq [ctor (:constructors section)]
+        (doseq [ctor (:create section)]
           (println "    •" (:name ctor))
           (println "      - Preconditions:" (count (:require ctor)))
           (println "      - Postconditions:" (count (:ensure ctor)))))

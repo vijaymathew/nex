@@ -58,7 +58,7 @@ end"]
     (let [unformatted "class Point
 feature
 x: Integer
-constructors
+create
 make(px: Integer) do
 let x := px
 end
@@ -68,7 +68,7 @@ end"
 feature
   x: Integer
 
-constructors
+create
   make(px: Integer) do
       let x := px
   end

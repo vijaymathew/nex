@@ -95,7 +95,7 @@ feature
 private feature
   internal_id: String note "Internal tracking ID"
 
-constructors
+create
   make(initial: Integer, name: String)
     require
       non_negative: initial >= 0

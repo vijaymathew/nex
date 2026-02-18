@@ -30,7 +30,7 @@ The formatter follows these conventions (matching the Emacs mode):
 
 ### Class Structure
 - `class` keyword at column 0
-- Class-level keywords (`feature`, `constructors`, `inherit`, `invariant`) at column 0
+- Class-level keywords (`feature`, `create`, `inherit`, `invariant`) at column 0
 - Members indented 2 spaces inside feature/constructor sections
 
 ### Methods and Constructors

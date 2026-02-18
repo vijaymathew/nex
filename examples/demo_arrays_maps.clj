@@ -155,7 +155,7 @@ end")
     items: Array [String]
     prices: Map [String, Decimal]
 
-  constructors
+  create
     make() do
       items := [\"apple\", \"banana\"]
       prices := {\"apple\": 1.50, \"banana\": 0.75}
@@ -187,7 +187,7 @@ end")
   feature
     data: Array [Array [Integer]]
 
-  constructors
+  create
     make() do
       data := [[1, 2, 3], [4, 5, 6]]
     end
@@ -217,7 +217,7 @@ end")
   feature
     items: Map [String, Array [String]]
 
-  constructors
+  create
     make() do
       items := {
         \"fruits\": [\"apple\", \"banana\"],

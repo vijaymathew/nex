@@ -60,7 +60,7 @@ Type parameters are placeholders for actual types that will be provided when the
 
 ```nex
 class Box [T]
-  constructors
+  create
     make(initial: T) do
       let value := initial
     end
@@ -211,7 +211,7 @@ end
 
 ```nex
 class Stack [G]
-  constructors
+  create
     make() do
       let count := 0
     end
@@ -328,7 +328,7 @@ end
 
 ```nex
 class Pair [F, S]
-  constructors
+  create
     make(first: F, second: S) do
       let first := first
       let second := second

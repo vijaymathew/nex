@@ -3,7 +3,7 @@
 
 -- Simple generic class
 class Box [T]
-  constructors
+  create
     make(initial: T) do
       let value := initial
     end
@@ -22,7 +22,7 @@ end
 
 -- Generic stack with operations
 class Stack [G]
-  constructors
+  create
     make() do
       let count := 0
     end
@@ -87,7 +87,7 @@ end
 
 -- Multiple type parameters
 class Pair [F, S]
-  constructors
+  create
     make(first_val: F, second_val: S) do
       let first := first_val
       let second := second_val

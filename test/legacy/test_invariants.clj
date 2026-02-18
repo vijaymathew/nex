@@ -88,7 +88,7 @@ end")
 ;; Test 4: Complete Date example from specification
 (println "┌─ Test 4: Complete Date Example ─────────────────────────┐")
 (def code4 "class Date
-  constructors
+  create
     make(a_day: Integer, a_hour: Integer)
       require
         valid_day: a_day >= 1 and a_day <= 31
@@ -129,7 +129,7 @@ end")
       class-def (first (:classes ast))]
   (println "│ Class: Date (Complete Example)")
   (println "│")
-  (println "│ Constructors:" (count (filter #(= :constructors (:type %)) (:body class-def))))
+  (println "│ Constructors:" (count (filter #(= :create (:type %)) (:body class-def))))
   (println "│ Feature sections:" (count (filter #(= :feature-section (:type %)) (:body class-def))))
   (println "│ Invariants:" (count (:invariant class-def)))
   (println "│")

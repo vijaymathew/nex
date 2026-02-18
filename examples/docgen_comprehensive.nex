@@ -50,7 +50,7 @@ private feature
       print("dump")
   end
 
-constructors
+create
   make(max_size: Integer)
     require
       positive_size: max_size > 0

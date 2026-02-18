@@ -33,7 +33,7 @@ end"
 (deftest named-constructor-parsing-test
   (testing "Parse create with named constructor"
     (let [code "class Account
-  constructors
+  create
     with_balance(bal: Integer) do
       let balance := bal
     end
@@ -78,7 +78,7 @@ end"
 (deftest named-constructor-java-generation-test
   (testing "Generate Java code for create with named constructor"
     (let [code "class Account
-  constructors
+  create
     with_balance(bal: Integer) do
       let balance := bal
     end
@@ -118,7 +118,7 @@ end"
 (deftest constructor-execution-ast-test
   (testing "Create with constructor AST structure"
     (let [code "class Counter
-  constructors
+  create
     with_value(val: Integer) do
       let count := val
     end
@@ -139,7 +139,7 @@ end"
 (deftest multiple-parameters-constructor-java-test
   (testing "Java generation for multi-param constructor"
     (let [code "class Rectangle
-  constructors
+  create
     make(w, h: Integer) do
       let width := w
       let height := h
@@ -199,7 +199,7 @@ end"
 (deftest create-with-contracts-java-test
   (testing "Java generation with constructor contracts"
     (let [code "class Account
-  constructors
+  create
     with_balance(initial: Integer)
       require
         positive: initial >= 0
@@ -225,7 +225,7 @@ end"
 (deftest create-contract-violation-parsing-test
   (testing "Parse create with potentially violating contract"
     (let [code "class Account
-  constructors
+  create
     with_balance(initial: Integer)
       require
         positive: initial >= 0
@@ -285,7 +285,7 @@ end"
 (deftest create-multiple-objects-java-test
   (testing "Java generation for multiple create statements"
     (let [code "class Counter
-  constructors
+  create
     with_value(val: Integer) do
       let count := val
     end

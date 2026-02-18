@@ -249,7 +249,7 @@ class Calculator
   feature
     x: Integer
     y: Integer
-  constructors
+  create
     make(a, b: Integer) do
       x := a
       y := b
@@ -408,7 +408,7 @@ class Point
   private feature
     x: Integer
     y: Integer
-  constructors
+  create
     make(newx, newy: Integer) do
       x := newx
       y := newy

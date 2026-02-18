@@ -34,7 +34,7 @@ end")
 
 (def example2
   "class Account
-  constructors
+  create
     with_balance(initial: Integer)
       require
         non_negative: initial >= 0
@@ -76,7 +76,7 @@ end")
 end
 
 class Account
-  constructors
+  create
     with_balance(initial: Integer) do
       let balance := initial
     end
@@ -115,7 +115,7 @@ end")
 
 (def example4
   "class Rectangle
-  constructors
+  create
     make(w, h: Integer)
       require
         positive_width: w > 0

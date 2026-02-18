@@ -141,7 +141,7 @@ end
 ### Constructor Example
 ```nex
 class Date
-  constructors
+  create
     make(a_day: Integer, a_hour: Integer)
       require
         valid_day: a_day >= 1 and a_day <= 31

@@ -130,7 +130,7 @@ end"
 (deftest generic-constructor-test
   (testing "Generic type in constructor"
     (let [code "class Box [T]
-  constructors
+  create
     make(initial: T) do
       let value := initial
     end
@@ -178,7 +178,7 @@ end"
 (deftest generic-create-expression-test
   (testing "Create expression with parameterized type"
     (let [code "class Box [T]
-  constructors
+  create
     make(val: T) do
       let value := val
     end

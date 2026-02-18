@@ -58,7 +58,7 @@ end")
 ;; Test 3: Constructor with contracts
 (println "┌─ Test 3: Constructor with Contracts ────────────────────┐")
 (def code3 "class Date
-  constructors
+  create
     make(a_day: Integer, a_hour: Integer)
       require
         valid_day: a_day >= 1 and a_day <= 31
@@ -83,7 +83,7 @@ end")
   (println "│")
   (println "│ Constructor AST:")
   (clojure.pprint/pprint
-    (-> ast :classes first :body first :constructors first))
+    (-> ast :classes first :body first :create first))
   (println))
 (println "└──────────────────────────────────────────────────────────┘")
 (println)

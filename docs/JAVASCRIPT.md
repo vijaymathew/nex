@@ -141,7 +141,7 @@ class Person {
 **Nex:**
 ```nex
 class Point
-  constructors
+  create
     make(x, y: Integer) do
       x := x
       y := y
@@ -409,7 +409,7 @@ class Matrix
   feature
     data: Array [Array [Integer]]
 
-  constructors
+  create
     make() do
       data := [[1, 2, 3], [4, 5, 6]]
     end
@@ -623,7 +623,7 @@ class BankAccount
     balance: Decimal
     account_number: String
 
-  constructors
+  create
     make(number: String, initial: Decimal)
       require
         positive_initial: initial >= 0
@@ -715,7 +715,7 @@ class Stack [T]
     items: Array [T]
     count: Integer
 
-  constructors
+  create
     make() do
       items := []
       count := 0
