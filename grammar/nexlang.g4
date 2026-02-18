@@ -246,7 +246,15 @@ oldExpression
     ;
 
 createExpression
-    : CREATE IDENTIFIER ('.' IDENTIFIER '(' argumentList? ')')?
+    : CREATE IDENTIFIER genericArgs? ('.' IDENTIFIER '(' argumentList? ')')?
+    ;
+
+genericArgs
+    : '[' genericArg (',' genericArg)* ']'
+    ;
+
+genericArg
+    : IDENTIFIER | type
     ;
 
 literal

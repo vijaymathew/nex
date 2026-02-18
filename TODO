@@ -1,0 +1,3 @@
+1. Keep an index of generic-classes. A statement like `create Box[Integer]` should pick-up the type-realized class-definition from the index.
+   If the class-definition in missing in the index, it must be created.
+2. Make sure HashMap and ArrayList equivalants is supported in cljs
