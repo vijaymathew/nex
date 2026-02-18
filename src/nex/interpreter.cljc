@@ -98,22 +98,32 @@
 ;; Contract Checking
 ;;
 
+;; Contract types
+(def Precondition "Precondition")
+(def Postcondition "Postcondition")
+(def Loop-invariant "Loop invariant")
+(def Class-invariant "Class invariant")
+
+(defn report-contract-violation
+  [contract-type label condition]
+  (throw (ex-info (str contract-type " violation: " label)
+                  {:contract-type contract-type
+                   :label label
+                   :condition condition})))
+
 (defn check-assertions
   "Check a list of assertions. Throws exception if any fail."
   [ctx assertions contract-type]
   (doseq [{:keys [label condition]} assertions]
     (let [result (eval-node ctx condition)]
       (when-not result
-        (throw (ex-info (str contract-type " violation: " label)
-                        {:contract-type contract-type
-                         :label label
-                         :condition condition}))))))
+        (report-contract-violation contract-type label condition)))))
 
 (defn check-class-invariant
   "Check the class invariant for an object or class context."
   [ctx class-def]
   (when-let [invariant-assertions (:invariant class-def)]
-    (check-assertions ctx invariant-assertions "Class invariant")))
+    (check-assertions ctx invariant-assertions Class-invariant)))
 
 ;;
 ;; Inheritance Support
@@ -237,8 +247,8 @@
     ;; Handle parameterized types
     (map? field-type)
     (case (:base-type field-type)
-      "Array" []
-      "Map" {}
+      "Array" (java.util.Vector.)
+      "Map" (java.util.HashMap.)
       nil)
 
     ;; Handle simple types
@@ -392,15 +402,23 @@
     "slice"       (fn [arr start end & _] (subvec arr start end))}
 
    "Map"
-   {"at"           (fn [m key & _] (get m key))
-    "set"          (fn [m key val & _] (assoc m key val))
-    "size"         (fn [m & _] (count m))
-    "is_empty"     (fn [m & _] (empty? m))
-    "contains_key" (fn [m key & _] (contains? m key))
-    "keys"         (fn [m & _] (vec (keys m)))
-    "values"       (fn [m & _] (vec (vals m)))
-    "put"          (fn [m key val & _] (assoc m key val))
-    "remove"       (fn [m key & _] (dissoc m key))}})
+   {"get"         (fn [m key & _]
+                    (let [v (.get m key)]
+                      (if (nil? v)
+                        (report-contract-violation Precondition "key_must_exist" "has_key")
+                        v)))
+    "try_get"      (fn [m key default & _]
+                    (let [v (.get m key)]
+                      (if (nil? v)
+                        default
+                        v)))
+    "set"          (fn [m key val & _] (.put m key val))
+    "size"         (fn [m & _] (.size m))
+    "is_empty"     (fn [m & _] (.isEmpty m))
+    "contains_key" (fn [m key & _] (.containsKey m key))
+    "keys"         (fn [m & _] (vec (.keySet m)))
+    "values"       (fn [m & _] (vec (.values m)))
+    "remove"       (fn [m key & _] (.remove m key))}})
 
 (defn get-type-name
   "Get the type name for a value"
@@ -413,17 +431,19 @@
     (char? value) "Char"
     (boolean? value) "Boolean"
     (vector? value) "Array"
-    (map? value) "Map"
+    (instance? java.util.HashMap value) "Map"
     :else nil))
 
 (defn call-builtin-method
   "Call a built-in method on a primitive value"
-  [value method-name args]
-  (when-let [type-name (get-type-name value)]
-    (when-let [methods (get builtin-type-methods type-name)]
-      (when-let [method-fn (get methods method-name)]
-        (apply method-fn value args)))))
-
+  [target value method-name args]
+  (if-let [method-fn
+           (when-let [type-name (get-type-name value)]
+             (when-let [methods (get builtin-type-methods type-name)]
+               (get methods method-name)))]
+    (apply method-fn value args)
+    (throw (ex-info (str "Method not found on type: " method-name)
+                    {:target target :value value :method method-name}))))
 ;;
 ;; Node Evaluators
 ;;
@@ -578,7 +598,7 @@
                                  (assoc :old-values old-values))
                       ;; Check pre-conditions
                       _ (when-let [require-assertions (:require method-def)]
-                          (check-assertions new-ctx require-assertions "Precondition"))
+                          (check-assertions new-ctx require-assertions Precondition))
                       ;; Execute method body
                       _ (doseq [stmt (:body method-def)]
                           (eval-node new-ctx stmt))
@@ -601,7 +621,7 @@
                   (try
                     ;; Check post-conditions
                     (when-let [ensure-assertions (:ensure method-def)]
-                      (check-assertions new-ctx ensure-assertions "Postcondition"))
+                      (check-assertions new-ctx ensure-assertions Postcondition))
                     ;; Check class invariant
                     (check-class-invariant new-ctx class-def)
                     ;; Success: update object in parent environment
@@ -621,10 +641,7 @@
                   (throw (ex-info (str "Method not found: " method)
                                   {:object obj :method method}))))))
           ;; Not a NexObject - check if it's a primitive type with built-in methods
-          (if-let [result (call-builtin-method obj method arg-values)]
-            result
-            (throw (ex-info (str "Method not found on type: " method)
-                            {:target target :value obj :method method})))))
+          (call-builtin-method target obj method arg-values)))
 
       ;; Method call without target: method(args)
       ;; First check if we're inside an object method (self-call)
@@ -722,7 +739,7 @@
          iteration 0]
     ;; Check invariant before iteration (if present)
     (when invariant
-      (check-assertions ctx invariant "Loop invariant"))
+      (check-assertions ctx invariant Loop-invariant))
 
     ;; Check exit condition
     (let [until-val (eval-node ctx until)]
@@ -750,7 +767,7 @@
 
           ;; Check invariant after iteration (if present)
           (when invariant
-            (check-assertions ctx invariant "Loop invariant"))
+            (check-assertions ctx invariant Loop-invariant))
 
           ;; Recur with new state
           (recur result curr-variant (inc iteration)))))))
@@ -799,9 +816,9 @@
 (defmethod eval-node :map-literal
   [ctx {:keys [entries]}]
   ;; Evaluate all key-value pairs and return as a hash-map
-  (into {} (map (fn [{:keys [key value]}]
-                  [(eval-node ctx key) (eval-node ctx value)])
-                entries)))
+  (java.util.HashMap. (into {} (mapv (fn [{:keys [key value]}]
+                                       [(eval-node ctx key) (eval-node ctx value)])
+                                     entries))))
 
 (defmethod eval-node :subscript
   [ctx {:keys [target index]}]
@@ -872,7 +889,7 @@
                                  new-ctx (assoc ctx :current-env ctor-env)
                                  ;; Check pre-conditions
                                  _ (when-let [require-assertions (:require ctor-def)]
-                                     (check-assertions new-ctx require-assertions "Precondition"))
+                                     (check-assertions new-ctx require-assertions Precondition))
                                  ;; Execute constructor body
                                  _ (doseq [stmt (:body ctor-def)]
                                      (eval-node new-ctx stmt))
@@ -889,7 +906,7 @@
                                                        all-fields)
                                  ;; Check post-conditions
                                  _ (when-let [ensure-assertions (:ensure ctor-def)]
-                                     (check-assertions new-ctx ensure-assertions "Postcondition"))]
+                                     (check-assertions new-ctx ensure-assertions Postcondition))]
                              updated-fields))
                          ;; No constructor: use default initialization
                          initial-field-map)

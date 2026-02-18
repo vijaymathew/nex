@@ -231,7 +231,7 @@
     "contains_key" (fn [target args] (str target ".containsKey(" args ")"))
     "keys"         (fn [target _] (str "new ArrayList<>(" target ".keySet())"))
     "values"       (fn [target _] (str "new ArrayList<>(" target ".values())"))
-    "put"          (fn [target args] (str "(" target ".put(" args "), " target ")"))
+    "set"          (fn [target args] (str "(" target ".put(" args "), " target ")"))
     "remove"       (fn [target args] (str "(" target ".remove(" args "), " target ")"))}})
 (defn is-builtin-method?
   "Check if a method call is on a built-in type by looking at the target expression"
