@@ -437,7 +437,7 @@
 
     ;; Add Result variable for return type
     (when return-type
-      (env-add-var method-env "Result" return-type))
+      (env-add-var method-env "result" return-type))
 
     ;; Check preconditions
     (doseq [assertion require]
