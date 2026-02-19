@@ -133,8 +133,8 @@ class Math
   feature
     gcd(a, b: Integer) do
       from
-        x := a
-        y := b
+        let x := a
+        let y := b
       until
         x = y
       do
