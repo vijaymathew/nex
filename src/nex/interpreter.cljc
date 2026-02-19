@@ -3,6 +3,58 @@
             #?(:clj [nex.parser :as parser])))
 
 ;;
+;; Mutable Collections (platform abstraction)
+;;
+
+;; Array helpers
+(defn nex-array [] #?(:clj (java.util.ArrayList.) :cljs #js []))
+(defn nex-array-from [coll] #?(:clj (java.util.ArrayList. (vec coll)) :cljs (js/Array.from (to-array coll))))
+(defn nex-array? [v] #?(:clj (instance? java.util.ArrayList v) :cljs (array? v)))
+(defn nex-array-get [arr idx] #?(:clj (.get arr idx) :cljs (aget arr idx)))
+(defn nex-array-add [arr val] #?(:clj (.add arr val) :cljs (.push arr val)))
+(defn nex-array-add-at [arr idx val] #?(:clj (.add arr idx val) :cljs (.splice arr idx 0 val)))
+(defn nex-array-set [arr idx val] #?(:clj (.set arr idx val) :cljs (aset arr idx val)))
+(defn nex-array-size [arr] #?(:clj (.size arr) :cljs (.-length arr)))
+(defn nex-array-empty? [arr] #?(:clj (.isEmpty arr) :cljs (zero? (.-length arr))))
+(defn nex-array-contains [arr elem] #?(:clj (.contains arr elem) :cljs (.includes arr elem)))
+(defn nex-array-index-of [arr elem] #?(:clj (.indexOf arr elem) :cljs (.indexOf arr elem)))
+(defn nex-array-remove [arr idx] #?(:clj (.remove arr (int idx)) :cljs (.splice arr idx 1)))
+(defn nex-array-reverse [arr] #?(:clj (java.util.ArrayList. (.reversed arr)) :cljs (js/Array.from (.reverse (.slice arr)))))
+(defn nex-array-sort [arr] #?(:clj (.sort arr nil) :cljs (.sort arr)))
+(defn nex-array-slice [arr start end] #?(:clj (.subList arr start end) :cljs (.slice arr start end)))
+
+;; Map helpers
+(defn nex-map [] #?(:clj (java.util.HashMap.) :cljs (js/Map.)))
+(defn nex-map-from [pairs]
+  #?(:clj (java.util.HashMap. (into {} pairs))
+     :cljs (js/Map. (to-array (map to-array pairs)))))
+(defn nex-map? [v] #?(:clj (instance? java.util.HashMap v) :cljs (instance? js/Map v)))
+(defn nex-map-get [m key] #?(:clj (.get m key) :cljs (.get m key)))
+(defn nex-map-put [m key val] #?(:clj (.put m key val) :cljs (.set m key val)))
+(defn nex-map-size [m] #?(:clj (.size m) :cljs (.-size m)))
+(defn nex-map-empty? [m] #?(:clj (.isEmpty m) :cljs (zero? (.-size m))))
+(defn nex-map-contains-key [m key] #?(:clj (.containsKey m key) :cljs (.has m key)))
+(defn nex-map-keys [m] #?(:clj (vec (.keySet m)) :cljs (vec (es6-iterator-seq (.keys m)))))
+(defn nex-map-values [m] #?(:clj (vec (.values m)) :cljs (vec (es6-iterator-seq (.values m)))))
+(defn nex-map-remove [m key] #?(:clj (.remove m key) :cljs (.delete m key)))
+
+;; Math helpers
+(defn nex-abs [n] #?(:clj (Math/abs (double n)) :cljs (js/Math.abs n)))
+(defn nex-round [n] #?(:clj (Math/round (double n)) :cljs (js/Math.round n)))
+
+;; Subscript helper (works on both Array and Map)
+(defn nex-coll-get [coll idx]
+  (cond
+    (nex-array? coll) (nex-array-get coll idx)
+    (nex-map? coll) (nex-map-get coll idx)
+    :else #?(:clj (.get coll idx) :cljs (aget coll idx))))
+
+;; Char detection helper
+(defn nex-char? [v]
+  #?(:clj (char? v)
+     :cljs (and (string? v) (== (.-length v) 1))))
+
+;;
 ;; Runtime Environment
 ;;
 
@@ -338,8 +390,8 @@
     ;; Handle parameterized types
     (map? field-type)
     (case (:base-type field-type)
-      "Array" (java.util.ArrayList.)
-      "Map" (java.util.HashMap.)
+      "Array" (nex-array)
+      "Map" (nex-map)
       nil)
 
     ;; Handle simple types
@@ -388,7 +440,7 @@
 
    :Integer
    {"to_string"         (fn [n & _] (str n))
-    "abs"               (fn [n & _] (Math/abs (int n)))
+    "abs"               (fn [n & _] (nex-abs n))
     "min"               (fn [n other & _] (min n other))
     "max"               (fn [n other & _] (max n other))
     ;; Arithmetic operator methods
@@ -406,7 +458,7 @@
 
    :Integer64
    {"to_string"         (fn [n & _] (str n))
-    "abs"               (fn [n & _] (Math/abs (long n)))
+    "abs"               (fn [n & _] (nex-abs n))
     "min"               (fn [n other & _] (min n other))
     "max"               (fn [n other & _] (max n other))
     ;; Arithmetic operator methods
@@ -424,10 +476,10 @@
 
    :Real
    {"to_string"         (fn [n & _] (str n))
-    "abs"               (fn [n & _] (Math/abs (double n)))
+    "abs"               (fn [n & _] (nex-abs n))
     "min"               (fn [n other & _] (min n other))
     "max"               (fn [n other & _] (max n other))
-    "round"             (fn [n & _] (Math/round (double n)))
+    "round"             (fn [n & _] (nex-round n))
     ;; Arithmetic operator methods
     "plus"              (fn [n other & _] (+ n other))
     "minus"             (fn [n other & _] (- n other))
@@ -443,10 +495,10 @@
 
    :Decimal
    {"to_string"         (fn [n & _] (str n))
-    "abs"               (fn [n & _] (Math/abs (double n)))
+    "abs"               (fn [n & _] (nex-abs n))
     "min"               (fn [n other & _] (min n other))
     "max"               (fn [n other & _] (max n other))
-    "round"             (fn [n & _] (Math/round (double n)))
+    "round"             (fn [n & _] (nex-round n))
     ;; Arithmetic operator methods
     "plus"              (fn [n other & _] (+ n other))
     "minus"             (fn [n other & _] (- n other))
@@ -475,39 +527,39 @@
     "not_equals"  (fn [b other & _] (not= b other))}
 
    :Array
-   {"get"         (fn [arr index & _] (.get arr index))
-    "add"         (fn [arr value & _] (.add arr value))
-    "at"          (fn [arr index value & _] (.add arr index value))
-    "set"         (fn [arr index value & _] (.set arr index value))
-    "length"      (fn [arr & _] (.size arr))
-    "is_empty"    (fn [arr & _] (.isEmpty arr))
-    "contains"    (fn [arr elem & _] (.contains arr elem))
+   {"get"         (fn [arr index & _] (nex-array-get arr index))
+    "add"         (fn [arr value & _] (nex-array-add arr value))
+    "at"          (fn [arr index value & _] (nex-array-add-at arr index value))
+    "set"         (fn [arr index value & _] (nex-array-set arr index value))
+    "length"      (fn [arr & _] (nex-array-size arr))
+    "is_empty"    (fn [arr & _] (nex-array-empty? arr))
+    "contains"    (fn [arr elem & _] (nex-array-contains arr elem))
     "index_of"    (fn [arr elem & _]
-                    (let [idx (.indexOf arr elem)]
+                    (let [idx (nex-array-index-of arr elem)]
                       (if (>= idx 0) idx -1)))
-    "remove"      (fn [arr ^Integer idx & _] (.remove arr idx))
-    "reverse"     (fn [arr _] (java.util.ArrayList. (.reversed(arr))))
-    "sort"        (fn [arr & _] (.sort arr nil))
-    "slice"       (fn [arr start end & _] (.subList arr start end))}
+    "remove"      (fn [arr idx & _] (nex-array-remove arr idx))
+    "reverse"     (fn [arr _] (nex-array-reverse arr))
+    "sort"        (fn [arr & _] (nex-array-sort arr))
+    "slice"       (fn [arr start end & _] (nex-array-slice arr start end))}
 
    :Map
    {"get"         (fn [m key & _]
-                    (let [v (.get m key)]
+                    (let [v (nex-map-get m key)]
                       (if (nil? v)
                         (report-contract-violation Precondition "key_must_exist" "has_key")
                         v)))
     "try_get"      (fn [m key default & _]
-                    (let [v (.get m key)]
+                    (let [v (nex-map-get m key)]
                       (if (nil? v)
                         default
                         v)))
-    "at"           (fn [m key val & _] (.put m key val))
-    "size"         (fn [m & _] (.size m))
-    "is_empty"     (fn [m & _] (.isEmpty m))
-    "contains_key" (fn [m key & _] (.containsKey m key))
-    "keys"         (fn [m & _] (vec (.keySet m)))
-    "values"       (fn [m & _] (vec (.values m)))
-    "remove"       (fn [m key & _] (.remove m key))}})
+    "at"           (fn [m key val & _] (nex-map-put m key val))
+    "size"         (fn [m & _] (nex-map-size m))
+    "is_empty"     (fn [m & _] (nex-map-empty? m))
+    "contains_key" (fn [m key & _] (nex-map-contains-key m key))
+    "keys"         (fn [m & _] (nex-map-keys m))
+    "values"       (fn [m & _] (nex-map-values m))
+    "remove"       (fn [m key & _] (nex-map-remove m key))}})
 
 (defn get-type-name
   "Get the type name for a value"
@@ -517,10 +569,10 @@
     (integer? value) :Integer
     (float? value) :Real
     (double? value) :Decimal
-    (char? value) :Char
+    (nex-char? value) :Char
     (boolean? value) :Boolean
-    (instance? java.util.ArrayList value) :Array
-    (instance? java.util.HashMap value) :Map
+    (nex-array? value) :Array
+    (nex-map? value) :Map
     :else nil))
 
 (defn call-builtin-method
@@ -899,22 +951,22 @@
 
 (defmethod eval-node :array-literal
   [ctx {:keys [elements]}]
-  ;; Evaluate all elements and return as a vector
-  (java.util.ArrayList. (mapv #(eval-node ctx %) elements)))
+  ;; Evaluate all elements and return as a mutable array
+  (nex-array-from (mapv #(eval-node ctx %) elements)))
 
 (defmethod eval-node :map-literal
   [ctx {:keys [entries]}]
-  ;; Evaluate all key-value pairs and return as a hash-map
-  (java.util.HashMap. (into {} (mapv (fn [{:keys [key value]}]
-                                       [(eval-node ctx key) (eval-node ctx value)])
-                                     entries))))
+  ;; Evaluate all key-value pairs and return as a mutable map
+  (nex-map-from (mapv (fn [{:keys [key value]}]
+                        [(eval-node ctx key) (eval-node ctx value)])
+                      entries)))
 
 (defmethod eval-node :subscript
   [ctx {:keys [target index]}]
   ;; Evaluate target (array or map) and index, then access element
   (let [coll (eval-node ctx target)
         idx (eval-node ctx index)]
-    (.get coll idx)))
+    (nex-coll-get coll idx)))
 
 (defmethod eval-node :identifier
   [ctx {:keys [name]}]
