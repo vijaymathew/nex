@@ -670,6 +670,33 @@
 ;; Program Type Checking
 ;;
 
+(defn register-builtin-methods
+  "Register method signatures for built-in types (Console, File, Process)"
+  [env]
+  (doseq [[method-name sig]
+          {"print" {:params [{:name "msg" :type "String"}] :return-type "Void"}
+           "print_line" {:params [{:name "msg" :type "String"}] :return-type "Void"}
+           "read_line" {:params [] :return-type "String"}
+           "error" {:params [{:name "msg" :type "String"}] :return-type "Void"}
+           "new_line" {:params [] :return-type "Void"}
+           "read_integer" {:params [] :return-type "Integer"}
+           "read_real" {:params [] :return-type "Real"}}]
+    (env-add-method env "Console" method-name sig))
+  (doseq [[method-name sig]
+          {"read" {:params [] :return-type "String"}
+           "write" {:params [{:name "content" :type "String"}] :return-type "Void"}
+           "append" {:params [{:name "content" :type "String"}] :return-type "Void"}
+           "exists" {:params [] :return-type "Boolean"}
+           "delete" {:params [] :return-type "Void"}
+           "lines" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}
+           "close" {:params [] :return-type "Void"}}]
+    (env-add-method env "File" method-name sig))
+  (doseq [[method-name sig]
+          {"getenv" {:params [{:name "name" :type "String"}] :return-type "String"}
+           "setenv" {:params [{:name "name" :type "String"} {:name "value" :type "String"}] :return-type "Void"}
+           "command_line" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}}]
+    (env-add-method env "Process" method-name sig)))
+
 (defn check-program
   "Type check a complete program.
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
@@ -681,34 +708,7 @@
        (doseq [class-def classes]
          (collect-class-info env class-def))
 
-       ;; Register built-in Console methods
-       (doseq [[method-name sig]
-               {"print" {:params [{:name "msg" :type "String"}] :return-type "Void"}
-                "print_line" {:params [{:name "msg" :type "String"}] :return-type "Void"}
-                "read_line" {:params [] :return-type "String"}
-                "error" {:params [{:name "msg" :type "String"}] :return-type "Void"}
-                "new_line" {:params [] :return-type "Void"}
-                "read_integer" {:params [] :return-type "Integer"}
-                "read_real" {:params [] :return-type "Real"}}]
-         (env-add-method env "Console" method-name sig))
-
-       ;; Register built-in File methods
-       (doseq [[method-name sig]
-               {"read" {:params [] :return-type "String"}
-                "write" {:params [{:name "content" :type "String"}] :return-type "Void"}
-                "append" {:params [{:name "content" :type "String"}] :return-type "Void"}
-                "exists" {:params [] :return-type "Boolean"}
-                "delete" {:params [] :return-type "Void"}
-                "lines" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}
-                "close" {:params [] :return-type "Void"}}]
-         (env-add-method env "File" method-name sig))
-
-       ;; Register built-in Process methods
-       (doseq [[method-name sig]
-               {"getenv" {:params [{:name "name" :type "String"}] :return-type "String"}
-                "setenv" {:params [{:name "name" :type "String"} {:name "value" :type "String"}] :return-type "Void"}
-                "command_line" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}}]
-         (env-add-method env "Process" method-name sig))
+       (register-builtin-methods env)
 
        ;; Inject pre-existing variable types (e.g., from REPL)
        (doseq [[var-name var-type] (:var-types opts)]
@@ -737,3 +737,18 @@
   ([ast] (type-check ast {}))
   ([ast opts]
    (check-program ast opts)))
+
+(defn infer-expression-type
+  "Infer the type of an expression AST node.
+   opts: :classes - seq of class defs, :var-types - {name type} map.
+   Returns the type (string or map) or nil on failure."
+  [expr opts]
+  (try
+    (let [env (make-type-env)]
+      (doseq [class-def (:classes opts)]
+        (collect-class-info env class-def))
+      (register-builtin-methods env)
+      (doseq [[var-name var-type] (:var-types opts)]
+        (env-add-var env var-name var-type))
+      (check-expression env expr))
+    (catch Exception _ nil)))

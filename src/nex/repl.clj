@@ -285,6 +285,30 @@
     :else
     (pr-str value)))
 
+(defn format-type
+  "Format a type value for REPL display"
+  [type-val]
+  (cond
+    (nil? type-val) nil
+    (string? type-val) type-val
+    (map? type-val) (let [base (:base-type type-val)
+                          params (or (:type-params type-val) (:type-args type-val))]
+                     (if (seq params)
+                       (str base "[" (str/join ", " (map format-type params)) "]")
+                       base))
+    :else (str type-val)))
+
+(defn infer-result-type
+  "Infer and format the type of an expression in the REPL context.
+   Returns a formatted type string, or nil if inference fails."
+  [ctx expr-node]
+  (when (and @*type-checking-enabled* expr-node)
+    (when-let [t (tc/infer-expression-type
+                   expr-node
+                   {:classes (vals @(:classes ctx))
+                    :var-types @*repl-var-types*})]
+      (format-type t))))
+
 (defn looks-like-class?
   "Check if input looks like a class definition"
   [input]
@@ -380,13 +404,20 @@
             (doseq [stmt (:body method-def)]
               (when (and (map? stmt) (= (:type stmt) :let) (:var-type stmt))
                 (swap! *repl-var-types* assoc (:name stmt) (:var-type stmt)))))
-          ;; Show output from print statements
-          (when (seq output)
-            (doseq [line output]
-              (println line)))
-          ;; Show result if it's not nil and not from a print
-          (when (and result (empty? output))
-            (println (format-value result)))
+          ;; Infer type of the result expression when typechecking is on
+          (let [type-str (when is-expression?
+                           (infer-result-type ctx (-> method-def :body first :args first)))]
+            ;; Show output from print statements
+            (when (seq output)
+              (if type-str
+                (println (str type-str " " (first output)))
+                (doseq [line output]
+                  (println line))))
+            ;; Show result if it's not nil and not from a print
+            (when (and result (empty? output))
+              (if type-str
+                (println (str type-str " " (format-value result)))
+                (println (format-value result)))))
           ;; Don't say "Class registered" for wrapped code
           ctx)
 
@@ -409,7 +440,10 @@
                 (println line)))
             ;; Show result if it's not nil, not from a print, and no classes were defined
             (when (and result (empty? output) (empty? real-class-names))
-              (println (format-value result)))
+              (if-let [type-str (when (seq calls)
+                                  (infer-result-type ctx (last calls)))]
+                (println (str type-str " " (format-value result)))
+                (println (format-value result))))
             ;; Only show "Class registered" message if there are real classes
             (when (and (seq real-class-names) (not (every? str/blank? real-class-names)))
               (println "Class(es) registered:" (str/join ", " real-class-names))))
@@ -425,7 +459,9 @@
               (println line)))
           ;; Show result if it's not nil and not from a print
           (when (and result (empty? output))
-            (println (format-value result)))
+            (if-let [type-str (infer-result-type ctx ast)]
+              (println (str type-str " " (format-value result)))
+              (println (format-value result))))
           ctx)))
 
     (catch clojure.lang.ExceptionInfo e
