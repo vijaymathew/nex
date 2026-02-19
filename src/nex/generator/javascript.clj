@@ -254,7 +254,7 @@
   (let [args-code (str/join ", " (map generate-expression args))]
     (if target
       ;; Object method call
-      (let [target-code (if (string? target) target (generate-expression {:type :identifier :name target}))]
+      (let [target-code (if (string? target) target (generate-expression target))]
         (or
          ;; Try Integer methods first (for operators, numeric is more common)
          (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]

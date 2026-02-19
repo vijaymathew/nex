@@ -151,6 +151,7 @@ statement
     | ifStatement
     | loopStatement
     | withStatement
+    | expression
     ;
 
 scopedBlock
@@ -182,7 +183,12 @@ localVarDecl
     ;
 
 methodCall
-    : (IDENTIFIER '.')? IDENTIFIER ('(' argumentList? ')')?
+    : primary callChain
+    | IDENTIFIER
+    ;
+
+callChain
+    : (memberAccess | callSuffix) postfixPart*
     ;
 
 argumentList
@@ -229,7 +235,25 @@ unary
     ;
 
 postfix
-    : primary ('[' expression ']')*
+    : primary postfixPart*
+    ;
+
+postfixPart
+    : memberAccess
+    | callSuffix
+    | subscript
+    ;
+
+memberAccess
+    : '.' IDENTIFIER ('(' argumentList? ')')?
+    ;
+
+callSuffix
+    : '(' argumentList? ')'
+    ;
+
+subscript
+    : '[' expression ']'
     ;
 
 primary
@@ -237,7 +261,6 @@ primary
     | createExpression
     | oldExpression
     | IDENTIFIER
-    | methodCall
     | '(' expression ')'
     ;
 

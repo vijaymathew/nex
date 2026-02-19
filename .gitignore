@@ -12,9 +12,6 @@ package-lock.json
 # ANTLR
 antlr-*.jar
 
-# Generated parser files
-src/nex/parser_js/
-
 # Editor/IDE
 .idea/
 *.swp

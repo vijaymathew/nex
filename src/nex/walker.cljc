@@ -471,29 +471,61 @@
         :var-type var-type
         :value (transform-node expr)}))
 
-   :methodCall
-   (fn [[_ & parts]]
-     (let [;; Remove punctuation tokens
-           cleaned (remove #(#{"." "(" ")"} %) parts)
-           ;; Check if there's a target (obj.method vs just method)
-           has-target? (and (>= (count cleaned) 2)
-                           (string? (first cleaned))
-                           (string? (second cleaned)))
-           [target method args] (if has-target?
-                                  [(first cleaned) (second cleaned) (drop 2 cleaned)]
-                                  [nil (first cleaned) (rest cleaned)])]
-       {:type :call
-        :target target
-        :method method
-        :args (->> args
-                   (filter sequential?) ; Only process argument list nodes
-                   (mapcat transform-node))}))
-
    :argumentList
    (fn [[_ & args]]
      (->> args
           (remove #(= "," %))
           (mapv transform-node)))
+
+   :methodCall
+   (fn [[_ & rest]]
+     (cond
+       ;; Parameterless call without parentheses: IDENTIFIER
+       (and (= 1 (count rest))
+            (string? (first rest)))
+       {:type :call
+        :target nil
+        :method (first rest)
+        :args []}
+
+       ;; Chained call: primary callChain
+       :else
+       (let [[primary-node call-chain] rest
+             base (transform-node primary-node)
+             parts (transform-node call-chain)]
+         (reduce (fn [acc part]
+                 (case (:type part)
+                   :member-access
+                   {:type :call
+                    :target (if (and (map? acc) (= :identifier (:type acc)))
+                              (:name acc)
+                              acc)
+                    :method (:name part)
+                    :args (:args part)}
+
+                     :call-suffix
+                     (if (and (map? acc) (= :identifier (:type acc)))
+                       {:type :call
+                        :target nil
+                        :method (:name acc)
+                        :args (:args part)}
+                       (throw (ex-info "Call suffix can only be applied to identifiers"
+                                       {:expr acc})))
+
+                     :subscript
+                     {:type :subscript
+                      :target acc
+                      :index (:index part)}
+
+                     acc))
+                 base
+                 parts))))
+
+   :callChain
+   (fn [[_ & parts]]
+     (->> parts
+          (filter sequential?)
+          (map transform-node)))
 
    :expression
    (fn [[_ expr]]
@@ -529,23 +561,68 @@
      (transform-node postfix))
 
    :postfix
-   (fn [[_ primary-node & subscripts]]
-     ;; Structure: primary ('[' expression ']')*
+   (fn [[_ primary-node & parts]]
      (let [base (transform-node primary-node)
-           ;; Filter to get only expression nodes (ignore brackets)
-           indices (filter #(and (sequential? %)
-                                (= :expression (first %)))
-                          subscripts)]
-       (if (empty? indices)
-         ;; No subscripts, just return the base
-         base
-         ;; Build nested subscript operations
-         (reduce (fn [acc idx-node]
-                  {:type :subscript
-                   :target acc
-                   :index (transform-node idx-node)})
-                base
-                indices))))
+           parts (->> parts
+                      (filter sequential?)
+                      (map transform-node))]
+       (reduce (fn [acc part]
+                 (case (:type part)
+                   :member-access
+                   {:type :call
+                    :target (if (and (map? acc) (= :identifier (:type acc)))
+                              (:name acc)
+                              acc)
+                    :method (:name part)
+                    :args (:args part)}
+
+                   :call-suffix
+                   (if (and (map? acc) (= :identifier (:type acc)))
+                     {:type :call
+                      :target nil
+                      :method (:name acc)
+                      :args (:args part)}
+                     (throw (ex-info "Call suffix can only be applied to identifiers"
+                                     {:expr acc})))
+
+                   :subscript
+                   {:type :subscript
+                    :target acc
+                    :index (:index part)}
+
+                   acc))
+               base
+               parts)))
+
+   :postfixPart
+   (fn [[_ part]]
+     (transform-node part))
+
+   :memberAccess
+   (fn [[_ _dot name & rest]]
+     (let [args-node (first (filter #(and (sequential? %)
+                                         (= :argumentList (first %)))
+                                    rest))]
+       {:type :member-access
+        :name (token-text name)
+        :args (if args-node
+               (transform-node args-node)
+               [])}))
+
+   :callSuffix
+   (fn [[_ & rest]]
+     (let [args-node (first (filter #(and (sequential? %)
+                                         (= :argumentList (first %)))
+                                    rest))]
+       {:type :call-suffix
+        :args (if args-node
+               (transform-node args-node)
+               [])}))
+
+   :subscript
+   (fn [[_ _open-bracket expr _close-bracket]]
+     {:type :subscript
+      :index (transform-node expr)})
 
    :primaryExpr
    (fn [[_ primary]]

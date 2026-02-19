@@ -765,7 +765,10 @@
 
     (if target
       ;; Object method call: target.method(args)
-      (let [obj (env-lookup (:current-env ctx) target)]
+      (let [target-name (when (string? target) target)
+            obj (if target-name
+                  (env-lookup (:current-env ctx) target-name)
+                  (eval-node ctx target))]
         (if (instance? NexObject obj)
           ;; Call method on object
           (let [class-def (lookup-class ctx (:class-name obj))
@@ -798,7 +801,7 @@
                       new-ctx (-> ctx
                                  (assoc :current-env method-env)
                                  (assoc :current-object obj)
-                                 (assoc :current-target target)
+                                 (assoc :current-target target-name)
                                  (assoc :old-values old-values))
                       ;; Check pre-conditions
                       _ (when-let [require-assertions (:require method-def)]
@@ -828,12 +831,14 @@
                       (check-assertions new-ctx ensure-assertions Postcondition))
                     ;; Check class invariant
                     (check-class-invariant new-ctx class-def)
-                    ;; Success: update object in parent environment
-                    (env-set! (:current-env ctx) target updated-obj)
+                    ;; Success: update object in parent environment when possible
+                    (when target-name
+                      (env-set! (:current-env ctx) target-name updated-obj))
                     result
                     (catch #?(:clj Exception :cljs :default) e
                       ;; Postcondition or invariant failed: restore original object
-                      (env-set! (:current-env ctx) target obj)
+                      (when target-name
+                        (env-set! (:current-env ctx) target-name obj))
                       (throw e)))))
               ;; Method not found - check if it's a field (query access)
               (let [all-fields (get-all-fields ctx class-def)
@@ -845,7 +850,7 @@
                   (throw (ex-info (str "Method not found: " method)
                                   {:object obj :method method}))))))
           ;; Not a NexObject - check if it's a primitive type with built-in methods
-          (call-builtin-method target obj method arg-values)))
+          (call-builtin-method (or target-name target) obj method arg-values)))
 
       ;; Method call without target: method(args)
       ;; First check if we're inside an object method (self-call)
@@ -871,17 +876,20 @@
                                         all-fields)
                   ;; Create updated object
                   updated-obj (make-object (:class-name current-obj) updated-fields)
-                  ;; Update in parent context
-                  _ (env-set! (-> ctx :current-env :parent) (:current-target ctx) updated-obj)
+                  ;; Update in parent context when we have a target
+                  _ (when-let [target-name (:current-target ctx)]
+                      (env-set! (-> ctx :current-env :parent) target-name updated-obj))
                   ;; Make the method call
                   result (eval-node ctx {:type :call
                                         :target (:current-target ctx)
                                         :method method
                                         :args args})
-                  ;; After call, read updated field values back
-                  called-obj (env-lookup (-> ctx :current-env :parent) (:current-target ctx))
-                  _ (doseq [[field-name field-val] (:fields called-obj)]
-                      (env-set! current-env (name field-name) field-val))]
+                  ;; After call, read updated field values back when possible
+                  called-obj (when-let [target-name (:current-target ctx)]
+                               (env-lookup (-> ctx :current-env :parent) target-name))
+                  _ (when called-obj
+                      (doseq [[field-name field-val] (:fields called-obj)]
+                        (env-set! current-env (name field-name) field-val)))]
               result)
             ;; Method not found on current object - try builtin
             (if-let [builtin (get builtins method)]

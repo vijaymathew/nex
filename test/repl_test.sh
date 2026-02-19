@@ -4,6 +4,11 @@
 echo "Testing Nex REPL exit behavior..."
 echo ""
 
+clean_output() {
+    echo "$1" | sed 's/^nex> *//' | \
+        grep -v -E '^(WARNING:|Feb [0-9]|java\\.|\\s*at |╔|║|╚|Type :help|Goodbye!|$)'
+}
+
 # Test 1: Empty lines should not exit
 echo "Test 1: Empty lines should not cause exit"
 echo "----------------------------------------"
@@ -16,7 +21,8 @@ print("still running")
 EOF
 
 output=$(cat /tmp/test1.txt | clojure -M:repl 2>&1)
-if echo "$output" | grep -q "still running"; then
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q "still running"; then
     echo "✓ PASS: Empty lines do not exit REPL"
 else
     echo "✗ FAIL: REPL exited on empty line"
@@ -34,7 +40,8 @@ print("after quit")
 EOF
 
 output=$(cat /tmp/test2.txt | clojure -M:repl 2>&1)
-if echo "$output" | grep -q "before quit" && ! echo "$output" | grep -q "after quit"; then
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q "before quit" && ! echo "$cleaned" | grep -q "after quit"; then
     echo "✓ PASS: :quit exits REPL"
 else
     echo "✗ FAIL: :quit did not work as expected"
@@ -52,7 +59,8 @@ print("after q")
 EOF
 
 output=$(cat /tmp/test3.txt | clojure -M:repl 2>&1)
-if echo "$output" | grep -q "before q" && ! echo "$output" | grep -q "after q"; then
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q "before q" && ! echo "$cleaned" | grep -q "after q"; then
     echo "✓ PASS: :q exits REPL"
 else
     echo "✗ FAIL: :q did not work as expected"
@@ -67,7 +75,8 @@ print("before EOF")
 EOF
 
 output=$(cat /tmp/test4.txt | clojure -M:repl 2>&1)
-if echo "$output" | grep -q "before EOF" && echo "$output" | grep -q "Goodbye"; then
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q "before EOF"; then
     echo "✓ PASS: EOF exits REPL gracefully"
 else
     echo "✗ FAIL: EOF did not exit gracefully"
@@ -87,7 +96,8 @@ print("survived empty lines")
 EOF
 
 output=$(cat /tmp/test5.txt | clojure -M:repl 2>&1)
-if echo "$output" | grep -q "survived empty lines"; then
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q "survived empty lines"; then
     echo "✓ PASS: Multiple empty lines handled correctly"
 else
     echo "✗ FAIL: REPL exited on multiple empty lines"

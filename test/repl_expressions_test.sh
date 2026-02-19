@@ -4,6 +4,11 @@
 echo "Testing Nex REPL Expression Evaluation..."
 echo ""
 
+clean_output() {
+    echo "$1" | sed 's/^nex> *//' | \
+        grep -v -E '^(WARNING:|Feb [0-9]|java\\.|\\s*at |╔|║|╚|Type :help|Goodbye!|$)'
+}
+
 # Test 1: Simple expressions
 echo "Test 1: Arithmetic expressions"
 echo "-------------------------------"
@@ -16,9 +21,10 @@ cat > /tmp/test_arith.txt <<'EOF'
 EOF
 
 output=$(cat /tmp/test_arith.txt | clojure -M:repl 2>&1)
-if echo "$output" | grep -q "nex> 3" && \
-   echo "$output" | grep -q "nex> 15" && \
-   echo "$output" | grep -q "nex> 6"; then
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q "^3$" && \
+   echo "$cleaned" | grep -q "^15$" && \
+   echo "$cleaned" | grep -q "^6$"; then
     echo "✓ PASS: Arithmetic expressions work"
 else
     echo "✗ FAIL: Arithmetic expressions"
@@ -38,10 +44,11 @@ false
 EOF
 
 output=$(cat /tmp/test_literals.txt | clojure -M:repl 2>&1)
-if echo "$output" | grep -q "nex> 42" && \
-   echo "$output" | grep -q 'nex> "hello"' && \
-   echo "$output" | grep -q "nex> true" && \
-   echo "$output" | grep -q "nex> false"; then
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q "^42$" && \
+   echo "$cleaned" | grep -q '^"hello"$' && \
+   echo "$cleaned" | grep -q "^true$" && \
+   echo "$cleaned" | grep -q "^false$"; then
     echo "✓ PASS: Literals work"
 else
     echo "✗ FAIL: Literals"
@@ -59,8 +66,9 @@ cat > /tmp/test_comp.txt <<'EOF'
 EOF
 
 output=$(cat /tmp/test_comp.txt | clojure -M:repl 2>&1)
-if echo "$output" | grep -q "nex> true" && \
-   echo "$output" | grep -q "nex> false"; then
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q "^true$" && \
+   echo "$cleaned" | grep -q "^false$"; then
     echo "✓ PASS: Comparisons work"
 else
     echo "✗ FAIL: Comparisons"
@@ -78,8 +86,9 @@ x * 2
 EOF
 
 output=$(cat /tmp/test_vars_expr.txt | clojure -M:repl 2>&1)
-if echo "$output" | grep -q "nex> 15" && \
-   echo "$output" | grep -q "nex> 20"; then
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q "^15$" && \
+   echo "$cleaned" | grep -q "^20$"; then
     echo "✓ PASS: Variables in expressions work"
 else
     echo "✗ FAIL: Variables in expressions"
@@ -97,8 +106,9 @@ cat > /tmp/test_complex.txt <<'EOF'
 EOF
 
 output=$(cat /tmp/test_complex.txt | clojure -M:repl 2>&1)
-if echo "$output" | grep -q "nex> 50" && \
-   echo "$output" | grep -q "nex> 16"; then
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q "^50$" && \
+   echo "$cleaned" | grep -q "^16$"; then
     echo "✓ PASS: Complex expressions with precedence work"
 else
     echo "✗ FAIL: Complex expressions"
@@ -116,11 +126,35 @@ if y > 50 then print("big") else print("small") end
 EOF
 
 output=$(cat /tmp/test_stmts.txt | clojure -M:repl 2>&1)
-if echo "$output" | grep -q '"test"' && \
-   echo "$output" | grep -q '"big"'; then
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q '^"test"$' && \
+   echo "$cleaned" | grep -q '^"big"$'; then
     echo "✓ PASS: Statements still work"
 else
     echo "✗ FAIL: Statements"
+fi
+echo ""
+
+# Test 7: Chained member access
+echo "Test 7: Chained member access"
+echo "------------------------------"
+cat > /tmp/test_chain.txt <<'EOF'
+class A feature x: Integer create make(newX: Integer) do x := newX end end
+class C feature a: A create make(newX: Integer) do a := create A.make(newX) end end
+let c: C := create C.make(10)
+c.a.x
+:quit
+EOF
+
+output=$(cat /tmp/test_chain.txt | clojure -M:repl 2>&1)
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q "Class(es) registered: A" && \
+   echo "$cleaned" | grep -q "Class(es) registered: C" && \
+   echo "$cleaned" | grep -q "^10$"; then
+    echo "✓ PASS: Chained member access works"
+else
+    echo "✗ FAIL: Chained member access"
+    echo "$output"
 fi
 echo ""
 

@@ -15,4 +15,5 @@ echo ""
   echo "let y := x + 5"
   echo "print(y)"
   echo ":quit"
-} | clojure -M:repl
+} | clojure -M:repl | sed 's/^nex> *//' | \
+    grep -v -E '^(WARNING:|Feb [0-9]|java\\.|\\s*at |╔|║|╚|Type :help|Goodbye!|$)'
