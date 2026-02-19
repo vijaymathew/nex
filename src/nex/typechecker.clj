@@ -358,7 +358,14 @@
       :create (check-create env expr)
       :array-literal (check-array-literal env expr)
       :map-literal (check-map-literal env expr)
-      :subscript (check-expression env (:target expr))
+      :subscript (let [target-type (check-expression env (:target expr))]
+                       (if (map? target-type)
+                         (let [type-params (or (:type-params target-type) (:type-args target-type))]
+                           (cond
+                             (= (:base-type target-type) "Array") (first type-params)
+                             (= (:base-type target-type) "Map") (second type-params)
+                             :else target-type))
+                         target-type))
       :old (check-expression env (:expr expr))
       "Any")
     :else "Any"))
@@ -386,14 +393,18 @@
 (defn check-let
   "Check a let statement"
   [env {:keys [name var-type value] :as stmt}]
+  (when-not var-type
+    (throw (ex-info (str "Type annotation required for variable '" name "'")
+                    {:error (type-error
+                             (str "Type annotation required for variable '" name
+                                  "'. Use: let " name ": <Type> := ..."))})))
   (let [val-type (check-expression env value)]
-    (when var-type
-      (when-not (types-equal? var-type val-type)
-        (throw (ex-info (str "Type mismatch in let binding for " name)
-                        {:error (type-error
-                                 (str "Cannot bind " val-type " to variable of type "
-                                      var-type))}))))
-    (env-add-var env name (or var-type val-type))))
+    (when-not (types-equal? var-type val-type)
+      (throw (ex-info (str "Type mismatch in let binding for " name)
+                      {:error (type-error
+                               (str "Cannot bind " val-type " to variable of type "
+                                    var-type))})))
+    (env-add-var env name var-type)))
 
 (defn check-if
   "Check an if statement"
@@ -437,9 +448,36 @@
 ;; Method/Constructor Type Checking
 ;;
 
+(defn references-result?
+  "Check if an AST node or any of its descendants references 'result' or 'Result'."
+  [node]
+  (cond
+    (nil? node) false
+    (string? node) (or (= node "result") (= node "Result"))
+    (sequential? node) (some references-result? node)
+    (map? node)
+    (case (:type node)
+      :assign (or (= (:target node) "result") (= (:target node) "Result")
+                  (references-result? (:value node)))
+      :let (or (= (:name node) "result") (= (:name node) "Result")
+               (references-result? (:value node)))
+      :identifier (or (= (:name node) "result") (= (:name node) "Result"))
+      ;; Walk all map values for other node types
+      (some references-result? (vals node)))
+    :else false))
+
 (defn check-method
   "Check a method definition"
   [env class-name {:keys [name params return-type require body ensure] :as method}]
+  ;; Check that methods using Result declare a return type
+  (when (and (not return-type)
+             (or (some references-result? body)
+                 (some #(references-result? (:condition %)) ensure)))
+    (throw (ex-info (str "Return type required for method '" name "' because it uses Result")
+                    {:error (type-error
+                             (str "Method '" name "' uses Result but does not declare a return type. "
+                                  "Use: " name "(...): <ReturnType>"))})))
+
   (let [method-env (make-type-env env)]
     ;; Add parameters to method environment
     (doseq [param params]
@@ -447,6 +485,7 @@
 
     ;; Add Result variable for return type
     (when return-type
+      (env-add-var method-env "Result" return-type)
       (env-add-var method-env "result" return-type))
 
     ;; Check preconditions

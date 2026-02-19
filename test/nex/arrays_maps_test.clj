@@ -37,7 +37,7 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let arr := [1, 2, 3]
+      let arr: Array [Integer] := [1, 2, 3]
       print(arr)
     end
 end"
@@ -54,7 +54,7 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let arr := [1, 2, 3]
+      let arr: Array [Integer] := [1, 2, 3]
     end
 end"
           java-code (java/translate code)]
@@ -65,8 +65,8 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let arr := [1, 2, 3]
-      let x := arr[0]
+      let arr: Array [Integer] := [1, 2, 3]
+      let x: Integer := arr[0]
       print(x)
     end
 end"
@@ -86,7 +86,7 @@ end"
     items: Array [Integer]
 
     demo() do
-      let x := items[0]
+      let x: Integer := items[0]
     end
 end"
           java-code (java/translate code)]
@@ -111,7 +111,7 @@ end"
   feature
     demo() do
       let matrix: Array [Array [Integer]] := create Array
-      let x := matrix[0][1]
+      let x: Integer := matrix[0][1]
     end
 end"
           ast (p/ast code)]
@@ -149,7 +149,7 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let m := {\"a\": 1, \"b\": 2}
+      let m: Map [String, Integer] := {\"a\": 1, \"b\": 2}
       print(m)
     end
 end"
@@ -166,8 +166,8 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let m := {\"a\": 1, \"b\": 2}
-      let x := m[\"a\"]
+      let m: Map [String, Integer] := {\"a\": 1, \"b\": 2}
+      let x: Integer := m[\"a\"]
       print(x)
     end
 end"
@@ -186,7 +186,7 @@ end"
     data: Map [String, Integer]
 
     demo() do
-      let x := data[\"key\"]
+      let x: Integer := data[\"key\"]
     end
 end"
           java-code (java/translate code)]
@@ -217,8 +217,8 @@ end"
     lookup: Map [String, Integer]
 
     demo() do
-      let x := items[0]
-      let y := lookup[\"key\"]
+      let x: String := items[0]
+      let y: Integer := lookup[\"key\"]
     end
 end"
           java-code (java/translate code)]
@@ -232,7 +232,7 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let arr := []
+      let arr: Array [Integer] := []
     end
 end"
           ast (p/ast code)
@@ -248,7 +248,7 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let m := {}
+      let m: Map [String, Integer] := {}
     end
 end"
           ast (p/ast code)
@@ -282,7 +282,7 @@ end"
     (let [code "class Test
   feature
     process(items: Array [Integer]) do
-      let x := items[0]
+      let x: Integer := items[0]
     end
 end"
           java-code (java/translate code)]
@@ -294,7 +294,7 @@ end"
     (let [code "class Test
   feature
     process(data: Map [String, Integer]) do
-      let x := data[\"key\"]
+      let x: Integer := data[\"key\"]
     end
 end"
           java-code (java/translate code)]
@@ -306,7 +306,7 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let names := [\"Alice\", \"Bob\", \"Charlie\"]
+      let names: Array [String] := [\"Alice\", \"Bob\", \"Charlie\"]
     end
 end"
           java-code (java/translate code)]
@@ -317,7 +317,7 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let m := {name: \"Alice\", age: 30}
+      let m: Map [String, Any] := {name: \"Alice\", age: 30}
     end
 end"
           ast (p/ast code)
@@ -333,9 +333,9 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let arr := [1, 2, 3]
-      let i := 1
-      let x := arr[i]
+      let arr: Array [Integer] := [1, 2, 3]
+      let i: Integer := 1
+      let x: Integer := arr[i]
     end
 end"
           java-code (java/translate code)]
@@ -346,9 +346,9 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let m := {\"a\": 1, \"b\": 2}
-      let key := \"a\"
-      let x := m[key]
+      let m: Map [String, Integer] := {\"a\": 1, \"b\": 2}
+      let key: String := \"a\"
+      let x: Integer := m[key]
     end
 end"
           java-code (java/translate code)]

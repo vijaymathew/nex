@@ -121,7 +121,7 @@ end"
   feature
     item: G
     put(new_item: G) do
-      let item := new_item
+      let item: G := new_item
     end
 end"
           java-code (java/translate code)]
@@ -133,7 +133,7 @@ end"
     (let [code "class Box [T]
   create
     make(initial: T) do
-      let value := initial
+      let value: T := initial
     end
   feature
     value: T
@@ -181,7 +181,7 @@ end"
     (let [code "class Box [T]
   create
     make(val: T) do
-      let value := val
+      let value: T := val
     end
   feature
     value: T
@@ -204,7 +204,7 @@ end"
     top: G
 
     push(item: G) do
-      let top := item
+      let top: G := item
     end
 
     pop() do
@@ -226,7 +226,7 @@ end"
       require
         not_null: new_item /= 0
       do
-        let item := new_item
+        let item: G := new_item
       ensure
         stored: item = new_item
       end
@@ -258,7 +258,7 @@ end"
     (let [code "class Box [T]
   create
     make(val: T) do
-      let value := val
+      let value: T := val
     end
   feature
     value: T
@@ -267,7 +267,7 @@ end
 class Main
   feature
     demo() do
-      let b := create Box[Integer].make(42)
+      let b: Box[Integer] := create Box[Integer].make(42)
     end
 end"
           ast (p/ast code)
@@ -286,20 +286,20 @@ end"
     (let [code "class Box [T]
   create
     make(val: T) do
-      let value := val
+      let value: T := val
     end
   feature
     value: T
 
     get_value(): T do
-      let result := value
+      let result: T := value
     end
 end
 
 class Main
   feature
     demo() do
-      let b := create Box[Integer].make(42)
+      let b: Box[Integer] := create Box[Integer].make(42)
       println(b.get_value())
     end
 end"
@@ -318,7 +318,7 @@ end"
     (let [code "class Box [T]
   create
     make(val: T) do
-      let value := val
+      let value: T := val
     end
   feature
     value: T
@@ -327,7 +327,7 @@ end
 class Main
   feature
     demo() do
-      let b := create Box[Integer].make(42)
+      let b: Box[Integer] := create Box[Integer].make(42)
     end
 end"
           java-code (java/translate code)]
@@ -343,7 +343,7 @@ end
 class Main
   feature
     demo() do
-      let h := create Holder[String]
+      let h: Holder[String] := create Holder[String]
     end
 end"
           ast (p/ast code)
@@ -361,8 +361,8 @@ end"
     (let [code "class Pair [A, B]
   create
     make(first: A, second: B) do
-      let left := first
-      let right := second
+      let left: A := first
+      let right: B := second
     end
   feature
     left: A
@@ -372,7 +372,7 @@ end
 class Main
   feature
     demo() do
-      let p := create Pair[Integer, String].make(1, \"hello\")
+      let p: Pair[Integer, String] := create Pair[Integer, String].make(1, \"hello\")
     end
 end"
           java-code (java/translate code)]
