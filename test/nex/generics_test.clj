@@ -3,6 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [nex.parser :as p]
+            [nex.interpreter :as interp]
             [nex.generator.java :as java]))
 
 (deftest simple-generic-class-parsing-test
@@ -120,7 +121,7 @@ end"
   feature
     item: G
     put(new_item: G) do
-      let item := new_item
+      let item: G := new_item
     end
 end"
           java-code (java/translate code)]
@@ -132,7 +133,7 @@ end"
     (let [code "class Box [T]
   create
     make(initial: T) do
-      let value := initial
+      let value: T := initial
     end
   feature
     value: T
@@ -180,7 +181,7 @@ end"
     (let [code "class Box [T]
   create
     make(val: T) do
-      let value := val
+      let value: T := val
     end
   feature
     value: T
@@ -203,7 +204,7 @@ end"
     top: G
 
     push(item: G) do
-      let top := item
+      let top: G := item
     end
 
     pop() do
@@ -225,7 +226,7 @@ end"
       require
         not_null: new_item /= 0
       do
-        let item := new_item
+        let item: G := new_item
       ensure
         stored: item = new_item
       end
@@ -247,3 +248,132 @@ end"
           java-code (java/translate code)]
       (is (str/includes? java-code "public class Container<T>"))
       (is (str/includes? java-code "T temp = input;")))))
+
+;;
+;; Generic class instantiation (create with type args) tests
+;;
+
+(deftest create-with-generic-args-walker-test
+  (testing "Walker parses create Box[Integer].make(42) with generic-args"
+    (let [code "class Box [T]
+  create
+    make(val: T) do
+      let value: T := val
+    end
+  feature
+    value: T
+end
+
+class Main
+  feature
+    demo() do
+      let b: Box[Integer] := create Box[Integer].make(42)
+    end
+end"
+          ast (p/ast code)
+          main-class (second (:classes ast))
+          method (-> main-class :body first :members first)
+          let-stmt (-> method :body first)
+          create-expr (:value let-stmt)]
+      (is (= :create (:type create-expr)))
+      (is (= "Box" (:class-name create-expr)))
+      (is (= ["Integer"] (:generic-args create-expr)))
+      (is (= "make" (:constructor create-expr)))
+      (is (= 1 (count (:args create-expr)))))))
+
+(deftest create-with-generic-args-interpreter-test
+  (testing "Interpreter specializes generic class on create"
+    (let [code "class Box [T]
+  create
+    make(val: T) do
+      let value: T := val
+    end
+  feature
+    value: T
+
+    get_value(): T do
+      let result: T := value
+    end
+end
+
+class Main
+  feature
+    demo() do
+      let b: Box[Integer] := create Box[Integer].make(42)
+      println(b.get_value())
+    end
+end"
+          ast (p/ast code)
+          ctx (interp/interpret ast)
+          ;; Create Main instance and call demo
+          _ (interp/eval-node ctx {:type :let :name "main_obj"
+                                    :value {:type :create :class-name "Main"
+                                            :generic-args nil :constructor nil :args []}})
+          _ (interp/eval-node ctx {:type :call :target "main_obj" :method "demo" :args []})
+          output @(:output ctx)]
+      (is (= ["42"] output)))))
+
+(deftest create-with-generic-args-java-codegen-test
+  (testing "Java codegen emits type params in create expression"
+    (let [code "class Box [T]
+  create
+    make(val: T) do
+      let value: T := val
+    end
+  feature
+    value: T
+end
+
+class Main
+  feature
+    demo() do
+      let b: Box[Integer] := create Box[Integer].make(42)
+    end
+end"
+          java-code (java/translate code)]
+      (is (str/includes? java-code "new Box<Integer>(42)")))))
+
+(deftest create-generic-without-constructor-test
+  (testing "Create generic class without constructor"
+    (let [code "class Holder [T]
+  feature
+    item: T
+end
+
+class Main
+  feature
+    demo() do
+      let h: Holder[String] := create Holder[String]
+    end
+end"
+          ast (p/ast code)
+          main-class (second (:classes ast))
+          method (-> main-class :body first :members first)
+          let-stmt (-> method :body first)
+          create-expr (:value let-stmt)]
+      (is (= :create (:type create-expr)))
+      (is (= "Holder" (:class-name create-expr)))
+      (is (= ["String"] (:generic-args create-expr)))
+      (is (nil? (:constructor create-expr))))))
+
+(deftest create-generic-multiple-type-args-test
+  (testing "Create with multiple type arguments"
+    (let [code "class Pair [A, B]
+  create
+    make(first: A, second: B) do
+      let left: A := first
+      let right: B := second
+    end
+  feature
+    left: A
+    right: B
+end
+
+class Main
+  feature
+    demo() do
+      let p: Pair[Integer, String] := create Pair[Integer, String].make(1, \"hello\")
+    end
+end"
+          java-code (java/translate code)]
+      (is (str/includes? java-code "new Pair<Integer, String>(1, \"hello\")")))))

@@ -267,9 +267,11 @@
 
 (defn generate-create-expr
   "Generate Java code for create expression"
-  [{:keys [class-name constructor args]}]
-  (let [args-code (str/join ", " (map generate-expression args))]
-    (str "new " class-name "(" args-code ")")))
+  [{:keys [class-name generic-args constructor args]}]
+  (let [args-code (str/join ", " (map generate-expression args))
+        type-params (when (seq generic-args)
+                      (str "<" (str/join ", " (map nex-type-to-java-boxed generic-args)) ">"))]
+    (str "new " class-name (or type-params "") "(" args-code ")")))
 
 (defn generate-subscript-expr
   "Generate Java code for subscript access (array/map access)"

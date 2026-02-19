@@ -87,7 +87,7 @@ end"
   (testing "Generate Java code with typed let"
     (let [code "class Calculator
   feature
-    add(a, b: Integer) do
+    add(a, b: Integer): Integer do
       let result: Integer := a + b
       print(result)
     end
@@ -106,7 +106,7 @@ end"
       print(result)
     end
 end"
-          java-code (java/translate code)]
+          java-code (java/translate code {:skip-type-check true})]
       (is (str/includes? java-code "result = (a + b);"))
       (is (not (str/includes? java-code "int result"))))))
 

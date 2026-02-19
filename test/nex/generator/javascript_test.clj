@@ -20,7 +20,7 @@ end"
     (let [nex-code "class Point
   create
     make(x, y: Integer) do
-      let x := x
+      let x: Integer := x
     end
   feature
     x: Integer
@@ -91,7 +91,7 @@ end"
   feature
     count(n: Integer) do
       from
-        let i := 1
+        let i: Integer := 1
       until
         i > n
       do
@@ -110,9 +110,9 @@ end"
     (let [nex-code "class Test
   feature
     demo() do
-      let x := 10
+      let x: Integer := 10
       do
-        let x := 20
+        let x: Integer := 20
       end
     end
 end"
@@ -136,14 +136,14 @@ end"
     (let [nex-code "class Test
   feature
     test() do
-      let a := 1 + 2
-      let b := 3 - 4
-      let c := 5 * 6
-      let d := 7 / 8
-      let e := 9 > 10
-      let f := 11 < 12
-      let g := true and false
-      let h := true or false
+      let a: Integer := 1 + 2
+      let b: Integer := 3 - 4
+      let c: Integer := 5 * 6
+      let d: Integer := 7 / 8
+      let e: Boolean := 9 > 10
+      let f: Boolean := 11 < 12
+      let g: Boolean := true and false
+      let h: Boolean := true or false
     end
 end"
           js-code (js/translate nex-code)]
@@ -161,8 +161,8 @@ end"
     (let [nex-code "class Test
   feature
     test(a, b: Integer) do
-      let x := a = b
-      let y := a /= b
+      let x: Boolean := a = b
+      let y: Boolean := a /= b
     end
 end"
           js-code (js/translate nex-code)]
@@ -179,7 +179,7 @@ end"
       require
         positive: amount > 0
       do
-        let balance := balance + amount
+        let balance: Integer := balance + amount
       ensure
         increased: balance >= 0
       end
@@ -254,7 +254,7 @@ end"
     (let [nex-code "class Demo
   feature
     demo() do
-      let nums := [1, 2, 3]
+      let nums: Array[Integer] := [1, 2, 3]
     end
 end"
           js-code (js/translate nex-code)]
@@ -265,7 +265,7 @@ end"
     (let [nex-code "class Demo
   feature
     demo() do
-      let m := {\"a\": 1, \"b\": 2}
+      let m: Map[String, Integer] := {\"a\": 1, \"b\": 2}
     end
 end"
           js-code (js/translate nex-code)]
@@ -280,7 +280,7 @@ end"
     items: Array [Integer]
 
     demo() do
-      let x := items[0]
+      let x: Integer := items[0]
     end
 end"
           js-code (js/translate nex-code)]
@@ -298,7 +298,7 @@ end"
 
   feature
     demo() do
-      let p := create Point.make(10, 20)
+      let p: Point := create Point.make(10, 20)
     end
 end"
           js-code (js/translate nex-code)]

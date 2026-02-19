@@ -80,8 +80,8 @@
                   feature
                     bad_compare()
                     do
-                      let x := 5
-                      let y := \"hello\"
+                      let x: Integer := 5
+                      let y: String := \"hello\"
                       print(x < y)
                     end
                   end"
@@ -109,8 +109,8 @@
                   feature
                     bad_bool()
                     do
-                      let x := 5
-                      let y := 10
+                      let x: Integer := 5
+                      let y: Integer := 10
                       print(x and y)
                     end
                   end"
@@ -227,7 +227,7 @@
 
                     deposit(amount: Integer)
                     do
-                      let balance := balance + amount
+                      let balance: Integer := balance + amount
                     end
                   end
 
@@ -244,10 +244,146 @@
 
                   deposit(amount: Integer)
                   do
-                    let balance := balance + amount
+                    let balance: Integer := balance + amount
                   end
                 end"
           ast (p/ast code)
           result (tc/type-check ast)]
       (is (:success result))
       (is (empty? (:errors result))))))
+
+;; Mandatory type annotation tests
+
+(deftest test-let-without-type-annotation-fails
+  (testing "Let without type annotation should fail in typechecking mode"
+    (let [code "class Test
+                  feature
+                    test()
+                    do
+                      let a := 1
+                      print(a)
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (seq (:errors result)))
+      (is (some #(re-find #"Type annotation required" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-let-with-type-annotation-succeeds
+  (testing "Let with type annotation should pass in typechecking mode"
+    (let [code "class Test
+                  feature
+                    test()
+                    do
+                      let a: Integer := 1
+                      print(a)
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result)))))
+
+(deftest test-let-without-type-create-expression-fails
+  (testing "Let without type annotation on create expression should fail"
+    (let [code "class Box
+                  feature
+                    value: Integer
+                  end
+
+                class Test
+                  feature
+                    test()
+                    do
+                      let b := create Box
+                      print(b)
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"Type annotation required" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-let-with-type-create-expression-succeeds
+  (testing "Let with type annotation on create expression should pass"
+    (let [code "class Box
+                  feature
+                    value: Integer
+                  end
+
+                class Test
+                  feature
+                    test()
+                    do
+                      let b: Box := create Box
+                      print(b)
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result)))))
+
+;; Mandatory return type tests
+
+(deftest test-method-using-result-without-return-type-fails
+  (testing "Method using Result without return type should fail"
+    (let [code "class Test
+                  feature
+                    compute(x: Integer)
+                    do
+                      Result := x + 1
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (seq (:errors result)))
+      (is (some #(re-find #"does not declare a return type" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-method-using-result-with-return-type-succeeds
+  (testing "Method using Result with return type should pass"
+    (let [code "class Test
+                  feature
+                    compute(x: Integer): Integer
+                    do
+                      Result := x + 1
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result)))))
+
+(deftest test-method-without-result-no-return-type-succeeds
+  (testing "Method not using Result without return type should pass"
+    (let [code "class Test
+                  private feature
+                    x: Integer
+                  feature
+                    set_x(val: Integer)
+                    do
+                      x := val
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result)))))
+
+(deftest test-method-result-in-postcondition-requires-return-type
+  (testing "Method referencing Result in postcondition must declare return type"
+    (let [code "class Test
+                  feature
+                    compute(x: Integer)
+                    do
+                      Result := x * 2
+                    ensure
+                      positive: Result > 0
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"does not declare a return type" %)
+                (map tc/format-type-error (:errors result)))))))

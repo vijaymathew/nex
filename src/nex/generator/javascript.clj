@@ -245,7 +245,8 @@
 
 (defn generate-create-expr
   "Generate JavaScript code for create expression"
-  [{:keys [class-name constructor args]}]
+  [{:keys [class-name generic-args constructor args]}]
+  ;; JS has no generics syntax, generic-args is accepted but not emitted
   (let [args-code (str/join ", " (map generate-expression args))]
     (str "new " class-name "(" args-code ")")))
 

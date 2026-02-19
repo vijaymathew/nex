@@ -335,6 +335,17 @@
        {:name (token-text param-name)
         :constraint constraint}))
 
+   :genericArgs
+   (fn [[_ _open-bracket & args]]
+     (let [arg-nodes (filter #(and (sequential? %) (= :genericArg (first %))) args)]
+       (mapv transform-node arg-nodes)))
+
+   :genericArg
+   (fn [[_ arg]]
+     (if (sequential? arg)
+       (transform-node arg)     ;; parameterized type like List[Integer]
+       (token-text arg)))       ;; simple identifier like Integer
+
    :type
    (fn [[_ type-name & rest]]
      ;; Check if there are type arguments
@@ -619,9 +630,13 @@
 
    :createExpression
    (fn [[_ _create-kw class-name & rest]]
-     ;; Structure: "create" ClassName ("." ConstructorName "(" argumentList? ")")?
-     (let [;; Remove punctuation tokens
-           cleaned (remove #(#{"." "(" ")"} %) rest)
+     ;; Structure: "create" ClassName genericArgs? ("." ConstructorName "(" argumentList? ")")?
+     (let [;; Extract generic args node if present
+           generic-args-node (first (filter #(and (sequential? %) (= :genericArgs (first %))) rest))
+           generic-args (when generic-args-node (transform-node generic-args-node))
+           ;; Remove punctuation and genericArgs node
+           cleaned (remove #(or (#{"." "(" ")"} %)
+                               (and (sequential? %) (= :genericArgs (first %)))) rest)
            ;; Check if there's a constructor call
            has-constructor? (seq cleaned)
            constructor-name (when has-constructor? (first cleaned))
@@ -631,6 +646,7 @@
                                    rest))]
        {:type :create
         :class-name (token-text class-name)
+        :generic-args generic-args
         :constructor (when has-constructor? constructor-name)
         :args (if args-node
                (transform-node args-node)

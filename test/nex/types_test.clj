@@ -150,7 +150,7 @@ end"
 
     deposit(amount: Decimal) do
       balance := balance + amount
-      let transactions := transactions + 1
+      let transactions: Integer64 := transactions + 1
     end
 end"
           java-code (java/translate code)]

@@ -3,6 +3,58 @@
             #?(:clj [nex.parser :as parser])))
 
 ;;
+;; Mutable Collections (platform abstraction)
+;;
+
+;; Array helpers
+(defn nex-array [] #?(:clj (java.util.ArrayList.) :cljs #js []))
+(defn nex-array-from [coll] #?(:clj (java.util.ArrayList. (vec coll)) :cljs (js/Array.from (to-array coll))))
+(defn nex-array? [v] #?(:clj (instance? java.util.ArrayList v) :cljs (array? v)))
+(defn nex-array-get [arr idx] #?(:clj (.get arr idx) :cljs (aget arr idx)))
+(defn nex-array-add [arr val] #?(:clj (.add arr val) :cljs (.push arr val)))
+(defn nex-array-add-at [arr idx val] #?(:clj (.add arr idx val) :cljs (.splice arr idx 0 val)))
+(defn nex-array-set [arr idx val] #?(:clj (.set arr idx val) :cljs (aset arr idx val)))
+(defn nex-array-size [arr] #?(:clj (.size arr) :cljs (.-length arr)))
+(defn nex-array-empty? [arr] #?(:clj (.isEmpty arr) :cljs (zero? (.-length arr))))
+(defn nex-array-contains [arr elem] #?(:clj (.contains arr elem) :cljs (.includes arr elem)))
+(defn nex-array-index-of [arr elem] #?(:clj (.indexOf arr elem) :cljs (.indexOf arr elem)))
+(defn nex-array-remove [arr idx] #?(:clj (.remove arr (int idx)) :cljs (.splice arr idx 1)))
+(defn nex-array-reverse [arr] #?(:clj (java.util.ArrayList. (.reversed arr)) :cljs (js/Array.from (.reverse (.slice arr)))))
+(defn nex-array-sort [arr] #?(:clj (.sort arr nil) :cljs (.sort arr)))
+(defn nex-array-slice [arr start end] #?(:clj (.subList arr start end) :cljs (.slice arr start end)))
+
+;; Map helpers
+(defn nex-map [] #?(:clj (java.util.HashMap.) :cljs (js/Map.)))
+(defn nex-map-from [pairs]
+  #?(:clj (java.util.HashMap. (into {} pairs))
+     :cljs (js/Map. (to-array (map to-array pairs)))))
+(defn nex-map? [v] #?(:clj (instance? java.util.HashMap v) :cljs (instance? js/Map v)))
+(defn nex-map-get [m key] #?(:clj (.get m key) :cljs (.get m key)))
+(defn nex-map-put [m key val] #?(:clj (.put m key val) :cljs (.set m key val)))
+(defn nex-map-size [m] #?(:clj (.size m) :cljs (.-size m)))
+(defn nex-map-empty? [m] #?(:clj (.isEmpty m) :cljs (zero? (.-size m))))
+(defn nex-map-contains-key [m key] #?(:clj (.containsKey m key) :cljs (.has m key)))
+(defn nex-map-keys [m] #?(:clj (vec (.keySet m)) :cljs (vec (es6-iterator-seq (.keys m)))))
+(defn nex-map-values [m] #?(:clj (vec (.values m)) :cljs (vec (es6-iterator-seq (.values m)))))
+(defn nex-map-remove [m key] #?(:clj (.remove m key) :cljs (.delete m key)))
+
+;; Math helpers
+(defn nex-abs [n] #?(:clj (Math/abs (double n)) :cljs (js/Math.abs n)))
+(defn nex-round [n] #?(:clj (Math/round (double n)) :cljs (js/Math.round n)))
+
+;; Subscript helper (works on both Array and Map)
+(defn nex-coll-get [coll idx]
+  (cond
+    (nex-array? coll) (nex-array-get coll idx)
+    (nex-map? coll) (nex-map-get coll idx)
+    :else #?(:clj (.get coll idx) :cljs (aget coll idx))))
+
+;; Char detection helper
+(defn nex-char? [v]
+  #?(:clj (char? v)
+     :cljs (and (string? v) (== (.-length v) 1))))
+
+;;
 ;; Runtime Environment
 ;;
 
@@ -46,7 +98,7 @@
 ;; Runtime Context (holds classes, globals, current environment)
 ;;
 
-(defrecord Context [classes globals current-env output imports])
+(defrecord Context [classes globals current-env output imports specialized-classes])
 
 (defn make-context
   "Create a new runtime context."
@@ -57,7 +109,8 @@
      globals             ; global environment
      globals             ; current environment starts as global
      (atom [])           ; output accumulator
-     (atom []))))        ; imports registry
+     (atom [])           ; imports registry
+     (atom {}))))        ; specialized classes cache
 
 (defn register-class
   "Register a class definition in the context."
@@ -68,8 +121,98 @@
   "Look up a class definition by name."
   [ctx class-name]
   (or (get @(:classes ctx) class-name)
+      (get @(:specialized-classes ctx) class-name)
       (throw (ex-info (str "Undefined class: " class-name)
                       {:class-name class-name}))))
+
+(defn register-specialized-class
+  "Register a specialized (type-realized) class in the context."
+  [ctx class-def]
+  (swap! (:specialized-classes ctx) assoc (:name class-def) class-def))
+
+(defn lookup-specialized-class
+  "Look up a specialized class definition by name."
+  [ctx class-name]
+  (get @(:specialized-classes ctx) class-name))
+
+;;
+;; Generic Class Specialization
+;;
+
+(defn specialized-class-name
+  "Build a specialized class name like Box[Integer]."
+  [base-name type-args]
+  (str base-name "[" (clojure.string/join "," type-args) "]"))
+
+(defn substitute-type
+  "Replace type parameter strings with concrete types using type-map."
+  [type-expr type-map]
+  (cond
+    (string? type-expr)
+    (get type-map type-expr type-expr)
+
+    (map? type-expr)
+    (-> type-expr
+        (update :base-type #(get type-map % %))
+        (update :type-args (fn [args]
+                             (when args
+                               (mapv #(substitute-type % type-map) args)))))
+
+    :else type-expr))
+
+(defn substitute-in-body
+  "Walk class body sections, substituting types using type-map."
+  [body type-map]
+  (mapv (fn [section]
+          (cond
+            (= (:type section) :feature-section)
+            (update section :members
+                    (fn [members]
+                      (mapv (fn [member]
+                              (case (:type member)
+                                :field
+                                (update member :field-type #(substitute-type % type-map))
+
+                                :method
+                                (-> member
+                                    (update :params
+                                            (fn [params]
+                                              (when params
+                                                (mapv #(update % :type (fn [t] (substitute-type t type-map)))
+                                                      params))))
+                                    (update :return-type
+                                            (fn [rt] (when rt (substitute-type rt type-map)))))
+
+                                member))
+                            members)))
+
+            (= (:type section) :constructors)
+            (update section :constructors
+                    (fn [ctors]
+                      (mapv (fn [ctor]
+                              (update ctor :params
+                                      (fn [params]
+                                        (when params
+                                          (mapv #(update % :type (fn [t] (substitute-type t type-map)))
+                                                params)))))
+                            ctors)))
+
+            :else section))
+        body))
+
+(defn specialize-class
+  "Create a specialized version of a generic class with concrete type args."
+  [generic-class-def type-args]
+  (let [generic-params (:generic-params generic-class-def)
+        type-map (into {} (map (fn [param arg]
+                                 [(:name param) arg])
+                               generic-params type-args))
+        spec-name (specialized-class-name (:name generic-class-def) type-args)]
+    (-> generic-class-def
+        (assoc :name spec-name)
+        (assoc :template-name (:name generic-class-def))
+        (assoc :generic-params nil)
+        (update :body #(substitute-in-body % type-map)))))
 
 (defn add-output
   "Add output to the context (for print statements)."
@@ -247,8 +390,8 @@
     ;; Handle parameterized types
     (map? field-type)
     (case (:base-type field-type)
-      "Array" (java.util.ArrayList.)
-      "Map" (java.util.HashMap.)
+      "Array" (nex-array)
+      "Map" (nex-map)
       nil)
 
     ;; Handle simple types
@@ -297,7 +440,7 @@
 
    :Integer
    {"to_string"         (fn [n & _] (str n))
-    "abs"               (fn [n & _] (Math/abs (int n)))
+    "abs"               (fn [n & _] (nex-abs n))
     "min"               (fn [n other & _] (min n other))
     "max"               (fn [n other & _] (max n other))
     ;; Arithmetic operator methods
@@ -315,7 +458,7 @@
 
    :Integer64
    {"to_string"         (fn [n & _] (str n))
-    "abs"               (fn [n & _] (Math/abs (long n)))
+    "abs"               (fn [n & _] (nex-abs n))
     "min"               (fn [n other & _] (min n other))
     "max"               (fn [n other & _] (max n other))
     ;; Arithmetic operator methods
@@ -333,10 +476,10 @@
 
    :Real
    {"to_string"         (fn [n & _] (str n))
-    "abs"               (fn [n & _] (Math/abs (double n)))
+    "abs"               (fn [n & _] (nex-abs n))
     "min"               (fn [n other & _] (min n other))
     "max"               (fn [n other & _] (max n other))
-    "round"             (fn [n & _] (Math/round (double n)))
+    "round"             (fn [n & _] (nex-round n))
     ;; Arithmetic operator methods
     "plus"              (fn [n other & _] (+ n other))
     "minus"             (fn [n other & _] (- n other))
@@ -352,10 +495,10 @@
 
    :Decimal
    {"to_string"         (fn [n & _] (str n))
-    "abs"               (fn [n & _] (Math/abs (double n)))
+    "abs"               (fn [n & _] (nex-abs n))
     "min"               (fn [n other & _] (min n other))
     "max"               (fn [n other & _] (max n other))
-    "round"             (fn [n & _] (Math/round (double n)))
+    "round"             (fn [n & _] (nex-round n))
     ;; Arithmetic operator methods
     "plus"              (fn [n other & _] (+ n other))
     "minus"             (fn [n other & _] (- n other))
@@ -384,39 +527,39 @@
     "not_equals"  (fn [b other & _] (not= b other))}
 
    :Array
-   {"get"         (fn [arr index & _] (.get arr index))
-    "add"         (fn [arr value & _] (.add arr value))
-    "at"          (fn [arr index value & _] (.add arr index value))
-    "set"         (fn [arr index value & _] (.set arr index value))
-    "length"      (fn [arr & _] (.size arr))
-    "is_empty"    (fn [arr & _] (.isEmpty arr))
-    "contains"    (fn [arr elem & _] (.contains arr elem))
+   {"get"         (fn [arr index & _] (nex-array-get arr index))
+    "add"         (fn [arr value & _] (nex-array-add arr value))
+    "at"          (fn [arr index value & _] (nex-array-add-at arr index value))
+    "set"         (fn [arr index value & _] (nex-array-set arr index value))
+    "length"      (fn [arr & _] (nex-array-size arr))
+    "is_empty"    (fn [arr & _] (nex-array-empty? arr))
+    "contains"    (fn [arr elem & _] (nex-array-contains arr elem))
     "index_of"    (fn [arr elem & _]
-                    (let [idx (.indexOf arr elem)]
+                    (let [idx (nex-array-index-of arr elem)]
                       (if (>= idx 0) idx -1)))
-    "remove"      (fn [arr ^Integer idx & _] (.remove arr idx))
-    "reverse"     (fn [arr _] (java.util.ArrayList. (.reversed(arr))))
-    "sort"        (fn [arr & _] (.sort arr nil))
-    "slice"       (fn [arr start end & _] (.subList arr start end))}
+    "remove"      (fn [arr idx & _] (nex-array-remove arr idx))
+    "reverse"     (fn [arr _] (nex-array-reverse arr))
+    "sort"        (fn [arr & _] (nex-array-sort arr))
+    "slice"       (fn [arr start end & _] (nex-array-slice arr start end))}
 
    :Map
    {"get"         (fn [m key & _]
-                    (let [v (.get m key)]
+                    (let [v (nex-map-get m key)]
                       (if (nil? v)
                         (report-contract-violation Precondition "key_must_exist" "has_key")
                         v)))
     "try_get"      (fn [m key default & _]
-                    (let [v (.get m key)]
+                    (let [v (nex-map-get m key)]
                       (if (nil? v)
                         default
                         v)))
-    "at"           (fn [m key val & _] (.put m key val))
-    "size"         (fn [m & _] (.size m))
-    "is_empty"     (fn [m & _] (.isEmpty m))
-    "contains_key" (fn [m key & _] (.containsKey m key))
-    "keys"         (fn [m & _] (vec (.keySet m)))
-    "values"       (fn [m & _] (vec (.values m)))
-    "remove"       (fn [m key & _] (.remove m key))}})
+    "at"           (fn [m key val & _] (nex-map-put m key val))
+    "size"         (fn [m & _] (nex-map-size m))
+    "is_empty"     (fn [m & _] (nex-map-empty? m))
+    "contains_key" (fn [m key & _] (nex-map-contains-key m key))
+    "keys"         (fn [m & _] (nex-map-keys m))
+    "values"       (fn [m & _] (nex-map-values m))
+    "remove"       (fn [m key & _] (nex-map-remove m key))}})
 
 (defn get-type-name
   "Get the type name for a value"
@@ -426,10 +569,10 @@
     (integer? value) :Integer
     (float? value) :Real
     (double? value) :Decimal
-    (char? value) :Char
+    (nex-char? value) :Char
     (boolean? value) :Boolean
-    (instance? java.util.ArrayList value) :Array
-    (instance? java.util.HashMap value) :Map
+    (nex-array? value) :Array
+    (nex-map? value) :Map
     :else nil))
 
 (defn call-builtin-method
@@ -808,22 +951,22 @@
 
 (defmethod eval-node :array-literal
   [ctx {:keys [elements]}]
-  ;; Evaluate all elements and return as a vector
-  (java.util.ArrayList. (mapv #(eval-node ctx %) elements)))
+  ;; Evaluate all elements and return as a mutable array
+  (nex-array-from (mapv #(eval-node ctx %) elements)))
 
 (defmethod eval-node :map-literal
   [ctx {:keys [entries]}]
-  ;; Evaluate all key-value pairs and return as a hash-map
-  (java.util.HashMap. (into {} (mapv (fn [{:keys [key value]}]
-                                       [(eval-node ctx key) (eval-node ctx value)])
-                                     entries))))
+  ;; Evaluate all key-value pairs and return as a mutable map
+  (nex-map-from (mapv (fn [{:keys [key value]}]
+                        [(eval-node ctx key) (eval-node ctx value)])
+                      entries)))
 
 (defmethod eval-node :subscript
   [ctx {:keys [target index]}]
   ;; Evaluate target (array or map) and index, then access element
   (let [coll (eval-node ctx target)
         idx (eval-node ctx index)]
-    (.get coll idx)))
+    (nex-coll-get coll idx)))
 
 (defmethod eval-node :identifier
   [ctx {:keys [name]}]
@@ -856,9 +999,33 @@
        first))
 
 (defmethod eval-node :create
-  [ctx {:keys [class-name constructor args]}]
-  ;; Get class definition
-  (let [class-def (lookup-class ctx class-name)
+  [ctx {:keys [class-name generic-args constructor args]}]
+  ;; Resolve effective class name (handle generic specialization)
+  (let [effective-class-name
+        (if (seq generic-args)
+          (let [spec-name (specialized-class-name class-name generic-args)]
+            (if (lookup-specialized-class ctx spec-name)
+              spec-name
+              ;; Need to create the specialization
+              (let [template (get @(:classes ctx) class-name)]
+                (when-not template
+                  (throw (ex-info (str "Undefined template class: " class-name)
+                                  {:class-name class-name})))
+                (when-not (:generic-params template)
+                  (throw (ex-info (str "Class " class-name " is not generic")
+                                  {:class-name class-name})))
+                (when (not= (count (:generic-params template)) (count generic-args))
+                  (throw (ex-info (str "Type argument count mismatch for " class-name
+                                       ": expected " (count (:generic-params template))
+                                       ", got " (count generic-args))
+                                  {:class-name class-name
+                                   :expected (count (:generic-params template))
+                                   :got (count generic-args)})))
+                (let [specialized (specialize-class template generic-args)]
+                  (register-specialized-class ctx specialized)
+                  spec-name))))
+          class-name)
+        class-def (lookup-class ctx effective-class-name)
         ;; Get all fields (including inherited)
         all-fields (get-all-fields ctx class-def)
         ;; Initialize fields with default values
@@ -909,7 +1076,7 @@
                          ;; No constructor: use default initialization
                          initial-field-map)
         ;; Create the final object
-        obj (make-object class-name final-field-map)]
+        obj (make-object effective-class-name final-field-map)]
 
     ;; Check class invariant with object fields in scope
     (when-let [invariant (:invariant class-def)]

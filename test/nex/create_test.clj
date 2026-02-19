@@ -16,7 +16,7 @@ end
 class Main
   feature
     demo() do
-      let obj := create Test
+      let obj: Test := create Test
       print(obj)
     end
 end"
@@ -35,7 +35,7 @@ end"
     (let [code "class Account
   create
     with_balance(bal: Integer) do
-      let balance := bal
+      let balance: Integer := bal
     end
   feature
     balance: Integer
@@ -44,7 +44,7 @@ end
 class Main
   feature
     demo() do
-      let acc := create Account.with_balance(1000)
+      let acc: Account := create Account.with_balance(1000)
       print(acc)
     end
 end"
@@ -80,7 +80,7 @@ end"
     (let [code "class Account
   create
     with_balance(bal: Integer) do
-      let balance := bal
+      let balance: Integer := bal
     end
   feature
     balance: Integer
@@ -107,7 +107,7 @@ end
 class Main
   feature
     test() do
-      let p := create Point
+      let p: Point := create Point
       print(p)
     end
 end"
@@ -120,7 +120,7 @@ end"
     (let [code "class Counter
   create
     with_value(val: Integer) do
-      let count := val
+      let count: Integer := val
     end
   feature
     count: Integer
@@ -129,7 +129,7 @@ end
 class Main
   feature
     test() do
-      let c := create Counter.with_value(10)
+      let c: Counter := create Counter.with_value(10)
     end
 end"
           ast (p/ast code)]
@@ -141,8 +141,8 @@ end"
     (let [code "class Rectangle
   create
     make(w, h: Integer) do
-      let width := w
-      let height := h
+      let width: Integer := w
+      let height: Integer := h
     end
   feature
     width: Integer
@@ -192,7 +192,7 @@ class Main
       let obj := create Test
     end
 end"
-          java-code (java/translate code)]
+          java-code (java/translate code {:skip-type-check true})]
       ;; Without type annotation, uses simple assignment
       (is (str/includes? java-code "obj = new Test();")))))
 
@@ -204,7 +204,7 @@ end"
       require
         positive: initial >= 0
       do
-        let balance := initial
+        let balance: Integer := initial
       ensure
         set: balance = initial
       end
@@ -230,7 +230,7 @@ end"
       require
         positive: initial >= 0
       do
-        let balance := initial
+        let balance: Integer := initial
       end
   feature
     balance: Integer
@@ -239,7 +239,7 @@ end
 class Main
   feature
     test() do
-      let acc := create Account.with_balance(-100)
+      let acc: Account := create Account.with_balance(-100)
     end
 end"
           ast (p/ast code)]
@@ -287,7 +287,7 @@ end"
     (let [code "class Counter
   create
     with_value(val: Integer) do
-      let count := val
+      let count: Integer := val
     end
   feature
     count: Integer
