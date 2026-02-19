@@ -46,7 +46,7 @@
 ;; Runtime Context (holds classes, globals, current environment)
 ;;
 
-(defrecord Context [classes globals current-env output imports])
+(defrecord Context [classes globals current-env output imports specialized-classes])
 
 (defn make-context
   "Create a new runtime context."
@@ -57,7 +57,8 @@
      globals             ; global environment
      globals             ; current environment starts as global
      (atom [])           ; output accumulator
-     (atom []))))        ; imports registry
+     (atom [])           ; imports registry
+     (atom {}))))        ; specialized classes cache
 
 (defn register-class
   "Register a class definition in the context."
@@ -68,8 +69,98 @@
   "Look up a class definition by name."
   [ctx class-name]
   (or (get @(:classes ctx) class-name)
+      (get @(:specialized-classes ctx) class-name)
       (throw (ex-info (str "Undefined class: " class-name)
                       {:class-name class-name}))))
+
+(defn register-specialized-class
+  "Register a specialized (type-realized) class in the context."
+  [ctx class-def]
+  (swap! (:specialized-classes ctx) assoc (:name class-def) class-def))
+
+(defn lookup-specialized-class
+  "Look up a specialized class definition by name."
+  [ctx class-name]
+  (get @(:specialized-classes ctx) class-name))
+
+;;
+;; Generic Class Specialization
+;;
+
+(defn specialized-class-name
+  "Build a specialized class name like Box[Integer]."
+  [base-name type-args]
+  (str base-name "[" (clojure.string/join "," type-args) "]"))
+
+(defn substitute-type
+  "Replace type parameter strings with concrete types using type-map."
+  [type-expr type-map]
+  (cond
+    (string? type-expr)
+    (get type-map type-expr type-expr)
+
+    (map? type-expr)
+    (-> type-expr
+        (update :base-type #(get type-map % %))
+        (update :type-args (fn [args]
+                             (when args
+                               (mapv #(substitute-type % type-map) args)))))
+
+    :else type-expr))
+
+(defn substitute-in-body
+  "Walk class body sections, substituting types using type-map."
+  [body type-map]
+  (mapv (fn [section]
+          (cond
+            (= (:type section) :feature-section)
+            (update section :members
+                    (fn [members]
+                      (mapv (fn [member]
+                              (case (:type member)
+                                :field
+                                (update member :field-type #(substitute-type % type-map))
+
+                                :method
+                                (-> member
+                                    (update :params
+                                            (fn [params]
+                                              (when params
+                                                (mapv #(update % :type (fn [t] (substitute-type t type-map)))
+                                                      params))))
+                                    (update :return-type
+                                            (fn [rt] (when rt (substitute-type rt type-map)))))
+
+                                member))
+                            members)))
+
+            (= (:type section) :constructors)
+            (update section :constructors
+                    (fn [ctors]
+                      (mapv (fn [ctor]
+                              (update ctor :params
+                                      (fn [params]
+                                        (when params
+                                          (mapv #(update % :type (fn [t] (substitute-type t type-map)))
+                                                params)))))
+                            ctors)))
+
+            :else section))
+        body))
+
+(defn specialize-class
+  "Create a specialized version of a generic class with concrete type args."
+  [generic-class-def type-args]
+  (let [generic-params (:generic-params generic-class-def)
+        type-map (into {} (map (fn [param arg]
+                                 [(:name param) arg])
+                               generic-params type-args))
+        spec-name (specialized-class-name (:name generic-class-def) type-args)]
+    (-> generic-class-def
+        (assoc :name spec-name)
+        (assoc :template-name (:name generic-class-def))
+        (assoc :generic-params nil)
+        (update :body #(substitute-in-body % type-map)))))
 
 (defn add-output
   "Add output to the context (for print statements)."
@@ -856,9 +947,33 @@
        first))
 
 (defmethod eval-node :create
-  [ctx {:keys [class-name constructor args]}]
-  ;; Get class definition
-  (let [class-def (lookup-class ctx class-name)
+  [ctx {:keys [class-name generic-args constructor args]}]
+  ;; Resolve effective class name (handle generic specialization)
+  (let [effective-class-name
+        (if (seq generic-args)
+          (let [spec-name (specialized-class-name class-name generic-args)]
+            (if (lookup-specialized-class ctx spec-name)
+              spec-name
+              ;; Need to create the specialization
+              (let [template (get @(:classes ctx) class-name)]
+                (when-not template
+                  (throw (ex-info (str "Undefined template class: " class-name)
+                                  {:class-name class-name})))
+                (when-not (:generic-params template)
+                  (throw (ex-info (str "Class " class-name " is not generic")
+                                  {:class-name class-name})))
+                (when (not= (count (:generic-params template)) (count generic-args))
+                  (throw (ex-info (str "Type argument count mismatch for " class-name
+                                       ": expected " (count (:generic-params template))
+                                       ", got " (count generic-args))
+                                  {:class-name class-name
+                                   :expected (count (:generic-params template))
+                                   :got (count generic-args)})))
+                (let [specialized (specialize-class template generic-args)]
+                  (register-specialized-class ctx specialized)
+                  spec-name))))
+          class-name)
+        class-def (lookup-class ctx effective-class-name)
         ;; Get all fields (including inherited)
         all-fields (get-all-fields ctx class-def)
         ;; Initialize fields with default values
@@ -909,7 +1024,7 @@
                          ;; No constructor: use default initialization
                          initial-field-map)
         ;; Create the final object
-        obj (make-object class-name final-field-map)]
+        obj (make-object effective-class-name final-field-map)]
 
     ;; Check class invariant with object fields in scope
     (when-let [invariant (:invariant class-def)]

@@ -282,12 +282,22 @@
 
 (defn check-create
   "Check the type of a create expression"
-  [env {:keys [class-name constructor args] :as expr}]
+  [env {:keys [class-name generic-args constructor args] :as expr}]
   ;; Check if class exists
   (when-not (or (env-lookup-class env class-name) (builtin-type? class-name))
     (throw (ex-info (str "Undefined class: " class-name)
                     {:error (type-error (str "Undefined class: " class-name))})))
-  class-name)
+  (if (seq generic-args)
+    ;; Validate generic args against template class
+    (let [class-def (env-lookup-class env class-name)]
+      (when (and class-def (:generic-params class-def))
+        (when (not= (count (:generic-params class-def)) (count generic-args))
+          (throw (ex-info (str "Type argument count mismatch for " class-name)
+                          {:error (type-error
+                                   (str "Expected " (count (:generic-params class-def))
+                                        " type arguments, got " (count generic-args)))}))))
+      {:base-type class-name :type-args generic-args})
+    class-name))
 
 (defn check-array-literal
   "Check the type of an array literal"
