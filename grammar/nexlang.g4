@@ -285,6 +285,7 @@ literal
     | realLiteral
     | charLiteral
     | booleanLiteral
+    | nilLiteral
     | STRING
     | arrayLiteral
     | mapLiteral
@@ -311,6 +312,10 @@ charLiteral
 booleanLiteral
     : TRUE
     | FALSE
+    ;
+
+nilLiteral
+    : NIL
     ;
 
 arrayLiteral
@@ -371,6 +376,7 @@ STRING_TYPE    : 'String';
 
 TRUE         : 'true';
 FALSE        : 'false';
+NIL          : 'nil';
 
 ASSIGN       : ':=';
 ARROW        : '->';

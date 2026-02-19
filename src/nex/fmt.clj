@@ -47,6 +47,7 @@
       :string (str "\"" (:value expr) "\"")
       :char (str "'" (:value expr) "'")
       :boolean (str (:value expr))
+      :nil "nil"
       :identifier (:name expr)
       :old (str "old " (format-expression (:expr expr)))
       :binary (str (format-expression (:left expr))

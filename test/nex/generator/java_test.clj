@@ -51,6 +51,17 @@ end"
       (is (str/includes? java-code "public class Animal"))
       (is (str/includes? java-code "public class Dog extends Animal")))))
 
+(deftest nil-literal-test
+  (testing "Nil literal translation"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      print(nil)
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "System.out.print(null")))))
+
 (deftest multiple-inheritance-test
   (testing "Class with multiple inheritance"
     (let [nex-code "class A
@@ -212,4 +223,3 @@ end"
       (is (not (str/includes? java-without-contracts "Precondition")))
       (is (not (str/includes? java-without-contracts "Postcondition")))
       (is (not (str/includes? java-without-contracts "// Class invariant:"))))))
-

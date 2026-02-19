@@ -1020,6 +1020,10 @@
   [_ctx {:keys [value]}]
   value)
 
+(defmethod eval-node :nil
+  [_ctx _node]
+  nil)
+
 (defmethod eval-node :array-literal
   [ctx {:keys [elements]}]
   ;; Evaluate all elements and return as a mutable array

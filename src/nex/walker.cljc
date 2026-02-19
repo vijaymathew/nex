@@ -646,6 +646,10 @@
      {:type :boolean
       :value (= value "true")})
 
+   :nilLiteral
+   (fn [[_ _value]]
+     {:type :nil})
+
    :charLiteral
    (fn [[_ value]]
      (let [v (subs value 1)]

@@ -60,7 +60,7 @@
 
 (def builtin-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Any" "Void" "Console" "File" "Process"})
+    "Array" "Map" "Any" "Void" "Nil" "Console" "File" "Process"})
 
 (defn builtin-type? [type-name]
   (contains? builtin-types type-name))
@@ -167,6 +167,7 @@
     :string "String"
     :char "Char"
     :boolean "Boolean"
+    :nil "Nil"
     (throw (ex-info "Unknown literal type" {:expr expr}))))
 
 (defn check-identifier
@@ -192,7 +193,9 @@
                                       left-type " and " right-type))})))
 
       ("=" "/=")
-      (if (or (types-equal? left-type right-type)
+      (if (or (= left-type "Nil")
+              (= right-type "Nil")
+              (types-equal? left-type right-type)
               ;; Allow comparisons with generic type parameters
               (is-generic-type-param? left-type)
               (is-generic-type-param? right-type))

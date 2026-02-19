@@ -69,6 +69,17 @@ end"
       (is (str/includes? js-code "Precondition"))
       (is (str/includes? js-code "Postcondition")))))
 
+(deftest nil-literal-test
+  (testing "Nil literal translation"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      print(nil)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "console.log(null)")))))
+
 (deftest if-then-else-test
   (testing "If-then-else statement"
     (let [nex-code "class Test

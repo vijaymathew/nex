@@ -321,6 +321,7 @@
     :string (str "\"" (:value expr) "\"")
     :boolean (str (:value expr))
     :char (str "'" (:value expr) "'")
+    :nil "null"
     :identifier (:name expr)
     :binary (generate-binary-expr expr)
     :unary (generate-unary-expr expr)
