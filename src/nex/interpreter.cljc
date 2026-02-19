@@ -159,6 +159,44 @@
       (throw (ex-info (str "Undefined class: " class-name)
                       {:class-name class-name}))))
 
+(defn lookup-class-if-exists
+  "Look up a class definition by name, or nil if not found."
+  [ctx class-name]
+  (or (get @(:classes ctx) class-name)
+      (get @(:specialized-classes ctx) class-name)))
+
+#?(:clj
+   (defn resolve-imported-java-class
+     "Resolve a Java class name using imports in the context."
+     [ctx class-name]
+     (let [imports @(:imports ctx)
+           match (some (fn [{:keys [qualified-name source]}]
+                         (when (and (nil? source)
+                                    qualified-name
+                                    (= class-name (last (str/split qualified-name #"\."))))
+                           qualified-name))
+                       imports)
+           qualified (or match class-name)]
+       (try
+         (Class/forName qualified)
+         (catch Exception _ nil)))))
+
+#?(:clj
+   (defn java-create-object
+     "Create a Java object via reflection."
+     [ctx class-name arg-values]
+     (let [klass (resolve-imported-java-class ctx class-name)]
+       (when-not klass
+         (throw (ex-info (str "Undefined class: " class-name)
+                         {:class-name class-name})))
+       (clojure.lang.Reflector/invokeConstructor klass (to-array arg-values)))))
+
+#?(:clj
+   (defn java-call-method
+     "Call a Java method via reflection."
+     [target method-name arg-values]
+     (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array arg-values))))
+
 (defn register-specialized-class
   "Register a specialized (type-realized) class in the context."
   [ctx class-def]
@@ -263,6 +301,12 @@
   "Create a new object instance."
   [class-name field-values]
   (->NexObject class-name field-values))
+
+(defn nex-object?
+  "Check if a value is a Nex object instance."
+  [v]
+  (or (instance? NexObject v)
+      (and (map? v) (contains? v :class-name) (contains? v :fields))))
 
 ;;
 ;; Forward declarations
@@ -760,17 +804,14 @@
 
 (defmethod eval-node :call
   [ctx {:keys [target method args]}]
-  (let [;; Evaluate arguments
-        arg-values (mapv #(eval-node ctx %) args)]
-
+  (let [arg-values (mapv #(eval-node ctx %) args)]
     (if target
-      ;; Object method call: target.method(args)
       (let [target-name (when (string? target) target)
             obj (if target-name
                   (env-lookup (:current-env ctx) target-name)
                   (eval-node ctx target))]
-        (if (instance? NexObject obj)
-          ;; Call method on object
+        (cond
+          (nex-object? obj)
           (let [class-def (lookup-class ctx (:class-name obj))
                 method-lookup (lookup-method-with-inheritance ctx class-def method)]
             (if method-lookup
@@ -778,129 +819,107 @@
                     source-class (:source-class method-lookup)
                     all-fields (get-all-fields ctx class-def)
                     has-postconditions? (seq (:ensure method-def))
-                    ;; Snapshot old field values if postconditions exist
                     old-values (when has-postconditions? (:fields obj))]
-                ;; Execute method with object context
                 (let [method-env (make-env (:current-env ctx))
-                      ;; Bind parameters
                       params (:params method-def)
                       _ (when params
                           (doseq [[param arg-val] (map vector params arg-values)]
                             (env-define method-env (:name param) arg-val)))
-                      ;; Bind fields as local variables
                       _ (doseq [[field-name field-val] (:fields obj)]
                           (env-define method-env (name field-name) field-val))
-                      ;; Initialize implicit 'result' variable
                       return-type (:return-type method-def)
                       default-result (if return-type
                                       (get-default-field-value return-type)
                                       nil)
                       _ (env-define method-env "result" default-result)
-                      ;; Bind "Current" to the current object for self-calls
                       _ (env-define method-env "Current" obj)
                       new-ctx (-> ctx
                                  (assoc :current-env method-env)
                                  (assoc :current-object obj)
                                  (assoc :current-target target-name)
                                  (assoc :old-values old-values))
-                      ;; Check pre-conditions
                       _ (when-let [require-assertions (:require method-def)]
                           (check-assertions new-ctx require-assertions Precondition))
-                      ;; Execute method body
                       _ (doseq [stmt (:body method-def)]
                           (eval-node new-ctx stmt))
-                      ;; Update object fields from modified environment
                       updated-fields (reduce (fn [m field]
                                               (let [field-name (:name field)
-                                                    field-key (keyword field-name)]
-                                                (if-let [val (try
-                                                              (env-lookup method-env field-name)
-                                                              (catch #?(:clj Exception :cljs :default) _ nil))]
+                                                    field-key (keyword field-name)
+                                                    val (try
+                                                          (env-lookup method-env field-name)
+                                                          (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+                                                (if (not= val ::not-found)
                                                   (assoc m field-key val)
                                                   m)))
                                             (:fields obj)
                                             all-fields)
-                      ;; Create updated object
                       updated-obj (make-object (:class-name obj) updated-fields)
-                      ;; Get the final value of 'result'
                       result (env-lookup method-env "result")]
-                  ;; Check post-conditions and invariant with rollback support
                   (try
-                    ;; Check post-conditions
                     (when-let [ensure-assertions (:ensure method-def)]
                       (check-assertions new-ctx ensure-assertions Postcondition))
-                    ;; Check class invariant
                     (check-class-invariant new-ctx class-def)
-                    ;; Success: update object in parent environment when possible
                     (when target-name
                       (env-set! (:current-env ctx) target-name updated-obj))
                     result
                     (catch #?(:clj Exception :cljs :default) e
-                      ;; Postcondition or invariant failed: restore original object
                       (when target-name
                         (env-set! (:current-env ctx) target-name obj))
                       (throw e)))))
-              ;; Method not found - check if it's a field (query access)
               (let [all-fields (get-all-fields ctx class-def)
                     field (first (filter #(= (:name %) method) all-fields))]
                 (if (and field (empty? arg-values))
-                  ;; Field access as query (uniform access principle)
                   (get (:fields obj) (keyword method))
-                  ;; Not a field or has arguments
                   (throw (ex-info (str "Method not found: " method)
                                   {:object obj :method method}))))))
-          ;; Not a NexObject - check if it's a primitive type with built-in methods
-          (call-builtin-method (or target-name target) obj method arg-values)))
 
-      ;; Method call without target: method(args)
-      ;; First check if we're inside an object method (self-call)
+          (get-type-name obj)
+          (call-builtin-method (or target-name target) obj method arg-values)
+
+          :else
+          #?(:clj (java-call-method obj method arg-values)
+             :cljs (throw (ex-info (str "Method not found on type: " method)
+                                   {:target target :value obj :method method})))))
+
       (if-let [current-obj (:current-object ctx)]
-        ;; We're inside a method - call on current object
         (let [class-def (lookup-class ctx (:class-name current-obj))
               method-lookup (lookup-method-with-inheritance ctx class-def method)]
           (if method-lookup
-            ;; Before making self-call, update object with current field values
-            ;; so the called method sees the changes
             (let [all-fields (get-all-fields ctx class-def)
                   current-env (:current-env ctx)
-                  ;; Read current field values from the environment
                   updated-fields (reduce (fn [m field]
                                           (let [field-name (:name field)
-                                                field-key (keyword field-name)]
-                                            (if-let [val (try
-                                                          (env-lookup current-env field-name)
-                                                          (catch #?(:clj Exception :cljs :default) _ nil))]
+                                                field-key (keyword field-name)
+                                                val (try
+                                                      (env-lookup current-env field-name)
+                                                      (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+                                            (if (not= val ::not-found)
                                               (assoc m field-key val)
                                               m)))
                                         (:fields current-obj)
                                         all-fields)
-                  ;; Create updated object
                   updated-obj (make-object (:class-name current-obj) updated-fields)
-                  ;; Update in parent context when we have a target
                   _ (when-let [target-name (:current-target ctx)]
                       (env-set! (-> ctx :current-env :parent) target-name updated-obj))
-                  ;; Make the method call
                   result (eval-node ctx {:type :call
-                                        :target (:current-target ctx)
-                                        :method method
-                                        :args args})
-                  ;; After call, read updated field values back when possible
+                                         :target (:current-target ctx)
+                                         :method method
+                                         :args args})
                   called-obj (when-let [target-name (:current-target ctx)]
                                (env-lookup (-> ctx :current-env :parent) target-name))
                   _ (when called-obj
                       (doseq [[field-name field-val] (:fields called-obj)]
                         (env-set! current-env (name field-name) field-val)))]
               result)
-            ;; Method not found on current object - try builtin
             (if-let [builtin (get builtins method)]
               (apply builtin ctx arg-values)
               (throw (ex-info (str "Undefined method: " method)
                               {:function method :object current-obj})))))
-        ;; Not inside a method - check for global function/builtin
         (if-let [builtin (get builtins method)]
           (apply builtin ctx arg-values)
           (throw (ex-info (str "Undefined function: " method)
-                          {:function method})))))))
+                          {:function method}))))))
+    )
 
 (defmethod eval-node :assign
   [ctx {:keys [target value]}]
@@ -1108,69 +1127,78 @@
                   (register-specialized-class ctx specialized)
                   spec-name))))
           class-name)
-        class-def (lookup-class ctx effective-class-name)
+        class-def (lookup-class-if-exists ctx effective-class-name)
         ;; Get all fields (including inherited)
-        all-fields (get-all-fields ctx class-def)
+        all-fields (when class-def (get-all-fields ctx class-def))
         ;; Initialize fields with default values
-        initial-field-map (reduce (fn [m field]
-                                   (assoc m (keyword (:name field))
-                                          (get-default-field-value (:field-type field))))
-                                 {}
-                                 all-fields)
+        initial-field-map (when class-def
+                            (reduce (fn [m field]
+                                      (assoc m (keyword (:name field))
+                                             (get-default-field-value (:field-type field))))
+                                    {}
+                                    all-fields))
         ;; If a constructor is specified, call it and update fields
-        final-field-map (if constructor
-                         (let [ctor-def (lookup-constructor class-def constructor)]
-                           (when-not ctor-def
-                             (throw (ex-info (str "Constructor not found: " constructor)
-                                            {:class-name class-name :constructor constructor})))
-                           ;; Create environment for constructor execution
-                           (let [ctor-env (make-env (:current-env ctx))
-                                 ;; Bind parameters
-                                 params (:params ctor-def)
-                                 arg-values (mapv #(eval-node ctx %) args)
-                                 _ (when params
-                                     (doseq [[param arg-val] (map vector params arg-values)]
-                                       (env-define ctor-env (:name param) arg-val)))
-                                 ;; Bind fields as local variables
-                                 _ (doseq [[field-name field-val] initial-field-map]
-                                     (env-define ctor-env (name field-name) field-val))
-                                 new-ctx (assoc ctx :current-env ctor-env)
-                                 ;; Check pre-conditions
-                                 _ (when-let [require-assertions (:require ctor-def)]
-                                     (check-assertions new-ctx require-assertions Precondition))
-                                 ;; Execute constructor body
-                                 _ (doseq [stmt (:body ctor-def)]
-                                     (eval-node new-ctx stmt))
-                                 ;; Update object fields from modified environment
+        final-field-map (when class-def
+                          (if constructor
+                            (let [ctor-def (lookup-constructor class-def constructor)]
+                              (when-not ctor-def
+                                (throw (ex-info (str "Constructor not found: " constructor)
+                                                {:class-name class-name :constructor constructor})))
+                              ;; Create environment for constructor execution
+                              (let [ctor-env (make-env (:current-env ctx))
+                                    ;; Bind parameters
+                                    params (:params ctor-def)
+                                    arg-values (mapv #(eval-node ctx %) args)
+                                    _ (when params
+                                        (doseq [[param arg-val] (map vector params arg-values)]
+                                          (env-define ctor-env (:name param) arg-val)))
+                                    ;; Bind fields as local variables
+                                    _ (doseq [[field-name field-val] initial-field-map]
+                                        (env-define ctor-env (name field-name) field-val))
+                                    new-ctx (assoc ctx :current-env ctor-env)
+                                    ;; Check pre-conditions
+                                    _ (when-let [require-assertions (:require ctor-def)]
+                                        (check-assertions new-ctx require-assertions Precondition))
+                                    ;; Execute constructor body
+                                    _ (doseq [stmt (:body ctor-def)]
+                                        (eval-node new-ctx stmt))
+                                    ;; Update object fields from modified environment
                                  updated-fields (reduce (fn [m field]
                                                          (let [field-name (:name field)
-                                                               field-key (keyword field-name)]
-                                                           (if-let [val (try
-                                                                         (env-lookup ctor-env field-name)
-                                                                         (catch #?(:clj Exception :cljs :default) _ nil))]
+                                                               field-key (keyword field-name)
+                                                               val (try
+                                                                     (env-lookup ctor-env field-name)
+                                                                     (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+                                                           (if (not= val ::not-found)
                                                              (assoc m field-key val)
                                                              m)))
                                                        initial-field-map
                                                        all-fields)
-                                 ;; Check post-conditions
-                                 _ (when-let [ensure-assertions (:ensure ctor-def)]
-                                     (check-assertions new-ctx ensure-assertions Postcondition))]
-                             updated-fields))
-                         ;; No constructor: use default initialization
-                         initial-field-map)
+                                    ;; Check post-conditions
+                                    _ (when-let [ensure-assertions (:ensure ctor-def)]
+                                        (check-assertions new-ctx ensure-assertions Postcondition))]
+                                updated-fields))
+                            ;; No constructor: use default initialization
+                            initial-field-map))
         ;; Create the final object
-        obj (make-object effective-class-name final-field-map)]
+        obj (when class-def
+              (make-object effective-class-name final-field-map))]
 
     ;; Check class invariant with object fields in scope
-    (when-let [invariant (:invariant class-def)]
-      (let [inv-env (make-env (:current-env ctx))
-            _ (doseq [[field-name field-val] final-field-map]
-                (env-define inv-env (name field-name) field-val))
-            inv-ctx (assoc ctx :current-env inv-env)]
-        (check-class-invariant inv-ctx class-def)))
-
-    ;; Return the object
-    obj)))
+    (if class-def
+      (do
+        (when-let [invariant (:invariant class-def)]
+          (let [inv-env (make-env (:current-env ctx))
+                _ (doseq [[field-name field-val] final-field-map]
+                    (env-define inv-env (name field-name) field-val))
+                inv-ctx (assoc ctx :current-env inv-env)]
+            (check-class-invariant inv-ctx class-def)))
+        ;; Return the object
+        obj)
+      ;; Java interop fallback (CLJ only)
+      #?(:clj (java-create-object ctx class-name (mapv #(eval-node ctx %) args))
+         :cljs (throw (ex-info (str "Undefined class: " class-name)
+                               {:class-name class-name})))))))
 
 (defmethod eval-node :literal
   [_ctx node]

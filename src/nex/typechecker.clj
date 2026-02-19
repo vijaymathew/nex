@@ -115,6 +115,8 @@
   (let [t1 (normalize-type type1)
         t2 (normalize-type type2)]
     (or (= t1 t2)
+        ;; Any is compatible with all types
+        (or (= t1 "Any") (= t2 "Any"))
         ;; Integer and Integer64 are compatible
         (and (or (= t1 "Integer") (= t1 "Integer64"))
              (or (= t2 "Integer") (= t2 "Integer64")))
@@ -134,6 +136,41 @@
         ;; Allow base class name to match parameterized type (e.g., "Box" matches {:base-type "Box", ...})
         (or (and (string? t1) (map? t2) (= t1 (:base-type t2)))
             (and (map? t1) (string? t2) (= (:base-type t1) t2))))))
+
+(defn class-subtype?
+  "Check if sub is the same as or a subclass of super."
+  [env sub super]
+  (let [sub (normalize-type sub)
+        super (normalize-type super)]
+    (cond
+      (or (nil? sub) (nil? super)) false
+      (= sub super) true
+      (not (and (string? sub) (string? super))) false
+      :else
+      (letfn [(sub? [current seen]
+                (if (contains? seen current)
+                  false
+                  (if-let [class-def (env-lookup-class env current)]
+                    (let [parents (map :parent (:parents class-def))
+                          seen (conj seen current)]
+                      (or (some #(= % super) parents)
+                          (some #(sub? % seen) parents)))
+                    false)))]
+        (sub? sub #{})))))
+
+(defn types-compatible?
+  "Check if two types are compatible (including inheritance)."
+  [env type1 type2]
+  (let [t1 (normalize-type type1)
+        t2 (normalize-type type2)]
+    (or (types-equal? t1 t2)
+        (and (string? t1) (string? t2) (class-subtype? env t1 t2))
+        (and (map? t1) (map? t2)
+             (class-subtype? env (:base-type t1) (:base-type t2))
+             (or (= (:type-params t1) (:type-params t2))
+                 (= (:type-params t1) (:type-args t2))
+                 (= (:type-args t1) (:type-params t2))
+                 (= (:type-args t1) (:type-args t2)))))))
 
 (defn is-numeric-type?
   "Check if a type is numeric"
@@ -195,7 +232,7 @@
       ("=" "/=")
       (if (or (= left-type "Nil")
               (= right-type "Nil")
-              (types-equal? left-type right-type)
+              (types-compatible? env left-type right-type)
               ;; Allow comparisons with generic type parameters
               (is-generic-type-param? left-type)
               (is-generic-type-param? right-type))
@@ -303,7 +340,7 @@
             (let [arg-type (check-expression env arg)
                   ;; Resolve generic params (e.g., T -> Integer)
                   param-type (resolve-generic-type (:type param) type-map)]
-              (when-not (types-equal? arg-type param-type)
+              (when-not (types-compatible? env arg-type param-type)
                 (throw (ex-info (str "Argument type mismatch for method " method)
                                 {:error (type-error
                                          (str "Expected " param-type ", got " arg-type))})))))
@@ -437,7 +474,7 @@
     (when-not var-type
       (throw (ex-info (str "Undefined variable: " target)
                       {:error (type-error (str "Undefined variable: " target))})))
-    (when-not (types-equal? var-type val-type)
+    (when-not (types-compatible? env val-type var-type)
       (throw (ex-info (str "Type mismatch in assignment to " target)
                       {:error (type-error
                                (str "Cannot assign " val-type " to variable of type "
@@ -452,7 +489,7 @@
                              (str "Type annotation required for variable '" name
                                   "'. Use: let " name ": <Type> := ..."))})))
   (let [val-type (check-expression env value)]
-    (when-not (types-equal? var-type val-type)
+    (when-not (types-compatible? env val-type var-type)
       (throw (ex-info (str "Type mismatch in let binding for " name)
                       {:error (type-error
                                (str "Cannot bind " val-type " to variable of type "
@@ -704,9 +741,15 @@
   "Type check a complete program.
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([program] (check-program program {}))
-  ([{:keys [classes calls] :as program} opts]
+  ([{:keys [classes calls imports] :as program} opts]
    (let [env (make-type-env)]
      (try
+       ;; Register imported Java classes (as placeholders)
+       (doseq [{:keys [qualified-name source]} imports]
+         (when (nil? source)
+           (let [simple-name (last (str/split qualified-name #"\."))]
+             (env-add-class env simple-name {:name simple-name :body [] :import qualified-name}))))
+
        ;; First pass: collect all class definitions
        (doseq [class-def classes]
          (collect-class-info env class-def))
@@ -748,6 +791,10 @@
   [expr opts]
   (try
     (let [env (make-type-env)]
+      (doseq [{:keys [qualified-name source]} (:imports opts)]
+        (when (nil? source)
+          (let [simple-name (last (str/split qualified-name #"\."))]
+            (env-add-class env simple-name {:name simple-name :body [] :import qualified-name}))))
       (doseq [class-def (:classes opts)]
         (collect-class-info env class-def))
       (register-builtin-methods env)

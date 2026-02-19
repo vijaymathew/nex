@@ -58,3 +58,22 @@ class A
 end"
           output (execute-method code "A" "demo")]
       (is (= ["true" "false"] output)))))
+
+(deftest boolean-field-update-test
+  (testing "Boolean field updates persist when set to false"
+    (let [code "class Flag
+  feature
+    enabled: Boolean
+
+    disable() do
+      enabled := false
+    end
+
+    demo() do
+      enabled := true
+      disable
+      print(enabled)
+    end
+end"
+          output (execute-method code "Flag" "demo")]
+      (is (= [\"false\"] output)))))

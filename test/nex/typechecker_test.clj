@@ -104,6 +104,21 @@
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-java-import-typecheck
+  (testing "Imported Java classes should be recognized"
+    (let [code "import java.net.Socket
+
+class Client
+  feature
+    connect(host: String, port: Integer) do
+      let s: Socket := create Socket.make(host, port)
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result)))))) 
+
 (deftest test-boolean-operators
   (testing "Boolean operators should require Boolean operands"
     (let [code "class Test

@@ -158,5 +158,90 @@ else
 fi
 echo ""
 
+# Test 8: :load command
+echo "Test 8: :load command"
+echo "----------------------"
+cat > /tmp/repl_load_test.nex <<'EOF'
+class LoadTest
+  feature
+    demo() do
+      print("loaded")
+    end
+end
+EOF
+
+cat > /tmp/test_load.txt <<'EOF'
+:load /tmp/repl_load_test.nex
+:classes
+:quit
+EOF
+
+output=$(cat /tmp/test_load.txt | clojure -M:repl 2>&1)
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q "Class(es) registered: LoadTest" && \
+   echo "$cleaned" | grep -q "• LoadTest"; then
+    echo "✓ PASS: :load command works"
+else
+    echo "✗ FAIL: :load command"
+    echo "$output"
+fi
+echo ""
+
+# Test 9: :typecheck with :load imports
+echo "Test 9: Typecheck with loaded imports"
+echo "--------------------------------------"
+cat > /tmp/test_tcp_socket.nex <<'EOF'
+import java.net.Socket
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.PrintWriter
+
+class TcpSocket
+  feature
+    host: String
+    port: Integer
+    socket: Socket
+    reader: BufferedReader
+    writer: PrintWriter
+    connected: Boolean
+
+  create
+    connect(host_value: String, port_value: Integer) do
+      host := host_value
+      port := port_value
+      socket := create Socket.make(host_value, port_value)
+      reader := create BufferedReader.make(create InputStreamReader.make(socket.getInputStream()))
+      writer := create PrintWriter.make(socket.getOutputStream(), true)
+      connected := true
+    end
+
+  feature
+    is_connected(): Boolean do
+      result := connected
+    end
+end
+EOF
+
+cat > /tmp/test_tcp_repl.txt <<'EOF'
+:typecheck on
+:load /tmp/test_tcp_socket.nex
+let client: TcpSocket := create TcpSocket.connect("google.com", 80)
+:quit
+EOF
+
+output=$(cat /tmp/test_tcp_repl.txt | clojure -M:repl 2>&1)
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q "Type checking enabled" && \
+   echo "$cleaned" | grep -q "Class(es) registered: TcpSocket" && \
+   ! echo "$cleaned" | grep -q "Type error"; then
+    echo "✓ PASS: Typecheck with loaded imports works"
+else
+    echo "✗ FAIL: Typecheck with loaded imports"
+    echo "$output"
+fi
+echo ""
+
 echo "All tests complete!"
 rm -f /tmp/test*.txt
+rm -f /tmp/repl_load_test.nex
+rm -f /tmp/test_tcp_socket.nex

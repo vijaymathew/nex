@@ -171,15 +171,15 @@ clojure -M
 (def nex-code "
 class Account
   feature
-    balance: Integer
+    balance: Real
 
-    deposit(amount: Integer)
+    deposit(amount: Real)
       require
-        positive: amount > 0
+        positive: amount > 0.0
       do
         balance := balance + amount
       ensure
-        increased: balance >= 0
+        increased: balance >= 0.0
       end
 end")
 
@@ -363,7 +363,7 @@ feature
     end
 
   update_interest() do
-    let interest := balance * interest_rate
+    let interest: Real := balance * interest_rate
     balance := balance + interest
   end
 

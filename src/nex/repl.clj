@@ -115,6 +115,7 @@
   (println "  :typecheck on     - Enable type checking (validates code before execution)")
   (println "  :typecheck off    - Disable type checking (default)")
   (println "  :typecheck status - Show current type checking status")
+  (println "  :load <path>      - Load and evaluate a .nex file")
   (println)
   (println "Navigation:")
   (println "  Up/Down arrows    - Navigate command history")
@@ -174,6 +175,37 @@
                            (pr-str value))]
             (println (str "  • " var-name " = " value-str))))))))
 
+(declare eval-code)
+
+(defn normalize-load-path [raw]
+  (let [trimmed (str/trim raw)]
+    (if (and (>= (count trimmed) 2)
+             (or (and (.startsWith trimmed "\"") (.endsWith trimmed "\""))
+                 (and (.startsWith trimmed "'") (.endsWith trimmed "'"))))
+      (subs trimmed 1 (dec (count trimmed)))
+      trimmed)))
+
+(defn load-file-into-repl
+  "Load and evaluate a .nex file, returning updated context."
+  [ctx path]
+  (let [path (normalize-load-path path)]
+    (cond
+      (str/blank? path)
+      (do
+        (println "Usage: :load <path-to-file.nex>")
+        ctx)
+
+      :else
+      (let [file (io/file path)]
+        (if-not (.exists file)
+          (do
+            (println (str "File not found: " path))
+            ctx)
+          (do
+            (when-not (.endsWith (.getName file) ".nex")
+              (println "Warning: expected a .nex file"))
+            (eval-code ctx (slurp file))))))))
+
 (defn handle-command [ctx input]
   (let [input-lower (str/lower-case input)]
     (cond
@@ -218,6 +250,11 @@
         (println (str "Type checking is currently: "
                      (if @*type-checking-enabled* "ENABLED" "DISABLED")))
         ctx)
+
+      ;; Load file command
+      (str/starts-with? input-lower ":load")
+      (let [path (subs input (min (count input) (count ":load")))]
+        (load-file-into-repl ctx path))
 
       ;; Unknown command
       :else
@@ -306,6 +343,7 @@
     (when-let [t (tc/infer-expression-type
                    expr-node
                    {:classes (vals @(:classes ctx))
+                    :imports @(:imports ctx)
                     :var-types @*repl-var-types*})]
       (format-type t))))
 
@@ -381,8 +419,20 @@
         ;; Create an augmented AST that includes previously defined classes
         ;; so the type checker knows about them
         (let [prev-classes (vals @(:classes ctx))
-              augmented-ast (if (seq prev-classes)
+              prev-imports @(:imports ctx)
+              augmented-ast (cond
+                              (and (seq prev-classes) (seq prev-imports))
+                              (assoc ast
+                                     :classes (concat prev-classes (:classes ast))
+                                     :imports (concat prev-imports (:imports ast)))
+
+                              (seq prev-classes)
                               (assoc ast :classes (concat prev-classes (:classes ast)))
+
+                              (seq prev-imports)
+                              (assoc ast :imports (concat prev-imports (:imports ast)))
+
+                              :else
                               ast)
               result (tc/type-check augmented-ast {:var-types @*repl-var-types*})]
           (when-not (:success result)
@@ -414,7 +464,8 @@
                 (doseq [line output]
                   (println line))))
             ;; Show result if it's not nil and not from a print
-            (when (and result (empty? output))
+            ;; Always show false/0 results too.
+            (when (and (some? result) (empty? output))
               (if type-str
                 (println (str type-str " " (format-value result)))
                 (println (format-value result)))))
@@ -439,7 +490,8 @@
               (doseq [line output]
                 (println line)))
             ;; Show result if it's not nil, not from a print, and no classes were defined
-            (when (and result (empty? output) (empty? real-class-names))
+            ;; Always show false/0 results too.
+            (when (and (some? result) (empty? output) (empty? real-class-names))
               (if-let [type-str (when (seq calls)
                                   (infer-result-type ctx (last calls)))]
                 (println (str type-str " " (format-value result)))
@@ -458,7 +510,8 @@
             (doseq [line output]
               (println line)))
           ;; Show result if it's not nil and not from a print
-          (when (and result (empty? output))
+          ;; Always show false/0 results too.
+          (when (and (some? result) (empty? output))
             (if-let [type-str (infer-result-type ctx ast)]
               (println (str type-str " " (format-value result)))
               (println (format-value result))))
