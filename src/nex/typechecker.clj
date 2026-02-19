@@ -60,7 +60,7 @@
 
 (def builtin-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Any" "Void"})
+    "Array" "Map" "Any" "Void" "Console" "File" "Process"})
 
 (defn builtin-type? [type-name]
   (contains? builtin-types type-name))
@@ -316,21 +316,38 @@
 (defn check-create
   "Check the type of a create expression"
   [env {:keys [class-name generic-args constructor args] :as expr}]
-  ;; Check if class exists
-  (when-not (or (env-lookup-class env class-name) (builtin-type? class-name))
-    (throw (ex-info (str "Undefined class: " class-name)
-                    {:error (type-error (str "Undefined class: " class-name))})))
-  (if (seq generic-args)
-    ;; Validate generic args against template class
-    (let [class-def (env-lookup-class env class-name)]
-      (when (and class-def (:generic-params class-def))
-        (when (not= (count (:generic-params class-def)) (count generic-args))
-          (throw (ex-info (str "Type argument count mismatch for " class-name)
-                          {:error (type-error
-                                   (str "Expected " (count (:generic-params class-def))
-                                        " type arguments, got " (count generic-args)))}))))
-      {:base-type class-name :type-args generic-args})
-    class-name))
+  (cond
+    ;; Handle built-in Console type
+    (= class-name "Console") "Console"
+    ;; Handle built-in Process type
+    (= class-name "Process") "Process"
+    ;; Handle built-in File type
+    (= class-name "File")
+    (do
+      (when (= constructor "open")
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= arg-type "String")
+              (throw (ex-info "File.open requires a String path argument"
+                              {:error (type-error "File.open requires a String path argument")}))))))
+      "File")
+    :else
+    (do
+      ;; Check if class exists
+      (when-not (or (env-lookup-class env class-name) (builtin-type? class-name))
+        (throw (ex-info (str "Undefined class: " class-name)
+                        {:error (type-error (str "Undefined class: " class-name))})))
+      (if (seq generic-args)
+        ;; Validate generic args against template class
+        (let [class-def (env-lookup-class env class-name)]
+          (when (and class-def (:generic-params class-def))
+            (when (not= (count (:generic-params class-def)) (count generic-args))
+              (throw (ex-info (str "Type argument count mismatch for " class-name)
+                              {:error (type-error
+                                       (str "Expected " (count (:generic-params class-def))
+                                            " type arguments, got " (count generic-args)))}))))
+          {:base-type class-name :type-args generic-args})
+        class-name))))
 
 (defn check-array-literal
   "Check the type of an array literal"
@@ -663,6 +680,35 @@
        ;; First pass: collect all class definitions
        (doseq [class-def classes]
          (collect-class-info env class-def))
+
+       ;; Register built-in Console methods
+       (doseq [[method-name sig]
+               {"print" {:params [{:name "msg" :type "String"}] :return-type "Void"}
+                "print_line" {:params [{:name "msg" :type "String"}] :return-type "Void"}
+                "read_line" {:params [] :return-type "String"}
+                "error" {:params [{:name "msg" :type "String"}] :return-type "Void"}
+                "new_line" {:params [] :return-type "Void"}
+                "read_integer" {:params [] :return-type "Integer"}
+                "read_real" {:params [] :return-type "Real"}}]
+         (env-add-method env "Console" method-name sig))
+
+       ;; Register built-in File methods
+       (doseq [[method-name sig]
+               {"read" {:params [] :return-type "String"}
+                "write" {:params [{:name "content" :type "String"}] :return-type "Void"}
+                "append" {:params [{:name "content" :type "String"}] :return-type "Void"}
+                "exists" {:params [] :return-type "Boolean"}
+                "delete" {:params [] :return-type "Void"}
+                "lines" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}
+                "close" {:params [] :return-type "Void"}}]
+         (env-add-method env "File" method-name sig))
+
+       ;; Register built-in Process methods
+       (doseq [[method-name sig]
+               {"getenv" {:params [{:name "name" :type "String"}] :return-type "String"}
+                "setenv" {:params [{:name "name" :type "String"} {:name "value" :type "String"}] :return-type "Void"}
+                "command_line" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}}]
+         (env-add-method env "Process" method-name sig))
 
        ;; Inject pre-existing variable types (e.g., from REPL)
        (doseq [[var-name var-type] (:var-types opts)]

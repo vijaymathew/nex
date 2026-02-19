@@ -42,6 +42,40 @@
 (defn nex-abs [n] #?(:clj (Math/abs (double n)) :cljs (js/Math.abs n)))
 (defn nex-round [n] #?(:clj (Math/round (double n)) :cljs (js/Math.round n)))
 
+;; Console helpers
+(defn nex-console-print [msg] #?(:clj (print msg) :cljs (.write js/process.stdout (str msg))))
+(defn nex-console-println [msg] #?(:clj (println msg) :cljs (js/console.log msg)))
+(defn nex-console-error [msg] #?(:clj (binding [*out* *err*] (println msg)) :cljs (js/console.error msg)))
+(defn nex-console-newline [] #?(:clj (println) :cljs (js/console.log "")))
+(defn nex-console-read-line [] #?(:clj (read-line) :cljs (throw (ex-info "read-line not supported in ClojureScript" {}))))
+(defn nex-parse-integer [s] #?(:clj (Integer/parseInt (.trim s)) :cljs (js/parseInt s 10)))
+(defn nex-parse-real [s] #?(:clj (Double/parseDouble (.trim s)) :cljs (js/parseFloat s)))
+
+;; File helpers
+(defn nex-file-read [path] #?(:clj (slurp path) :cljs (.toString (.readFileSync (js/require "fs") path "utf8"))))
+(defn nex-file-write [path content] #?(:clj (spit path content) :cljs (.writeFileSync (js/require "fs") path content "utf8")))
+(defn nex-file-append [path content] #?(:clj (spit path content :append true) :cljs (.appendFileSync (js/require "fs") path content "utf8")))
+(defn nex-file-exists? [path] #?(:clj (.exists (java.io.File. path)) :cljs (.existsSync (js/require "fs") path)))
+(defn nex-file-delete [path] #?(:clj (.delete (java.io.File. path)) :cljs (.unlinkSync (js/require "fs") path)))
+(defn nex-file-lines [path] #?(:clj (nex-array-from (str/split-lines (slurp path)))
+                                :cljs (nex-array-from (.split (.toString (.readFileSync (js/require "fs") path "utf8")) "\n"))))
+
+;; Process helpers
+(defn nex-process-getenv [name]
+  #?(:clj (System/getenv name)
+     :cljs (aget (.-env js/process) name)))
+(defn nex-process-setenv [name value]
+  #?(:clj (throw (ex-info "setenv is not supported on the JVM" {:name name}))
+     :cljs (aset (.-env js/process) name value)))
+(defn nex-process-command-line []
+  #?(:clj (nex-array-from (into [] (.getInputArguments (java.lang.management.ManagementFactory/getRuntimeMXBean))))
+     :cljs (nex-array-from (vec (.-argv js/process)))))
+
+;; Built-in IO type detection
+(defn nex-console? [v] (and (map? v) (= (:nex-builtin-type v) :Console)))
+(defn nex-file? [v] (and (map? v) (= (:nex-builtin-type v) :File)))
+(defn nex-process? [v] (and (map? v) (= (:nex-builtin-type v) :Process)))
+
 ;; Subscript helper (works on both Array and Map)
 (defn nex-coll-get [coll idx]
   (cond
@@ -404,6 +438,9 @@
       "Char" \0
       "Boolean" false
       "String" ""
+      "Console" {:nex-builtin-type :Console}
+      "File" nil
+      "Process" {:nex-builtin-type :Process}
       nil)
 
     :else nil))
@@ -559,7 +596,30 @@
     "contains_key" (fn [m key & _] (nex-map-contains-key m key))
     "keys"         (fn [m & _] (nex-map-keys m))
     "values"       (fn [m & _] (nex-map-values m))
-    "remove"       (fn [m key & _] (nex-map-remove m key))}})
+    "remove"       (fn [m key & _] (nex-map-remove m key))}
+
+   :Console
+   {"print"        (fn [_ msg & _] (nex-console-print (str msg)) nil)
+    "print_line"   (fn [_ msg & _] (nex-console-println (str msg)) nil)
+    "read_line"    (fn [_ & args] (when (seq args) (nex-console-print (str (first args)))) (nex-console-read-line))
+    "error"        (fn [_ msg & _] (nex-console-error (str msg)) nil)
+    "new_line"     (fn [_ & _] (nex-console-newline) nil)
+    "read_integer" (fn [_ & _] (nex-parse-integer (nex-console-read-line)))
+    "read_real"    (fn [_ & _] (nex-parse-real (nex-console-read-line)))}
+
+   :File
+   {"read"   (fn [f & _] (nex-file-read (:path f)))
+    "write"  (fn [f content & _] (nex-file-write (:path f) (str content)) nil)
+    "append" (fn [f content & _] (nex-file-append (:path f) (str content)) nil)
+    "exists" (fn [f & _] (nex-file-exists? (:path f)))
+    "delete" (fn [f & _] (nex-file-delete (:path f)) nil)
+    "lines"  (fn [f & _] (nex-file-lines (:path f)))
+    "close"  (fn [_ & _] nil)}
+
+   :Process
+   {"getenv"       (fn [_ name & _] (or (nex-process-getenv (str name)) ""))
+    "setenv"       (fn [_ name value & _] (nex-process-setenv (str name) (str value)) nil)
+    "command_line" (fn [_ & _] (nex-process-command-line))}})
 
 (defn get-type-name
   "Get the type name for a value"
@@ -573,6 +633,9 @@
     (boolean? value) :Boolean
     (nex-array? value) :Array
     (nex-map? value) :Map
+    (nex-console? value) :Console
+    (nex-file? value) :File
+    (nex-process? value) :Process
     :else nil))
 
 (defn call-builtin-method
@@ -1000,6 +1063,14 @@
 
 (defmethod eval-node :create
   [ctx {:keys [class-name generic-args constructor args]}]
+  ;; Handle built-in IO types
+  (case class-name
+    "Console" {:nex-builtin-type :Console}
+    "File" (let [arg-values (mapv #(eval-node ctx %) args)]
+             (when-not (= constructor "open")
+               (throw (ex-info "File requires constructor: create File.open(path)" {:class-name "File"})))
+             {:nex-builtin-type :File :path (first arg-values)})
+    "Process" {:nex-builtin-type :Process}
   ;; Resolve effective class name (handle generic specialization)
   (let [effective-class-name
         (if (seq generic-args)
@@ -1087,7 +1158,7 @@
         (check-class-invariant inv-ctx class-def)))
 
     ;; Return the object
-    obj))
+    obj)))
 
 (defmethod eval-node :literal
   [_ctx node]
