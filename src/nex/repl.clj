@@ -348,9 +348,8 @@
                                                         [(p/ast (wrap-as-method input)) true false])))
                                                   (throw e))))]
 
-      ;; Type check if enabled (only for non-wrapped code with classes)
+      ;; Type check if enabled
       (when (and @*type-checking-enabled*
-                 (not was-wrapped?)
                  (= (:type ast) :program)
                  (seq (:classes ast)))
         ;; Create an augmented AST that includes previously defined classes

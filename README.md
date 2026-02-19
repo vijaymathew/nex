@@ -409,7 +409,7 @@ end
 class Box [T]
   create
     make(initial: T) do
-      let value := initial
+      value := initial
     end
 
   feature
@@ -417,7 +417,7 @@ class Box [T]
 
     set(new_value: T)
     do
-      let value := new_value
+      value := new_value
     end
 
     print_value()
