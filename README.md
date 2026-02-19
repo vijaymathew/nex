@@ -133,15 +133,15 @@ class Math
   feature
     gcd(a, b: Integer) do
       from
-        let x := a
-        let y := b
+        x := a
+        y := b
       until
         x = y
       do
         if x > y then
-          let x := x - y
+          x := x - y
         else
-          let y := y - x
+          y := y - x
         end
       end
       print(x)
