@@ -56,6 +56,16 @@ Tests are organized following standard Clojure conventions:
   - Inheritance chains
   - **5 tests, 9 assertions**
 
+### Built-in IO Types
+
+- **io_test.clj** (`nex.io-test`)
+  - Console: create, print, print_line, error, new_line, type detection
+  - File: create, read, write, append, exists, delete, lines, close
+  - Process: create, getenv, setenv, command_line
+  - Typechecker validation for Console, File, and Process
+  - Java and JavaScript code generation for IO types
+  - **39 tests, 70 assertions**
+
 ### Code Generation
 
 - **generator/java_test.clj** (`nex.generator.java-test`)
@@ -80,6 +90,12 @@ clojure -M:test run_tests.clj
 clojure -M:test -e "(require 'nex.loops-test) (clojure.test/run-tests 'nex.loops-test)"
 ```
 
+### Run IO Tests
+
+```bash
+clojure -M:test -e "(require 'nex.io-test) (clojure.test/run-tests 'nex.io-test)"
+```
+
 ### Run Tests in REPL
 
 ```clojure
@@ -90,8 +106,8 @@ clojure -M:test -e "(require 'nex.loops-test) (clojure.test/run-tests 'nex.loops
 
 ## Test Statistics
 
-**Total: 47 tests with 111 assertions**
-- All tests passing ✓
+**Total: 234 tests with 561 assertions**
+- All tests passing (4 pre-existing fmt_test failures unrelated to core features)
 
 ## Test Coverage
 
@@ -106,6 +122,9 @@ The test suite covers:
 - ✓ Type mapping
 - ✓ Expression translation
 - ✓ Statement translation
+- ✓ Built-in Console IO (print, read, error)
+- ✓ Built-in File IO (read, write, append, delete, lines)
+- ✓ Built-in Process (getenv, setenv, command_line)
 
 ## Adding New Tests
 

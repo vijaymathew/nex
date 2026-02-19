@@ -41,6 +41,9 @@
       "String" "string"
       "Array" "Array"
       "Map" "Map"
+      "Console" "Object"
+      "File" "Object"
+      "Process" "Object"
       nex-type)
 
     :else nex-type))
@@ -69,6 +72,9 @@
       "String" "\"\""
       "Array" "[]"
       "Map" "new Map()"
+      "Console" "({_type: 'Console'})"
+      "File" "null"
+      "Process" "({_type: 'Process'})"
       "null")
 
     :else "null"))
@@ -214,7 +220,31 @@
     "contains_key" (fn [target args] (str target ".has(" args ")"))
     "keys"         (fn [target _] (str "Array.from(" target ".keys())"))
     "values"       (fn [target _] (str "Array.from(" target ".values())"))
-    "remove"       (fn [target args] (str "(" target ".delete(" args "), " target ")"))}})
+    "remove"       (fn [target args] (str "(" target ".delete(" args "), " target ")"))}
+
+   :Console
+   {"print"        (fn [_ args] (str "process.stdout.write(String(" args "))"))
+    "print_line"   (fn [_ args] (str "console.log(" args ")"))
+    "read_line"    (fn [_ _] "require('readline-sync').question('')")
+    "error"        (fn [_ args] (str "console.error(" args ")"))
+    "new_line"     (fn [_ _] "console.log()")
+    "read_integer" (fn [_ _] "parseInt(require('readline-sync').question(''), 10)")
+    "read_real"    (fn [_ _] "parseFloat(require('readline-sync').question(''))")}
+
+   :File
+   {"read"   (fn [t _] (str "require('fs').readFileSync(" t ".path, 'utf8')"))
+    "write"  (fn [t a] (str "require('fs').writeFileSync(" t ".path, " a ", 'utf8')"))
+    "append" (fn [t a] (str "require('fs').appendFileSync(" t ".path, " a ", 'utf8')"))
+    "exists" (fn [t _] (str "require('fs').existsSync(" t ".path)"))
+    "delete" (fn [t _] (str "require('fs').unlinkSync(" t ".path)"))
+    "lines"  (fn [t _] (str "require('fs').readFileSync(" t ".path, 'utf8').split('\\n')"))
+    "close"  (fn [t _] (str "/* " t ".close() */"))}
+
+   :Process
+   {"getenv"       (fn [_ a] (str "process.env[" a "]"))
+    "setenv"       (fn [_ a] (str "process.env[" a "]"))
+    "command_line" (fn [_ _] "process.argv")}})
+
 (defn generate-call-expr
   "Generate JavaScript code for method call.
    NOTE: For operator methods (plus, less_than, etc.) that exist on multiple types,
@@ -248,7 +278,11 @@
   [{:keys [class-name generic-args constructor args]}]
   ;; JS has no generics syntax, generic-args is accepted but not emitted
   (let [args-code (str/join ", " (map generate-expression args))]
-    (str "new " class-name "(" args-code ")")))
+    (case class-name
+      "Console" "({_type: 'Console'})"
+      "File" (str "({_type: 'File', path: " args-code "})")
+      "Process" "({_type: 'Process'})"
+      (str "new " class-name "(" args-code ")"))))
 
 (defn generate-subscript-expr
   "Generate JavaScript code for subscript access (array/map access)"

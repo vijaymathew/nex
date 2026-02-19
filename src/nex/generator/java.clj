@@ -22,6 +22,9 @@
     "String" "String"
     "Array" "ArrayList"
     "Map" "HashMap"
+    "Console" "Object"
+    "File" "java.io.File"
+    "Process" "Object"
     nex-type))
 
 (defn nex-type-to-java
@@ -61,6 +64,9 @@
          "String" "String"
          "Array" "ArrayList"
          "Map" "HashMap"
+         "Console" "Object"
+         "File" "java.io.File"
+         "Process" "Object"
          nex-type))
 
      :else nex-type)))
@@ -90,6 +96,9 @@
       "String" "\"\""
       "Array" "new ArrayList<>()"
       "Map" "new HashMap<>()"
+      "Console" "new Object() /* Console */"
+      "File" "null"
+      "Process" "new Object() /* Process */"
       "null")
 
     :else "null"))
@@ -235,7 +244,32 @@
     "contains_key" (fn [target args] (str target ".containsKey(" args ")"))
     "keys"         (fn [target _] (str "new ArrayList<>(" target ".keySet())"))
     "values"       (fn [target _] (str "new ArrayList<>(" target ".values())"))
-    "remove"       (fn [target args] (str "(" target ".remove(" args "), " target ")"))}})
+    "remove"       (fn [target args] (str "(" target ".remove(" args "), " target ")"))}
+
+   :Console
+   {"print"        (fn [_ args] (str "System.out.print(" args ")"))
+    "print_line"   (fn [_ args] (str "System.out.println(" args ")"))
+    "read_line"    (fn [_ args] (if (empty? args)
+                                  "new java.util.Scanner(System.in).nextLine()"
+                                  (str "new java.util.Scanner(System.in).nextLine() /* prompt: " args " */")))
+    "error"        (fn [_ args] (str "System.err.println(" args ")"))
+    "new_line"     (fn [_ _] "System.out.println()")
+    "read_integer" (fn [_ _] "Integer.parseInt(new java.util.Scanner(System.in).nextLine().trim())")
+    "read_real"    (fn [_ _] "Double.parseDouble(new java.util.Scanner(System.in).nextLine().trim())")}
+
+   :File
+   {"read"   (fn [t _] (str "java.nio.file.Files.readString(" t ".toPath())"))
+    "write"  (fn [t a] (str "java.nio.file.Files.writeString(" t ".toPath(), " a ")"))
+    "append" (fn [t a] (str "java.nio.file.Files.writeString(" t ".toPath(), " a ", java.nio.file.StandardOpenOption.APPEND)"))
+    "exists" (fn [t _] (str t ".exists()"))
+    "delete" (fn [t _] (str t ".delete()"))
+    "lines"  (fn [t _] (str "new ArrayList<>(java.nio.file.Files.readAllLines(" t ".toPath()))"))
+    "close"  (fn [t _] (str "/* " t ".close() */"))}
+
+   :Process
+   {"getenv"       (fn [_ a] (str "System.getenv(" a ")"))
+    "setenv"       (fn [_ a] (str "/* setenv not supported in Java: " a " */"))
+    "command_line" (fn [_ _] "new ArrayList<>(java.util.Arrays.asList(args))")}})
 
 (defn generate-call-expr
   "Generate Java code for method call.
@@ -271,7 +305,11 @@
   (let [args-code (str/join ", " (map generate-expression args))
         type-params (when (seq generic-args)
                       (str "<" (str/join ", " (map nex-type-to-java-boxed generic-args)) ">"))]
-    (str "new " class-name (or type-params "") "(" args-code ")")))
+    (case class-name
+      "Console" "new Object() /* Console */"
+      "File" (str "new java.io.File(" args-code ")")
+      "Process" "new Object() /* Process */"
+      (str "new " class-name (or type-params "") "(" args-code ")"))))
 
 (defn generate-subscript-expr
   "Generate Java code for subscript access (array/map access)"
