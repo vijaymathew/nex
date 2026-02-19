@@ -420,7 +420,7 @@ class Box [T]
       value := new_value
     end
 
-    print_value()
+    print_value
     do
       print(value)
     end
@@ -428,14 +428,14 @@ end
 
 -- Usage with different types:
 let int_box: Box [Integer] := create Box.make(42)
-int_box.print_value()  -- Prints: 42
+int_box.print_value  -- Prints: 42
 int_box.set(100)
-int_box.print_value()  -- Prints: 100
+int_box.print_value  -- Prints: 100
 
 let str_box: Box [String] := create Box.make("hello")
-str_box.print_value()  -- Prints: hello
+str_box.print_value  -- Prints: hello
 str_box.set("world")
-str_box.print_value()  -- Prints: world
+str_box.print_value  -- Prints: world
 
 -- Access fields as queries (uniform access):
 let current: Integer := int_box.value  -- Returns 100
