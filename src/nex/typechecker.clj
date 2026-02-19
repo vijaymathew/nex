@@ -247,6 +247,32 @@
       (throw (ex-info (str "Unknown unary operator: " operator)
                       {:error (type-error (str "Unknown unary operator: " operator))})))))
 
+(defn resolve-generic-type
+  "Substitute generic type parameters using a type-map.
+   E.g., with type-map {\"T\" \"Integer\"}, resolves \"T\" to \"Integer\"."
+  [param-type type-map]
+  (cond
+    (nil? type-map) param-type
+    (string? param-type) (get type-map param-type param-type)
+    (map? param-type) (-> param-type
+                          (update :base-type #(get type-map % %))
+                          (update :type-args #(when % (mapv (fn [t] (resolve-generic-type t type-map)) %)))
+                          (update :type-params #(when % (mapv (fn [t] (resolve-generic-type t type-map)) %))))
+    :else param-type))
+
+(defn build-generic-type-map
+  "Build a type-map from a class's generic params and a parameterized target type.
+   E.g., class Box[T] with target-type Box[Integer] => {\"T\" \"Integer\"}."
+  [env target-type]
+  (when (map? target-type)
+    (let [base-name (:base-type target-type)
+          type-args (or (:type-args target-type) (:type-params target-type))
+          class-def (env-lookup-class env base-name)]
+      (when (and class-def (:generic-params class-def) type-args)
+        (into {} (map (fn [param arg]
+                        [(:name param) arg])
+                      (:generic-params class-def) type-args))))))
+
 (defn check-call
   "Check the type of a method call"
   [env {:keys [target method args] :as expr}]
@@ -254,8 +280,14 @@
     ;; Method call on object
     (let [target-type (if (string? target)
                        (env-lookup-var env target)
-                       (check-expression env target))]
-      (if-let [method-sig (env-lookup-method env target-type method)]
+                       (check-expression env target))
+          ;; For parameterized types like Box[Integer], look up methods on the base class
+          base-type (if (map? target-type)
+                      (:base-type target-type)
+                      target-type)
+          ;; Build type-map for generic substitution
+          type-map (build-generic-type-map env target-type)]
+      (if-let [method-sig (env-lookup-method env base-type method)]
         (do
           ;; Check argument types
           (when (not= (count args) (count (:params method-sig)))
@@ -266,12 +298,13 @@
                                           " arguments, got " (count args)))})))
           (doseq [[arg param] (map vector args (:params method-sig))]
             (let [arg-type (check-expression env arg)
-                  param-type (:type param)]
+                  ;; Resolve generic params (e.g., T -> Integer)
+                  param-type (resolve-generic-type (:type param) type-map)]
               (when-not (types-equal? arg-type param-type)
                 (throw (ex-info (str "Argument type mismatch for method " method)
                                 {:error (type-error
                                          (str "Expected " param-type ", got " arg-type))})))))
-          (:return-type method-sig))
+          (resolve-generic-type (:return-type method-sig) type-map))
         ;; Method not found - might be built-in method, return Any for now
         "Any"))
     ;; Function call (built-in like print) - check arguments
@@ -621,32 +654,40 @@
 ;;
 
 (defn check-program
-  "Type check a complete program"
-  [{:keys [classes calls] :as program}]
-  (let [env (make-type-env)]
-    (try
-      ;; First pass: collect all class definitions
-      (doseq [class-def classes]
-        (collect-class-info env class-def))
+  "Type check a complete program.
+   opts may include :var-types - a map of {var-name => type} for pre-existing variables."
+  ([program] (check-program program {}))
+  ([{:keys [classes calls] :as program} opts]
+   (let [env (make-type-env)]
+     (try
+       ;; First pass: collect all class definitions
+       (doseq [class-def classes]
+         (collect-class-info env class-def))
 
-      ;; Second pass: check class bodies
-      (doseq [class-def classes]
-        (check-class env class-def))
+       ;; Inject pre-existing variable types (e.g., from REPL)
+       (doseq [[var-name var-type] (:var-types opts)]
+         (env-add-var env var-name var-type))
 
-      ;; Check top-level calls
-      (doseq [call calls]
-        (check-expression env call))
+       ;; Second pass: check class bodies
+       (doseq [class-def classes]
+         (check-class env class-def))
 
-      {:success true
-       :errors []}
+       ;; Check top-level calls
+       (doseq [call calls]
+         (check-expression env call))
 
-      (catch clojure.lang.ExceptionInfo e
-        (let [error-data (ex-data e)]
-          {:success false
-           :errors [(or (:error error-data)
-                       (type-error (.getMessage e)))]})))))
+       {:success true
+        :errors []}
+
+       (catch clojure.lang.ExceptionInfo e
+         (let [error-data (ex-data e)]
+           {:success false
+            :errors [(or (:error error-data)
+                        (type-error (.getMessage e)))]}))))))
 
 (defn type-check
-  "Type check Nex code (entry point)"
-  [ast]
-  (check-program ast))
+  "Type check Nex code (entry point).
+   opts may include :var-types - a map of {var-name => type} for pre-existing variables."
+  ([ast] (type-check ast {}))
+  ([ast opts]
+   (check-program ast opts)))

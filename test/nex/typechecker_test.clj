@@ -387,3 +387,81 @@
       (is (not (:success result)))
       (is (some #(re-find #"does not declare a return type" %)
                 (map tc/format-type-error (:errors result)))))))
+
+;; Generic type safety tests
+
+(deftest test-generic-method-type-mismatch
+  (testing "Calling generic method with wrong type should fail"
+    (let [code "class Box [T]
+                  feature
+                    value: T
+
+                    set(new_value: T)
+                    do
+                      value := new_value
+                    end
+                  end
+
+                class Main
+                  feature
+                    demo()
+                    do
+                      let b: Box[Integer] := create Box[Integer]
+                      b.set(\"hello\")
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"Expected Integer, got String" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-generic-method-correct-type-succeeds
+  (testing "Calling generic method with correct type should pass"
+    (let [code "class Box [T]
+                  feature
+                    value: T
+
+                    set(new_value: T)
+                    do
+                      value := new_value
+                    end
+                  end
+
+                class Main
+                  feature
+                    demo()
+                    do
+                      let b: Box[Integer] := create Box[Integer]
+                      b.set(42)
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result)))))
+
+(deftest test-generic-method-with-var-types
+  (testing "Type checking with pre-existing var-types catches generic mismatches"
+    (let [code "class Box [T]
+                  feature
+                    value: T
+
+                    set(new_value: T)
+                    do
+                      value := new_value
+                    end
+                  end"
+          ast (p/ast code)
+          ;; Simulate REPL: b was previously defined as Box[Integer]
+          var-types {"b" {:base-type "Box" :type-args ["Integer"]}}
+          ;; Now check b.set("hello") as a top-level call
+          call-ast {:type :program
+                    :classes (:classes ast)
+                    :calls [{:type :call
+                             :target "b"
+                             :method "set"
+                             :args [{:type :string :value "hello"}]}]}
+          result (tc/type-check call-ast {:var-types var-types})]
+      (is (not (:success result)))
+      (is (some #(re-find #"Expected Integer, got String" %)
+                (map tc/format-type-error (:errors result)))))))

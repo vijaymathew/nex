@@ -17,6 +17,7 @@
 
 (defonce ^:dynamic *repl-context* nil)
 (defonce ^:dynamic *type-checking-enabled* (atom false))
+(defonce ^:dynamic *repl-var-types* (atom {}))
 
 (defn init-repl-context
   "Initialize or reset the REPL context"
@@ -188,6 +189,7 @@
       (contains? #{":clear" ":reset"} input-lower)
       (do
         (println "Context cleared.")
+        (reset! *repl-var-types* {})
         (init-repl-context))
 
       ;; Classes command
@@ -351,12 +353,14 @@
       ;; Type check if enabled
       (when (and @*type-checking-enabled*
                  (= (:type ast) :program)
-                 (seq (:classes ast)))
+                 (or (seq (:classes ast)) (seq (:calls ast))))
         ;; Create an augmented AST that includes previously defined classes
         ;; so the type checker knows about them
         (let [prev-classes (vals @(:classes ctx))
-              augmented-ast (assoc ast :classes (concat prev-classes (:classes ast)))
-              result (tc/type-check augmented-ast)]
+              augmented-ast (if (seq prev-classes)
+                              (assoc ast :classes (concat prev-classes (:classes ast)))
+                              ast)
+              result (tc/type-check augmented-ast {:var-types @*repl-var-types*})]
           (when-not (:success result)
             (doseq [error (:errors result)]
               (println "Type error:" (tc/format-type-error error)))
@@ -371,6 +375,11 @@
               ;; Execute directly in the current context (preserves global vars)
               result (last (map #(interp/eval-node ctx %) (:body method-def)))
               output @(:output ctx)]
+          ;; Persist variable types from let statements (for future type checking)
+          (when @*type-checking-enabled*
+            (doseq [stmt (:body method-def)]
+              (when (and (map? stmt) (= (:type stmt) :let) (:var-type stmt))
+                (swap! *repl-var-types* assoc (:name stmt) (:var-type stmt)))))
           ;; Show output from print statements
           (when (seq output)
             (doseq [line output]
