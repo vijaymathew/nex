@@ -261,7 +261,7 @@
   (let [left-type (check-expression env left)
         right-type (check-expression env right)]
     (case operator
-      ("+" "-" "*" "/")
+      ("+" "-" "*" "/" "%")
       (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
         left-type
         (throw (ex-info (str "Operator " operator " requires numeric operands")

@@ -133,6 +133,7 @@
     "-" "-"
     "*" "*"
     "/" "/"
+    "%" "%"
     operator))
 
 (declare generate-expression)
