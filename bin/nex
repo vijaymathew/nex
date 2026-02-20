@@ -2,7 +2,7 @@
 # Nex Language Command-Line Interface (JVM)
 
 VERSION="0.1.0"
-NEX_HOME="${NEX_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+NEX_HOME="/usr/local/lib/nex"
 
 # Helper functions
 show_help() {
@@ -47,10 +47,11 @@ show_version() {
 }
 
 J_OPTIONS="-J--enable-native-access=ALL-UNNAMED"
+USER_DIR="$(pwd)"
 
 # Command implementations
 cmd_repl() {
-    cd "$NEX_HOME" && clojure ${J_OPTIONS} -M:repl
+    cd "$NEX_HOME" && clojure ${J_OPTIONS} -J-Dnex.user.dir="$USER_DIR" -M:repl
 }
 
 cmd_compile() {

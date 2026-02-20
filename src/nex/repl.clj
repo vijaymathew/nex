@@ -196,10 +196,17 @@
         ctx)
 
       :else
-      (let [file (io/file path)]
+      (let [;; Resolve relative paths against the user's original working directory
+            ;; (NEX_USER_DIR is set by the nex shell script before cd-ing to NEX_HOME)
+            file (let [f (io/file path)]
+                   (if (.isAbsolute f)
+                     f
+                     (if-let [user-dir (System/getProperty "nex.user.dir")]
+                       (io/file user-dir path)
+                       f)))]
         (if-not (.exists file)
           (do
-            (println (str "File not found: " path))
+            (println (str "File not found: " (.getPath file)))
             ctx)
           (do
             (when-not (.endsWith (.getName file) ".nex")
