@@ -103,39 +103,49 @@
     :else (str type-expr)))
 
 (defn is-generic-type-param?
-  "Check if a type is a generic type parameter (single uppercase letter)"
-  [type]
-  (let [t (normalize-type type)]
-    (and (string? t)
-         (re-matches #"[A-Z]" t))))
+  "Check if a type is a generic type parameter (single uppercase letter)."
+  ([type]
+   (let [t (normalize-type type)]
+     (and (string? t)
+          (re-matches #"[A-Z]" t))))
+  ([env type]
+   (let [t (normalize-type type)]
+     (and (string? t)
+          (re-matches #"[A-Z]" t)
+          (not (env-lookup-class env t))
+          (not (builtin-type? t))))))
 
 (defn types-equal?
   "Check if two types are equal"
-  [type1 type2]
-  (let [t1 (normalize-type type1)
-        t2 (normalize-type type2)]
-    (or (= t1 t2)
-        ;; Any is compatible with all types
-        (or (= t1 "Any") (= t2 "Any"))
-        ;; Integer and Integer64 are compatible
-        (and (or (= t1 "Integer") (= t1 "Integer64"))
-             (or (= t2 "Integer") (= t2 "Integer64")))
-        ;; Real and Decimal are compatible
-        (and (or (= t1 "Real") (= t1 "Decimal"))
-             (or (= t2 "Real") (= t2 "Decimal")))
-        ;; Generic type parameters are compatible with any type
-        (or (is-generic-type-param? t1)
-            (is-generic-type-param? t2))
-        ;; Handle parameterized types with different keys
-        (and (map? t1) (map? t2)
-             (= (:base-type t1) (:base-type t2))
-             (or (= (:type-params t1) (:type-params t2))
-                 (= (:type-params t1) (:type-args t2))
-                 (= (:type-args t1) (:type-params t2))
-                 (= (:type-args t1) (:type-args t2))))
-        ;; Allow base class name to match parameterized type (e.g., "Box" matches {:base-type "Box", ...})
-        (or (and (string? t1) (map? t2) (= t1 (:base-type t2)))
-            (and (map? t1) (string? t2) (= (:base-type t1) t2))))))
+  ([type1 type2]
+   (types-equal? nil type1 type2))
+  ([env type1 type2]
+   (let [t1 (normalize-type type1)
+         t2 (normalize-type type2)]
+     (or (= t1 t2)
+         ;; Any is compatible with all types
+         (or (= t1 "Any") (= t2 "Any"))
+         ;; Integer and Integer64 are compatible
+         (and (or (= t1 "Integer") (= t1 "Integer64"))
+              (or (= t2 "Integer") (= t2 "Integer64")))
+         ;; Real and Decimal are compatible
+         (and (or (= t1 "Real") (= t1 "Decimal"))
+              (or (= t2 "Real") (= t2 "Decimal")))
+         ;; Generic type parameters are compatible with any type (only when not a class)
+         (or (and env (is-generic-type-param? env t1))
+             (and env (is-generic-type-param? env t2))
+             (and (nil? env) (is-generic-type-param? t1))
+             (and (nil? env) (is-generic-type-param? t2)))
+         ;; Handle parameterized types with different keys
+         (and (map? t1) (map? t2)
+              (= (:base-type t1) (:base-type t2))
+              (or (= (:type-params t1) (:type-params t2))
+                  (= (:type-params t1) (:type-args t2))
+                  (= (:type-args t1) (:type-params t2))
+                  (= (:type-args t1) (:type-args t2))))
+         ;; Allow base class name to match parameterized type (e.g., "Box" matches {:base-type "Box", ...})
+         (or (and (string? t1) (map? t2) (= t1 (:base-type t2)))
+             (and (map? t1) (string? t2) (= (:base-type t1) t2)))))))
 
 (defn class-subtype?
   "Check if sub is the same as or a subclass of super."
@@ -163,14 +173,44 @@
   [env type1 type2]
   (let [t1 (normalize-type type1)
         t2 (normalize-type type2)]
-    (or (types-equal? t1 t2)
+    (or (types-equal? env t1 t2)
         (and (string? t1) (string? t2) (class-subtype? env t1 t2))
+        (and (map? t1) (string? t2) (class-subtype? env (:base-type t1) t2))
         (and (map? t1) (map? t2)
              (class-subtype? env (:base-type t1) (:base-type t2))
              (or (= (:type-params t1) (:type-params t2))
                  (= (:type-params t1) (:type-args t2))
                  (= (:type-args t1) (:type-params t2))
                  (= (:type-args t1) (:type-args t2)))))))
+
+(defn validate-generic-args
+  "Validate generic arguments against a class's generic constraints."
+  [env class-name generic-args]
+  (when (seq generic-args)
+    (let [class-def (env-lookup-class env class-name)]
+      (when (and class-def (:generic-params class-def))
+        (when (not= (count (:generic-params class-def)) (count generic-args))
+          (throw (ex-info (str "Type argument count mismatch for " class-name)
+                          {:error (type-error
+                                   (str "Expected " (count (:generic-params class-def))
+                                        " type arguments, got " (count generic-args)))})))
+        (doseq [[param arg] (map vector (:generic-params class-def) generic-args)]
+          (when-let [constraint (:constraint param)]
+            (when-not (types-compatible? env arg constraint)
+              (throw (ex-info (str "Type argument " arg " does not satisfy constraint " constraint)
+                              {:error (type-error
+                                       (str "Type argument " arg " does not satisfy constraint " constraint))})))))))))
+
+(defn validate-type-annotation
+  "Validate parameterized type annotations against generic constraints."
+  [env type-expr]
+  (let [t (normalize-type type-expr)]
+    (when (map? t)
+      (let [base (:base-type t)
+            args (or (:type-args t) (:type-params t))]
+        (validate-generic-args env base args)
+        (doseq [arg args]
+          (validate-type-annotation env arg))))))
 
 (defn is-numeric-type?
   "Check if a type is numeric"
@@ -234,8 +274,8 @@
               (= right-type "Nil")
               (types-compatible? env left-type right-type)
               ;; Allow comparisons with generic type parameters
-              (is-generic-type-param? left-type)
-              (is-generic-type-param? right-type))
+              (is-generic-type-param? env left-type)
+              (is-generic-type-param? env right-type))
         "Boolean"
         (throw (ex-info (str "Cannot compare " left-type " with " right-type)
                         {:error (type-error
@@ -244,10 +284,10 @@
       ("<" "<=" ">" ">=")
       (if (or (and (is-comparable-type? left-type)
                    (is-comparable-type? right-type)
-                   (types-equal? left-type right-type))
+                   (types-equal? env left-type right-type))
               ;; Allow comparisons with generic type parameters
-              (is-generic-type-param? left-type)
-              (is-generic-type-param? right-type))
+              (is-generic-type-param? env left-type)
+              (is-generic-type-param? env right-type))
         "Boolean"
         (throw (ex-info (str "Cannot compare " left-type " with " right-type)
                         {:error (type-error
@@ -377,17 +417,33 @@
       (when-not (or (env-lookup-class env class-name) (builtin-type? class-name))
         (throw (ex-info (str "Undefined class: " class-name)
                         {:error (type-error (str "Undefined class: " class-name))})))
-      (if (seq generic-args)
-        ;; Validate generic args against template class
-        (let [class-def (env-lookup-class env class-name)]
-          (when (and class-def (:generic-params class-def))
-            (when (not= (count (:generic-params class-def)) (count generic-args))
-              (throw (ex-info (str "Type argument count mismatch for " class-name)
+      (let [target-type (if (seq generic-args)
+                          (do
+                            (validate-generic-args env class-name generic-args)
+                            {:base-type class-name :type-args generic-args})
+                          class-name)]
+        (let [type-map (build-generic-type-map env target-type)
+              ctor-name (or constructor "make")
+              ctor-sig (env-lookup-method env class-name ctor-name)]
+          (when (or constructor (seq args))
+            (when-not ctor-sig
+              (throw (ex-info (str "Constructor not found: " class-name "." ctor-name)
                               {:error (type-error
-                                       (str "Expected " (count (:generic-params class-def))
-                                            " type arguments, got " (count generic-args)))}))))
-          {:base-type class-name :type-args generic-args})
-        class-name))))
+                                       (str "Constructor not found: " class-name "." ctor-name))})))
+            (let [params (:params ctor-sig)]
+              (when (not= (count params) (count args))
+                (throw (ex-info (str "Constructor argument count mismatch for " class-name "." ctor-name)
+                                {:error (type-error
+                                         (str "Expected " (count params) " args, got "
+                                              (count args)))})))
+              (doseq [[arg param] (map vector args params)]
+                (let [arg-type (check-expression env arg)
+                      param-type (resolve-generic-type (:type param) type-map)]
+                  (when-not (types-compatible? env arg-type param-type)
+                    (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
+                                    {:error (type-error
+                                             (str "Expected " param-type ", got " arg-type))}))))))))
+          target-type))))
 
 (defn check-array-literal
   "Check the type of an array literal"
@@ -398,7 +454,7 @@
       ;; Check all elements have same type
       (doseq [elem (rest elements)]
         (let [elem-type (check-expression env elem)]
-          (when-not (types-equal? first-type elem-type)
+          (when-not (types-equal? env first-type elem-type)
             (throw (ex-info "Array elements must have same type"
                             {:error (type-error
                                      (str "Array elements must have same type, got "
@@ -417,8 +473,8 @@
       (doseq [entry (rest entries)]
         (let [k-type (check-expression env (:key entry))
               v-type (check-expression env (:value entry))]
-          (when-not (and (types-equal? key-type k-type)
-                        (types-equal? val-type v-type))
+          (when-not (and (types-equal? env key-type k-type)
+                        (types-equal? env val-type v-type))
             (throw (ex-info "Map entries must have consistent types"
                             {:error (type-error
                                      "Map entries must have consistent types")})))))
@@ -488,6 +544,7 @@
                     {:error (type-error
                              (str "Type annotation required for variable '" name
                                   "'. Use: let " name ": <Type> := ..."))})))
+  (validate-type-annotation env var-type)
   (let [val-type (check-expression env value)]
     (when-not (types-compatible? env val-type var-type)
       (throw (ex-info (str "Type mismatch in let binding for " name)
@@ -559,6 +616,11 @@
 (defn check-method
   "Check a method definition"
   [env class-name {:keys [name params return-type require body ensure] :as method}]
+  ;; Validate parameter and return type annotations (generic constraints)
+  (doseq [param params]
+    (validate-type-annotation env (:type param)))
+  (when return-type
+    (validate-type-annotation env return-type))
   ;; Check that methods using Result declare a return type
   (when (and (not return-type)
              (or (some references-result? body)
@@ -602,6 +664,9 @@
   "Check a constructor definition"
   [env class-name {:keys [name params require body ensure] :as constructor}]
   (let [ctor-env (make-type-env env)]
+    ;; Validate parameter type annotations (generic constraints)
+    (doseq [param params]
+      (validate-type-annotation env (:type param)))
     ;; Add parameters
     (doseq [param params]
       (env-add-var ctor-env (:name param) (:type param)))
@@ -699,8 +764,11 @@
     (cond
       (= (:type section) :feature-section)
       (doseq [member (:members section)]
-        (when (= (:type member) :method)
-          (check-method env name member)))
+        (cond
+          (= (:type member) :method)
+          (check-method env name member)
+          (= (:type member) :field)
+          (validate-type-annotation env (:field-type member))))
 
       (= (:type section) :constructors)
       (doseq [ctor (:constructors section)]

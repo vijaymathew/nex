@@ -45,7 +45,7 @@ inheritClause
     ;
 
 inheritEntry
-    : IDENTIFIER renameClause? redefineClause? END
+    : IDENTIFIER renameClause? redefineClause? END?
     ;
 
 renameClause

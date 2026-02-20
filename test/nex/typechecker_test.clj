@@ -119,6 +119,60 @@ end"
       (is (:success result))
       (is (empty? (:errors result)))))) 
 
+(deftest test-generic-constraint-enforced
+  (testing "Generic constraints should be enforced"
+    (let [code "class A feature p do end end
+class B inherit A feature p do end end
+class X feature p do end end
+class C[T -> A]
+  feature
+    t: T
+  create
+    make(tt: T) do
+      t := tt
+    end
+end
+class Test
+  feature
+    demo() do
+      let b: B := create B
+      let x: X := create X
+      let ok: C[B] := create C[B].make(b)
+      let bad: C[X] := create C[X].make(x)
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (seq (:errors result)))))) 
+
+(deftest test-generic-constructor-arg-mismatch
+  (testing "Constructor args must respect resolved generic types"
+    (let [code "class A feature p do end end
+class B inherit A feature p do end end
+class Y inherit B feature p do end end
+class X feature p do end end
+class C[T -> A]
+  feature
+    t: T
+  create
+    make(tt: T) do
+      t := tt
+    end
+end
+class Test
+  feature
+    demo() do
+      let x: X := create X
+      let ok: C[Y] := create C[Y].make(create Y)
+      let bad: C[Y] := create C[Y].make(x)
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (seq (:errors result)))))) 
+
 (deftest test-boolean-operators
   (testing "Boolean operators should require Boolean operands"
     (let [code "class Test
