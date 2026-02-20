@@ -86,7 +86,7 @@ fieldDecl
     ;
 
 constructorDecl
-    : IDENTIFIER '(' paramList? ')' requireClause? DO block ensureClause? rescueClause? END
+    : IDENTIFIER ('(' paramList? ')')? requireClause? DO block ensureClause? rescueClause? END
     ;
 
 methodDecl
@@ -289,7 +289,7 @@ oldExpression
     ;
 
 createExpression
-    : CREATE IDENTIFIER genericArgs? ('.' IDENTIFIER '(' argumentList? ')')?
+    : CREATE IDENTIFIER genericArgs? ('.' IDENTIFIER ('(' argumentList? ')')?)?
     ;
 
 genericArgs
