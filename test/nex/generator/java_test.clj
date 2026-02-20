@@ -1,7 +1,9 @@
 (ns nex.generator.java-test
   (:require [clojure.test :refer [deftest is testing run-tests]]
             [nex.generator.java :as java]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clojure.java.io :as io]
+            [nex.parser :as p]))
 
 (deftest simple-class-test
   (testing "Simple class with fields and methods"
@@ -223,3 +225,120 @@ end"
       (is (not (str/includes? java-without-contracts "Precondition")))
       (is (not (str/includes? java-without-contracts "Postcondition")))
       (is (not (str/includes? java-without-contracts "// Class invariant:"))))))
+
+(deftest generate-main-default-constructor-test
+  (testing "Main class with no constructors uses new ClassName()"
+    (let [nex-code "class App
+  feature
+    run() do
+      print(\"hello\")
+    end
+end"
+          ast (p/ast nex-code)
+          main-code (java/generate-main ast)]
+      (is (str/includes? main-code "public class Main"))
+      (is (str/includes? main-code "public static void main(String[] args)"))
+      (is (str/includes? main-code "new App()")))))
+
+(deftest generate-main-named-constructor-test
+  (testing "Main class with no-arg constructor uses ClassName.ctorName()"
+    (let [nex-code "class App
+  create
+    make() do
+      print(\"init\")
+    end
+  feature
+    run() do
+      print(\"hello\")
+    end
+end"
+          ast (p/ast nex-code)
+          main-code (java/generate-main ast)]
+      (is (str/includes? main-code "App.make()"))
+      (is (not (str/includes? main-code "new App()"))))))
+
+(deftest generate-main-picks-first-noarg-test
+  (testing "Main picks the first no-arg constructor when multiple exist"
+    (let [nex-code "class App
+  create
+    from_config(path: String) do
+      print(path)
+    end
+    default() do
+      print(\"default\")
+    end
+    other() do
+      print(\"other\")
+    end
+  feature
+    run() do
+      print(\"hello\")
+    end
+end"
+          ast (p/ast nex-code)
+          main-code (java/generate-main ast)]
+      (is (str/includes? main-code "App.default()"))
+      (is (not (str/includes? main-code "App.other()"))))))
+
+(deftest translate-file-compiles-jar-test
+  (testing "translate-file compiles .java files into a runnable JAR and cleans up"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-java-test")
+          nex-file (io/file tmp-dir "test.nex")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class Greeter
+  create
+    make() do
+      print(\"hi\")
+    end
+  feature
+    greet() do
+      print(\"hello\")
+    end
+end")
+        (let [out-dir (io/file tmp-dir "out")
+              result (java/translate-file (.getPath nex-file) (.getPath out-dir) {})]
+          ;; Returns :files map and :jar path
+          (is (contains? (:files result) "Function.java"))
+          (is (contains? (:files result) "Greeter.java"))
+          (is (contains? (:files result) "Main.java"))
+          (is (str/includes? (get (:files result) "Main.java") "Greeter.make()"))
+          ;; JAR exists
+          (is (.exists (io/file (:jar result))))
+          (is (str/ends-with? (:jar result) ".jar"))
+          ;; .java and .class files are cleaned up
+          (is (empty? (filter #(str/ends-with? (.getName %) ".java")
+                              (.listFiles out-dir))))
+          (is (empty? (filter #(str/ends-with? (.getName %) ".class")
+                              (.listFiles out-dir)))))
+        (finally
+          (doseq [f (reverse (file-seq tmp-dir))]
+            (.delete f)))))))
+
+(deftest translate-file-jar-is-runnable-test
+  (testing "The produced JAR can be executed with java -jar"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-java-run-test")
+          nex-file (io/file tmp-dir "app.nex")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class App
+  create
+    make() do
+      print(\"hello from nex\")
+    end
+  feature
+    greet() do
+      print(\"hi\")
+    end
+end")
+        (let [out-dir (io/file tmp-dir "out")
+              result (java/translate-file (.getPath nex-file) (.getPath out-dir) {})
+              proc (.exec (Runtime/getRuntime)
+                          (into-array String ["java" "-jar" (:jar result)]))]
+          (.waitFor proc)
+          (let [output (slurp (.getInputStream proc))]
+            (is (= 0 (.exitValue proc)))
+            (is (str/includes? output "hello from nex"))))
+        (finally
+          (doseq [f (reverse (file-seq tmp-dir))]
+            (.delete f)))))))

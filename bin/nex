@@ -14,21 +14,24 @@ USAGE:
 
 COMMANDS:
     (no command)              Start the Nex REPL
-    compile <target> <file>   Compile a Nex file to target language
+    compile <target> <file> [output-dir]
+                              Compile a Nex file to target language
     format <file|dir>         Format Nex source files
     doc <file|dir> [output]   Generate documentation from Nex files
     eval <code>               Evaluate a Nex code snippet
     help                      Show this help message
 
 COMPILE TARGETS:
-    java                      Generate Java source code
-    javascript                Generate JavaScript source code
-    js                        Alias for javascript
+    java        Compile to a runnable JAR (uses javac)
+    javascript  Generate JavaScript source files
+    js          Alias for javascript
 
 EXAMPLES:
     nex                                      # Start REPL
-    nex compile java MyClass.nex             # Compile to Java
-    nex compile js MyClass.nex               # Compile to JavaScript
+    nex compile java app.nex                 # Compile to app.jar in current dir
+    nex compile java app.nex build/          # Compile to build/app.jar
+    nex compile js app.nex                   # Print JavaScript to stdout
+    nex compile js app.nex build/            # Write .js files to build/
     nex format src/                          # Format all files in directory
     nex format MyClass.nex                   # Format single file
     nex doc MyClass.nex MyClass.md           # Generate documentation
@@ -57,10 +60,11 @@ cmd_repl() {
 cmd_compile() {
     local target="$1"
     local file="$2"
+    local output="$3"
 
     if [[ -z "$target" || -z "$file" ]]; then
         echo "Error: compile requires target and file arguments"
-        echo "Usage: nex compile <target> <file>"
+        echo "Usage: nex compile <target> <file> [output-dir]"
         echo "Targets: java, javascript (or js)"
         exit 1
     fi
@@ -83,7 +87,19 @@ cmd_compile() {
     # Use absolute path for file
     file="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
 
-    cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.generator.$target "$file"
+    # For Java, default output dir to user's current directory (produces a JAR)
+    if [[ "$target" == "java" && -z "$output" ]]; then
+        output="$USER_DIR"
+    fi
+
+    if [[ -n "$output" ]]; then
+        # Make output path absolute
+        mkdir -p "$output"
+        output="$(cd "$output" && pwd)"
+        cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.generator.$target "$file" "$output"
+    else
+        cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.generator.$target "$file"
+    fi
 }
 
 cmd_format() {
