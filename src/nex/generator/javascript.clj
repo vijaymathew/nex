@@ -5,6 +5,8 @@
             [clojure.string :as str]
             [clojure.set :as set]))
 
+(def ^:dynamic *function-names* #{})
+
 ;;
 ;; Type Mapping
 ;;
@@ -44,6 +46,7 @@
       "Console" "Object"
       "File" "Object"
       "Process" "Object"
+      "Function" "Function"
       nex-type)
 
     :else nex-type))
@@ -270,8 +273,10 @@
            (method-fn target-code args-code))
          ;; Default: regular method call
          (str target-code "." method "(" args-code ")")))
-      ;; Global function call: map builtins
-      (map-builtin-function method args-code))))
+      ;; Global function call: function object or builtin
+      (if (contains? *function-names* method)
+        (str "NexGlobals." method ".call" (count args) "(" args-code ")")
+        (map-builtin-function method args-code)))))
 
 (defn generate-create-expr
   "Generate JavaScript code for create expression"
@@ -686,6 +691,30 @@
                 methods-code
                 ["}"])))))
 
+(defn generate-function-base-class
+  "Generate the built-in Function base class."
+  []
+  (let [method-lines
+        (map (fn [n]
+               (let [params (str/join ", " (map (fn [i] (str "arg" i))
+                                                (range 1 (inc n))))]
+                 (str "  call" n "(" params ") { return null; }")))
+             (range 1 33))]
+    (str "class Function {\n"
+         (str/join "\n" method-lines)
+         "\n}")))
+
+(defn generate-function-globals
+  "Generate a globals holder for function instances."
+  [functions]
+  (when (seq functions)
+    (let [lines (map (fn [{:keys [name class-name]}]
+                       (str "  " name ": new " class-name "(),"))
+                     functions)]
+      (str "const NexGlobals = {\n"
+           (str/join "\n" lines)
+           "\n};"))))
+
 ;;
 ;; Main Translation Function
 ;;
@@ -712,10 +741,21 @@
   ([ast opts]
    (let [imports (:imports ast)
          classes (:classes ast)
+         functions (:functions ast)
+         function-names (set (map :name functions))
          js-imports (keep generate-import imports)
-         js-classes (map #(generate-class % opts) classes)
-         parts (concat js-imports [""] js-classes)] ; Empty string adds blank line after imports
-     (str/join "\n" (remove empty? parts)))))
+         function-base (generate-function-base-class)
+         function-globals (generate-function-globals functions)]
+     (binding [*function-names* function-names]
+       (let [js-classes (map #(generate-class % opts) classes)
+             parts (concat js-imports
+                           (when (seq js-imports) [""])
+                           [function-base]
+                           (when function-globals [""])
+                           (when function-globals [function-globals])
+                           (when (seq js-classes) [""])
+                           js-classes)]
+         (str/join "\n" (remove empty? parts)))))))
 
 (defn translate
   "Translate Nex source code to JavaScript

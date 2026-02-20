@@ -7,8 +7,7 @@ grammar nexlang;
  */
 
 program
-    : (importStmt | internStmt | classDecl)+ EOF
-    | methodCall+ EOF
+    : (importStmt | internStmt | classDecl | functionDecl | methodCall)* EOF
     ;
 
 importStmt
@@ -26,6 +25,10 @@ classDecl
       classBody
       invariantClause?
       END
+    ;
+
+functionDecl
+    : FUNCTION IDENTIFIER '(' paramList? ')' (':' type)? DO block END
     ;
 
 genericParams
@@ -337,6 +340,7 @@ mapEntry
  */
 
 CLASS        : 'class';
+FUNCTION     : 'function';
 FEATURE      : 'feature';
 PRIVATE      : 'private';
 CONSTRUCTORS : 'constructors';

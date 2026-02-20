@@ -348,9 +348,10 @@
       (format-type t))))
 
 (defn looks-like-class?
-  "Check if input looks like a class definition"
+  "Check if input looks like a class or function definition"
   [input]
-  (re-find #"^\s*class\s+" input))
+  (or (re-find #"^\s*class\s+" input)
+      (re-find #"^\s*function\s+" input)))
 
 (defn looks-like-statement?
   "Check if input needs to be wrapped in a method"
@@ -475,14 +476,19 @@
         ;; If it's a program, handle it based on content
         (= (:type ast) :program)
         (let [classes (:classes ast)
+              functions (:functions ast)
               calls (:calls ast)
               real-class-names (filter #(not= % "__ReplTemp__")
-                                      (map :name (filter map? classes)))]
-          ;; If there are classes, evaluate the program to register them
-          (when (seq real-class-names)
-            (interp/eval-node ctx ast))
+                                      (map :name (filter map? classes)))
+              function-names (map :name (filter map? functions))]
+          ;; If there are classes or functions, evaluate the program to register them
+          (when (or (seq real-class-names) (seq function-names))
+            (interp/eval-node ctx ast)
+            (when @*type-checking-enabled*
+              (doseq [fn-def (filter map? functions)]
+                (swap! *repl-var-types* assoc (:name fn-def) (:class-name fn-def)))))
           ;; If there are calls/expressions and no classes, evaluate them to get result
-          (let [result (when (and (seq calls) (empty? real-class-names))
+          (let [result (when (and (seq calls) (empty? real-class-names) (empty? function-names))
                         (last (map #(interp/eval-node ctx %) calls)))
                 output @(:output ctx)]
             ;; Show any output
@@ -491,7 +497,7 @@
                 (println line)))
             ;; Show result if it's not nil, not from a print, and no classes were defined
             ;; Always show false/0 results too.
-            (when (and (some? result) (empty? output) (empty? real-class-names))
+            (when (and (some? result) (empty? output) (empty? real-class-names) (empty? function-names))
               (if-let [type-str (when (seq calls)
                                   (infer-result-type ctx (last calls)))]
                 (println (str type-str " " (format-value result)))

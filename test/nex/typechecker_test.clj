@@ -173,6 +173,39 @@ end"
       (is (not (:success result)))
       (is (seq (:errors result)))))) 
 
+(deftest test-function-typecheck
+  (testing "Function definitions and calls should typecheck"
+    (let [code "function increment(x: Integer): Integer
+do
+  Result := x + 1
+end
+class Test
+  feature
+    demo() do
+      let y: Integer := increment(10)
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result)))))
+
+(deftest test-function-arg-mismatch
+  (testing "Function call with wrong argument type should fail"
+    (let [code "function increment(x: Integer): Integer
+do
+  Result := x + 1
+end
+class Test
+  feature
+    demo() do
+      let y: Integer := increment(\"oops\")
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (seq (:errors result)))))) 
+
 (deftest test-boolean-operators
   (testing "Boolean operators should require Boolean operands"
     (let [code "class Test

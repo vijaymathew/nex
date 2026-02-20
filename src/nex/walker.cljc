@@ -66,13 +66,17 @@
      (let [cleaned-nodes (remove string? nodes) ; Filter out "<EOF>" token
            transformed (mapv transform-node cleaned-nodes)
            classes (filter #(= :class (:type %)) transformed)
+           functions (filter #(= :function (:type %)) transformed)
            interns (filter #(= :intern (:type %)) transformed)
            imports (filter #(= :import (:type %)) transformed)
-           calls (filter #(= :call (:type %)) transformed)]
+           calls (filter #(= :call (:type %)) transformed)
+           function-classes (mapv :class-def functions)
+           all-classes (vec (concat classes function-classes))]
        {:type :program
         :imports (vec imports)
         :interns (vec interns)
-        :classes (vec classes)
+        :classes all-classes
+        :functions (vec functions)
         :calls (vec calls)}))
 
    :internStmt
@@ -147,6 +151,49 @@
         :parents (when inherit-clause (transform-node inherit-clause))
         :body (walk-children class-body)
         :invariant (when invariant-clause (transform-node invariant-clause))}))
+
+   :functionDecl
+   (fn [[_ _function-kw name & rest]]
+     (let [cleaned (remove #(#{"(" ")" "do" "end" ":"} %) rest)
+           params (first (filter #(and (sequential? %)
+                                       (= :paramList (first %)))
+                                 cleaned))
+           return-type (first (filter #(and (sequential? %)
+                                            (= :type (first %)))
+                                      cleaned))
+           block (first (filter #(and (sequential? %)
+                                      (= :block (first %)))
+                                cleaned))
+           params-v (when params (transform-node params))
+           return-type-v (when return-type (transform-node return-type))
+           body (transform-node block)
+           fn-name (token-text name)
+           class-name (str fn-name "_Function")
+           method-name (str "call" (count params-v))
+           method-def {:type :method
+                       :name method-name
+                       :params params-v
+                       :return-type return-type-v
+                       :note nil
+                       :require nil
+                       :body body
+                       :ensure nil}
+           class-def {:type :class
+                      :name class-name
+                      :generic-params nil
+                      :note nil
+                      :parents [{:parent "Function" :renames nil :redefines nil}]
+                      :body [{:type :feature-section
+                              :visibility {:type :public}
+                              :members [method-def]}]
+                      :invariant nil}]
+       {:type :function
+        :name fn-name
+        :class-name class-name
+        :params params-v
+        :return-type return-type-v
+        :body body
+        :class-def class-def}))
 
    :inheritClause
    (fn [[_ _inherit-kw & entries]]

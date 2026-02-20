@@ -60,7 +60,7 @@
 
 (def builtin-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Any" "Void" "Nil" "Console" "File" "Process"})
+    "Array" "Map" "Any" "Void" "Nil" "Console" "File" "Process" "Function"})
 
 (defn builtin-type? [type-name]
   (contains? builtin-types type-name))
@@ -387,11 +387,34 @@
           (resolve-generic-type (:return-type method-sig) type-map))
         ;; Method not found - might be built-in method, return Any for now
         "Any"))
-    ;; Function call (built-in like print) - check arguments
-    (do
-      (doseq [arg args]
-        (check-expression env arg))
-      "Void")))
+    ;; Function call (built-in like print) or function object call
+    (if-let [var-type (env-lookup-var env method)]
+      (let [base-type (if (map? var-type) (:base-type var-type) var-type)
+            call-name (str "call" (count args))
+            method-sig (env-lookup-method env base-type call-name)
+            type-map (build-generic-type-map env var-type)]
+        (when-not method-sig
+          (throw (ex-info (str "Method not found: " call-name)
+                          {:error (type-error
+                                   (str "Method not found: " call-name))})))
+        (when (not= (count args) (count (:params method-sig)))
+          (throw (ex-info (str "Method " call-name " expects " (count (:params method-sig))
+                               " arguments, got " (count args))
+                          {:error (type-error
+                                   (str "Method " call-name " expects " (count (:params method-sig))
+                                        " arguments, got " (count args)))})))
+        (doseq [[arg param] (map vector args (:params method-sig))]
+          (let [arg-type (check-expression env arg)
+                param-type (resolve-generic-type (:type param) type-map)]
+            (when-not (types-compatible? env arg-type param-type)
+              (throw (ex-info (str "Argument type mismatch for method " call-name)
+                              {:error (type-error
+                                       (str "Expected " param-type ", got " arg-type))})))))
+        (resolve-generic-type (:return-type method-sig) type-map))
+      (do
+        (doseq [arg args]
+          (check-expression env arg))
+        "Void"))))
 
 (defn check-create
   "Check the type of a create expression"
@@ -417,33 +440,38 @@
       (when-not (or (env-lookup-class env class-name) (builtin-type? class-name))
         (throw (ex-info (str "Undefined class: " class-name)
                         {:error (type-error (str "Undefined class: " class-name))})))
-      (let [target-type (if (seq generic-args)
+      (let [class-def (env-lookup-class env class-name)
+            target-type (if (seq generic-args)
                           (do
                             (validate-generic-args env class-name generic-args)
                             {:base-type class-name :type-args generic-args})
                           class-name)]
-        (let [type-map (build-generic-type-map env target-type)
-              ctor-name (or constructor "make")
-              ctor-sig (env-lookup-method env class-name ctor-name)]
-          (when (or constructor (seq args))
-            (when-not ctor-sig
-              (throw (ex-info (str "Constructor not found: " class-name "." ctor-name)
-                              {:error (type-error
-                                       (str "Constructor not found: " class-name "." ctor-name))})))
-            (let [params (:params ctor-sig)]
-              (when (not= (count params) (count args))
-                (throw (ex-info (str "Constructor argument count mismatch for " class-name "." ctor-name)
-                                {:error (type-error
-                                         (str "Expected " (count params) " args, got "
-                                              (count args)))})))
-              (doseq [[arg param] (map vector args params)]
-                (let [arg-type (check-expression env arg)
-                      param-type (resolve-generic-type (:type param) type-map)]
-                  (when-not (types-compatible? env arg-type param-type)
-                    (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
+        ;; Imported Java classes have no Nex constructor signatures; skip validation.
+        (if (and class-def (:import class-def))
+          target-type
+          (do
+            (let [type-map (build-generic-type-map env target-type)
+                  ctor-name (or constructor "make")
+                  ctor-sig (env-lookup-method env class-name ctor-name)]
+              (when (or constructor (seq args))
+                (when-not ctor-sig
+                  (throw (ex-info (str "Constructor not found: " class-name "." ctor-name)
+                                  {:error (type-error
+                                           (str "Constructor not found: " class-name "." ctor-name))})))
+                (let [params (:params ctor-sig)]
+                  (when (not= (count params) (count args))
+                    (throw (ex-info (str "Constructor argument count mismatch for " class-name "." ctor-name)
                                     {:error (type-error
-                                             (str "Expected " param-type ", got " arg-type))}))))))))
-          target-type))))
+                                             (str "Expected " (count params) " args, got "
+                                                  (count args)))})))
+                  (doseq [[arg param] (map vector args params)]
+                    (let [arg-type (check-expression env arg)
+                          param-type (resolve-generic-type (:type param) type-map)]
+                      (when-not (types-compatible? env arg-type param-type)
+                        (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
+                                        {:error (type-error
+                                                 (str "Expected " param-type ", got " arg-type))}))))))))
+            target-type))))))
 
 (defn check-array-literal
   "Check the type of an array literal"
@@ -803,13 +831,21 @@
           {"getenv" {:params [{:name "name" :type "String"}] :return-type "String"}
            "setenv" {:params [{:name "name" :type "String"} {:name "value" :type "String"}] :return-type "Void"}
            "command_line" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}}]
-    (env-add-method env "Process" method-name sig)))
+    (env-add-method env "Process" method-name sig))
+
+  ;; Built-in Function methods: call1..call32
+  (doseq [n (range 1 33)]
+    (env-add-method env "Function"
+                    (str "call" n)
+                    {:params (mapv (fn [i] {:name (str "arg" i) :type "Any"})
+                                   (range 1 (inc n)))
+                     :return-type "Any"})))
 
 (defn check-program
   "Type check a complete program.
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([program] (check-program program {}))
-  ([{:keys [classes calls imports] :as program} opts]
+  ([{:keys [classes calls imports functions] :as program} opts]
    (let [env (make-type-env)]
      (try
        ;; Register imported Java classes (as placeholders)
@@ -827,6 +863,17 @@
        ;; Inject pre-existing variable types (e.g., from REPL)
        (doseq [[var-name var-type] (:var-types opts)]
          (env-add-var env var-name var-type))
+
+       ;; Register function variables (name -> generated class)
+       (doseq [fn-def functions]
+         (let [arity (count (:params fn-def))]
+           (when (or (< arity 1) (> arity 32))
+             (throw (ex-info (str "Function " (:name fn-def)
+                                  " must have between 1 and 32 parameters")
+                             {:error (type-error
+                                      (str "Function " (:name fn-def)
+                                           " must have between 1 and 32 parameters"))}))))
+         (env-add-var env (:name fn-def) (:class-name fn-def)))
 
        ;; Second pass: check class bodies
        (doseq [class-def classes]

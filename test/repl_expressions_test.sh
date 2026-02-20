@@ -241,6 +241,25 @@ else
 fi
 echo ""
 
+# Test 10: function syntax and call dispatch
+echo "Test 10: function syntax"
+echo "-------------------------"
+cat > /tmp/test_function.txt <<'EOF'
+function increment(x: Integer): Integer do Result := x + 1 end
+increment(10)
+:quit
+EOF
+
+output=$(cat /tmp/test_function.txt | clojure -M:repl 2>&1)
+cleaned=$(clean_output "$output")
+if echo "$cleaned" | grep -q "^11$"; then
+    echo "✓ PASS: function syntax works"
+else
+    echo "✗ FAIL: function syntax"
+    echo "$output"
+fi
+echo ""
+
 echo "All tests complete!"
 rm -f /tmp/test*.txt
 rm -f /tmp/repl_load_test.nex

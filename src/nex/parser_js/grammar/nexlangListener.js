@@ -41,6 +41,15 @@ export default class nexlangListener extends antlr4.tree.ParseTreeListener {
 	}
 
 
+	// Enter a parse tree produced by nexlangParser#functionDecl.
+	enterFunctionDecl(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#functionDecl.
+	exitFunctionDecl(ctx) {
+	}
+
+
 	// Enter a parse tree produced by nexlangParser#genericParams.
 	enterGenericParams(ctx) {
 	}

@@ -134,17 +134,49 @@
 
 (defrecord Context [classes globals current-env output imports specialized-classes])
 
+(declare register-class)
+
+(defn- build-function-base-class
+  "Create the built-in Function base class definition."
+  []
+  (let [make-method (fn [n]
+                      {:type :method
+                       :name (str "call" n)
+                       :params (if (zero? 0)
+                                 []
+                                 (mapv (fn [i]
+                                         {:name (str "arg" i) :type "Any"})
+                                       (range 1 (inc n))))
+                       :return-type "Any"
+                       :note nil
+                       :require nil
+                       :body []
+                       :ensure nil})
+        methods (vec (cons (make-method 0) (mapv make-method (range 1 33))))]
+    {:type :class
+     :name "Function"
+     :generic-params nil
+     :note nil
+     :parents nil
+     :body [{:type :feature-section
+             :visibility {:type :public}
+             :members methods}]
+     :invariant nil}))
+
 (defn make-context
   "Create a new runtime context."
   []
   (let [globals (make-env)]
-    (->Context
-     (atom {})           ; classes registry
-     globals             ; global environment
-     globals             ; current environment starts as global
-     (atom [])           ; output accumulator
-     (atom [])           ; imports registry
-     (atom {}))))        ; specialized classes cache
+    (let [ctx (->Context
+               (atom {})           ; classes registry
+               globals             ; global environment
+               globals             ; current environment starts as global
+               (atom [])           ; output accumulator
+               (atom [])           ; imports registry
+               (atom {}))]         ; specialized classes cache
+      ;; Register built-in Function base class
+      (register-class ctx (build-function-base-class))
+      ctx)))
 
 (defn register-class
   "Register a class definition in the context."
@@ -772,7 +804,7 @@
                     {:path path :class-name class-name :alias alias}))))
 
 (defmethod eval-node :program
-  [ctx {:keys [imports interns classes calls]}]
+  [ctx {:keys [imports interns classes functions calls]}]
   ;; First, store all import statements (for code generation)
   (doseq [import-node imports]
     (when (map? import-node)
@@ -788,6 +820,11 @@
     (when (map? class-node)
       (register-class ctx class-node)))
 
+  ;; Register and instantiate functions
+  (doseq [fn-node functions]
+    (when (map? fn-node)
+      (eval-node ctx fn-node)))
+
   ;; Finally, execute any top-level method calls
   (doseq [call-node calls]
     (when (map? call-node)
@@ -801,6 +838,14 @@
   ;; Classes are just registered, not executed
   (register-class ctx class-def)
   nil)
+
+(defmethod eval-node :function
+  [ctx {:keys [name class-def class-name]}]
+  ;; Register the generated function class and create a global instance
+  (register-class ctx class-def)
+  (let [obj (make-object class-name {})]
+    (env-define (:current-env ctx) name obj)
+    obj))
 
 (defmethod eval-node :call
   [ctx {:keys [target method args]}]
@@ -832,6 +877,7 @@
                                       (get-default-field-value return-type)
                                       nil)
                       _ (env-define method-env "result" default-result)
+                      _ (env-define method-env "Result" default-result)
                       _ (env-define method-env "Current" obj)
                       new-ctx (-> ctx
                                  (assoc :current-env method-env)
@@ -854,7 +900,21 @@
                                             (:fields obj)
                                             all-fields)
                       updated-obj (make-object (:class-name obj) updated-fields)
-                      result (env-lookup method-env "result")]
+                      result-flag (try
+                                    (env-lookup method-env "__result_assigned__")
+                                    (catch #?(:clj Exception :cljs :default) _ ::not-found))
+                      result (cond
+                               (= result-flag "Result")
+                               (env-lookup method-env "Result")
+                               (= result-flag "result")
+                               (env-lookup method-env "result")
+                               :else
+                               (let [res (try
+                                           (env-lookup method-env "Result")
+                                           (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+                                 (if (not= res ::not-found)
+                                   res
+                                   (env-lookup method-env "result"))))]
                   (try
                     (when-let [ensure-assertions (:ensure method-def)]
                       (check-assertions new-ctx ensure-assertions Postcondition))
@@ -881,11 +941,20 @@
              :cljs (throw (ex-info (str "Method not found on type: " method)
                                    {:target target :value obj :method method})))))
 
-      (if-let [current-obj (:current-object ctx)]
-        (let [class-def (lookup-class ctx (:class-name current-obj))
-              method-lookup (lookup-method-with-inheritance ctx class-def method)]
-          (if method-lookup
-            (let [all-fields (get-all-fields ctx class-def)
+      (let [fn-obj (try
+                     (env-lookup (:current-env ctx) method)
+                     (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+        (if (and (not= fn-obj ::not-found) (nex-object? fn-obj))
+          (let [call-method (str "call" (count args))]
+            (eval-node ctx {:type :call
+                            :target method
+                            :method call-method
+                            :args args}))
+          (if-let [current-obj (:current-object ctx)]
+            (let [class-def (lookup-class ctx (:class-name current-obj))
+                  method-lookup (lookup-method-with-inheritance ctx class-def method)]
+              (if method-lookup
+                (let [all-fields (get-all-fields ctx class-def)
                   current-env (:current-env ctx)
                   updated-fields (reduce (fn [m field]
                                           (let [field-name (:name field)
@@ -911,14 +980,14 @@
                       (doseq [[field-name field-val] (:fields called-obj)]
                         (env-set! current-env (name field-name) field-val)))]
               result)
+                (if-let [builtin (get builtins method)]
+                  (apply builtin ctx arg-values)
+                  (throw (ex-info (str "Undefined method: " method)
+                                  {:function method :object current-obj})))))
             (if-let [builtin (get builtins method)]
               (apply builtin ctx arg-values)
-              (throw (ex-info (str "Undefined method: " method)
-                              {:function method :object current-obj})))))
-        (if-let [builtin (get builtins method)]
-          (apply builtin ctx arg-values)
-          (throw (ex-info (str "Undefined function: " method)
-                          {:function method}))))))
+              (throw (ex-info (str "Undefined function: " method)
+                              {:function method}))))))))
     )
 
 (defmethod eval-node :assign
@@ -927,6 +996,8 @@
     ;; Assignment (without let) ONLY updates existing variables
     ;; It should fail if the variable doesn't exist
     (env-set! (:current-env ctx) target val)
+    (when (#{"Result" "result"} target)
+      (env-define (:current-env ctx) "__result_assigned__" target))
     val))
 
 (defmethod eval-node :let
@@ -934,6 +1005,8 @@
   (let [val (eval-node ctx value)]
     ;; Always define a new binding in the current scope (can shadow outer scopes)
     (env-define (:current-env ctx) name val)
+    (when (#{"Result" "result"} name)
+      (env-define (:current-env ctx) "__result_assigned__" name))
     val))
 
 (defmethod eval-node :block
