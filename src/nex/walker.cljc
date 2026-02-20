@@ -283,7 +283,7 @@
    (fn [[_ name & rest]]
      (let [;; Filter out punctuation tokens
            cleaned (remove #(#{"(" ")" "do" "end"} %) rest)
-           ;; Separate params, require, ensure, and block
+           ;; Separate params, require, ensure, rescue, and block
            params (first (filter #(and (sequential? %)
                                        (= :paramList (first %)))
                                 cleaned))
@@ -293,6 +293,9 @@
            ensure-clause (first (filter #(and (sequential? %)
                                               (= :ensureClause (first %)))
                                        cleaned))
+           rescue-clause (first (filter #(and (sequential? %)
+                                              (= :rescueClause (first %)))
+                                       cleaned))
            block (first (filter #(and (sequential? %)
                                       (= :block (first %)))
                                cleaned))]
@@ -301,13 +304,14 @@
         :params (when params (transform-node params))
         :require (when require-clause (transform-node require-clause))
         :body (transform-node block)
-        :ensure (when ensure-clause (transform-node ensure-clause))}))
+        :ensure (when ensure-clause (transform-node ensure-clause))
+        :rescue (when rescue-clause (transform-node rescue-clause))}))
 
    :methodDecl
    (fn [[_ name & rest]]
      (let [;; Filter out punctuation tokens
            cleaned (remove #(#{"(" ")" "do" "end" ":"} %) rest)
-           ;; Separate params, return type, note, require, ensure, and block
+           ;; Separate params, return type, note, require, ensure, rescue, and block
            params (first (filter #(and (sequential? %)
                                        (= :paramList (first %)))
                                 cleaned))
@@ -323,6 +327,9 @@
            ensure-clause (first (filter #(and (sequential? %)
                                               (= :ensureClause (first %)))
                                        cleaned))
+           rescue-clause (first (filter #(and (sequential? %)
+                                              (= :rescueClause (first %)))
+                                       cleaned))
            block (first (filter #(and (sequential? %)
                                       (= :block (first %)))
                                cleaned))]
@@ -333,7 +340,8 @@
         :note (when note-clause (transform-node note-clause))
         :require (when require-clause (transform-node require-clause))
         :body (transform-node block)
-        :ensure (when ensure-clause (transform-node ensure-clause))}))
+        :ensure (when ensure-clause (transform-node ensure-clause))
+        :rescue (when rescue-clause (transform-node rescue-clause))}))
 
    :paramList
    (fn [[_ & params]]
@@ -421,9 +429,13 @@
      (transform-node stmt))
 
    :scopedBlock
-   (fn [[_ _do-kw block _end-kw]]
-     {:type :scoped-block
-      :body (transform-node block)})
+   (fn [[_ _do-kw & rest]]
+     (let [cleaned (remove #(#{"do" "end"} %) rest)
+           rescue-clause (first (filter #(and (sequential? %) (= :rescueClause (first %))) cleaned))
+           block (first (filter #(and (sequential? %) (= :block (first %))) cleaned))]
+       {:type :scoped-block
+        :body (transform-node block)
+        :rescue (when rescue-clause (transform-node rescue-clause))}))
 
    :ifStatement
    (fn [[_ _if-kw condition _then-kw then-block _else-kw else-block _end-kw]]
@@ -477,6 +489,18 @@
    :ensureClause
    (fn [[_ _ensure-kw & assertions]]
      (mapv transform-node assertions))
+
+   :rescueClause
+   (fn [[_ _rescue-kw block]]
+     (transform-node block))
+
+   :raiseStatement
+   (fn [[_ _raise-kw expr]]
+     {:type :raise :value (transform-node expr)})
+
+   :retryStatement
+   (fn [[_ _retry-kw]]
+     {:type :retry})
 
    :invariantClause
    (fn [[_ _invariant-kw & assertions]]

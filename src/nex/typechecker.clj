@@ -621,8 +621,15 @@
       :call (check-expression env stmt)
       :if (check-if env stmt)
       :loop (check-loop env stmt)
-      :scoped-block (doseq [s (:body stmt)] (check-statement env s))
+      :scoped-block (do
+                      (doseq [s (:body stmt)] (check-statement env s))
+                      (when-let [rescue (:rescue stmt)]
+                        (let [rescue-env (make-type-env env)]
+                          (env-add-var rescue-env "exception" "Any")
+                          (doseq [s rescue] (check-statement rescue-env s)))))
       :with (doseq [s (:body stmt)] (check-statement env s))
+      :raise (check-expression env (:value stmt))
+      :retry nil
       :member-assign
       (let [field-name (:field stmt)
             field-type (env-lookup-var env field-name)
@@ -658,7 +665,7 @@
 
 (defn check-method
   "Check a method definition"
-  [env class-name {:keys [name params return-type require body ensure] :as method}]
+  [env class-name {:keys [name params return-type require body ensure rescue] :as method}]
   ;; Validate parameter and return type annotations (generic constraints)
   (doseq [param params]
     (validate-type-annotation env (:type param)))
@@ -704,11 +711,18 @@
         (when-not (= cond-type "Boolean")
           (throw (ex-info (str "Postcondition must be Boolean in method " name)
                           {:error (type-error
-                                   (str "Postcondition must be Boolean, got " cond-type))})))))))
+                                   (str "Postcondition must be Boolean, got " cond-type))})))))
+
+    ;; Check rescue clause
+    (when rescue
+      (let [rescue-env (make-type-env method-env)]
+        (env-add-var rescue-env "exception" "Any")
+        (doseq [stmt rescue]
+          (check-statement rescue-env stmt))))))
 
 (defn check-constructor
   "Check a constructor definition"
-  [env class-name {:keys [name params require body ensure] :as constructor}]
+  [env class-name {:keys [name params require body ensure rescue] :as constructor}]
   (let [ctor-env (make-type-env env)]
     ;; Track current class for this/super resolution
     (env-add-var ctor-env "__current_class__" class-name)
@@ -740,7 +754,14 @@
           (when-not (= cond-type "Boolean")
             (throw (ex-info (str "Postcondition must be Boolean in constructor " name)
                             {:error (type-error
-                                     (str "Postcondition must be Boolean, got " cond-type))}))))))))
+                                     (str "Postcondition must be Boolean, got " cond-type))}))))))
+
+    ;; Check rescue clause
+    (when rescue
+      (let [rescue-env (make-type-env ctor-env)]
+        (env-add-var rescue-env "exception" "Any")
+        (doseq [stmt rescue]
+          (check-statement rescue-env stmt))))))
 
 ;;
 ;; Class Type Checking

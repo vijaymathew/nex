@@ -117,7 +117,8 @@
   '("class" "feature" "inherit" "end" "do" "if" "then" "else"
     "from" "until" "invariant" "variant" "require" "ensure"
     "let" "rename" "redefine" "as" "and" "or" "not"
-    "old" "create" "private" "note" "with" "import" "intern" "function")
+    "old" "create" "private" "note" "with" "import" "intern" "function"
+    "raise" "rescue" "retry")
   "Nex language keywords.")
 
 (defconst nex-types
@@ -130,8 +131,8 @@
   "Nex language constants.")
 
 (defconst nex-builtins
-  '("print" "println")
-  "Nex built-in functions.")
+  '("print" "println" "result" "exception")
+  "Nex built-in functions and special variables.")
 
 (defvar nex-font-lock-keywords
   `(
@@ -240,7 +241,7 @@
      (looking-back
       (regexp-opt '("class" "do" "then" "else" "require" "ensure"
                     "from" "until" "inherit" "invariant" "variant"
-                    "rename" "redefine")
+                    "rename" "redefine" "rescue")
                   'words)
       (line-beginning-position))
      ;; Section keywords that contain items (feature, create)
@@ -275,8 +276,8 @@
     (beginning-of-line)
     (skip-chars-forward " \t")
     (or
-     ;; 'end' and 'else' close blocks
-     (looking-at (regexp-opt '("end" "else") 'words))
+     ;; 'end', 'else', and 'rescue' close blocks
+     (looking-at (regexp-opt '("end" "else" "rescue") 'words))
      ;; 'do' aligns with require/ensure if inside contract block
      (and (looking-at "\\bdo\\b")
           (nex-in-contract-block-p)))))

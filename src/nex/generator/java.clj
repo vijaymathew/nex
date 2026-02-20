@@ -413,14 +413,64 @@
                (str/join "\n" else-code)
                (indent level "}")])))
 
+(defn has-retry?
+  "Check if statements contain a :retry node"
+  [stmts]
+  (some (fn [stmt]
+          (case (:type stmt)
+            :retry true
+            :if (or (has-retry? (:then stmt)) (has-retry? (:else stmt)))
+            :scoped-block (has-retry? (:body stmt))
+            false))
+        stmts))
+
+(defn ends-with-retry?
+  "Check if the last statement is a :retry"
+  [stmts]
+  (= :retry (:type (last stmts))))
+
+(defn generate-rescue
+  "Generate Java try/catch with optional retry loop"
+  [level body rescue var-names]
+  (let [body-stmts (map #(generate-statement (+ level 2) % var-names) body)
+        rescue-stmts (map #(generate-statement (+ level 2) % var-names) rescue)
+        has-retry (has-retry? rescue)
+        needs-throw (not (ends-with-retry? rescue))]
+    (if has-retry
+      ;; while(true) { try { body; break; } catch (...) { rescue; throw?; } }
+      (str/join "\n"
+        (concat
+          [(indent level "while (true) {")]
+          [(indent (+ level 1) "try {")]
+          body-stmts
+          [(indent (+ level 2) "break;")]
+          [(indent (+ level 1) "} catch (Exception _nex_e) {")]
+          [(indent (+ level 2) "var exception = _nex_e.getMessage();")]
+          rescue-stmts
+          (when needs-throw [(indent (+ level 2) "throw _nex_e;")])
+          [(indent (+ level 1) "}")]
+          [(indent level "}")]))
+      ;; try { body; } catch (...) { rescue; throw; }
+      (str/join "\n"
+        (concat
+          [(indent level "try {")]
+          body-stmts
+          [(indent level "} catch (Exception _nex_e) {")]
+          [(indent (+ level 1) "var exception = _nex_e.getMessage();")]
+          rescue-stmts
+          [(indent (+ level 1) "throw _nex_e;")]
+          [(indent level "}")])))))
+
 (defn generate-scoped-block
   "Generate Java code for scoped block"
-  [level {:keys [body]} var-names]
-  (let [statements (map #(generate-statement (+ level 1) % var-names) body)]
-    (str/join "\n"
-              [(indent level "{")
-               (str/join "\n" statements)
-               (indent level "}")])))
+  [level {:keys [body rescue]} var-names]
+  (if rescue
+    (generate-rescue level body rescue var-names)
+    (let [statements (map #(generate-statement (+ level 1) % var-names) body)]
+      (str/join "\n"
+                [(indent level "{")
+                 (str/join "\n" statements)
+                 (indent level "}")]))))
 
 (defn extract-var-names
   "Extract variable names from let statements"
@@ -471,6 +521,9 @@
      :with (when (= (:target stmt) "java")
              ;; Only include this block if target is "java"
              (str/join "\n" (map #(generate-statement level % var-names) (:body stmt))))
+     :raise (indent level (str "throw new RuntimeException(String.valueOf("
+                                (generate-expression (:value stmt)) "));"))
+     :retry (indent level "continue;")
      :member-assign (indent level
                       (let [obj-str (if (= (:object-type stmt) :this) *this-name* "super")]
                         (str obj-str "." (:field stmt) " = " (generate-expression (:value stmt)) ";")))
@@ -533,7 +586,7 @@
 
 (defn generate-method
   "Generate Java code for a method"
-  [level {:keys [name params return-type body require ensure visibility note]} opts]
+  [level {:keys [name params return-type body require ensure rescue visibility note]} opts]
   (let [java-return (if return-type
                       (nex-type-to-java return-type)
                       "void")
@@ -559,7 +612,9 @@
                                    (str "var old_" field-name " = " field-name ";")))
                           old-refs))
         preconditions (generate-assertions (+ level 1) require "Precondition" opts)
-        statements (map #(generate-statement (+ level 1) %) body)
+        statements (if rescue
+                     [(generate-rescue (+ level 1) body rescue #{})]
+                     (map #(generate-statement (+ level 1) %) body))
         postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)
         ;; Add return statement if method has return type
         return-stmt (when return-type
@@ -601,7 +656,7 @@
 
 (defn generate-constructor
   "Generate Java static factory method for a Nex constructor"
-  [level class-name {:keys [name params body require ensure]} opts]
+  [level class-name {:keys [name params body require ensure rescue]} opts]
   (let [local-name (class-name-to-local class-name)
         params-code (str/join ", "
                               (map (fn [{:keys [name type]}]
@@ -609,7 +664,9 @@
                                    params))
         preconditions (generate-assertions (+ level 1) require "Precondition" opts)
         statements (binding [*this-name* local-name]
-                     (mapv #(generate-statement (+ level 1) %) body))
+                     (if rescue
+                       [(generate-rescue (+ level 1) body rescue #{})]
+                       (mapv #(generate-statement (+ level 1) %) body)))
         postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)]
     (str/join "\n"
               (concat

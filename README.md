@@ -19,6 +19,7 @@ Nex is an Eiffel-inspired programming language that combines elegant, English-li
 ### 💎 Modern Language Features
 - **Generic Types**: Parameterized classes with constraints (`List [G]`, `Map [K -> Hashable, V]`)
 - **Arrays & Maps**: Built-in collections with method access (`arr.at(0)`, `map.at("key")`, `arr.set(0, value)`)
+- **Exception Handling**: `raise`, `rescue`, and `retry` for structured error recovery
 - **Multiple Inheritance**: With rename and redefine clauses
 - **Lexical Scoping**: Scoped blocks with variable shadowing
 - **Loop Contracts**: Invariants and variants for verified iteration
@@ -269,7 +270,7 @@ class Account {
 
 ### 5. Running Tests
 
-The test suite includes 47 tests covering all language features:
+The test suite covers all language features:
 
 ```bash
 # Run all tests
@@ -293,11 +294,11 @@ Testing nex.loops-test
 Testing nex.if-conditions-test
 ...
 
-Ran 47 tests containing 111 assertions.
+Ran 206 tests containing 520 assertions.
 0 failures, 0 errors.
 
-Total tests: 47
-Passed: 111
+Total tests: 206
+Passed: 520
 Failed: 0
 Errors: 0
 ```
@@ -403,6 +404,31 @@ class Math
 end
 ```
 
+### Example: Exception Handling with Retry
+
+```nex
+class HttpClient
+  feature
+    fetch(url: String) do
+      let attempts := 0
+      do
+        attempts := attempts + 1
+        -- simulate a request that might fail
+        if attempts < 3 then
+          raise "connection timeout"
+        else
+          print("success on attempt " + attempts)
+        end
+      rescue
+        print("attempt " + attempts + " failed: " + exception)
+        retry
+      end
+    end
+end
+```
+
+`raise` throws an exception with any value. The `rescue` block catches it, binding the value to `exception`. Using `retry` re-executes the `do` block from the beginning. If `rescue` completes without `retry`, the exception is automatically rethrown. Rescue blocks work on both scoped `do...end` blocks and method bodies.
+
 ### Example: Generic Container with Type Safety
 
 ```nex
@@ -463,6 +489,7 @@ let text: String := str_box.value      -- Returns "world"
 - **If-Then-Else**: `if condition then ... else ... end`
 - **Loops**: `from init invariant inv variant var until condition do ... end`
 - **Scoped Blocks**: `do ... end` with lexical scoping
+- **Exception Handling**: `raise value` to throw, `rescue` to catch, `retry` to re-execute
 
 ### Type System
 - **Basic Types**: Integer, String, Boolean, Real
@@ -489,7 +516,7 @@ nex/
 │   └── generator/
 │       ├── java.clj      # Java code generator
 │       └── javascript.clj # JavaScript (ES6+) code generator
-├── test/                 # Test suite (73 tests, 184 assertions)
+├── test/                 # Test suite (206 tests, 520 assertions)
 │   ├── nex/              # Organized test files
 │   │   ├── loops_test.clj
 │   │   ├── if_conditions_test.clj

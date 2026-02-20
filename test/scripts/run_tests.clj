@@ -18,6 +18,7 @@
 (require 'nex.generics-test)
 (require 'nex.parameterless-call-test)
 (require 'nex.arrays-maps-test)
+(require 'nex.exception-test)
 
 (println "╔════════════════════════════════════════════════════════════╗")
 (println "║                    RUNNING ALL TESTS                       ║")
@@ -39,7 +40,8 @@
                                'nex.create-test
                                'nex.generics-test
                                'nex.parameterless-call-test
-                               'nex.arrays-maps-test)]
+                               'nex.arrays-maps-test
+                               'nex.exception-test)]
   (println)
   (println "╔════════════════════════════════════════════════════════════╗")
   (println "║                    TEST SUMMARY                            ║")

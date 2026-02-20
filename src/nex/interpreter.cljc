@@ -346,6 +346,7 @@
 
 (declare eval-node)
 (declare get-all-fields)
+(declare eval-body-with-rescue)
 
 ;;
 ;; Contract Checking
@@ -892,8 +893,10 @@
                                  (assoc :current-target (:current-target ctx))
                                  (assoc :current-class-name (:class-name current-obj))
                                  (assoc :old-values old-values))
-                      _ (doseq [stmt (:body method-def)]
-                          (eval-node new-ctx stmt))
+                      _ (if-let [rescue (:rescue method-def)]
+                          (eval-body-with-rescue new-ctx (:body method-def) rescue)
+                          (doseq [stmt (:body method-def)]
+                            (eval-node new-ctx stmt)))
                       updated-fields (reduce (fn [m field]
                                               (let [field-name (:name field)
                                                     field-key (keyword field-name)
@@ -961,8 +964,10 @@
                                  (assoc :old-values old-values))
                       _ (when-let [require-assertions (:require method-def)]
                           (check-assertions new-ctx require-assertions Precondition))
-                      _ (doseq [stmt (:body method-def)]
-                          (eval-node new-ctx stmt))
+                      _ (if-let [rescue (:rescue method-def)]
+                          (eval-body-with-rescue new-ctx (:body method-def) rescue)
+                          (doseq [stmt (:body method-def)]
+                            (eval-node new-ctx stmt)))
                       updated-fields (reduce (fn [m field]
                                               (let [field-name (:name field)
                                                     field-key (keyword field-name)
@@ -1108,13 +1113,57 @@
   (when (sequential? statements)
     (last (map #(eval-node ctx %) statements))))
 
+(defmethod eval-node :raise
+  [ctx {:keys [value]}]
+  (let [val (eval-node ctx value)]
+    (throw (ex-info (str val) {:type :nex-exception :value val}))))
+
+(defmethod eval-node :retry
+  [_ctx _node]
+  (throw (ex-info "retry" {:type :nex-retry})))
+
+(defn eval-body-with-rescue
+  "Execute body statements with rescue/retry support.
+   If rescue contains retry, re-executes body.
+   If rescue completes without retry, rethrows the original exception."
+  [ctx body rescue]
+  (let [should-retry (atom true)]
+    (while @should-retry
+      (reset! should-retry false)
+      (try
+        (doseq [stmt body] (eval-node ctx stmt))
+        (catch #?(:clj Exception :cljs :default) e
+          ;; Don't catch retry markers from nested blocks
+          (if (and (instance? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) e)
+                   (= :nex-retry (:type (ex-data e))))
+            (throw e)
+            ;; Real exception — run rescue
+            (let [exc-value (if (and (instance? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) e)
+                                    (= :nex-exception (:type (ex-data e))))
+                              (:value (ex-data e))
+                              #?(:clj (.getMessage e) :cljs (.-message e)))
+                  rescue-env (make-env (:current-env ctx))
+                  _ (env-define rescue-env "exception" exc-value)
+                  rescue-ctx (assoc ctx :current-env rescue-env)]
+              (try
+                (doseq [stmt rescue] (eval-node rescue-ctx stmt))
+                ;; No retry hit — rethrow original exception
+                (throw e)
+                (catch #?(:clj Exception :cljs :default) re
+                  (if (and (instance? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) re)
+                           (= :nex-retry (:type (ex-data re))))
+                    (reset! should-retry true) ;; retry: loop back
+                    (throw re)))))))))))
+
 (defmethod eval-node :scoped-block
-  [ctx {:keys [body]}]
+  [ctx {:keys [body rescue]}]
   ;; Create a new lexical scope
   (let [new-env (make-env (:current-env ctx))
         new-ctx (assoc ctx :current-env new-env)]
-    ;; Execute the block in the new scope
-    (last (map #(eval-node new-ctx %) body))))
+    (if rescue
+      (eval-body-with-rescue new-ctx body rescue)
+      ;; Execute the block in the new scope
+      (last (map #(eval-node new-ctx %) body)))))
 
 (defmethod eval-node :if
   [ctx {:keys [condition then else]}]
@@ -1330,8 +1379,10 @@
                                     _ (when-let [require-assertions (:require ctor-def)]
                                         (check-assertions new-ctx require-assertions Precondition))
                                     ;; Execute constructor body
-                                    _ (doseq [stmt (:body ctor-def)]
-                                        (eval-node new-ctx stmt))
+                                    _ (if-let [rescue (:rescue ctor-def)]
+                                        (eval-body-with-rescue new-ctx (:body ctor-def) rescue)
+                                        (doseq [stmt (:body ctor-def)]
+                                          (eval-node new-ctx stmt)))
                                     ;; Update object fields from modified environment
                                  updated-fields (reduce (fn [m field]
                                                          (let [field-name (:name field)

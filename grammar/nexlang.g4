@@ -86,11 +86,11 @@ fieldDecl
     ;
 
 constructorDecl
-    : IDENTIFIER '(' paramList? ')' requireClause? DO block ensureClause? END
+    : IDENTIFIER '(' paramList? ')' requireClause? DO block ensureClause? rescueClause? END
     ;
 
 methodDecl
-    : IDENTIFIER ('(' paramList? ')')? (':' type)? noteClause? requireClause? DO block ensureClause? END
+    : IDENTIFIER ('(' paramList? ')')? (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
     ;
 
 paramList
@@ -124,6 +124,10 @@ ensureClause
     : ENSURE assertion+
     ;
 
+rescueClause
+    : RESCUE block
+    ;
+
 assertion
     : IDENTIFIER ':' expression
     ;
@@ -154,11 +158,13 @@ statement
     | ifStatement
     | loopStatement
     | withStatement
+    | raiseStatement
+    | retryStatement
     | expression
     ;
 
 scopedBlock
-    : DO block END
+    : DO block rescueClause? END
     ;
 
 ifStatement
@@ -171,6 +177,14 @@ loopStatement
 
 withStatement
     : WITH STRING DO block END
+    ;
+
+raiseStatement
+    : RAISE expression
+    ;
+
+retryStatement
+    : RETRY
     ;
 
 variantClause
@@ -371,6 +385,9 @@ THIS         : 'this';
 SUPER        : 'super';
 NOTE         : 'note';
 WITH         : 'with';
+RAISE        : 'raise';
+RESCUE       : 'rescue';
+RETRY        : 'retry';
 AND          : 'and';
 OR           : 'or';
 
