@@ -1,7 +1,9 @@
 (ns nex.generator.javascript_test
   (:require [clojure.test :refer [deftest is testing run-tests]]
             [nex.generator.javascript :as js]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clojure.java.io :as io]
+            [nex.parser :as p]))
 
 (deftest simple-class-test
   (testing "Simple class with fields and methods"
@@ -395,3 +397,85 @@ end"
           js-code (js/translate nex-code)]
       (is (str/includes? js-code "new Map("))
       (is (str/includes? js-code "[\"apple\", \"banana\"]")))))
+
+(deftest generate-main-default-constructor-test
+  (testing "Main with no constructors uses new ClassName()"
+    (let [nex-code "class App
+  feature
+    run() do
+      print(\"hello\")
+    end
+end"
+          ast (p/ast nex-code)
+          main-code (js/generate-main ast)]
+      (is (str/includes? main-code "require('./App')"))
+      (is (str/includes? main-code "new App()")))))
+
+(deftest generate-main-named-constructor-test
+  (testing "Main with no-arg constructor uses ClassName.ctorName()"
+    (let [nex-code "class App
+  create
+    make() do
+      print(\"init\")
+    end
+  feature
+    run() do
+      print(\"hello\")
+    end
+end"
+          ast (p/ast nex-code)
+          main-code (js/generate-main ast)]
+      (is (str/includes? main-code "App.make()"))
+      (is (not (str/includes? main-code "new App()"))))))
+
+(deftest generate-main-picks-first-noarg-test
+  (testing "Main picks the first no-arg constructor when multiple exist"
+    (let [nex-code "class App
+  create
+    from_config(path: String) do
+      print(path)
+    end
+    default() do
+      print(\"default\")
+    end
+    other() do
+      print(\"other\")
+    end
+  feature
+    run() do
+      print(\"hello\")
+    end
+end"
+          ast (p/ast nex-code)
+          main-code (js/generate-main ast)]
+      (is (str/includes? main-code "App.default()"))
+      (is (not (str/includes? main-code "App.other()"))))))
+
+(deftest translate-file-creates-separate-files-test
+  (testing "translate-file writes separate files to output directory"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-js-test")
+          nex-file (io/file tmp-dir "test.nex")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class Greeter
+  create
+    make() do
+      print(\"hi\")
+    end
+  feature
+    greet() do
+      print(\"hello\")
+    end
+end")
+        (let [out-dir (io/file tmp-dir "out")
+              files (js/translate-file (.getPath nex-file) (.getPath out-dir) {})]
+          (is (contains? files "Function.js"))
+          (is (contains? files "Greeter.js"))
+          (is (contains? files "main.js"))
+          (is (.exists (io/file out-dir "Function.js")))
+          (is (.exists (io/file out-dir "Greeter.js")))
+          (is (.exists (io/file out-dir "main.js")))
+          (is (str/includes? (get files "main.js") "Greeter.make()")))
+        (finally
+          (doseq [f (reverse (file-seq tmp-dir))]
+            (.delete f)))))))

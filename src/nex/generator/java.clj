@@ -3,7 +3,10 @@
   (:require [nex.parser :as p]
             [nex.typechecker :as tc]
             [clojure.string :as str]
-            [clojure.set :as set]))
+            [clojure.set :as set]
+            [clojure.java.io :as io])
+  (:import [java.util.jar JarOutputStream JarEntry Manifest]
+           [java.io FileInputStream ByteArrayInputStream]))
 
 (def ^:dynamic *function-names* #{})
 (def ^:dynamic *this-name* "this")
@@ -797,6 +800,29 @@
            "\n}"))))
 
 ;;
+;; Main Class Generation
+;;
+
+(defn generate-main
+  "Generate a Main class that instantiates the last user-defined class.
+   If the class has a no-arg named constructor, calls ClassName.ctorName().
+   Otherwise calls new ClassName()."
+  [ast]
+  (let [classes (:classes ast)
+        last-class (last classes)
+        class-name (:name last-class)
+        {:keys [constructors]} (extract-members (:body last-class))
+        no-arg-ctor (first (filter #(empty? (:params %)) constructors))
+        call (if no-arg-ctor
+               (str class-name "." (:name no-arg-ctor) "()")
+               (str "new " class-name "()"))]
+    (str "public class Main {\n"
+         "    public static void main(String[] args) {\n"
+         "        " call ";\n"
+         "    }\n"
+         "}")))
+
+;;
 ;; Main Translation Function
 ;;
 
@@ -855,19 +881,99 @@
                            {:errors (map tc/format-type-error (:errors result))})))))
      (translate-ast ast opts))))
 
+(defn compile-jar
+  "Compile .java files in dir with javac, package into a JAR with Main-Class
+   manifest, then delete the .java and .class files.
+   Returns the path to the created JAR."
+  [dir jar-name]
+  (let [java-files (vec (filter #(str/ends-with? (.getName %) ".java")
+                                (.listFiles (io/file dir))))
+        jar-file (io/file dir (str jar-name ".jar"))]
+    ;; Compile
+    (let [javac-args (into-array String
+                       (concat ["-d" (.getPath (io/file dir))]
+                               (map #(.getPath %) java-files)))
+          compiler (javax.tools.ToolProvider/getSystemJavaCompiler)
+          exit-code (.run compiler nil nil nil javac-args)]
+      (when-not (zero? exit-code)
+        (throw (ex-info "javac compilation failed" {:exit-code exit-code}))))
+    ;; Build JAR with manifest
+    (let [manifest-str "Manifest-Version: 1.0\nMain-Class: Main\n\n"
+          manifest (Manifest. (ByteArrayInputStream. (.getBytes manifest-str)))
+          class-files (vec (filter #(str/ends-with? (.getName %) ".class")
+                                   (.listFiles (io/file dir))))]
+      (with-open [jar-out (JarOutputStream. (java.io.FileOutputStream. jar-file) manifest)]
+        (doseq [cf class-files]
+          (.putNextEntry jar-out (JarEntry. (.getName cf)))
+          (io/copy cf jar-out)
+          (.closeEntry jar-out))))
+    ;; Delete .java and .class files
+    (doseq [f (.listFiles (io/file dir))]
+      (when (or (str/ends-with? (.getName f) ".java")
+                (str/ends-with? (.getName f) ".class"))
+        (.delete f)))
+    (.getPath jar-file)))
+
 (defn translate-file
-  "Translate a Nex file to Java and optionally save it
+  "Translate a Nex file to Java, compile to a JAR, and clean up.
+
+  When output-dir is provided:
+    1. Writes .java files to a temp build directory
+    2. Compiles them with javac
+    3. Packages into <jar-name>.jar (default: derived from nex filename)
+    4. Moves the JAR to output-dir and deletes the temp build directory
+
+  Returns a map of {:files {filename -> code-string}, :jar jar-path}.
+  When output-dir is nil, returns just the files map (no compilation).
 
   Options:
-    :skip-contracts - When true, omits all contracts (useful for production)"
+    :skip-contracts - When true, omits all contracts (useful for production)
+    :skip-type-check - When true, skips static type checking
+    :jar-name - Base name for the JAR file (without .jar extension)"
   ([nex-file] (translate-file nex-file nil {}))
-  ([nex-file output-file] (translate-file nex-file output-file {}))
-  ([nex-file output-file opts]
+  ([nex-file output-dir] (translate-file nex-file output-dir {}))
+  ([nex-file output-dir opts]
    (let [nex-code (slurp nex-file)
-         java-code (translate nex-code opts)]
-     (if output-file
-       (spit output-file java-code)
-       java-code))))
+         ast (p/ast nex-code)
+         _ (when-not (:skip-type-check opts)
+             (let [result (tc/type-check ast)]
+               (when-not (:success result)
+                 (throw (ex-info "Type checking failed"
+                                 {:errors (map tc/format-type-error (:errors result))})))))
+         classes (:classes ast)
+         functions (:functions ast)
+         function-names (set (map :name functions))
+         function-base (generate-function-base-class)
+         function-globals (generate-function-globals functions)
+         main-code (generate-main ast)
+         class-codes (binding [*function-names* function-names]
+                       (mapv (fn [cls] [(:name cls) (generate-class cls opts)]) classes))
+         files (into {"Function.java" function-base}
+                     (concat
+                      (when function-globals
+                        [["NexGlobals.java" function-globals]])
+                      (map (fn [[name code]] [(str name ".java") code]) class-codes)
+                      [["Main.java" main-code]]))]
+     (if output-dir
+       (let [jar-name (or (:jar-name opts)
+                          (-> (io/file nex-file)
+                              (.getName)
+                              (str/replace #"\.nex$" "")))
+             build-dir (io/file (System/getProperty "java.io.tmpdir")
+                                (str "nex-build-" (System/nanoTime)))
+             _ (.mkdirs build-dir)
+             _ (doseq [[filename code] files]
+                 (spit (io/file build-dir filename) code))
+             _ (compile-jar build-dir jar-name)
+             out-dir (io/file output-dir)
+             _ (.mkdirs out-dir)
+             final-jar (io/file out-dir (str jar-name ".jar"))]
+         (io/copy (io/file build-dir (str jar-name ".jar")) final-jar)
+         ;; Clean up entire temp build directory
+         (doseq [f (reverse (file-seq build-dir))]
+           (.delete f))
+         {:files files :jar (.getPath final-jar)})
+       files))))
 
 ;;
 ;; Pretty Printing
@@ -945,17 +1051,19 @@
   "Main entry point for command-line compilation"
   [& args]
   (when (empty? args)
-    (println "Usage: nex compile java <input.nex> [output.java]")
+    (println "Usage: nex compile java <input.nex> [output-dir]")
     (System/exit 1))
-  
+
   (let [input-file (first args)
-        output-file (when (> (count args) 1) (second args))]
+        output-dir (when (> (count args) 1) (second args))]
     (try
-      (if output-file
-        (do
-          (translate-file input-file output-file)
-          (println (str "Compiled " input-file " -> " output-file)))
-        (println (translate-file input-file)))
+      (let [result (translate-file input-file output-dir)]
+        (if output-dir
+          (println (str "Compiled " input-file " -> " (:jar result)))
+          (doseq [[filename code] result]
+            (println (str "// === " filename " ==="))
+            (println code)
+            (println))))
       (System/exit 0)
       (catch Exception e
         (println "Error:" (.getMessage e))

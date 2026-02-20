@@ -3,7 +3,8 @@
   (:require [nex.parser :as p]
             [nex.typechecker :as tc]
             [clojure.string :as str]
-            [clojure.set :as set]))
+            [clojure.set :as set]
+            [clojure.java.io :as io]))
 
 (def ^:dynamic *function-names* #{})
 (def ^:dynamic *this-name* "this")
@@ -777,6 +778,26 @@
            "\n};"))))
 
 ;;
+;; Main Class Generation
+;;
+
+(defn generate-main
+  "Generate a main.js that requires and instantiates the last user-defined class.
+   If the class has a no-arg named constructor, calls ClassName.ctorName().
+   Otherwise calls new ClassName()."
+  [ast]
+  (let [classes (:classes ast)
+        last-class (last classes)
+        class-name (:name last-class)
+        {:keys [constructors]} (extract-members (:body last-class))
+        no-arg-ctor (first (filter #(empty? (:params %)) constructors))
+        call (if no-arg-ctor
+               (str class-name "." (:name no-arg-ctor) "()")
+               (str "new " class-name "()"))]
+    (str "const { " class-name " } = require('./" class-name "');\n"
+         call ";\n")))
+
+;;
 ;; Main Translation Function
 ;;
 
@@ -841,18 +862,46 @@
      (translate-ast ast opts))))
 
 (defn translate-file
-  "Translate a Nex file to JavaScript and optionally save it
+  "Translate a Nex file to JavaScript, writing one file per class to output-dir.
+
+  Writes: Function.js, NexGlobals.js (if functions exist),
+          <ClassName>.js for each class, and main.js.
+
+  Returns a map of {filename -> code-string}.
 
   Options:
-    :skip-contracts - When true, omits all contracts (useful for production)"
+    :skip-contracts - When true, omits all contracts (useful for production)
+    :skip-type-check - When true, skips static type checking"
   ([nex-file] (translate-file nex-file nil {}))
-  ([nex-file output-file] (translate-file nex-file output-file {}))
-  ([nex-file output-file opts]
+  ([nex-file output-dir] (translate-file nex-file output-dir {}))
+  ([nex-file output-dir opts]
    (let [nex-code (slurp nex-file)
-         js-code (translate nex-code opts)]
-     (if output-file
-       (spit output-file js-code)
-       js-code))))
+         ast (p/ast nex-code)
+         _ (when-not (:skip-type-check opts)
+             (let [result (tc/type-check ast)]
+               (when-not (:success result)
+                 (throw (ex-info "Type checking failed"
+                                 {:errors (map tc/format-type-error (:errors result))})))))
+         classes (:classes ast)
+         functions (:functions ast)
+         function-names (set (map :name functions))
+         function-base (generate-function-base-class)
+         function-globals (generate-function-globals functions)
+         main-code (generate-main ast)
+         class-codes (binding [*function-names* function-names]
+                       (mapv (fn [cls] [(:name cls) (generate-class cls opts)]) classes))
+         files (into {"Function.js" function-base}
+                     (concat
+                      (when function-globals
+                        [["NexGlobals.js" function-globals]])
+                      (map (fn [[name code]] [(str name ".js") code]) class-codes)
+                      [["main.js" main-code]]))]
+     (when output-dir
+       (let [dir (io/file output-dir)]
+         (.mkdirs dir)
+         (doseq [[filename code] files]
+           (spit (io/file dir filename) code))))
+     files)))
 
 ;;
 ;; Pretty Printing
@@ -931,17 +980,19 @@
   "Main entry point for command-line compilation"
   [& args]
   (when (empty? args)
-    (println "Usage: nex compile javascript <input.nex> [output.js]")
+    (println "Usage: nex compile javascript <input.nex> [output-dir]")
     (System/exit 1))
-  
+
   (let [input-file (first args)
-        output-file (when (> (count args) 1) (second args))]
+        output-dir (when (> (count args) 1) (second args))]
     (try
-      (if output-file
-        (do
-          (translate-file input-file output-file)
-          (println (str "Compiled " input-file " -> " output-file)))
-        (println (translate-file input-file)))
+      (let [files (translate-file input-file output-dir)]
+        (if output-dir
+          (println (str "Compiled " input-file " -> " output-dir "/ (" (count files) " files)"))
+          (doseq [[filename code] files]
+            (println (str "// === " filename " ==="))
+            (println code)
+            (println))))
       (System/exit 0)
       (catch Exception e
         (println "Error:" (.getMessage e))
