@@ -6,6 +6,12 @@
             [clojure.set :as set]))
 
 (def ^:dynamic *function-names* #{})
+(def ^:dynamic *this-name* "this")
+
+(defn class-name-to-local
+  "Convert a class name to a local variable name (e.g., 'Point' -> 'point')"
+  [class-name]
+  (str (Character/toLowerCase ^char (first class-name)) (subs class-name 1)))
 
 ;;
 ;; Type Mapping
@@ -287,7 +293,11 @@
       "Console" "({_type: 'Console'})"
       "File" (str "({_type: 'File', path: " args-code "})")
       "Process" "({_type: 'Process'})"
-      (str "new " class-name "(" args-code ")"))))
+      (if constructor
+        ;; Named constructor: static factory method call
+        (str class-name "." constructor "(" args-code ")")
+        ;; Default: new ClassName()
+        (str "new " class-name "()")))))
 
 (defn generate-subscript-expr
   "Generate JavaScript code for subscript access (array/map access)"
@@ -336,7 +346,7 @@
     :array-literal (generate-array-literal (:elements expr))
     :map-literal (generate-map-literal (:entries expr))
     :old (str "old_" (generate-expression (:expr expr)))
-    :this "this"
+    :this *this-name*
     :super "super"
     (str "/* Unknown expression: " (:type expr) " */")))
 
@@ -436,7 +446,7 @@
              ;; Only include this block if target is "javascript"
              (str/join "\n" (map #(generate-statement level % var-names) (:body stmt))))
      :member-assign (indent level
-                      (let [obj-str (if (= (:object-type stmt) :this) "this" "super")]
+                      (let [obj-str (if (= (:object-type stmt) :this) *this-name* "super")]
                         (str obj-str "." (:field stmt) " = " (generate-expression (:value stmt)) ";")))
      (indent level (str "/* Unknown statement: " (:type stmt) " */")))))
 
@@ -565,23 +575,36 @@
 ;; Constructor Generation
 ;;
 
-(defn generate-constructor
-  "Generate JavaScript code for a constructor"
-  [level class-name fields {:keys [params body require ensure]} opts]
-  (let [params-code (str/join ", " (map :name params))
+(defn generate-default-constructor
+  "Generate a JavaScript default no-arg constructor with field initialization"
+  [level fields has-parent?]
+  (let [super-call (when has-parent?
+                     [(indent (+ level 1) "super();")])
+        field-inits (map #(generate-field-init (+ level 1) %) fields)]
+    (str/join "\n"
+              (concat
+               [(indent level "constructor() {")]
+               super-call
+               field-inits
+               [(indent level "}")]))))
+
+(defn generate-factory-constructor
+  "Generate JavaScript static factory method for a Nex constructor"
+  [level class-name {:keys [name params body require ensure]} opts]
+  (let [local-name (class-name-to-local class-name)
+        params-code (str/join ", " (map :name params))
         preconditions (generate-assertions (+ level 1) require "Precondition" opts)
-        ;; First initialize all fields
-        field-inits (map #(generate-field-init (+ level 1) %) fields)
-        ;; Then execute constructor body
-        statements (map #(generate-statement (+ level 1) %) body)
+        statements (binding [*this-name* local-name]
+                     (mapv #(generate-statement (+ level 1) %) body))
         postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)]
     (str/join "\n"
               (concat
-               [(indent level (str "constructor(" params-code ") {"))]
-               field-inits
+               [(indent level (str "static " name "(" params-code ") {"))]
+               [(indent (+ level 1) (str "let " local-name " = new " class-name "();"))]
                preconditions
                statements
                postconditions
+               [(indent (+ level 1) (str "return " local-name ";"))]
                [(indent level "}")]))))
 
 ;;
@@ -654,34 +677,11 @@
          invariant-comment (when (and invariant (not (:skip-contracts opts)))
                             (indent 1 (str "// Class invariant: "
                                           (str/join ", " (map :label invariant)))))
-         ;; JavaScript classes need at least one constructor
-         default-constructor (when (empty? constructors)
-                              (generate-constructor 1 name fields
-                                                   {:params [] :body [] :require [] :ensure []}
-                                                   opts))
-         ;; Generate constructors - only one constructor in JS, others become static factory methods
-         main-constructor (when (seq constructors)
-                           (generate-constructor 1 name fields (first constructors) opts))
-         ;; Other constructors become static factory methods
-         factory-methods (when (> (count constructors) 1)
-                          (map-indexed
-                           (fn [idx ctor]
-                             (when (> idx 0)
-                               (let [factory-name (str "create" (if (:name ctor)
-                                                                 (str/capitalize (str (:name ctor)))
-                                                                 (str "Alternative" idx)))
-                                     params-code (str/join ", " (map :name (:params ctor)))
-                                     args-code (str/join ", " (map :name (:params ctor)))]
-                                 (str (indent 1 (str "static " factory-name "(" params-code ") {"))
-                                      "\n"
-                                      (indent 2 (str "const instance = new " name "();"))
-                                      "\n"
-                                      (str/join "\n" (map #(generate-statement 2 %) (:body ctor)))
-                                      "\n"
-                                      (indent 2 "return instance;")
-                                      "\n"
-                                      (indent 1 "}")))))
-                           constructors))
+         ;; Always generate a default no-arg constructor for field initialization
+         has-parent? (some? (:extends (analyze-inheritance parents)))
+         default-constructor (generate-default-constructor 1 fields has-parent?)
+         ;; All Nex constructors become static factory methods
+         factory-methods (map #(generate-factory-constructor 1 name % opts) constructors)
          methods-code (map #(generate-method 1 % opts) methods)]
      (str/join "\n"
                (concat
@@ -689,9 +689,8 @@
                 (when generic-comment [generic-comment])
                 [class-header]
                 (when invariant-comment [invariant-comment ""])
-                (when default-constructor [default-constructor ""])
-                (when main-constructor [main-constructor ""])
-                (filter some? factory-methods)
+                [default-constructor ""]
+                factory-methods
                 (when (seq factory-methods) [""])
                 methods-code
                 ["}"])))))

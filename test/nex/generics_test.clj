@@ -80,7 +80,7 @@ end"
 end"
           java-code (java/translate code)]
       (is (str/includes? java-code "public class List<G>"))
-      (is (str/includes? java-code "private G item = null;")))))
+      (is (str/includes? java-code "public G item = null;")))))
 
 (deftest constrained-generic-java-generation-test
   (testing "Generate Java code for constrained generic"
@@ -90,7 +90,7 @@ end"
 end"
           java-code (java/translate code)]
       (is (str/includes? java-code "public class Sorted_List<G extends Comparable>"))
-      (is (str/includes? java-code "private G item = null;")))))
+      (is (str/includes? java-code "public G item = null;")))))
 
 (deftest multiple-generic-params-java-generation-test
   (testing "Generate Java code for multiple generic parameters"
@@ -101,8 +101,8 @@ end"
 end"
           java-code (java/translate code)]
       (is (str/includes? java-code "public class Hash_Table<G, KEY extends Hashable>"))
-      (is (str/includes? java-code "private G value = null;"))
-      (is (str/includes? java-code "private KEY key = null;")))))
+      (is (str/includes? java-code "public G value = null;"))
+      (is (str/includes? java-code "public KEY key = null;")))))
 
 (deftest parameterized-type-usage-java-generation-test
   (testing "Generate Java code with parameterized type usage"
@@ -112,8 +112,8 @@ end"
     numbers: List [Integer]
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private List<Cat> cats = null;"))
-      (is (str/includes? java-code "private List<Integer> numbers = null;")))))
+      (is (str/includes? java-code "public List<Cat> cats = null;"))
+      (is (str/includes? java-code "public List<Integer> numbers = null;")))))
 
 (deftest generic-method-parameter-test
   (testing "Generic type in method parameter"
@@ -140,7 +140,7 @@ end"
 end"
           java-code (java/translate code)]
       (is (str/includes? java-code "public class Box<T>"))
-      (is (str/includes? java-code "public Box(T initial)")))))
+      (is (str/includes? java-code "public static Box make(T initial)")))))
 
 (deftest nested-generic-types-test
   (testing "Nested generic types"
@@ -149,7 +149,7 @@ end"
     lists: List [List [Integer]]
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private List<List<Integer>> lists = null;")))))
+      (is (str/includes? java-code "public List<List<Integer>> lists = null;")))))
 
 (deftest generic-with-basic-types-test
   (testing "Generic type instantiated with basic types"
@@ -160,9 +160,9 @@ end"
     string_list: List [String]
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private List<Integer> int_list = null;"))
-      (is (str/includes? java-code "private List<Float> real_list = null;"))
-      (is (str/includes? java-code "private List<String> string_list = null;")))))
+      (is (str/includes? java-code "public List<Integer> int_list = null;"))
+      (is (str/includes? java-code "public List<Float> real_list = null;"))
+      (is (str/includes? java-code "public List<String> string_list = null;")))))
 
 (deftest multiple-constraints-test
   (testing "Multiple generic parameters with different constraints"
@@ -173,8 +173,8 @@ end"
 end"
           java-code (java/translate code)]
       (is (str/includes? java-code "public class Dictionary<K extends Comparable, V>"))
-      (is (str/includes? java-code "private K key = null;"))
-      (is (str/includes? java-code "private V value = null;")))))
+      (is (str/includes? java-code "public K key = null;"))
+      (is (str/includes? java-code "public V value = null;")))))
 
 (deftest generic-create-expression-test
   (testing "Create expression with parameterized type"
@@ -195,7 +195,7 @@ class Main
 end"
           java-code (java/translate code)]
       (is (str/includes? java-code "public class Box<T>"))
-      (is (str/includes? java-code "Box<Integer> box = new Box(42);")))))
+      (is (str/includes? java-code "Box<Integer> box = Box.make(42);")))))
 
 (deftest generic-class-with-methods-test
   (testing "Generic class with multiple methods"
@@ -213,7 +213,7 @@ end"
 end"
           java-code (java/translate code)]
       (is (str/includes? java-code "public class Stack<G>"))
-      (is (str/includes? java-code "private G top = null;"))
+      (is (str/includes? java-code "public G top = null;"))
       (is (str/includes? java-code "public void push(G item)")))))
 
 (deftest generic-with-contracts-test
@@ -331,7 +331,7 @@ class Main
     end
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "new Box<Integer>(42)")))))
+      (is (str/includes? java-code "Box<Integer>.make(42)")))))
 
 (deftest create-generic-without-constructor-test
   (testing "Create generic class without constructor"
@@ -376,4 +376,4 @@ class Main
     end
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "new Pair<Integer, String>(1, \"hello\")")))))
+      (is (str/includes? java-code "Pair<Integer, String>.make(1, \"hello\")")))))

@@ -6,6 +6,12 @@
             [clojure.set :as set]))
 
 (def ^:dynamic *function-names* #{})
+(def ^:dynamic *this-name* "this")
+
+(defn class-name-to-local
+  "Convert a class name to a local variable name (e.g., 'Point' -> 'point')"
+  [class-name]
+  (str (Character/toLowerCase ^char (first class-name)) (subs class-name 1)))
 
 ;;
 ;; Type Mapping
@@ -315,7 +321,11 @@
       "Console" "new Object() /* Console */"
       "File" (str "new java.io.File(" args-code ")")
       "Process" "new Object() /* Process */"
-      (str "new " class-name (or type-params "") "(" args-code ")"))))
+      (if constructor
+        ;; Named constructor: static factory method call
+        (str class-name (or type-params "") "." constructor "(" args-code ")")
+        ;; Default: new ClassName()
+        (str "new " class-name (or type-params "") "()")))))
 
 (defn generate-subscript-expr
   "Generate Java code for subscript access (array/map access)"
@@ -360,7 +370,7 @@
     :array-literal (generate-array-literal (:elements expr))
     :map-literal (generate-map-literal (:entries expr))
     :old (str "old_" (generate-expression (:expr expr)))
-    :this "this"
+    :this *this-name*
     :super "super"
     (str "/* Unknown expression: " (:type expr) " */")))
 
@@ -462,7 +472,7 @@
              ;; Only include this block if target is "java"
              (str/join "\n" (map #(generate-statement level % var-names) (:body stmt))))
      :member-assign (indent level
-                      (let [obj-str (if (= (:object-type stmt) :this) "this" "super")]
+                      (let [obj-str (if (= (:object-type stmt) :this) *this-name* "super")]
                         (str obj-str "." (:field stmt) " = " (generate-expression (:value stmt)) ";")))
      (indent level (str "/* Unknown statement: " (:type stmt) " */")))))
 
@@ -573,10 +583,9 @@
 (defn generate-field
   "Generate Java code for a field with default initialization"
   [level {:keys [name field-type visibility note]}]
-  (let [;; Default fields to private, unless explicitly marked otherwise
-        vis (if (and visibility (not= (:type visibility) :public))
-             (visibility-to-java visibility)
-             "private")
+  (let [vis (if (and visibility (= (:type visibility) :private))
+             "private"
+             "public")
         java-type (nex-type-to-java field-type)
         init-value (default-value field-type)
         ;; Generate Javadoc if note present
@@ -591,21 +600,25 @@
 ;;
 
 (defn generate-constructor
-  "Generate Java code for a constructor"
-  [level class-name {:keys [params body require ensure]} opts]
-  (let [params-code (str/join ", "
+  "Generate Java static factory method for a Nex constructor"
+  [level class-name {:keys [name params body require ensure]} opts]
+  (let [local-name (class-name-to-local class-name)
+        params-code (str/join ", "
                               (map (fn [{:keys [name type]}]
                                      (str (nex-type-to-java type) " " name))
                                    params))
         preconditions (generate-assertions (+ level 1) require "Precondition" opts)
-        statements (map #(generate-statement (+ level 1) %) body)
+        statements (binding [*this-name* local-name]
+                     (mapv #(generate-statement (+ level 1) %) body))
         postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)]
     (str/join "\n"
               (concat
-               [(indent level (str "public " class-name "(" params-code ") {"))]
+               [(indent level (str "public static " class-name " " name "(" params-code ") {"))]
+               [(indent (+ level 1) (str class-name " " local-name " = new " class-name "();"))]
                preconditions
                statements
                postconditions
+               [(indent (+ level 1) (str "return " local-name ";"))]
                [(indent level "}")]))))
 
 ;;

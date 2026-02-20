@@ -37,7 +37,7 @@ end"
     count: Integer
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private int count = 0;")))))
+      (is (str/includes? java-code "public int count = 0;")))))
 
 (deftest integer64-type-java-generation-test
   (testing "Generate Java code for Integer64 type with default value"
@@ -46,7 +46,7 @@ end"
     big_count: Integer64
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private long big_count = 0L;")))))
+      (is (str/includes? java-code "public long big_count = 0L;")))))
 
 (deftest real-type-java-generation-test
   (testing "Generate Java code for Real type with default value"
@@ -55,7 +55,7 @@ end"
     temperature: Real
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private float temperature = 0.0f;")))))
+      (is (str/includes? java-code "public float temperature = 0.0f;")))))
 
 (deftest decimal-type-java-generation-test
   (testing "Generate Java code for Decimal type with default value"
@@ -64,7 +64,7 @@ end"
     price: Decimal
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private double price = 0.0;")))))
+      (is (str/includes? java-code "public double price = 0.0;")))))
 
 (deftest char-type-java-generation-test
   (testing "Generate Java code for Char type with default value"
@@ -73,7 +73,7 @@ end"
     initial: Char
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private char initial = '\\0';")))))
+      (is (str/includes? java-code "public char initial = '\\0';")))))
 
 (deftest boolean-type-java-generation-test
   (testing "Generate Java code for Boolean type with default value"
@@ -82,7 +82,7 @@ end"
     active: Boolean
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private boolean active = false;")))))
+      (is (str/includes? java-code "public boolean active = false;")))))
 
 (deftest string-type-java-generation-test
   (testing "Generate Java code for String type with default value"
@@ -91,7 +91,7 @@ end"
     name: String
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private String name = \"\";")))))
+      (is (str/includes? java-code "public String name = \"\";")))))
 
 (deftest all-types-default-values-test
   (testing "Generate Java with all types and their default values"
@@ -106,13 +106,13 @@ end"
     s: String
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private int i = 0;"))
-      (is (str/includes? java-code "private long i64 = 0L;"))
-      (is (str/includes? java-code "private float r = 0.0f;"))
-      (is (str/includes? java-code "private double d = 0.0;"))
-      (is (str/includes? java-code "private char c = '\\0';"))
-      (is (str/includes? java-code "private boolean b = false;"))
-      (is (str/includes? java-code "private String s = \"\";")))))
+      (is (str/includes? java-code "public int i = 0;"))
+      (is (str/includes? java-code "public long i64 = 0L;"))
+      (is (str/includes? java-code "public float r = 0.0f;"))
+      (is (str/includes? java-code "public double d = 0.0;"))
+      (is (str/includes? java-code "public char c = '\\0';"))
+      (is (str/includes? java-code "public boolean b = false;"))
+      (is (str/includes? java-code "public String s = \"\";")))))
 
 (deftest method-with-typed-parameters-test
   (testing "Methods with all basic types as parameters"
@@ -154,10 +154,10 @@ end"
     end
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private double balance = 0.0;"))
-      (is (str/includes? java-code "private long transactions = 0L;"))
-      (is (str/includes? java-code "private boolean active = false;"))
-      (is (str/includes? java-code "private String owner = \"\";"))
+      (is (str/includes? java-code "public double balance = 0.0;"))
+      (is (str/includes? java-code "public long transactions = 0L;"))
+      (is (str/includes? java-code "public boolean active = false;"))
+      (is (str/includes? java-code "public String owner = \"\";"))
       (is (str/includes? java-code "public void deposit(double amount)")))))
 
 (deftest char-type-parsing-test
@@ -190,8 +190,8 @@ end"
 end"
           java-code (java/translate code)]
       ;; Real maps to float, Decimal maps to double
-      (is (str/includes? java-code "private float f = 0.0f;"))
-      (is (str/includes? java-code "private double d = 0.0;")))))
+      (is (str/includes? java-code "public float f = 0.0f;"))
+      (is (str/includes? java-code "public double d = 0.0;")))))
 
 (deftest integer-vs-integer64-distinction-test
   (testing "Integer (32-bit) vs Integer64 (64-bit) are distinct types"
@@ -202,8 +202,8 @@ end"
 end"
           java-code (java/translate code)]
       ;; Integer maps to int, Integer64 maps to long
-      (is (str/includes? java-code "private int i = 0;"))
-      (is (str/includes? java-code "private long big = 0L;")))))
+      (is (str/includes? java-code "public int i = 0;"))
+      (is (str/includes? java-code "public long big = 0L;")))))
 
 (deftest default-initialization-with-visibility-test
   (testing "Default values work with visibility modifiers"
@@ -215,4 +215,4 @@ end"
 end"
           java-code (java/translate code)]
       (is (str/includes? java-code "private int secret = 0;"))
-      (is (str/includes? java-code "/* Visible to: Friend */ double shared = 0.0;")))))
+      (is (str/includes? java-code "public double shared = 0.0;")))))

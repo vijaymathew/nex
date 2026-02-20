@@ -243,9 +243,9 @@ class Main
     end
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "public Point(int newx, int newy)"))
+      (is (str/includes? java-code "public static Point make(int newx, int newy)"))
       (is (str/includes? java-code "public void show()"))
-      (is (str/includes? java-code "Point p = new Point(10, 20);"))
+      (is (str/includes? java-code "Point p = Point.make(10, 20);"))
       (is (str/includes? java-code "p.show();")))))
 
 (deftest parameterless-in-expression-test

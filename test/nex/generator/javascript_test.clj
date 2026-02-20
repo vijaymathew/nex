@@ -26,7 +26,7 @@ end"
     x: Integer
 end"
           js-code (js/translate nex-code)]
-      (is (str/includes? js-code "constructor(x, y)"))
+      (is (str/includes? js-code "static make(x, y)"))
       (is (str/includes? js-code "this.x")))))
 
 (deftest inheritance-test
@@ -313,7 +313,7 @@ end"
     end
 end"
           js-code (js/translate nex-code)]
-      (is (str/includes? js-code "new Point(10, 20)")))))
+      (is (str/includes? js-code "Point.make(10, 20)")))))
 
 (deftest parameterless-call-test
   (testing "Parameterless method call"

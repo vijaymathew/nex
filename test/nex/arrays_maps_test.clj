@@ -30,7 +30,7 @@ end"
     items: Array [String]
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private ArrayList<String> items = new ArrayList<>();")))))
+      (is (str/includes? java-code "public ArrayList<String> items = new ArrayList<>();")))))
 
 (deftest array-literal-parsing-test
   (testing "Parse array literal"
@@ -142,7 +142,7 @@ end"
     data: Map [String, Integer]
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private HashMap<String, Integer> data = new HashMap<>();")))))
+      (is (str/includes? java-code "public HashMap<String, Integer> data = new HashMap<>();")))))
 
 (deftest map-literal-parsing-test
   (testing "Parse map literal"

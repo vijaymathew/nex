@@ -94,7 +94,7 @@ class Main
     end
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "Account acc = new Account(1000);")))))
+      (is (str/includes? java-code "Account acc = Account.with_balance(1000);")))))
 
 (deftest default-initialization-ast-test
   (testing "Create expression AST structure"
@@ -156,7 +156,7 @@ class Main
     end
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "Rectangle r = new Rectangle(5, 10);")))))
+      (is (str/includes? java-code "Rectangle r = Rectangle.make(5, 10);")))))
 
 (deftest create-with-all-types-test
   (testing "Create with all basic types"
@@ -171,13 +171,13 @@ end"
     s: String
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private int i = 0;"))
-      (is (str/includes? java-code "private long i64 = 0L;"))
-      (is (str/includes? java-code "private float r = 0.0f;"))
-      (is (str/includes? java-code "private double d = 0.0;"))
-      (is (str/includes? java-code "private char c = '\\0';"))
-      (is (str/includes? java-code "private boolean b = false;"))
-      (is (str/includes? java-code "private String s = \"\";")))))
+      (is (str/includes? java-code "public int i = 0;"))
+      (is (str/includes? java-code "public long i64 = 0L;"))
+      (is (str/includes? java-code "public float r = 0.0f;"))
+      (is (str/includes? java-code "public double d = 0.0;"))
+      (is (str/includes? java-code "public char c = '\\0';"))
+      (is (str/includes? java-code "public boolean b = false;"))
+      (is (str/includes? java-code "public String s = \"\";")))))
 
 (deftest create-without-type-annotation-java-test
   (testing "Java generation without type annotation"
@@ -219,7 +219,7 @@ class Main
     end
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "Account acc = new Account(1000);"))
+      (is (str/includes? java-code "Account acc = Account.with_balance(1000);"))
       (is (str/includes? java-code "assert (initial >= 0)")))))
 
 (deftest create-contract-violation-parsing-test
@@ -301,5 +301,5 @@ class Main
     end
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "Counter c1 = new Counter(10);"))
-      (is (str/includes? java-code "Counter c2 = new Counter(20);")))))
+      (is (str/includes? java-code "Counter c1 = Counter.with_value(10);"))
+      (is (str/includes? java-code "Counter c2 = Counter.with_value(20);")))))

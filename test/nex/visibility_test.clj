@@ -88,7 +88,7 @@ end"
     end
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "private int x = 0;"))
+      (is (str/includes? java-code "public int x = 0;"))
       (is (str/includes? java-code "public void demo()")))))
 
 (deftest private-java-generation-test
@@ -114,7 +114,7 @@ end"
     end
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "/* Visible to: Friend, Helper */ int x = 0;"))
+      (is (str/includes? java-code "public int x = 0;"))
       (is (str/includes? java-code "/* Visible to: Friend, Helper */ void restricted()")))))
 
 (deftest mixed-visibility-java-generation-test
@@ -140,13 +140,13 @@ end"
 end"
           java-code (java/translate code)]
       ;; Public members
-      (is (str/includes? java-code "private int balance = 0;"))
+      (is (str/includes? java-code "public int balance = 0;"))
       (is (str/includes? java-code "public void deposit(int amount)"))
       ;; Private members
       (is (str/includes? java-code "private String internal_id = \"\";"))
       (is (str/includes? java-code "private void generate_id()"))
       ;; Selective visibility
-      (is (str/includes? java-code "/* Visible to: Bank, Auditor */ String audit_log = \"\";"))
+      (is (str/includes? java-code "public String audit_log = \"\";"))
       (is (str/includes? java-code "/* Visible to: Bank, Auditor */ void log_transaction()")))))
 
 (deftest multiple-selective-sections-test

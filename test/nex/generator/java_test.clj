@@ -12,8 +12,8 @@
 end"
           java-code (java/translate nex-code)]
       (is (str/includes? java-code "public class Person"))
-      (is (str/includes? java-code "private String name = \"\""))
-      (is (str/includes? java-code "private int age = 0")))))
+      (is (str/includes? java-code "public String name = \"\""))
+      (is (str/includes? java-code "public int age = 0")))))
 
 (deftest constructor-test
   (testing "Class with constructor"
@@ -26,8 +26,8 @@ end"
     x: Integer
 end"
           java-code (java/translate nex-code)]
-      (is (str/includes? java-code "public Point(int x, int y)"))
-      (is (str/includes? java-code "private int x")))))
+      (is (str/includes? java-code "public static Point make(int x, int y)"))
+      (is (str/includes? java-code "public int x")))))
 
 (deftest inheritance-test
   (testing "Class with single inheritance"

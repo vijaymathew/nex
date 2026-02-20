@@ -236,8 +236,13 @@ class B inherit A end
     end
 end"
           java-code (java-gen/translate code {:skip-type-check true})]
-      (is (str/includes? java-code "this.x = x;"))
-      (is (str/includes? java-code "this.y = y;")))))
+      ;; In factory method, this maps to local variable name
+      (is (str/includes? java-code "b.x = x;"))
+      (is (str/includes? java-code "b.y = y;"))
+      ;; Constructor is a static factory method
+      (is (str/includes? java-code "public static B make("))
+      (is (str/includes? java-code "B b = new B();"))
+      (is (str/includes? java-code "return b;")))))
 
 ;; ─── JavaScript Generator Tests ───
 
@@ -265,5 +270,32 @@ class B inherit A end
     end
 end"
           js-code (js-gen/translate code {:skip-type-check true})]
-      (is (str/includes? js-code "this.x = x;"))
-      (is (str/includes? js-code "this.y = y;")))))
+      ;; In factory method, this maps to local variable name
+      (is (str/includes? js-code "b.x = x;"))
+      (is (str/includes? js-code "b.y = y;"))
+      ;; Constructor is a static factory method
+      (is (str/includes? js-code "static make("))
+      (is (str/includes? js-code "let b = new B();"))
+      (is (str/includes? js-code "return b;")))))
+
+;; ─── Create Expression Tests ───
+
+(deftest java-create-factory-method
+  (testing "create A.make(10) generates A.make(10) in Java"
+    (let [expr {:type :create :class-name "A" :generic-args nil
+                :constructor "make" :args [{:type :integer :value 10}]}]
+      (is (= "A.make(10)" (java-gen/generate-create-expr expr)))))
+  (testing "create A generates new A() in Java"
+    (let [expr {:type :create :class-name "A" :generic-args nil
+                :constructor nil :args []}]
+      (is (= "new A()" (java-gen/generate-create-expr expr))))))
+
+(deftest js-create-factory-method
+  (testing "create A.make(10) generates A.make(10) in JS"
+    (let [expr {:type :create :class-name "A" :generic-args nil
+                :constructor "make" :args [{:type :integer :value 10}]}]
+      (is (= "A.make(10)" (js-gen/generate-create-expr expr)))))
+  (testing "create A generates new A() in JS"
+    (let [expr {:type :create :class-name "A" :generic-args nil
+                :constructor nil :args []}]
+      (is (= "new A()" (js-gen/generate-create-expr expr))))))
