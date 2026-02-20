@@ -179,6 +179,7 @@ variantClause
 
 assignment
     : IDENTIFIER ASSIGN expression
+    | (THIS | SUPER) '.' IDENTIFIER ASSIGN expression
     ;
 
 localVarDecl
@@ -263,6 +264,8 @@ primary
     : literal
     | createExpression
     | oldExpression
+    | THIS
+    | SUPER
     | IDENTIFIER
     | '(' expression ')'
     ;
@@ -364,6 +367,8 @@ REQUIRE      : 'require';
 ENSURE       : 'ensure';
 INVARIANT    : 'invariant';
 OLD          : 'old';
+THIS         : 'this';
+SUPER        : 'super';
 NOTE         : 'note';
 WITH         : 'with';
 AND          : 'and';

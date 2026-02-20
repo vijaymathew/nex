@@ -856,6 +856,80 @@
                   (env-lookup (:current-env ctx) target-name)
                   (eval-node ctx target))]
         (cond
+          ;; super.method() dispatch - look up method starting from parent class
+          (:nex-super obj)
+          (let [current-obj (:object obj)
+                current-class-name (:current-class-name obj)
+                current-class-def (lookup-class ctx current-class-name)
+                parents (get-parent-classes ctx current-class-def)
+                ;; Look up method in parent classes only (skip current class)
+                method-lookup (some (fn [parent-info]
+                                     (lookup-method-with-inheritance ctx (:class-def parent-info) method))
+                                   parents)]
+            (if method-lookup
+              (let [method-def (:method method-lookup)
+                    class-def (lookup-class ctx (:class-name current-obj))
+                    all-fields (get-all-fields ctx class-def)
+                    has-postconditions? (seq (:ensure method-def))
+                    old-values (when has-postconditions? (:fields current-obj))]
+                (let [method-env (make-env (:current-env ctx))
+                      params (:params method-def)
+                      _ (when params
+                          (doseq [[param arg-val] (map vector params arg-values)]
+                            (env-define method-env (:name param) arg-val)))
+                      _ (doseq [[field-name field-val] (:fields current-obj)]
+                          (env-define method-env (name field-name) field-val))
+                      return-type (:return-type method-def)
+                      default-result (if return-type
+                                      (get-default-field-value return-type)
+                                      nil)
+                      _ (env-define method-env "result" default-result)
+                      _ (env-define method-env "Result" default-result)
+                      _ (env-define method-env "Current" current-obj)
+                      new-ctx (-> ctx
+                                 (assoc :current-env method-env)
+                                 (assoc :current-object current-obj)
+                                 (assoc :current-target (:current-target ctx))
+                                 (assoc :current-class-name (:class-name current-obj))
+                                 (assoc :old-values old-values))
+                      _ (doseq [stmt (:body method-def)]
+                          (eval-node new-ctx stmt))
+                      updated-fields (reduce (fn [m field]
+                                              (let [field-name (:name field)
+                                                    field-key (keyword field-name)
+                                                    val (try
+                                                          (env-lookup method-env field-name)
+                                                          (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+                                                (if (not= val ::not-found)
+                                                  (assoc m field-key val)
+                                                  m)))
+                                            (:fields current-obj)
+                                            all-fields)
+                      updated-obj (make-object (:class-name current-obj) updated-fields)
+                      result (let [res (try
+                                         (env-lookup method-env "Result")
+                                         (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+                               (if (not= res ::not-found)
+                                 res
+                                 (env-lookup method-env "result")))]
+                  ;; Update the object in the calling context
+                  (when-let [target-name (:current-target ctx)]
+                    (try
+                      (env-set! (:current-env ctx) target-name updated-obj)
+                      (catch #?(:clj Exception :cljs :default) _)))
+                  ;; Also update field env vars in the caller's method env
+                  (doseq [[field-name field-val] (:fields updated-obj)]
+                    (try
+                      (env-set! (:current-env ctx) (name field-name) field-val)
+                      (catch #?(:clj Exception :cljs :default) _)))
+                  result))
+              ;; Try field access on current object
+              (let [field-val (get (:fields current-obj) (keyword method))]
+                (if (some? field-val)
+                  field-val
+                  (throw (ex-info (str "Method not found in parent: " method)
+                                  {:method method}))))))
+
           (nex-object? obj)
           (let [class-def (lookup-class ctx (:class-name obj))
                 method-lookup (lookup-method-with-inheritance ctx class-def method)]
@@ -883,6 +957,7 @@
                                  (assoc :current-env method-env)
                                  (assoc :current-object obj)
                                  (assoc :current-target target-name)
+                                 (assoc :current-class-name (:class-name obj))
                                  (assoc :old-values old-values))
                       _ (when-let [require-assertions (:require method-def)]
                           (check-assertions new-ctx require-assertions Precondition))
@@ -989,6 +1064,24 @@
               (throw (ex-info (str "Undefined function: " method)
                               {:function method}))))))))
     )
+
+(defmethod eval-node :this
+  [ctx _]
+  (:current-object ctx))
+
+(defmethod eval-node :super
+  [ctx _]
+  {:nex-super true
+   :object (:current-object ctx)
+   :current-class-name (:current-class-name ctx)})
+
+(defmethod eval-node :member-assign
+  [ctx {:keys [object-type field value]}]
+  (let [val (eval-node ctx value)]
+    ;; Both this.field and super.field set the env variable
+    ;; (fields are tracked as env vars, extracted back to object after body)
+    (env-set! (:current-env ctx) field val)
+    val))
 
 (defmethod eval-node :assign
   [ctx {:keys [target value]}]
@@ -1219,16 +1312,20 @@
                                                 {:class-name class-name :constructor constructor})))
                               ;; Create environment for constructor execution
                               (let [ctor-env (make-env (:current-env ctx))
-                                    ;; Bind parameters
+                                    ;; Bind fields as local variables FIRST
+                                    _ (doseq [[field-name field-val] initial-field-map]
+                                        (env-define ctor-env (name field-name) field-val))
+                                    ;; Bind parameters SECOND (so they shadow fields with same name)
                                     params (:params ctor-def)
                                     arg-values (mapv #(eval-node ctx %) args)
                                     _ (when params
                                         (doseq [[param arg-val] (map vector params arg-values)]
                                           (env-define ctor-env (:name param) arg-val)))
-                                    ;; Bind fields as local variables
-                                    _ (doseq [[field-name field-val] initial-field-map]
-                                        (env-define ctor-env (name field-name) field-val))
-                                    new-ctx (assoc ctx :current-env ctor-env)
+                                    temp-obj (make-object effective-class-name initial-field-map)
+                                    new-ctx (-> ctx
+                                               (assoc :current-env ctor-env)
+                                               (assoc :current-object temp-obj)
+                                               (assoc :current-class-name effective-class-name))
                                     ;; Check pre-conditions
                                     _ (when-let [require-assertions (:require ctor-def)]
                                         (check-assertions new-ctx require-assertions Precondition))

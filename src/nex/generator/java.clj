@@ -360,6 +360,8 @@
     :array-literal (generate-array-literal (:elements expr))
     :map-literal (generate-map-literal (:entries expr))
     :old (str "old_" (generate-expression (:expr expr)))
+    :this "this"
+    :super "super"
     (str "/* Unknown expression: " (:type expr) " */")))
 
 ;;
@@ -459,6 +461,9 @@
      :with (when (= (:target stmt) "java")
              ;; Only include this block if target is "java"
              (str/join "\n" (map #(generate-statement level % var-names) (:body stmt))))
+     :member-assign (indent level
+                      (let [obj-str (if (= (:object-type stmt) :this) "this" "super")]
+                        (str obj-str "." (:field stmt) " = " (generate-expression (:value stmt)) ";")))
      (indent level (str "/* Unknown statement: " (:type stmt) " */")))))
 
 ;;

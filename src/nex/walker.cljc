@@ -494,10 +494,20 @@
       :condition (transform-node expr)})
 
    :assignment
-   (fn [[_ name _assign expr]]
-     {:type :assign
-      :target (token-text name)
-      :value (transform-node expr)})
+   (fn [[_ first-token & rest]]
+     (if (or (= first-token "this") (= first-token "super"))
+       ;; Member assignment: this.field := expr  or  super.field := expr
+       ;; Tokens: THIS/SUPER "." IDENTIFIER ":=" expression
+       (let [[_dot field-name _assign expr] rest]
+         {:type :member-assign
+          :object-type (if (= first-token "this") :this :super)
+          :field (token-text field-name)
+          :value (transform-node expr)})
+       ;; Simple assignment: IDENTIFIER := expression
+       (let [[_assign expr] rest]
+         {:type :assign
+          :target (token-text first-token)
+          :value (transform-node expr)})))
 
    :localVarDecl
    (fn [[_ _let name & rest]]
@@ -748,9 +758,13 @@
    (fn [[_ & children]]
      (if (= 1 (count children))
        (let [child (first children)]
-         (if (and (string? child) (not (.startsWith child "\"")))
+         (cond
+           (= child "this") {:type :this}
+           (= child "super") {:type :super}
+           (and (string? child) (not (.startsWith child "\"")))
            ;; It's an identifier (not a string literal)
            {:type :identifier :name child}
+           :else
            ;; Otherwise, transform normally
            (transform-node child)))
        ;; Handle parenthesized expressions

@@ -541,6 +541,12 @@
                              :else target-type))
                          target-type))
       :old (check-expression env (:expr expr))
+      :this (or (env-lookup-var env "__current_class__") "Any")
+      :super (or (when-let [class-name (env-lookup-var env "__current_class__")]
+                   (when-let [class-def (env-lookup-class env class-name)]
+                     (when-let [parent (first (:parents class-def))]
+                       (:parent parent))))
+                 "Any")
       "Any")
     :else "Any"))
 
@@ -617,6 +623,15 @@
       :loop (check-loop env stmt)
       :scoped-block (doseq [s (:body stmt)] (check-statement env s))
       :with (doseq [s (:body stmt)] (check-statement env s))
+      :member-assign
+      (let [field-name (:field stmt)
+            field-type (env-lookup-var env field-name)
+            val-type (check-expression env (:value stmt))]
+        (when (and field-type val-type)
+          (when-not (types-compatible? env val-type field-type)
+            (throw (ex-info (str "Type mismatch in assignment to " field-name)
+                            {:error (type-error
+                                     (str "Cannot assign " val-type " to field of type " field-type))})))))
       nil)))
 
 ;;
@@ -659,6 +674,9 @@
                                   "Use: " name "(...): <ReturnType>"))})))
 
   (let [method-env (make-type-env env)]
+    ;; Track current class for this/super resolution
+    (env-add-var method-env "__current_class__" class-name)
+
     ;; Add parameters to method environment
     (doseq [param params]
       (env-add-var method-env (:name param) (:type param)))
@@ -692,6 +710,9 @@
   "Check a constructor definition"
   [env class-name {:keys [name params require body ensure] :as constructor}]
   (let [ctor-env (make-type-env env)]
+    ;; Track current class for this/super resolution
+    (env-add-var ctor-env "__current_class__" class-name)
+
     ;; Validate parameter type annotations (generic constraints)
     (doseq [param params]
       (validate-type-annotation env (:type param)))
