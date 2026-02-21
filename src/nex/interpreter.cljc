@@ -327,12 +327,14 @@
 ;; Object Representation
 ;;
 
-(defrecord NexObject [class-name fields])
+(defrecord NexObject [class-name fields closure-env])
 
 (defn make-object
   "Create a new object instance."
-  [class-name field-values]
-  (->NexObject class-name field-values))
+  ([class-name field-values]
+   (make-object class-name field-values nil))
+  ([class-name field-values closure-env]
+   (->NexObject class-name field-values closure-env)))
 
 (defn nex-object?
   "Check if a value is a Nex object instance."
@@ -851,6 +853,12 @@
     (env-define (:current-env ctx) name obj)
     obj))
 
+(defmethod eval-node :anonymous-function
+  [ctx {:keys [class-def class-name]}]
+  ;; Register the generated function class and return an object with closure env
+  (register-class ctx class-def)
+  (make-object class-name {} (:current-env ctx)))
+
 (defmethod eval-node :call
   [ctx {:keys [target method args]}]
   (let [arg-values (mapv #(eval-node ctx %) args)]
@@ -876,7 +884,7 @@
                     all-fields (get-all-fields ctx class-def)
                     has-postconditions? (seq (:ensure method-def))
                     old-values (when has-postconditions? (:fields current-obj))]
-                (let [method-env (make-env (:current-env ctx))
+                (let [method-env (make-env (or (:closure-env obj) (:current-env ctx)))
                       params (:params method-def)
                       _ (when params
                           (doseq [[param arg-val] (map vector params arg-values)]
@@ -945,7 +953,7 @@
                     all-fields (get-all-fields ctx class-def)
                     has-postconditions? (seq (:ensure method-def))
                     old-values (when has-postconditions? (:fields obj))]
-                (let [method-env (make-env (:current-env ctx))
+                (let [method-env (make-env (or (:closure-env obj) (:current-env ctx)))
                       params (:params method-def)
                       _ (when params
                           (doseq [[param arg-val] (map vector params arg-values)]

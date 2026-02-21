@@ -277,11 +277,16 @@ subscript
 primary
     : literal
     | createExpression
+    | anonymousFunction
     | oldExpression
     | THIS
     | SUPER
     | IDENTIFIER
     | '(' expression ')'
+    ;
+
+anonymousFunction
+    : FN '(' paramList? ')' (':' type)? DO block END
     ;
 
 oldExpression
@@ -358,6 +363,7 @@ mapEntry
 
 CLASS        : 'class';
 FUNCTION     : 'function';
+FN           : 'fn';
 FEATURE      : 'feature';
 PRIVATE      : 'private';
 CONSTRUCTORS : 'constructors';

@@ -234,6 +234,8 @@
 ;;
 
 (declare check-expression)
+(declare collect-class-info)
+(declare check-class)
 
 (defn check-literal
   "Check the type of a literal expression"
@@ -540,6 +542,15 @@
                              (= (:base-type target-type) "Map") (second type-params)
                              :else target-type))
                          target-type))
+      :anonymous-function (let [class-def (:class-def expr)
+                                 class-name (:class-name expr)]
+                            ;; Register the dynamic class definition in the type environment
+                            (collect-class-info env class-def)
+                            ;; Check the class (this will check the callN method body)
+                            (check-class env class-def)
+                            ;; Return the class name.
+                            ;; Since it inherits from Function, it will support callN methods.
+                            class-name)
       :old (check-expression env (:expr expr))
       :this (or (env-lookup-var env "__current_class__") "Any")
       :super (or (when-let [class-name (env-lookup-var env "__current_class__")]
@@ -659,6 +670,7 @@
       :let (or (= (:name node) "result") (= (:name node) "Result")
                (references-result? (:value node)))
       :identifier (or (= (:name node) "result") (= (:name node) "Result"))
+      :anonymous-function false ;; Skip anonymous functions, they have their own Result scope
       ;; Walk all map values for other node types
       (some references-result? (vals node)))
     :else false))

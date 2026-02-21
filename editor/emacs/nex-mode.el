@@ -116,14 +116,14 @@
 (defconst nex-keywords
   '("class" "feature" "inherit" "end" "do" "if" "then" "else"
     "from" "until" "invariant" "variant" "require" "ensure"
-    "let" "rename" "redefine" "as" "and" "or" "not"
+    "let" "rename" "redefine" "as" "and" "or" "not" "fn"
     "old" "create" "private" "note" "with" "import" "intern" "function"
     "raise" "rescue" "retry")
   "Nex language keywords.")
 
 (defconst nex-types
   '("Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Any" "Void")
+    "Array" "Map" "Any" "Void" "Function")
   "Nex built-in types.")
 
 (defconst nex-constants
@@ -159,6 +159,9 @@
 
     ;; Method/function definitions
     ("\\<\\([a-z_][a-z0-9_]*\\)\\s-*(" 1 font-lock-function-name-face)
+
+    ;; Anonymous functions
+    ("\\<fn\\>\\s-*(" . font-lock-keyword-face)
 
     ;; Variables after "let"
     ("\\<let\\s-+\\([a-z_][a-z0-9_]*\\)" 1 font-lock-variable-name-face)

@@ -12,6 +12,13 @@
   [code]
   (-> code p/ast interp/run))
 
+(defn -main [& args]
+  (if (empty? args)
+    (println "Usage: clojure -M -m nex <file.nex>")
+    (let [file-path (first args)
+          code (slurp file-path)]
+      (eval-and-print code))))
+
 (defn run [opts]
   (println "╔═══════════════════════════════════════════╗")
   (println "║           NEX Language v0.0.1             ║")

@@ -50,6 +50,14 @@ This document summarizes all major features added to the Nex language.
 - **Selective**: `[Friend, Helper] feature`
 - **Tests**: 12 tests in `test/nex/visibility_test.clj`
 
+### 7. ✅ Anonymous Functions
+- **Syntax**: `fn(x: Integer): Integer do result := x * x end`
+- **Closures**: Support for capturing variables from lexical scope
+- **Calling**: Natural syntax `f(x)` or explicit `f.call1(x)`
+- **Function Type**: All functions inherit from built-in `Function` class
+- **Documentation**: [ANONYMOUS_FUNCTIONS.md](ANONYMOUS_FUNCTIONS.md)
+- **Status**: Implemented in interpreter, Java, and JavaScript generators
+
 ## Components Updated
 
 ### ✅ Grammar (grammar/nexlang.g4)
