@@ -294,11 +294,11 @@ Testing nex.loops-test
 Testing nex.if-conditions-test
 ...
 
-Ran 206 tests containing 520 assertions.
+Ran 215 tests containing 550 assertions.
 0 failures, 0 errors.
 
-Total tests: 206
-Passed: 520
+Total tests: 215
+Passed: 550
 Failed: 0
 Errors: 0
 ```
@@ -516,7 +516,7 @@ nex/
 │   └── generator/
 │       ├── java.clj      # Java code generator
 │       └── javascript.clj # JavaScript (ES6+) code generator
-├── test/                 # Test suite (206 tests, 520 assertions)
+├── test/                 # Test suite (215 tests, 550 assertions)
 │   ├── nex/              # Organized test files
 │   │   ├── loops_test.clj
 │   │   ├── if_conditions_test.clj
