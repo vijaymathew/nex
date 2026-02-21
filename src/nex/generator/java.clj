@@ -165,6 +165,7 @@
     operator))
 
 (declare generate-expression)
+(declare generate-method)
 
 (defn generate-binary-expr
   "Generate Java code for binary expression"
@@ -186,11 +187,11 @@
 
 (defn map-builtin-function
   "Map Nex built-in functions to Java equivalents"
-  [method args-code]
+  [method args-code num-args]
   (case method
     "print" (str "System.out.print(" args-code ")")
     "println" (str "System.out.println(" args-code ")")
-    ;; Default: use as-is
+    ;; Default: use as-is (regular method call)
     (str method "(" args-code ")")))
 
 (def builtin-method-mappings
@@ -291,29 +292,35 @@
    we try Integer methods first since numeric operations are more common.
    For string operations, use string literals or string-specific methods."
   [{:keys [target method args] :as call-node}]
-  (let [args-code (str/join ", " (map generate-expression args))]
+  (let [args-code (str/join ", " (map generate-expression args))
+        num-args (count args)]
     (if target
       ;; Object method call
       (let [target-code (if (string? target) target (generate-expression target))]
-        (or
-         ;; Try Integer methods first (for operators, numeric is more common)
-         (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
-           (method-fn target-code args-code))
-         ;; Try String methods
-         (when-let [method-fn (get-in builtin-method-mappings [:String method])]
-           (method-fn target-code args-code))
-         ;; Try Array methods (ArrayList in Java)
-         (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
-           (method-fn target-code args-code))
-         ;; Try Map methods
-         (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
-           (method-fn target-code args-code))
-         ;; Default: regular method call
-         (str target-code "." method "(" args-code ")")))
+        (if (nil? method)
+          ;; Calling an expression that returns a function
+          (str target-code ".call" num-args "(" args-code ")")
+          (or
+           ;; Try Integer methods first (for operators, numeric is more common)
+           (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
+             (method-fn target-code args-code))
+           ;; Try String methods
+           (when-let [method-fn (get-in builtin-method-mappings [:String method])]
+             (method-fn target-code args-code))
+           ;; Try Array methods (ArrayList in Java)
+           (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
+             (method-fn target-code args-code))
+           ;; Try Map methods
+           (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
+             (method-fn target-code args-code))
+           ;; Default: regular method call
+           (str target-code "." method "(" args-code ")"))))
       ;; Global function call: function object or builtin
-      (if (contains? *function-names* method)
-        (str "NexGlobals." method ".call" (count args) "(" args-code ")")
-        (map-builtin-function method args-code)))))
+      (if (and method (contains? *function-names* method))
+        (str "NexGlobals." method ".call" num-args "(" args-code ")")
+        (if (nil? method)
+          (str (generate-expression target) ".call" num-args "(" args-code ")")
+          (map-builtin-function method args-code num-args))))))
 
 (defn generate-create-expr
   "Generate Java code for create expression"
@@ -373,6 +380,26 @@
     :subscript (generate-subscript-expr expr)
     :array-literal (generate-array-literal (:elements expr))
     :map-literal (generate-map-literal (:entries expr))
+    :anonymous-function (let [class-def (:class-def expr)
+                              ;; Extract the callN method definition
+                              method-def (first (:members (first (:body class-def))))
+                              num-args (count (:params method-def))
+                              method-name (:name method-def)
+                              params (:params method-def)
+                              return-type (:return-type method-def)]
+                          (str "(new Function() {\n"
+                               (indent 1 (str "@Override public Object call" num-args "("
+                                              (str/join ", " (map #(str "Object arg" %) (range 1 (inc num-args))))
+                                              ") {\n"))
+                               (indent 2 (str "return this." method-name "("
+                                              (str/join ", " (map (fn [i p]
+                                                                    (str "(" (nex-type-to-java-boxed (:type p)) ")arg" i))
+                                                                  (range 1 (inc num-args))
+                                                                  params))
+                                              ");\n"))
+                               (indent 1 "}\n")
+                               (generate-method 1 method-def {})
+                               "\n" (indent 0 "})")))
     :old (str "old_" (generate-expression (:expr expr)))
     :this *this-name*
     :super "super"

@@ -11,6 +11,7 @@ This directory contains comprehensive documentation for the Nex programming lang
 - **[CREATE.md](CREATE.md)** - Object instantiation with the `create` keyword
 - **[PARAMETERLESS_CALLS.md](PARAMETERLESS_CALLS.md)** - Calling methods without parentheses
 - **[LET_SYNTAX.md](LET_SYNTAX.md)** - Local variable declarations (typed and untyped)
+- **[ANONYMOUS_FUNCTIONS.md](ANONYMOUS_FUNCTIONS.md)** - First-class functions and lexical closures
 
 ### Design by Contract
 - **[CONTRACTS.md](CONTRACTS.md)** - Preconditions, postconditions, and class invariants

@@ -60,6 +60,11 @@
 ;; Node handlers map (data-driven transformations)
 ;;
 
+(def ^:private next-fn-id (atom 0))
+
+(defn- generate-unique-fn-name []
+  (str "AnonymousFunction_" (swap! next-fn-id inc)))
+
 (def node-handlers
   {:program
    (fn [[_ & nodes]]
@@ -189,6 +194,47 @@
                       :invariant nil}]
        {:type :function
         :name fn-name
+        :class-name class-name
+        :params params-v
+        :return-type return-type-v
+        :body body
+        :class-def class-def}))
+
+   :anonymousFunction
+   (fn [[_ _fn-kw & rest]]
+     (let [cleaned (remove #(#{"(" ")" "do" "end" ":"} %) rest)
+           params (first (filter #(and (sequential? %)
+                                       (= :paramList (first %)))
+                                 cleaned))
+           return-type (first (filter #(and (sequential? %)
+                                            (= :type (first %)))
+                                      cleaned))
+           block (first (filter #(and (sequential? %)
+                                      (= :block (first %)))
+                                cleaned))
+           params-v (when params (transform-node params))
+           return-type-v (when return-type (transform-node return-type))
+           body (transform-node block)
+           class-name (generate-unique-fn-name)
+           method-name (str "call" (count params-v))
+           method-def {:type :method
+                       :name method-name
+                       :params params-v
+                       :return-type return-type-v
+                       :note nil
+                       :require nil
+                       :body body
+                       :ensure nil}
+           class-def {:type :class
+                      :name class-name
+                      :generic-params nil
+                      :note nil
+                      :parents [{:parent "Function" :renames nil :redefines nil}]
+                      :body [{:type :feature-section
+                              :visibility {:type :public}
+                              :members [method-def]}]
+                      :invariant nil}]
+       {:type :anonymous-function
         :class-name class-name
         :params params-v
         :return-type return-type-v
@@ -585,13 +631,14 @@
                     :args (:args part)}
 
                      :call-suffix
-                     (if (and (map? acc) (= :identifier (:type acc)))
-                       {:type :call
-                        :target nil
-                        :method (:name acc)
-                        :args (:args part)}
-                       (throw (ex-info "Call suffix can only be applied to identifiers"
-                                       {:expr acc})))
+                     {:type :call
+                      :target (if (and (map? acc) (= :identifier (:type acc)))
+                                nil
+                                acc)
+                      :method (if (and (map? acc) (= :identifier (:type acc)))
+                                (:name acc)
+                                nil)
+                      :args (:args part)}
 
                      :subscript
                      {:type :subscript
@@ -658,13 +705,14 @@
                     :args (:args part)}
 
                    :call-suffix
-                   (if (and (map? acc) (= :identifier (:type acc)))
-                     {:type :call
-                      :target nil
-                      :method (:name acc)
-                      :args (:args part)}
-                     (throw (ex-info "Call suffix can only be applied to identifiers"
-                                     {:expr acc})))
+                   {:type :call
+                    :target (if (and (map? acc) (= :identifier (:type acc)))
+                              nil
+                              acc)
+                    :method (if (and (map? acc) (= :identifier (:type acc)))
+                              (:name acc)
+                              nil)
+                    :args (:args part)}
 
                    :subscript
                    {:type :subscript
