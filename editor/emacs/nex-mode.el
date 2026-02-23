@@ -114,7 +114,7 @@
 ;;;; Font Lock (Syntax Highlighting)
 
 (defconst nex-keywords
-  '("class" "feature" "inherit" "end" "do" "if" "then" "else"
+  '("class" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
     "from" "until" "invariant" "variant" "require" "ensure"
     "let" "as" "and" "or" "not" "fn"
     "old" "create" "private" "note" "with" "import" "intern" "function"
@@ -242,7 +242,7 @@
     (or
      ;; Keywords that start indented blocks
      (looking-back
-      (regexp-opt '("class" "do" "then" "else" "require" "ensure"
+      (regexp-opt '("class" "do" "then" "else" "elseif" "require" "ensure"
                     "from" "until" "inherit" "invariant" "variant"
                     "rescue")
                   'words)
@@ -280,7 +280,7 @@
     (skip-chars-forward " \t")
     (or
      ;; 'end', 'else', and 'rescue' close blocks
-     (looking-at (regexp-opt '("end" "else" "rescue") 'words))
+     (looking-at (regexp-opt '("end" "else" "elseif" "rescue") 'words))
      ;; 'do' aligns with require/ensure if inside contract block
      (and (looking-at "\\bdo\\b")
           (nex-in-contract-block-p)))))

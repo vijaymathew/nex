@@ -440,18 +440,25 @@
      (str "let " name " = " (generate-expression value) ";"))))
 
 (defn generate-if
-  "Generate JavaScript code for if-then-else"
+  "Generate JavaScript code for if/elseif/else"
   ([level node] (generate-if level node #{}))
-  ([level {:keys [condition then else]} var-names]
+  ([level {:keys [condition then elseif else]} var-names]
    (let [cond-code (generate-expression condition)
          then-code (map #(generate-statement (+ level 1) % var-names) then)
-         else-code (map #(generate-statement (+ level 1) % var-names) else)]
+         elseif-parts (mapcat (fn [clause]
+                                [(indent level (str "} else if (" (generate-expression (:condition clause)) ") {"))
+                                 (str/join "\n" (map #(generate-statement (+ level 1) % var-names) (:then clause)))])
+                              elseif)
+         else-part (when else
+                     [(indent level "} else {")
+                      (str/join "\n" (map #(generate-statement (+ level 1) % var-names) else))])]
      (str/join "\n"
-               [(indent level (str "if (" cond-code ") {"))
-                (str/join "\n" then-code)
-                (indent level "} else {")
-                (str/join "\n" else-code)
-                (indent level "}")]))))
+               (concat
+                [(indent level (str "if (" cond-code ") {"))
+                 (str/join "\n" then-code)]
+                elseif-parts
+                else-part
+                [(indent level "}")])))))
 
 (defn has-retry?
   "Check if statements contain a :retry node"
@@ -459,7 +466,9 @@
   (some (fn [stmt]
           (case (:type stmt)
             :retry true
-            :if (or (has-retry? (:then stmt)) (has-retry? (:else stmt)))
+            :if (or (has-retry? (:then stmt))
+                    (some #(has-retry? (:then %)) (:elseif stmt))
+                    (has-retry? (:else stmt)))
             :scoped-block (has-retry? (:body stmt))
             false))
         stmts))

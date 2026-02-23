@@ -623,14 +623,22 @@
 
 (defn check-if
   "Check an if statement"
-  [env {:keys [condition then else] :as stmt}]
+  [env {:keys [condition then elseif else] :as stmt}]
   (let [cond-type (check-expression env condition)]
     (when-not (= cond-type "Boolean")
       (throw (ex-info "If condition must be Boolean"
                       {:error (type-error
                                (str "If condition must be Boolean, got " cond-type))}))))
   (doseq [stmt then] (check-statement env stmt))
-  (doseq [stmt else] (check-statement env stmt)))
+  (doseq [clause elseif]
+    (let [ei-cond-type (check-expression env (:condition clause))]
+      (when-not (= ei-cond-type "Boolean")
+        (throw (ex-info "Elseif condition must be Boolean"
+                        {:error (type-error
+                                 (str "Elseif condition must be Boolean, got " ei-cond-type))}))))
+    (doseq [stmt (:then clause)] (check-statement env stmt)))
+  (when else
+    (doseq [stmt else] (check-statement env stmt))))
 
 (defn check-loop
   "Check a loop statement"
