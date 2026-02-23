@@ -32,7 +32,7 @@ end"
       (is (str/includes? java-code "public int x")))))
 
 (deftest inheritance-test
-  (testing "Class with single inheritance"
+  (testing "Class with single inheritance uses composition"
     (let [nex-code "class Animal
   feature
     speak() do
@@ -40,10 +40,7 @@ end"
     end
 end
 
-class Dog
-inherit
-  Animal
-  end
+class Dog inherit Animal
 feature
   bark() do
     print(\"Woof\")
@@ -51,7 +48,11 @@ feature
 end"
           java-code (java/translate nex-code)]
       (is (str/includes? java-code "public class Animal"))
-      (is (str/includes? java-code "public class Dog extends Animal")))))
+      (is (str/includes? java-code "public class Dog {"))
+      (is (not (str/includes? java-code "extends")))
+      (is (str/includes? java-code "private Animal _parent_Animal"))
+      ;; Delegation for speak()
+      (is (str/includes? java-code "_parent_Animal.speak()")))))
 
 (deftest nil-literal-test
   (testing "Nil literal translation"
@@ -65,7 +66,7 @@ end"
       (is (str/includes? java-code "System.out.print(null")))))
 
 (deftest multiple-inheritance-test
-  (testing "Class with multiple inheritance"
+  (testing "Class with multiple inheritance uses composition"
     (let [nex-code "class A
   feature
     a() do
@@ -80,19 +81,129 @@ class B
     end
 end
 
-class C
-inherit
-  A
-  end,
-  B
-  end
+class C inherit A, B
 feature
   c() do
     print(\"C\")
   end
 end"
           java-code (java/translate nex-code)]
-      (is (str/includes? java-code "public class C extends A implements B")))))
+      (is (str/includes? java-code "public class C {"))
+      (is (not (str/includes? java-code "extends")))
+      (is (not (str/includes? java-code "implements")))
+      (is (str/includes? java-code "private A _parent_A"))
+      (is (str/includes? java-code "private B _parent_B"))
+      ;; Delegation methods
+      (is (str/includes? java-code "_parent_A.a()"))
+      (is (str/includes? java-code "_parent_B.b()")))))
+
+(deftest parent-qualified-call-test
+  (testing "Parent-qualified method call via A.show generates _parent_A.show()"
+    (let [nex-code "class A
+  feature
+    x: Integer
+    show() do
+      print(x)
+    end
+end
+
+class B inherit A
+feature
+  y: Integer
+  show() do
+    A.show
+    print(y)
+  end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "_parent_A.show()")))))
+
+(deftest parent-constructor-call-test
+  (testing "Parent constructor call A.make_A(x) generates _parent_A = A.make_A(x)"
+    (let [nex-code "class A
+  feature
+    x: Integer
+  create
+    make_A(x: Integer) do
+      this.x := x
+    end
+end
+
+class B inherit A
+feature
+  y: Integer
+create
+  make_B(x, y: Integer) do
+    A.make_A(x)
+    this.y := y
+  end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "_parent_A = A.make_A(x)")))))
+
+(deftest inherited-field-in-expression-test
+  (testing "Inherited field x from parent A is routed through _parent_A in method body"
+    (let [nex-code "class A
+  feature
+    x: Integer
+end
+
+class B inherit A
+feature
+  y: Integer
+  add(): Integer do
+    result := x + y
+  end
+end"
+          java-code (java/translate nex-code)]
+      ;; x should be resolved as _parent_A.x
+      (is (str/includes? java-code "_parent_A.x"))
+      ;; y should remain bare (own field)
+      (is (re-find #"\(_parent_A\.x \+ y\)" java-code)))))
+
+(deftest inherited-field-member-assign-test
+  (testing "this.x := val in constructor routes through _parent_A when x is inherited"
+    (let [nex-code "class A
+  feature
+    x: Integer
+end
+
+class B inherit A
+feature
+  y: Integer
+create
+  make_B(x, y: Integer) do
+    this.x := x
+    this.y := y
+  end
+end"
+          java-code (java/translate nex-code)]
+      ;; In B's constructor, this.x should route through _parent_A
+      (is (str/includes? java-code "._parent_A.x = x"))
+      ;; y is own field, should stay as-is
+      (is (str/includes? java-code ".y = y")))))
+
+(deftest parameter-shadows-parent-field-test
+  (testing "Method parameter x shadows parent field x"
+    (let [nex-code "class A
+  feature
+    x: Integer
+end
+
+class B inherit A
+feature
+  y: Integer
+  set_both(x, y: Integer) do
+    this.x := x
+    this.y := y
+  end
+end"
+          java-code (java/translate nex-code)]
+      ;; In B.set_both, param x shadows parent field x
+      ;; The RHS x should be the param (bare), not _parent_A.x
+      ;; The LHS this.x should route through _parent_A
+      (is (str/includes? java-code "._parent_A.x = x"))
+      (is (str/includes? java-code ".y = y")))))
 
 (deftest contracts-test
   (testing "Methods with contracts"

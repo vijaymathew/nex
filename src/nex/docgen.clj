@@ -198,17 +198,8 @@
   [parents]
   (when (seq parents)
     (str "\n\n**Inherits from:** "
-         (str/join ", " (map (fn [{:keys [parent renames redefines]}]
-                              (let [parent-str (str "`" parent "`")
-                                    rename-str (when (seq renames)
-                                                (str " (renames: "
-                                                     (str/join ", " (map (fn [{:keys [from to]}]
-                                                                          (str from " → " to))
-                                                                        renames))
-                                                     ")"))
-                                    redefine-str (when (seq redefines)
-                                                  (str " (redefines: " (str/join ", " redefines) ")"))]
-                                (str parent-str rename-str redefine-str)))
+         (str/join ", " (map (fn [{:keys [parent]}]
+                              (str "`" parent "`"))
                             parents))
          "\n")))
 

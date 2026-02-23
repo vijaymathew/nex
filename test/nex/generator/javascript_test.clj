@@ -40,10 +40,7 @@ end"
     end
 end
 
-class Dog
-inherit
-  Animal
-  end
+class Dog inherit Animal
 feature
   bark() do
     print(\"Woof\")

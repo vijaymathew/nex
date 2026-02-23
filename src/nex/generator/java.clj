@@ -10,6 +10,11 @@
 
 (def ^:dynamic *function-names* #{})
 (def ^:dynamic *this-name* "this")
+(def ^:dynamic *class-registry* {})
+(def ^:dynamic *current-parents* #{})
+(def ^:dynamic *parent-field-map* {})   ;; field-name -> "_parent_X" prefix
+(def ^:dynamic *own-fields* #{})        ;; field names defined on current class
+(def ^:dynamic *local-names* #{})       ;; method params + loop vars (shadow parent fields)
 
 (defn class-name-to-local
   "Convert a class name to a local variable name (e.g., 'Point' -> 'point')"
@@ -165,7 +170,9 @@
     operator))
 
 (declare generate-expression)
+(declare is-parent-constructor?)
 (declare generate-method)
+(declare resolve-field-name)
 
 (defn generate-binary-expr
   "Generate Java code for binary expression"
@@ -300,21 +307,28 @@
         (if (nil? method)
           ;; Calling an expression that returns a function
           (str target-code ".call" num-args "(" args-code ")")
-          (or
-           ;; Try Integer methods first (for operators, numeric is more common)
-           (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
-             (method-fn target-code args-code))
-           ;; Try String methods
-           (when-let [method-fn (get-in builtin-method-mappings [:String method])]
-             (method-fn target-code args-code))
-           ;; Try Array methods (ArrayList in Java)
-           (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
-             (method-fn target-code args-code))
-           ;; Try Map methods
-           (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
-             (method-fn target-code args-code))
-           ;; Default: regular method call
-           (str target-code "." method "(" args-code ")"))))
+          ;; Check if target is a parent class name (composition delegation)
+          (if (and (string? target) (contains? *current-parents* target))
+            ;; Parent-qualified call: delegate through composition field
+            (let [prefix (if (= *this-name* "this")
+                           ""
+                           (str *this-name* "."))]
+              (str prefix "_parent_" target "." method "(" args-code ")"))
+            (or
+             ;; Try Integer methods first (for operators, numeric is more common)
+             (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
+               (method-fn target-code args-code))
+             ;; Try String methods
+             (when-let [method-fn (get-in builtin-method-mappings [:String method])]
+               (method-fn target-code args-code))
+             ;; Try Array methods (ArrayList in Java)
+             (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
+               (method-fn target-code args-code))
+             ;; Try Map methods
+             (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
+               (method-fn target-code args-code))
+             ;; Default: regular method call
+             (str target-code "." method "(" args-code ")")))))
       ;; Global function call: function object or builtin
       (if (and method (contains? *function-names* method))
         (str "NexGlobals." method ".call" num-args "(" args-code ")")
@@ -372,7 +386,7 @@
     :boolean (str (:value expr))
     :char (str "'" (:value expr) "'")
     :nil "null"
-    :identifier (:name expr)
+    :identifier (resolve-field-name (:name expr))
     :binary (generate-binary-expr expr)
     :unary (generate-unary-expr expr)
     :call (generate-call-expr expr)
@@ -402,7 +416,6 @@
                                "\n" (indent 0 "})")))
     :old (str "old_" (generate-expression (:expr expr)))
     :this *this-name*
-    :super "super"
     (str "/* Unknown expression: " (:type expr) " */")))
 
 ;;
@@ -414,7 +427,7 @@
 (defn generate-assignment
   "Generate Java code for assignment"
   [{:keys [target value]}]
-  (str target " = " (generate-expression value) ";"))
+  (str (resolve-field-name target) " = " (generate-expression value) ";"))
 
 (defn generate-let
   "Generate Java code for let (local variable declaration).
@@ -515,8 +528,9 @@
   "Generate Java code for from-until-do loop"
   [level {:keys [init invariant variant until body]}]
   (let [;; Extract variable names declared in init
-        loop-vars (extract-var-names init)
-        ;; Generate init statements
+        loop-vars (extract-var-names init)]
+    (binding [*local-names* (into *local-names* loop-vars)]
+      (let [;; Generate init statements
         init-stmts (map #(generate-statement level % #{}) init)
         cond-code (str "!(" (generate-expression until) ")")
         ;; Generate body statements with loop variables in scope
@@ -536,7 +550,7 @@
                (when invariant-comment [invariant-comment])
                (when variant-comment [variant-comment])
                body-stmts
-               [(indent level "}")]))))
+               [(indent level "}")]))))))
 
 (defn generate-statement
   "Generate Java code for a statement"
@@ -544,7 +558,20 @@
   ([level stmt var-names]
    (case (:type stmt)
      :assign (indent level (generate-assignment stmt))
-     :call (indent level (str (generate-call-expr stmt) ";"))
+     :call (let [{:keys [target method]} stmt]
+             (if (and (string? target)
+                      (contains? *current-parents* target)
+                      (not= *this-name* "this")
+                      (or (is-parent-constructor? target method)
+                          ;; When parent not in registry, assume constructor
+                          ;; if we're inside a constructor body
+                          (nil? (get *class-registry* target))))
+               ;; Parent constructor call: reassign composition field
+               (let [prefix (str *this-name* ".")
+                     args-code (str/join ", " (map generate-expression (:args stmt)))]
+                 (indent level (str prefix "_parent_" target " = "
+                                    target "." method "(" args-code ");")))
+               (indent level (str (generate-call-expr stmt) ";"))))
      :let (indent level (generate-let stmt var-names))
      :if (generate-if level stmt var-names)
      :scoped-block (generate-scoped-block level stmt var-names)
@@ -555,9 +582,14 @@
      :raise (indent level (str "throw new RuntimeException(String.valueOf("
                                 (generate-expression (:value stmt)) "));"))
      :retry (indent level "continue;")
-     :member-assign (indent level
-                      (let [obj-str (if (= (:object-type stmt) :this) *this-name* "super")]
-                        (str obj-str "." (:field stmt) " = " (generate-expression (:value stmt)) ";")))
+     :member-assign (let [field (:field stmt)]
+                      (if (contains? *parent-field-map* field)
+                        ;; Route through parent composition object
+                        (let [parent-prefix (get *parent-field-map* field)]
+                          (indent level
+                            (str *this-name* "." parent-prefix "." field " = " (generate-expression (:value stmt)) ";")))
+                        (indent level
+                          (str *this-name* "." field " = " (generate-expression (:value stmt)) ";"))))
      (indent level (str "/* Unknown statement: " (:type stmt) " */")))))
 
 ;;
@@ -618,49 +650,53 @@
 (defn generate-method
   "Generate Java code for a method"
   [level {:keys [name params return-type body require ensure rescue visibility note]} opts]
-  (let [java-return (if return-type
-                      (nex-type-to-java return-type)
-                      "void")
-        params-code (str/join ", "
-                              (map (fn [{:keys [name type]}]
-                                     (str (nex-type-to-java type) " " name))
-                                   params))
-        vis (if visibility
-             (visibility-to-java visibility)
-             "public")
-        ;; Generate Javadoc if note present
-        javadoc (when note
-                 [(generate-javadoc level note)])
-        ;; Initialize result variable if method has return type
-        result-init (when return-type
-                     [(indent (+ level 1)
-                             (str java-return " result = " (default-value return-type) ";"))])
-        ;; Extract old references and generate capture statements
-        old-refs (when ensure (extract-old-references ensure))
-        old-captures (when (seq old-refs)
-                      (map (fn [field-name]
-                            (indent (+ level 1)
-                                   (str "var old_" field-name " = " field-name ";")))
-                          old-refs))
-        preconditions (generate-assertions (+ level 1) require "Precondition" opts)
-        statements (if rescue
-                     [(generate-rescue (+ level 1) body rescue #{})]
-                     (map #(generate-statement (+ level 1) %) body))
-        postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)
-        ;; Add return statement if method has return type
-        return-stmt (when return-type
-                     [(indent (+ level 1) "return result;")])]
-    (str/join "\n"
-              (concat
-               javadoc
-               [(indent level (str vis " " java-return " " name "(" params-code ") {"))]
-               result-init
-               old-captures
-               preconditions
-               statements
-               postconditions
-               return-stmt
-               [(indent level "}")]))))
+  (let [param-names (set (map :name params))
+        local-names (cond-> param-names
+                      return-type (conj "result"))]
+    (binding [*local-names* (into *local-names* local-names)]
+      (let [java-return (if return-type
+                          (nex-type-to-java return-type)
+                          "void")
+            params-code (str/join ", "
+                                  (map (fn [{:keys [name type]}]
+                                         (str (nex-type-to-java type) " " name))
+                                       params))
+            vis (if visibility
+                 (visibility-to-java visibility)
+                 "public")
+            ;; Generate Javadoc if note present
+            javadoc (when note
+                     [(generate-javadoc level note)])
+            ;; Initialize result variable if method has return type
+            result-init (when return-type
+                         [(indent (+ level 1)
+                                 (str java-return " result = " (default-value return-type) ";"))])
+            ;; Extract old references and generate capture statements
+            old-refs (when ensure (extract-old-references ensure))
+            old-captures (when (seq old-refs)
+                          (map (fn [field-name]
+                                (indent (+ level 1)
+                                       (str "var old_" field-name " = " (resolve-field-name field-name) ";")))
+                              old-refs))
+            preconditions (generate-assertions (+ level 1) require "Precondition" opts)
+            statements (if rescue
+                         [(generate-rescue (+ level 1) body rescue #{})]
+                         (map #(generate-statement (+ level 1) %) body))
+            postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)
+            ;; Add return statement if method has return type
+            return-stmt (when return-type
+                         [(indent (+ level 1) "return result;")])]
+        (str/join "\n"
+                  (concat
+                   javadoc
+                   [(indent level (str vis " " java-return " " name "(" params-code ") {"))]
+                   result-init
+                   old-captures
+                   preconditions
+                   statements
+                   postconditions
+                   return-stmt
+                   [(indent level "}")]))))))
 
 ;;
 ;; Field Generation
@@ -689,12 +725,14 @@
   "Generate Java static factory method for a Nex constructor"
   [level class-name {:keys [name params body require ensure rescue]} opts]
   (let [local-name (class-name-to-local class-name)
+        param-names (set (map :name params))
         params-code (str/join ", "
                               (map (fn [{:keys [name type]}]
                                      (str (nex-type-to-java type) " " name))
                                    params))
         preconditions (generate-assertions (+ level 1) require "Precondition" opts)
-        statements (binding [*this-name* local-name]
+        statements (binding [*this-name* local-name
+                             *local-names* (into *local-names* param-names)]
                      (if rescue
                        [(generate-rescue (+ level 1) body rescue #{})]
                        (mapv #(generate-statement (+ level 1) %) body)))
@@ -714,16 +752,9 @@
 ;;
 
 (defn analyze-inheritance
-  "Analyze inheritance structure to determine extends/implements"
+  "Return the list of parent names for composition-based inheritance"
   [parents]
-  (if (empty? parents)
-    {:extends nil :implements []}
-    (if (= 1 (count parents))
-      {:extends (:parent (first parents))
-       :implements []}
-      ;; Multiple inheritance: first parent is extends, rest are interfaces
-      {:extends (:parent (first parents))
-       :implements (map :parent (rest parents))})))
+  (mapv :parent parents))
 
 (defn generate-generic-params
   "Generate Java generic parameters from Nex generic params"
@@ -738,14 +769,98 @@
       (str "<" params-str ">"))))
 
 (defn generate-class-header
-  "Generate Java class header with inheritance and generics"
-  [class-name generic-params parents]
-  (let [{:keys [extends implements]} (analyze-inheritance parents)
-        generics (generate-generic-params generic-params)
-        extends-clause (when extends (str " extends " extends))
-        implements-clause (when (seq implements)
-                           (str " implements " (str/join ", " implements)))]
-    (str "public class " class-name generics extends-clause implements-clause " {")))
+  "Generate Java class header (no extends/implements - uses composition)"
+  [class-name generic-params _parents]
+  (let [generics (generate-generic-params generic-params)]
+    (str "public class " class-name generics " {")))
+
+(declare extract-members)
+
+(defn generate-composition-fields
+  "Generate private composition fields for each parent class"
+  [level parents]
+  (mapv (fn [parent-name]
+          (indent level (str "private " parent-name " _parent_" parent-name
+                             " = new " parent-name "();")))
+        (mapv :parent parents)))
+
+(defn get-parent-methods
+  "Get all method names from a parent class definition via the class registry"
+  [parent-name]
+  (when-let [parent-def (get *class-registry* parent-name)]
+    (let [{:keys [methods]} (extract-members (:body parent-def))]
+      methods)))
+
+(defn get-parent-fields
+  "Get all field names from a parent class definition via the class registry"
+  [parent-name]
+  (when-let [parent-def (get *class-registry* parent-name)]
+    (let [{:keys [fields]} (extract-members (:body parent-def))]
+      (map :name fields))))
+
+(defn build-parent-field-map
+  "Build a map of field-name -> '_parent_X' for all parent fields.
+   E.g. {'x' '_parent_A', 'speed' '_parent_Vehicle'}"
+  [parents]
+  (reduce (fn [m parent-name]
+            (let [fields (get-parent-fields parent-name)]
+              (reduce (fn [m2 field-name]
+                        (if (contains? m2 field-name)
+                          m2  ;; first parent wins (no override)
+                          (assoc m2 field-name (str "_parent_" parent-name))))
+                      m fields)))
+          {} parents))
+
+(defn resolve-field-name
+  "Resolve a field name: locals shadow own fields shadow parent fields.
+   For parent fields, returns '_parent_X.name' (with this-name prefix in constructor context)."
+  [field-name]
+  (cond
+    (contains? *local-names* field-name) field-name
+    (contains? *own-fields* field-name) field-name
+    (contains? *parent-field-map* field-name)
+    (let [parent-prefix (get *parent-field-map* field-name)]
+      (if (= *this-name* "this")
+        (str parent-prefix "." field-name)
+        (str *this-name* "." parent-prefix "." field-name)))
+    :else field-name))
+
+(defn generate-delegation-methods
+  "Generate delegation methods for inherited methods not overridden by the child"
+  [level parents own-method-names]
+  (vec
+   (mapcat
+    (fn [{:keys [parent]}]
+      (let [parent-methods (get-parent-methods parent)]
+        (keep
+         (fn [{:keys [name params return-type]}]
+           (when-not (contains? own-method-names name)
+             (let [java-return (if return-type
+                                 (nex-type-to-java return-type)
+                                 "void")
+                   params-code (str/join ", "
+                                        (map (fn [{:keys [name type]}]
+                                               (str (nex-type-to-java type) " " name))
+                                             params))
+                   args-code (str/join ", " (map :name params))
+                   call-str (str "_parent_" parent "." name "(" args-code ")")
+                   body-str (if return-type
+                              (str "return " call-str ";")
+                              (str call-str ";"))]
+               (str (indent level (str "public " java-return " " name "(" params-code ") {"))
+                    "\n"
+                    (indent (+ level 1) body-str)
+                    "\n"
+                    (indent level "}")))))
+         parent-methods)))
+    parents)))
+
+(defn is-parent-constructor?
+  "Check if a method name is a constructor on a given parent class"
+  [parent-name method-name]
+  (when-let [parent-def (get *class-registry* parent-name)]
+    (let [{:keys [constructors]} (extract-members (:body parent-def))]
+      (some #(= (:name %) method-name) constructors))))
 
 ;;
 ;; Class Generation
@@ -779,27 +894,45 @@
   ([class-def] (generate-class class-def {}))
   ([{:keys [name generic-params parents body invariant note]} opts]
    (let [{:keys [fields methods constructors]} (extract-members body)
-         ;; Generate class Javadoc if note present
-         class-javadoc (when note
-                        [(generate-javadoc 0 note)])
-         class-header (generate-class-header name generic-params parents)
-         invariant-comment (when (and invariant (not (:skip-contracts opts)))
-                            (indent 1 (str "// Class invariant: "
-                                          (str/join ", " (map :label invariant)))))
-         fields-code (map #(generate-field 1 %) fields)
-         constructors-code (map #(generate-constructor 1 name % opts) constructors)
-         methods-code (map #(generate-method 1 % opts) methods)]
-     (str/join "\n"
-               (concat
-                class-javadoc
-                [class-header]
-                (when invariant-comment [invariant-comment ""])
-                fields-code
-                (when (seq fields) [""])
-                constructors-code
-                (when (seq constructors) [""])
-                methods-code
-                ["}"])))))
+         parent-names (mapv :parent parents)
+         parent-fm (build-parent-field-map parent-names)
+         own-flds (set (map :name fields))]
+    (binding [*current-parents* (set parent-names)
+              *parent-field-map* parent-fm
+              *own-fields* own-flds]
+     (let [
+           ;; Generate class Javadoc if note present
+           class-javadoc (when note
+                          [(generate-javadoc 0 note)])
+           class-header (generate-class-header name generic-params parents)
+           ;; Composition fields for parent classes
+           composition-fields (when (seq parents)
+                                (generate-composition-fields 1 parents))
+           invariant-comment (when (and invariant (not (:skip-contracts opts)))
+                              (indent 1 (str "// Class invariant: "
+                                            (str/join ", " (map :label invariant)))))
+           fields-code (map #(generate-field 1 %) fields)
+           ;; Delegation methods for inherited methods not overridden
+           own-method-names (set (map :name methods))
+           delegation-methods (when (seq parents)
+                                (generate-delegation-methods 1 parents own-method-names))
+           constructors-code (map #(generate-constructor 1 name % opts) constructors)
+           methods-code (map #(generate-method 1 % opts) methods)]
+       (str/join "\n"
+                 (concat
+                  class-javadoc
+                  [class-header]
+                  (when invariant-comment [invariant-comment ""])
+                  composition-fields
+                  (when (seq composition-fields) [""])
+                  fields-code
+                  (when (seq fields) [""])
+                  (when (seq delegation-methods) delegation-methods)
+                  (when (seq delegation-methods) [""])
+                  constructors-code
+                  (when (seq constructors) [""])
+                  methods-code
+                  ["}"])))))))
 
 (defn generate-function-base-class
   "Generate the built-in Function base class."
@@ -875,7 +1008,8 @@
          java-imports (keep generate-import imports)
          function-base (generate-function-base-class)
          function-globals (generate-function-globals functions)]
-     (binding [*function-names* function-names]
+     (binding [*function-names* function-names
+               *class-registry* (into {} (map (juxt :name identity) classes))]
        (let [java-classes (map #(generate-class % opts) classes)
              parts (concat java-imports
                            (when (seq java-imports) [""])
@@ -973,7 +1107,8 @@
          function-base (generate-function-base-class)
          function-globals (generate-function-globals functions)
          main-code (generate-main ast)
-         class-codes (binding [*function-names* function-names]
+         class-codes (binding [*function-names* function-names
+                              *class-registry* (into {} (map (juxt :name identity) classes))]
                        (mapv (fn [cls] [(:name cls) (generate-class cls opts)]) classes))
          files (into {"Function.java" function-base}
                      (concat

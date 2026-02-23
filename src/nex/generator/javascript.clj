@@ -362,7 +362,6 @@
                                "\n" (indent 0 "})")))
     :old (str "old_" (generate-expression (:expr expr)))
     :this *this-name*
-    :super "super"
     (str "/* Unknown expression: " (:type expr) " */")))
 
 ;;
@@ -513,8 +512,7 @@
      :raise (indent level (str "throw " (generate-expression (:value stmt)) ";"))
      :retry (indent level "continue;")
      :member-assign (indent level
-                      (let [obj-str (if (= (:object-type stmt) :this) *this-name* "super")]
-                        (str obj-str "." (:field stmt) " = " (generate-expression (:value stmt)) ";")))
+                      (str *this-name* "." (:field stmt) " = " (generate-expression (:value stmt)) ";"))
      (indent level (str "/* Unknown statement: " (:type stmt) " */")))))
 
 ;;

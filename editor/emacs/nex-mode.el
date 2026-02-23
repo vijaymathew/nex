@@ -116,7 +116,7 @@
 (defconst nex-keywords
   '("class" "feature" "inherit" "end" "do" "if" "then" "else"
     "from" "until" "invariant" "variant" "require" "ensure"
-    "let" "rename" "redefine" "as" "and" "or" "not" "fn"
+    "let" "as" "and" "or" "not" "fn"
     "old" "create" "private" "note" "with" "import" "intern" "function"
     "raise" "rescue" "retry")
   "Nex language keywords.")
@@ -244,7 +244,7 @@
      (looking-back
       (regexp-opt '("class" "do" "then" "else" "require" "ensure"
                     "from" "until" "inherit" "invariant" "variant"
-                    "rename" "redefine" "rescue")
+                    "rescue")
                   'words)
       (line-beginning-position))
      ;; Section keywords that contain items (feature, create)

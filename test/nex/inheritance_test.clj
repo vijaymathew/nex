@@ -12,10 +12,7 @@
     end
 end
 
-class Dog
-inherit
-  Animal
-  end
+class Dog inherit Animal
 feature
   bark() do
     print(\"Woof!\")
@@ -26,62 +23,6 @@ end"
       (is (some? (:parents dog-class)))
       (is (= 1 (count (:parents dog-class))))
       (is (= "Animal" (:parent (first (:parents dog-class))))))))
-
-(deftest inheritance-with-rename-test
-  (testing "Inheritance with rename clause"
-    (let [code "class Base
-  feature
-    greet() do
-      print(\"Hello from Base\")
-    end
-end
-
-class Derived
-inherit
-  Base
-    rename
-      greet as base_greet
-    end
-feature
-  greet() do
-    print(\"Hello from Derived\")
-  end
-end"
-          ast (p/ast code)
-          derived-class (second (:classes ast))
-          parent (first (:parents derived-class))]
-      (is (= "Base" (:parent parent)))
-      (is (some? (:renames parent)))
-      (is (= 1 (count (:renames parent))))
-      (is (= "greet" (:old-name (first (:renames parent)))))
-      (is (= "base_greet" (:new-name (first (:renames parent))))))))
-
-(deftest inheritance-with-redefine-test
-  (testing "Inheritance with redefine clause"
-    (let [code "class Shape
-  feature
-    area() do
-      print(\"Generic area\")
-    end
-end
-
-class Circle
-inherit
-  Shape
-    redefine
-      area
-    end
-feature
-  area() do
-    print(\"Circle area\")
-  end
-end"
-          ast (p/ast code)
-          circle-class (second (:classes ast))
-          parent (first (:parents circle-class))]
-      (is (= "Shape" (:parent parent)))
-      (is (some? (:redefines parent)))
-      (is (= ["area"] (:redefines parent))))))
 
 (deftest multiple-inheritance-test
   (testing "Multiple inheritance"
@@ -99,12 +40,7 @@ class Swimmable
     end
 end
 
-class Duck
-inherit
-  Flyable
-  end,
-  Swimmable
-  end
+class Duck inherit Flyable, Swimmable
 feature
   quack() do
     print(\"Quack!\")
@@ -117,44 +53,26 @@ end"
       (is (= "Flyable" (:parent (first parents))))
       (is (= "Swimmable" (:parent (second parents)))))))
 
-(deftest complex-inheritance-test
-  (testing "Complex inheritance with both rename and redefine"
-    (let [code "class Account
+(deftest inline-inherit-syntax-test
+  (testing "Inherit clause is inline with class declaration"
+    (let [code "class Base
   feature
-    deposit(amount: Integer) do
-      print(\"Account deposit:\", amount)
-    end
-
-    balance() do
-      print(\"Account balance\")
+    hello() do
+      print(\"hello\")
     end
 end
 
-class SavingsAccount
-inherit
-  Account
-    rename
-      deposit as account_deposit
-    redefine
-      deposit
-    end
+class Child inherit Base
 feature
-  deposit(amount: Integer) do
-    print(\"Savings deposit:\", amount)
-  end
-
-  interest() do
-    print(\"Calculating interest\")
+  world() do
+    print(\"world\")
   end
 end"
           ast (p/ast code)
-          savings-class (second (:classes ast))
-          parent (first (:parents savings-class))]
-      (is (= "Account" (:parent parent)))
-      (is (some? (:renames parent)))
-      (is (= 1 (count (:renames parent))))
-      (is (= "deposit" (:old-name (first (:renames parent)))))
-      (is (= "account_deposit" (:new-name (first (:renames parent)))))
-      (is (some? (:redefines parent)))
-      (is (= ["deposit"] (:redefines parent))))))
-
+          child-class (second (:classes ast))]
+      (is (= "Child" (:name child-class)))
+      (is (= 1 (count (:parents child-class))))
+      (is (= "Base" (:parent (first (:parents child-class)))))
+      ;; No :renames or :redefines keys
+      (is (nil? (:renames (first (:parents child-class)))))
+      (is (nil? (:redefines (first (:parents child-class))))))))
