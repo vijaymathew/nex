@@ -12,10 +12,7 @@
     end
 end
 
-class Dog
-inherit
-  Animal
-  end
+class Dog inherit Animal
 feature
   bark() do
     print(\"Woof!\")
@@ -46,10 +43,7 @@ end"
     end
 end
 
-class Dog
-inherit
-  Animal
-  end
+class Dog inherit Animal
 feature
   bark() do
     print(\"Woof!\")
@@ -72,7 +66,7 @@ end"
         (is (= ["\"Woof!\""] @(:output ctx-with-dog)))))))
 
 (deftest method-overriding-test
-  (testing "Method overriding (redefine)"
+  (testing "Method overriding (implicit - same name as parent method)"
     (let [code "class Shape
   feature
     draw() do
@@ -80,12 +74,7 @@ end"
     end
 end
 
-class Circle
-inherit
-  Shape
-    redefine
-      draw
-    end
+class Circle inherit Shape
 feature
   draw() do
     print(\"Drawing circle\")
@@ -96,7 +85,7 @@ end"
       ;; Register all classes
       (doseq [class-node (:classes ast)]
         (interp/register-class ctx class-node))
-      ;; Create object and call redefined method
+      ;; Create object and call overridden method
       (let [circle-obj (interp/make-object "Circle" {})
             env (interp/make-env (:globals ctx))
             _ (interp/env-define env "mycircle" circle-obj)
@@ -123,12 +112,7 @@ class Swimmable
     end
 end
 
-class Duck
-inherit
-  Flyable
-  end,
-  Swimmable
-  end
+class Duck inherit Flyable, Swimmable
 feature
   quack() do
     print(\"Quack!\")
@@ -174,20 +158,14 @@ end"
     end
 end
 
-class Mammal
-inherit
-  Animal
-  end
+class Mammal inherit Animal
 feature
   nurture() do
     print(\"Nurturing young\")
   end
 end
 
-class Dog
-inherit
-  Mammal
-  end
+class Dog inherit Mammal
 feature
   bark() do
     print(\"Woof!\")
@@ -224,3 +202,106 @@ end"
                                          :args []})
         (is (= ["\"Woof!\""] @(:output ctx-with-dog)))))))
 
+(deftest parent-method-call-test
+  (testing "Calling parent method via A.show() syntax"
+    (let [code "class A
+  feature
+    x: Integer
+
+    show() do
+      print(x)
+    end
+end
+
+class B inherit A
+feature
+  y: Integer
+
+  show() do
+    A.show
+    print(y)
+  end
+end"
+          ast (p/ast code)
+          ctx (interp/make-context)]
+      ;; Register all classes
+      (doseq [class-node (:classes ast)]
+        (interp/register-class ctx class-node))
+      ;; Create B object with fields and call show
+      (let [b-obj (interp/make-object "B" {:x 10 :y 20})
+            env (interp/make-env (:globals ctx))
+            _ (interp/env-define env "b" b-obj)
+            ctx-with-b (assoc ctx :current-env env)]
+        (interp/eval-node ctx-with-b {:type :call
+                                       :target "b"
+                                       :method "show"
+                                       :args []})
+        ;; A.show prints x (10), then show prints y (20)
+        (is (= ["10" "20"] @(:output ctx-with-b)))))))
+
+(deftest parent-constructor-call-test
+  (testing "Calling parent constructor via A.make_A(x) syntax"
+    (let [code "class A
+  feature
+    x: Integer
+  create
+    make_A(x: Integer) do
+      this.x := x
+    end
+end
+
+class B inherit A
+feature
+  y: Integer
+create
+  make_B(x, y: Integer) do
+    A.make_A(x)
+    this.y := y
+  end
+end"
+          ast (p/ast code)
+          ctx (interp/make-context)]
+      ;; Register all classes
+      (doseq [class-node (:classes ast)]
+        (interp/register-class ctx class-node))
+      ;; Create B using constructor
+      (let [b-obj (interp/eval-node ctx {:type :create
+                                          :class-name "B"
+                                          :generic-args nil
+                                          :constructor "make_B"
+                                          :args [{:type :integer :value 10}
+                                                 {:type :integer :value 20}]})]
+        (is (= 10 (get (:fields b-obj) :x)))
+        (is (= 20 (get (:fields b-obj) :y)))))))
+
+(deftest parent-field-access-test
+  (testing "Inherited fields are accessible"
+    (let [code "class Vehicle
+  feature
+    speed: Integer
+end
+
+class Car inherit Vehicle
+feature
+  brand: String
+
+  info() do
+    print(speed)
+    print(brand)
+  end
+end"
+          ast (p/ast code)
+          ctx (interp/make-context)]
+      ;; Register all classes
+      (doseq [class-node (:classes ast)]
+        (interp/register-class ctx class-node))
+      ;; Create car with inherited and own fields
+      (let [car-obj (interp/make-object "Car" {:speed 100 :brand "Tesla"})
+            env (interp/make-env (:globals ctx))
+            _ (interp/env-define env "mycar" car-obj)
+            ctx-with-car (assoc ctx :current-env env)]
+        (interp/eval-node ctx-with-car {:type :call
+                                         :target "mycar"
+                                         :method "info"
+                                         :args []})
+        (is (= ["100" "\"Tesla\""] @(:output ctx-with-car)))))))

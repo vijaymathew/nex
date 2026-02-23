@@ -44,23 +44,7 @@ classBody
     ;
 
 inheritClause
-    : INHERIT inheritEntry (',' inheritEntry)*
-    ;
-
-inheritEntry
-    : IDENTIFIER renameClause? redefineClause? END?
-    ;
-
-renameClause
-    : RENAME renameMapping+
-    ;
-
-renameMapping
-    : IDENTIFIER AS IDENTIFIER
-    ;
-
-redefineClause
-    : REDEFINE IDENTIFIER+
+    : INHERIT IDENTIFIER (',' IDENTIFIER)*
     ;
 
 featureSection
@@ -193,7 +177,7 @@ variantClause
 
 assignment
     : IDENTIFIER ASSIGN expression
-    | (THIS | SUPER) '.' IDENTIFIER ASSIGN expression
+    | THIS '.' IDENTIFIER ASSIGN expression
     ;
 
 localVarDecl
@@ -280,7 +264,6 @@ primary
     | anonymousFunction
     | oldExpression
     | THIS
-    | SUPER
     | IDENTIFIER
     | '(' expression ')'
     ;
@@ -368,8 +351,6 @@ FEATURE      : 'feature';
 PRIVATE      : 'private';
 CONSTRUCTORS : 'constructors';
 INHERIT      : 'inherit';
-RENAME       : 'rename';
-REDEFINE     : 'redefine';
 AS           : 'as';
 DO           : 'do';
 END          : 'end';
@@ -388,7 +369,6 @@ ENSURE       : 'ensure';
 INVARIANT    : 'invariant';
 OLD          : 'old';
 THIS         : 'this';
-SUPER        : 'super';
 NOTE         : 'note';
 WITH         : 'with';
 RAISE        : 'raise';

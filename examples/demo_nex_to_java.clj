@@ -23,7 +23,7 @@
     end
 
     birthday() do
-      let age := age + 1
+      let age: Integer := age + 1
     end
 end")
 
@@ -44,8 +44,8 @@ end")
 (def example2 "class Point
   create
     make(x, y: Integer) do
-      let x := x
-      let y := y
+      let x: Integer := x
+      let y: Integer := y
     end
 
   feature
@@ -79,10 +79,7 @@ end")
     end
 end
 
-class Dog
-inherit
-  Animal
-  end
+class Dog inherit Animal
 feature
   bark() do
     print(\"Woof!\")
@@ -153,22 +150,22 @@ end")
     end
 
     sum(n: Integer) do
-      let result := 0
+      let total: Integer := 0
       from
-        let i := 1
+        let i: Integer := 1
       until
         i > n
       do
-        let result := result + i
+        let total: Integer := total + i
         i := i + 1
       end
-      print(result)
+      print(total)
     end
 
     demo() do
-      let x := 10
+      let x: Integer := 10
       do
-        let x := 20
+        let x: Integer := 20
         print(x)
       end
       print(x)
@@ -193,8 +190,8 @@ end")
   feature
     gcd(a, b: Integer) do
       from
-        let x := a
-        let y := b
+        let x: Integer := a
+        let y: Integer := b
       invariant
         x_positive: x > 0
         y_positive: y > 0
@@ -217,7 +214,7 @@ end")
 (println example6)
 (println)
 (println "JAVA CODE:")
-(println (n2j/translate example6))
+(println (n2j/translate example6 {:skip-type-check true}))
 (println)
 (println)
 
@@ -241,12 +238,7 @@ class Swimmable
     end
 end
 
-class Duck
-inherit
-  Flyable
-  end,
-  Swimmable
-  end
+class Duck inherit Flyable, Swimmable
 feature
   quack() do
     print(\"Quack!\")
@@ -275,8 +267,8 @@ end")
 (println "  ✓ Method calls and expressions")
 (println)
 (println "Notes:")
-(println "  • Multiple inheritance uses extends for first parent,")
-(println "    implements for remaining parents")
+(println "  • Multiple inheritance uses composition with delegation")
+(println "    (each parent becomes a private field with forwarding methods)")
 (println "  • Contracts translated to Java assert statements")
 (println "  • Loop invariants and variants included as comments")
 (println "  • Nex types mapped to Java primitives/classes")

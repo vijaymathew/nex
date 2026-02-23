@@ -426,7 +426,7 @@ This will show 9 examples with side-by-side Nex and JavaScript output.
 | Feature                  | Java                          | JavaScript                    |
 |--------------------------|-------------------------------|-------------------------------|
 | Class syntax             | `public class`                | `class`                       |
-| Inheritance              | `extends`, `implements`       | `extends` only                |
+| Inheritance              | Composition with delegation   | `extends` only                |
 | Field visibility         | `private`, `public`           | Underscore prefix convention  |
 | Type system              | Static, checked               | Dynamic, JSDoc comments       |
 | Primitive types          | int, long, double, etc.       | number, string, boolean       |
@@ -437,7 +437,7 @@ This will show 9 examples with side-by-side Nex and JavaScript output.
 | Map subscript            | `.get(key)`                   | Smart: `.get(key)` or `[key]` |
 | Default constructor      | Implicit if no constructors   | Always generated              |
 | Method overloading       | Supported                     | Not supported                 |
-| Multiple inheritance     | First extends, rest implement | First parent only             |
+| Multiple inheritance     | Composition for all parents   | First parent only             |
 
 ## Benefits
 

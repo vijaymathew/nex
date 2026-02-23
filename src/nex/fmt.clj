@@ -238,25 +238,10 @@
     (str name " -> " constraint)
     name))
 
-(defn format-rename-mapping
-  "Format a rename mapping"
-  [{:keys [from to]} level]
-  (str (indent (inc level)) from " as " to))
-
 (defn format-inherit-entry
   "Format an inherit entry"
-  [{:keys [parent rename redefine]} level]
-  (let [ind (indent (inc level))]
-    (str/join "\n"
-              (remove empty?
-                      [(str ind parent)
-                       (when rename
-                         (str (indent (+ level 2)) "rename\n"
-                              (str/join "\n" (map #(format-rename-mapping % (+ level 2)) rename))))
-                       (when redefine
-                         (str (indent (+ level 2)) "redefine\n"
-                              (str/join "\n" (map #(str (indent (+ level 3)) %) redefine))))
-                       (str ind "end")]))))
+  [{:keys [parent]} _level]
+  parent)
 
 (defn format-class
   "Format a class declaration"
@@ -266,8 +251,7 @@
         note-str (when note
                    (str "\n  note \"" note "\""))
         parent-str (when parents
-                     (str "\ninherit\n"
-                          (str/join "\n\n" (map #(format-inherit-entry % 0) parents))))]
+                     (str " inherit " (str/join ", " (map :parent parents))))]
     (str/join "\n"
               (remove empty?
                       [(str "class " name generic-str note-str)

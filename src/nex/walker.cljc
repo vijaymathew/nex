@@ -187,7 +187,7 @@
                       :name class-name
                       :generic-params nil
                       :note nil
-                      :parents [{:parent "Function" :renames nil :redefines nil}]
+                      :parents [{:parent "Function"}]
                       :body [{:type :feature-section
                               :visibility {:type :public}
                               :members [method-def]}]
@@ -229,7 +229,7 @@
                       :name class-name
                       :generic-params nil
                       :note nil
-                      :parents [{:parent "Function" :renames nil :redefines nil}]
+                      :parents [{:parent "Function"}]
                       :body [{:type :feature-section
                               :visibility {:type :public}
                               :members [method-def]}]
@@ -242,37 +242,10 @@
         :class-def class-def}))
 
    :inheritClause
-   (fn [[_ _inherit-kw & entries]]
-     (->> entries
+   (fn [[_ _inherit-kw & names]]
+     (->> names
           (remove #(= "," %))
-          (mapv transform-node)))
-
-   :inheritEntry
-   (fn [[_ parent-name & clauses]]
-     (let [;; Filter out "end" keyword
-           cleaned (remove #(= "end" %) clauses)
-           rename-clause (first (filter #(and (sequential? %)
-                                             (= :renameClause (first %)))
-                                       cleaned))
-           redefine-clause (first (filter #(and (sequential? %)
-                                               (= :redefineClause (first %)))
-                                         cleaned))]
-       {:parent (token-text parent-name)
-        :renames (when rename-clause (transform-node rename-clause))
-        :redefines (when redefine-clause (transform-node redefine-clause))}))
-
-   :renameClause
-   (fn [[_ _rename-kw & mappings]]
-     (mapv transform-node mappings))
-
-   :renameMapping
-   (fn [[_ old-name _as new-name]]
-     {:old-name (token-text old-name)
-      :new-name (token-text new-name)})
-
-   :redefineClause
-   (fn [[_ _redefine-kw & method-names]]
-     (mapv token-text method-names))
+          (mapv (fn [name] {:parent (token-text name)}))))
 
    :visibilityModifier
    (fn [node]
@@ -565,12 +538,12 @@
 
    :assignment
    (fn [[_ first-token & rest]]
-     (if (or (= first-token "this") (= first-token "super"))
-       ;; Member assignment: this.field := expr  or  super.field := expr
-       ;; Tokens: THIS/SUPER "." IDENTIFIER ":=" expression
+     (if (= first-token "this")
+       ;; Member assignment: this.field := expr
+       ;; Tokens: THIS "." IDENTIFIER ":=" expression
        (let [[_dot field-name _assign expr] rest]
          {:type :member-assign
-          :object-type (if (= first-token "this") :this :super)
+          :object-type :this
           :field (token-text field-name)
           :value (transform-node expr)})
        ;; Simple assignment: IDENTIFIER := expression
@@ -832,7 +805,6 @@
        (let [child (first children)]
          (cond
            (= child "this") {:type :this}
-           (= child "super") {:type :super}
            (and (string? child) (not (.startsWith child "\"")))
            ;; It's an identifier (not a string literal)
            {:type :identifier :name child}

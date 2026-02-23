@@ -553,11 +553,6 @@
                             class-name)
       :old (check-expression env (:expr expr))
       :this (or (env-lookup-var env "__current_class__") "Any")
-      :super (or (when-let [class-name (env-lookup-var env "__current_class__")]
-                   (when-let [class-def (env-lookup-class env class-name)]
-                     (when-let [parent (first (:parents class-def))]
-                       (:parent parent))))
-                 "Any")
       "Any")
     :else "Any"))
 
@@ -810,20 +805,12 @@
 (defn check-inheritance
   "Check that inheritance declarations are valid"
   [env class-name parents]
-  (doseq [{:keys [parent renames redefines]} parents]
+  (doseq [{:keys [parent]} parents]
     ;; Check that parent class exists
     (when-not (or (env-lookup-class env parent) (builtin-type? parent))
       (throw (ex-info (str "Parent class " parent " not found for class " class-name)
                       {:error (type-error
-                               (str "Undefined parent class: " parent))})))
-
-    ;; Check that renamed methods exist in parent (if we have parent info)
-    ;; Note: For now we skip this validation since we don't have full parent method info
-    ;; in the type environment. This could be enhanced later.
-
-    ;; Check that redefined methods exist in parent
-    ;; Note: Similarly skipped for now
-    ))
+                               (str "Undefined parent class: " parent))})))))
 
 (defn check-class
   "Check a class definition"
