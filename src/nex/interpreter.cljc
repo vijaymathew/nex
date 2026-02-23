@@ -1190,12 +1190,18 @@
       (last (map #(eval-node new-ctx %) body)))))
 
 (defmethod eval-node :if
-  [ctx {:keys [condition then else]}]
-  ;; Evaluate condition and execute appropriate branch
+  [ctx {:keys [condition then elseif else]}]
+  ;; Evaluate condition, then elseif chain, then optional else
   (let [cond-val (eval-node ctx condition)]
     (if cond-val
       (last (map #(eval-node ctx %) then))
-      (last (map #(eval-node ctx %) else)))))
+      (if-let [matched (some (fn [clause]
+                               (when (eval-node ctx (:condition clause))
+                                 clause))
+                             elseif)]
+        (last (map #(eval-node ctx %) (:then matched)))
+        (when else
+          (last (map #(eval-node ctx %) else)))))))
 
 (defmethod eval-node :loop
   [ctx {:keys [init invariant variant until body]}]

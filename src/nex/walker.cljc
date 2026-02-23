@@ -457,11 +457,39 @@
         :rescue (when rescue-clause (transform-node rescue-clause))}))
 
    :ifStatement
-   (fn [[_ _if-kw condition _then-kw then-block _else-kw else-block _end-kw]]
-     {:type :if
-      :condition (transform-node condition)
-      :then (transform-node then-block)
-      :else (transform-node else-block)})
+   (fn [[_ _if-kw & rest]]
+     ;; rest: condition "then" block ("elseif" condition "then" block)* ("else" block)? "end"
+     (let [tokens (vec rest)
+           ;; First condition and then-block
+           condition (nth tokens 0)
+           ;; skip "then" at index 1
+           then-block (nth tokens 2)
+           ;; Remaining tokens after the first then-block, before "end"
+           remaining (subvec tokens 3)
+           ;; Parse elseif clauses and optional else
+           [elseif-clauses else-block]
+           (loop [toks remaining
+                  elseifs []]
+             (cond
+               ;; "end" - done
+               (or (empty? toks) (= "end" (first toks)))
+               [elseifs nil]
+               ;; "elseif" condition "then" block
+               (= "elseif" (first toks))
+               (recur (subvec (vec toks) 4)
+                      (conj elseifs {:condition (transform-node (nth toks 1))
+                                     :then (transform-node (nth toks 3))}))
+               ;; "else" block ["end"]
+               (= "else" (first toks))
+               [elseifs (transform-node (second toks))]
+               ;; skip unexpected tokens
+               :else
+               (recur (rest toks) elseifs)))]
+       {:type :if
+        :condition (transform-node condition)
+        :then (transform-node then-block)
+        :elseif elseif-clauses
+        :else else-block}))
 
    :loopStatement
    (fn [[_ _from-kw init-block & rest]]

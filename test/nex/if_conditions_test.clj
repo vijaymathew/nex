@@ -1,7 +1,10 @@
 (ns nex.if-conditions-test
   (:require [clojure.test :refer [deftest is testing run-tests]]
+            [clojure.string :as str]
             [nex.parser :as p]
-            [nex.interpreter :as interp]))
+            [nex.interpreter :as interp]
+            [nex.generator.java :as java-gen]
+            [nex.generator.javascript :as js-gen]))
 
 ;; Helper function to execute a method body
 (defn execute-method [code]
@@ -166,4 +169,187 @@ end"
 end"
           output (execute-method code)]
       (is (= ["\"Pass\"" "17/2"] output)))))
+
+;; ========== elseif tests ==========
+
+(deftest elseif-first-branch-true-test
+  (testing "elseif chain - first branch true"
+    (let [code "class Test
+  feature
+    demo() do
+      let x := -5
+      if x < 0 then
+        print(\"negative\")
+      elseif x > 100 then
+        print(\"big\")
+      else
+        print(\"normal\")
+      end
+    end
+end"
+          output (execute-method code)]
+      (is (= ["\"negative\""] output)))))
+
+(deftest elseif-middle-branch-true-test
+  (testing "elseif chain - middle branch true"
+    (let [code "class Test
+  feature
+    demo() do
+      let x := 200
+      if x < 0 then
+        print(\"negative\")
+      elseif x > 100 then
+        print(\"big\")
+      else
+        print(\"normal\")
+      end
+    end
+end"
+          output (execute-method code)]
+      (is (= ["\"big\""] output)))))
+
+(deftest elseif-else-branch-test
+  (testing "elseif chain - else branch"
+    (let [code "class Test
+  feature
+    demo() do
+      let x := 50
+      if x < 0 then
+        print(\"negative\")
+      elseif x > 100 then
+        print(\"big\")
+      else
+        print(\"normal\")
+      end
+    end
+end"
+          output (execute-method code)]
+      (is (= ["\"normal\""] output)))))
+
+(deftest multiple-elseif-test
+  (testing "Multiple elseif clauses"
+    (let [code "class Test
+  feature
+    demo() do
+      let score := 75
+      if score >= 90 then
+        print(\"A\")
+      elseif score >= 80 then
+        print(\"B\")
+      elseif score >= 70 then
+        print(\"C\")
+      elseif score >= 60 then
+        print(\"D\")
+      else
+        print(\"F\")
+      end
+    end
+end"
+          output (execute-method code)]
+      (is (= ["\"C\""] output)))))
+
+(deftest elseif-no-else-test
+  (testing "if/elseif with no else"
+    (let [code "class Test
+  feature
+    demo() do
+      let x := 50
+      if x < 0 then
+        print(\"negative\")
+      elseif x > 100 then
+        print(\"big\")
+      end
+      print(\"done\")
+    end
+end"
+          output (execute-method code)]
+      (is (= ["\"done\""] output)))))
+
+(deftest if-then-end-no-else-no-elseif-test
+  (testing "if/then/end with no else and no elseif"
+    (let [code "class Test
+  feature
+    demo() do
+      let x := 10
+      if x > 5 then
+        print(\"big\")
+      end
+      print(\"done\")
+    end
+end"
+          output (execute-method code)]
+      (is (= ["\"big\"" "\"done\""] output)))))
+
+(deftest if-then-end-false-no-else-test
+  (testing "if/then/end with false condition and no else"
+    (let [code "class Test
+  feature
+    demo() do
+      let x := 3
+      if x > 5 then
+        print(\"big\")
+      end
+      print(\"done\")
+    end
+end"
+          output (execute-method code)]
+      (is (= ["\"done\""] output)))))
+
+(deftest java-codegen-elseif-test
+  (testing "Java codegen emits else if for elseif"
+    (let [code "class Test
+  feature
+    demo() do
+      let x: Integer := 0
+      if x < 0 then
+        print(\"negative\")
+      elseif x > 100 then
+        print(\"big\")
+      else
+        print(\"normal\")
+      end
+    end
+end"
+          ast (p/ast code)
+          java-code (java-gen/translate-ast ast)]
+      (is (str/includes? java-code "} else if ("))
+      (is (str/includes? java-code "} else {")))))
+
+(deftest java-codegen-no-else-test
+  (testing "Java codegen with no else block"
+    (let [code "class Test
+  feature
+    demo() do
+      let x: Integer := 0
+      if x < 0 then
+        print(\"negative\")
+      elseif x > 100 then
+        print(\"big\")
+      end
+    end
+end"
+          ast (p/ast code)
+          java-code (java-gen/translate-ast ast)]
+      (is (str/includes? java-code "} else if ("))
+      (is (not (str/includes? java-code "} else {"))))))
+
+(deftest js-codegen-elseif-test
+  (testing "JavaScript codegen emits else if for elseif"
+    (let [code "class Test
+  feature
+    demo() do
+      let x: Integer := 0
+      if x < 0 then
+        print(\"negative\")
+      elseif x > 100 then
+        print(\"big\")
+      else
+        print(\"normal\")
+      end
+    end
+end"
+          ast (p/ast code)
+          js-code (js-gen/translate-ast ast)]
+      (is (str/includes? js-code "} else if ("))
+      (is (str/includes? js-code "} else {")))))
 

@@ -152,7 +152,7 @@ scopedBlock
     ;
 
 ifStatement
-    : IF expression THEN block ELSE block END
+    : IF expression THEN block (ELSEIF expression THEN block)* (ELSE block)? END
     ;
 
 loopStatement
@@ -361,6 +361,7 @@ IMPORT       : 'import';
 IF           : 'if';
 THEN         : 'then';
 ELSE         : 'else';
+ELSEIF       : 'elseif';
 FROM         : 'from';
 UNTIL        : 'until';
 VARIANT      : 'variant';
