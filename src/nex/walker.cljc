@@ -586,7 +586,8 @@
        {:type :call
         :target nil
         :method (first rest)
-        :args []}
+        :args []
+        :has-parens false}
 
        ;; Chained call: primary callChain
        :else
@@ -596,12 +597,14 @@
          (reduce (fn [acc part]
                  (case (:type part)
                    :member-access
-                   {:type :call
-                    :target (if (and (map? acc) (= :identifier (:type acc)))
-                              (:name acc)
-                              acc)
-                    :method (:name part)
-                    :args (:args part)}
+                   (cond-> {:type :call
+                            :target (if (and (map? acc) (= :identifier (:type acc)))
+                                      (:name acc)
+                                      acc)
+                            :method (:name part)
+                            :args (:args part)}
+                     (some? (:has-parens part))
+                     (assoc :has-parens (:has-parens part)))
 
                      :call-suffix
                      {:type :call
@@ -670,12 +673,14 @@
        (reduce (fn [acc part]
                  (case (:type part)
                    :member-access
-                   {:type :call
-                    :target (if (and (map? acc) (= :identifier (:type acc)))
-                              (:name acc)
-                              acc)
-                    :method (:name part)
-                    :args (:args part)}
+                   (cond-> {:type :call
+                            :target (if (and (map? acc) (= :identifier (:type acc)))
+                                      (:name acc)
+                                      acc)
+                            :method (:name part)
+                            :args (:args part)}
+                     (some? (:has-parens part))
+                     (assoc :has-parens (:has-parens part)))
 
                    :call-suffix
                    {:type :call
@@ -702,11 +707,13 @@
 
    :memberAccess
    (fn [[_ _dot name & rest]]
-     (let [args-node (first (filter #(and (sequential? %)
+     (let [has-parens (boolean (some #(= "(" %) rest))
+           args-node (first (filter #(and (sequential? %)
                                          (= :argumentList (first %)))
                                     rest))]
        {:type :member-access
         :name (token-text name)
+        :has-parens has-parens
         :args (if args-node
                (transform-node args-node)
                [])}))

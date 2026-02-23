@@ -249,13 +249,27 @@
     :nil "Nil"
     (throw (ex-info "Unknown literal type" {:expr expr}))))
 
+(defn lookup-class-method
+  "Look up a method on a class and its parent chain"
+  [env class-name method-name]
+  (or (env-lookup-method env class-name method-name)
+      (when-let [class-def (env-lookup-class env class-name)]
+        (some (fn [{:keys [parent]}]
+                (lookup-class-method env parent method-name))
+              (:parents class-def)))))
+
 (defn check-identifier
   "Check the type of an identifier"
   [env {:keys [name] :as expr}]
   (if-let [var-type (env-lookup-var env name)]
     var-type
-    (throw (ex-info (str "Undefined variable: " name)
-                    {:error (type-error (str "Undefined variable: " name))}))))
+    (if-let [current-class (env-lookup-var env "__current_class__")]
+      (if-let [method-sig (lookup-class-method env current-class name)]
+        (or (:return-type method-sig) "Void")
+        (throw (ex-info (str "Undefined variable: " name)
+                        {:error (type-error (str "Undefined variable: " name))})))
+      (throw (ex-info (str "Undefined variable: " name)
+                      {:error (type-error (str "Undefined variable: " name))})))))
 
 (defn check-binary-op
   "Check the type of a binary operation"
@@ -413,10 +427,24 @@
                               {:error (type-error
                                        (str "Expected " param-type ", got " arg-type))})))))
         (resolve-generic-type (:return-type method-sig) type-map))
-      (do
-        (doseq [arg args]
-          (check-expression env arg))
-        "Void"))))
+      (if-let [current-class (env-lookup-var env "__current_class__")]
+        (if-let [method-sig (lookup-class-method env current-class method)]
+          (do
+            (when (not= (count args) (count (:params method-sig)))
+              (throw (ex-info (str "Method " method " expects " (count (:params method-sig))
+                                   " arguments, got " (count args))
+                              {:error (type-error
+                                       (str "Method " method " expects " (count (:params method-sig))
+                                            " arguments, got " (count args)))})))
+            (doseq [[arg param] (map vector args (:params method-sig))]
+              (let [arg-type (check-expression env arg)]
+                (when-not (types-compatible? env arg-type (:type param))
+                  (throw (ex-info (str "Argument type mismatch for method " method)
+                                  {:error (type-error
+                                           (str "Expected " (:type param) ", got " arg-type))})))))
+            (or (:return-type method-sig) "Void"))
+          (do (doseq [arg args] (check-expression env arg)) "Void"))
+        (do (doseq [arg args] (check-expression env arg)) "Void")))))
 
 (defn check-create
   "Check the type of a create expression"
@@ -874,8 +902,8 @@
            "command_line" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}}]
     (env-add-method env "Process" method-name sig))
 
-  ;; Built-in Function methods: call1..call32
-  (doseq [n (range 1 33)]
+  ;; Built-in Function methods: call0..call32
+  (doseq [n (range 0 33)]
     (env-add-method env "Function"
                     (str "call" n)
                     {:params (mapv (fn [i] {:name (str "arg" i) :type "Any"})
@@ -908,12 +936,12 @@
        ;; Register function variables (name -> generated class)
        (doseq [fn-def functions]
          (let [arity (count (:params fn-def))]
-           (when (or (< arity 1) (> arity 32))
+           (when (> arity 32)
              (throw (ex-info (str "Function " (:name fn-def)
-                                  " must have between 1 and 32 parameters")
+                                  " must have at most 32 parameters")
                              {:error (type-error
                                       (str "Function " (:name fn-def)
-                                           " must have between 1 and 32 parameters"))}))))
+                                           " must have at most 32 parameters"))}))))
          (env-add-var env (:name fn-def) (:class-name fn-def)))
 
        ;; Second pass: check class bodies

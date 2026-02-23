@@ -927,7 +927,7 @@
                       {:parent parent-class-name :method method})))))
 
 (defmethod eval-node :call
-  [ctx {:keys [target method args]}]
+  [ctx {:keys [target method args has-parens]}]
   (let [arg-values (mapv #(eval-node ctx %) args)]
     (if target
       (let [target-name (when (string? target) target)
@@ -1021,8 +1021,21 @@
                       (throw e)))))
               (let [all-fields (get-all-fields ctx class-def)
                     field (first (filter #(= (:name %) method) all-fields))]
-                (if (and field (empty? arg-values))
-                  (get (:fields obj) (keyword method))
+                (if field
+                  (let [field-val (get (:fields obj) (keyword method))]
+                    (if (and has-parens (nex-object? field-val))
+                      ;; Function field with parens: invoke callN on it
+                      (let [call-method (str "call" (count arg-values))
+                            literal-args (mapv (fn [v] {:type :literal :value v}) arg-values)]
+                        (eval-node ctx {:type :call
+                                        :target {:type :literal :value field-val}
+                                        :method call-method
+                                        :args literal-args}))
+                      ;; No parens or not a Function: return field value (if no args)
+                      (if (empty? arg-values)
+                        field-val
+                        (throw (ex-info (str "Method not found: " method)
+                                        {:object obj :method method})))))
                   (throw (ex-info (str "Method not found: " method)
                                   {:object obj :method method}))))))
 
@@ -1038,11 +1051,15 @@
                      (env-lookup (:current-env ctx) method)
                      (catch #?(:clj Exception :cljs :default) _ ::not-found))]
         (if (and (not= fn-obj ::not-found) (nex-object? fn-obj))
-          (let [call-method (str "call" (count args))]
-            (eval-node ctx {:type :call
-                            :target method
-                            :method call-method
-                            :args args}))
+          (if (not= has-parens false)
+            ;; has-parens is true or nil (default): invoke the Function
+            (let [call-method (str "call" (count args))]
+              (eval-node ctx {:type :call
+                              :target method
+                              :method call-method
+                              :args args}))
+            ;; has-parens is false: return the Function object
+            fn-obj)
           (if-let [current-obj (:current-object ctx)]
             (let [class-def (lookup-class ctx (:class-name current-obj))
                   method-lookup (lookup-method-with-inheritance ctx class-def method)]
@@ -1286,7 +1303,25 @@
 
 (defmethod eval-node :identifier
   [ctx {:keys [name]}]
-  (env-lookup (:current-env ctx) name))
+  (let [val (try
+              (env-lookup (:current-env ctx) name)
+              (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+    (if (not= val ::not-found)
+      val
+      ;; Not in env - check if it's a zero-arg method on current object
+      (if-let [current-obj (:current-object ctx)]
+        (let [class-def (lookup-class ctx (:class-name current-obj))
+              method-lookup (lookup-method-with-inheritance ctx class-def name)]
+          (if method-lookup
+            ;; It's a method - invoke it (implicit this)
+            (eval-node ctx {:type :call
+                            :target (:current-target ctx)
+                            :method name
+                            :args []})
+            (throw (ex-info (str "Undefined variable: " name)
+                            {:var-name name}))))
+        (throw (ex-info (str "Undefined variable: " name)
+                        {:var-name name}))))))
 
 (defn get-all-fields
   "Get all fields from a class and its parents"

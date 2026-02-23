@@ -8,6 +8,10 @@
 
 (def ^:dynamic *function-names* #{})
 (def ^:dynamic *this-name* "this")
+(def ^:dynamic *all-method-names* #{})  ;; own + parent method names
+(def ^:dynamic *own-fields* #{})        ;; field names defined on current class
+(def ^:dynamic *local-names* #{})       ;; method params + loop vars
+(def ^:dynamic *field-types* {})        ;; field-name -> type
 
 (defn class-name-to-local
   "Convert a class name to a local variable name (e.g., 'Point' -> 'point')"
@@ -140,6 +144,23 @@
 (declare generate-expression)
 (declare generate-method)
 
+(defn function-type?
+  "Check if a type is Function (string or map with base-type Function)"
+  [t]
+  (or (= t "Function")
+      (and (map? t) (= (:base-type t) "Function"))))
+
+(defn resolve-identifier
+  "Resolve an identifier in expression context for JavaScript.
+   Resolution order: locals -> methods -> fields -> functions -> bare name"
+  [id-name]
+  (cond
+    (contains? *local-names* id-name) id-name
+    (contains? *all-method-names* id-name) (str "this." id-name "()")
+    (contains? *own-fields* id-name) (str "this." id-name)
+    (contains? *function-names* id-name) (str "NexGlobals." id-name)
+    :else id-name))
+
 (defn generate-binary-expr
   "Generate JavaScript code for binary expression"
   [{:keys [operator left right]}]
@@ -262,36 +283,68 @@
    NOTE: For operator methods (plus, less_than, etc.) that exist on multiple types,
    we try Integer methods first since numeric operations are more common.
    For string operations, use string literals or string-specific methods."
-  [{:keys [target method args]}]
+  [{:keys [target method args] :as call-node}]
   (let [args-code (str/join ", " (map generate-expression args))
         num-args (count args)]
     (if target
       ;; Object method call
-      (let [target-code (if (string? target) target (generate-expression target))]
+      (let [target-code (if (string? target) target (generate-expression target))
+            this-target? (and (map? target) (= :this (:type target)))
+            has-parens (:has-parens call-node)]
         (if (nil? method)
           ;; Calling an expression that returns a function
           (str target-code ".call" num-args "(" args-code ")")
-          (or
-           ;; Try Integer methods first (for operators, numeric is more common)
-           (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
-             (method-fn target-code args-code))
-           ;; Try String methods
-           (when-let [method-fn (get-in builtin-method-mappings [:String method])]
-             (method-fn target-code args-code))
-           ;; Try Array methods
-           (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
-             (method-fn target-code args-code))
-           ;; Try Map methods
-           (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
-             (method-fn target-code args-code))
-           ;; Default: regular method call
-           (str target-code "." method "(" args-code ")"))))
-      ;; Global function call: function object or builtin
-      (if (and method (contains? *function-names* method))
+          ;; Check for this-target with has-parens distinction
+          (if this-target?
+            (if (false? has-parens)
+              ;; this.x (no parens): method -> call, field -> access
+              (if (contains? *all-method-names* method)
+                (str target-code "." method "()")
+                (str target-code "." method))
+              ;; this.x() or this.x(args) (with parens or absent)
+              (if (and (not (contains? *all-method-names* method))
+                       (function-type? (get *field-types* method)))
+                (str target-code "." method ".call" num-args "(" args-code ")")
+                (str target-code "." method "(" args-code ")")))
+            ;; External object: try builtins, then default
+            (or
+             ;; Try Integer methods first (for operators, numeric is more common)
+             (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
+               (method-fn target-code args-code))
+             ;; Try String methods
+             (when-let [method-fn (get-in builtin-method-mappings [:String method])]
+               (method-fn target-code args-code))
+             ;; Try Array methods
+             (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
+               (method-fn target-code args-code))
+             ;; Try Map methods
+             (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
+               (method-fn target-code args-code))
+             ;; Default: regular method call
+             (str target-code "." method "(" args-code ")")))))
+      ;; No target: class method, function object field, global function, or builtin
+      (cond
+        ;; Class method (own or inherited)
+        (and method (contains? *all-method-names* method))
+        (if (= *this-name* "this")
+          (str "this." method "(" args-code ")")
+          (str *this-name* "." method "(" args-code ")"))
+
+        ;; Function-typed field: call the function object
+        (and method (function-type? (get *field-types* method)))
+        (str "this." method ".call" num-args "(" args-code ")")
+
+        ;; Global function
+        (and method (contains? *function-names* method))
         (str "NexGlobals." method ".call" num-args "(" args-code ")")
-        (if (nil? method)
-          (str (generate-expression target) ".call" num-args "(" args-code ")")
-          (map-builtin-function method args-code num-args))))))
+
+        ;; Expression that returns a function
+        (nil? method)
+        (str (generate-expression target) ".call" num-args "(" args-code ")")
+
+        ;; Builtin
+        :else
+        (map-builtin-function method args-code num-args)))))
 
 (defn generate-create-expr
   "Generate JavaScript code for create expression"
@@ -346,7 +399,7 @@
     :boolean (str (:value expr))
     :char (str "'" (:value expr) "'")
     :nil "null"
-    :identifier (:name expr)
+    :identifier (resolve-identifier (:name expr))
     :binary (generate-binary-expr expr)
     :unary (generate-unary-expr expr)
     :call (generate-call-expr expr)
@@ -472,8 +525,9 @@
   "Generate JavaScript code for from-until-do loop"
   [level {:keys [init invariant variant until body]}]
   (let [;; Extract variable names declared in init
-        loop-vars (extract-var-names-js init)
-        ;; Generate init statements
+        loop-vars (extract-var-names-js init)]
+    (binding [*local-names* (into *local-names* loop-vars)]
+      (let [;; Generate init statements
         init-stmts (map #(generate-statement level % #{}) init)
         cond-code (str "!(" (generate-expression until) ")")
         ;; Generate body statements with loop variables in scope
@@ -493,7 +547,7 @@
                (when invariant-comment [invariant-comment])
                (when variant-comment [variant-comment])
                body-stmts
-               [(indent level "}")]))))
+               [(indent level "}")]))))))
 
 (defn generate-statement
   "Generate JavaScript code for a statement"
@@ -573,56 +627,60 @@
 (defn generate-method
   "Generate JavaScript code for a method"
   [level {:keys [name params return-type body require ensure rescue visibility note]} opts]
-  (let [params-code (str/join ", " (map :name params))
-        ;; Apply visibility naming convention
-        method-name (if visibility
-                     (visibility-to-js visibility name)
-                     name)
-        ;; Initialize result variable if method has return type
-        result-init (when return-type
-                     [(indent (+ level 1)
-                             (str "let result = " (default-value return-type) ";"))])
-        ;; Extract old references and generate capture statements
-        old-refs (when ensure (extract-old-references ensure))
-        old-captures (when (seq old-refs)
-                      (map (fn [field-name]
-                            (indent (+ level 1)
-                                   (str "let old_" field-name " = this." field-name ";")))
-                          old-refs))
-        preconditions (generate-assertions (+ level 1) require "Precondition" opts)
-        statements (if rescue
-                     [(generate-rescue (+ level 1) body rescue #{})]
-                     (map #(generate-statement (+ level 1) %) body))
-        postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)
-        ;; Add return statement if method has return type
-        return-stmt (when return-type
-                     [(indent (+ level 1) "return result;")])
-        ;; Generate JSDoc comment for type information and note
-        jsdoc (when (or note (seq params) return-type)
-                (let [note-line (when note [(str "   * " note)])
-                      param-docs (map (fn [{:keys [name type]}]
-                                       (str "   * @param {" (nex-type-to-js type) "} " name))
-                                     params)
-                      return-doc (when return-type
-                                  [(str "   * @returns {" (nex-type-to-js return-type) "}")])]
-                  (str/join "\n"
-                           (concat
-                            [(indent level "/**")]
-                            note-line
-                            param-docs
-                            return-doc
-                            [(indent level "   */")]))))]
-    (str/join "\n"
-              (concat
-               (when jsdoc [jsdoc])
-               [(indent level (str method-name "(" params-code ") {"))]
-               result-init
-               old-captures
-               preconditions
-               statements
-               postconditions
-               return-stmt
-               [(indent level "}")]))))
+  (let [param-names (set (map :name params))
+        local-names (cond-> param-names
+                      return-type (conj "result"))]
+    (binding [*local-names* (into *local-names* local-names)]
+      (let [params-code (str/join ", " (map :name params))
+            ;; Apply visibility naming convention
+            method-name (if visibility
+                         (visibility-to-js visibility name)
+                         name)
+            ;; Initialize result variable if method has return type
+            result-init (when return-type
+                         [(indent (+ level 1)
+                                 (str "let result = " (default-value return-type) ";"))])
+            ;; Extract old references and generate capture statements
+            old-refs (when ensure (extract-old-references ensure))
+            old-captures (when (seq old-refs)
+                          (map (fn [field-name]
+                                (indent (+ level 1)
+                                       (str "let old_" field-name " = this." field-name ";")))
+                              old-refs))
+            preconditions (generate-assertions (+ level 1) require "Precondition" opts)
+            statements (if rescue
+                         [(generate-rescue (+ level 1) body rescue #{})]
+                         (map #(generate-statement (+ level 1) %) body))
+            postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)
+            ;; Add return statement if method has return type
+            return-stmt (when return-type
+                         [(indent (+ level 1) "return result;")])
+            ;; Generate JSDoc comment for type information and note
+            jsdoc (when (or note (seq params) return-type)
+                    (let [note-line (when note [(str "   * " note)])
+                          param-docs (map (fn [{:keys [name type]}]
+                                           (str "   * @param {" (nex-type-to-js type) "} " name))
+                                         params)
+                          return-doc (when return-type
+                                      [(str "   * @returns {" (nex-type-to-js return-type) "}")])]
+                      (str/join "\n"
+                               (concat
+                                [(indent level "/**")]
+                                note-line
+                                param-docs
+                                return-doc
+                                [(indent level "   */")]))))]
+        (str/join "\n"
+                  (concat
+                   (when jsdoc [jsdoc])
+                   [(indent level (str method-name "(" params-code ") {"))]
+                   result-init
+                   old-captures
+                   preconditions
+                   statements
+                   postconditions
+                   return-stmt
+                   [(indent level "}")]))))))
 
 ;;
 ;; Field Generation
@@ -659,9 +717,11 @@
   "Generate JavaScript static factory method for a Nex constructor"
   [level class-name {:keys [name params body require ensure rescue]} opts]
   (let [local-name (class-name-to-local class-name)
+        param-names (set (map :name params))
         params-code (str/join ", " (map :name params))
         preconditions (generate-assertions (+ level 1) require "Precondition" opts)
-        statements (binding [*this-name* local-name]
+        statements (binding [*this-name* local-name
+                             *local-names* (into *local-names* param-names)]
                      (if rescue
                        [(generate-rescue (+ level 1) body rescue #{})]
                        (mapv #(generate-statement (+ level 1) %) body)))
@@ -733,36 +793,70 @@
      :methods methods
      :constructors ctors}))
 
+(defn get-parent-method-names
+  "Get all method names from a parent class via the class registry (JS uses extends)"
+  [parent-name classes-by-name]
+  (when-let [parent-def (get classes-by-name parent-name)]
+    (let [{:keys [methods]} (extract-members (:body parent-def))]
+      (map :name methods))))
+
+(defn build-field-types-js
+  "Build field-name -> type map from own + parent fields"
+  [fields parent-names classes-by-name]
+  (let [own (into {} (map (fn [f] [(:name f) (:field-type f)]) fields))
+        parent-flds (reduce (fn [m parent-name]
+                              (if-let [parent-def (get classes-by-name parent-name)]
+                                (let [{pfields :fields} (extract-members (:body parent-def))]
+                                  (reduce (fn [m2 f]
+                                            (if (contains? m2 (:name f))
+                                              m2
+                                              (assoc m2 (:name f) (:field-type f))))
+                                          m pfields))
+                                m))
+                            {} parent-names)]
+    (merge parent-flds own)))
+
 (defn generate-class
   "Generate JavaScript code for a Nex class"
-  ([class-def] (generate-class class-def {}))
-  ([{:keys [name generic-params parents body invariant note]} opts]
+  ([class-def] (generate-class class-def {} {}))
+  ([class-def opts] (generate-class class-def opts {}))
+  ([{:keys [name generic-params parents body invariant note]} opts classes-by-name]
    (let [{:keys [fields methods constructors]} (extract-members body)
-         ;; Generate class JSDoc if note present
-         class-jsdoc (when note
-                      [(generate-jsdoc 0 note)])
-         generic-comment (generate-generic-comment generic-params)
-         class-header (generate-class-header name generic-params parents)
-         invariant-comment (when (and invariant (not (:skip-contracts opts)))
-                            (indent 1 (str "// Class invariant: "
-                                          (str/join ", " (map :label invariant)))))
-         ;; Always generate a default no-arg constructor for field initialization
-         has-parent? (some? (:extends (analyze-inheritance parents)))
-         default-constructor (generate-default-constructor 1 fields has-parent?)
-         ;; All Nex constructors become static factory methods
-         factory-methods (map #(generate-factory-constructor 1 name % opts) constructors)
-         methods-code (map #(generate-method 1 % opts) methods)]
-     (str/join "\n"
-               (concat
-                class-jsdoc
-                (when generic-comment [generic-comment])
-                [class-header]
-                (when invariant-comment [invariant-comment ""])
-                [default-constructor ""]
-                factory-methods
-                (when (seq factory-methods) [""])
-                methods-code
-                ["}"])))))
+         parent-names (mapv :parent parents)
+         own-flds (set (map :name fields))
+         own-method-names (set (map :name methods))
+         all-methods (into own-method-names
+                           (mapcat #(get-parent-method-names % classes-by-name)
+                                   parent-names))
+         fld-types (build-field-types-js fields parent-names classes-by-name)]
+     (binding [*all-method-names* all-methods
+               *own-fields* own-flds
+               *field-types* fld-types]
+       (let [;; Generate class JSDoc if note present
+             class-jsdoc (when note
+                          [(generate-jsdoc 0 note)])
+             generic-comment (generate-generic-comment generic-params)
+             class-header (generate-class-header name generic-params parents)
+             invariant-comment (when (and invariant (not (:skip-contracts opts)))
+                                (indent 1 (str "// Class invariant: "
+                                              (str/join ", " (map :label invariant)))))
+             ;; Always generate a default no-arg constructor for field initialization
+             has-parent? (some? (:extends (analyze-inheritance parents)))
+             default-constructor (generate-default-constructor 1 fields has-parent?)
+             ;; All Nex constructors become static factory methods
+             factory-methods (map #(generate-factory-constructor 1 name % opts) constructors)
+             methods-code (map #(generate-method 1 % opts) methods)]
+         (str/join "\n"
+                   (concat
+                    class-jsdoc
+                    (when generic-comment [generic-comment])
+                    [class-header]
+                    (when invariant-comment [invariant-comment ""])
+                    [default-constructor ""]
+                    factory-methods
+                    (when (seq factory-methods) [""])
+                    methods-code
+                    ["}"])))))))
 
 (defn generate-function-base-class
   "Generate the built-in Function base class."
@@ -772,7 +866,7 @@
                (let [params (str/join ", " (map (fn [i] (str "arg" i))
                                                 (range 1 (inc n))))]
                  (str "  call" n "(" params ") { return null; }")))
-             (range 1 33))]
+             (range 0 33))]
     (str "class Function {\n"
          (str/join "\n" method-lines)
          "\n}")))
@@ -840,7 +934,8 @@
          function-base (generate-function-base-class)
          function-globals (generate-function-globals functions)]
      (binding [*function-names* function-names]
-       (let [js-classes (map #(generate-class % opts) classes)
+       (let [classes-by-name (into {} (map (juxt :name identity) classes))
+             js-classes (map #(generate-class % opts classes-by-name) classes)
              parts (concat js-imports
                            (when (seq js-imports) [""])
                            [function-base]
@@ -901,8 +996,9 @@
          function-base (generate-function-base-class)
          function-globals (generate-function-globals functions)
          main-code (generate-main ast)
+         classes-by-name (into {} (map (juxt :name identity) classes))
          class-codes (binding [*function-names* function-names]
-                       (mapv (fn [cls] [(:name cls) (generate-class cls opts)]) classes))
+                       (mapv (fn [cls] [(:name cls) (generate-class cls opts classes-by-name)]) classes))
          files (into {"Function.js" function-base}
                      (concat
                       (when function-globals

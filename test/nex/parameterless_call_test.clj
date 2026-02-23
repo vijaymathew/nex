@@ -3,7 +3,8 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [nex.parser :as p]
-            [nex.generator.java :as java]))
+            [nex.generator.java :as java]
+            [nex.interpreter :as interp]))
 
 (deftest simple-parameterless-call-parsing-test
   (testing "Parse parameterless method call without parentheses"
@@ -306,3 +307,168 @@ class Main
 end"
           java-code (java/translate code)]
       (is (str/includes? java-code "io.print(\"Hello\");")))))
+
+(deftest bare-method-in-expression-test
+  (testing "Bare method name in expression context resolves to method call"
+    (let [code "class C1
+  feature
+    a: Integer do result := 10 end
+    b(x: Integer): Integer do result := a + x end
+end"
+          java-code (java/translate code)]
+      ;; 'a' in expression context should generate 'a()' since it's a method
+      (is (str/includes? java-code "a() + x")))))
+
+(deftest function-field-access-test
+  (testing "Function field in expression returns Function object (no call)"
+    (let [code "class C1
+  feature
+    f: Function
+    a: Integer do result := 10 end
+    b(x: Integer): Integer do result := a + x end
+end"
+          java-code (java/translate code)]
+      ;; 'a' is a method -> a(), 'f' is a Function field -> bare f
+      (is (str/includes? java-code "a() + x")))))
+
+(deftest parameter-shadows-method-test
+  (testing "Parameter shadows method of same name"
+    (let [code "class C1
+  feature
+    a: Integer do result := 10 end
+    b(a: Integer): Integer do result := a + 1 end
+end"
+          java-code (java/translate code)]
+      ;; 'a' is a parameter, so it should be bare 'a' not 'a()'
+      (is (str/includes? java-code "a + 1")))))
+
+(deftest inherited-method-in-expression-test
+  (testing "Inherited method in expression context"
+    (let [code "class A
+  feature
+    x: Integer
+    get_x: Integer do result := x end
+end
+
+class B
+  inherit A
+  feature
+    compute: Integer do result := get_x + 1 end
+end"
+          java-code (java/translate code)]
+      ;; get_x is inherited via delegation, should generate get_x() in expression
+      (is (str/includes? java-code "get_x() + 1")))))
+
+(deftest inherited-field-in-expression-test
+  (testing "Inherited field in expression context uses parent delegation"
+    (let [code "class A
+  feature
+    x: Integer
+end
+
+class B
+  inherit A
+  feature
+    compute: Integer do result := x + 1 end
+end"
+          java-code (java/translate code)]
+      ;; x is a parent field, should use _parent_A.x
+      (is (str/includes? java-code "_parent_A.x + 1")))))
+
+;; ===== Interpreter tests =====
+
+(deftest interpreter-bare-method-in-expression-test
+  (testing "Interpreter: bare method name in expression resolves to method call"
+    (let [code "class C1
+  feature
+    a: Integer do result := 10 end
+    b(x: Integer): Integer do result := a + x end
+end"
+          ast (p/ast code)
+          ctx (interp/make-context)]
+      (doseq [class-node (:classes ast)]
+        (interp/register-class ctx class-node))
+      (let [c1-obj (interp/make-object "C1" {})
+            env (interp/make-env (:globals ctx))
+            _ (interp/env-define env "c1" c1-obj)
+            test-ctx (assoc ctx :current-env env)
+            result (interp/eval-node test-ctx {:type :call
+                                                :target "c1"
+                                                :method "b"
+                                                :args [{:type :integer :value 10}]})]
+        (is (= 20 result))))))
+
+(deftest interpreter-function-field-no-parens-test
+  (testing "Interpreter: c1.f (no parens) returns Function object"
+    (let [code "class MyFunc inherit Function
+  feature
+    call0: Integer do result := 42 end
+end
+
+class C1
+  feature
+    f: Function
+end"
+          ast (p/ast code)
+          ctx (interp/make-context)]
+      (doseq [class-node (:classes ast)]
+        (interp/register-class ctx class-node))
+      (let [fn-obj (interp/make-object "MyFunc" {})
+            c1-obj (interp/make-object "C1" {:f fn-obj})
+            env (interp/make-env (:globals ctx))
+            _ (interp/env-define env "c1" c1-obj)
+            test-ctx (assoc ctx :current-env env)
+            result (interp/eval-node test-ctx {:type :call
+                                                :target "c1"
+                                                :method "f"
+                                                :args []
+                                                :has-parens false})]
+        (is (interp/nex-object? result))
+        (is (= "MyFunc" (:class-name result)))))))
+
+(deftest interpreter-function-field-with-parens-test
+  (testing "Interpreter: c1.f() (with parens) invokes Function"
+    (let [code "class MyFunc inherit Function
+  feature
+    call0: Integer do result := 42 end
+end
+
+class C1
+  feature
+    f: Function
+end"
+          ast (p/ast code)
+          ctx (interp/make-context)]
+      (doseq [class-node (:classes ast)]
+        (interp/register-class ctx class-node))
+      (let [fn-obj (interp/make-object "MyFunc" {})
+            c1-obj (interp/make-object "C1" {:f fn-obj})
+            env (interp/make-env (:globals ctx))
+            _ (interp/env-define env "c1" c1-obj)
+            test-ctx (assoc ctx :current-env env)
+            result (interp/eval-node test-ctx {:type :call
+                                                :target "c1"
+                                                :method "f"
+                                                :args []
+                                                :has-parens true})]
+        (is (= 42 result))))))
+
+(deftest interpreter-zero-arg-method-invoke-test
+  (testing "Interpreter: c1.a (zero-arg method) invokes and returns value"
+    (let [code "class C1
+  feature
+    a: Integer do result := 10 end
+end"
+          ast (p/ast code)
+          ctx (interp/make-context)]
+      (doseq [class-node (:classes ast)]
+        (interp/register-class ctx class-node))
+      (let [c1-obj (interp/make-object "C1" {})
+            env (interp/make-env (:globals ctx))
+            _ (interp/env-define env "c1" c1-obj)
+            test-ctx (assoc ctx :current-env env)
+            result (interp/eval-node test-ctx {:type :call
+                                                :target "c1"
+                                                :method "a"
+                                                :args []})]
+        (is (= 10 result))))))
