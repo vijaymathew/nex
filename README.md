@@ -13,7 +13,7 @@ Nex is an Eiffel-inspired programming language that combines elegant, English-li
 
 ### 🤖 LLM-Friendly Syntax
 - **English-like Keywords**: `feature`, `require`, `ensure`, `invariant`, `from`, `until`
-- **Natural Flow**: `if...then...else...end`, `from...until...do...end`
+- **Natural Flow**: `if...then...elseif...then...else...end`, `from...until...do...end`
 - **Explicit Intent**: Clear syntax makes LLM code generation more reliable
 
 ### 💎 Modern Language Features
