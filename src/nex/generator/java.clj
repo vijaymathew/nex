@@ -15,6 +15,8 @@
 (def ^:dynamic *parent-field-map* {})   ;; field-name -> "_parent_X" prefix
 (def ^:dynamic *own-fields* #{})        ;; field names defined on current class
 (def ^:dynamic *local-names* #{})       ;; method params + loop vars (shadow parent fields)
+(def ^:dynamic *all-method-names* #{})  ;; own + delegated parent method names
+(def ^:dynamic *field-types* {})        ;; field-name -> type, own + parent
 
 (defn class-name-to-local
   "Convert a class name to a local variable name (e.g., 'Point' -> 'point')"
@@ -293,6 +295,31 @@
     "setenv"       (fn [_ a] (str "/* setenv not supported in Java: " a " */"))
     "command_line" (fn [_ _] "new ArrayList<>(java.util.Arrays.asList(args))")}})
 
+(defn function-type?
+  "Check if a type is Function (string or map with base-type Function)"
+  [t]
+  (or (= t "Function")
+      (and (map? t) (= (:base-type t) "Function"))))
+
+(defn resolve-identifier
+  "Resolve an identifier in expression context.
+   Resolution order: locals -> methods -> own fields -> parent fields -> functions -> bare name"
+  [id-name]
+  (cond
+    (contains? *local-names* id-name) id-name
+    (contains? *all-method-names* id-name)
+    (if (= *this-name* "this")
+      (str id-name "()")
+      (str *this-name* "." id-name "()"))
+    (contains? *own-fields* id-name) id-name
+    (contains? *parent-field-map* id-name)
+    (let [parent-prefix (get *parent-field-map* id-name)]
+      (if (= *this-name* "this")
+        (str parent-prefix "." id-name)
+        (str *this-name* "." parent-prefix "." id-name)))
+    (contains? *function-names* id-name) (str "NexGlobals." id-name)
+    :else id-name))
+
 (defn generate-call-expr
   "Generate Java code for method call.
    NOTE: For operator methods (plus, less_than, etc.) that exist on multiple types,
@@ -303,7 +330,9 @@
         num-args (count args)]
     (if target
       ;; Object method call
-      (let [target-code (if (string? target) target (generate-expression target))]
+      (let [target-code (if (string? target) target (generate-expression target))
+            this-target? (and (map? target) (= :this (:type target)))
+            has-parens (:has-parens call-node)]
         (if (nil? method)
           ;; Calling an expression that returns a function
           (str target-code ".call" num-args "(" args-code ")")
@@ -314,27 +343,58 @@
                            ""
                            (str *this-name* "."))]
               (str prefix "_parent_" target "." method "(" args-code ")"))
-            (or
-             ;; Try Integer methods first (for operators, numeric is more common)
-             (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
-               (method-fn target-code args-code))
-             ;; Try String methods
-             (when-let [method-fn (get-in builtin-method-mappings [:String method])]
-               (method-fn target-code args-code))
-             ;; Try Array methods (ArrayList in Java)
-             (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
-               (method-fn target-code args-code))
-             ;; Try Map methods
-             (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
-               (method-fn target-code args-code))
-             ;; Default: regular method call
-             (str target-code "." method "(" args-code ")")))))
-      ;; Global function call: function object or builtin
-      (if (and method (contains? *function-names* method))
+            ;; Check for this-target with has-parens distinction
+            (if this-target?
+              (if (false? has-parens)
+                ;; this.x (no parens): method -> call, field -> access
+                (if (contains? *all-method-names* method)
+                  (str target-code "." method "()")
+                  (str target-code "." method))
+                ;; this.x() or this.x(args) (with parens or absent)
+                (if (and (not (contains? *all-method-names* method))
+                         (function-type? (get *field-types* method)))
+                  (str target-code "." method ".call" num-args "(" args-code ")")
+                  (str target-code "." method "(" args-code ")")))
+              ;; External object: try builtins, then default
+              (or
+               ;; Try Integer methods first (for operators, numeric is more common)
+               (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
+                 (method-fn target-code args-code))
+               ;; Try String methods
+               (when-let [method-fn (get-in builtin-method-mappings [:String method])]
+                 (method-fn target-code args-code))
+               ;; Try Array methods (ArrayList in Java)
+               (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
+                 (method-fn target-code args-code))
+               ;; Try Map methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
+                 (method-fn target-code args-code))
+               ;; Default: regular method call
+               (str target-code "." method "(" args-code ")"))))))
+      ;; No target: class method, function object field, global function, or builtin
+      (cond
+        ;; Class method (own or inherited via delegation)
+        (and method (contains? *all-method-names* method))
+        (if (= *this-name* "this")
+          (str method "(" args-code ")")
+          (str *this-name* "." method "(" args-code ")"))
+
+        ;; Function-typed field: call the function object
+        (and method (function-type? (get *field-types* method)))
+        (let [field-ref (resolve-field-name method)]
+          (str field-ref ".call" num-args "(" args-code ")"))
+
+        ;; Global function
+        (and method (contains? *function-names* method))
         (str "NexGlobals." method ".call" num-args "(" args-code ")")
-        (if (nil? method)
-          (str (generate-expression target) ".call" num-args "(" args-code ")")
-          (map-builtin-function method args-code num-args))))))
+
+        ;; Expression that returns a function
+        (nil? method)
+        (str (generate-expression target) ".call" num-args "(" args-code ")")
+
+        ;; Builtin
+        :else
+        (map-builtin-function method args-code num-args)))))
 
 (defn generate-create-expr
   "Generate Java code for create expression"
@@ -386,7 +446,7 @@
     :boolean (str (:value expr))
     :char (str "'" (:value expr) "'")
     :nil "null"
-    :identifier (resolve-field-name (:name expr))
+    :identifier (resolve-identifier (:name expr))
     :binary (generate-binary-expr expr)
     :unary (generate-unary-expr expr)
     :call (generate-call-expr expr)
@@ -825,6 +885,30 @@
         (str *this-name* "." parent-prefix "." field-name)))
     :else field-name))
 
+(defn get-all-method-names
+  "Union of own method names + parent method names (delegation methods exist on the class)"
+  [parent-names own-method-names]
+  (into own-method-names
+        (mapcat (fn [parent-name]
+                  (map :name (get-parent-methods parent-name)))
+                parent-names)))
+
+(defn build-field-types
+  "Build field-name -> type map from own + parent fields"
+  [fields parent-names]
+  (let [own (into {} (map (fn [f] [(:name f) (:field-type f)]) fields))
+        parent-flds (reduce (fn [m parent-name]
+                              (if-let [parent-def (get *class-registry* parent-name)]
+                                (let [{pfields :fields} (extract-members (:body parent-def))]
+                                  (reduce (fn [m2 f]
+                                            (if (contains? m2 (:name f))
+                                              m2
+                                              (assoc m2 (:name f) (:field-type f))))
+                                          m pfields))
+                                m))
+                            {} parent-names)]
+    (merge parent-flds own)))
+
 (defn generate-delegation-methods
   "Generate delegation methods for inherited methods not overridden by the child"
   [level parents own-method-names]
@@ -896,10 +980,15 @@
    (let [{:keys [fields methods constructors]} (extract-members body)
          parent-names (mapv :parent parents)
          parent-fm (build-parent-field-map parent-names)
-         own-flds (set (map :name fields))]
+         own-flds (set (map :name fields))
+         own-method-names (set (map :name methods))
+         all-methods (get-all-method-names parent-names own-method-names)
+         fld-types (build-field-types fields parent-names)]
     (binding [*current-parents* (set parent-names)
               *parent-field-map* parent-fm
-              *own-fields* own-flds]
+              *own-fields* own-flds
+              *all-method-names* all-methods
+              *field-types* fld-types]
      (let [
            ;; Generate class Javadoc if note present
            class-javadoc (when note
@@ -913,7 +1002,6 @@
                                             (str/join ", " (map :label invariant)))))
            fields-code (map #(generate-field 1 %) fields)
            ;; Delegation methods for inherited methods not overridden
-           own-method-names (set (map :name methods))
            delegation-methods (when (seq parents)
                                 (generate-delegation-methods 1 parents own-method-names))
            constructors-code (map #(generate-constructor 1 name % opts) constructors)
@@ -942,7 +1030,7 @@
                (let [params (str/join ", " (map (fn [i] (str "Object arg" i))
                                                 (range 1 (inc n))))]
                  (str "  public Object call" n "(" params ") { return null; }")))
-             (range 1 33))]
+             (range 0 33))]
     (str "public class Function {\n"
          (str/join "\n" method-lines)
          "\n}")))

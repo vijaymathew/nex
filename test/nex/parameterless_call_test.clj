@@ -306,3 +306,70 @@ class Main
 end"
           java-code (java/translate code)]
       (is (str/includes? java-code "io.print(\"Hello\");")))))
+
+(deftest bare-method-in-expression-test
+  (testing "Bare method name in expression context resolves to method call"
+    (let [code "class C1
+  feature
+    a: Integer do result := 10 end
+    b(x: Integer): Integer do result := a + x end
+end"
+          java-code (java/translate code)]
+      ;; 'a' in expression context should generate 'a()' since it's a method
+      (is (str/includes? java-code "a() + x")))))
+
+(deftest function-field-access-test
+  (testing "Function field in expression returns Function object (no call)"
+    (let [code "class C1
+  feature
+    f: Function
+    a: Integer do result := 10 end
+    b(x: Integer): Integer do result := a + x end
+end"
+          java-code (java/translate code)]
+      ;; 'a' is a method -> a(), 'f' is a Function field -> bare f
+      (is (str/includes? java-code "a() + x")))))
+
+(deftest parameter-shadows-method-test
+  (testing "Parameter shadows method of same name"
+    (let [code "class C1
+  feature
+    a: Integer do result := 10 end
+    b(a: Integer): Integer do result := a + 1 end
+end"
+          java-code (java/translate code)]
+      ;; 'a' is a parameter, so it should be bare 'a' not 'a()'
+      (is (str/includes? java-code "a + 1")))))
+
+(deftest inherited-method-in-expression-test
+  (testing "Inherited method in expression context"
+    (let [code "class A
+  feature
+    x: Integer
+    get_x: Integer do result := x end
+end
+
+class B
+  inherit A
+  feature
+    compute: Integer do result := get_x + 1 end
+end"
+          java-code (java/translate code)]
+      ;; get_x is inherited via delegation, should generate get_x() in expression
+      (is (str/includes? java-code "get_x() + 1")))))
+
+(deftest inherited-field-in-expression-test
+  (testing "Inherited field in expression context uses parent delegation"
+    (let [code "class A
+  feature
+    x: Integer
+end
+
+class B
+  inherit A
+  feature
+    compute: Integer do result := x + 1 end
+end"
+          java-code (java/translate code)]
+      ;; x is a parent field, should use _parent_A.x
+      (is (str/includes? java-code "_parent_A.x + 1")))))
