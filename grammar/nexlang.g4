@@ -233,6 +233,7 @@ multiplication
 
 unary
     : MINUS unary          # unaryMinus
+    | NOT unary            # unaryNot
     | postfix              # postfixExpr
     ;
 
@@ -383,6 +384,7 @@ RESCUE       : 'rescue';
 RETRY        : 'retry';
 AND          : 'and';
 OR           : 'or';
+NOT          : 'not';
 
 // Type keywords
 INTEGER_TYPE   : 'Integer';

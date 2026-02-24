@@ -86,42 +86,6 @@ export default class nexlangListener extends antlr4.tree.ParseTreeListener {
 	}
 
 
-	// Enter a parse tree produced by nexlangParser#inheritEntry.
-	enterInheritEntry(ctx) {
-	}
-
-	// Exit a parse tree produced by nexlangParser#inheritEntry.
-	exitInheritEntry(ctx) {
-	}
-
-
-	// Enter a parse tree produced by nexlangParser#renameClause.
-	enterRenameClause(ctx) {
-	}
-
-	// Exit a parse tree produced by nexlangParser#renameClause.
-	exitRenameClause(ctx) {
-	}
-
-
-	// Enter a parse tree produced by nexlangParser#renameMapping.
-	enterRenameMapping(ctx) {
-	}
-
-	// Exit a parse tree produced by nexlangParser#renameMapping.
-	exitRenameMapping(ctx) {
-	}
-
-
-	// Enter a parse tree produced by nexlangParser#redefineClause.
-	enterRedefineClause(ctx) {
-	}
-
-	// Exit a parse tree produced by nexlangParser#redefineClause.
-	exitRedefineClause(ctx) {
-	}
-
-
 	// Enter a parse tree produced by nexlangParser#featureSection.
 	enterFeatureSection(ctx) {
 	}
@@ -239,6 +203,15 @@ export default class nexlangListener extends antlr4.tree.ParseTreeListener {
 	}
 
 
+	// Enter a parse tree produced by nexlangParser#rescueClause.
+	enterRescueClause(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#rescueClause.
+	exitRescueClause(ctx) {
+	}
+
+
 	// Enter a parse tree produced by nexlangParser#assertion.
 	enterAssertion(ctx) {
 	}
@@ -317,6 +290,24 @@ export default class nexlangListener extends antlr4.tree.ParseTreeListener {
 
 	// Exit a parse tree produced by nexlangParser#withStatement.
 	exitWithStatement(ctx) {
+	}
+
+
+	// Enter a parse tree produced by nexlangParser#raiseStatement.
+	enterRaiseStatement(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#raiseStatement.
+	exitRaiseStatement(ctx) {
+	}
+
+
+	// Enter a parse tree produced by nexlangParser#retryStatement.
+	enterRetryStatement(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#retryStatement.
+	exitRetryStatement(ctx) {
 	}
 
 
@@ -446,6 +437,15 @@ export default class nexlangListener extends antlr4.tree.ParseTreeListener {
 	}
 
 
+	// Enter a parse tree produced by nexlangParser#unaryNot.
+	enterUnaryNot(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#unaryNot.
+	exitUnaryNot(ctx) {
+	}
+
+
 	// Enter a parse tree produced by nexlangParser#postfixExpr.
 	enterPostfixExpr(ctx) {
 	}
@@ -506,6 +506,24 @@ export default class nexlangListener extends antlr4.tree.ParseTreeListener {
 
 	// Exit a parse tree produced by nexlangParser#primary.
 	exitPrimary(ctx) {
+	}
+
+
+	// Enter a parse tree produced by nexlangParser#whenExpression.
+	enterWhenExpression(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#whenExpression.
+	exitWhenExpression(ctx) {
+	}
+
+
+	// Enter a parse tree produced by nexlangParser#anonymousFunction.
+	enterAnonymousFunction(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#anonymousFunction.
+	exitAnonymousFunction(ctx) {
 	}
 
 

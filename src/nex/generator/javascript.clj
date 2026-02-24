@@ -173,8 +173,8 @@
 
 (defn generate-unary-expr
   "Generate JavaScript code for unary expression"
-  [{:keys [operator operand]}]
-  (let [operand-code (generate-expression operand)
+  [{:keys [operator expr]}]
+  (let [operand-code (generate-expression expr)
         op (case operator
              "not" "!"
              "-" "-"
@@ -626,7 +626,7 @@
                                       #{})
                                 :binary (set/union (extract (:left expr))
                                                   (extract (:right expr)))
-                                :unary (extract (:operand expr))
+                                :unary (extract (:expr expr))
                                 :call (reduce set/union #{}
                                             (map extract (:args expr)))
                                 #{})

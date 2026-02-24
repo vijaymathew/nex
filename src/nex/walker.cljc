@@ -675,18 +675,28 @@
    ;; Unary operators
    :unary
    (fn [[_ first-child & rest-children]]
-     (if (= first-child "-")
-       ;; This is a unary minus
+     (cond
+       (= first-child "-")
        {:type :unary
         :operator "-"
         :expr (transform-node (first rest-children))}
-       ;; Just a wrapper node, pass through
+       (= first-child "not")
+       {:type :unary
+        :operator "not"
+        :expr (transform-node (first rest-children))}
+       :else
        (transform-node first-child)))
 
    :unaryMinus
    (fn [[_ _minus expr]]
      {:type :unary
       :operator "-"
+      :expr (transform-node expr)})
+
+   :unaryNot
+   (fn [[_ _not expr]]
+     {:type :unary
+      :operator "not"
       :expr (transform-node expr)})
 
    :postfixExpr

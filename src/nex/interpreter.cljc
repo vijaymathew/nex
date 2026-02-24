@@ -493,6 +493,7 @@
   [op value]
   (case op
     "-" (- value)
+    "not" (not value)
     (throw (ex-info (str "Unknown unary operator: " op)
                     {:operator op}))))
 
