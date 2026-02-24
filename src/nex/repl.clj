@@ -5,7 +5,7 @@
             [nex.typechecker :as tc]
             [clojure.string :as str]
             [clojure.java.io :as io])
-  (:import [org.jline.reader LineReaderBuilder LineReader LineReader$Option]
+  (:import [org.jline.reader LineReaderBuilder LineReader LineReader$Option Completer Candidate]
            [org.jline.terminal TerminalBuilder]
            [org.jline.reader.impl.history DefaultHistory]
            [java.io EOFException])
@@ -18,6 +18,63 @@
 (defonce ^:dynamic *repl-context* nil)
 (defonce ^:dynamic *type-checking-enabled* (atom false))
 (defonce ^:dynamic *repl-var-types* (atom {}))
+
+(def nex-keywords
+  ["class" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
+   "when" "from" "until" "invariant" "variant" "require" "ensure"
+   "let" "create" "fn" "function" "and" "or" "old" "this" "note"
+   "with" "import" "intern" "private" "raise" "rescue" "retry"
+   "true" "false" "nil"])
+
+(def nex-types
+  ["Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
+   "Array" "Map" "Function" "Console" "File" "Process"])
+
+(def nex-builtins ["print" "println"])
+
+(def nex-repl-commands
+  [":help" ":quit" ":exit" ":clear" ":reset" ":classes" ":vars"
+   ":typecheck" ":load"])
+
+(defonce ^:dynamic *completer-ctx* (atom nil))
+
+(defn- current-word
+  "Extract the word being typed at the cursor position."
+  [^String line ^long cursor]
+  (loop [i (dec cursor)]
+    (if (neg? i)
+      (.substring line 0 cursor)
+      (let [ch (.charAt line i)]
+        (if (or (Character/isWhitespace ch)
+                (= ch \() (= ch \)) (= ch \,))
+          (.substring line (inc i) cursor)
+          (recur (dec i)))))))
+
+(defn make-nex-completer
+  "Create a JLine Completer that provides completions from static word
+  lists and the dynamic REPL context stored in *completer-ctx*."
+  []
+  (reify Completer
+    (complete [_ _reader line candidates]
+      (let [buf  (.line line)
+            cur  (.cursor line)
+            word (current-word buf cur)]
+        (when (seq word)
+          (let [ctx        @*completer-ctx*
+                var-names  (when ctx
+                             (map name (keys @(:bindings (:globals ctx)))))
+                cls-names  (when ctx
+                             (->> (keys @(:classes ctx))
+                                  (remove #(or (= % "__ReplTemp__")
+                                               (.startsWith ^String % "AnonymousFunction_")
+                                               (= % "Function")))
+                                  (map name)))
+                all-words  (concat nex-keywords nex-types nex-builtins
+                                   nex-repl-commands
+                                   var-names cls-names)]
+            (doseq [w all-words]
+              (when (.startsWith ^String w word)
+                (.add candidates (Candidate. w))))))))))
 
 (defn init-repl-context
   "Initialize or reset the REPL context"
@@ -39,6 +96,7 @@
         (.terminal terminal)
         (.variable LineReader/HISTORY_FILE (.getAbsolutePath history-file))
         (.option LineReader$Option/DISABLE_EVENT_EXPANSION true)
+        (.completer (make-nex-completer))
         (.build))))
 
 (defonce ^:dynamic *line-reader* nil)
@@ -557,24 +615,27 @@
 (defn repl-loop
   "Main REPL loop"
   []
-  (loop [ctx (init-repl-context)]
-    (if-let [input (read-input)]
-      ;; Got input (could be empty line, command, or code)
-      (let [trimmed (str/trim input)]
-        (if (str/blank? trimmed)
-          ;; Empty line - just continue the loop
-          (recur ctx)
-          ;; Non-empty input - process it
-          (let [new-ctx (if (str/starts-with? trimmed ":")
-                         (handle-command ctx trimmed)
-                         (eval-code ctx trimmed))]
-            (if (= new-ctx :quit)
-              ;; Exit requested via :quit command
-              nil
-              ;; Continue with new context
-              (recur new-ctx)))))
-      ;; Got nil (EOF/Ctrl+D) - exit gracefully
-      nil)))
+  (let [ctx (init-repl-context)]
+    (reset! *completer-ctx* ctx)
+    (loop [ctx ctx]
+      (if-let [input (read-input)]
+        ;; Got input (could be empty line, command, or code)
+        (let [trimmed (str/trim input)]
+          (if (str/blank? trimmed)
+            ;; Empty line - just continue the loop
+            (recur ctx)
+            ;; Non-empty input - process it
+            (let [new-ctx (if (str/starts-with? trimmed ":")
+                           (handle-command ctx trimmed)
+                           (eval-code ctx trimmed))]
+              (if (= new-ctx :quit)
+                ;; Exit requested via :quit command
+                nil
+                ;; Continue with new context
+                (do (reset! *completer-ctx* new-ctx)
+                    (recur new-ctx))))))
+        ;; Got nil (EOF/Ctrl+D) - exit gracefully
+        nil))))
 
 (defn start-repl
   "Start the Nex REPL"
