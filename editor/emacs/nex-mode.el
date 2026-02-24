@@ -115,7 +115,7 @@
 
 (defconst nex-keywords
   '("class" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
-    "from" "until" "invariant" "variant" "require" "ensure"
+    "when" "from" "until" "invariant" "variant" "require" "ensure"
     "let" "as" "and" "or" "not" "fn"
     "old" "create" "private" "note" "with" "import" "intern" "function"
     "raise" "rescue" "retry")

@@ -26,6 +26,8 @@
   "Convert Nex type to JavaScript type name (for JSDoc comments)"
   [nex-type]
   (cond
+    (nil? nex-type) "*"
+    (= nex-type "Any") "*"
     ;; Handle parameterized types like {:base-type "List" :type-args ["Cat"]}
     (map? nex-type)
     (let [base-type (:base-type nex-type)
@@ -413,6 +415,7 @@
                           (str "(new class extends Function {\n"
                                (generate-method 1 method-def {})
                                "\n" (indent 0 "})")))
+    :when (str "(" (generate-expression (:condition expr)) " ? " (generate-expression (:consequent expr)) " : " (generate-expression (:alternative expr)) ")")
     :old (str "old_" (generate-expression (:expr expr)))
     :this *this-name*
     (str "/* Unknown expression: " (:type expr) " */")))

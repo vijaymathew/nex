@@ -374,6 +374,7 @@
    (fn [[_ & parts]]
      ;; Parts can be: name1 "," name2 ":" type
      ;; or just: name ":" type
+     ;; or just: name1 "," name2 (no type, defaults to Any)
      (let [;; Find type node (it's a sequential node)
            type-node (first (filter sequential? parts))
            ;; Everything before the colon is identifiers (filter out commas)
@@ -381,7 +382,7 @@
                            (take-while #(not= ":" %))
                            (filter string?)
                            (remove #(= "," %)))
-           param-type (transform-node type-node)]
+           param-type (if type-node (transform-node type-node) "Any")]
        ;; Return a vector of parameter maps, one for each identifier
        (mapv (fn [name]
                {:name (token-text name)
@@ -876,7 +877,14 @@
    :oldExpression
    (fn [[_ _old-kw expr]]
      {:type :old
-      :expr (transform-node expr)})})
+      :expr (transform-node expr)})
+
+   :whenExpression
+   (fn [[_ _when-kw condition consequent _else-kw alternative _end-kw]]
+     {:type :when
+      :condition (transform-node condition)
+      :consequent (transform-node consequent)
+      :alternative (transform-node alternative)})})
 
 ;;
 ;; Core transformation function (defined after node-handlers)

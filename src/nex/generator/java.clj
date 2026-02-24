@@ -30,21 +30,24 @@
 (defn nex-type-to-java-boxed
   "Convert Nex type to Java boxed type (for generics)"
   [nex-type]
-  (case nex-type
-    "Integer" "Integer"
-    "Integer64" "Long"
-    "Real" "Float"
-    "Decimal" "Double"
-    "Char" "Character"
-    "Boolean" "Boolean"
-    "String" "String"
-    "Array" "ArrayList"
-    "Map" "HashMap"
-    "Console" "Object"
-    "File" "java.io.File"
-    "Process" "Object"
-    "Function" "Function"
-    nex-type))
+  (if (nil? nex-type)
+    "Object"
+    (case nex-type
+      "Integer" "Integer"
+      "Integer64" "Long"
+      "Real" "Float"
+      "Decimal" "Double"
+      "Char" "Character"
+      "Boolean" "Boolean"
+      "String" "String"
+      "Array" "ArrayList"
+      "Map" "HashMap"
+      "Console" "Object"
+      "File" "java.io.File"
+      "Process" "Object"
+      "Function" "Function"
+      "Any" "Object"
+      nex-type)))
 
 (defn nex-type-to-java
   "Convert Nex type to Java type
@@ -52,6 +55,8 @@
   ([nex-type] (nex-type-to-java nex-type false))
   ([nex-type use-boxed?]
    (cond
+     (nil? nex-type) "Object"
+     (= nex-type "Any") "Object"
      ;; Handle parameterized types like {:base-type "List" :type-args ["Cat"]}
      (map? nex-type)
      (let [base-type (:base-type nex-type)
@@ -474,6 +479,7 @@
                                (indent 1 "}\n")
                                (generate-method 1 method-def {})
                                "\n" (indent 0 "})")))
+    :when (str "(" (generate-expression (:condition expr)) " ? " (generate-expression (:consequent expr)) " : " (generate-expression (:alternative expr)) ")")
     :old (str "old_" (generate-expression (:expr expr)))
     :this *this-name*
     (str "/* Unknown expression: " (:type expr) " */")))

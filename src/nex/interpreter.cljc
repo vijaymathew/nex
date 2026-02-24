@@ -1189,6 +1189,12 @@
       ;; Execute the block in the new scope
       (last (map #(eval-node new-ctx %) body)))))
 
+(defmethod eval-node :when
+  [ctx {:keys [condition consequent alternative]}]
+  (if (eval-node ctx condition)
+    (eval-node ctx consequent)
+    (eval-node ctx alternative)))
+
 (defmethod eval-node :if
   [ctx {:keys [condition then elseif else]}]
   ;; Evaluate condition, then elseif chain, then optional else

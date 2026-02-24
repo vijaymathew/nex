@@ -82,7 +82,7 @@ paramList
     ;
 
 param
-    : IDENTIFIER (',' IDENTIFIER)* ':' type
+    : IDENTIFIER (',' IDENTIFIER)* (':' type)?
     ;
 
 type
@@ -262,10 +262,15 @@ primary
     : literal
     | createExpression
     | anonymousFunction
+    | whenExpression
     | oldExpression
     | THIS
     | IDENTIFIER
     | '(' expression ')'
+    ;
+
+whenExpression
+    : WHEN expression expression ELSE expression END
     ;
 
 anonymousFunction
@@ -362,6 +367,7 @@ IF           : 'if';
 THEN         : 'then';
 ELSE         : 'else';
 ELSEIF       : 'elseif';
+WHEN         : 'when';
 FROM         : 'from';
 UNTIL        : 'until';
 VARIANT      : 'variant';

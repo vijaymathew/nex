@@ -579,6 +579,14 @@
                             ;; Return the class name.
                             ;; Since it inherits from Function, it will support callN methods.
                             class-name)
+      :when (let [cond-type (check-expression env (:condition expr))
+                   cons-type (check-expression env (:consequent expr))
+                   alt-type (check-expression env (:alternative expr))]
+               (when-not (types-compatible? env cond-type "Boolean")
+                 (throw (ex-info "when condition must be Boolean"
+                                 {:error (type-error
+                                          (str "when condition has type " cond-type ", expected Boolean"))})))
+               cons-type)
       :old (check-expression env (:expr expr))
       :this (or (env-lookup-var env "__current_class__") "Any")
       "Any")
@@ -711,7 +719,8 @@
   [env class-name {:keys [name params return-type require body ensure rescue] :as method}]
   ;; Validate parameter and return type annotations (generic constraints)
   (doseq [param params]
-    (validate-type-annotation env (:type param)))
+    (when (:type param)
+      (validate-type-annotation env (:type param))))
   (when return-type
     (validate-type-annotation env return-type))
   ;; Check that methods using Result declare a return type
@@ -729,7 +738,7 @@
 
     ;; Add parameters to method environment
     (doseq [param params]
-      (env-add-var method-env (:name param) (:type param)))
+      (env-add-var method-env (:name param) (or (:type param) "Any")))
 
     ;; Add Result variable for return type
     (when return-type
@@ -772,10 +781,11 @@
 
     ;; Validate parameter type annotations (generic constraints)
     (doseq [param params]
-      (validate-type-annotation env (:type param)))
+      (when (:type param)
+        (validate-type-annotation env (:type param))))
     ;; Add parameters
     (doseq [param params]
-      (env-add-var ctor-env (:name param) (:type param)))
+      (env-add-var ctor-env (:name param) (or (:type param) "Any")))
 
     ;; Check preconditions
     (doseq [assertion require]
