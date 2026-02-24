@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [clojure.java.io :as io])
   (:import [org.jline.reader LineReaderBuilder LineReader LineReader$Option Completer Candidate]
+           [org.jline.reader.impl DefaultParser]
            [org.jline.terminal TerminalBuilder]
            [org.jline.reader.impl.history DefaultHistory]
            [java.io EOFException])
@@ -24,7 +25,9 @@
    "when" "from" "until" "invariant" "variant" "require" "ensure"
    "let" "create" "fn" "function" "and" "or" "old" "this" "note"
    "with" "import" "intern" "private" "raise" "rescue" "retry"
-   "true" "false" "nil"])
+   "true" "false" "nil"
+   ;; strictly 'result' is not a keyword, but a pre-defined variable name.
+   "result"])
 
 (def nex-types
   ["Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
@@ -38,17 +41,15 @@
 
 (defonce ^:dynamic *completer-ctx* (atom nil))
 
-(defn- current-word
-  "Extract the word being typed at the cursor position."
-  [^String line ^long cursor]
-  (loop [i (dec cursor)]
-    (if (neg? i)
-      (.substring line 0 cursor)
-      (let [ch (.charAt line i)]
-        (if (or (Character/isWhitespace ch)
-                (= ch \() (= ch \)) (= ch \,))
-          (.substring line (inc i) cursor)
-          (recur (dec i)))))))
+(defn make-nex-parser
+  "Create a DefaultParser that also splits words at parentheses and commas,
+  so that tab-completion works inside function-call arguments."
+  []
+  (proxy [DefaultParser] []
+    (isDelimiterChar [^CharSequence buffer ^long pos]
+      (let [ch (.charAt buffer (int pos))]
+        (or (Character/isWhitespace ch)
+            (= ch \() (= ch \)) (= ch \,))))))
 
 (defn make-nex-completer
   "Create a JLine Completer that provides completions from static word
@@ -56,9 +57,7 @@
   []
   (reify Completer
     (complete [_ _reader line candidates]
-      (let [buf  (.line line)
-            cur  (.cursor line)
-            word (current-word buf cur)]
+      (let [word (.word line)]
         (when (seq word)
           (let [ctx        @*completer-ctx*
                 var-names  (when ctx
@@ -94,6 +93,7 @@
         history-file (io/file (System/getProperty "user.home") ".nex_history")]
     (-> (LineReaderBuilder/builder)
         (.terminal terminal)
+        (.parser (make-nex-parser))
         (.variable LineReader/HISTORY_FILE (.getAbsolutePath history-file))
         (.option LineReader$Option/DISABLE_EVENT_EXPANSION true)
         (.completer (make-nex-completer))
