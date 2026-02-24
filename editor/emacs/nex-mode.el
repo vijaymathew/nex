@@ -118,7 +118,7 @@
     "when" "from" "until" "invariant" "variant" "require" "ensure"
     "let" "as" "and" "or" "not" "fn"
     "old" "create" "private" "note" "with" "import" "intern" "function"
-    "raise" "rescue" "retry")
+    "raise" "rescue" "retry" "case" "of")
   "Nex language keywords.")
 
 (defconst nex-types
@@ -244,7 +244,7 @@
      (looking-back
       (regexp-opt '("class" "do" "then" "else" "elseif" "require" "ensure"
                     "from" "until" "inherit" "invariant" "variant"
-                    "rescue")
+                    "rescue" "of")
                   'words)
       (line-beginning-position))
      ;; Section keywords that contain items (feature, create)

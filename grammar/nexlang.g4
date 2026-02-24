@@ -144,7 +144,16 @@ statement
     | withStatement
     | raiseStatement
     | retryStatement
+    | caseStatement
     | expression
+    ;
+
+caseStatement
+    : CASE expression OF caseClause+ (ELSE statement)? END
+    ;
+
+caseClause
+    : literal (',' literal)* THEN statement
     ;
 
 scopedBlock
@@ -382,6 +391,8 @@ WITH         : 'with';
 RAISE        : 'raise';
 RESCUE       : 'rescue';
 RETRY        : 'retry';
+CASE         : 'case';
+OF           : 'of';
 AND          : 'and';
 OR           : 'or';
 NOT          : 'not';
