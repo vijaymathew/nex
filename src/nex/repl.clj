@@ -402,22 +402,20 @@
 
           ;; Try to parse, track if we wrapped
           [ast was-wrapped? is-expression?] (try
-                                              [(p/ast code-to-parse) (not= code-to-parse input) false]
+                                              ;; Bare identifiers parse as methodCall but should
+                                              ;; evaluate as expressions (return their value)
+                                              (if (and (= code-to-parse input)
+                                                       (looks-like-identifier? input))
+                                                [(p/ast (wrap-expression input)) true true]
+                                                [(p/ast code-to-parse) (not= code-to-parse input) false])
                                               (catch Exception e
                                                 ;; If parsing failed and we haven't wrapped yet, try wrapping
                                                 (if (= code-to-parse input)
-                                                  (cond
-                                                    ;; Check if it's a bare identifier - wrap in print
-                                                    (looks-like-identifier? input)
+                                                  (try
                                                     [(p/ast (wrap-expression input)) true true]
-
-                                                    ;; Try wrapping as expression
-                                                    :else
-                                                    (try
-                                                      [(p/ast (wrap-expression input)) true true]
-                                                      (catch Exception e2
-                                                        ;; If expression wrapping fails, try as statement
-                                                        [(p/ast (wrap-as-method input)) true false])))
+                                                    (catch Exception e2
+                                                      ;; If expression wrapping fails, try as statement
+                                                      [(p/ast (wrap-as-method input)) true false]))
                                                   (throw e))))]
 
       ;; Type check if enabled
@@ -426,7 +424,9 @@
                  (or (seq (:classes ast)) (seq (:calls ast))))
         ;; Create an augmented AST that includes previously defined classes
         ;; so the type checker knows about them
-        (let [prev-classes (vals @(:classes ctx))
+        (let [prev-classes (remove #(or (= "__ReplTemp__" (:name %))
+                                       (.startsWith (:name %) "AnonymousFunction_"))
+                                  (vals @(:classes ctx)))
               prev-imports @(:imports ctx)
               augmented-ast (cond
                               (and (seq prev-classes) (seq prev-imports))

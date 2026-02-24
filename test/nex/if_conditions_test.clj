@@ -353,3 +353,92 @@ end"
       (is (str/includes? js-code "} else if ("))
       (is (str/includes? js-code "} else {")))))
 
+;; ========== when expression tests ==========
+
+(deftest when-true-condition-test
+  (testing "when expression with true condition"
+    (let [code "class Test
+  feature
+    demo() do
+      let x := when true 1 else 2 end
+      print(x)
+    end
+end"
+          output (execute-method code)]
+      (is (= ["1"] output)))))
+
+(deftest when-false-condition-test
+  (testing "when expression with false condition"
+    (let [code "class Test
+  feature
+    demo() do
+      let x := when false 1 else 2 end
+      print(x)
+    end
+end"
+          output (execute-method code)]
+      (is (= ["2"] output)))))
+
+(deftest when-in-let-binding-test
+  (testing "when expression in let binding with comparison"
+    (let [code "class Test
+  feature
+    demo() do
+      let s := when 1 < 5 \"hello\" else \"bye\" end
+      print(s)
+    end
+end"
+          output (execute-method code)]
+      (is (= ["\"hello\""] output)))))
+
+(deftest when-as-function-argument-test
+  (testing "when expression as function argument"
+    (let [code "class Test
+  feature
+    demo() do
+      print(when 1 < 5 1 else 2 end)
+    end
+end"
+          output (execute-method code)]
+      (is (= ["1"] output)))))
+
+(deftest when-with-complex-expressions-test
+  (testing "when expression with complex expressions"
+    (let [code "class Test
+  feature
+    demo() do
+      let a := 10
+      let b := 20
+      let result := when a > b a * 2 else b * 2 end
+      print(result)
+    end
+end"
+          output (execute-method code)]
+      (is (= ["40"] output)))))
+
+(deftest java-codegen-when-test
+  (testing "Java codegen emits ternary for when expression"
+    (let [code "class Test
+  feature
+    demo() do
+      let x: Integer := when 1 < 5 1 else 2 end
+    end
+end"
+          ast (p/ast code)
+          java-code (java-gen/translate-ast ast)]
+      (is (str/includes? java-code "?"))
+      (is (str/includes? java-code ":")))))
+
+(deftest js-codegen-when-test
+  (testing "JavaScript codegen emits ternary for when expression"
+    (let [code "class Test
+  feature
+    demo() do
+      let x: Integer := when 1 < 5 1 else 2 end
+    end
+end"
+          ast (p/ast code)
+          js-code (js-gen/translate-ast ast)]
+      (is (str/includes? js-code "?"))
+      (is (str/includes? js-code ":")))))
+
