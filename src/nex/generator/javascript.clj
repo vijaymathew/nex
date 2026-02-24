@@ -561,6 +561,33 @@
                body-stmts
                [(indent level "}")]))))))
 
+(defn generate-case
+  "Generate JavaScript code for case statement as switch"
+  [level {:keys [expr clauses else]} var-names]
+  (let [expr-code (generate-expression expr)
+        case-parts (mapcat (fn [{:keys [values body]}]
+                             (let [labels (map #(indent (+ level 1)
+                                                        (str "case " (generate-expression %) ":"))
+                                               values)
+                                   body-code (generate-statement (+ level 2) body var-names)]
+                               (concat labels
+                                       [body-code
+                                        (indent (+ level 2) "break;")])))
+                           clauses)
+        default-part (when else
+                       [(indent (+ level 1) "default:")
+                        (generate-statement (+ level 2) else var-names)
+                        (indent (+ level 2) "break;")])
+        no-else-default (when-not else
+                          [(indent (+ level 1) "default:")
+                           (indent (+ level 2) "throw \"No matching case\";")])]
+    (str/join "\n"
+              (concat
+               [(indent level (str "switch (" expr-code ") {"))]
+               case-parts
+               (or default-part no-else-default)
+               [(indent level "}")]))))
+
 (defn generate-statement
   "Generate JavaScript code for a statement"
   ([level stmt] (generate-statement level stmt #{}))
@@ -570,6 +597,7 @@
      :call (indent level (str (generate-call-expr stmt) ";"))
      :let (indent level (generate-let stmt var-names))
      :if (generate-if level stmt var-names)
+     :case (generate-case level stmt var-names)
      :scoped-block (generate-scoped-block level stmt var-names)
      :loop (generate-loop level stmt)
      :with (when (= (:target stmt) "javascript")

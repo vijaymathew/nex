@@ -24,7 +24,7 @@
   ["class" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
    "when" "from" "until" "invariant" "variant" "require" "ensure"
    "let" "create" "fn" "function" "and" "or" "old" "this" "note"
-   "with" "import" "intern" "private" "raise" "rescue" "retry"
+   "with" "import" "intern" "private" "raise" "rescue" "retry" "case" "of"
    "true" "false" "nil"
    ;; strictly 'result' is not a keyword, but a pre-defined variable name.
    "result"])
@@ -130,12 +130,13 @@
         do-count (count (re-seq #"\bdo\b" text))
         from-count (count (re-seq #"\bfrom\b" text))
         if-count (count (re-seq #"\bif\b" text))
+        case-count (count (re-seq #"\bcase\b" text))
         end-count (count (re-seq #"\bend\b" text))
         ;; In loops, 'do' is part of 'from...until...do...end', not a separate block
         ;; So subtract 'from-count' from 'do-count' to avoid double-counting
         standalone-do-count (max 0 (- do-count from-count))
         ;; Total blocks that need closing
-        open-blocks (+ class-count standalone-do-count from-count if-count)]
+        open-blocks (+ class-count standalone-do-count from-count if-count case-count)]
     ;; Continue if we have more opens than closes
     (> open-blocks end-count)))
 

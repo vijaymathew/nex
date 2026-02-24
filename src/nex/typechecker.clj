@@ -678,6 +678,12 @@
                           (env-add-var rescue-env "exception" "Any")
                           (doseq [s rescue] (check-statement rescue-env s)))))
       :with (doseq [s (:body stmt)] (check-statement env s))
+      :case (do
+              (check-expression env (:expr stmt))
+              (doseq [clause (:clauses stmt)]
+                (check-statement env (:body clause)))
+              (when-let [else-stmt (:else stmt)]
+                (check-statement env else-stmt)))
       :raise (check-expression env (:value stmt))
       :retry nil
       :member-assign

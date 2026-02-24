@@ -1210,6 +1210,23 @@
         (when else
           (last (map #(eval-node ctx %) else)))))))
 
+(defmethod eval-node :case
+  [ctx {:keys [expr clauses else]}]
+  (let [val (eval-node ctx expr)
+        matched (loop [cs clauses]
+                  (if (empty? cs)
+                    ::no-match
+                    (let [{:keys [values body]} (first cs)]
+                      (if (some #(= val (eval-node ctx %)) values)
+                        (eval-node ctx body)
+                        (recur (rest cs))))))]
+    (if (= matched ::no-match)
+      (if else
+        (eval-node ctx else)
+        (throw (ex-info "No matching case and no else clause"
+                        {:value val})))
+      matched)))
+
 (defmethod eval-node :loop
   [ctx {:keys [init invariant variant until body]}]
   ;; Execute initialization statements

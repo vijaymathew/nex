@@ -457,6 +457,34 @@
         :body (transform-node block)
         :rescue (when rescue-clause (transform-node rescue-clause))}))
 
+   :caseStatement
+   (fn [[_ _case-kw expr _of-kw & rest]]
+     ;; rest: caseClause+ ("else" statement)? "end"
+     (let [tokens (vec rest)
+           clauses (filterv #(and (sequential? %) (= :caseClause (first %))) tokens)
+           ;; Check for else clause: "else" followed by a statement node
+           has-else? (some #(= "else" %) tokens)
+           else-stmt (when has-else?
+                       (let [after-else (second (drop-while #(not= "else" %) tokens))]
+                         (when (and (sequential? after-else) (not= "end" after-else))
+                           (transform-node after-else))))]
+       {:type :case
+        :expr (transform-node expr)
+        :clauses (mapv transform-node clauses)
+        :else else-stmt}))
+
+   :caseClause
+   (fn [[_ & tokens]]
+     ;; tokens: literal ("," literal)* "then" statement
+     (let [parts (vec tokens)
+           then-idx (first (keep-indexed (fn [i v] (when (= "then" v) i)) parts))
+           literals (->> (subvec parts 0 then-idx)
+                         (remove #(= "," %))
+                         (mapv transform-node))
+           body (transform-node (nth parts (inc then-idx)))]
+       {:values literals
+        :body body}))
+
    :ifStatement
    (fn [[_ _if-kw & rest]]
      ;; rest: condition "then" block ("elseif" condition "then" block)* ("else" block)? "end"

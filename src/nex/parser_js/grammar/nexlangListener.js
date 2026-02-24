@@ -257,6 +257,24 @@ export default class nexlangListener extends antlr4.tree.ParseTreeListener {
 	}
 
 
+	// Enter a parse tree produced by nexlangParser#caseStatement.
+	enterCaseStatement(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#caseStatement.
+	exitCaseStatement(ctx) {
+	}
+
+
+	// Enter a parse tree produced by nexlangParser#caseClause.
+	enterCaseClause(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#caseClause.
+	exitCaseClause(ctx) {
+	}
+
+
 	// Enter a parse tree produced by nexlangParser#scopedBlock.
 	enterScopedBlock(ctx) {
 	}
