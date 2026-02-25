@@ -154,6 +154,7 @@ end"
       let f: Boolean := 11 < 12
       let g: Boolean := true and false
       let h: Boolean := true or false
+      let g: Integer := 2 ^ 3
     end
 end"
           js-code (js/translate nex-code)]
@@ -164,7 +165,8 @@ end"
       (is (str/includes? js-code "(9 > 10)"))
       (is (str/includes? js-code "(11 < 12)"))
       (is (str/includes? js-code "&&"))
-      (is (str/includes? js-code "||")))))
+      (is (str/includes? js-code "||"))
+      (is (str/includes? js-code "(2 ** 3)")))))
 
 (deftest equality-operators-test
   (testing "Equality operator translation to ==="

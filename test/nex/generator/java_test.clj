@@ -296,6 +296,7 @@ end"
       let d: Integer := 7 / 8
       let e: Boolean := 9 > 10
       let f: Boolean := 11 < 12
+      let g: Integer := 2 ^ 3
     end
 end"
           java-code (java/translate nex-code)]
@@ -304,7 +305,8 @@ end"
       (is (str/includes? java-code "(5 * 6)"))
       (is (str/includes? java-code "(7 / 8)"))
       (is (str/includes? java-code "(9 > 10)"))
-      (is (str/includes? java-code "(11 < 12)")))))
+      (is (str/includes? java-code "(11 < 12)"))
+      (is (str/includes? java-code "(Math.pow(2, 3))")))))
 
 (deftest skip-contracts-option-test
   (testing "Skip contracts option for production builds"

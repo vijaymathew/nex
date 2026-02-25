@@ -141,6 +141,7 @@
     "*" "*"
     "/" "/"
     "%" "%"
+    "^" "**"
     operator))
 
 (declare generate-expression)

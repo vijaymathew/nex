@@ -477,6 +477,7 @@
     "/" (if (zero? right)
           (throw (ex-info "Division by zero" {:left left :right right}))
           (/ left right))
+    "^" (Math/pow left right)
     "%" (if (zero? right)
           (throw (ex-info "Division by zero" {:left left :right right}))
           (mod left right))
