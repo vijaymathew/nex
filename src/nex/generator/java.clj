@@ -191,9 +191,11 @@
   "Generate Java code for binary expression"
   [{:keys [operator left right]}]
   (let [left-code (generate-expression left)
-        right-code (generate-expression right)
-        op (generate-binary-op operator)]
-    (str "(" left-code " " op " " right-code ")")))
+        right-code (generate-expression right)]
+    (if (= operator "^")
+      (str "(Math.pow(" left-code ", " right-code "))")
+      (let [op (generate-binary-op operator)]
+        (str "(" left-code " " op " " right-code ")")))))
 
 (defn generate-unary-expr
   "Generate Java code for unary expression"

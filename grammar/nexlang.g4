@@ -237,7 +237,7 @@ addition
     ;
 
 multiplication
-    : unary ((STAR | DIV | MOD) unary)*
+    : unary ((STAR | DIV | MOD | POW) unary)*
     ;
 
 unary
@@ -417,6 +417,7 @@ PLUS         : '+';
 MINUS        : '-';
 STAR         : '*';
 DIV          : '/';
+POW          : '^';
 MOD          : '%';
 
 EQUAL        : '=';
