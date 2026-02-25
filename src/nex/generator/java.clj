@@ -46,6 +46,8 @@
       "File" "java.io.File"
       "Process" "Object"
       "Function" "Function"
+      "Window" "NexWindow"
+      "Turtle" "NexTurtle"
       "Any" "Object"
       nex-type)))
 
@@ -92,6 +94,8 @@
         "File" "java.io.File"
         "Process" "Object"
         "Function" "Function"
+        "Window" "NexWindow"
+        "Turtle" "NexTurtle"
         nex-type))
 
      :else nex-type)))
@@ -124,6 +128,8 @@
       "Console" "new Object() /* Console */"
       "File" "null"
       "Process" "new Object() /* Process */"
+      "Window" "null"
+      "Turtle" "null"
       "null")
 
     :else "null"))
@@ -339,8 +345,13 @@
             this-target? (and (map? target) (= :this (:type target)))
             has-parens (:has-parens call-node)]
         (if (nil? method)
-          ;; Calling an expression that returns a function
-          (str target-code ".call" num-args "(" args-code ")")
+          ;; Check if target is a create expression for builtin types that accept constructor args
+          (if (and (map? target) (= :create (:type target))
+                   (#{"Window" "Turtle"} (:class-name target)))
+            (let [java-class (case (:class-name target) "Window" "NexWindow" "Turtle" "NexTurtle")]
+              (str "new " java-class "(" args-code ")"))
+            ;; Calling an expression that returns a function
+            (str target-code ".call" num-args "(" args-code ")"))
           ;; Check if target is a parent class name (composition delegation)
           (if (and (string? target) (contains? *current-parents* target))
             ;; Parent-qualified call: delegate through composition field
@@ -374,6 +385,9 @@
                ;; Try Map methods
                (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
                  (method-fn target-code args-code))
+               ;; Handle Java reserved words used as method names
+               (when (= method "goto")
+                 (str target-code ".goto_(" args-code ")"))
                ;; Default: regular method call
                (str target-code "." method "(" args-code ")"))))))
       ;; No target: class method, function object field, global function, or builtin
@@ -411,6 +425,8 @@
       "Console" "new Object() /* Console */"
       "File" (str "new java.io.File(" args-code ")")
       "Process" "new Object() /* Process */"
+      "Window" (str "new NexWindow(" args-code ")")
+      "Turtle" (str "new NexTurtle(" args-code ")")
       (if constructor
         ;; Named constructor: static factory method call
         (str class-name (or type-params "") "." constructor "(" args-code ")")
@@ -1065,6 +1081,338 @@
                   methods-code
                   ["}"])))))))
 
+(defn generate-nex-window-class
+  "Generate Java source for NexWindow.java — Swing/AWT window with canvas."
+  []
+  "import javax.swing.*;
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+public class NexWindow {
+    private int width;
+    private int height;
+    private Color bgColor = Color.WHITE;
+    private BufferedImage canvas;
+    final CopyOnWriteArrayList<NexTurtle> turtles = new CopyOnWriteArrayList<>();
+    private JFrame frame;
+    private JLabel label;
+
+    public NexWindow() { this(\"Nex Turtle Graphics\", 800, 600); }
+    public NexWindow(String title) { this(title, 800, 600); }
+    public NexWindow(String title, int w, int h) {
+        this.width = w;
+        this.height = h;
+        canvas = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2d = canvas.createGraphics();
+        g2d.setColor(Color.WHITE);
+        g2d.fillRect(0, 0, w, h);
+        g2d.dispose();
+
+        label = new JLabel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2d = (Graphics2D) g.create();
+                g2d.drawImage(canvas, 0, 0, null);
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                                     RenderingHints.VALUE_ANTIALIAS_ON);
+                for (NexTurtle t : turtles) {
+                    if (t.isVisible()) {
+                        double cx = width / 2.0 + t.getX();
+                        double cy = height / 2.0 - t.getY();
+                        t.drawCursor(g2d, cx, cy);
+                    }
+                }
+                g2d.dispose();
+            }
+        };
+        label.setPreferredSize(new Dimension(w, h));
+        frame = new JFrame(title);
+        frame.getContentPane().add(label);
+        frame.pack();
+        frame.setLocationRelativeTo(null);
+        frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+    }
+
+    public int getCanvasWidth() { return width; }
+    public int getCanvasHeight() { return height; }
+    public BufferedImage getCanvas() { return canvas; }
+
+    public Object show() {
+        SwingUtilities.invokeLater(() -> frame.setVisible(true));
+        return null;
+    }
+
+    public Object close() {
+        SwingUtilities.invokeLater(() -> frame.dispose());
+        return null;
+    }
+
+    public Object bgcolor(String colorStr) {
+        Color c = NexTurtle.parseColor(colorStr);
+        this.bgColor = c;
+        Graphics2D g2d = canvas.createGraphics();
+        g2d.setColor(c);
+        g2d.fillRect(0, 0, width, height);
+        g2d.dispose();
+        label.repaint();
+        return null;
+    }
+
+    public void repaintCanvas() { label.repaint(); }
+}")
+
+(defn generate-nex-turtle-class
+  "Generate Java source for NexTurtle.java — turtle graphics on a NexWindow canvas."
+  []
+  "import java.awt.*;
+import java.awt.geom.*;
+import java.awt.image.BufferedImage;
+
+public class NexTurtle {
+    private NexWindow window;
+    private double x = 0, y = 0;
+    private double heading = 90;  // 90 = north
+    private boolean penDown = true;
+    private String colorName = \"black\";
+    private int penSz = 1;
+    private int spd = 6;
+    private String shapeName = \"classic\";
+    private boolean visible = true;
+    private boolean filling = false;
+    private java.util.List<double[]> fillPoints = new java.util.ArrayList<>();
+    private String fillColor = \"black\";
+
+    public NexTurtle(NexWindow win) {
+        this.window = win;
+        win.turtles.add(this);
+        win.repaintCanvas();
+    }
+
+    // Accessors for NexWindow overlay painting
+    public double getX() { return x; }
+    public double getY() { return y; }
+    public boolean isVisible() { return visible; }
+
+    // Color parsing utility
+    static Color parseColor(String s) {
+        s = s.trim().toLowerCase();
+        switch (s) {
+            case \"black\":   return new Color(0, 0, 0);
+            case \"white\":   return new Color(255, 255, 255);
+            case \"red\":     return new Color(255, 0, 0);
+            case \"green\":   return new Color(0, 128, 0);
+            case \"blue\":    return new Color(0, 0, 255);
+            case \"yellow\":  return new Color(255, 255, 0);
+            case \"orange\":  return new Color(255, 165, 0);
+            case \"purple\":  return new Color(128, 0, 128);
+            case \"cyan\":    return new Color(0, 255, 255);
+            case \"magenta\": return new Color(255, 0, 255);
+            case \"brown\":   return new Color(139, 69, 19);
+            case \"pink\":    return new Color(255, 192, 203);
+            case \"gray\": case \"grey\": return new Color(128, 128, 128);
+            default:
+                try { return Color.decode(s); }
+                catch (Exception e) { return Color.BLACK; }
+        }
+    }
+
+    private int speedDelay() {
+        if (spd <= 0) return 0;
+        if (spd >= 10) return 5;
+        return (int)(200.0 / spd);
+    }
+
+    private double[] canvasCoords(double tx, double ty) {
+        return new double[] {
+            window.getCanvasWidth() / 2.0 + tx,
+            window.getCanvasHeight() / 2.0 - ty
+        };
+    }
+
+    void drawCursor(Graphics2D g2d, double cx, double cy) {
+        AffineTransform saved = g2d.getTransform();
+        g2d.translate(cx, cy);
+        g2d.rotate(Math.toRadians(-(heading - 90)));
+        g2d.setColor(parseColor(colorName));
+        if (\"circle\".equals(shapeName)) {
+            int r = 6;
+            g2d.fill(new Ellipse2D.Double(-r, -r, 2*r, 2*r));
+        } else {
+            Path2D.Double path = new Path2D.Double();
+            path.moveTo(12, 0);
+            path.lineTo(-6, -7);
+            path.lineTo(-6, 7);
+            path.closePath();
+            g2d.fill(path);
+        }
+        g2d.setTransform(saved);
+    }
+
+    public Object forward(double dist) {
+        double rad = Math.toRadians(heading);
+        double dx = dist * Math.cos(rad);
+        double dy = dist * Math.sin(rad);
+        double nx = x + dx, ny = y + dy;
+        if (penDown) {
+            BufferedImage canvas = window.getCanvas();
+            Graphics2D g2d = canvas.createGraphics();
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                                 RenderingHints.VALUE_ANTIALIAS_ON);
+            g2d.setColor(parseColor(colorName));
+            g2d.setStroke(new BasicStroke(penSz, BasicStroke.CAP_ROUND,
+                                         BasicStroke.JOIN_ROUND));
+            double[] s = canvasCoords(x, y);
+            double[] e = canvasCoords(nx, ny);
+            g2d.drawLine((int)s[0], (int)s[1], (int)e[0], (int)e[1]);
+            g2d.dispose();
+        }
+        x = nx; y = ny;
+        if (filling) fillPoints.add(new double[]{nx, ny});
+        window.repaintCanvas();
+        int delay = speedDelay();
+        if (delay > 0) { try { Thread.sleep(delay); } catch (Exception ex) {} }
+        return null;
+    }
+
+    public Object forward(int dist) { return forward((double) dist); }
+
+    public Object backward(double dist) { return forward(-dist); }
+    public Object backward(int dist) { return backward((double) dist); }
+
+    public Object right(double angle) {
+        heading -= angle;
+        window.repaintCanvas();
+        return null;
+    }
+    public Object right(int angle) { return right((double) angle); }
+
+    public Object left(double angle) {
+        heading += angle;
+        window.repaintCanvas();
+        return null;
+    }
+    public Object left(int angle) { return left((double) angle); }
+
+    public Object penup() { penDown = false; return null; }
+    public Object pendown() { penDown = true; return null; }
+
+    public Object color(String c) {
+        colorName = c;
+        fillColor = c;
+        return null;
+    }
+
+    public Object pensize(int s) { penSz = s; return null; }
+    public Object pensize(double s) { penSz = (int) s; return null; }
+
+    public Object speed(int s) { spd = s; return null; }
+    public Object speed(double s) { spd = (int) s; return null; }
+
+    public Object shape(String s) { shapeName = s.toLowerCase(); return null; }
+
+    public Object goto_(double gx, double gy) {
+        if (penDown) {
+            BufferedImage canvas = window.getCanvas();
+            Graphics2D g2d = canvas.createGraphics();
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                                 RenderingHints.VALUE_ANTIALIAS_ON);
+            g2d.setColor(parseColor(colorName));
+            g2d.setStroke(new BasicStroke(penSz, BasicStroke.CAP_ROUND,
+                                         BasicStroke.JOIN_ROUND));
+            double[] s = canvasCoords(x, y);
+            double[] e = canvasCoords(gx, gy);
+            g2d.drawLine((int)s[0], (int)s[1], (int)e[0], (int)e[1]);
+            g2d.dispose();
+        }
+        x = gx; y = gy;
+        if (filling) fillPoints.add(new double[]{gx, gy});
+        window.repaintCanvas();
+        int delay = speedDelay();
+        if (delay > 0) { try { Thread.sleep(delay); } catch (Exception ex) {} }
+        return null;
+    }
+
+    public Object circle(double radius) {
+        int segments = 36;
+        double angleStep = 360.0 / segments;
+        BufferedImage canvas = window.getCanvas();
+        Graphics2D g2d = canvas.createGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                             RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.setColor(parseColor(colorName));
+        g2d.setStroke(new BasicStroke(penSz, BasicStroke.CAP_ROUND,
+                                     BasicStroke.JOIN_ROUND));
+        double cx = x, cy = y, h = heading;
+        for (int i = 0; i < segments; i++) {
+            double newH = h + angleStep;
+            double stepLen = 2.0 * radius * Math.sin(Math.toRadians(angleStep / 2.0));
+            double moveRad = Math.toRadians(h + angleStep / 2.0);
+            double nx = cx + stepLen * Math.cos(moveRad);
+            double ny = cy + stepLen * Math.sin(moveRad);
+            if (penDown) {
+                double[] s = canvasCoords(cx, cy);
+                double[] e = canvasCoords(nx, ny);
+                g2d.drawLine((int)s[0], (int)s[1], (int)e[0], (int)e[1]);
+            }
+            if (filling) fillPoints.add(new double[]{nx, ny});
+            cx = nx; cy = ny; h = newH;
+        }
+        g2d.dispose();
+        window.repaintCanvas();
+        int delay = speedDelay();
+        if (delay > 0) { try { Thread.sleep(delay); } catch (Exception ex) {} }
+        return null;
+    }
+    public Object circle(int radius) { return circle((double) radius); }
+
+    public Object begin_fill() {
+        filling = true;
+        fillPoints = new java.util.ArrayList<>();
+        fillPoints.add(new double[]{x, y});
+        fillColor = colorName;
+        return null;
+    }
+
+    public Object end_fill() {
+        if (filling && fillPoints.size() >= 3) {
+            BufferedImage canvas = window.getCanvas();
+            Graphics2D g2d = canvas.createGraphics();
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                                 RenderingHints.VALUE_ANTIALIAS_ON);
+            Path2D.Double path = new Path2D.Double();
+            double[] first = fillPoints.get(0);
+            double[] fc = canvasCoords(first[0], first[1]);
+            path.moveTo(fc[0], fc[1]);
+            for (int i = 1; i < fillPoints.size(); i++) {
+                double[] pt = fillPoints.get(i);
+                double[] pc = canvasCoords(pt[0], pt[1]);
+                path.lineTo(pc[0], pc[1]);
+            }
+            path.closePath();
+            g2d.setColor(parseColor(fillColor));
+            g2d.fill(path);
+            g2d.dispose();
+            window.repaintCanvas();
+        }
+        filling = false;
+        fillPoints = new java.util.ArrayList<>();
+        return null;
+    }
+
+    public Object hide() {
+        visible = false;
+        window.repaintCanvas();
+        return null;
+    }
+
+    public Object show() {
+        visible = true;
+        window.repaintCanvas();
+        return null;
+    }
+}")
+
 (defn generate-function-base-class
   "Generate the built-in Function base class."
   []
@@ -1241,7 +1589,9 @@
          class-codes (binding [*function-names* function-names
                               *class-registry* (into {} (map (juxt :name identity) classes))]
                        (mapv (fn [cls] [(:name cls) (generate-class cls opts)]) classes))
-         files (into {"Function.java" function-base}
+         files (into {"Function.java" function-base
+                      "NexWindow.java" (generate-nex-window-class)
+                      "NexTurtle.java" (generate-nex-turtle-class)}
                      (concat
                       (when function-globals
                         [["NexGlobals.java" function-globals]])

@@ -1,6 +1,7 @@
 (ns nex.interpreter
   (:require [clojure.string :as str]
-            #?(:clj [nex.parser :as parser])))
+            #?(:clj [nex.parser :as parser])
+            #?(:clj [nex.turtle :as turtle])))
 
 ;;
 ;; Mutable Collections (platform abstraction)
@@ -75,6 +76,8 @@
 (defn nex-console? [v] (and (map? v) (= (:nex-builtin-type v) :Console)))
 (defn nex-file? [v] (and (map? v) (= (:nex-builtin-type v) :File)))
 (defn nex-process? [v] (and (map? v) (= (:nex-builtin-type v) :Process)))
+(defn nex-window? [v] (and (map? v) (= (:nex-builtin-type v) :Window)))
+(defn nex-turtle? [v] (and (map? v) (= (:nex-builtin-type v) :Turtle)))
 
 ;; Subscript helper (works on both Array and Map)
 (defn nex-coll-get [coll idx]
@@ -521,6 +524,8 @@
       "Console" {:nex-builtin-type :Console}
       "File" nil
       "Process" {:nex-builtin-type :Process}
+      "Window" nil
+      "Turtle" nil
       nil)
 
     :else nil))
@@ -699,7 +704,31 @@
    :Process
    {"getenv"       (fn [_ name & _] (or (nex-process-getenv (str name)) ""))
     "setenv"       (fn [_ name value & _] (nex-process-setenv (str name) (str value)) nil)
-    "command_line" (fn [_ & _] (nex-process-command-line))}})
+    "command_line" (fn [_ & _] (nex-process-command-line))}
+
+   #?@(:clj
+       [:Window
+        {"show"    (fn [w & _] (turtle/show-window w))
+         "close"   (fn [w & _] (turtle/close-window w))
+         "bgcolor" (fn [w color & _] (turtle/set-bgcolor w (str color)))}
+
+        :Turtle
+        {"forward"    (fn [t dist & _] (turtle/turtle-forward t dist))
+         "backward"   (fn [t dist & _] (turtle/turtle-backward t dist))
+         "right"      (fn [t angle & _] (turtle/turtle-right t angle))
+         "left"       (fn [t angle & _] (turtle/turtle-left t angle))
+         "penup"      (fn [t & _] (turtle/turtle-penup t))
+         "pendown"    (fn [t & _] (turtle/turtle-pendown t))
+         "color"      (fn [t c & _] (turtle/turtle-color t (str c)))
+         "pensize"    (fn [t s & _] (turtle/turtle-pensize t s))
+         "speed"      (fn [t s & _] (turtle/turtle-speed t s))
+         "shape"      (fn [t s & _] (turtle/turtle-shape t (str s)))
+         "goto"       (fn [t x y & _] (turtle/turtle-goto t x y))
+         "circle"     (fn [t r & _] (turtle/turtle-circle t r))
+         "begin_fill" (fn [t & _] (turtle/turtle-begin-fill t))
+         "end_fill"   (fn [t & _] (turtle/turtle-end-fill t))
+         "hide"       (fn [t & _] (turtle/turtle-hide t))
+         "show"       (fn [t & _] (turtle/turtle-show t))}])})
 
 (defn get-type-name
   "Get the type name for a value"
@@ -716,6 +745,8 @@
     (nex-console? value) :Console
     (nex-file? value) :File
     (nex-process? value) :Process
+    (nex-window? value) :Window
+    (nex-turtle? value) :Turtle
     :else nil))
 
 (defn call-builtin-method
@@ -1389,6 +1420,30 @@
                (throw (ex-info "File requires constructor: create File.open(path)" {:class-name "File"})))
              {:nex-builtin-type :File :path (first arg-values)})
     "Process" {:nex-builtin-type :Process}
+    "Window" #?(:clj (let [arg-values (mapv #(eval-node ctx %) args)]
+                       (case constructor
+                         "with_title"
+                         (case (count arg-values)
+                           1 (turtle/create-window (first arg-values))
+                           3 (turtle/create-window (first arg-values) (second arg-values) (nth arg-values 2))
+                           (throw (ex-info "Window.with_title takes 1 or 3 arguments (title) or (title, width, height)"
+                                           {:class-name "Window"})))
+                         ;; No named constructor
+                         (case (count arg-values)
+                           0 (turtle/create-window)
+                           2 (turtle/create-window "Nex Turtle Graphics" (first arg-values) (second arg-values))
+                           (throw (ex-info "Window takes 0 or 2 arguments (width, height)"
+                                           {:class-name "Window"})))))
+               :cljs (throw (ex-info "Window is not supported in JavaScript" {:class-name "Window"})))
+    "Turtle" #?(:clj (let [arg-values (mapv #(eval-node ctx %) args)]
+                       (when-not (= constructor "on_window")
+                         (throw (ex-info "Turtle requires constructor: create Turtle.on_window(window)"
+                                         {:class-name "Turtle"})))
+                       (when-not (= (count arg-values) 1)
+                         (throw (ex-info "Turtle.on_window takes 1 argument (window)"
+                                         {:class-name "Turtle"})))
+                       (turtle/create-turtle (first arg-values)))
+               :cljs (throw (ex-info "Turtle is not supported in JavaScript" {:class-name "Turtle"})))
   ;; Resolve effective class name (handle generic specialization)
   (let [effective-class-name
         (if (seq generic-args)
