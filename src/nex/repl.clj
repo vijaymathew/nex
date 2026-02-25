@@ -540,7 +540,6 @@
               (if type-str
                 (println (str type-str " " (format-value result)))
                 (println (format-value result)))))
-          ;; Don't say "Class registered" for wrapped code
           ctx)
 
         ;; If it's a program, handle it based on content
@@ -571,10 +570,7 @@
               (if-let [type-str (when (seq calls)
                                   (infer-result-type ctx (last calls)))]
                 (println (str type-str " " (format-value result)))
-                (println (format-value result))))
-            ;; Only show "Class registered" message if there are real classes
-            (when (and (seq real-class-names) (not (every? str/blank? real-class-names)))
-              (println "Class(es) registered:" (str/join ", " real-class-names))))
+                (println (format-value result)))))
           ctx)
 
         ;; Single expression or statement

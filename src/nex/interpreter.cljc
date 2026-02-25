@@ -915,8 +915,7 @@
             return-type (:return-type callable)
             default-result (when return-type (get-default-field-value return-type))
             _ (env-define method-env "result" default-result)
-            _ (env-define method-env "Result" default-result)
-            _ (env-define method-env "Current" current-obj)
+            _ (env-define method-env "this" current-obj)
             new-ctx (-> ctx
                        (assoc :current-env method-env)
                        (assoc :current-object current-obj)
@@ -939,11 +938,11 @@
                                   all-fields)
             updated-obj (make-object (:class-name current-obj) updated-fields)
             result (let [res (try
-                               (env-lookup method-env "Result")
+                               (env-lookup method-env "result")
                                (catch #?(:clj Exception :cljs :default) _ ::not-found))]
                      (if (not= res ::not-found)
                        res
-                       (env-lookup method-env "result")))]
+                       nil))]
         ;; Update the object in the calling context
         (when-let [tgt (:current-target ctx)]
           (try
@@ -984,30 +983,37 @@
                 method-lookup (lookup-method-with-inheritance ctx class-def method)]
             (if method-lookup
               (let [method-def (:method method-lookup)
-                    source-class (:source-class method-lookup)
+                    params (:params method-def)]
+                ;; Bug fix: disallow paren-less calls to methods that require arguments
+                (when (and (false? has-parens) (seq params))
+                  (throw (ex-info (str method " requires arguments")
+                                  {:method method :params (mapv :name params)})))
+                (let [source-class (:source-class method-lookup)
                     all-fields (get-all-fields ctx class-def)
                     has-postconditions? (seq (:ensure method-def))
                     old-values (when has-postconditions? (:fields obj))]
                 (let [method-env (make-env (or (:closure-env obj) (:current-env ctx)))
-                      params (:params method-def)
+                      param-names (set (map :name params))
+                      ;; Define fields first, then params — so params shadow fields
+                      _ (doseq [[field-name field-val] (:fields obj)]
+                          (env-define method-env (name field-name) field-val))
                       _ (when params
                           (doseq [[param arg-val] (map vector params arg-values)]
                             (env-define method-env (:name param) arg-val)))
-                      _ (doseq [[field-name field-val] (:fields obj)]
-                          (env-define method-env (name field-name) field-val))
+                      modified-fields (atom #{})
                       return-type (:return-type method-def)
                       default-result (if return-type
                                       (get-default-field-value return-type)
                                       nil)
                       _ (env-define method-env "result" default-result)
-                      _ (env-define method-env "Result" default-result)
-                      _ (env-define method-env "Current" obj)
+                      _ (env-define method-env "this" obj)
                       new-ctx (-> ctx
                                  (assoc :current-env method-env)
                                  (assoc :current-object obj)
                                  (assoc :current-target target-name)
                                  (assoc :current-class-name (:class-name obj))
-                                 (assoc :old-values old-values))
+                                 (assoc :old-values old-values)
+                                 (assoc :modified-fields modified-fields))
                       _ (when-let [require-assertions (:require method-def)]
                           (check-assertions new-ctx require-assertions Precondition))
                       _ (if-let [rescue (:rescue method-def)]
@@ -1016,13 +1022,17 @@
                             (eval-node new-ctx stmt)))
                       updated-fields (reduce (fn [m field]
                                               (let [field-name (:name field)
-                                                    field-key (keyword field-name)
-                                                    val (try
-                                                          (env-lookup method-env field-name)
-                                                          (catch #?(:clj Exception :cljs :default) _ ::not-found))]
-                                                (if (not= val ::not-found)
-                                                  (assoc m field-key val)
-                                                  m)))
+                                                    field-key (keyword field-name)]
+                                                ;; Skip fields shadowed by params unless explicitly modified via this.field :=
+                                                (if (and (contains? param-names field-name)
+                                                         (not (contains? @modified-fields field-name)))
+                                                  m
+                                                  (let [val (try
+                                                              (env-lookup method-env field-name)
+                                                              (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+                                                    (if (not= val ::not-found)
+                                                      (assoc m field-key val)
+                                                      m)))))
                                             (:fields obj)
                                             all-fields)
                       updated-obj (make-object (:class-name obj) updated-fields)
@@ -1030,17 +1040,15 @@
                                     (env-lookup method-env "__result_assigned__")
                                     (catch #?(:clj Exception :cljs :default) _ ::not-found))
                       result (cond
-                               (= result-flag "Result")
-                               (env-lookup method-env "Result")
                                (= result-flag "result")
                                (env-lookup method-env "result")
                                :else
                                (let [res (try
-                                           (env-lookup method-env "Result")
+                                           (env-lookup method-env "result")
                                            (catch #?(:clj Exception :cljs :default) _ ::not-found))]
                                  (if (not= res ::not-found)
                                    res
-                                   (env-lookup method-env "result"))))]
+                                   nil)))]
                   (try
                     (when-let [ensure-assertions (:ensure method-def)]
                       (check-assertions new-ctx ensure-assertions Postcondition))
@@ -1051,7 +1059,7 @@
                     (catch #?(:clj Exception :cljs :default) e
                       (when target-name
                         (env-set! (:current-env ctx) target-name obj))
-                      (throw e)))))
+                      (throw e))))))
               (let [all-fields (get-all-fields ctx class-def)
                     field (first (filter #(= (:name %) method) all-fields))]
                 (if field
@@ -1140,6 +1148,9 @@
 (defmethod eval-node :member-assign
   [ctx {:keys [object-type field value]}]
   (let [val (eval-node ctx value)]
+    ;; Track that this field was explicitly modified via this.field :=
+    (when-let [mf (:modified-fields ctx)]
+      (swap! mf conj field))
     ;; this.field sets the env variable
     ;; (fields are tracked as env vars, extracted back to object after body)
     (env-set! (:current-env ctx) field val)
@@ -1151,8 +1162,10 @@
     ;; Assignment (without let) ONLY updates existing variables
     ;; It should fail if the variable doesn't exist
     (env-set! (:current-env ctx) target val)
-    (when (#{"Result" "result"} target)
+    (when (#{"result"} target)
       (env-define (:current-env ctx) "__result_assigned__" target))
+    ;; Strictly speaking, assignment is a statement and does not have a value,
+    ;; but returning the value is helpful for repl users.
     val))
 
 (defmethod eval-node :let
@@ -1160,8 +1173,10 @@
   (let [val (eval-node ctx value)]
     ;; Always define a new binding in the current scope (can shadow outer scopes)
     (env-define (:current-env ctx) name val)
-    (when (#{"Result" "result"} name)
+    (when (#{"result"} name)
       (env-define (:current-env ctx) "__result_assigned__" name))
+    ;; Strictly speaking, let-binding is a statement and does not have a value,
+    ;; but returning the value is helpful for repl users.
     val))
 
 (defmethod eval-node :block
