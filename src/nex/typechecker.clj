@@ -60,7 +60,8 @@
 
 (def builtin-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Any" "Void" "Nil" "Console" "File" "Process" "Function"})
+    "Array" "Map" "Any" "Void" "Nil" "Console" "File" "Process" "Function"
+    "Window" "Turtle"})
 
 (defn builtin-type? [type-name]
   (contains? builtin-types type-name))
@@ -454,6 +455,10 @@
     (= class-name "Console") "Console"
     ;; Handle built-in Process type
     (= class-name "Process") "Process"
+    ;; Handle built-in Window type
+    (= class-name "Window") "Window"
+    ;; Handle built-in Turtle type
+    (= class-name "Turtle") "Turtle"
     ;; Handle built-in File type
     (= class-name "File")
     (do
@@ -925,6 +930,29 @@
            "setenv" {:params [{:name "name" :type "String"} {:name "value" :type "String"}] :return-type "Void"}
            "command_line" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}}]
     (env-add-method env "Process" method-name sig))
+  (doseq [[method-name sig]
+          {"show"    {:params [] :return-type "Void"}
+           "close"   {:params [] :return-type "Void"}
+           "bgcolor" {:params [{:name "color" :type "String"}] :return-type "Void"}}]
+    (env-add-method env "Window" method-name sig))
+  (doseq [[method-name sig]
+          {"forward"    {:params [{:name "distance" :type "Real"}] :return-type "Void"}
+           "backward"   {:params [{:name "distance" :type "Real"}] :return-type "Void"}
+           "right"      {:params [{:name "angle" :type "Real"}] :return-type "Void"}
+           "left"       {:params [{:name "angle" :type "Real"}] :return-type "Void"}
+           "penup"      {:params [] :return-type "Void"}
+           "pendown"    {:params [] :return-type "Void"}
+           "color"      {:params [{:name "color" :type "String"}] :return-type "Void"}
+           "pensize"    {:params [{:name "size" :type "Integer"}] :return-type "Void"}
+           "speed"      {:params [{:name "speed" :type "Integer"}] :return-type "Void"}
+           "shape"      {:params [{:name "shape" :type "String"}] :return-type "Void"}
+           "goto"       {:params [{:name "x" :type "Real"} {:name "y" :type "Real"}] :return-type "Void"}
+           "circle"     {:params [{:name "radius" :type "Real"}] :return-type "Void"}
+           "begin_fill" {:params [] :return-type "Void"}
+           "end_fill"   {:params [] :return-type "Void"}
+           "hide"       {:params [] :return-type "Void"}
+           "show"       {:params [] :return-type "Void"}}]
+    (env-add-method env "Turtle" method-name sig))
 
   ;; Built-in Function methods: call0..call32
   (doseq [n (range 0 33)]

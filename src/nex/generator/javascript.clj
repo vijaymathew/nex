@@ -294,8 +294,13 @@
             this-target? (and (map? target) (= :this (:type target)))
             has-parens (:has-parens call-node)]
         (if (nil? method)
-          ;; Calling an expression that returns a function
-          (str target-code ".call" num-args "(" args-code ")")
+          ;; Check if target is a create expression for unsupported builtin types
+          (if (and (map? target) (= :create (:type target))
+                   (#{"Window" "Turtle"} (:class-name target)))
+            (throw (ex-info (str (:class-name target) " is not supported in the JavaScript target (requires Swing/AWT)")
+                            {:class-name (:class-name target)}))
+            ;; Calling an expression that returns a function
+            (str target-code ".call" num-args "(" args-code ")"))
           ;; Check for this-target with has-parens distinction
           (if this-target?
             (if (false? has-parens)
@@ -357,6 +362,10 @@
       "Console" "({_type: 'Console'})"
       "File" (str "({_type: 'File', path: " args-code "})")
       "Process" "({_type: 'Process'})"
+      "Window" (throw (ex-info "Window is not supported in the JavaScript target (requires Swing/AWT)"
+                               {:class-name "Window"}))
+      "Turtle" (throw (ex-info "Turtle is not supported in the JavaScript target (requires Swing/AWT)"
+                               {:class-name "Turtle"}))
       (if constructor
         ;; Named constructor: static factory method call
         (str class-name "." constructor "(" args-code ")")

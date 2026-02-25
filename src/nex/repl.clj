@@ -31,7 +31,7 @@
 
 (def nex-types
   ["Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-   "Array" "Map" "Function" "Console" "File" "Process"])
+   "Array" "Map" "Function" "Console" "File" "Process" "Window" "Turtle"])
 
 (def nex-builtins ["print" "println"])
 
@@ -363,6 +363,10 @@
     ;; Nex objects
     (instance? nex.interpreter.NexObject value)
     (str "#<" (:class-name value) " object>")
+
+    ;; Built-in types with :nex-builtin-type
+    (and (map? value) (:nex-builtin-type value))
+    (str "#<" (name (:nex-builtin-type value)) ">")
 
     ;; Strings - show without quotes for direct display
     (string? value)

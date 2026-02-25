@@ -1,0 +1,27 @@
+-- Turtle Graphics: Draw a colorful square.
+
+let win := create Window.with_title("My Turtle Demo")
+win.show()
+
+let t := create Turtle.on_window(win)
+t.speed(6)
+t.pensize(3)
+
+-- Draw a square with different colors on each side
+t.color("red")
+t.forward(100)
+t.right(90)
+
+t.color("blue")
+t.forward(100)
+t.right(90)
+
+t.color("green")
+t.forward(100)
+t.right(90)
+
+t.color("orange")
+t.forward(100)
+t.right(90)
+
+t.hide()
