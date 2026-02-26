@@ -605,7 +605,7 @@
               result (tc/type-check augmented-ast {:var-types @*repl-var-types*})]
           (when-not (:success result)
             (doseq [error (:errors result)]
-              (println "Type error:" (tc/format-type-error error)))
+              (println (tc/format-type-error error)))
             (throw (ex-info "Type checking failed" {:errors (:errors result)})))))
 
       ;; Evaluate based on type
