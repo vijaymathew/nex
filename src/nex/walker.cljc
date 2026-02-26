@@ -56,6 +56,18 @@
   (fn [[_ & children]]
     {type-keyword (mapv transform-node children)}))
 
+(def ^:private special-char-codes
+  {"nul" "\0"
+   "space" " "
+   "newline" "\n"
+   "return" "\r"
+   "tab" "\t"})
+
+(defn- maybe-transform-special-char [v]
+  (if (and (string? v) (> (count v) 1))
+    (or (get special-char-codes v) 0)
+    v))
+
 ;;
 ;; Node handlers map (data-driven transformations)
 ;;
@@ -828,9 +840,11 @@
 
    :charLiteral
    (fn [[_ value]]
-     (let [v (subs value 1)]
+     (let [v0 (subs value 1)
+           is-code (re-matches #"\d+" v0)
+           v (if is-code v0 (maybe-transform-special-char v0))]
        {:type :char
-        :value (if (re-matches #"\d+" v)
+        :value (if is-code
                  #?(:clj (char (Integer/parseInt v))
                     :cljs (.fromCharCode js/String (js/parseInt v)))
                  (first v))}))

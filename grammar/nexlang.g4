@@ -468,6 +468,9 @@ fragment EXPONENT
     : [eE] [+\-]? DIGITS
     ;
 
+SPECIAL_CHAR  : 'nul' | 'space' | 'newline' | 'tab' | 'return'
+;
+
 /*
  * -------------------------
  * Character Literals
@@ -478,7 +481,7 @@ fragment EXPONENT
  * #65  (unicode code point)
  */
 CHAR_LITERAL
-    : '#' ( ~[0-9 \t\r\n] | DIGITS )
+    : '#' ( ~[0-9 \t\r\n] | SPECIAL_CHAR | DIGITS )
     ;
 
 /*

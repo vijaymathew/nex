@@ -448,41 +448,7 @@
        "    end\n"
        "end"))
 
-(defn format-value
-  "Format a value for REPL display"
-  [value]
-  (cond
-    ;; Nex objects
-    (instance? nex.interpreter.NexObject value)
-    (str "#<" (:class-name value) " object>")
-
-    ;; Built-in types with :nex-builtin-type
-    (and (map? value) (:nex-builtin-type value))
-    (str "#<" (name (:nex-builtin-type value)) ">")
-
-    ;; Strings - show without quotes for direct display
-    (string? value)
-    value
-
-    ;; Numbers
-    (number? value)
-    (str value)
-
-    ;; Booleans
-    (boolean? value)
-    (str value)
-
-    ;; Nil
-    (nil? value)
-    "nil"
-
-    ;; Collections
-    (coll? value)
-    (pr-str value)
-
-    ;; Everything else
-    :else
-    (pr-str value)))
+(def format-value interp/nex-format-value)
 
 (defn format-type
   "Format a type value for REPL display"
@@ -577,7 +543,6 @@
                                                           ;; so line numbers reference the user's actual code
                                                           (throw e)))))
                                                   (throw e))))]
-
       ;; Type check if enabled
       (when (and @*type-checking-enabled*
                  (= (:type ast) :program)

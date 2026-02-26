@@ -436,6 +436,45 @@
   [parent-assertions child-assertions]
   (vec (concat (or parent-assertions []) (or child-assertions []))))
 
+(defn nex-format-value
+  "Format a value as-per Nex syntax rules."
+  [value]
+  (cond
+    ;; Nex objects
+    (instance? nex.interpreter.NexObject value)
+    (str "#<" (:class-name value) " object>")
+
+    ;; Built-in types with :nex-builtin-type
+    (and (map? value) (:nex-builtin-type value))
+    (str "#<" (name (:nex-builtin-type value)) ">")
+
+    ;; Strings - show without quotes for direct display
+    (string? value)
+    (str \" value \")
+
+    ;; Numbers
+    (number? value)
+    (str value)
+
+    ;; Booleans
+    (boolean? value)
+    (str value)
+
+    ;; Nil
+    (nil? value)
+    "nil"
+
+    ;; Collections
+    (coll? value)
+    (pr-str value)
+
+    (char? value)
+    (str "#" value)
+
+    ;; Everything else
+    :else
+    (pr-str value)))
+
 ;;
 ;; Built-in Functions
 ;;
@@ -443,19 +482,13 @@
 (def builtins
   {"print"
    (fn [ctx & args]
-     (let [output (str/join " " (map #(if (instance? NexObject %)
-                                        (str "#<" (:class-name %) ">")
-                                        (pr-str %))
-                                     args))]
+     (let [output (str/join " " (map nex-format-value args))]
        (add-output ctx output)
        nil))
 
    "println"
    (fn [ctx & args]
-     (let [output (str/join " " (map #(if (instance? NexObject %)
-                                        (str "#<" (:class-name %) ">")
-                                        (pr-str %))
-                                     args))]
+     (let [output (str/join " " (map nex-format-value args))]
        (add-output ctx output)
        nil))})
 
