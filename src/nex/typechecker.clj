@@ -88,18 +88,37 @@
          ": " message)
     (str "Type error: " message)))
 
+(defn display-type
+  "Format a type value for human-readable display."
+  [type-val]
+  (cond
+    (string? type-val) type-val
+    (map? type-val) (let [base (:base-type type-val)
+                          params (or (:type-params type-val) (:type-args type-val))]
+                     (if (seq params)
+                       (str base "[" (clojure.string/join ", " (map display-type params)) "]")
+                       base))
+    :else (str type-val)))
+
 ;;
 ;; Type Utilities
 ;;
 
 (defn normalize-type
-  "Normalize a type expression to a string or map"
+  "Normalize a type expression to a string or map.
+   Canonicalizes :type-args to :type-params so that inferred types
+   (which use :type-params) and declared types (which use :type-args)
+   can be compared with simple equality."
   [type-expr]
   (cond
     (string? type-expr) type-expr
     (map? type-expr)
     (if (:base-type type-expr)
-      type-expr
+      (let [params (or (:type-params type-expr) (:type-args type-expr))]
+        (if params
+          {:base-type (:base-type type-expr)
+           :type-params (mapv normalize-type params)}
+          {:base-type (:base-type type-expr)}))
       (str type-expr))
     :else (str type-expr)))
 
@@ -137,13 +156,10 @@
              (and env (is-generic-type-param? env t2))
              (and (nil? env) (is-generic-type-param? t1))
              (and (nil? env) (is-generic-type-param? t2)))
-         ;; Handle parameterized types with different keys
+         ;; Handle parameterized types
          (and (map? t1) (map? t2)
               (= (:base-type t1) (:base-type t2))
-              (or (= (:type-params t1) (:type-params t2))
-                  (= (:type-params t1) (:type-args t2))
-                  (= (:type-args t1) (:type-params t2))
-                  (= (:type-args t1) (:type-args t2))))
+              (= (:type-params t1) (:type-params t2)))
          ;; Allow base class name to match parameterized type (e.g., "Box" matches {:base-type "Box", ...})
          (or (and (string? t1) (map? t2) (= t1 (:base-type t2)))
              (and (map? t1) (string? t2) (= (:base-type t1) t2)))))))
@@ -179,10 +195,7 @@
         (and (map? t1) (string? t2) (class-subtype? env (:base-type t1) t2))
         (and (map? t1) (map? t2)
              (class-subtype? env (:base-type t1) (:base-type t2))
-             (or (= (:type-params t1) (:type-params t2))
-                 (= (:type-params t1) (:type-args t2))
-                 (= (:type-args t1) (:type-params t2))
-                 (= (:type-args t1) (:type-args t2)))))))
+             (= (:type-params t1) (:type-params t2))))))
 
 (defn validate-generic-args
   "Validate generic arguments against a class's generic constraints."
@@ -284,7 +297,7 @@
         (throw (ex-info (str "Operator " operator " requires numeric operands")
                         {:error (type-error
                                  (str "Operator " operator " requires numeric operands, got "
-                                      left-type " and " right-type))})))
+                                      (display-type left-type) " and " (display-type right-type)))})))
 
       ("=" "/=")
       (if (or (= left-type "Nil")
@@ -309,7 +322,7 @@
         (throw (ex-info (str "Cannot compare " left-type " with " right-type)
                         {:error (type-error
                                  (str "Comparison requires compatible types, got "
-                                      left-type " and " right-type))})))
+                                      (display-type left-type) " and " (display-type right-type)))})))
 
       ("and" "or")
       (if (and (= left-type "Boolean") (= right-type "Boolean"))
@@ -317,7 +330,7 @@
         (throw (ex-info (str "Operator " operator " requires Boolean operands")
                         {:error (type-error
                                  (str "Operator " operator " requires Boolean operands, got "
-                                      left-type " and " right-type))})))
+                                      (display-type left-type) " and " (display-type right-type)))})))
 
       (throw (ex-info (str "Unknown operator: " operator)
                       {:error (type-error (str "Unknown operator: " operator))})))))
@@ -400,7 +413,7 @@
               (when-not (types-compatible? env arg-type param-type)
                 (throw (ex-info (str "Argument type mismatch for method " method)
                                 {:error (type-error
-                                         (str "Expected " param-type ", got " arg-type))})))))
+                                         (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
           (resolve-generic-type (:return-type method-sig) type-map))
         ;; Method not found - might be built-in method, return Any for now
         "Any"))
@@ -426,7 +439,7 @@
             (when-not (types-compatible? env arg-type param-type)
               (throw (ex-info (str "Argument type mismatch for method " call-name)
                               {:error (type-error
-                                       (str "Expected " param-type ", got " arg-type))})))))
+                                       (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
         (resolve-generic-type (:return-type method-sig) type-map))
       (if-let [current-class (env-lookup-var env "__current_class__")]
         (if-let [method-sig (lookup-class-method env current-class method)]
@@ -505,7 +518,7 @@
                       (when-not (types-compatible? env arg-type param-type)
                         (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
                                         {:error (type-error
-                                                 (str "Expected " param-type ", got " arg-type))}))))))))
+                                                 (str "Expected " (display-type param-type) ", got " (display-type arg-type)))}))))))))
             target-type))))))
 
 (defn check-array-literal
@@ -521,7 +534,7 @@
             (throw (ex-info "Array elements must have same type"
                             {:error (type-error
                                      (str "Array elements must have same type, got "
-                                          first-type " and " elem-type))})))))
+                                          (display-type first-type) " and " (display-type elem-type)))})))))
       {:base-type "Array" :type-params [first-type]})))
 
 (defn check-map-literal
@@ -614,8 +627,8 @@
     (when-not (types-compatible? env val-type var-type)
       (throw (ex-info (str "Type mismatch in assignment to " target)
                       {:error (type-error
-                               (str "Cannot assign " val-type " to variable of type "
-                                    var-type))})))))
+                               (str "Cannot assign " (display-type val-type)
+                                    " to variable of type " (display-type var-type)))})))))
 
 (defn check-let
   "Check a let statement"
@@ -630,8 +643,9 @@
     (when-not (types-compatible? env val-type var-type)
       (throw (ex-info (str "Type mismatch in let binding for " name)
                       {:error (type-error
-                               (str "Cannot bind " val-type " to variable of type "
-                                    var-type))})))
+                               (str "Cannot assign " (display-type val-type)
+                                    " to variable '" name "' of type "
+                                    (display-type var-type)))})))
     (env-add-var env name var-type)))
 
 (defn check-if
@@ -699,7 +713,8 @@
           (when-not (types-compatible? env val-type field-type)
             (throw (ex-info (str "Type mismatch in assignment to " field-name)
                             {:error (type-error
-                                     (str "Cannot assign " val-type " to field of type " field-type))})))))
+                                     (str "Cannot assign " (display-type val-type)
+                                          " to field of type " (display-type field-type)))})))))
       nil)))
 
 ;;
@@ -953,6 +968,46 @@
            "hide"       {:params [] :return-type "Void"}
            "show"       {:params [] :return-type "Void"}}]
     (env-add-method env "Turtle" method-name sig))
+
+  ;; Register Array[T] class and methods
+  (env-add-class env "Array" {:name "Array"
+                               :generic-params [{:name "T"}]})
+  (doseq [[method-name sig]
+          {"get"         {:params [{:name "index" :type "Integer"}] :return-type "T"}
+           "add"         {:params [{:name "value" :type "T"}] :return-type "Void"}
+           "push"        {:params [{:name "value" :type "T"}] :return-type "Void"}
+           "at"          {:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}
+           "set"         {:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}
+           "length"      {:params [] :return-type "Integer"}
+           "size"        {:params [] :return-type "Integer"}
+           "is_empty"    {:params [] :return-type "Boolean"}
+           "contains"    {:params [{:name "elem" :type "T"}] :return-type "Boolean"}
+           "index_of"    {:params [{:name "elem" :type "T"}] :return-type "Integer"}
+           "remove"      {:params [{:name "index" :type "Integer"}] :return-type "Void"}
+           "reverse"     {:params [] :return-type "Void"}
+           "sort"        {:params [] :return-type "Void"}
+           "slice"       {:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}]
+                          :return-type {:base-type "Array" :type-params ["T"]}}
+           "first"       {:params [] :return-type "T"}
+           "last"        {:params [] :return-type "T"}
+           "join"        {:params [{:name "sep" :type "String"}] :return-type "String"}}]
+    (env-add-method env "Array" method-name sig))
+
+  ;; Register Map[K, V] class and methods
+  (env-add-class env "Map" {:name "Map"
+                             :generic-params [{:name "K"} {:name "V"}]})
+  (doseq [[method-name sig]
+          {"get"          {:params [{:name "key" :type "K"}] :return-type "V"}
+           "try_get"      {:params [{:name "key" :type "K"} {:name "default" :type "V"}] :return-type "V"}
+           "at"           {:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}
+           "set"          {:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}
+           "size"         {:params [] :return-type "Integer"}
+           "is_empty"     {:params [] :return-type "Boolean"}
+           "contains_key" {:params [{:name "key" :type "K"}] :return-type "Boolean"}
+           "keys"         {:params [] :return-type {:base-type "Array" :type-params ["K"]}}
+           "values"       {:params [] :return-type {:base-type "Array" :type-params ["V"]}}
+           "remove"       {:params [{:name "key" :type "K"}] :return-type "Void"}}]
+    (env-add-method env "Map" method-name sig))
 
   ;; Built-in Function methods: call0..call32
   (doseq [n (range 0 33)]

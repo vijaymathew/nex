@@ -350,7 +350,7 @@ mapLiteral
     ;
 
 mapEntry
-    : (STRING | IDENTIFIER) ':' expression
+    : expression ':' expression
     ;
 
 /*
