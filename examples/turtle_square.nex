@@ -1,6 +1,7 @@
 -- Turtle Graphics: Draw a colorful square.
 
-function make_turtle(title: String): Turtle do
+function turtle(title: String): Turtle
+do
   let win: Window := create Window.with_title(title)
   win.show()
 
@@ -10,7 +11,8 @@ function make_turtle(title: String): Turtle do
   result := t
 end
 
-function draw_square(t: Turtle): Turtle do
+function square(t: Turtle): Turtle
+do
   -- Draw a square with different colors on each side
   t.color("red")
   t.forward(100)
@@ -31,7 +33,8 @@ function draw_square(t: Turtle): Turtle do
   result := t
 end
 
-function draw_polygon(t: Turtle, n: Integer, length: Integer): Turtle do
+function polygon(t: Turtle, n: Integer, length: Integer): Turtle
+do
   let angle := 360 / n
   from let i := 0 until i = n do
     t.forward(length)
@@ -41,7 +44,17 @@ function draw_polygon(t: Turtle, n: Integer, length: Integer): Turtle do
   result := t
 end
 
+function circle(t: Turtle, radius: Integer): Turtle
+do
+  let circumference := 2 * 3.14159265359 * radius
+  let n := 30
+  let length := circumference / n
+  polygon(t, n, length)
+  result := t
+end
+
 ---- Example usage:
--- let t: Turtle := make_turtle("My Turtle Demo")
--- draw_square(t)
--- draw_polygon(7, 30)
+-- let t: Turtle := turtle("My Turtle Demo")
+-- square(t)
+-- polygon(t, 7, 30)
+-- circle(t, 30)
