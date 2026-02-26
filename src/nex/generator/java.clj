@@ -1235,7 +1235,7 @@ public class NexTurtle {
     void drawCursor(Graphics2D g2d, double cx, double cy) {
         AffineTransform saved = g2d.getTransform();
         g2d.translate(cx, cy);
-        g2d.rotate(Math.toRadians(-(heading - 90)));
+        g2d.rotate(Math.toRadians(-heading));
         g2d.setColor(parseColor(colorName));
         if (\"circle\".equals(shapeName)) {
             int r = 6;

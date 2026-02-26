@@ -110,7 +110,7 @@
                                    cy (- (/ (:height s) 2.0) (:y ts))]
                                (draw-turtle-cursor ^Graphics2D g2d
                                                    cx cy
-                                                   (- 90.0 (:heading ts))
+                                                   (- (:heading ts))
                                                    (parse-color (:color ts))
                                                    (:shape ts))))))
                        (.dispose g2d))))
