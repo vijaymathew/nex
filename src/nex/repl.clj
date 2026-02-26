@@ -9,7 +9,8 @@
            [org.jline.reader.impl DefaultParser]
            [org.jline.terminal TerminalBuilder]
            [org.jline.reader.impl.history DefaultHistory]
-           [java.io EOFException])
+           [java.io EOFException]
+           [clj_antlr ParseError])
   (:gen-class))
 
 ;;
@@ -333,6 +334,97 @@
 ;; Code Evaluation
 ;;
 
+(defn- simplify-expected
+  "Simplify ANTLR expected token sets into readable descriptions."
+  [expected-str]
+  (if-let [[_ tokens] (re-matches #"\{(.+)\}" expected-str)]
+    (let [items (set (map str/trim (str/split tokens #",")))
+          ;; Detect categories based on which tokens are in the expected set
+          has-identifier (items "IDENTIFIER")
+          has-literals (or (items "INTEGER") (items "REAL") (items "STRING"))
+          has-class (items "'class'")
+          has-function (or (items "'function'") (items "'fn'"))
+          has-end (items "'end'")
+          has-eof (items "<EOF>")
+          has-create (items "'create'")
+          ;; An "expression" context has identifiers + literals but not class/function at top level
+          expression-context? (and has-identifier has-literals (not has-eof))]
+      (cond
+        ;; Inside a body expecting an expression (e.g., after :=, in argument list)
+        expression-context?
+        "an expression"
+
+        ;; After if/elseif condition, expecting 'then'
+        (items "'then'")
+        "'then'"
+
+        ;; After 'do' keyword, expecting block body or 'end'
+        (and has-end (not has-eof) (not has-class))
+        "'end'"
+
+        ;; Top-level: class, function, EOF
+        :else
+        (let [readable (cond-> []
+                         has-class (conj "class declaration")
+                         has-function (conj "function declaration")
+                         has-end (conj "'end'")
+                         has-eof (conj "end of input"))]
+          (if (seq readable)
+            (str/join ", " readable)
+            expected-str))))
+    expected-str))
+
+(defn format-parse-errors
+  "Format parse errors from clj-antlr ParseError with source context and caret pointers."
+  [^ParseError e source-code line-offset]
+  (let [source-lines (str/split-lines source-code)
+        num-lines (count source-lines)
+        errors (.-errors e)
+        ;; Adjust line numbers and filter out errors on wrapper lines
+        adjusted (keep (fn [err]
+                         (let [line (- (:line err) line-offset)]
+                           (when (and (pos? line) (<= line num-lines))
+                             (assoc err :adjusted-line line))))
+                       errors)
+        ;; Deduplicate by line to show only the first error per line
+        seen-lines (atom #{})
+        unique-errors (filter (fn [err]
+                                (let [l (:adjusted-line err)]
+                                  (when-not (@seen-lines l)
+                                    (swap! seen-lines conj l)
+                                    true)))
+                              adjusted)
+        ;; Limit to first 3 errors
+        limited-errors (take 3 unique-errors)]
+    (if (empty? limited-errors)
+      ;; All errors were on wrapper lines — show a generic message pointing to the end
+      (let [last-line (last source-lines)
+            last-num num-lines]
+        (println (str "  Line " last-num ": unexpected end of input"))
+        (when last-line
+          (println (str "  | " last-line))
+          (println (str "  | " (apply str (repeat (count last-line) " ")) "^"))))
+      ;; Show each error with source context
+      (doseq [err limited-errors]
+        (let [line (:adjusted-line err)
+              col (:char err)
+              msg (:message err)
+              ;; Make the message more user-friendly
+              friendly-msg (-> msg
+                               (str/replace #"mismatched input '(.+?)' expecting (.+)"
+                                            (fn [[_ token expected]]
+                                              (str "unexpected '" token "', expected " (simplify-expected expected))))
+                               (str/replace #"extraneous input '(.+?)' expecting (.+)"
+                                            (fn [[_ token expected]]
+                                              (str "unexpected '" token "', expected " (simplify-expected expected))))
+                               (str/replace #"missing '(.+?)' at '(.+?)'"
+                                            "missing '$1' before '$2'"))]
+          (println (str "  Line " line ": " friendly-msg))
+          ;; Show the source line and caret
+          (let [src-line (nth source-lines (dec line))]
+            (println (str "  | " src-line))
+            (when (and col (>= col 0))
+              (println (str "  | " (apply str (repeat col " ")) "^")))))))))
 
 (defn wrap-as-method
   "Wrap code in a temporary class and method structure for parsing"
@@ -476,9 +568,14 @@
                                                 (if (= code-to-parse input)
                                                   (try
                                                     [(p/ast (wrap-expression input)) true true]
-                                                    (catch Exception e2
+                                                    (catch Exception _e2
                                                       ;; If expression wrapping fails, try as statement
-                                                      [(p/ast (wrap-as-method input)) true false]))
+                                                      (try
+                                                        [(p/ast (wrap-as-method input)) true false]
+                                                        (catch Exception _e3
+                                                          ;; All attempts failed - throw the ORIGINAL error
+                                                          ;; so line numbers reference the user's actual code
+                                                          (throw e)))))
                                                   (throw e))))]
 
       ;; Type check if enabled
@@ -588,6 +685,15 @@
               (println (str type-str " " (format-value result)))
               (println (format-value result))))
           ctx)))
+
+    (catch ParseError e
+      (println "Syntax error:")
+      ;; When input was pre-wrapped as a statement, errors reference the wrapper
+      ;; code (offset by 3 lines). Adjust accordingly.
+      (let [pre-wrapped? (looks-like-statement? input)
+            line-offset (if pre-wrapped? 3 0)]
+        (format-parse-errors e input line-offset))
+      ctx)
 
     (catch clojure.lang.ExceptionInfo e
       (println "Error:" (.getMessage e))
