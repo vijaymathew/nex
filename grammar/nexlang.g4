@@ -478,7 +478,7 @@ fragment EXPONENT
  * #65  (unicode code point)
  */
 CHAR_LITERAL
-    : '#' ( [a-zA-Z] | DIGITS )
+    : '#' ( ~[0-9 \t\r\n] | DIGITS )
     ;
 
 /*

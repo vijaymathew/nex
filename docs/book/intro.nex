@@ -1,0 +1,19 @@
+-- Symbolic/declarative programming
+function is_beatle(n) do result := (["john", "paul", "george", "ringo"]).contains(n) end
+
+is_beatle("john") -- true
+is_beatle("elvis") -- false
+
+-- tic-tac-toe
+function merge_positions(winning_combinations: String, positions: String): String
+do
+  from let i: Integer := 0
+  until i >= winning_combinations.length do
+    let p: Char := positions.char_at(i)
+    let w: Char := winning_combinations.char_at(i)
+    if p /= #_ then result := result + p else result := result + w end
+    i := i + 1    
+  end
+end
+
+-- example: merge_positions("123 456 789 147 258 369 159 357", "_xo _x_ o__ __o xx_ o__")
