@@ -553,6 +553,7 @@ nex/
 
 ## Documentation
 
+- **[Syntax on a Postcard](docs/SYNTAX.md)** - The entire language at a glance
 - **[Project Structure](docs/PROJECT_STRUCTURE.md)** - Detailed project organization
 - **[Type System](docs/TYPES.md)** - Basic types and default initialization
 - **[Generic Types](docs/GENERICS.md)** - Parameterized classes with constraints
