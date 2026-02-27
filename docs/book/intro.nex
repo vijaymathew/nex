@@ -97,3 +97,26 @@ function circles(t: Turtle) do
   end
   t.speed(2)
 end
+
+function poly(t: Turtle, n: Integer, side: Integer, angle: Integer) do
+  repeat n do
+    t.forward(side)
+    t.right(angle)
+  end
+end
+
+function polispi(t: Turtle, n: Integer, side: Integer, angle: Integer, inc: Integer) do
+  if n >= 0 then
+    t.forward(side)
+    t.right(angle)
+    polispi(t, n-1, side+inc, angle, inc)
+  end
+end
+
+function inspi(t: Turtle, n: Integer, side: Integer, angle: Integer, inc: Integer) do
+  repeat n do
+    t.forward(side)
+    t.right(angle)
+    angle := angle + inc
+  end
+end
