@@ -576,6 +576,43 @@
                              :left counter-id
                              :right {:type :integer :value 1 :text "1"}}})}))
 
+   :acrossStatement
+   (fn [[_ _across-kw collection-expr _as-kw alias-name _do-kw body-block _end-kw]]
+     (let [cursor-name (str "__across_c_" (swap! next-fn-id inc) "__")
+           cursor-id {:type :identifier :name cursor-name}
+           collection-ast (transform-node collection-expr)
+           alias (token-text alias-name)
+           body-stmts (transform-node body-block)]
+       {:type :loop
+        :init [{:type :let
+                :name cursor-name
+                :value {:type :call
+                        :target collection-ast
+                        :method "cursor"
+                        :args []}}
+               {:type :call
+                :target cursor-name
+                :method "start"
+                :args []}]
+        :invariant nil
+        :variant nil
+        :until {:type :call
+                :target cursor-name
+                :method "at_end"
+                :args []}
+        :body (vec (concat
+                    [{:type :let
+                      :name alias
+                      :value {:type :call
+                              :target cursor-name
+                              :method "item"
+                              :args []}}]
+                    body-stmts
+                    [{:type :call
+                      :target cursor-name
+                      :method "next"
+                      :args []}]))}))
+
    :withStatement
    (fn [[_ _with-kw target-string _do-kw body-block _end-kw]]
      (let [;; Extract target string, removing quotes

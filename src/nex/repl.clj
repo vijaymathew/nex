@@ -25,14 +25,14 @@
   ["class" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
    "when" "from" "until" "invariant" "variant" "require" "ensure"
    "let" "create" "fn" "function" "and" "or" "old" "this" "note"
-   "with" "import" "intern" "private" "raise" "rescue" "retry" "repeat" "case" "of"
+   "with" "import" "intern" "private" "raise" "rescue" "retry" "repeat" "across" "case" "of"
    "true" "false" "nil"
    ;; strictly 'result' is not a keyword, but a pre-defined variable name.
    "result"])
 
 (def nex-types
   ["Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-   "Array" "Map" "Function" "Console" "File" "Process" "Window" "Turtle"])
+   "Array" "Map" "Function" "Cursor" "Console" "File" "Process" "Window" "Turtle"])
 
 (def nex-builtins ["print" "println"])
 
@@ -131,14 +131,15 @@
         do-count (count (re-seq #"\bdo\b" text))
         from-count (count (re-seq #"\bfrom\b" text))
         repeat-count (count (re-seq #"\brepeat\b" text))
+        across-count (count (re-seq #"\bacross\b" text))
         if-count (count (re-seq #"\bif\b" text))
         case-count (count (re-seq #"\bcase\b" text))
         end-count (count (re-seq #"\bend\b" text))
-        ;; In loops, 'do' is part of 'from...until...do...end' or 'repeat...do...end', not a separate block
-        ;; So subtract from-count and repeat-count from do-count to avoid double-counting
-        standalone-do-count (max 0 (- do-count from-count repeat-count))
+        ;; In loops, 'do' is part of 'from...until...do...end', 'repeat...do...end', or 'across...do...end'
+        ;; So subtract from-count, repeat-count, and across-count from do-count to avoid double-counting
+        standalone-do-count (max 0 (- do-count from-count repeat-count across-count))
         ;; Total blocks that need closing
-        open-blocks (+ class-count standalone-do-count from-count repeat-count if-count case-count)]
+        open-blocks (+ class-count standalone-do-count from-count repeat-count across-count if-count case-count)]
     ;; Continue if we have more opens than closes
     (> open-blocks end-count)))
 
@@ -489,6 +490,7 @@
       (re-find #"^\s*if\s+" input)
       (re-find #"^\s*from\s+" input)
       (re-find #"^\s*repeat\s+" input)
+      (re-find #"^\s*across\s+" input)
       (re-find #"^\s*do\s+" input)))
 
 (defn looks-like-identifier?

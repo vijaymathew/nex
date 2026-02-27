@@ -84,6 +84,34 @@ end
 -- prints hello! three times
 ```
 
+## Across
+
+Iterate over any collection (Array, String, Map) using its cursor:
+
+```nex
+across [10, 20, 30] as x do
+  print(x)
+end
+-- prints 10 20 30
+```
+
+Strings iterate by character:
+
+```nex
+across "abc" as ch do
+  print(ch)
+end
+-- prints #a #b #c
+```
+
+Maps iterate as `[key, value]` pairs:
+
+```nex
+across {"name": "Alice", "age": "10"} as pair do
+  print(pair.get(0))
+end
+```
+
 ## Functions
 
 ```nex
@@ -283,5 +311,5 @@ this.name := "Nex"              -- set a field inside a method
 
 ## That's it!
 
-Nex reads like English: `if...then...end`, `from...until...do...end`, `repeat...do...end`, `class...feature...end`.
+Nex reads like English: `if...then...end`, `from...until...do...end`, `repeat...do...end`, `across...as...do...end`, `class...feature...end`.
 Write what you mean, and Nex will check that you mean what you write.

@@ -61,7 +61,7 @@
 (def builtin-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
     "Array" "Map" "Any" "Void" "Nil" "Console" "File" "Process" "Function"
-    "Window" "Turtle"})
+    "Cursor" "Window" "Turtle"})
 
 (defn builtin-type? [type-name]
   (contains? builtin-types type-name))
