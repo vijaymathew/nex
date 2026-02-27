@@ -135,20 +135,24 @@
      #(.dispose ^JFrame (:frame s))))
   nil)
 
-(defn set-bgcolor [win color-str]
-  (let [color (parse-color color-str)
-        s     (swap! (:state win) assoc :bg-color color)
-        ^BufferedImage canvas (:canvas s)
-        g2d   (.createGraphics canvas)]
-    (.setColor g2d color)
-    (.fillRect g2d 0 0 (:width s) (:height s))
-    (.dispose g2d)
-    (.repaint ^JLabel (:label s)))
-  nil)
-
 (defn repaint-window [win]
   (let [s @(:state win)]
     (.repaint ^JLabel (:label s))))
+
+(defn clear-window [win]
+  (let [s @(:state win)
+        ^BufferedImage canvas (:canvas s)
+        g2d   (.createGraphics canvas)]
+    (.setColor g2d (:bg-color s))
+    (.fillRect g2d 0 0 (:width s) (:height s))
+    (.dispose g2d)
+    (repaint-window win))
+  nil)
+
+(defn set-bgcolor [win color-str]
+  (let [color (parse-color color-str)]
+    (swap! (:state win) assoc :bg-color color)
+    (clear-window win)))
 
 ;;
 ;; Turtle
@@ -175,6 +179,9 @@
       (.add ^CopyOnWriteArrayList (:turtles ws) turtle))
     (repaint-window win)
     turtle))
+
+(defn turtle-window [turtle]
+  (:window @(:state turtle)))
 
 (defn- canvas-coords
   "Convert turtle (x,y) to canvas pixel coordinates."

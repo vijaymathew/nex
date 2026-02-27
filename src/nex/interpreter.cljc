@@ -841,6 +841,7 @@
        [:Window
         {"show"    (fn [w & _] (turtle/show-window w))
          "close"   (fn [w & _] (turtle/close-window w))
+         "clear"   (fn [w & _] (turtle/clear-window w))
          "bgcolor" (fn [w color & _] (turtle/set-bgcolor w (str color)))}
 
         :Turtle
@@ -858,6 +859,7 @@
          "circle"     (fn [t r & _] (turtle/turtle-circle t r))
          "begin_fill" (fn [t & _] (turtle/turtle-begin-fill t))
          "end_fill"   (fn [t & _] (turtle/turtle-end-fill t))
+         "surface"    (fn [t & _] (turtle/turtle-window t))
          "hide"       (fn [t & _] (turtle/turtle-hide t))
          "show"       (fn [t & _] (turtle/turtle-show t))}])})
 

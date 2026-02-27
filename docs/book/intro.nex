@@ -2,7 +2,7 @@ function init(title: String): Turtle do
   let win: Window := create Window.with_title(title)
   win.show()
   let t: Turtle := create Turtle.on_window(win)
-  t.speed(6)
+  t.speed(2)
   t.pensize(3)
   result := t
 end
@@ -79,4 +79,21 @@ function arc(t: Turtle, left: Boolean, r: Integer, deg: Integer) do
     t.forward(r)
     if left then t.left(1) else t.right(1) end
   end
+end
+
+function arc_r(t: Turtle, r: Integer, deg: Integer) do
+  arc(t, false, r, deg)
+end
+
+function arc_l(t: Turtle, r: Integer, deg: Integer) do
+  arc(t, true, r, deg)
+end
+
+function circles(t: Turtle) do
+  t.speed(10)
+  repeat 9 do
+    arc_r(t, 1, 360)
+    t.right(40)
+  end
+  t.speed(2)
 end

@@ -1150,14 +1150,19 @@ public class NexWindow {
         return null;
     }
 
-    public Object bgcolor(String colorStr) {
-        Color c = NexTurtle.parseColor(colorStr);
-        this.bgColor = c;
+    public Object clear() {
         Graphics2D g2d = canvas.createGraphics();
-        g2d.setColor(c);
+        g2d.setColor(this.bgColor);
         g2d.fillRect(0, 0, width, height);
         g2d.dispose();
         label.repaint();
+        return null;
+    }
+
+    public Object bgcolor(String colorStr) {
+        Color c = NexTurtle.parseColor(colorStr);
+        this.bgColor = c;
+        this.clear();
         return null;
     }
 
@@ -1194,6 +1199,7 @@ public class NexTurtle {
     // Accessors for NexWindow overlay painting
     public double getX() { return x; }
     public double getY() { return y; }
+    public NexWindow surface() { return window; }
     public boolean isVisible() { return visible; }
 
     // Color parsing utility
