@@ -11,7 +11,7 @@ do
   result := t
 end
 
-function square(t: Turtle): Turtle
+function square(t: Turtle)
 do
   -- Draw a square with different colors on each side
   t.color("red")
@@ -29,11 +29,9 @@ do
   t.color("orange")
   t.forward(100)
   t.right(90)
-
-  result := t
 end
 
-function polygon(t: Turtle, n: Integer, length: Integer): Turtle
+function polygon(t: Turtle, n: Integer, length: Integer)
 do
   let angle := 360 / n
   from let i := 0 until i = n do
@@ -41,16 +39,14 @@ do
     t.left(angle)
     i := i + 1
   end
-  result := t
 end
 
-function circle(t: Turtle, radius: Integer): Turtle
+function circle(t: Turtle, radius: Integer)
 do
   let circumference := 2 * 3.14159265359 * radius
   let n := 30
   let length := circumference / n
   polygon(t, n, length)
-  result := t
 end
 
 ---- Example usage:
