@@ -142,6 +142,7 @@ statement
     | ifStatement
     | loopStatement
     | repeatStatement
+    | acrossStatement
     | withStatement
     | raiseStatement
     | retryStatement
@@ -171,6 +172,10 @@ loopStatement
 
 repeatStatement
     : REPEAT expression DO block END
+    ;
+
+acrossStatement
+    : ACROSS expression AS IDENTIFIER DO block END
     ;
 
 withStatement
@@ -397,6 +402,7 @@ RAISE        : 'raise';
 RESCUE       : 'rescue';
 RETRY        : 'retry';
 REPEAT       : 'repeat';
+ACROSS       : 'across';
 CASE         : 'case';
 OF           : 'of';
 AND          : 'and';

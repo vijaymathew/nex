@@ -118,12 +118,12 @@
     "when" "from" "until" "invariant" "variant" "require" "ensure"
     "let" "as" "and" "or" "not" "fn"
     "old" "create" "private" "note" "with" "import" "intern" "function"
-    "raise" "rescue" "retry" "repeat" "case" "of")
+    "raise" "rescue" "retry" "repeat" "across" "case" "of")
   "Nex language keywords.")
 
 (defconst nex-types
   '("Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Any" "Void" "Function")
+    "Array" "Map" "Any" "Void" "Function" "Cursor")
   "Nex built-in types.")
 
 (defconst nex-constants

@@ -79,6 +79,11 @@
 (defn nex-window? [v] (and (map? v) (= (:nex-builtin-type v) :Window)))
 (defn nex-turtle? [v] (and (map? v) (= (:nex-builtin-type v) :Turtle)))
 
+;; Cursor type detection
+(defn nex-array-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :ArrayCursor)))
+(defn nex-string-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :StringCursor)))
+(defn nex-map-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :MapCursor)))
+
 ;; Subscript helper (works on both Array and Map)
 (defn nex-coll-get [coll idx]
   (cond
@@ -166,6 +171,28 @@
              :members methods}]
      :invariant nil}))
 
+(defn- build-cursor-base-class
+  "Create the built-in Cursor base class definition.
+   Cursor defines the iteration interface: start, item, next, at_end.
+   Array, String, and Map are conceptual subclasses."
+  []
+  {:type :class
+   :name "Cursor"
+   :generic-params nil
+   :note nil
+   :parents nil
+   :body [{:type :feature-section
+           :visibility {:type :public}
+           :members [{:type :method :name "start" :params nil :return-type nil
+                      :note nil :require nil :body [] :ensure nil}
+                     {:type :method :name "item" :params nil :return-type "Any"
+                      :note nil :require nil :body [] :ensure nil}
+                     {:type :method :name "next" :params nil :return-type nil
+                      :note nil :require nil :body [] :ensure nil}
+                     {:type :method :name "at_end" :params nil :return-type "Boolean"
+                      :note nil :require nil :body [] :ensure nil}]}]
+   :invariant nil})
+
 (defn make-context
   "Create a new runtime context."
   []
@@ -177,8 +204,9 @@
                (atom [])           ; output accumulator
                (atom [])           ; imports registry
                (atom {}))]         ; specialized classes cache
-      ;; Register built-in Function base class
+      ;; Register built-in base classes
       (register-class ctx (build-function-base-class))
+      (register-class ctx (build-cursor-base-class))
       ctx)))
 
 (defn register-class
@@ -592,7 +620,11 @@
     "less_than"   (fn [s other & _] (neg? (compare s other)))
     "less_than_or_equal" (fn [s other & _] (<= (compare s other) 0))
     "greater_than" (fn [s other & _] (pos? (compare s other)))
-    "greater_than_or_equal" (fn [s other & _] (>= (compare s other) 0))}
+    "greater_than_or_equal" (fn [s other & _] (>= (compare s other) 0))
+    "cursor"      (fn [s & _]
+                    {:nex-builtin-type :StringCursor
+                     :source s
+                     :index (atom 0)})}
 
    :Integer
    {"to_string"         (fn [n & _] (str n))
@@ -696,7 +728,11 @@
     "remove"      (fn [arr idx & _] (nex-array-remove arr idx))
     "reverse"     (fn [arr _] (nex-array-reverse arr))
     "sort"        (fn [arr & _] (nex-array-sort arr))
-    "slice"       (fn [arr start end & _] (nex-array-slice arr start end))}
+    "slice"       (fn [arr start end & _] (nex-array-slice arr start end))
+    "cursor"      (fn [arr & _]
+                    {:nex-builtin-type :ArrayCursor
+                     :source arr
+                     :index (atom 0)})}
 
    :Map
    {"get"         (fn [m key & _]
@@ -715,7 +751,12 @@
     "contains_key" (fn [m key & _] (nex-map-contains-key m key))
     "keys"         (fn [m & _] (nex-map-keys m))
     "values"       (fn [m & _] (nex-map-values m))
-    "remove"       (fn [m key & _] (nex-map-remove m key))}
+    "remove"       (fn [m key & _] (nex-map-remove m key))
+    "cursor"       (fn [m & _]
+                     {:nex-builtin-type :MapCursor
+                      :source m
+                      :keys (atom (nex-map-keys m))
+                      :index (atom 0)})}
 
    :Console
    {"print"        (fn [_ msg & _] (nex-console-print (str msg)) nil)
@@ -739,6 +780,62 @@
    {"getenv"       (fn [_ name & _] (or (nex-process-getenv (str name)) ""))
     "setenv"       (fn [_ name value & _] (nex-process-setenv (str name) (str value)) nil)
     "command_line" (fn [_ & _] (nex-process-command-line))}
+
+   :ArrayCursor
+   {"start"   (fn [c & _] (reset! (:index c) 0) nil)
+    "item"    (fn [c & _]
+                (let [arr (:source c)
+                      idx @(:index c)]
+                  (if (< idx (nex-array-size arr))
+                    (nex-array-get arr idx)
+                    (throw (ex-info "Cursor is at end" {:index idx})))))
+    "next"    (fn [c & _]
+                (let [arr (:source c)
+                      idx @(:index c)]
+                  (when (< idx (nex-array-size arr))
+                    (swap! (:index c) inc))
+                  nil))
+    "at_end"  (fn [c & _]
+                (>= @(:index c) (nex-array-size (:source c))))}
+
+   :StringCursor
+   {"start"   (fn [c & _] (reset! (:index c) 0) nil)
+    "item"    (fn [c & _]
+                (let [s (:source c)
+                      idx @(:index c)]
+                  (if (< idx (count s))
+                    (get s idx)
+                    (throw (ex-info "Cursor is at end" {:index idx})))))
+    "next"    (fn [c & _]
+                (let [s (:source c)
+                      idx @(:index c)]
+                  (when (< idx (count s))
+                    (swap! (:index c) inc))
+                  nil))
+    "at_end"  (fn [c & _]
+                (>= @(:index c) (count (:source c))))}
+
+   :MapCursor
+   {"start"   (fn [c & _]
+                (reset! (:keys c) (nex-map-keys (:source c)))
+                (reset! (:index c) 0)
+                nil)
+    "item"    (fn [c & _]
+                (let [ks @(:keys c)
+                      idx @(:index c)]
+                  (if (< idx (count ks))
+                    (let [k (nth ks idx)
+                          v (nex-map-get (:source c) k)]
+                      (nex-array-from [k v]))
+                    (throw (ex-info "Cursor is at end" {:index idx})))))
+    "next"    (fn [c & _]
+                (let [ks @(:keys c)
+                      idx @(:index c)]
+                  (when (< idx (count ks))
+                    (swap! (:index c) inc))
+                  nil))
+    "at_end"  (fn [c & _]
+                (>= @(:index c) (count @(:keys c))))}
 
    #?@(:clj
        [:Window
@@ -781,6 +878,9 @@
     (nex-process? value) :Process
     (nex-window? value) :Window
     (nex-turtle? value) :Turtle
+    (nex-array-cursor? value) :ArrayCursor
+    (nex-string-cursor? value) :StringCursor
+    (nex-map-cursor? value) :MapCursor
     :else nil))
 
 (defn call-builtin-method
