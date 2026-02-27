@@ -220,6 +220,7 @@
     "abs"       (fn [target _] (str "Math.abs(" target ")"))
     "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
     "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
+    "pick"      (fn [target _] (str "Math.floor(Math.random() * " target")"))
     ;; Arithmetic operators
     "plus"      (fn [target args] (str "(" target " + " args ")"))
     "minus"     (fn [target args] (str "(" target " - " args ")"))

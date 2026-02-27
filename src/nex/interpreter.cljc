@@ -631,6 +631,7 @@
     "abs"               (fn [n & _] (nex-abs n))
     "min"               (fn [n other & _] (min n other))
     "max"               (fn [n other & _] (max n other))
+    "pick"              (fn [n & _] (rand-int n))
     ;; Arithmetic operator methods
     "plus"              (fn [n other & _] (+ n other))
     "minus"             (fn [n other & _] (- n other))
