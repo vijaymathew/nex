@@ -118,7 +118,7 @@
     "when" "from" "until" "invariant" "variant" "require" "ensure"
     "let" "as" "and" "or" "not" "fn"
     "old" "create" "private" "note" "with" "import" "intern" "function"
-    "raise" "rescue" "retry" "case" "of")
+    "raise" "rescue" "retry" "repeat" "case" "of")
   "Nex language keywords.")
 
 (defconst nex-types

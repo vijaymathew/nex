@@ -557,6 +557,25 @@
         :until (transform-node until-expr)
         :body (transform-node body-block)}))
 
+   :repeatStatement
+   (fn [[_ _repeat-kw count-expr _do-kw body-block _end-kw]]
+     (let [counter-name "__repeat_i__"
+           counter-id {:type :identifier :name counter-name}
+           count-ast (transform-node count-expr)
+           body-stmts (transform-node body-block)]
+       {:type :loop
+        :init [{:type :let :name counter-name :value {:type :integer :value 0 :text "0"}}]
+        :invariant nil
+        :variant nil
+        :until {:type :binary :operator "=" :left counter-id :right count-ast}
+        :body (conj (vec body-stmts)
+                    {:type :assign
+                     :target counter-name
+                     :value {:type :binary
+                             :operator "+"
+                             :left counter-id
+                             :right {:type :integer :value 1 :text "1"}}})}))
+
    :withStatement
    (fn [[_ _with-kw target-string _do-kw body-block _end-kw]]
      (let [;; Extract target string, removing quotes

@@ -14,16 +14,14 @@ function square_piece(t: Turtle, size: Integer) do
 end
 
 function square(t: Turtle, size: Integer) do
-  from let i := 0 until i = 4 do
+  repeat 4 do
     square_piece(t, size)
-    i := i + 1
   end
 end
 
 function rectangle(t: Turtle, side1: Integer, side2: Integer) do
-  from let i := 0 until i = 2 do
+  repeat 2 do
     square_piece(t, side1)
     square_piece(t, side2)
-    i := i + 1
   end
 end

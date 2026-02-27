@@ -141,6 +141,7 @@ statement
     | scopedBlock
     | ifStatement
     | loopStatement
+    | repeatStatement
     | withStatement
     | raiseStatement
     | retryStatement
@@ -166,6 +167,10 @@ ifStatement
 
 loopStatement
     : FROM block invariantClause? variantClause? UNTIL expression DO block END
+    ;
+
+repeatStatement
+    : REPEAT expression DO block END
     ;
 
 withStatement
@@ -391,6 +396,7 @@ WITH         : 'with';
 RAISE        : 'raise';
 RESCUE       : 'rescue';
 RETRY        : 'retry';
+REPEAT       : 'repeat';
 CASE         : 'case';
 OF           : 'of';
 AND          : 'and';

@@ -75,6 +75,15 @@ end
 -- prints 1 2 3 4 5
 ```
 
+## Repeat
+
+```nex
+repeat 3 do
+  print("hello!")
+end
+-- prints hello! three times
+```
+
 ## Functions
 
 ```nex
@@ -274,5 +283,5 @@ this.name := "Nex"              -- set a field inside a method
 
 ## That's it!
 
-Nex reads like English: `if...then...end`, `from...until...do...end`, `class...feature...end`.
+Nex reads like English: `if...then...end`, `from...until...do...end`, `repeat...do...end`, `class...feature...end`.
 Write what you mean, and Nex will check that you mean what you write.
