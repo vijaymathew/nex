@@ -1,8 +1,7 @@
-function turtle(title: String): Turtle do
+function init(title: String): Turtle do
   let win: Window := create Window.with_title(title)
   win.show()
-
-  let t := create Turtle.on_window(win)
+  let t: Turtle := create Turtle.on_window(win)
   t.speed(6)
   t.pensize(3)
   result := t
@@ -23,5 +22,61 @@ function rectangle(t: Turtle, side1: Integer, side2: Integer) do
   repeat 2 do
     square_piece(t, side1)
     square_piece(t, side2)
+  end
+end
+
+function triangle(t: Turtle) do
+  repeat 3 do
+    t.forward(100)
+    t.right(120)
+  end
+end
+
+function house(t: Turtle, side: Integer) do
+  square(t, side)
+  forward(side)
+  right(30)
+  triangle(side)
+end
+
+function thing(t: Turtle) do
+  t.forward(100)
+  t.right(90)
+  t.forward(100)
+  t.right(90)
+  t.forward(50)
+  t.right(90)
+  t.forward(50)
+  t.right(90)
+  t.forward(100)
+  t.right(90)
+  t.forward(25)
+  t.right(90)
+  t.forward(25)
+  t.right(90)
+  t.forward(50)
+end
+
+function thing2(t: Turtle) do
+  let f: Integer := 50
+  repeat 20 do
+    thing(t)
+    t.right(10)
+    t.forward(f)
+    f := f - 5
+  end
+end
+
+function circle(t: Turtle) do
+  repeat 360 do
+    t.forward(1)
+    t.right(1)
+  end
+end
+
+function arc(t: Turtle, left: Boolean, r: Integer, deg: Integer) do
+  repeat deg do
+    t.forward(r)
+    if left then t.left(1) else t.right(1) end
   end
 end
