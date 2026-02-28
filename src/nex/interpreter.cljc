@@ -840,10 +840,12 @@
 
    #?@(:clj
        [:Window
-        {"show"    (fn [w & _] (turtle/show-window w))
-         "close"   (fn [w & _] (turtle/close-window w))
-         "clear"   (fn [w & _] (turtle/clear-window w))
-         "bgcolor" (fn [w color & _] (turtle/set-bgcolor w (str color)))}
+        {"show"        (fn [w & _] (turtle/show-window w))
+         "close"       (fn [w & _] (turtle/close-window w))
+         "clear"       (fn [w & _] (turtle/clear-window w))
+         "vw"          (fn [w & _] (turtle/window-width w))
+         "vh"          (fn [w & _] (turtle/window-height w))
+         "bgcolor"     (fn [w color & _] (turtle/set-bgcolor w (str color)))}
 
         :Turtle
         {"forward"    (fn [t dist & _] (turtle/turtle-forward t dist))
@@ -862,6 +864,8 @@
          "end_fill"   (fn [t & _] (turtle/turtle-end-fill t))
          "surface"    (fn [t & _] (turtle/turtle-window t))
          "hide"       (fn [t & _] (turtle/turtle-hide t))
+         "xpos"       (fn [t & _] (turtle/turtle-x t))
+         "ypos"       (fn [t & _] (turtle/turtle-y t))
          "show"       (fn [t & _] (turtle/turtle-show t))}])})
 
 (defn get-type-name

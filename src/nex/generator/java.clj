@@ -1121,8 +1121,8 @@ public class NexWindow {
                                      RenderingHints.VALUE_ANTIALIAS_ON);
                 for (NexTurtle t : turtles) {
                     if (t.isVisible()) {
-                        double cx = width / 2.0 + t.getX();
-                        double cy = height / 2.0 - t.getY();
+                        double cx = width / 2.0 + t.xpos();
+                        double cy = height / 2.0 - t.ypos();
                         t.drawCursor(g2d, cx, cy);
                     }
                 }
@@ -1137,8 +1137,8 @@ public class NexWindow {
         frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
     }
 
-    public int getCanvasWidth() { return width; }
-    public int getCanvasHeight() { return height; }
+    public int vw() { return width; }
+    public int vh() { return height; }
     public BufferedImage getCanvas() { return canvas; }
 
     public Object show() {
@@ -1198,8 +1198,8 @@ public class NexTurtle {
     }
 
     // Accessors for NexWindow overlay painting
-    public double getX() { return x; }
-    public double getY() { return y; }
+    public double xpos() { return x; }
+    public double ypos() { return y; }
     public NexWindow surface() { return window; }
     public boolean isVisible() { return visible; }
 
@@ -1234,8 +1234,8 @@ public class NexTurtle {
 
     private double[] canvasCoords(double tx, double ty) {
         return new double[] {
-            window.getCanvasWidth() / 2.0 + tx,
-            window.getCanvasHeight() / 2.0 - ty
+            window.vw() / 2.0 + tx,
+            window.vh() / 2.0 - ty
         };
     }
 

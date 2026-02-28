@@ -123,6 +123,12 @@
        (swap! state assoc :frame frame :label label)
        {:nex-builtin-type :Window :state state}))))
 
+(defn- window-state [state-key win]
+  (state-key @(:state win)))
+
+(def window-height (partial window-state :height))
+(def window-width (partial window-state :width))
+
 (defn show-window [win]
   (let [s @(:state win)]
     (SwingUtilities/invokeLater
@@ -180,8 +186,12 @@
     (repaint-window win)
     turtle))
 
-(defn turtle-window [turtle]
-  (:window @(:state turtle)))
+(defn- turtle-state [state-key turtle]
+  (state-key @(:state turtle)))
+
+(def turtle-window (partial turtle-state :window))
+(def turtle-x (partial turtle-state :x))
+(def turtle-y (partial turtle-state :y))
 
 (defn- canvas-coords
   "Convert turtle (x,y) to canvas pixel coordinates."

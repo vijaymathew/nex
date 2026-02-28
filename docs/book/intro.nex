@@ -1,12 +1,3 @@
-function init(title: String): Turtle do
-  let win: Window := create Window.with_title(title)
-  win.show()
-  let t: Turtle := create Turtle.on_window(win)
-  t.speed(2)
-  t.pensize(3)
-  result := t
-end
-
 function square_piece(t: Turtle, size: Integer) do
   t.forward(size)
   t.right(90)

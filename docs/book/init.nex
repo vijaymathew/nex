@@ -1,0 +1,8 @@
+function init(title: String): Turtle do
+  let win: Window := create Window.with_title(title)
+  win.show()
+  let t: Turtle := create Turtle.on_window(win)
+  t.speed(8)
+  t.pensize(3)
+  result := t
+end
