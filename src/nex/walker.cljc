@@ -178,6 +178,18 @@
            return-type (first (filter #(and (sequential? %)
                                             (= :type (first %)))
                                       cleaned))
+           note-clause (first (filter #(and (sequential? %)
+                                            (= :noteClause (first %)))
+                                     cleaned))
+           require-clause (first (filter #(and (sequential? %)
+                                               (= :requireClause (first %)))
+                                         cleaned))
+           ensure-clause (first (filter #(and (sequential? %)
+                                              (= :ensureClause (first %)))
+                                        cleaned))
+           rescue-clause (first (filter #(and (sequential? %)
+                                              (= :rescueClause (first %)))
+                                        cleaned))
            block (first (filter #(and (sequential? %)
                                       (= :block (first %)))
                                 cleaned))
@@ -191,10 +203,11 @@
                        :name method-name
                        :params params-v
                        :return-type return-type-v
-                       :note nil
-                       :require nil
+                       :note (when note-clause (transform-node note-clause))
+                       :require (when require-clause (transform-node require-clause))
                        :body body
-                       :ensure nil}
+                       :ensure (when ensure-clause (transform-node ensure-clause))
+                       :rescue (when rescue-clause (transform-node rescue-clause))}
            class-def {:type :class
                       :name class-name
                       :generic-params nil
