@@ -316,6 +316,22 @@ end"
           js-code (js/translate nex-code)]
       (is (str/includes? js-code "Point.make(10, 20)")))))
 
+(deftest graphics-create-expression-test
+  (testing "Window/Turtle create expressions are supported in JS generator"
+    (let [nex-code "class Draw
+  feature
+    demo() do
+      let win: Window := create Window.with_title(\"Demo\", 640, 480)
+      let t: Turtle := create Turtle.on_window(win)
+      t.forward(10.0)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "class NexWindow"))
+      (is (str/includes? js-code "class NexTurtle"))
+      (is (str/includes? js-code "new NexWindow(\"Demo\", 640, 480)"))
+      (is (str/includes? js-code "new NexTurtle(win)")))))
+
 (deftest parameterless-call-test
   (testing "Parameterless method call"
     (let [nex-code "class Point
@@ -469,9 +485,11 @@ end")
         (let [out-dir (io/file tmp-dir "out")
               files (js/translate-file (.getPath nex-file) (.getPath out-dir) {})]
           (is (contains? files "Function.js"))
+          (is (contains? files "NexWindow.js"))
           (is (contains? files "Greeter.js"))
           (is (contains? files "main.js"))
           (is (.exists (io/file out-dir "Function.js")))
+          (is (.exists (io/file out-dir "NexWindow.js")))
           (is (.exists (io/file out-dir "Greeter.js")))
           (is (.exists (io/file out-dir "main.js")))
           (is (str/includes? (get files "main.js") "Greeter.make()")))
