@@ -1,0 +1,70 @@
+-- Canvas Demo: Direct drawing API with a bouncing ball animation.
+
+let win := create Window.with_title("Canvas Demo", 640, 480)
+win.show()
+
+-- Draw some static shapes
+win.set_color("blue")
+win.fill_rect(50, 50, 200, 150)
+
+win.set_color("red")
+win.fill_circle(450, 120, 60)
+
+win.set_color("green")
+win.draw_rect(300, 300, 150, 100)
+
+win.set_color("purple")
+win.draw_line(50, 400, 590, 400)
+
+win.set_color("black")
+win.set_font_size(24)
+win.draw_text("Hello Nex!", 230, 460)
+win.refresh()
+
+-- Wait a moment to admire the static scene
+win.sleep(1500)
+
+-- Bouncing ball animation
+let x := 320.0
+let y := 240.0
+let dx := 3.0
+let dy := 2.0
+let radius := 20
+
+from let frame := 0 until frame = 300 do
+  win.clear()
+
+  -- Draw border
+  win.set_color("gray")
+  win.draw_rect(10, 10, 620, 460)
+
+  -- Draw the ball
+  win.set_color("red")
+  win.fill_circle(x, y, radius)
+
+  -- Draw a shadow
+  win.set_color("gray")
+  win.fill_circle(x + 5, y + 5, radius)
+
+  -- HUD text
+  win.set_color("black")
+  win.set_font_size(14)
+  win.draw_text("Bouncing Ball Demo", 10, 25)
+
+  win.refresh()
+  win.sleep(16)
+
+  -- Update position
+  x := x + dx
+  y := y + dy
+
+  -- Bounce off walls
+  if x - radius < 10 or x + radius > 630 then
+    dx := 0 - dx
+  end
+  if y - radius < 10 or y + radius > 470 then
+    dy := 0 - dy
+  end
+
+  frame := frame + 1
+end

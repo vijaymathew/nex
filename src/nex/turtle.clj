@@ -2,11 +2,14 @@
   "Turtle graphics for Nex – Window and Turtle built-in types.
    All Swing/AWT rendering logic lives here so the interpreter
    never needs to call Java static methods directly."
-  (:import [java.awt Color Graphics2D BasicStroke RenderingHints]
+  (:import [java.awt Color Graphics2D BasicStroke RenderingHints Font]
            [java.awt.image BufferedImage]
            [java.awt.geom AffineTransform Path2D$Double Ellipse2D$Double]
            [javax.swing JFrame JLabel SwingUtilities]
-           [java.util.concurrent CopyOnWriteArrayList]))
+           [javax.imageio ImageIO]
+           [java.io File]
+           [java.util.concurrent CopyOnWriteArrayList])
+  (:require [nex.util :as nu]))
 
 ;;
 ;; Color Helpers
@@ -87,6 +90,7 @@
          turtles (CopyOnWriteArrayList.)
          state  (atom {:width w :height h :bg-color (Color. 255 255 255)
                        :canvas canvas :turtles turtles
+                       :draw-color (Color. 0 0 0) :font-size 14
                        :frame nil :label nil})
          ;; Fill canvas with white
          g2d   (.createGraphics canvas)]
@@ -159,6 +163,137 @@
   (let [color (parse-color color-str)]
     (swap! (:state win) assoc :bg-color color)
     (clear-window win)))
+
+;;
+;; Direct Canvas Drawing (screen coordinates: top-left origin, Y-down)
+;;
+
+(defn set-draw-color [win color-str]
+  (swap! (:state win) assoc :draw-color (parse-color color-str))
+  nil)
+
+(defn set-font-size [win size]
+  (swap! (:state win) assoc :font-size (int size))
+  nil)
+
+(defn draw-line [win x1 y1 x2 y2]
+  (let [s @(:state win)
+        ^BufferedImage canvas (:canvas s)
+        g2d (.createGraphics canvas)]
+    (.setRenderingHint g2d RenderingHints/KEY_ANTIALIASING RenderingHints/VALUE_ANTIALIAS_ON)
+    (.setColor g2d (:draw-color s))
+    (.drawLine g2d (int x1) (int y1) (int x2) (int y2))
+    (.dispose g2d))
+  nil)
+
+(defn draw-rect [win x y w h]
+  (let [s @(:state win)
+        ^BufferedImage canvas (:canvas s)
+        g2d (.createGraphics canvas)]
+    (.setColor g2d (:draw-color s))
+    (.drawRect g2d (int x) (int y) (int w) (int h))
+    (.dispose g2d))
+  nil)
+
+(defn fill-rect [win x y w h]
+  (let [s @(:state win)
+        ^BufferedImage canvas (:canvas s)
+        g2d (.createGraphics canvas)]
+    (.setColor g2d (:draw-color s))
+    (.fillRect g2d (int x) (int y) (int w) (int h))
+    (.dispose g2d))
+  nil)
+
+(defn draw-circle [win x y r]
+  (let [s @(:state win)
+        ^BufferedImage canvas (:canvas s)
+        g2d (.createGraphics canvas)]
+    (.setRenderingHint g2d RenderingHints/KEY_ANTIALIASING RenderingHints/VALUE_ANTIALIAS_ON)
+    (.setColor g2d (:draw-color s))
+    (.draw g2d (Ellipse2D$Double. (double (- x r)) (double (- y r))
+                                  (double (* 2 r)) (double (* 2 r))))
+    (.dispose g2d))
+  nil)
+
+(defn fill-circle [win x y r]
+  (let [s @(:state win)
+        ^BufferedImage canvas (:canvas s)
+        g2d (.createGraphics canvas)]
+    (.setRenderingHint g2d RenderingHints/KEY_ANTIALIASING RenderingHints/VALUE_ANTIALIAS_ON)
+    (.setColor g2d (:draw-color s))
+    (.fill g2d (Ellipse2D$Double. (double (- x r)) (double (- y r))
+                                  (double (* 2 r)) (double (* 2 r))))
+    (.dispose g2d))
+  nil)
+
+(defn draw-text [win text x y]
+  (let [s @(:state win)
+        ^BufferedImage canvas (:canvas s)
+        g2d (.createGraphics canvas)]
+    (.setRenderingHint g2d RenderingHints/KEY_ANTIALIASING RenderingHints/VALUE_ANTIALIAS_ON)
+    (.setColor g2d (:draw-color s))
+    (.setFont g2d (Font. "SansSerif" Font/PLAIN (int (:font-size s))))
+    (.drawString g2d (str text) (int x) (int y))
+    (.dispose g2d))
+  nil)
+
+(defn window-sleep [_win ms]
+  (Thread/sleep (long ms))
+  nil)
+
+;;
+;; Image Type
+;;
+
+(defn create-image [path]
+  (let [file (File. (nu/ensure-absolute-path path))
+        img  (ImageIO/read file)]
+    (when-not img
+      (throw (ex-info (str "Failed to load image: " path) {:path path})))
+    {:nex-builtin-type :Image
+     :state (atom {:image img
+                   :width (.getWidth img)
+                   :height (.getHeight img)})}))
+
+(defn image-width [img]
+  (:width @(:state img)))
+
+(defn image-height [img]
+  (:height @(:state img)))
+
+(defn draw-image [win img x y]
+  (let [ws @(:state win)
+        is @(:state img)
+        ^BufferedImage canvas (:canvas ws)
+        g2d (.createGraphics canvas)]
+    (.drawImage g2d ^BufferedImage (:image is) (int x) (int y) nil)
+    (.dispose g2d))
+  nil)
+
+(defn draw-image-scaled [win img x y w h]
+  (let [ws @(:state win)
+        is @(:state img)
+        ^BufferedImage canvas (:canvas ws)
+        g2d (.createGraphics canvas)]
+    (.drawImage g2d ^BufferedImage (:image is) (int x) (int y) (int w) (int h) nil)
+    (.dispose g2d))
+  nil)
+
+(defn draw-image-rotated [win img x y angle]
+  (let [ws @(:state win)
+        is @(:state img)
+        ^BufferedImage canvas (:canvas ws)
+        g2d (.createGraphics canvas)
+        iw (:width is)
+        ih (:height is)
+        cx (+ (double x) (/ (double iw) 2.0))
+        cy (+ (double y) (/ (double ih) 2.0))
+        saved (.getTransform g2d)]
+    (.rotate g2d (Math/toRadians (double angle)) cx cy)
+    (.drawImage g2d ^BufferedImage (:image is) (int x) (int y) nil)
+    (.setTransform g2d saved)
+    (.dispose g2d))
+  nil)
 
 ;;
 ;; Turtle

@@ -1,0 +1,56 @@
+-- Image Animation: Load a sprite and animate it across the window.
+--
+-- Usage:
+--   1. Place an image file (e.g. sprite.png) in the current directory
+--   2. Run:  nex> :load examples/image_animation.nex
+--
+-- Change the path below to match your image file.
+
+let win := create Window.with_title("Image Animation", 640, 480)
+win.show()
+
+let sprite := create Image.from_file("sprite.png")
+let sw := sprite.width()
+let sh := sprite.height()
+
+-- Slide the sprite across the screen
+from let x := 0 - sw until x > 640 do
+  win.clear()
+
+  -- Draw a ground line
+  win.set_color("green")
+  win.fill_rect(0, 400, 640, 80)
+
+  -- Draw the sprite
+  win.draw_image(sprite, x, 400 - sh)
+
+  -- Label
+  win.set_color("black")
+  win.set_font_size(16)
+  win.draw_text("Image Animation", 10, 25)
+
+  win.refresh()
+  win.sleep(16)
+  x := x + 3
+end
+
+-- Show scaled and rotated variants
+win.clear()
+win.set_color("black")
+win.set_font_size(18)
+win.draw_text("Scaled and Rotated", 220, 30)
+
+-- Original
+win.draw_image(sprite, 50, 100)
+win.set_font_size(12)
+win.draw_text("original", 50, 90)
+
+-- Scaled up 2x
+win.draw_image_scaled(sprite, 200, 100, sw * 2, sh * 2)
+win.draw_text("scaled 2x", 200, 90)
+
+-- Rotated 45 degrees
+win.draw_image_rotated(sprite, 450, 100, 45)
+win.draw_text("rotated 45°", 450, 90)
+
+win.refresh()

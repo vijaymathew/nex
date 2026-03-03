@@ -32,7 +32,7 @@
 
 (def nex-types
   ["Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-   "Array" "Map" "Function" "Cursor" "Console" "File" "Process" "Window" "Turtle"])
+   "Array" "Map" "Function" "Cursor" "Console" "File" "Process" "Window" "Turtle" "Image"])
 
 (def nex-builtins ["print" "println"])
 

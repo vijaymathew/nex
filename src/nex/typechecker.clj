@@ -61,7 +61,7 @@
 (def builtin-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
     "Array" "Map" "Any" "Void" "Nil" "Console" "File" "Process" "Function"
-    "Cursor" "Window" "Turtle"})
+    "Cursor" "Window" "Turtle" "Image"})
 
 (defn builtin-type? [type-name]
   (contains? builtin-types type-name))
@@ -472,6 +472,8 @@
     (= class-name "Window") "Window"
     ;; Handle built-in Turtle type
     (= class-name "Turtle") "Turtle"
+    ;; Handle built-in Image type
+    (= class-name "Image") "Image"
     ;; Handle built-in File type
     (= class-name "File")
     (do
@@ -946,10 +948,38 @@
            "command_line" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}}]
     (env-add-method env "Process" method-name sig))
   (doseq [[method-name sig]
-          {"show"    {:params [] :return-type "Void"}
-           "close"   {:params [] :return-type "Void"}
-           "bgcolor" {:params [{:name "color" :type "String"}] :return-type "Void"}}]
+          {"show"          {:params [] :return-type "Void"}
+           "close"         {:params [] :return-type "Void"}
+           "clear"         {:params [] :return-type "Void"}
+           "bgcolor"       {:params [{:name "color" :type "String"}] :return-type "Void"}
+           "refresh"       {:params [] :return-type "Void"}
+           "set_color"     {:params [{:name "color" :type "String"}] :return-type "Void"}
+           "set_font_size" {:params [{:name "size" :type "Integer"}] :return-type "Void"}
+           "draw_line"     {:params [{:name "x1" :type "Real"} {:name "y1" :type "Real"}
+                                     {:name "x2" :type "Real"} {:name "y2" :type "Real"}] :return-type "Void"}
+           "draw_rect"     {:params [{:name "x" :type "Real"} {:name "y" :type "Real"}
+                                     {:name "w" :type "Real"} {:name "h" :type "Real"}] :return-type "Void"}
+           "fill_rect"     {:params [{:name "x" :type "Real"} {:name "y" :type "Real"}
+                                     {:name "w" :type "Real"} {:name "h" :type "Real"}] :return-type "Void"}
+           "draw_circle"   {:params [{:name "x" :type "Real"} {:name "y" :type "Real"}
+                                     {:name "r" :type "Real"}] :return-type "Void"}
+           "fill_circle"   {:params [{:name "x" :type "Real"} {:name "y" :type "Real"}
+                                     {:name "r" :type "Real"}] :return-type "Void"}
+           "draw_text"     {:params [{:name "text" :type "String"} {:name "x" :type "Real"}
+                                     {:name "y" :type "Real"}] :return-type "Void"}
+           "draw_image"    {:params [{:name "img" :type "Image"} {:name "x" :type "Real"}
+                                     {:name "y" :type "Real"}] :return-type "Void"}
+           "draw_image_scaled"  {:params [{:name "img" :type "Image"} {:name "x" :type "Real"}
+                                          {:name "y" :type "Real"} {:name "w" :type "Real"}
+                                          {:name "h" :type "Real"}] :return-type "Void"}
+           "draw_image_rotated" {:params [{:name "img" :type "Image"} {:name "x" :type "Real"}
+                                          {:name "y" :type "Real"} {:name "angle" :type "Real"}] :return-type "Void"}
+           "sleep"         {:params [{:name "ms" :type "Integer"}] :return-type "Void"}}]
     (env-add-method env "Window" method-name sig))
+  (doseq [[method-name sig]
+          {"width"  {:params [] :return-type "Integer"}
+           "height" {:params [] :return-type "Integer"}}]
+    (env-add-method env "Image" method-name sig))
   (doseq [[method-name sig]
           {"forward"    {:params [{:name "distance" :type "Real"}] :return-type "Void"}
            "backward"   {:params [{:name "distance" :type "Real"}] :return-type "Void"}
