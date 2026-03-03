@@ -27,6 +27,7 @@ This directory contains comprehensive documentation for the Nex programming lang
 - **[INTERPRETER.md](INTERPRETER.md)** - How the Nex interpreter works
 - **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** - Project organization and architecture
 - **[QUICKSTART.md](QUICKSTART.md)** - Quick start guide for new users
+- **[WEB_IDE.md](WEB_IDE.md)** - Browser IDE setup and usage
 
 ### Editor Support
 - **[EMACS.md](EMACS.md)** - Emacs major mode documentation
@@ -43,8 +44,9 @@ This directory contains comprehensive documentation for the Nex programming lang
 
 **Getting Started:**
 1. [QUICKSTART.md](QUICKSTART.md) - Start here!
-2. [TYPES.md](TYPES.md) - Learn the type system
-3. [LET_SYNTAX.md](LET_SYNTAX.md) - Variable declarations
+2. [WEB_IDE.md](WEB_IDE.md) - Run Nex in the browser
+3. [TYPES.md](TYPES.md) - Learn the type system
+4. [LET_SYNTAX.md](LET_SYNTAX.md) - Variable declarations
 
 **Object-Oriented Features:**
 - [CREATE.md](CREATE.md) - Creating objects
@@ -70,6 +72,7 @@ This directory contains comprehensive documentation for the Nex programming lang
 
 **Beginner:**
 - [QUICKSTART.md](QUICKSTART.md)
+- [WEB_IDE.md](WEB_IDE.md)
 - [TYPES.md](TYPES.md)
 - [LET_SYNTAX.md](LET_SYNTAX.md)
 - [CREATE.md](CREATE.md)

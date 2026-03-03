@@ -115,6 +115,17 @@ The REPL supports:
 
 See [examples/demo_repl.md](examples/demo_repl.md) for more examples.
 
+### Browser Web IDE
+
+Run Nex directly in the browser with the built-in IDE:
+
+```bash
+npx shadow-cljs compile browser
+npx serve public
+```
+
+See **[docs/WEB_IDE.md](docs/WEB_IDE.md)** for full setup, usage, and troubleshooting.
+
 ### 2. Running the Interpreter Programmatically
 
 Execute Nex code from Clojure:
@@ -554,6 +565,7 @@ nex/
 ## Documentation
 
 - **[Syntax on a Postcard](docs/SYNTAX.md)** - The entire language at a glance
+- **[Web IDE Guide](docs/WEB_IDE.md)** - Start and use the browser-based Nex IDE
 - **[Project Structure](docs/PROJECT_STRUCTURE.md)** - Detailed project organization
 - **[Type System](docs/TYPES.md)** - Basic types and default initialization
 - **[Generic Types](docs/GENERICS.md)** - Parameterized classes with constraints

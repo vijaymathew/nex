@@ -18,6 +18,15 @@
    "gray" "#808080"
    "grey" "#808080"})
 
+(defonce ^:private window-host (atom nil))
+
+(defn set-window-host!
+  "Set DOM element where Window.show() mounts canvases.
+   When nil, defaults to document.body."
+  [el]
+  (reset! window-host el)
+  nil)
+
 (defn- ensure-dom! []
   (when-not (exists? js/document)
     (throw (ex-info "Window/Turtle requires a browser DOM environment" {}))))
@@ -138,9 +147,10 @@
 
 (defn show-window [win]
   (ensure-dom!)
-  (let [{:keys [container title]} @(:state win)]
+  (let [{:keys [container title]} @(:state win)
+        host (or @window-host (.-body js/document))]
     (when-not (.-isConnected container)
-      (.appendChild (.-body js/document) container))
+      (.appendChild host container))
     (set! (.-title js/document) title)
     (repaint-overlay! win))
   nil)

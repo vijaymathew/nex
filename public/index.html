@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nex Browser IDE</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script src="js/main.js?v=20260303q"></script>
+    <script>
+      (function bootstrapParserRuntime() {
+        const version = "20260303q";
+        const antlrId = "module$node_modules$antlr4$dist$antlr4_web_cjs";
+        const files = [
+          { key: "listener", src: "parser-runtime/nexlangListener.runtime.js?v=" + version },
+          { key: "lexer", src: "parser-runtime/nexlangLexer.runtime.js?v=" + version },
+          { key: "parser", src: "parser-runtime/nexlangParser.runtime.js?v=" + version }
+        ];
+
+        function syncParserGlobals() {
+          try {
+            if (!window.__nexlangLexer && typeof module$nex$parser_js$grammar$nexlangLexer !== "undefined") {
+              window.__nexlangLexer = module$nex$parser_js$grammar$nexlangLexer;
+            }
+          } catch (_) {}
+          try {
+            if (!window.__nexlangParser && typeof module$nex$parser_js$grammar$nexlangParser !== "undefined") {
+              window.__nexlangParser = module$nex$parser_js$grammar$nexlangParser;
+            }
+          } catch (_) {}
+        }
+
+        async function loadSequentially() {
+          for (const { key, src } of files) {
+            try {
+              const res = await fetch(src, { cache: "no-store" });
+              if (!res.ok) {
+                window["__nex_" + key + "_error"] = true;
+                window["__nex_" + key + "_status"] = String(res.status);
+                continue;
+              }
+              const code = await res.text();
+              // Global eval so module$... vars become globally visible.
+              (0, eval)(code);
+              window["__nex_" + key + "_loaded"] = true;
+              syncParserGlobals();
+            } catch (e) {
+              window["__nex_" + key + "_error"] = true;
+              window["__nex_" + key + "_exception"] = String((e && e.message) || e);
+            }
+          }
+        }
+
+        function waitForShadowAndAntlr(tries) {
+          const shadowReady = !!(window.shadow && window.shadow.js && typeof window.shadow.js.require === "function");
+          const antlrReady = shadowReady && !!window.shadow.js.require(antlrId, {});
+          if (shadowReady && antlrReady) {
+            window.__nex_antlr_ready = true;
+            loadSequentially();
+            return;
+          }
+          if (tries <= 0) {
+            window.__nex_parser_bootstrap_timeout = true;
+            return;
+          }
+          setTimeout(function () { waitForShadowAndAntlr(tries - 1); }, 25);
+        }
+
+        waitForShadowAndAntlr(400);
+      })();
+    </script>
+  </body>
+</html>

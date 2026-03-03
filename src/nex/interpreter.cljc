@@ -1000,7 +1000,7 @@
                     {:path path :class-name class-name :alias alias}))))
 
 (defmethod eval-node :program
-  [ctx {:keys [imports interns classes functions calls]}]
+  [ctx {:keys [imports interns classes functions statements calls]}]
   ;; First, store all import statements (for code generation)
   (doseq [import-node imports]
     (when (map? import-node)
@@ -1021,10 +1021,11 @@
     (when (map? fn-node)
       (eval-node ctx fn-node)))
 
-  ;; Finally, execute any top-level method calls
-  (doseq [call-node calls]
-    (when (map? call-node)
-      (eval-node ctx call-node)))
+  ;; Execute top-level executable statements in source order.
+  ;; Fall back to legacy :calls-only programs if :statements is absent.
+  (doseq [stmt-node (if (seq statements) statements calls)]
+    (when (map? stmt-node)
+      (eval-node ctx stmt-node)))
 
   ;; Return the context for inspection
   ctx)
@@ -1251,16 +1252,23 @@
       (let [fn-obj (try
                      (env-lookup (:current-env ctx) method)
                      (catch #?(:clj Exception :cljs :default) _ ::not-found))]
-        (if (and (not= fn-obj ::not-found) (nex-object? fn-obj))
-          (if (not= has-parens false)
-            ;; has-parens is true or nil (default): invoke the Function
-            (let [call-method (str "call" (count args))]
-              (eval-node ctx {:type :call
-                              :target method
-                              :method call-method
-                              :args args}))
-            ;; has-parens is false: return the Function object
-            fn-obj)
+        (if (not= fn-obj ::not-found)
+          (if (nex-object? fn-obj)
+            (if (not= has-parens false)
+              ;; has-parens is true or nil (default): invoke the Function
+              (let [call-method (str "call" (count args))]
+                (eval-node ctx {:type :call
+                                :target method
+                                :method call-method
+                                :args args}))
+              ;; has-parens is false: return the Function object
+              fn-obj)
+            ;; Variable value found (non-callable). In no-parens form, treat as identifier.
+            ;; This keeps expressions like x + 1 working when parser emits :call for bare identifiers.
+            (if (false? has-parens)
+              fn-obj
+              (throw (ex-info (str "Undefined function: " method)
+                              {:function method}))))
           (if-let [current-obj (:current-object ctx)]
             (let [class-def (lookup-class ctx (:class-name current-obj))
                   method-lookup (lookup-method-with-inheritance ctx class-def method)]
