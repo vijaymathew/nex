@@ -1,7 +1,8 @@
 (ns nex.interpreter
   (:require [clojure.string :as str]
             #?(:clj [nex.parser :as parser])
-            #?(:clj [nex.turtle :as turtle])))
+            #?(:clj [nex.turtle :as turtle]
+               :cljs [nex.turtle-browser :as turtle])))
 
 ;;
 ;; Mutable Collections (platform abstraction)
@@ -840,52 +841,51 @@
     "at_end"  (fn [c & _]
                 (>= @(:index c) (count @(:keys c))))}
 
-   #?@(:clj
-       [:Window
-        {"show"          (fn [w & _] (turtle/show-window w))
-         "close"         (fn [w & _] (turtle/close-window w))
-         "clear"         (fn [w & _] (turtle/clear-window w))
-         "vw"            (fn [w & _] (turtle/window-width w))
-         "vh"            (fn [w & _] (turtle/window-height w))
-         "bgcolor"       (fn [w color & _] (turtle/set-bgcolor w (str color)))
-         "refresh"       (fn [w & _] (turtle/repaint-window w))
-         "set_color"     (fn [w color & _] (turtle/set-draw-color w (str color)))
-         "set_font_size" (fn [w size & _] (turtle/set-font-size w size))
-         "draw_line"     (fn [w x1 y1 x2 y2 & _] (turtle/draw-line w x1 y1 x2 y2))
-         "draw_rect"     (fn [w x y width height & _] (turtle/draw-rect w x y width height))
-         "fill_rect"     (fn [w x y width height & _] (turtle/fill-rect w x y width height))
-         "draw_circle"   (fn [w x y r & _] (turtle/draw-circle w x y r))
-         "fill_circle"   (fn [w x y r & _] (turtle/fill-circle w x y r))
-         "draw_text"     (fn [w text x y & _] (turtle/draw-text w text x y))
-         "draw_image"    (fn [w img x y & _] (turtle/draw-image w img x y))
-         "draw_image_scaled"  (fn [w img x y width height & _] (turtle/draw-image-scaled w img x y width height))
-         "draw_image_rotated" (fn [w img x y angle & _] (turtle/draw-image-rotated w img x y angle))
-         "sleep"         (fn [w ms & _] (turtle/window-sleep w ms))}
+   :Window
+   {"show"          (fn [w & _] (turtle/show-window w))
+    "close"         (fn [w & _] (turtle/close-window w))
+    "clear"         (fn [w & _] (turtle/clear-window w))
+    "vw"            (fn [w & _] (turtle/window-width w))
+    "vh"            (fn [w & _] (turtle/window-height w))
+    "bgcolor"       (fn [w color & _] (turtle/set-bgcolor w (str color)))
+    "refresh"       (fn [w & _] (turtle/repaint-window w))
+    "set_color"     (fn [w color & _] (turtle/set-draw-color w (str color)))
+    "set_font_size" (fn [w size & _] (turtle/set-font-size w size))
+    "draw_line"     (fn [w x1 y1 x2 y2 & _] (turtle/draw-line w x1 y1 x2 y2))
+    "draw_rect"     (fn [w x y width height & _] (turtle/draw-rect w x y width height))
+    "fill_rect"     (fn [w x y width height & _] (turtle/fill-rect w x y width height))
+    "draw_circle"   (fn [w x y r & _] (turtle/draw-circle w x y r))
+    "fill_circle"   (fn [w x y r & _] (turtle/fill-circle w x y r))
+    "draw_text"     (fn [w text x y & _] (turtle/draw-text w text x y))
+    "draw_image"    (fn [w img x y & _] (turtle/draw-image w img x y))
+    "draw_image_scaled"  (fn [w img x y width height & _] (turtle/draw-image-scaled w img x y width height))
+    "draw_image_rotated" (fn [w img x y angle & _] (turtle/draw-image-rotated w img x y angle))
+    "sleep"         (fn [w ms & _] (turtle/window-sleep w ms))}
 
-        :Image
-        {"width"  (fn [img & _] (turtle/image-width img))
-         "height" (fn [img & _] (turtle/image-height img))}
+   :Image
+   {"width"  (fn [img & _] (turtle/image-width img))
+    "height" (fn [img & _] (turtle/image-height img))}
 
-        :Turtle
-        {"forward"    (fn [t dist & _] (turtle/turtle-forward t dist))
-         "backward"   (fn [t dist & _] (turtle/turtle-backward t dist))
-         "right"      (fn [t angle & _] (turtle/turtle-right t angle))
-         "left"       (fn [t angle & _] (turtle/turtle-left t angle))
-         "penup"      (fn [t & _] (turtle/turtle-penup t))
-         "pendown"    (fn [t & _] (turtle/turtle-pendown t))
-         "color"      (fn [t c & _] (turtle/turtle-color t (str c)))
-         "pensize"    (fn [t s & _] (turtle/turtle-pensize t s))
-         "speed"      (fn [t s & _] (turtle/turtle-speed t s))
-         "shape"      (fn [t s & _] (turtle/turtle-shape t (str s)))
-         "goto"       (fn [t x y & _] (turtle/turtle-goto t x y))
-         "circle"     (fn [t r & _] (turtle/turtle-circle t r))
-         "begin_fill" (fn [t & _] (turtle/turtle-begin-fill t))
-         "end_fill"   (fn [t & _] (turtle/turtle-end-fill t))
-         "surface"    (fn [t & _] (turtle/turtle-window t))
-         "hide"       (fn [t & _] (turtle/turtle-hide t))
-         "xpos"       (fn [t & _] (turtle/turtle-x t))
-         "ypos"       (fn [t & _] (turtle/turtle-y t))
-         "show"       (fn [t & _] (turtle/turtle-show t))}])})
+   :Turtle
+   {"forward"    (fn [t dist & _] (turtle/turtle-forward t dist))
+    "backward"   (fn [t dist & _] (turtle/turtle-backward t dist))
+    "right"      (fn [t angle & _] (turtle/turtle-right t angle))
+    "left"       (fn [t angle & _] (turtle/turtle-left t angle))
+    "penup"      (fn [t & _] (turtle/turtle-penup t))
+    "pendown"    (fn [t & _] (turtle/turtle-pendown t))
+    "color"      (fn [t c & _] (turtle/turtle-color t (str c)))
+    "pensize"    (fn [t s & _] (turtle/turtle-pensize t s))
+    "speed"      (fn [t s & _] (turtle/turtle-speed t s))
+    "shape"      (fn [t s & _] (turtle/turtle-shape t (str s)))
+    "goto"       (fn [t x y & _] (turtle/turtle-goto t x y))
+    "circle"     (fn [t r & _] (turtle/turtle-circle t r))
+    "begin_fill" (fn [t & _] (turtle/turtle-begin-fill t))
+    "end_fill"   (fn [t & _] (turtle/turtle-end-fill t))
+    "surface"    (fn [t & _] (turtle/turtle-window t))
+    "hide"       (fn [t & _] (turtle/turtle-hide t))
+    "xpos"       (fn [t & _] (turtle/turtle-x t))
+    "ypos"       (fn [t & _] (turtle/turtle-y t))
+    "show"       (fn [t & _] (turtle/turtle-show t))}})
 
 (defn get-type-name
   "Get the type name for a value"
@@ -1596,39 +1596,36 @@
                (throw (ex-info "File requires constructor: create File.open(path)" {:class-name "File"})))
              {:nex-builtin-type :File :path (first arg-values)})
     "Process" {:nex-builtin-type :Process}
-    "Window" #?(:clj (let [arg-values (mapv #(eval-node ctx %) args)]
-                       (case constructor
-                         "with_title"
-                         (case (count arg-values)
-                           1 (turtle/create-window (first arg-values))
-                           3 (turtle/create-window (first arg-values) (second arg-values) (nth arg-values 2))
-                           (throw (ex-info "Window.with_title takes 1 or 3 arguments (title) or (title, width, height)"
-                                           {:class-name "Window"})))
-                         ;; No named constructor
-                         (case (count arg-values)
-                           0 (turtle/create-window)
-                           2 (turtle/create-window "Nex Turtle Graphics" (first arg-values) (second arg-values))
-                           (throw (ex-info "Window takes 0 or 2 arguments (width, height)"
-                                           {:class-name "Window"})))))
-               :cljs (throw (ex-info "Window is not supported in JavaScript" {:class-name "Window"})))
-    "Turtle" #?(:clj (let [arg-values (mapv #(eval-node ctx %) args)]
-                       (when-not (= constructor "on_window")
-                         (throw (ex-info "Turtle requires constructor: create Turtle.on_window(window)"
-                                         {:class-name "Turtle"})))
-                       (when-not (= (count arg-values) 1)
-                         (throw (ex-info "Turtle.on_window takes 1 argument (window)"
-                                         {:class-name "Turtle"})))
-                       (turtle/create-turtle (first arg-values)))
-               :cljs (throw (ex-info "Turtle is not supported in JavaScript" {:class-name "Turtle"})))
-    "Image" #?(:clj (let [arg-values (mapv #(eval-node ctx %) args)]
-                      (when-not (= constructor "from_file")
-                        (throw (ex-info "Image requires constructor: create Image.from_file(path)"
-                                        {:class-name "Image"})))
-                      (when-not (= (count arg-values) 1)
-                        (throw (ex-info "Image.from_file takes 1 argument (path)"
-                                        {:class-name "Image"})))
-                      (turtle/create-image (first arg-values)))
-               :cljs (throw (ex-info "Image is not supported in JavaScript" {:class-name "Image"})))
+    "Window" (let [arg-values (mapv #(eval-node ctx %) args)]
+               (case constructor
+                 "with_title"
+                 (case (count arg-values)
+                   1 (turtle/create-window (first arg-values))
+                   3 (turtle/create-window (first arg-values) (second arg-values) (nth arg-values 2))
+                   (throw (ex-info "Window.with_title takes 1 or 3 arguments (title) or (title, width, height)"
+                                   {:class-name "Window"})))
+                 ;; No named constructor
+                 (case (count arg-values)
+                   0 (turtle/create-window)
+                   2 (turtle/create-window "Nex Turtle Graphics" (first arg-values) (second arg-values))
+                   (throw (ex-info "Window takes 0 or 2 arguments (width, height)"
+                                   {:class-name "Window"})))))
+    "Turtle" (let [arg-values (mapv #(eval-node ctx %) args)]
+               (when-not (= constructor "on_window")
+                 (throw (ex-info "Turtle requires constructor: create Turtle.on_window(window)"
+                                 {:class-name "Turtle"})))
+               (when-not (= (count arg-values) 1)
+                 (throw (ex-info "Turtle.on_window takes 1 argument (window)"
+                                 {:class-name "Turtle"})))
+               (turtle/create-turtle (first arg-values)))
+    "Image" (let [arg-values (mapv #(eval-node ctx %) args)]
+              (when-not (= constructor "from_file")
+                (throw (ex-info "Image requires constructor: create Image.from_file(path)"
+                                {:class-name "Image"})))
+              (when-not (= (count arg-values) 1)
+                (throw (ex-info "Image.from_file takes 1 argument (path)"
+                                {:class-name "Image"})))
+              (turtle/create-image (first arg-values)))
   ;; Resolve effective class name (handle generic specialization)
   (let [effective-class-name
         (if (seq generic-args)
