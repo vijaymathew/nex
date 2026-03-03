@@ -30,3 +30,5 @@ temp/
 
 # REPL history
 .nex_history
+
+public/js

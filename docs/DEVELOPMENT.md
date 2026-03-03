@@ -129,7 +129,7 @@ npx shadow-cljs watch node
 For browser applications:
 ```bash
 npx shadow-cljs compile browser
-# Output: target/public/js/main.js
+# Output: public/js/main.js
 ```
 
 ## Parser Development

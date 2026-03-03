@@ -86,7 +86,8 @@
            functions (filter #(= :function (:type %)) transformed)
            interns (filter #(= :intern (:type %)) transformed)
            imports (filter #(= :import (:type %)) transformed)
-           calls (filter #(= :call (:type %)) transformed)
+           statements (filter #(not (#{:class :function :intern :import} (:type %))) transformed)
+           calls (filter #(= :call (:type %)) statements)
            function-classes (mapv :class-def functions)
            all-classes (vec (concat classes function-classes))]
        {:type :program
@@ -94,6 +95,7 @@
         :interns (vec interns)
         :classes all-classes
         :functions (vec functions)
+        :statements (vec statements)
         :calls (vec calls)}))
 
    :internStmt
@@ -745,14 +747,31 @@
                      (assoc :has-parens (:has-parens part)))
 
                      :call-suffix
-                     {:type :call
-                      :target (if (and (map? acc) (= :identifier (:type acc)))
-                                nil
-                                acc)
-                      :method (if (and (map? acc) (= :identifier (:type acc)))
-                                (:name acc)
-                                nil)
-                      :args (:args part)}
+                     (cond
+                       ;; Function call: f(...)
+                       (and (map? acc) (= :identifier (:type acc)))
+                       {:type :call
+                        :target nil
+                        :method (:name acc)
+                        :args (:args part)
+                        :has-parens true}
+
+                       ;; Method call split as memberAccess + callSuffix: obj.m(...)
+                       (and (map? acc)
+                            (= :call (:type acc))
+                            (some? (:method acc))
+                            (not (:has-parens acc)))
+                       (assoc acc
+                              :args (:args part)
+                              :has-parens true)
+
+                       ;; Call on expression result: (expr)(...)
+                       :else
+                       {:type :call
+                        :target acc
+                        :method nil
+                        :args (:args part)
+                        :has-parens true})
 
                      :subscript
                      {:type :subscript
@@ -831,14 +850,31 @@
                      (assoc :has-parens (:has-parens part)))
 
                    :call-suffix
-                   {:type :call
-                    :target (if (and (map? acc) (= :identifier (:type acc)))
-                              nil
-                              acc)
-                    :method (if (and (map? acc) (= :identifier (:type acc)))
-                              (:name acc)
-                              nil)
-                    :args (:args part)}
+                   (cond
+                     ;; Function call: f(...)
+                     (and (map? acc) (= :identifier (:type acc)))
+                     {:type :call
+                      :target nil
+                      :method (:name acc)
+                      :args (:args part)
+                      :has-parens true}
+
+                     ;; Method call split as memberAccess + callSuffix: obj.m(...)
+                     (and (map? acc)
+                          (= :call (:type acc))
+                          (some? (:method acc))
+                          (not (:has-parens acc)))
+                     (assoc acc
+                            :args (:args part)
+                            :has-parens true)
+
+                     ;; Call on expression result: (expr)(...)
+                     :else
+                     {:type :call
+                      :target acc
+                      :method nil
+                      :args (:args part)
+                      :has-parens true})
 
                    :subscript
                    {:type :subscript

@@ -83,7 +83,7 @@ Generates `target/nex.js` with exports:
 npx shadow-cljs compile browser
 ```
 
-Generates browser-compatible JavaScript in `target/public/js/`.
+Generates browser-compatible JavaScript in `public/js/`.
 
 ### Development
 
