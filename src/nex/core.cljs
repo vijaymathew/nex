@@ -3,11 +3,13 @@
             [cljs.reader :as reader]
             [nex.parser :as p]
             [nex.interpreter :as interp]
+            [nex.typechecker :as tc]
             [nex.turtle-browser :as turtle]))
 
 (def repl-history-storage-key "nex.browser.repl.history.v1")
 (def editor-files-storage-key "nex.browser.editor.files.v1")
 (def editor-active-file-storage-key "nex.browser.editor.active-file.v1")
+(def typecheck-storage-key "nex.browser.repl.typecheck.v1")
 
 (def default-editor-source
   (str "-- Example program\n"
@@ -43,6 +45,8 @@
          :repl-history []
          :repl-history-index nil
          :repl-history-draft ""
+         :typecheck-enabled false
+         :repl-var-types {}
          :editor-files {"scratch.nex" default-editor-source}
          :editor-active-file "scratch.nex"
          :docs-pages
@@ -158,10 +162,16 @@
     (storage-set! editor-files-storage-key (pr-str editor-files))
     (storage-set! editor-active-file-storage-key editor-active-file)))
 
+(defn- persist-typecheck-state! []
+  (storage-set! typecheck-storage-key
+                (if (:typecheck-enabled @app-state) "on" "off")))
+
 (defn- load-storage-state! []
   (let [history (storage-get-edn repl-history-storage-key [])
         files (storage-get-edn editor-files-storage-key nil)
         active-file (or (storage-get editor-active-file-storage-key) "scratch.nex")
+        typecheck-raw (storage-get typecheck-storage-key)
+        typecheck-enabled? (= "on" typecheck-raw)
         safe-history (if (vector? history) history [])
         safe-files (if (and (map? files) (seq files))
                      files
@@ -171,6 +181,8 @@
                       (first (sort (keys safe-files))))]
     (swap! app-state assoc
            :repl-history safe-history
+           :typecheck-enabled typecheck-enabled?
+           :repl-var-types {}
            :editor-files safe-files
            :editor-active-file safe-active)))
 
@@ -181,6 +193,45 @@
     (set! (.-textContent line) text)
     (.appendChild out line)
     (set! (.-scrollTop out) (.-scrollHeight out))))
+
+(defn- update-typecheck-ui! []
+  (let [enabled? (:typecheck-enabled @app-state)
+        btn (by-id "repl-typecheck")]
+    (when btn
+      (set! (.-textContent btn) (str "Typecheck: " (if enabled? "ON" "OFF")))
+      (set! (.-className btn)
+            (str "toggle " (if enabled? "on" "off"))))))
+
+(defn- toggle-typecheck! []
+  (let [enabled? (not (:typecheck-enabled @app-state))]
+    (swap! app-state assoc :typecheck-enabled enabled?)
+    (persist-typecheck-state!)
+    (update-typecheck-ui!)
+    (append-line! "info" (str "Type checking " (if enabled? "enabled." "disabled.")))))
+
+(defn- throw-type-errors! [result]
+  (when-not (:success result)
+    (let [errors (or (:errors result) [])
+          msg (if (seq errors)
+                (str "Type check failed:\n"
+                     (str/join "\n" (map tc/format-type-error errors)))
+                "Type check failed.")]
+      (throw (ex-info msg {:type :typecheck :errors errors})))))
+
+(defn- typecheck-ast! [ast]
+  (when (:typecheck-enabled @app-state)
+    (throw-type-errors!
+     (tc/type-check ast {:var-types (:repl-var-types @app-state)}))))
+
+(defn- typecheck-error? [e]
+  (= :typecheck (:type (ex-data e))))
+
+(defn- remember-typed-lets! [stmts]
+  (doseq [stmt stmts]
+    (when (and (map? stmt)
+               (= :let (:type stmt))
+               (:var-type stmt))
+      (swap! app-state assoc-in [:repl-var-types (:name stmt)] (:var-type stmt)))))
 
 (defn- escape-html [s]
   (-> s
@@ -593,13 +644,18 @@
 
 (defn- eval-wrapped! [ctx wrapped-code]
   (let [ast (p/ast wrapped-code)
+        _ (typecheck-ast! ast)
         method-def (-> ast :classes first :body first :members first)
-        result (last (mapv #(interp/eval-node ctx %) (:body method-def)))]
+        body (:body method-def)
+        result (last (mapv #(interp/eval-node ctx %) body))]
+    (when (:typecheck-enabled @app-state)
+      (remember-typed-lets! body))
     {:result result
      :output @(:output ctx)}))
 
 (defn- run-program! [ctx source]
   (let [ast (p/ast source)
+        _ (typecheck-ast! ast)
         raw-result (interp/eval-node ctx ast)
         result (if (= :program (:type ast)) nil raw-result)]
     {:result result
@@ -634,10 +690,12 @@
                 (try
                   (eval-wrapped! ctx (wrap-expression trimmed))
                   (catch :default e1
-                    (try
-                      (eval-wrapped! ctx (wrap-statement-block trimmed))
-                      (catch :default e2
-                        (throw e1)))))]
+                    (if (typecheck-error? e1)
+                      (throw e1)
+                      (try
+                        (eval-wrapped! ctx (wrap-statement-block trimmed))
+                        (catch :default _e2
+                          (throw e1))))))]
             (show-runtime-output! output result)))
         (catch :default e
           (let [msg (str "Error: " (or (.-message e) (str e)))]
@@ -700,9 +758,14 @@
                "      <h2>1. REPL</h2>"
                "      <div id='repl-output' class='repl-output'></div>"
                "      <div class='repl-controls'>"
-               "        <input id='repl-input' type='text' placeholder='Enter any Nex expression...' />"
-               "        <button id='repl-eval'>Evaluate</button>"
-               "        <button id='repl-clear'>Clear</button>"
+               "        <div class='repl-input-row'>"
+               "          <input id='repl-input' type='text' placeholder='Enter any Nex expression...' />"
+               "        </div>"
+               "        <div class='repl-actions'>"
+               "          <button id='repl-typecheck' class='toggle off'>Typecheck: OFF</button>"
+               "          <button id='repl-eval'>Evaluate</button>"
+               "          <button id='repl-clear'>Clear</button>"
+               "        </div>"
                "      </div>"
                "    </section>"
                "    <section class='panel editor'>"
@@ -747,8 +810,10 @@
                "  .repl-output { height:230px; overflow:auto; background:#18130b; color:#f8f2e8; border-radius:8px; padding:8px; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.9rem; }"
                "  .repl-line { margin-bottom:4px; white-space:pre-wrap; }"
                "  .repl-line.input { color:#6ec6ff; } .repl-line.result { color:#8ee59e; } .repl-line.err { color:#ff8a8a; } .repl-line.info { color:#f7cf86; }"
-               "  .repl-controls { margin-top:8px; display:flex; gap:8px; }"
-               "  .repl-controls input { flex:1; min-width:0; padding:8px; border:1px solid var(--line); border-radius:8px; }"
+               "  .repl-controls { margin-top:8px; display:grid; grid-template-rows:auto auto; row-gap:8px; }"
+               "  .repl-input-row { display:block; }"
+               "  .repl-controls input { width:100%; min-width:0; padding:8px; border:1px solid var(--line); border-radius:8px; }"
+               "  .repl-actions { margin-top:8px; display:flex; gap:8px; }"
                "  .editor-code-wrap { position:relative; height:230px; border:1px solid var(--line); border-radius:8px; overflow:auto; background:#fff; }"
                "  #editor-highlight { margin:0; padding:8px; min-height:100%; white-space:pre; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.9rem; line-height:1.35; pointer-events:none; }"
                "  textarea#editor-input { position:absolute; inset:0; width:100%; height:100%; resize:none; margin:0; padding:8px; border:0; outline:none; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.9rem; line-height:1.35; background:transparent; color:transparent; caret-color:#111; }"
@@ -765,6 +830,8 @@
                "  .editor-file-controls input, .editor-file-controls select { width:100%; min-width:0; padding:8px; border:1px solid var(--line); border-radius:8px; background:#fff; }"
                "  .editor-controls { margin-top:8px; display:flex; justify-content:flex-end; gap:8px; }"
                "  button { border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:8px; padding:8px 12px; cursor:pointer; }"
+               "  button.toggle.off { background:#8a7f70; border-color:#8a7f70; }"
+               "  button.toggle.on { background:#2f7a34; border-color:#2f7a34; }"
                "  button:disabled { opacity:0.5; cursor:default; }"
                "  .canvas-host { min-height:280px; border:1px dashed var(--line); border-radius:8px; padding:8px; background:#fff; overflow:auto; }"
                "  .docs-nav { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }"
@@ -778,6 +845,7 @@
                "</style>"))
 
     (load-storage-state!)
+    (update-typecheck-ui!)
     (let [active-file (:editor-active-file @app-state)
           active-content (get-in @app-state [:editor-files active-file] default-editor-source)]
       (set! (.-value (by-id "editor-file-name")) active-file)
@@ -789,6 +857,7 @@
     (update-docs!)
 
     (.addEventListener (by-id "repl-eval") "click" (fn [_] (eval-repl-input!)))
+    (.addEventListener (by-id "repl-typecheck") "click" (fn [_] (toggle-typecheck!)))
     (.addEventListener (by-id "repl-clear") "click" (fn [_] (clear-repl-output!)))
     (.addEventListener (by-id "editor-save") "click" (fn [_] (save-editor-file!)))
     (.addEventListener (by-id "editor-load") "click" (fn [_] (load-editor-file!)))

@@ -1288,11 +1288,11 @@
        {:success true
         :errors []}
 
-       (catch clojure.lang.ExceptionInfo e
+       (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e
          (let [error-data (ex-data e)]
            {:success false
             :errors [(or (:error error-data)
-                        (type-error (.getMessage e)))]}))))))
+                        (type-error (ex-message e)))]}))))))
 
 (defn type-check
   "Type check Nex code (entry point).
@@ -1318,4 +1318,4 @@
       (doseq [[var-name var-type] (:var-types opts)]
         (env-add-var env var-name var-type))
       (check-expression env expr))
-    (catch Exception _ nil)))
+    (catch #?(:clj Exception :cljs :default) _ nil)))
