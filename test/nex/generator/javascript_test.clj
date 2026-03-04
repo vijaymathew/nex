@@ -332,6 +332,21 @@ end"
       (is (str/includes? js-code "new NexWindow(\"Demo\", 640, 480)"))
       (is (str/includes? js-code "new NexTurtle(win)")))))
 
+(deftest image-create-and-methods-js-generation-test
+  (testing "Image create/from_file and width/height methods are supported in JS generator"
+    (let [nex-code "class ImgDemo
+  feature
+    demo() do
+      let img: Image := create Image.from_file(\"sprite.png\")
+      let w: Integer := img.width()
+      let h: Integer := img.height()
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "NexImage.from_file(\"sprite.png\")"))
+      (is (str/includes? js-code "let w = img.width"))
+      (is (str/includes? js-code "let h = img.height")))))
+
 (deftest parameterless-call-test
   (testing "Parameterless method call"
     (let [nex-code "class Point

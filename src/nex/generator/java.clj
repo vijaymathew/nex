@@ -35,8 +35,8 @@
     (case nex-type
       "Integer" "Integer"
       "Integer64" "Long"
-      "Real" "Float"
-      "Decimal" "Double"
+      "Real" "Double"
+      "Decimal" "java.math.BigDecimal"
       "Char" "Character"
       "Boolean" "Boolean"
       "String" "String"
@@ -48,6 +48,7 @@
       "Function" "Function"
       "Window" "NexWindow"
       "Turtle" "NexTurtle"
+      "Image" "NexImage"
       "Any" "Object"
       nex-type)))
 
@@ -83,8 +84,8 @@
        (case nex-type
          "Integer" "int"
          "Integer64" "long"
-         "Real" "float"
-         "Decimal" "double"
+         "Real" "double"
+         "Decimal" "java.math.BigDecimal"
          "Char" "char"
          "Boolean" "boolean"
          "String" "String"
@@ -96,6 +97,7 @@
         "Function" "Function"
         "Window" "NexWindow"
         "Turtle" "NexTurtle"
+        "Image" "NexImage"
         nex-type))
 
      :else nex-type)))
@@ -118,8 +120,8 @@
     (case nex-type
       "Integer" "0"
       "Integer64" "0L"
-      "Real" "0.0f"
-      "Decimal" "0.0"
+      "Real" "0.0"
+      "Decimal" "java.math.BigDecimal.ZERO"
       "Char" "'\\0'"
       "Boolean" "false"
       "String" "\"\""
@@ -224,6 +226,10 @@
     "substring"   (fn [target args] (str target ".substring(" args ")"))
     "to_upper"    (fn [target _] (str target ".toUpperCase()"))
     "to_lower"    (fn [target _] (str target ".toLowerCase()"))
+    "to_integer"  (fn [target _] (str "Integer.parseInt(" target ".trim())"))
+    "to_integer64" (fn [target _] (str "Long.parseLong(" target ".trim())"))
+    "to_real"     (fn [target _] (str "Double.parseDouble(" target ".trim())"))
+    "to_decimal"  (fn [target _] (str "new java.math.BigDecimal(" target ".trim())"))
     "contains"    (fn [target args] (str target ".contains(" args ")"))
     "starts_with" (fn [target args] (str target ".startsWith(" args ")"))
     "ends_with"   (fn [target args] (str target ".endsWith(" args ")"))
@@ -259,6 +265,62 @@
     "greater_than" (fn [target args] (str "(" target " > " args ")"))
     "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
 
+   :Integer64
+   {"to_string" (fn [target _] (str "String.valueOf(" target ")"))
+    "abs"       (fn [target _] (str "Math.abs(" target ")"))
+    "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
+    "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
+    ;; Arithmetic operators
+    "plus"      (fn [target args] (str "(" target " + " args ")"))
+    "minus"     (fn [target args] (str "(" target " - " args ")"))
+    "times"     (fn [target args] (str "(" target " * " args ")"))
+    "divided_by" (fn [target args] (str "(" target " / " args ")"))
+    ;; Comparison operators
+    "equals"    (fn [target args] (str "(" target " == " args ")"))
+    "not_equals" (fn [target args] (str "(" target " != " args ")"))
+    "less_than" (fn [target args] (str "(" target " < " args ")"))
+    "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
+    "greater_than" (fn [target args] (str "(" target " > " args ")"))
+    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
+
+   :Real
+   {"to_string" (fn [target _] (str "String.valueOf(" target ")"))
+    "abs"       (fn [target _] (str "Math.abs(" target ")"))
+    "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
+    "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
+    "round"     (fn [target _] (str "Math.round(" target ")"))
+    ;; Arithmetic operators
+    "plus"      (fn [target args] (str "(" target " + " args ")"))
+    "minus"     (fn [target args] (str "(" target " - " args ")"))
+    "times"     (fn [target args] (str "(" target " * " args ")"))
+    "divided_by" (fn [target args] (str "(" target " / " args ")"))
+    ;; Comparison operators
+    "equals"    (fn [target args] (str "(" target " == " args ")"))
+    "not_equals" (fn [target args] (str "(" target " != " args ")"))
+    "less_than" (fn [target args] (str "(" target " < " args ")"))
+    "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
+    "greater_than" (fn [target args] (str "(" target " > " args ")"))
+    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
+
+   :Decimal
+   {"to_string" (fn [target _] (str "String.valueOf(" target ")"))
+    "abs"       (fn [target _] (str target ".abs()"))
+    "min"       (fn [target args] (str target ".min(" args ")"))
+    "max"       (fn [target args] (str target ".max(" args ")"))
+    "round"     (fn [target _] (str target ".setScale(0, java.math.RoundingMode.HALF_UP)"))
+    ;; Arithmetic operators (BigDecimal)
+    "plus"      (fn [target args] (str target ".add(" args ")"))
+    "minus"     (fn [target args] (str target ".subtract(" args ")"))
+    "times"     (fn [target args] (str target ".multiply(" args ")"))
+    "divided_by" (fn [target args] (str target ".divide(" args ", java.math.MathContext.DECIMAL128)"))
+    ;; Comparison operators (BigDecimal)
+    "equals"    (fn [target args] (str "(" target ".compareTo(" args ") == 0)"))
+    "not_equals" (fn [target args] (str "(" target ".compareTo(" args ") != 0)"))
+    "less_than" (fn [target args] (str "(" target ".compareTo(" args ") < 0)"))
+    "less_than_or_equal" (fn [target args] (str "(" target ".compareTo(" args ") <= 0)"))
+    "greater_than" (fn [target args] (str "(" target ".compareTo(" args ") > 0)"))
+    "greater_than_or_equal" (fn [target args] (str "(" target ".compareTo(" args ") >= 0)"))}
+
    :Array
    {"length"    (fn [target _] (str target ".size()"))
     "is_empty"  (fn [target _] (str target ".isEmpty()"))
@@ -283,6 +345,10 @@
     "keys"         (fn [target _] (str "new ArrayList<>(" target ".keySet())"))
     "values"       (fn [target _] (str "new ArrayList<>(" target ".values())"))
     "remove"       (fn [target args] (str "(" target ".remove(" args "), " target ")"))}
+
+   :Image
+   {"width"        (fn [target _] (str target ".width()"))
+    "height"       (fn [target _] (str target ".height()"))}
 
    :Console
    {"print"        (fn [_ args] (str "System.out.print(" args ")"))
@@ -379,6 +445,15 @@
                ;; Try Integer methods first (for operators, numeric is more common)
                (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
                  (method-fn target-code args-code))
+               ;; Try Integer64 methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Integer64 method])]
+                 (method-fn target-code args-code))
+               ;; Try Real methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Real method])]
+                 (method-fn target-code args-code))
+               ;; Try Decimal methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Decimal method])]
+                 (method-fn target-code args-code))
                ;; Try String methods
                (when-let [method-fn (get-in builtin-method-mappings [:String method])]
                  (method-fn target-code args-code))
@@ -387,6 +462,9 @@
                  (method-fn target-code args-code))
                ;; Try Map methods
                (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
+                 (method-fn target-code args-code))
+               ;; Try Image methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Image method])]
                  (method-fn target-code args-code))
                ;; Handle Java reserved words used as method names
                (when (= method "goto")
@@ -430,6 +508,9 @@
       "Process" "new Object() /* Process */"
       "Window" (str "new NexWindow(" args-code ")")
       "Turtle" (str "new NexTurtle(" args-code ")")
+      "Image" (if (= constructor "from_file")
+                (str "NexImage.from_file(" args-code ")")
+                (str "new NexImage(" args-code ")"))
       (if constructor
         ;; Named constructor: static factory method call
         (str class-name (or type-params "") "." constructor "(" args-code ")")
@@ -1167,7 +1248,68 @@ public class NexWindow {
         return null;
     }
 
+    public Object draw_image(NexImage img, double x, double y) {
+        Graphics2D g2d = canvas.createGraphics();
+        g2d.drawImage(img.raw(), (int) x, (int) y, null);
+        g2d.dispose();
+        label.repaint();
+        return null;
+    }
+
+    public Object draw_image_scaled(NexImage img, double x, double y, double w, double h) {
+        Graphics2D g2d = canvas.createGraphics();
+        g2d.drawImage(img.raw(), (int) x, (int) y, (int) w, (int) h, null);
+        g2d.dispose();
+        label.repaint();
+        return null;
+    }
+
+    public Object draw_image_rotated(NexImage img, double x, double y, double angle) {
+        Graphics2D g2d = canvas.createGraphics();
+        BufferedImage raw = img.raw();
+        double iw = img.width();
+        double ih = img.height();
+        double cx = x + iw / 2.0;
+        double cy = y + ih / 2.0;
+        java.awt.geom.AffineTransform saved = g2d.getTransform();
+        g2d.translate(cx, cy);
+        g2d.rotate(Math.toRadians(angle));
+        g2d.drawImage(raw, (int) (-iw / 2.0), (int) (-ih / 2.0), null);
+        g2d.setTransform(saved);
+        g2d.dispose();
+        label.repaint();
+        return null;
+    }
+
     public void repaintCanvas() { label.repaint(); }
+}")
+
+(defn generate-nex-image-class
+  "Generate Java source for NexImage.java — image loading wrapper."
+  []
+  "import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
+import java.io.File;
+
+public class NexImage {
+    private BufferedImage image;
+
+    public NexImage(String path) {
+        try {
+            this.image = ImageIO.read(new File(path));
+            if (this.image == null) {
+                throw new RuntimeException(\"Unable to load image: \" + path);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(\"Unable to load image: \" + path, e);
+        }
+    }
+
+    public static NexImage from_file(String path) { return new NexImage(path); }
+
+    public int width() { return image.getWidth(); }
+    public int height() { return image.getHeight(); }
+    public BufferedImage raw() { return image; }
 }")
 
 (defn generate-nex-turtle-class
@@ -1600,6 +1742,7 @@ public class NexTurtle {
                        (mapv (fn [cls] [(:name cls) (generate-class cls opts)]) classes))
          files (into {"Function.java" function-base
                       "NexWindow.java" (generate-nex-window-class)
+                      "NexImage.java" (generate-nex-image-class)
                       "NexTurtle.java" (generate-nex-turtle-class)}
                      (concat
                       (when function-globals

@@ -922,8 +922,27 @@
 ;;
 
 (defn register-builtin-methods
-  "Register method signatures for built-in types (Console, File, Process)"
+  "Register method signatures for built-in types."
   [env]
+  (doseq [[method-name sig]
+          {"length"      {:params [] :return-type "Integer"}
+           "index_of"    {:params [{:name "substr" :type "String"}] :return-type "Integer"}
+           "substring"   {:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}] :return-type "String"}
+           "to_upper"    {:params [] :return-type "String"}
+           "to_lower"    {:params [] :return-type "String"}
+           "to_integer"  {:params [] :return-type "Integer"}
+           "to_integer64" {:params [] :return-type "Integer64"}
+           "to_real"     {:params [] :return-type "Real"}
+           "to_decimal"  {:params [] :return-type "Decimal"}
+           "contains"    {:params [{:name "substr" :type "String"}] :return-type "Boolean"}
+           "starts_with" {:params [{:name "prefix" :type "String"}] :return-type "Boolean"}
+           "ends_with"   {:params [{:name "suffix" :type "String"}] :return-type "Boolean"}
+           "trim"        {:params [] :return-type "String"}
+           "replace"     {:params [{:name "old" :type "String"} {:name "new" :type "String"}] :return-type "String"}
+           "char_at"     {:params [{:name "index" :type "Integer"}] :return-type "Char"}
+           "split"       {:params [{:name "delimiter" :type "String"}]
+                          :return-type {:base-type "Array" :type-params ["String"]}}}]
+    (env-add-method env "String" method-name sig))
   (doseq [[method-name sig]
           {"print" {:params [{:name "msg" :type "String"}] :return-type "Void"}
            "print_line" {:params [{:name "msg" :type "String"}] :return-type "Void"}

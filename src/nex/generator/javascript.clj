@@ -205,6 +205,10 @@
     "substring"   (fn [target args] (str target ".substring(" args ")"))
     "to_upper"    (fn [target _] (str target ".toUpperCase()"))
     "to_lower"    (fn [target _] (str target ".toLowerCase()"))
+    "to_integer"  (fn [target _] (str "parseInt(" target ".trim(), 10)"))
+    "to_integer64" (fn [target _] (str "parseInt(" target ".trim(), 10)"))
+    "to_real"     (fn [target _] (str "parseFloat(" target ".trim())"))
+    "to_decimal"  (fn [target _] (str "parseFloat(" target ".trim())"))
     "contains"    (fn [target args] (str target ".includes(" args ")"))
     "starts_with" (fn [target args] (str target ".startsWith(" args ")"))
     "ends_with"   (fn [target args] (str target ".endsWith(" args ")"))
@@ -227,6 +231,62 @@
     "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
     "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
     "pick"      (fn [target _] (str "Math.floor(Math.random() * " target")"))
+    ;; Arithmetic operators
+    "plus"      (fn [target args] (str "(" target " + " args ")"))
+    "minus"     (fn [target args] (str "(" target " - " args ")"))
+    "times"     (fn [target args] (str "(" target " * " args ")"))
+    "divided_by" (fn [target args] (str "(" target " / " args ")"))
+    ;; Comparison operators
+    "equals"    (fn [target args] (str "(" target " === " args ")"))
+    "not_equals" (fn [target args] (str "(" target " !== " args ")"))
+    "less_than" (fn [target args] (str "(" target " < " args ")"))
+    "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
+    "greater_than" (fn [target args] (str "(" target " > " args ")"))
+    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
+
+   :Integer64
+   {"to_string" (fn [target _] (str target ".toString()"))
+    "abs"       (fn [target _] (str "Math.abs(" target ")"))
+    "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
+    "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
+    ;; Arithmetic operators
+    "plus"      (fn [target args] (str "(" target " + " args ")"))
+    "minus"     (fn [target args] (str "(" target " - " args ")"))
+    "times"     (fn [target args] (str "(" target " * " args ")"))
+    "divided_by" (fn [target args] (str "(" target " / " args ")"))
+    ;; Comparison operators
+    "equals"    (fn [target args] (str "(" target " === " args ")"))
+    "not_equals" (fn [target args] (str "(" target " !== " args ")"))
+    "less_than" (fn [target args] (str "(" target " < " args ")"))
+    "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
+    "greater_than" (fn [target args] (str "(" target " > " args ")"))
+    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
+
+   :Real
+   {"to_string" (fn [target _] (str target ".toString()"))
+    "abs"       (fn [target _] (str "Math.abs(" target ")"))
+    "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
+    "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
+    "round"     (fn [target _] (str "Math.round(" target ")"))
+    ;; Arithmetic operators
+    "plus"      (fn [target args] (str "(" target " + " args ")"))
+    "minus"     (fn [target args] (str "(" target " - " args ")"))
+    "times"     (fn [target args] (str "(" target " * " args ")"))
+    "divided_by" (fn [target args] (str "(" target " / " args ")"))
+    ;; Comparison operators
+    "equals"    (fn [target args] (str "(" target " === " args ")"))
+    "not_equals" (fn [target args] (str "(" target " !== " args ")"))
+    "less_than" (fn [target args] (str "(" target " < " args ")"))
+    "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
+    "greater_than" (fn [target args] (str "(" target " > " args ")"))
+    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
+
+   :Decimal
+   {"to_string" (fn [target _] (str target ".toString()"))
+    "abs"       (fn [target _] (str "Math.abs(" target ")"))
+    "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
+    "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
+    "round"     (fn [target _] (str "Math.round(" target ")"))
     ;; Arithmetic operators
     "plus"      (fn [target args] (str "(" target " + " args ")"))
     "minus"     (fn [target args] (str "(" target " - " args ")"))
@@ -264,6 +324,10 @@
     "keys"         (fn [target _] (str "Array.from(" target ".keys())"))
     "values"       (fn [target _] (str "Array.from(" target ".values())"))
     "remove"       (fn [target args] (str "(" target ".delete(" args "), " target ")"))}
+
+   :Image
+   {"width"        (fn [target _] (str target ".width"))
+    "height"       (fn [target _] (str target ".height"))}
 
    :Console
    {"print"        (fn [_ args] (str "process.stdout.write(String(" args "))"))
@@ -321,6 +385,15 @@
              ;; Try Integer methods first (for operators, numeric is more common)
              (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
                (method-fn target-code args-code))
+             ;; Try Integer64 methods
+             (when-let [method-fn (get-in builtin-method-mappings [:Integer64 method])]
+               (method-fn target-code args-code))
+             ;; Try Real methods
+             (when-let [method-fn (get-in builtin-method-mappings [:Real method])]
+               (method-fn target-code args-code))
+             ;; Try Decimal methods
+             (when-let [method-fn (get-in builtin-method-mappings [:Decimal method])]
+               (method-fn target-code args-code))
              ;; Try String methods
              (when-let [method-fn (get-in builtin-method-mappings [:String method])]
                (method-fn target-code args-code))
@@ -329,6 +402,9 @@
                (method-fn target-code args-code))
              ;; Try Map methods
              (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
+               (method-fn target-code args-code))
+             ;; Try Image methods
+             (when-let [method-fn (get-in builtin-method-mappings [:Image method])]
                (method-fn target-code args-code))
              ;; Default: regular method call
              (str target-code "." method "(" args-code ")")))))

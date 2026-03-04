@@ -581,3 +581,32 @@ end"
       (is (not (:success result)))
       (is (some #(re-find #"Expected Integer, got String" %)
                 (map tc/format-type-error (:errors result)))))))
+
+(deftest test-string-conversion-methods-typecheck
+  (testing "String conversion methods resolve to concrete numeric types"
+    (let [code "class Test
+  feature
+    convert() do
+      let i: Integer := \"123\".to_integer()
+      let i64: Integer64 := \"123\".to_integer64()
+      let r: Real := \"3.14\".to_real()
+      let d: Decimal := \"42.5\".to_decimal()
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-string-to-real-not-integer
+  (testing "String.to_real should not type-check as Integer"
+    (let [code "class Test
+  feature
+    bad() do
+      let i: Integer := \"3.14\".to_real()
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (seq (:errors result))))))
