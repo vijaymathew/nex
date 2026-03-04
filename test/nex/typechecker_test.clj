@@ -610,3 +610,221 @@ end"
           result (tc/type-check ast)]
       (is (not (:success result)))
       (is (seq (:errors result))))))
+
+(deftest test-attachable-field-without-constructor-fails
+  (testing "Attachable class field must be initialized by constructors"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+
+class B
+  feature
+    a: A
+    show() do
+      a.show()
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"Attachable fields must be initialized by constructors" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-detachable-field-without-constructor-succeeds
+  (testing "Detachable class field is allowed to remain uninitialized"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+
+class B
+  feature
+    a: ?A
+    show() do
+      print(\"ok\")
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-attachable-field-must-be-initialized-by-all-constructors
+  (testing "Every constructor must initialize attachable fields"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+
+class B
+  feature
+    a: A
+  create
+    make_ok() do
+      a := create A
+    end
+    make_bad() do
+      print(\"skip\")
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"must initialize attachable fields: a" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-detachable-cannot-assign-to-attachable
+  (testing "A detachable value cannot be assigned to attachable variable"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+
+class B
+  feature
+    src: ?A
+  create
+    make() do
+      src := create A
+    end
+    demo() do
+      let dst: A := src
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"Cannot assign \?A to variable 'dst' of type A" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-detachable-feature-access-requires-nil-guard
+  (testing "Calling a feature on detachable object without nil-guard should fail"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+
+class B
+  feature
+    a: ?A
+    demo() do
+      a.show()
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"Cannot call feature 'show' on detachable" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-detachable-feature-access-with-nil-guard-succeeds
+  (testing "Calling a feature on detachable object inside `if a /= nil` should pass"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+
+class B
+  feature
+    a: ?A
+    demo() do
+      if a /= nil then
+        a.show()
+      end
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-default-create-disallowed-when-constructors-exist
+  (testing "create B without constructor should fail if class B defines constructors"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+
+class B
+  feature
+    x: Integer
+    a: A
+  create
+    m1(a: A) do
+      x := 10
+      this.a := a
+    end
+    m2(a: A) do
+      this.a := a
+      x := 20
+    end
+  feature
+    show() do
+      print(x)
+      a.show()
+    end
+end
+
+class Main
+  feature
+    run() do
+      let b: B := create B
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"defines constructors; use an explicit constructor call" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-explicit-create-allowed-when-constructors-exist
+  (testing "create B.m1(...) should pass when class B defines constructors"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+
+class B
+  feature
+    x: Integer
+    a: A
+  create
+    m1(a: A) do
+      x := 10
+      this.a := a
+    end
+  feature
+    show() do
+      print(x)
+      a.show()
+    end
+end
+
+class Main
+  feature
+    run() do
+      let a: A := create A
+      let b: B := create B.m1(a)
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))

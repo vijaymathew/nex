@@ -489,3 +489,23 @@ end"
       (is (str/includes? java-code "NexImage.from_file(\"sprite.png\")"))
       (is (str/includes? java-code "img.width()"))
       (is (str/includes? java-code "img.height()")))))
+
+(deftest void-safety-enforced-in-java-generator-test
+  (testing "Java generator should fail type-checking for uninitialized attachable fields"
+    (let [nex-code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+class B
+  feature
+    a: A
+    show() do
+      a.show()
+    end
+end"]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Type checking failed"
+            (java/translate nex-code))))))

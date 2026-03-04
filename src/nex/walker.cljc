@@ -269,10 +269,55 @@
         :class-def class-def}))
 
    :inheritClause
-   (fn [[_ _inherit-kw & names]]
+   (fn [[_ _inherit-kw & entries]]
+     (->> entries
+          (filter #(and (sequential? %)
+                        (= :inheritEntry (first %))))
+          (mapv transform-node)))
+
+   :inheritEntry
+   (fn [[_ parent-name & rest]]
+     (let [adaptation-node (first (filter #(and (sequential? %)
+                                                (= :inheritAdaptation (first %)))
+                                          rest))
+           {:keys [renames redefines]} (when adaptation-node
+                                         (transform-node adaptation-node))]
+       (cond-> {:parent (token-text parent-name)}
+         (seq renames) (assoc :renames renames)
+         (seq redefines) (assoc :redefines redefines))))
+
+   :inheritAdaptation
+   (fn [[_ first-node & rest]]
+     ;; Structure:
+     ;; 1) RENAME renameClause (REDEFINE redefineClause)? END
+     ;; 2) REDEFINE redefineClause END
+     (let [parts (cons first-node rest)
+           rename-clause (first (filter #(and (sequential? %)
+                                              (= :renameClause (first %)))
+                                        parts))
+           redefine-clause (first (filter #(and (sequential? %)
+                                                (= :redefineClause (first %)))
+                                          parts))]
+       {:renames (when rename-clause (transform-node rename-clause))
+        :redefines (when redefine-clause (transform-node redefine-clause))}))
+
+   :renameClause
+   (fn [[_ & items]]
+     (->> items
+          (filter #(and (sequential? %)
+                        (= :renameItem (first %))))
+          (mapv transform-node)))
+
+   :renameItem
+   (fn [[_ from-name _as to-name]]
+     {:from (token-text from-name)
+      :to (token-text to-name)})
+
+   :redefineClause
+   (fn [[_ & names]]
      (->> names
           (remove #(= "," %))
-          (mapv (fn [name] {:parent (token-text name)}))))
+          (mapv token-text)))
 
    :visibilityModifier
    (fn [node]
@@ -425,17 +470,22 @@
        (mapv transform-node param-nodes)))
 
    :genericParam
-   (fn [[_ param-name & rest]]
-     ;; Structure: param-name (ARROW constraint)?
-     (let [has-constraint? (some #(= "->" %) rest)
+   (fn [[_ first-node & nodes]]
+     ;; Structure: QMARK? param-name (ARROW constraint)?
+     (let [[detachable? param-name tail]
+           (if (= "?" first-node)
+             [true (first nodes) (clojure.core/rest nodes)]
+             [false first-node nodes])
+           has-constraint? (some #(= "->" %) tail)
            constraint (when has-constraint?
-                       ;; Get all elements after the arrow, filter for string identifiers
-                       (let [after-arrow (drop-while #(not= "->" %) rest)]
-                         (first (filter #(and (string? %)
-                                            (not= "->" %))
-                                       after-arrow))))]
+                        ;; Get all elements after the arrow, filter for string identifiers
+                        (let [after-arrow (drop-while #(not= "->" %) tail)]
+                          (first (filter #(and (string? %)
+                                               (not= "->" %))
+                                         after-arrow))))]
        {:name (token-text param-name)
-        :constraint constraint}))
+        :constraint constraint
+        :detachable detachable?}))
 
    :genericArgs
    (fn [[_ _open-bracket & args]]
@@ -449,15 +499,22 @@
        (token-text arg)))       ;; simple identifier like Integer
 
    :type
-   (fn [[_ type-name & rest]]
-     ;; Check if there are type arguments
-     (let [type-args-node (first (filter #(and (sequential? %)
-                                               (= :typeArgs (first %)))
-                                        rest))]
-       (if type-args-node
-         {:base-type (token-text type-name)
-          :type-args (transform-node type-args-node)}
-         (token-text type-name))))
+   (fn [[_ first-node & rest]]
+     ;; detachable type: ?T
+     (if (= "?" first-node)
+       (let [inner (transform-node (first rest))]
+         (if (map? inner)
+           (assoc inner :detachable true)
+           {:base-type inner :detachable true}))
+       ;; regular type, optionally parameterized
+       (let [type-name first-node
+             type-args-node (first (filter #(and (sequential? %)
+                                                 (= :typeArgs (first %)))
+                                          rest))]
+         (if type-args-node
+           {:base-type (token-text type-name)
+            :type-args (transform-node type-args-node)}
+           (token-text type-name)))))
 
    :typeArgs
    (fn [[_ _open-bracket & args]]

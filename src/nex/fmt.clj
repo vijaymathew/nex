@@ -26,10 +26,11 @@
     (string? type-expr) type-expr
     (map? type-expr)
     (let [base (:base-type type-expr)
-          params (:type-params type-expr)]
-      (if params
-        (str base " [" (str/join ", " (map format-type params)) "]")
-        base))
+          params (:type-params type-expr)
+          core (if params
+                 (str base " [" (str/join ", " (map format-type params)) "]")
+                 base)]
+      (if (:detachable type-expr) (str "?" core) core))
     :else (str type-expr)))
 
 (defn format-expression
@@ -233,10 +234,11 @@
 
 (defn format-generic-param
   "Format a generic parameter"
-  [{:keys [name constraint]}]
-  (if constraint
-    (str name " -> " constraint)
-    name))
+  [{:keys [name constraint detachable]}]
+  (let [prefix (if detachable "?" "")]
+    (if constraint
+      (str prefix name " -> " constraint)
+      (str prefix name))))
 
 (defn format-inherit-entry
   "Format an inherit entry"

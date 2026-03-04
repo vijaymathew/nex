@@ -93,6 +93,24 @@ end"
           java-code (java/translate code)]
       (is (str/includes? java-code "public String name = \"\";")))))
 
+(deftest detachable-type-parsing-test
+  (testing "Parse detachable type annotation '?A'"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+class B
+  feature
+    a: ?A
+end"
+          ast (p/ast code)
+          class-def (second (:classes ast))
+          field (-> class-def :body first :members first)]
+      (is (= {:base-type "A" :detachable true}
+             (:field-type field))))))
+
 (deftest all-types-default-values-test
   (testing "Generate Java with all types and their default values"
     (let [code "class AllTypes

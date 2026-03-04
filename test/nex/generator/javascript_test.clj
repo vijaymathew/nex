@@ -511,3 +511,23 @@ end")
         (finally
           (doseq [f (reverse (file-seq tmp-dir))]
             (.delete f)))))))
+
+(deftest void-safety-enforced-in-js-generator-test
+  (testing "JS generator should fail type-checking for uninitialized attachable fields"
+    (let [nex-code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+class B
+  feature
+    a: A
+    show() do
+      a.show()
+    end
+end"]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Type checking failed"
+            (js/translate nex-code))))))
