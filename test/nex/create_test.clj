@@ -173,8 +173,8 @@ end"
           java-code (java/translate code)]
       (is (str/includes? java-code "public int i = 0;"))
       (is (str/includes? java-code "public long i64 = 0L;"))
-      (is (str/includes? java-code "public float r = 0.0f;"))
-      (is (str/includes? java-code "public double d = 0.0;"))
+      (is (str/includes? java-code "public double r = 0.0;"))
+      (is (str/includes? java-code "public java.math.BigDecimal d = java.math.BigDecimal.ZERO;"))
       (is (str/includes? java-code "public char c = '\\0';"))
       (is (str/includes? java-code "public boolean b = false;"))
       (is (str/includes? java-code "public String s = \"\";")))))

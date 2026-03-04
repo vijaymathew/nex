@@ -55,7 +55,7 @@ end"
     temperature: Real
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "public float temperature = 0.0f;")))))
+      (is (str/includes? java-code "public double temperature = 0.0;")))))
 
 (deftest decimal-type-java-generation-test
   (testing "Generate Java code for Decimal type with default value"
@@ -64,7 +64,7 @@ end"
     price: Decimal
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "public double price = 0.0;")))))
+      (is (str/includes? java-code "public java.math.BigDecimal price = java.math.BigDecimal.ZERO;")))))
 
 (deftest char-type-java-generation-test
   (testing "Generate Java code for Char type with default value"
@@ -108,8 +108,8 @@ end"
           java-code (java/translate code)]
       (is (str/includes? java-code "public int i = 0;"))
       (is (str/includes? java-code "public long i64 = 0L;"))
-      (is (str/includes? java-code "public float r = 0.0f;"))
-      (is (str/includes? java-code "public double d = 0.0;"))
+      (is (str/includes? java-code "public double r = 0.0;"))
+      (is (str/includes? java-code "public java.math.BigDecimal d = java.math.BigDecimal.ZERO;"))
       (is (str/includes? java-code "public char c = '\\0';"))
       (is (str/includes? java-code "public boolean b = false;"))
       (is (str/includes? java-code "public String s = \"\";")))))
@@ -123,7 +123,7 @@ end"
     end
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "public void process(int i, long i64, float r, double d, char c, boolean b, String s)")))))
+      (is (str/includes? java-code "public void process(int i, long i64, double r, java.math.BigDecimal d, char c, boolean b, String s)")))))
 
 (deftest typed-let-with-new-types-test
   (testing "Typed let with new type annotations"
@@ -137,7 +137,7 @@ end"
 end"
           java-code (java/translate code)]
       (is (str/includes? java-code "long x = 100;"))
-      (is (str/includes? java-code "double y = 3.14;")))))
+      (is (str/includes? java-code "java.math.BigDecimal y = 3.14;")))))
 
 (deftest mixed-types-with-methods-test
   (testing "Class with mixed field types and methods"
@@ -154,11 +154,11 @@ end"
     end
 end"
           java-code (java/translate code)]
-      (is (str/includes? java-code "public double balance = 0.0;"))
+      (is (str/includes? java-code "public java.math.BigDecimal balance = java.math.BigDecimal.ZERO;"))
       (is (str/includes? java-code "public long transactions = 0L;"))
       (is (str/includes? java-code "public boolean active = false;"))
       (is (str/includes? java-code "public String owner = \"\";"))
-      (is (str/includes? java-code "public void deposit(double amount)")))))
+      (is (str/includes? java-code "public void deposit(java.math.BigDecimal amount)")))))
 
 (deftest char-type-parsing-test
   (testing "Char type is recognized as a keyword"
@@ -182,16 +182,16 @@ end"
           (is (some? ast) (str "Failed to parse type: " t)))))))
 
 (deftest real-vs-decimal-distinction-test
-  (testing "Real (32-bit) vs Decimal (64-bit) are distinct types"
+  (testing "Real (double) vs Decimal (BigDecimal) are distinct Java types"
     (let [code "class Test
   feature
     f: Real
     d: Decimal
 end"
           java-code (java/translate code)]
-      ;; Real maps to float, Decimal maps to double
-      (is (str/includes? java-code "public float f = 0.0f;"))
-      (is (str/includes? java-code "public double d = 0.0;")))))
+      ;; Real maps to double, Decimal maps to BigDecimal
+      (is (str/includes? java-code "public double f = 0.0;"))
+      (is (str/includes? java-code "public java.math.BigDecimal d = java.math.BigDecimal.ZERO;")))))
 
 (deftest integer-vs-integer64-distinction-test
   (testing "Integer (32-bit) vs Integer64 (64-bit) are distinct types"
@@ -215,4 +215,4 @@ end"
 end"
           java-code (java/translate code)]
       (is (str/includes? java-code "private int secret = 0;"))
-      (is (str/includes? java-code "public double shared = 0.0;")))))
+      (is (str/includes? java-code "public java.math.BigDecimal shared = java.math.BigDecimal.ZERO;")))))

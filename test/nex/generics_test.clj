@@ -161,7 +161,7 @@ end"
 end"
           java-code (java/translate code)]
       (is (str/includes? java-code "public List<Integer> int_list = null;"))
-      (is (str/includes? java-code "public List<Float> real_list = null;"))
+      (is (str/includes? java-code "public List<Double> real_list = null;"))
       (is (str/includes? java-code "public List<String> string_list = null;")))))
 
 (deftest multiple-constraints-test

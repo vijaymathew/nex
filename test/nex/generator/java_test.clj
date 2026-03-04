@@ -279,11 +279,12 @@ end"
   (testing "Type mapping from Nex to Java"
     (is (= "int" (java/nex-type-to-java "Integer")))
     (is (= "long" (java/nex-type-to-java "Integer64")))
-    (is (= "float" (java/nex-type-to-java "Real")))
-    (is (= "double" (java/nex-type-to-java "Decimal")))
+    (is (= "double" (java/nex-type-to-java "Real")))
+    (is (= "java.math.BigDecimal" (java/nex-type-to-java "Decimal")))
     (is (= "char" (java/nex-type-to-java "Char")))
     (is (= "boolean" (java/nex-type-to-java "Boolean")))
-    (is (= "String" (java/nex-type-to-java "String")))))
+    (is (= "String" (java/nex-type-to-java "String")))
+    (is (= "NexImage" (java/nex-type-to-java "Image")))))
 
 (deftest binary-operators-test
   (testing "Binary operator translation"
@@ -414,6 +415,7 @@ end")
           ;; Returns :files map and :jar path
           (is (contains? (:files result) "Function.java"))
           (is (contains? (:files result) "Greeter.java"))
+          (is (contains? (:files result) "NexImage.java"))
           (is (contains? (:files result) "Main.java"))
           (is (str/includes? (get (:files result) "Main.java") "Greeter.make()"))
           ;; JAR exists
@@ -455,3 +457,35 @@ end")
         (finally
           (doseq [f (reverse (file-seq tmp-dir))]
             (.delete f)))))))
+
+(deftest string-conversion-methods-java-generation-test
+  (testing "String conversion methods map to Java numeric parsing APIs"
+    (let [nex-code "class Test
+  feature
+    convert() do
+      let i: Integer := \"123\".to_integer()
+      let i64: Integer64 := \"123\".to_integer64()
+      let r: Real := \"3.14\".to_real()
+      let d: Decimal := \"42.5\".to_decimal()
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "Integer.parseInt(\"123\".trim())"))
+      (is (str/includes? java-code "Long.parseLong(\"123\".trim())"))
+      (is (str/includes? java-code "Double.parseDouble(\"3.14\".trim())"))
+          (is (str/includes? java-code "new java.math.BigDecimal(\"42.5\".trim())")))))
+
+(deftest image-create-and-methods-java-generation-test
+  (testing "Image create/from_file and width/height methods are supported in Java generator"
+    (let [nex-code "class ImgDemo
+  feature
+    demo() do
+      let img: Image := create Image.from_file(\"sprite.png\")
+      let w: Integer := img.width()
+      let h: Integer := img.height()
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "NexImage.from_file(\"sprite.png\")"))
+      (is (str/includes? java-code "img.width()"))
+      (is (str/includes? java-code "img.height()")))))

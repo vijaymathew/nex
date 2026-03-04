@@ -103,7 +103,7 @@ end"
           java-code (java/translate code)]
       (is (str/includes? java-code "ArrayList<String> strings = new ArrayList<>();"))
       (is (str/includes? java-code "ArrayList<Integer> integers = new ArrayList<>();"))
-      (is (str/includes? java-code "ArrayList<Float> reals = new ArrayList<>();")))))
+      (is (str/includes? java-code "ArrayList<Double> reals = new ArrayList<>();")))))
 
 (deftest nested-array-access-test
   (testing "Nested array access arr[i][j]"
@@ -203,7 +203,7 @@ end"
           java-code (java/translate code)]
       (is (str/includes? java-code "HashMap<String, Integer> string_to_int"))
       (is (str/includes? java-code "HashMap<Integer, String> int_to_string"))
-      (is (str/includes? java-code "HashMap<String, Float> string_to_real")))))
+      (is (str/includes? java-code "HashMap<String, Double> string_to_real")))))
 
 ;; ============================================================================
 ;; COMBINED TESTS
