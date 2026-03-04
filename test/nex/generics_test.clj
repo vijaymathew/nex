@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [nex.parser :as p]
             [nex.interpreter :as interp]
+            [nex.typechecker :as tc]
             [nex.generator.java :as java]))
 
 (deftest simple-generic-class-parsing-test
@@ -47,6 +48,48 @@ end"
       (is (nil? (-> class-def :generic-params first :constraint)))
       (is (= "KEY" (-> class-def :generic-params second :name)))
       (is (= "Hashable" (-> class-def :generic-params second :constraint))))))
+
+(deftest detachable-generic-parameter-parsing-test
+  (testing "Parse detachable generic parameter syntax"
+    (let [code "class Linked_List [?T]
+  feature
+    value: ?T
+    next: ?Linked_List [?T]
+end"
+          ast (p/ast code)
+          class-def (first (:classes ast))]
+      (is (= "Linked_List" (:name class-def)))
+      (is (= 1 (count (:generic-params class-def))))
+      (is (= {:name "T" :constraint nil :detachable true}
+             (-> class-def :generic-params first)))
+      (is (= {:base-type "T" :detachable true}
+             (-> class-def :body first :members first :field-type)))
+      (is (= {:base-type "Linked_List"
+              :type-args [{:base-type "T" :detachable true}]
+              :detachable true}
+             (-> class-def :body first :members second :field-type))))))
+
+(deftest linked-list-detachable-generic-typecheck-test
+  (testing "Linked list can use detachable generic value for nil termination"
+    (let [code "class Linked_List [?T]
+  feature
+    value: ?T
+    next: ?Linked_List [?T]
+
+    terminate() do
+      value := nil
+      next := nil
+    end
+end
+
+class Main
+  feature
+    demo() do
+      let list: Linked_List [Integer] := create Linked_List [Integer]
+      list.terminate()
+    end
+end"]
+      (is (some? (tc/type-check (p/ast code)))))))
 
 (deftest parameterized-type-usage-parsing-test
   (testing "Parse parameterized type usage"

@@ -36,7 +36,7 @@ genericParams
     ;
 
 genericParam
-    : IDENTIFIER (ARROW IDENTIFIER)?
+    : QMARK? IDENTIFIER (ARROW IDENTIFIER)?
     ;
 
 classBody
@@ -44,7 +44,28 @@ classBody
     ;
 
 inheritClause
-    : INHERIT IDENTIFIER (',' IDENTIFIER)*
+    : INHERIT inheritEntry (',' inheritEntry)*
+    ;
+
+inheritEntry
+    : IDENTIFIER inheritAdaptation?
+    ;
+
+inheritAdaptation
+    : RENAME renameClause (REDEFINE redefineClause)? END
+    | REDEFINE redefineClause END
+    ;
+
+renameClause
+    : renameItem+
+    ;
+
+renameItem
+    : IDENTIFIER AS IDENTIFIER
+    ;
+
+redefineClause
+    : IDENTIFIER (',' IDENTIFIER)*
     ;
 
 featureSection
@@ -86,7 +107,8 @@ param
     ;
 
 type
-    : INTEGER_TYPE
+    : QMARK type
+    | INTEGER_TYPE
     | INTEGER64_TYPE
     | REAL_TYPE
     | DECIMAL_TYPE
@@ -376,6 +398,8 @@ FEATURE      : 'feature';
 PRIVATE      : 'private';
 CONSTRUCTORS : 'constructors';
 INHERIT      : 'inherit';
+RENAME       : 'rename';
+REDEFINE     : 'redefine';
 AS           : 'as';
 DO           : 'do';
 END          : 'end';
@@ -434,6 +458,7 @@ MOD          : '%';
 
 EQUAL        : '=';
 NOTEQUAL     : '/=';
+QMARK        : '?';
 LT           : '<';
 LTE          : '<=';
 GT           : '>';

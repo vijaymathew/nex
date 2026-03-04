@@ -1,6 +1,7 @@
 (ns nex.typechecker
   "Static type checker for Nex language"
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [clojure.set :as set]))
 
 ;;
 ;; Type Environment
@@ -13,7 +14,8 @@
    {:parent parent
     :vars (atom {})
     :methods (atom {})
-    :classes (atom {})}))
+    :classes (atom {})
+    :non-nil-vars (atom #{})}))
 
 (defn env-lookup-var
   "Look up a variable type in the environment"
@@ -53,6 +55,20 @@
   "Add a class definition to the environment"
   [env class-name class-def]
   (swap! (:classes env) assoc class-name class-def))
+
+(defn env-mark-non-nil
+  "Mark a variable as proven non-nil in this environment scope."
+  [env var-name]
+  (when-let [nn (:non-nil-vars env)]
+    (swap! nn conj var-name)))
+
+(defn env-var-non-nil?
+  "Check whether a variable is proven non-nil in this env chain."
+  [env var-name]
+  (or (and (:non-nil-vars env)
+           (contains? @(:non-nil-vars env) var-name))
+      (when (:parent env)
+        (env-var-non-nil? (:parent env) var-name))))
 
 ;;
 ;; Built-in Types
@@ -94,10 +110,13 @@
   (cond
     (string? type-val) type-val
     (map? type-val) (let [base (:base-type type-val)
-                          params (or (:type-params type-val) (:type-args type-val))]
-                     (if (seq params)
-                       (str base "[" (clojure.string/join ", " (map display-type params)) "]")
-                       base))
+                          params (or (:type-params type-val) (:type-args type-val))
+                          core (if (seq params)
+                                 (str base "[" (clojure.string/join ", " (map display-type params)) "]")
+                                 base)]
+                     (if (:detachable type-val)
+                       (str "?" core)
+                       core))
     :else (str type-val)))
 
 ;;
@@ -114,13 +133,38 @@
     (string? type-expr) type-expr
     (map? type-expr)
     (if (:base-type type-expr)
-      (let [params (or (:type-params type-expr) (:type-args type-expr))]
-        (if params
-          {:base-type (:base-type type-expr)
-           :type-params (mapv normalize-type params)}
-          {:base-type (:base-type type-expr)}))
+      (let [params (or (:type-params type-expr) (:type-args type-expr))
+            detachable? (true? (:detachable type-expr))]
+        (cond-> {:base-type (:base-type type-expr)}
+          params (assoc :type-params (mapv normalize-type params))
+          detachable? (assoc :detachable true)))
       (str type-expr))
     :else (str type-expr)))
+
+(defn detachable-type?
+  "Check whether a normalized type is detachable."
+  [t]
+  (and (map? t) (true? (:detachable t))))
+
+(defn attachable-type
+  "Return type with detachable marker removed (normalized)."
+  [t]
+  (let [n (normalize-type t)]
+    (if (map? n)
+      (cond-> (dissoc n :detachable)
+        (:type-params n) (update :type-params #(mapv attachable-type %)))
+      n)))
+
+(defn reference-like-type?
+  "Whether type is a reference-like (potentially detachable) object type."
+  [t]
+  (let [n (attachable-type t)
+        base (cond
+               (string? n) n
+               (map? n) (:base-type n)
+               :else nil)]
+    (and (string? base)
+         (not (#{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean"} base)))))
 
 (defn is-generic-type-param?
   "Check if a type is a generic type parameter (single uppercase letter)."
@@ -188,14 +232,29 @@
 (defn types-compatible?
   "Check if two types are compatible (including inheritance)."
   [env type1 type2]
-  (let [t1 (normalize-type type1)
-        t2 (normalize-type type2)]
-    (or (types-equal? env t1 t2)
-        (and (string? t1) (string? t2) (class-subtype? env t1 t2))
-        (and (map? t1) (string? t2) (class-subtype? env (:base-type t1) t2))
-        (and (map? t1) (map? t2)
-             (class-subtype? env (:base-type t1) (:base-type t2))
-             (= (:type-params t1) (:type-params t2))))))
+  (let [t1 (normalize-type type1) ;; source type
+        t2 (normalize-type type2) ;; target type
+        d1 (detachable-type? t1)
+        d2 (detachable-type? t2)
+        a1 (attachable-type t1)
+        a2 (attachable-type t2)]
+    (cond
+      ;; Nil can only flow into detachable/reference-like targets.
+      (= t1 "Nil")
+      (or d2
+          (= a2 "Any"))
+
+      ;; Detachable value must not flow into attachable target.
+      (and d1 (not d2))
+      false
+
+      :else
+      (or (types-equal? env a1 a2)
+          (and (string? a1) (string? a2) (class-subtype? env a1 a2))
+          (and (map? a1) (string? a2) (class-subtype? env (:base-type a1) a2))
+          (and (map? a1) (map? a2)
+               (class-subtype? env (:base-type a1) (:base-type a2))
+               (= (:type-params a1) (:type-params a2)))))))
 
 (defn validate-generic-args
   "Validate generic arguments against a class's generic constraints."
@@ -303,6 +362,7 @@
       (if (or (= left-type "Nil")
               (= right-type "Nil")
               (types-compatible? env left-type right-type)
+              (types-compatible? env right-type left-type)
               ;; Allow comparisons with generic type parameters
               (is-generic-type-param? env left-type)
               (is-generic-type-param? env right-type))
@@ -383,6 +443,35 @@
                         [(:name param) arg])
                       (:generic-params class-def) type-args))))))
 
+(defn nil-literal?
+  "Whether an expression node is a nil literal."
+  [expr]
+  (or (= expr "nil")
+      (and (map? expr) (= :nil (:type expr)))))
+
+(defn identifier-name
+  "Extract identifier name from expression if it is a direct identifier."
+  [expr]
+  (cond
+    (string? expr) expr
+    (and (map? expr) (= :identifier (:type expr))) (:name expr)
+    :else nil))
+
+(defn guarded-non-nil-var
+  "Extract variable name from condition of the form `x /= nil` or `nil /= x`."
+  [condition]
+  (when (and (map? condition)
+             (= :binary (:type condition))
+             (= "/=" (:operator condition)))
+    (let [left (:left condition)
+          right (:right condition)
+          left-id (identifier-name left)
+          right-id (identifier-name right)]
+      (cond
+        (and left-id (nil-literal? right)) left-id
+        (and right-id (nil-literal? left)) right-id
+        :else nil))))
+
 (defn check-call
   "Check the type of a method call"
   [env {:keys [target method args] :as expr}]
@@ -391,12 +480,21 @@
     (let [target-type (if (string? target)
                        (env-lookup-var env target)
                        (check-expression env target))
+          normalized-target (normalize-type target-type)
+          target-detachable? (detachable-type? normalized-target)
+          guarded? (and (string? target) (env-var-non-nil? env target))
           ;; For parameterized types like Box[Integer], look up methods on the base class
           base-type (if (map? target-type)
                       (:base-type target-type)
                       target-type)
           ;; Build type-map for generic substitution
           type-map (build-generic-type-map env target-type)]
+      (when (and target-detachable? (not guarded?))
+        (throw (ex-info (str "Feature access on detachable target requires nil-check: " method)
+                        {:error (type-error
+                                 (str "Cannot call feature '" method "' on detachable "
+                                      (display-type normalized-target)
+                                      ". Wrap with: if <obj> /= nil then <obj>." method "(...) end"))})))
       (if-let [method-sig (env-lookup-method env base-type method)]
         (do
           ;; Check argument types
@@ -500,9 +598,22 @@
         (if (and class-def (:import class-def))
           target-type
           (do
-            (let [type-map (build-generic-type-map env target-type)
+            (let [constructors (->> (:body class-def)
+                                    (filter #(= :constructors (:type %)))
+                                    (mapcat :constructors))
+                  has-constructors? (seq constructors)
+                  type-map (build-generic-type-map env target-type)
                   ctor-name (or constructor "make")
                   ctor-sig (env-lookup-method env class-name ctor-name)]
+              ;; If class defines constructors, disallow implicit default create.
+              (when (and has-constructors?
+                         (nil? constructor)
+                         (empty? args))
+                (throw (ex-info (str "Constructor required for class " class-name)
+                                {:error (type-error
+                                         (str "Class " class-name
+                                              " defines constructors; use an explicit constructor call, e.g. create "
+                                              class-name ".<ctor>(...)"))})))
               (when (or constructor (seq args))
                 (when-not ctor-sig
                   (throw (ex-info (str "Constructor not found: " class-name "." ctor-name)
@@ -658,16 +769,25 @@
       (throw (ex-info "If condition must be Boolean"
                       {:error (type-error
                                (str "If condition must be Boolean, got " cond-type))}))))
-  (doseq [stmt then] (check-statement env stmt))
+  (let [then-env (make-type-env env)]
+    (when-let [non-nil-var (guarded-non-nil-var condition)]
+      (env-mark-non-nil then-env non-nil-var))
+    (doseq [stmt then]
+      (check-statement then-env stmt)))
   (doseq [clause elseif]
     (let [ei-cond-type (check-expression env (:condition clause))]
       (when-not (= ei-cond-type "Boolean")
         (throw (ex-info "Elseif condition must be Boolean"
                         {:error (type-error
                                  (str "Elseif condition must be Boolean, got " ei-cond-type))}))))
-    (doseq [stmt (:then clause)] (check-statement env stmt)))
+    (let [elseif-env (make-type-env env)]
+      (when-let [non-nil-var (guarded-non-nil-var (:condition clause))]
+        (env-mark-non-nil elseif-env non-nil-var))
+      (doseq [stmt (:then clause)]
+        (check-statement elseif-env stmt))))
   (when else
-    (doseq [stmt else] (check-statement env stmt))))
+    (let [else-env (make-type-env env)]
+      (doseq [stmt else] (check-statement else-env stmt)))))
 
 (defn check-loop
   "Check a loop statement"
@@ -915,7 +1035,64 @@
 
       (= (:type section) :constructors)
       (doseq [ctor (:constructors section)]
-        (check-constructor env name ctor)))))
+        (check-constructor env name ctor))))
+
+  ;; Void-safety: attachable class-object fields must be initialized by all ctors.
+  (let [fields (->> body
+                    (filter #(= :feature-section (:type %)))
+                    (mapcat :members)
+                    (filter #(= :field (:type %))))
+        constructors (->> body
+                          (filter #(= :constructors (:type %)))
+                          (mapcat :constructors))
+        required-fields
+        (->> fields
+             (filter (fn [{:keys [field-type]}]
+                       (let [t (normalize-type field-type)
+                             a (attachable-type t)
+                             base (if (map? a) (:base-type a) a)]
+                         (and (not (detachable-type? t))
+                              (string? base)
+                              ;; Enforce for user-defined class objects.
+                              (some? (env-lookup-class env base))
+                              (not (builtin-type? base))))))
+             (map :name)
+             set)
+        collect-assigned
+        (fn collect-assigned [stmt]
+          (case (:type stmt)
+            :assign #{(:target stmt)}
+            :member-assign #{(:field stmt)}
+            :if (reduce set/union #{}
+                        (concat
+                         (map collect-assigned (:then stmt))
+                         (mapcat #(map collect-assigned (:then %)) (:elseif stmt))
+                         (map collect-assigned (:else stmt))))
+            :loop (reduce set/union #{}
+                          (concat (map collect-assigned (:init stmt))
+                                  (map collect-assigned (:body stmt))))
+            :scoped-block (reduce set/union #{}
+                                  (concat (map collect-assigned (:body stmt))
+                                          (map collect-assigned (:rescue stmt))))
+            :with (reduce set/union #{} (map collect-assigned (:body stmt)))
+            :case (reduce set/union #{}
+                          (concat (map #(collect-assigned (:body %)) (:clauses stmt))
+                                  (when-let [e (:else stmt)] [(collect-assigned e)])))
+            #{}))]
+    (when (seq required-fields)
+      (when (empty? constructors)
+        (throw (ex-info (str "Class " name " has attachable fields that require constructor initialization")
+                        {:error (type-error
+                                 (str "Attachable fields must be initialized by constructors in class "
+                                      name ": " (str/join ", " (sort required-fields))))})))
+      (doseq [{:keys [name body]} constructors]
+        (let [assigned (reduce set/union #{} (map collect-assigned body))
+              missing (sort (seq (set/difference required-fields assigned)))]
+          (when (seq missing)
+            (throw (ex-info (str "Constructor " name " does not initialize all attachable fields")
+                            {:error (type-error
+                                     (str "Constructor " name " must initialize attachable fields: "
+                                          (str/join ", " missing)))}))))))))
 
 ;;
 ;; Program Type Checking

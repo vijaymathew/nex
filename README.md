@@ -18,6 +18,7 @@ Nex is an Eiffel-inspired programming language that combines elegant, English-li
 
 ### 💎 Modern Language Features
 - **Generic Types**: Parameterized classes with constraints (`List [G]`, `Map [K -> Hashable, V]`)
+- **Nil-Safety**: Types are attachable by default; use `?T` for detachable references
 - **Arrays & Maps**: Built-in collections with method access (`arr.at(0)`, `map.at("key")`, `arr.set(0, value)`)
 - **Exception Handling**: `raise`, `rescue`, and `retry` for structured error recovery
 - **Multiple Inheritance**: With rename and redefine clauses
@@ -505,6 +506,10 @@ let text: String := str_box.value      -- Returns "world"
 ### Type System
 - **Basic Types**: Integer, String, Boolean, Real
 - **Generic Types**: Parameterized classes (`Stack [G]`, `Map [K, V]`)
+- **Nil-Safety**:
+  - Attachable by default: `a: A` must be initialized by constructors
+  - Detachable references: `a: ?A` may be `nil`
+  - Feature access on detachable values must be nil-guarded (`if a /= nil then a.show() end`)
 - **Type Annotations**: Explicit parameter and field types
 - **Grouped Parameters**: `method(a, b, c: Integer)`
 - **Type Constraints**: Generic constraints with `->` operator
