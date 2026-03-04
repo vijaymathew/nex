@@ -1,11 +1,33 @@
 (ns nex.core
   (:require [clojure.string :as str]
+            [cljs.reader :as reader]
             [nex.parser :as p]
             [nex.interpreter :as interp]
             [nex.turtle-browser :as turtle]))
 
+(def repl-history-storage-key "nex.browser.repl.history.v1")
+(def editor-files-storage-key "nex.browser.editor.files.v1")
+(def editor-active-file-storage-key "nex.browser.editor.active-file.v1")
+
+(def default-editor-source
+  (str "-- Example program\n"
+       "let win := create Window.with_title(\"Nex Browser\", 640, 360)\n"
+       "win.show()\n"
+       "let t := create Turtle.on_window(win)\n"
+       "t.color(\"blue\")\n"
+       "t.forward(80.0)\n"
+       "t.right(120.0)\n"
+       "t.forward(80.0)\n"
+       "t.right(120.0)\n"
+       "t.forward(80.0)\n"))
+
 (defonce app-state
   (atom {:ctx (interp/make-context)
+         :repl-history []
+         :repl-history-index nil
+         :repl-history-draft ""
+         :editor-files {"scratch.nex" default-editor-source}
+         :editor-active-file "scratch.nex"
          :docs-pages
          [(str "<h3>Getting Started</h3>"
                "<p>Nex syntax is designed to read like plain English. Use the REPL for short expressions and the editor for larger programs.</p>"
@@ -93,6 +115,48 @@
 (defn- by-id [id]
   (.getElementById js/document id))
 
+(defn- storage-get [k]
+  (try
+    (.getItem js/localStorage k)
+    (catch :default _ nil)))
+
+(defn- storage-set! [k v]
+  (try
+    (.setItem js/localStorage k v)
+    (catch :default _ nil)))
+
+(defn- storage-get-edn [k fallback]
+  (if-let [raw (storage-get k)]
+    (try
+      (reader/read-string raw)
+      (catch :default _ fallback))
+    fallback))
+
+(defn- persist-repl-history! []
+  (let [hist (:repl-history @app-state)]
+    (storage-set! repl-history-storage-key (pr-str hist))))
+
+(defn- persist-editor-state! []
+  (let [{:keys [editor-files editor-active-file]} @app-state]
+    (storage-set! editor-files-storage-key (pr-str editor-files))
+    (storage-set! editor-active-file-storage-key editor-active-file)))
+
+(defn- load-storage-state! []
+  (let [history (storage-get-edn repl-history-storage-key [])
+        files (storage-get-edn editor-files-storage-key nil)
+        active-file (or (storage-get editor-active-file-storage-key) "scratch.nex")
+        safe-history (if (vector? history) history [])
+        safe-files (if (and (map? files) (seq files))
+                     files
+                     {"scratch.nex" default-editor-source})
+        safe-active (if (contains? safe-files active-file)
+                      active-file
+                      (first (sort (keys safe-files))))]
+    (swap! app-state assoc
+           :repl-history safe-history
+           :editor-files safe-files
+           :editor-active-file safe-active)))
+
 (defn- append-line! [kind text]
   (let [out (by-id "repl-output")
         line (.createElement js/document "div")]
@@ -139,6 +203,109 @@
 
 (defn- clear-repl-output! []
   (set! (.-innerHTML (by-id "repl-output")) ""))
+
+(defn- clamp-history-index [idx hist]
+  (let [max-idx (dec (count hist))]
+    (cond
+      (neg? max-idx) nil
+      (< idx 0) 0
+      (> idx max-idx) max-idx
+      :else idx)))
+
+(defn- push-repl-history! [entry]
+  (let [trimmed (str/trim entry)]
+    (when-not (str/blank? trimmed)
+      (swap! app-state
+             (fn [s]
+               (let [old (:repl-history s)
+                     no-dupe (if (= trimmed (last old))
+                               old
+                               (conj old trimmed))
+                     capped (if (> (count no-dupe) 200)
+                              (vec (take-last 200 no-dupe))
+                              no-dupe)]
+                 (assoc s
+                        :repl-history capped
+                        :repl-history-index nil
+                        :repl-history-draft ""))))
+      (persist-repl-history!))))
+
+(defn- set-repl-input-value! [v]
+  (let [input-el (by-id "repl-input")]
+    (set! (.-value input-el) v)
+    ;; move caret to end for predictable editing
+    (let [pos (count v)]
+      (.setSelectionRange input-el pos pos))))
+
+(defn- navigate-repl-history! [direction]
+  (let [{:keys [repl-history repl-history-index repl-history-draft]} @app-state
+        input-el (by-id "repl-input")
+        current-input (.-value input-el)
+        n (count repl-history)]
+    (when (pos? n)
+      (cond
+        (= direction :up)
+        (let [base-idx (if (nil? repl-history-index) n repl-history-index)
+              next-idx (clamp-history-index (dec base-idx) repl-history)]
+          (swap! app-state assoc
+                 :repl-history-index next-idx
+                 :repl-history-draft (if (nil? repl-history-index) current-input repl-history-draft))
+          (set-repl-input-value! (nth repl-history next-idx)))
+
+        (= direction :down)
+        (when-not (nil? repl-history-index)
+          (let [next-idx (inc repl-history-index)]
+            (if (>= next-idx n)
+              (do
+                (swap! app-state assoc :repl-history-index nil)
+                (set-repl-input-value! repl-history-draft))
+              (do
+                (swap! app-state assoc :repl-history-index next-idx)
+                (set-repl-input-value! (nth repl-history next-idx))))))))))
+
+(defn- refresh-editor-file-list! []
+  (let [select-el (by-id "editor-file-list")
+        files (:editor-files @app-state)
+        current (:editor-active-file @app-state)
+        names (sort (keys files))]
+    (set! (.-innerHTML select-el) "")
+    (doseq [name names]
+      (let [opt (.createElement js/document "option")]
+        (set! (.-value opt) name)
+        (set! (.-textContent opt) name)
+        (when (= name current)
+          (set! (.-selected opt) true))
+        (.appendChild select-el opt)))))
+
+(defn- set-active-editor-file! [filename]
+  (when-let [content (get-in @app-state [:editor-files filename])]
+    (swap! app-state assoc :editor-active-file filename)
+    (set! (.-value (by-id "editor-file-name")) filename)
+    (set! (.-value (by-id "editor-input")) content)
+    (refresh-editor-file-list!)
+    (persist-editor-state!)))
+
+(defn- sanitize-filename [s]
+  (let [trimmed (str/trim s)]
+    (if (str/blank? trimmed) "scratch.nex" trimmed)))
+
+(defn- save-editor-file! []
+  (let [filename (sanitize-filename (.-value (by-id "editor-file-name")))
+        content (.-value (by-id "editor-input"))]
+    (swap! app-state assoc-in [:editor-files filename] content)
+    (swap! app-state assoc :editor-active-file filename)
+    (persist-editor-state!)
+    (refresh-editor-file-list!)
+    (set! (.-value (by-id "editor-file-name")) filename)
+    (append-line! "info" (str "Saved '" filename "' to browser storage."))))
+
+(defn- load-editor-file! []
+  (let [filename (sanitize-filename (.-value (by-id "editor-file-list")))]
+    (if (contains? (:editor-files @app-state) filename)
+      (do
+        (set-active-editor-file! filename)
+        (append-line! "info" (str "Loaded '" filename "' from browser storage.")))
+      (append-line! "err" (str "No saved file named '" filename "'.")))))
 
 (defn- fmt-value [v]
   (cond
@@ -194,6 +361,7 @@
         trimmed (str/trim source)
         ctx (:ctx @app-state)]
     (when-not (str/blank? trimmed)
+      (push-repl-history! trimmed)
       (append-line! "input" (str "nex> " trimmed))
       (set! (.-value input-el) "")
       (reset! (:output ctx) [])
@@ -284,6 +452,12 @@
                "    <section class='panel editor'>"
                "      <h2>2. Nex Editor</h2>"
                "      <textarea id='editor-input' spellcheck='false'></textarea>"
+               "      <div class='editor-file-controls'>"
+               "        <input id='editor-file-name' type='text' value='scratch.nex' placeholder='filename.nex' />"
+               "        <button id='editor-save'>Save</button>"
+               "        <select id='editor-file-list'></select>"
+               "        <button id='editor-load'>Load</button>"
+               "      </div>"
                "      <div class='editor-controls'><button id='editor-run'>Run In REPL</button></div>"
                "    </section>"
                "    <section class='panel canvas'>"
@@ -317,6 +491,8 @@
                "  .repl-controls { margin-top:8px; display:flex; gap:8px; }"
                "  .repl-controls input { flex:1; min-width:0; padding:8px; border:1px solid var(--line); border-radius:8px; }"
                "  textarea#editor-input { width:100%; height:230px; resize:vertical; padding:8px; border:1px solid var(--line); border-radius:8px; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.9rem; background:#fff; }"
+               "  .editor-file-controls { margin-top:8px; display:grid; grid-template-columns: 1fr auto 180px auto; gap:8px; align-items:center; }"
+               "  .editor-file-controls input, .editor-file-controls select { width:100%; min-width:0; padding:8px; border:1px solid var(--line); border-radius:8px; background:#fff; }"
                "  .editor-controls { margin-top:8px; display:flex; justify-content:flex-end; }"
                "  button { border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:8px; padding:8px 12px; cursor:pointer; }"
                "  button:disabled { opacity:0.5; cursor:default; }"
@@ -328,32 +504,38 @@
                "  .docs-body code { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.88rem; }"
                "  .docs-body pre { margin:0 0 8px; padding:8px; border:1px solid var(--line); border-radius:8px; background:#faf7f1; overflow:auto; }"
                "  .docs-body pre code { color:var(--ink); }"
-               "  @media (max-width: 980px) { .layout { grid-template-columns:1fr; } .repl-output, textarea#editor-input { height:200px; } }"
+               "  @media (max-width: 980px) { .layout { grid-template-columns:1fr; } .repl-output, textarea#editor-input { height:200px; } .editor-file-controls { grid-template-columns: 1fr 1fr; } }"
                "</style>"))
 
-    (set! (.-value (by-id "editor-input"))
-          (str "-- Example program\n"
-               "let win := create Window.with_title(\"Nex Browser\", 640, 360)\n"
-               "win.show()\n"
-               "let t := create Turtle.on_window(win)\n"
-               "t.color(\"blue\")\n"
-               "t.forward(80.0)\n"
-               "t.right(120.0)\n"
-               "t.forward(80.0)\n"
-               "t.right(120.0)\n"
-               "t.forward(80.0)\n"))
+    (load-storage-state!)
+    (let [active-file (:editor-active-file @app-state)
+          active-content (get-in @app-state [:editor-files active-file] default-editor-source)]
+      (set! (.-value (by-id "editor-file-name")) active-file)
+      (set! (.-value (by-id "editor-input")) active-content)
+      (refresh-editor-file-list!))
 
     (turtle/set-window-host! (by-id "canvas-host"))
     (update-docs!)
 
     (.addEventListener (by-id "repl-eval") "click" (fn [_] (eval-repl-input!)))
     (.addEventListener (by-id "repl-clear") "click" (fn [_] (clear-repl-output!)))
+    (.addEventListener (by-id "editor-save") "click" (fn [_] (save-editor-file!)))
+    (.addEventListener (by-id "editor-load") "click" (fn [_] (load-editor-file!)))
+    (.addEventListener (by-id "editor-file-list") "change"
+                       (fn [e]
+                         (let [filename (.-value (.-target e))]
+                           (set-active-editor-file! filename))))
     (.addEventListener (by-id "editor-run") "click" (fn [_] (run-editor!)))
     (.addEventListener (by-id "repl-input") "keydown"
                        (fn [e]
-                         (when (= "Enter" (.-key e))
-                           (.preventDefault e)
-                           (eval-repl-input!))))
+                         (case (.-key e)
+                           "Enter" (do (.preventDefault e)
+                                       (eval-repl-input!))
+                           "ArrowUp" (do (.preventDefault e)
+                                         (navigate-repl-history! :up))
+                           "ArrowDown" (do (.preventDefault e)
+                                           (navigate-repl-history! :down))
+                           nil)))
     (.addEventListener (by-id "editor-input") "keydown"
                        (fn [e]
                          (when (and (= "Enter" (.-key e)) (.-ctrlKey e))
