@@ -21,6 +21,23 @@
        "t.right(120.0)\n"
        "t.forward(80.0)\n"))
 
+(def nex-keywords
+  #{"class" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
+    "when" "from" "until" "invariant" "variant" "require" "ensure"
+    "let" "as" "and" "or" "not" "fn" "old" "create" "private" "note"
+    "with" "import" "intern" "function" "raise" "rescue" "retry"
+    "repeat" "across" "case" "of"})
+
+(def nex-types
+  #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
+    "Array" "Map" "Any" "Void" "Function" "Cursor" "Window" "Turtle" "Image"})
+
+(def nex-constants
+  #{"true" "false" "nil"})
+
+(def nex-builtins
+  #{"print" "println" "result" "exception"})
+
 (defonce app-state
   (atom {:ctx (interp/make-context)
          :repl-history []
@@ -165,6 +182,56 @@
     (.appendChild out line)
     (set! (.-scrollTop out) (.-scrollHeight out))))
 
+(defn- escape-html [s]
+  (-> s
+      (str/replace "&" "&amp;")
+      (str/replace "<" "&lt;")
+      (str/replace ">" "&gt;")))
+
+(defn- token-html [tok]
+  (let [esc (escape-html tok)]
+    (cond
+      (str/starts-with? tok "\"") (str "<span class='tok-str'>" esc "</span>")
+      (re-matches #"^[0-9]+(\.[0-9]+)?$" tok) (str "<span class='tok-num'>" esc "</span>")
+      (#{"->" ":="} tok) (str "<span class='tok-op'>" esc "</span>")
+      (re-matches #"^[A-Za-z_][A-Za-z0-9_]*$" tok)
+      (cond
+        (contains? nex-keywords tok) (str "<span class='tok-kw'>" esc "</span>")
+        (contains? nex-types tok) (str "<span class='tok-type'>" esc "</span>")
+        (contains? nex-constants tok) (str "<span class='tok-const'>" esc "</span>")
+        (contains? nex-builtins tok) (str "<span class='tok-builtin'>" esc "</span>")
+        :else esc)
+      :else esc)))
+
+(defn- highlight-code-html [source]
+  (let [source* (str source)
+        line-html
+        (fn [line]
+          (let [comment-idx (str/index-of line "--")
+                code-part (if (some? comment-idx) (subs line 0 comment-idx) line)
+                comment-part (when (some? comment-idx) (subs line comment-idx))
+                ;; Use a non-capturing top-level group so re-seq returns strings, not match vectors.
+                parts (re-seq #"(?:\"(?:[^\"\\]|\\.)*\"|->|:=|[A-Za-z_][A-Za-z0-9_]*|[0-9]+(?:\.[0-9]+)?|\s+|.)" code-part)
+                code-html (->> parts
+                               (map token-html)
+                               (str/join ""))
+                comment-html (when comment-part
+                               (str "<span class='tok-comment'>" (escape-html comment-part) "</span>"))]
+            (str code-html (or comment-html ""))))]
+    (->> (str/split source* #"\n" -1)
+         (map line-html)
+         (str/join "\n"))))
+
+(defn- update-editor-highlight! []
+  (try
+    (let [editor (by-id "editor-input")
+          hl (by-id "editor-highlight")]
+      (when (and editor hl)
+        (set! (.-innerHTML hl) (highlight-code-html (.-value editor)))))
+    (catch :default e
+      ;; Never let highlighting failures break the editor/repl.
+      (js/console.error "Highlight error:" e))))
+
 (defn- parser-debug-info []
   (let [cljs-mods (or js/$CLJS #js {})
         shadow-js (.-js js/shadow)
@@ -282,6 +349,7 @@
     (swap! app-state assoc :editor-active-file filename)
     (set! (.-value (by-id "editor-file-name")) filename)
     (set! (.-value (by-id "editor-input")) content)
+    (update-editor-highlight!)
     (refresh-editor-file-list!)
     (persist-editor-state!)))
 
@@ -306,6 +374,194 @@
         (set-active-editor-file! filename)
         (append-line! "info" (str "Loaded '" filename "' from browser storage.")))
       (append-line! "err" (str "No saved file named '" filename "'.")))))
+
+(defn- line-opens-block? [trimmed]
+  (or
+   (= trimmed "feature")
+   (= trimmed "create")
+   (= trimmed "private feature")
+   (some #(str/ends-with? trimmed %)
+         ["class" "do" "then" "else" "elseif" "require" "ensure"
+          "from" "until" "inherit" "invariant" "variant" "rescue" "of"])))
+
+(defn- line-closes-block? [trimmed]
+  (or (str/starts-with? trimmed "end")
+      (str/starts-with? trimmed "else")
+      (str/starts-with? trimmed "elseif")
+      (str/starts-with? trimmed "rescue")))
+
+(defn- auto-format-source [source]
+  (let [lines (str/split (str source) #"\n" -1)]
+    (loop [remaining lines
+           indent-level 0
+           acc []]
+      (if (empty? remaining)
+        (str/join "\n" acc)
+        (let [line (first remaining)
+              trimmed (str/trim line)]
+          (if (str/blank? trimmed)
+            (recur (rest remaining) indent-level (conj acc ""))
+            (let [before-level (max 0 (if (line-closes-block? trimmed)
+                                        (dec indent-level)
+                                        indent-level))
+                  formatted (str (apply str (repeat (* 2 before-level) " ")) trimmed)
+                  after-level (if (and (line-opens-block? trimmed)
+                                       (not (str/starts-with? trimmed "end")))
+                                (inc before-level)
+                                before-level)]
+              (recur (rest remaining) after-level (conj acc formatted)))))))))
+
+(defn- format-editor! []
+  (let [editor (by-id "editor-input")
+        formatted (auto-format-source (.-value editor))]
+    (set! (.-value editor) formatted)
+    (update-editor-highlight!)
+    (append-line! "info" "Formatted editor buffer.")))
+
+(defn- count-leading-spaces [s]
+  (count (re-find #"^ *" s)))
+
+(defn- previous-non-empty-line [lines idx]
+  (loop [i (dec idx)]
+    (when (>= i 0)
+      (let [line (nth lines i)
+            t (str/trim line)]
+        (if (str/blank? t)
+          (recur (dec i))
+          line)))))
+
+(defn- next-non-empty-line [lines idx]
+  (loop [i idx]
+    (when (< i (count lines))
+      (let [line (nth lines i)
+            t (str/trim line)]
+        (if (str/blank? t)
+          (recur (inc i))
+          line)))))
+
+(defn- line-without-comment [line]
+  (if-let [idx (str/index-of line "--")]
+    (subs line 0 idx)
+    line))
+
+(defn- do-opener-line? [trimmed]
+  (boolean (re-find #"\bdo$" trimmed)))
+
+(defn- if-opener-line? [trimmed]
+  (boolean (re-find #"^if\b.*\bthen$" trimmed)))
+
+(defn- else-opener-line? [trimmed]
+  (or (str/starts-with? trimmed "else")
+      (str/starts-with? trimmed "elseif")))
+
+(defn- should-auto-scaffold-end?
+  [source-trim current-line-suffix has-end-below?]
+  (and (str/blank? current-line-suffix)
+       (not has-end-below?)
+       (or (do-opener-line? source-trim)
+           (if-opener-line? source-trim)
+           (else-opener-line? source-trim))))
+
+(defn- editor-auto-indent-enter! []
+  (let [editor (by-id "editor-input")
+        value (.-value editor)
+        caret (.-selectionStart editor)
+        before (subs value 0 caret)
+        after (subs value caret)
+        lines-before (str/split before #"\n" -1)
+        lines-after (str/split after #"\n" -1)
+        current-line-suffix (first lines-after)
+        next-after-line (next-non-empty-line lines-after 1)
+        current-line (or (last lines-before) "")
+        prev-line (or (previous-non-empty-line lines-before (count lines-before)) "")
+        current-code-trim (str/trim (line-without-comment current-line))
+        next-after-trim (some-> next-after-line line-without-comment str/trim)
+        prev-code-trim (str/trim (line-without-comment prev-line))
+        current-indent (count-leading-spaces current-line)
+        prev-indent (count-leading-spaces prev-line)
+        source-trim (if (str/blank? current-code-trim) prev-code-trim current-code-trim)
+        source-indent (if (str/blank? current-code-trim) prev-indent current-indent)
+        has-end-below? (and (some? next-after-trim)
+                            (str/starts-with? next-after-trim "end"))
+        next-indent (cond
+                      ;; Transitional keywords close one block and open another; next line is inner body.
+                      (or (str/starts-with? source-trim "else")
+                          (str/starts-with? source-trim "elseif")
+                          (str/starts-with? source-trim "rescue"))
+                      (+ source-indent 2)
+                      ;; `end` moves back to outer level.
+                      (str/starts-with? source-trim "end")
+                      (max 0 (- source-indent 2))
+                      ;; Generic block openers.
+                      (line-opens-block? source-trim)
+                      (+ source-indent 2)
+                      :else source-indent)
+        scaffold-end? (should-auto-scaffold-end? source-trim current-line-suffix has-end-below?)
+        indent-str (apply str (repeat next-indent " "))
+        end-indent-str (apply str (repeat source-indent " "))
+        inserted (if scaffold-end?
+                   (str "\n" indent-str "\n" end-indent-str "end")
+                   (str "\n" indent-str))
+        new-value (str before inserted after)
+        new-caret (+ caret 1 (count indent-str))]
+    (set! (.-value editor) new-value)
+    (.setSelectionRange editor new-caret new-caret)
+    (update-editor-highlight!)))
+
+(defn- editor-indent-selection! [direction]
+  (let [editor (by-id "editor-input")
+        value (.-value editor)
+        start (.-selectionStart editor)
+        end (.-selectionEnd editor)
+        before (subs value 0 start)
+        selected (subs value start end)
+        after (subs value end)
+        lines (str/split selected #"\n" -1)
+        shifted (map (fn [line]
+                       (case direction
+                         :right (str "  " line)
+                         :left (if (str/starts-with? line "  ")
+                                 (subs line 2)
+                                 (if (str/starts-with? line " ")
+                                   (subs line 1)
+                                   line))
+                         line))
+                     lines)
+        new-selected (str/join "\n" shifted)
+        new-value (str before new-selected after)
+        delta (- (count new-selected) (count selected))]
+    (set! (.-value editor) new-value)
+    (.setSelectionRange editor start (+ end delta))
+    (update-editor-highlight!)))
+
+(defn- editor-maybe-dedent-control-line! []
+  (let [editor (by-id "editor-input")
+        value (.-value editor)
+        caret (.-selectionStart editor)
+        before (subs value 0 caret)
+        after (subs value caret)
+        lines-before (str/split before #"\n" -1)
+        current-fragment (or (last lines-before) "")
+        current-line-full (str current-fragment (first (str/split after #"\n" -1)))
+        current-trim (str/trim (line-without-comment current-line-full))]
+    (when (re-find #"^(else|elseif|rescue|end)\b" current-trim)
+      (let [line-idx (dec (count lines-before))
+            all-lines (str/split value #"\n" -1)
+            prev-line (or (previous-non-empty-line all-lines line-idx) "")
+            prev-indent (count-leading-spaces prev-line)
+            target-indent (max 0 (- prev-indent 2))
+            desired-prefix (apply str (repeat target-indent " "))
+            desired-line (str desired-prefix current-trim)
+            current-leading (count-leading-spaces current-line-full)]
+        (when (not= current-line-full desired-line)
+          (let [line-start (- caret (count current-fragment))
+                line-end (+ line-start (count current-line-full))
+                new-value (str (subs value 0 line-start) desired-line (subs value line-end))
+                caret-delta (- target-indent current-leading)
+                new-caret (max line-start (+ caret caret-delta))]
+            (set! (.-value editor) new-value)
+            (.setSelectionRange editor new-caret new-caret)
+            (update-editor-highlight!)))))))
 
 (defn- fmt-value [v]
   (cond
@@ -451,14 +707,17 @@
                "    </section>"
                "    <section class='panel editor'>"
                "      <h2>2. Nex Editor</h2>"
-               "      <textarea id='editor-input' spellcheck='false'></textarea>"
-               "      <div class='editor-file-controls'>"
-               "        <input id='editor-file-name' type='text' value='scratch.nex' placeholder='filename.nex' />"
-               "        <button id='editor-save'>Save</button>"
-               "        <select id='editor-file-list'></select>"
-               "        <button id='editor-load'>Load</button>"
+               "      <div class='editor-code-wrap'>"
+               "        <pre id='editor-highlight' aria-hidden='true'></pre>"
+               "        <textarea id='editor-input' spellcheck='false'></textarea>"
                "      </div>"
-               "      <div class='editor-controls'><button id='editor-run'>Run In REPL</button></div>"
+               "      <div class='editor-file-controls'>"
+                "        <input id='editor-file-name' type='text' value='scratch.nex' placeholder='filename.nex' />"
+                "        <button id='editor-save'>Save</button>"
+                "        <select id='editor-file-list'></select>"
+                "        <button id='editor-load'>Load</button>"
+               "      </div>"
+               "      <div class='editor-controls'><button id='editor-format'>Format</button><button id='editor-run'>Run In REPL</button></div>"
                "    </section>"
                "    <section class='panel canvas'>"
                "      <h2>3. Canvas</h2>"
@@ -490,10 +749,21 @@
                "  .repl-line.input { color:#6ec6ff; } .repl-line.result { color:#8ee59e; } .repl-line.err { color:#ff8a8a; } .repl-line.info { color:#f7cf86; }"
                "  .repl-controls { margin-top:8px; display:flex; gap:8px; }"
                "  .repl-controls input { flex:1; min-width:0; padding:8px; border:1px solid var(--line); border-radius:8px; }"
-               "  textarea#editor-input { width:100%; height:230px; resize:vertical; padding:8px; border:1px solid var(--line); border-radius:8px; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.9rem; background:#fff; }"
+               "  .editor-code-wrap { position:relative; height:230px; border:1px solid var(--line); border-radius:8px; overflow:auto; background:#fff; }"
+               "  #editor-highlight { margin:0; padding:8px; min-height:100%; white-space:pre; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.9rem; line-height:1.35; pointer-events:none; }"
+               "  textarea#editor-input { position:absolute; inset:0; width:100%; height:100%; resize:none; margin:0; padding:8px; border:0; outline:none; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.9rem; line-height:1.35; background:transparent; color:transparent; caret-color:#111; }"
+               "  textarea#editor-input::selection { background:rgba(22,93,90,0.2); color:transparent; }"
+               "  .tok-comment { color:#7a6a58; font-style:italic; }"
+               "  .tok-kw { color:#6a1b9a; font-weight:600; }"
+               "  .tok-type { color:#1e4ea1; font-weight:600; }"
+               "  .tok-const { color:#b71c1c; font-weight:600; }"
+               "  .tok-builtin { color:#00796b; }"
+               "  .tok-num { color:#ad1457; }"
+               "  .tok-str { color:#2e7d32; }"
+               "  .tok-op { color:#bf360c; font-weight:600; }"
                "  .editor-file-controls { margin-top:8px; display:grid; grid-template-columns: 1fr auto 180px auto; gap:8px; align-items:center; }"
                "  .editor-file-controls input, .editor-file-controls select { width:100%; min-width:0; padding:8px; border:1px solid var(--line); border-radius:8px; background:#fff; }"
-               "  .editor-controls { margin-top:8px; display:flex; justify-content:flex-end; }"
+               "  .editor-controls { margin-top:8px; display:flex; justify-content:flex-end; gap:8px; }"
                "  button { border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:8px; padding:8px 12px; cursor:pointer; }"
                "  button:disabled { opacity:0.5; cursor:default; }"
                "  .canvas-host { min-height:280px; border:1px dashed var(--line); border-radius:8px; padding:8px; background:#fff; overflow:auto; }"
@@ -504,7 +774,7 @@
                "  .docs-body code { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.88rem; }"
                "  .docs-body pre { margin:0 0 8px; padding:8px; border:1px solid var(--line); border-radius:8px; background:#faf7f1; overflow:auto; }"
                "  .docs-body pre code { color:var(--ink); }"
-               "  @media (max-width: 980px) { .layout { grid-template-columns:1fr; } .repl-output, textarea#editor-input { height:200px; } .editor-file-controls { grid-template-columns: 1fr 1fr; } }"
+               "  @media (max-width: 980px) { .layout { grid-template-columns:1fr; } .repl-output, .editor-code-wrap { height:200px; } .editor-file-controls { grid-template-columns: 1fr 1fr; } }"
                "</style>"))
 
     (load-storage-state!)
@@ -512,7 +782,8 @@
           active-content (get-in @app-state [:editor-files active-file] default-editor-source)]
       (set! (.-value (by-id "editor-file-name")) active-file)
       (set! (.-value (by-id "editor-input")) active-content)
-      (refresh-editor-file-list!))
+      (refresh-editor-file-list!)
+      (update-editor-highlight!))
 
     (turtle/set-window-host! (by-id "canvas-host"))
     (update-docs!)
@@ -521,11 +792,22 @@
     (.addEventListener (by-id "repl-clear") "click" (fn [_] (clear-repl-output!)))
     (.addEventListener (by-id "editor-save") "click" (fn [_] (save-editor-file!)))
     (.addEventListener (by-id "editor-load") "click" (fn [_] (load-editor-file!)))
+    (.addEventListener (by-id "editor-format") "click" (fn [_] (format-editor!)))
     (.addEventListener (by-id "editor-file-list") "change"
                        (fn [e]
                          (let [filename (.-value (.-target e))]
                            (set-active-editor-file! filename))))
     (.addEventListener (by-id "editor-run") "click" (fn [_] (run-editor!)))
+    (.addEventListener (by-id "editor-input") "input"
+                       (fn [_]
+                         (editor-maybe-dedent-control-line!)
+                         (update-editor-highlight!)))
+    (.addEventListener (by-id "editor-input") "scroll"
+                       (fn [e]
+                         (let [input (.-target e)
+                               hl (by-id "editor-highlight")]
+                           (set! (.-scrollTop hl) (.-scrollTop input))
+                           (set! (.-scrollLeft hl) (.-scrollLeft input)))))
     (.addEventListener (by-id "repl-input") "keydown"
                        (fn [e]
                          (case (.-key e)
@@ -538,9 +820,23 @@
                            nil)))
     (.addEventListener (by-id "editor-input") "keydown"
                        (fn [e]
-                         (when (and (= "Enter" (.-key e)) (.-ctrlKey e))
-                           (.preventDefault e)
-                           (run-editor!))))
+                         (cond
+                           (and (= "Enter" (.-key e)) (.-ctrlKey e))
+                           (do (.preventDefault e)
+                               (run-editor!))
+                           (and (= "F" (.-key e)) (.-ctrlKey e) (.-shiftKey e))
+                           (do (.preventDefault e)
+                               (format-editor!))
+                           (and (= "Tab" (.-key e)) (.-shiftKey e))
+                           (do (.preventDefault e)
+                               (editor-indent-selection! :left))
+                           (= "Tab" (.-key e))
+                           (do (.preventDefault e)
+                               (editor-indent-selection! :right))
+                           (= "Enter" (.-key e))
+                           (do (.preventDefault e)
+                               (editor-auto-indent-enter!))
+                           :else nil)))
 
     (.addEventListener (by-id "docs-prev") "click"
                        (fn [_]
