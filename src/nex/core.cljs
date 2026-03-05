@@ -49,6 +49,7 @@
          :repl-var-types {}
          :editor-files {"scratch.nex" default-editor-source}
          :editor-active-file "scratch.nex"
+         :editor-file-handle nil
          :docs-pages
          [(str "<h3>Getting Started</h3>"
                "<p>Nex syntax is designed to read like plain English. Use the REPL for short expressions and the editor for larger programs.</p>"
@@ -131,7 +132,8 @@
                "end</code></pre>"
                "<p>Also available: <code>case/of</code>, scoped <code>do...end</code> blocks, anonymous functions, and generics.</p>"
                "<p>This tutorial is based on <code>docs/SYNTAX.md</code>.</p>")]
-         :docs-page 0}))
+         :docs-page 0
+         :tutorial-visible false}))
 
 (defn- by-id [id]
   (.getElementById js/document id))
@@ -348,6 +350,8 @@
                         :repl-history-draft ""))))
       (persist-repl-history!))))
 
+(declare update-active-file-label!)
+
 (defn- set-repl-input-value! [v]
   (let [input-el (by-id "repl-input")]
     (set! (.-value input-el) v)
@@ -381,50 +385,154 @@
                 (swap! app-state assoc :repl-history-index next-idx)
                 (set-repl-input-value! (nth repl-history next-idx))))))))))
 
-(defn- refresh-editor-file-list! []
-  (let [select-el (by-id "editor-file-list")
-        files (:editor-files @app-state)
-        current (:editor-active-file @app-state)
-        names (sort (keys files))]
-    (set! (.-innerHTML select-el) "")
-    (doseq [name names]
-      (let [opt (.createElement js/document "option")]
-        (set! (.-value opt) name)
-        (set! (.-textContent opt) name)
-        (when (= name current)
-          (set! (.-selected opt) true))
-        (.appendChild select-el opt)))))
-
 (defn- set-active-editor-file! [filename]
   (when-let [content (get-in @app-state [:editor-files filename])]
-    (swap! app-state assoc :editor-active-file filename)
-    (set! (.-value (by-id "editor-file-name")) filename)
+    (swap! app-state assoc :editor-active-file filename :editor-file-handle nil)
     (set! (.-value (by-id "editor-input")) content)
     (update-editor-highlight!)
-    (refresh-editor-file-list!)
-    (persist-editor-state!)))
+    (persist-editor-state!)
+    (update-active-file-label!)))
 
 (defn- sanitize-filename [s]
   (let [trimmed (str/trim s)]
     (if (str/blank? trimmed) "scratch.nex" trimmed)))
 
-(defn- save-editor-file! []
-  (let [filename (sanitize-filename (.-value (by-id "editor-file-name")))
-        content (.-value (by-id "editor-input"))]
-    (swap! app-state assoc-in [:editor-files filename] content)
-    (swap! app-state assoc :editor-active-file filename)
-    (persist-editor-state!)
-    (refresh-editor-file-list!)
-    (set! (.-value (by-id "editor-file-name")) filename)
-    (append-line! "info" (str "Saved '" filename "' to browser storage."))))
+(defn- fs-access-supported? []
+  (and (fn? (.-showOpenFilePicker js/window))
+       (fn? (.-showSaveFilePicker js/window))))
 
-(defn- load-editor-file! []
-  (let [filename (sanitize-filename (.-value (by-id "editor-file-list")))]
-    (if (contains? (:editor-files @app-state) filename)
+(defn- nex-picker-types []
+  (clj->js [{:description "Nex source files"
+             :accept {"text/plain" [".nex" ".txt"]}}]))
+
+(defn- snapshot-active-editor! []
+  (let [active (sanitize-filename (:editor-active-file @app-state))
+        content (.-value (by-id "editor-input"))]
+    (swap! app-state assoc-in [:editor-files active] content)
+    (swap! app-state assoc :editor-active-file active)
+    (persist-editor-state!)
+    {:filename active :content content}))
+
+(defn- apply-opened-file! [filename content handle]
+  (let [safe-name (sanitize-filename filename)]
+    (swap! app-state assoc-in [:editor-files safe-name] content)
+    (swap! app-state assoc :editor-active-file safe-name :editor-file-handle handle)
+    (persist-editor-state!)
+    (set! (.-value (by-id "editor-input")) content)
+    (update-editor-highlight!)
+    (update-active-file-label!)
+    (append-line! "info" (str "Loaded '" safe-name "' from filesystem."))))
+
+(defn- report-file-error! [prefix err]
+  (when-not (= "AbortError" (.-name err))
+    (append-line! "err" (str prefix ": " (or (.-message err) err)))))
+
+(defn- open-file-with-handle! [handle]
+  (-> (.getFile handle)
+      (.then (fn [file]
+               (-> (.text file)
+                   (.then (fn [text]
+                            (apply-opened-file! (or (.-name file) "scratch.nex")
+                                                text
+                                                handle)))
+                   (.catch (fn [err]
+                             (report-file-error! "Open failed" err))))))
+      (.catch (fn [err]
+                (report-file-error! "Open failed" err)))))
+
+(defn- open-file-via-input! []
+  (if-let [input (by-id "open-file-input")]
+    (do
+      (set! (.-value input) "")
+      (.click input))
+    (append-line! "err" "Open failed: file input not available.")))
+
+(defn- choose-file-to-open []
+  (if (fs-access-supported?)
+    (-> (.showOpenFilePicker js/window
+                             #js {:multiple false
+                                  :types (nex-picker-types)})
+        (.then (fn [handles]
+                 (when-let [handle (aget handles 0)]
+                   (open-file-with-handle! handle))))
+        (.catch (fn [err]
+                  (report-file-error! "Open failed" err))))
+    (open-file-via-input!)))
+
+(defn- trigger-download! [filename content]
+  (let [blob (js/Blob. #js [content] #js {:type "text/plain;charset=utf-8"})
+        url (.createObjectURL js/URL blob)
+        a (.createElement js/document "a")]
+    (set! (.-href a) url)
+    (set! (.-download a) filename)
+    (set! (.-style.display a) "none")
+    (.appendChild (.-body js/document) a)
+    (.click a)
+    (.remove a)
+    (.revokeObjectURL js/URL url)))
+
+(defn- finalize-file-save! [filename chosen-name content handle]
+  (swap! app-state
+         (fn [s]
+           (-> s
+               (update :editor-files
+                       (fn [files]
+                         (let [files' (if (and filename (not= filename chosen-name))
+                                        (dissoc files filename)
+                                        files)]
+                           (assoc files' chosen-name content))))
+               (assoc :editor-active-file chosen-name
+                      :editor-file-handle handle))))
+  (persist-editor-state!)
+  (update-active-file-label!)
+  (append-line! "info" (str "Saved '" chosen-name "' to filesystem.")))
+
+(defn- write-file-handle! [handle filename content]
+  (let [chosen-name (sanitize-filename (or (.-name handle) filename))]
+    (-> (.createWritable handle)
+        (.then (fn [writable]
+                 (-> (.write writable content)
+                     (.then (fn [_]
+                              (-> (.close writable)
+                                  (.then (fn [_]
+                                           (finalize-file-save! filename chosen-name content handle))))))
+                     (.catch (fn [err]
+                               (report-file-error! "Save failed" err))))))
+        (.catch (fn [err]
+                  (report-file-error! "Save failed" err))))))
+
+(defn- save-current-file! []
+  (let [{:keys [filename content]} (snapshot-active-editor!)
+        existing-handle (:editor-file-handle @app-state)]
+    (if (fs-access-supported?)
+      (if existing-handle
+        (write-file-handle! existing-handle filename content)
+        (-> (.showSaveFilePicker js/window
+                                 #js {:suggestedName filename
+                                      :types (nex-picker-types)})
+            (.then (fn [handle]
+                     (when handle
+                       (write-file-handle! handle filename content))))
+            (.catch (fn [err]
+                      (report-file-error! "Save failed" err)))))
       (do
-        (set-active-editor-file! filename)
-        (append-line! "info" (str "Loaded '" filename "' from browser storage.")))
-      (append-line! "err" (str "No saved file named '" filename "'.")))))
+        (trigger-download! filename content)
+        (append-line! "info" (str "Downloaded '" filename "' (browser fallback)."))))))
+
+(defn- create-new-file! []
+  (let [suggested (str "file" (inc (count (:editor-files @app-state))) ".nex")
+        input (js/prompt "New file name:" suggested)]
+    (when (some? input)
+      (let [filename (sanitize-filename input)
+            exists? (contains? (:editor-files @app-state) filename)
+            overwrite? (or (not exists?)
+                           (js/confirm (str "File '" filename "' already exists. Overwrite?")))]
+        (when overwrite?
+          (swap! app-state assoc-in [:editor-files filename] "")
+          (swap! app-state assoc :editor-file-handle nil)
+          (set-active-editor-file! filename)
+          (persist-editor-state!)
+          (append-line! "info" (str "Created '" filename "'.")))))))
 
 (defn- line-opens-block? [trimmed]
   (or
@@ -630,7 +738,7 @@
   (str "class __BrowserRepl__\n"
        "feature\n"
        "  __eval__() do\n"
-       "    print(" input ")\n"
+       "    " input "\n"
        "  end\n"
        "end"))
 
@@ -739,10 +847,41 @@
         next-btn (by-id "docs-next")
         title-el (by-id "docs-title")
         body-el (by-id "docs-body")]
-    (set! (.-textContent title-el) (str "Page " (inc docs-page) " / " (count docs-pages)))
-    (set! (.-innerHTML body-el) (nth docs-pages docs-page))
-    (set! (.-disabled prev-btn) (zero? docs-page))
-    (set! (.-disabled next-btn) (= docs-page max-page))))
+    (when (and prev-btn next-btn title-el body-el)
+      (set! (.-textContent title-el) (str "Page " (inc docs-page) " / " (count docs-pages)))
+      (set! (.-innerHTML body-el) (nth docs-pages docs-page))
+      (set! (.-disabled prev-btn) (zero? docs-page))
+      (set! (.-disabled next-btn) (= docs-page max-page)))))
+
+(defn- update-tutorial-visibility! []
+  (let [editor-main (by-id "editor-main")
+        pane (by-id "tutorial-pane")
+        visible? (:tutorial-visible @app-state)]
+    (when editor-main
+      (set! (.-className editor-main)
+            (str "panel editor-main " (if visible? "with-tutorial" "without-tutorial"))))
+    (when pane
+      (set! (.-className pane)
+            (str "tutorial-pane " (if visible? "open" "closed"))))))
+
+(defn- open-tutorial! []
+  (swap! app-state assoc :tutorial-visible true :docs-page 0)
+  (update-docs!)
+  (update-tutorial-visibility!))
+
+(defn- close-tutorial! []
+  (swap! app-state assoc :tutorial-visible false)
+  (update-tutorial-visibility!))
+
+(defn- update-active-file-label! []
+  (let [label (by-id "active-file-label")
+        active (:editor-active-file @app-state)]
+    (when label
+      (set! (.-textContent label) (str "Active: " active)))))
+
+(defn- close-all-menus! []
+  (doseq [menu (array-seq (.querySelectorAll js/document ".menu[open]"))]
+    (.removeAttribute menu "open")))
 
 (defn- render! []
   (let [root (or (by-id "app")
@@ -752,120 +891,140 @@
                    el))]
     (set! (.-innerHTML root)
           (str "<div class='shell'>"
-               "  <header class='topbar'><h1>Nex Browser IDE</h1><p>Explore Nex directly in your browser.</p></header>"
-               "  <main class='layout'>"
-               "    <section class='panel repl'>"
-               "      <h2>1. REPL</h2>"
-               "      <div id='repl-output' class='repl-output'></div>"
-               "      <div class='repl-controls'>"
-               "        <div class='repl-input-row'>"
-               "          <input id='repl-input' type='text' placeholder='Enter any Nex expression...' />"
-               "        </div>"
-               "        <div class='repl-actions'>"
-               "          <button id='repl-typecheck' class='toggle off'>Typecheck: OFF</button>"
-               "          <button id='repl-eval'>Evaluate</button>"
-               "          <button id='repl-clear'>Clear</button>"
-               "        </div>"
+               "  <header class='topbar'><h1>Nex Browser IDE</h1><p>Editor-first workflow with REPL and Canvas.</p></header>"
+               "  <nav class='menu-bar'>"
+               "    <details class='menu'><summary>File</summary>"
+               "      <div class='menu-items'>"
+               "        <button id='menu-new'>New File (Ctrl/Cmd+N)</button>"
+               "        <button id='menu-open'>Open File (Ctrl/Cmd+O)</button>"
+               "        <button id='menu-save'>Save File (Ctrl/Cmd+S)</button>"
                "      </div>"
-               "    </section>"
-               "    <section class='panel editor'>"
-               "      <h2>2. Nex Editor</h2>"
-               "      <div class='editor-code-wrap'>"
-               "        <pre id='editor-highlight' aria-hidden='true'></pre>"
-               "        <textarea id='editor-input' spellcheck='false'></textarea>"
+               "    </details>"
+               "    <details class='menu'><summary>Help</summary>"
+               "      <div class='menu-items'>"
+               "        <button id='menu-tutorial'>Tutorial</button>"
                "      </div>"
-               "      <div class='editor-file-controls'>"
-                "        <input id='editor-file-name' type='text' value='scratch.nex' placeholder='filename.nex' />"
-                "        <button id='editor-save'>Save</button>"
-                "        <select id='editor-file-list'></select>"
-                "        <button id='editor-load'>Load</button>"
+               "    </details>"
+               "    <span id='active-file-label' class='active-file-label'></span>"
+               "  </nav>"
+               "  <input id='open-file-input' type='file' accept='.nex,.txt,text/plain' style='display:none' />"
+               "  <main class='ide'>"
+               "    <section id='editor-main' class='panel editor-main without-tutorial'>"
+               "      <h2>Editor</h2>"
+               "      <div class='editor-workarea'>"
+               "        <div class='editor-code-wrap'>"
+               "          <pre id='editor-highlight' aria-hidden='true'></pre>"
+               "          <textarea id='editor-input' spellcheck='false'></textarea>"
+               "        </div>"
+               "        <aside id='tutorial-pane' class='tutorial-pane closed'>"
+               "          <div class='tutorial-head'>"
+               "            <h2>Tutorial</h2>"
+               "            <button id='tutorial-close'>Close</button>"
+               "          </div>"
+               "          <div class='docs-nav'>"
+               "            <button id='docs-prev'>Previous</button>"
+               "            <span id='docs-title'></span>"
+               "            <button id='docs-next'>Next</button>"
+               "          </div>"
+               "          <article id='docs-body' class='docs-body'></article>"
+               "        </aside>"
                "      </div>"
                "      <div class='editor-controls'><button id='editor-format'>Format</button><button id='editor-run'>Run In REPL</button></div>"
                "    </section>"
-               "    <section class='panel canvas'>"
-               "      <h2>3. Canvas</h2>"
-               "      <div id='canvas-host' class='canvas-host'></div>"
-               "    </section>"
-               "    <section class='panel docs'>"
-               "      <h2>4. Documentation</h2>"
-               "      <div class='docs-nav'>"
-               "        <button id='docs-prev'>Previous</button>"
-               "        <span id='docs-title'></span>"
-               "        <button id='docs-next'>Next</button>"
-               "      </div>"
-               "      <article id='docs-body' class='docs-body'></article>"
+               "    <section class='bottom-split'>"
+               "      <section class='panel repl'>"
+               "        <h2>REPL</h2>"
+               "        <div id='repl-output' class='repl-output'></div>"
+               "        <div class='repl-controls'>"
+               "          <div class='repl-input-row'>"
+               "            <input id='repl-input' type='text' placeholder='Enter any Nex expression...' />"
+               "          </div>"
+               "          <div class='repl-actions'>"
+               "            <button id='repl-typecheck' class='toggle off'>Typecheck: OFF</button>"
+               "            <button id='repl-eval'>Evaluate</button>"
+               "            <button id='repl-clear'>Clear</button>"
+               "          </div>"
+               "        </div>"
+               "      </section>"
+               "      <section class='panel canvas'>"
+               "        <h2>Canvas</h2>"
+               "        <div id='canvas-host' class='canvas-host'></div>"
+               "      </section>"
                "    </section>"
                "  </main>"
                "</div>"
                "<style>"
                "  :root { --bg:#f3efe8; --card:#fffdf9; --ink:#18130b; --muted:#7a6a58; --accent:#165d5a; --line:#d9cdbf; }"
-               "  * { box-sizing: border-box; }"
-               "  body { margin:0; font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif; color:var(--ink); background: radial-gradient(circle at 0% 0%, #efe5d7, #f3efe8 45%); }"
-               "  .shell { min-height:100vh; padding:16px; }"
-               "  .topbar h1 { margin:0; font-size:1.3rem; }"
-               "  .topbar p { margin:4px 0 14px 0; color:var(--muted); }"
-               "  .layout { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }"
+               "  * { box-sizing:border-box; }"
+               "  html, body { height:100%; }"
+               "  body { margin:0; font-family:'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif; color:var(--ink); background:radial-gradient(circle at 0% 0%, #efe5d7, #f3efe8 45%); }"
+               "  .shell { height:100vh; padding:10px; display:grid; grid-template-rows:auto auto minmax(0, 1fr); gap:10px; overflow:hidden; }"
+               "  .topbar h1 { margin:0; font-size:1.35rem; }"
+               "  .topbar p { margin:4px 0 10px 0; color:var(--muted); }"
+               "  .menu-bar { display:flex; align-items:center; gap:10px; margin-bottom:10px; }"
+               "  .menu { position:relative; }"
+               "  .menu > summary { list-style:none; cursor:pointer; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; user-select:none; }"
+               "  .menu > summary::-webkit-details-marker { display:none; }"
+               "  .menu-items { position:absolute; top:36px; left:0; z-index:20; min-width:150px; background:#fff; border:1px solid var(--line); border-radius:8px; padding:6px; box-shadow:0 10px 22px rgba(0,0,0,0.08); display:grid; gap:6px; }"
+               "  .menu-items button { width:100%; text-align:left; background:#f8f4ed; color:var(--ink); border:1px solid #e2d8ca; }"
+               "  .active-file-label { margin-left:auto; font-size:0.9rem; color:var(--muted); font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; }"
+               "  .ide { display:grid; grid-template-rows:minmax(0, 1fr) minmax(220px, 38vh); gap:12px; min-height:0; }"
                "  .panel { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px; }"
-               "  .panel h2 { margin:0 0 8px; font-size:0.98rem; }"
-               "  .repl-output { height:230px; overflow:auto; background:#18130b; color:#f8f2e8; border-radius:8px; padding:8px; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.9rem; }"
-               "  .repl-line { margin-bottom:4px; white-space:pre-wrap; }"
-               "  .repl-line.input { color:#6ec6ff; } .repl-line.result { color:#8ee59e; } .repl-line.err { color:#ff8a8a; } .repl-line.info { color:#f7cf86; }"
-               "  .repl-controls { margin-top:8px; display:grid; grid-template-rows:auto auto; row-gap:8px; }"
-               "  .repl-input-row { display:block; }"
-               "  .repl-controls input { width:100%; min-width:0; padding:8px; border:1px solid var(--line); border-radius:8px; }"
-               "  .repl-actions { margin-top:8px; display:flex; gap:8px; }"
-               "  .editor-code-wrap { position:relative; height:230px; border:1px solid var(--line); border-radius:8px; overflow:auto; background:#fff; }"
-               "  #editor-highlight { margin:0; padding:8px; min-height:100%; white-space:pre; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.9rem; line-height:1.35; pointer-events:none; }"
-               "  textarea#editor-input { position:absolute; inset:0; width:100%; height:100%; resize:none; margin:0; padding:8px; border:0; outline:none; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.9rem; line-height:1.35; background:transparent; color:transparent; caret-color:#111; }"
+               "  .panel h2 { margin:0 0 8px; font-size:1rem; }"
+               "  .editor-main { min-height:0; display:grid; grid-template-rows:auto minmax(0, 1fr) auto; gap:8px; }"
+               "  .editor-workarea { min-height:0; display:grid; grid-template-columns:minmax(0, 1fr); gap:12px; }"
+               "  .editor-main.with-tutorial .editor-workarea { grid-template-columns:minmax(0, 1fr) minmax(300px, 40%); }"
+               "  .editor-code-wrap { position:relative; height:100%; min-height:0; border:1px solid var(--line); border-radius:8px; overflow:auto; background:#fff; }"
+               "  #editor-highlight { margin:0; padding:10px; min-height:100%; white-space:pre; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.92rem; line-height:1.4; pointer-events:none; }"
+               "  textarea#editor-input { position:absolute; inset:0; width:100%; height:100%; resize:none; margin:0; padding:10px; border:0; outline:none; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.92rem; line-height:1.4; background:transparent; color:transparent; caret-color:#111; }"
                "  textarea#editor-input::selection { background:rgba(22,93,90,0.2); color:transparent; }"
-               "  .tok-comment { color:#7a6a58; font-style:italic; }"
-               "  .tok-kw { color:#6a1b9a; font-weight:600; }"
-               "  .tok-type { color:#1e4ea1; font-weight:600; }"
-               "  .tok-const { color:#b71c1c; font-weight:600; }"
-               "  .tok-builtin { color:#00796b; }"
-               "  .tok-num { color:#ad1457; }"
-               "  .tok-str { color:#2e7d32; }"
-               "  .tok-op { color:#bf360c; font-weight:600; }"
-               "  .editor-file-controls { margin-top:8px; display:grid; grid-template-columns: 1fr auto 180px auto; gap:8px; align-items:center; }"
-               "  .editor-file-controls input, .editor-file-controls select { width:100%; min-width:0; padding:8px; border:1px solid var(--line); border-radius:8px; background:#fff; }"
-               "  .editor-controls { margin-top:8px; display:flex; justify-content:flex-end; gap:8px; }"
+               "  .tok-comment { color:#7a6a58; font-style:italic; } .tok-kw { color:#6a1b9a; font-weight:600; } .tok-type { color:#1e4ea1; font-weight:600; } .tok-const { color:#b71c1c; font-weight:600; } .tok-builtin { color:#00796b; } .tok-num { color:#ad1457; } .tok-str { color:#2e7d32; } .tok-op { color:#bf360c; font-weight:600; }"
+               "  .editor-controls { display:flex; justify-content:flex-end; gap:8px; }"
+               "  .bottom-split { display:grid; grid-template-columns:1fr 1fr; gap:12px; min-height:0; }"
+               "  .repl { min-height:0; display:grid; grid-template-rows:auto minmax(0, 1fr) auto; }"
+               "  .repl-output { min-height:0; overflow:auto; background:#18130b; color:#f8f2e8; border-radius:8px; padding:8px; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.9rem; }"
+               "  .repl-line { margin-bottom:4px; white-space:pre-wrap; } .repl-line.input { color:#6ec6ff; } .repl-line.result { color:#8ee59e; } .repl-line.err { color:#ff8a8a; } .repl-line.info { color:#f7cf86; }"
+               "  .repl-controls { margin-top:8px; display:grid; row-gap:8px; }"
+               "  .repl-controls input { width:100%; min-width:0; padding:8px; border:1px solid var(--line); border-radius:8px; }"
+               "  .repl-actions { display:flex; gap:8px; flex-wrap:wrap; }"
                "  button { border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:8px; padding:8px 12px; cursor:pointer; }"
-               "  button.toggle.off { background:#8a7f70; border-color:#8a7f70; }"
-               "  button.toggle.on { background:#2f7a34; border-color:#2f7a34; }"
+               "  button.toggle.off { background:#8a7f70; border-color:#8a7f70; } button.toggle.on { background:#2f7a34; border-color:#2f7a34; }"
                "  button:disabled { opacity:0.5; cursor:default; }"
-               "  .canvas-host { min-height:280px; border:1px dashed var(--line); border-radius:8px; padding:8px; background:#fff; overflow:auto; }"
-               "  .docs-nav { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }"
-               "  .docs-body { min-height:240px; border:1px solid var(--line); border-radius:8px; padding:10px; color:var(--ink); background:#fff; overflow:auto; }"
-               "  .docs-body h3 { margin:0 0 8px; font-size:1rem; color:var(--ink); }"
-               "  .docs-body p { margin:0 0 8px; color:var(--muted); line-height:1.35; }"
-               "  .docs-body code { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.88rem; }"
-               "  .docs-body pre { margin:0 0 8px; padding:8px; border:1px solid var(--line); border-radius:8px; background:#faf7f1; overflow:auto; }"
-               "  .docs-body pre code { color:var(--ink); }"
-               "  @media (max-width: 980px) { .layout { grid-template-columns:1fr; } .repl-output, .editor-code-wrap { height:200px; } .editor-file-controls { grid-template-columns: 1fr 1fr; } }"
+               "  .canvas { min-height:0; display:grid; grid-template-rows:auto minmax(0, 1fr); }"
+               "  .canvas-host { min-height:0; height:100%; border:1px dashed var(--line); border-radius:8px; padding:8px; background:#fff; overflow:auto; }"
+               "  .tutorial-pane { min-height:0; border:1px solid var(--line); border-radius:8px; background:#fcfaf5; padding:8px; display:grid; grid-template-rows:auto auto minmax(0, 1fr); gap:8px; }"
+               "  .tutorial-pane.closed { display:none; }"
+               "  .tutorial-pane.open { display:grid; }"
+               "  .tutorial-head { display:flex; align-items:center; justify-content:space-between; }"
+               "  .docs-nav { display:flex; align-items:center; justify-content:space-between; gap:8px; }"
+               "  .docs-body { min-height:0; border:1px solid var(--line); border-radius:8px; padding:10px; color:var(--ink); background:#fff; overflow:auto; }"
+               "  .docs-body h3 { margin:0 0 8px; font-size:1rem; color:var(--ink); } .docs-body p { margin:0 0 8px; color:var(--muted); line-height:1.35; }"
+               "  .docs-body code { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size:0.88rem; } .docs-body pre { margin:0 0 8px; padding:8px; border:1px solid var(--line); border-radius:8px; background:#faf7f1; overflow:auto; } .docs-body pre code { color:var(--ink); }"
+               "  @media (max-width: 1200px) { .editor-main.with-tutorial .editor-workarea { grid-template-columns:1fr; grid-template-rows:minmax(0, 1fr) minmax(220px, 40%); } }"
+               "  @media (max-width: 980px) { .shell { height:auto; min-height:100vh; overflow:visible; } .ide { grid-template-rows:minmax(0, 1fr) auto; } .bottom-split { grid-template-columns:1fr; } .canvas-host { min-height:220px; } }"
                "</style>"))
 
     (load-storage-state!)
     (update-typecheck-ui!)
     (let [active-file (:editor-active-file @app-state)
           active-content (get-in @app-state [:editor-files active-file] default-editor-source)]
-      (set! (.-value (by-id "editor-file-name")) active-file)
       (set! (.-value (by-id "editor-input")) active-content)
-      (refresh-editor-file-list!)
-      (update-editor-highlight!))
+      (update-editor-highlight!)
+      (update-active-file-label!))
 
     (turtle/set-window-host! (by-id "canvas-host"))
     (update-docs!)
+    (update-tutorial-visibility!)
 
     (.addEventListener (by-id "repl-eval") "click" (fn [_] (eval-repl-input!)))
     (.addEventListener (by-id "repl-typecheck") "click" (fn [_] (toggle-typecheck!)))
     (.addEventListener (by-id "repl-clear") "click" (fn [_] (clear-repl-output!)))
-    (.addEventListener (by-id "editor-save") "click" (fn [_] (save-editor-file!)))
-    (.addEventListener (by-id "editor-load") "click" (fn [_] (load-editor-file!)))
+    (.addEventListener (by-id "menu-new") "click" (fn [_] (create-new-file!) (update-active-file-label!) (close-all-menus!)))
+    (.addEventListener (by-id "menu-open") "click" (fn [_] (choose-file-to-open) (update-active-file-label!) (close-all-menus!)))
+    (.addEventListener (by-id "menu-save") "click" (fn [_] (save-current-file!) (update-active-file-label!) (close-all-menus!)))
+    (.addEventListener (by-id "menu-tutorial") "click" (fn [_] (open-tutorial!) (close-all-menus!)))
+    (.addEventListener (by-id "tutorial-close") "click" (fn [_] (close-tutorial!)))
     (.addEventListener (by-id "editor-format") "click" (fn [_] (format-editor!)))
-    (.addEventListener (by-id "editor-file-list") "change"
-                       (fn [e]
-                         (let [filename (.-value (.-target e))]
-                           (set-active-editor-file! filename))))
     (.addEventListener (by-id "editor-run") "click" (fn [_] (run-editor!)))
     (.addEventListener (by-id "editor-input") "input"
                        (fn [_]
@@ -877,6 +1036,20 @@
                                hl (by-id "editor-highlight")]
                            (set! (.-scrollTop hl) (.-scrollTop input))
                            (set! (.-scrollLeft hl) (.-scrollLeft input)))))
+    (.addEventListener (by-id "open-file-input") "change"
+                       (fn [e]
+                         (let [input (.-target e)
+                               files (.-files input)
+                               file (when (and files (> (.-length files) 0))
+                                      (aget files 0))]
+                           (when file
+                             (-> (.text file)
+                                 (.then (fn [text]
+                                          (apply-opened-file! (or (.-name file) "scratch.nex")
+                                                              text
+                                                              nil)))
+                                 (.catch (fn [err]
+                                           (report-file-error! "Open failed" err))))))))
     (.addEventListener (by-id "repl-input") "keydown"
                        (fn [e]
                          (case (.-key e)
@@ -916,6 +1089,48 @@
                          (let [last-page (dec (count (:docs-pages @app-state)))]
                            (swap! app-state update :docs-page #(min last-page (inc %))))
                          (update-docs!)))
+
+    ;; Close open menus when clicking anywhere outside them.
+    (.addEventListener js/document "click"
+                       (fn [e]
+                         (let [target (.-target e)
+                               in-menu? (when (and target (.-closest target))
+                                          (.closest target ".menu"))]
+                           (when-not in-menu?
+                             (close-all-menus!)))))
+
+    ;; Keyboard shortcuts:
+    ;; Ctrl/Cmd+S => Save, Ctrl/Cmd+O => Open, Ctrl/Cmd+N => New, Esc => close menu/tutorial
+    (.addEventListener js/window "keydown"
+                       (fn [e]
+                         (let [k (str/lower-case (.-key e))
+                               mod? (or (.-ctrlKey e) (.-metaKey e))]
+                           (cond
+                             (and mod? (= k "s"))
+                             (do (.preventDefault e)
+                                 (save-current-file!)
+                                 (update-active-file-label!)
+                                 (close-all-menus!))
+
+                             (and mod? (= k "o"))
+                             (do (.preventDefault e)
+                                 (choose-file-to-open)
+                                 (update-active-file-label!)
+                                 (close-all-menus!))
+
+                             (and mod? (= k "n"))
+                             (do (.preventDefault e)
+                                 (create-new-file!)
+                                 (update-active-file-label!)
+                                 (close-all-menus!))
+
+                             (= k "escape")
+                             (do
+                               (close-all-menus!)
+                               (when (:tutorial-visible @app-state)
+                                 (close-tutorial!)))
+
+                             :else nil))))
 
     (append-line! "info" "Browser IDE build: 2026-03-03q")))
 
