@@ -386,6 +386,7 @@
 (declare get-all-fields)
 (declare eval-body-with-rescue)
 (declare lookup-constructor)
+(declare get-parent-classes)
 
 ;;
 ;; Contract Checking
@@ -415,8 +416,25 @@
 (defn check-class-invariant
   "Check the class invariant for an object or class context."
   [ctx class-def]
-  (when-let [invariant-assertions (:invariant class-def)]
-    (check-assertions ctx invariant-assertions Class-invariant)))
+  (letfn [(collect-invariants [class-def seen]
+            (let [class-name (:name class-def)
+                  already-seen? (and class-name (contains? seen class-name))
+                  seen' (if class-name (conj seen class-name) seen)]
+              (if already-seen?
+                [[] seen]
+                (let [[parent-invariants seen'']
+                      (if-let [parents (get-parent-classes ctx class-def)]
+                        (reduce (fn [[acc seen-so-far] {parent-class-def :class-def}]
+                                  (let [[inv seen-next] (collect-invariants parent-class-def seen-so-far)]
+                                    [(into acc inv) seen-next]))
+                                [[] seen']
+                                parents)
+                        [[] seen'])
+                      local-invariants (or (:invariant class-def) [])]
+                  [(vec (concat parent-invariants local-invariants)) seen'']))))]
+    (let [[invariant-assertions _] (collect-invariants class-def #{})]
+      (when (seq invariant-assertions)
+        (check-assertions ctx invariant-assertions Class-invariant)))))
 
 ;;
 ;; Inheritance Support
@@ -1742,12 +1760,11 @@
     ;; Check class invariant with object fields in scope
     (if class-def
       (do
-        (when-let [invariant (:invariant class-def)]
-          (let [inv-env (make-env (:current-env ctx))
-                _ (doseq [[field-name field-val] final-field-map]
-                    (env-define inv-env (name field-name) field-val))
-                inv-ctx (assoc ctx :current-env inv-env)]
-            (check-class-invariant inv-ctx class-def)))
+        (let [inv-env (make-env (:current-env ctx))
+              _ (doseq [[field-name field-val] final-field-map]
+                  (env-define inv-env (name field-name) field-val))
+              inv-ctx (assoc ctx :current-env inv-env)]
+          (check-class-invariant inv-ctx class-def))
         ;; Return the object
         obj)
       ;; Java interop fallback (CLJ only)
