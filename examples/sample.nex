@@ -1,140 +1,90 @@
--- Sample Nex program demonstrating syntax
--- This file is great for testing nex-mode.el in Emacs
+-- Sample Nex program demonstrating current syntax.
+-- Includes inheritance, base-constructor call, and base-feature access.
 
 class Account
 feature
   balance: Decimal
   account_number: String
   is_active: Boolean
+
 create
-  make(balance: Decimal, account_number: String) do
-    this.balance := balance
-    this.account_number := account_number
+  make(b: Decimal, number: String) do
+    balance := b
+    account_number := number
     is_active := true
   end
+
+feature
+  deposit(amount: Decimal)
+    require
+      positive_amount: amount > 0.0
+      active_account: is_active
+    do
+      balance := balance + amount
+    ensure
+      increased: balance = old balance + amount
+    end
+
+  withdraw(amount: Decimal)
+    require
+      positive_amount: amount > 0.0
+      enough: balance >= amount
+      active_account: is_active
+    do
+      balance := balance - amount
+    ensure
+      decreased: balance = old balance - amount
+    end
+
+  set_active(active: Boolean) do
+    is_active := active
+  end
+
+  show() do
+    print("Account ")
+    print(account_number)
+    print(" balance: ")
+    print(balance)
+  end
+
+invariant
+  non_negative_balance: balance >= 0.0
 end
 
-class BankAccount
+class Savings
 inherit
   Account
 feature
   interest_rate: Real
+
 create
-  make(initial_balance: Decimal, number: String) do
-create Account.make(initial_balance, number)
-interest_rate := 0.05
-end
+  make(b: Decimal, number: String, i: Real) do
+    Account.make(b, number)
+    interest_rate := i
+  end
 
 feature
-  -- Deposit money into account
-  deposit(amount: Decimal)
-  require
-    positive_amount: amount > 0
-    account_active: is_active
-  do
-    balance := balance + amount
-    print("Deposited:", amount)
-    print("New balance:", balance)
-    ensure
-      balance_increased: balance = old balance + amount
-      still_active: is_active
-  end
-    
-  -- Withdraw money from account
-  withdraw(amount: Decimal)
-  require
-    sufficient_funds: balance >= amount
-    positive_amount: amount > 0
-    account_active: is_active
-  do
-    balance := balance - amount
-    print("Withdrawn:", amount)
-    print("New balance:", balance)
-    ensure
-      balance_decreased: balance = old balance - amount
-      non_negative: balance >= 0
-  end
-      
-  -- Apply interest to account
   apply_interest() do
-    let interest := balance * interest_rate
-    balance := balance + interest
-    print("Interest applied:", interest)
-  end
-      
-  -- Calculate compound interest over time
-  project_balance(years: Decimal)
-  require
-    positive_years: years > 0
-  do
-    from
-      let year := 1
-      let projected := balance
-      invariant
-        year_positive: year > 0
-        projected_positive: projected > 0
-      variant
-        years - year + 1
-      until
-        year > years
-      do
-        projected := projected * (1 + interest_rate)
-        print("Year", year, ":", projected)
-        year := year + 1
-      end
-    end
-
-    -- Check if account needs attention
-    status() do
-      if balance < 100 then
-        print("Low balance warning!")
-      elseif balance > 10000 then
-        print("High balance - consider investment")
-      else
-        print("Account status: Normal")
-      end
-    end
+    balance := balance + (balance * interest_rate)
   end
 
-  -- Activate or deactivate account
-  set_active(active: Boolean) do
-    let is_active := active
-    if active then
-      print("Account activated")
-    else
-      print("Account deactivated")
+  withdraw(amount: Decimal)
+    require
+      active_account: is_active
+    do
+      -- Base class feature access (similar to Java super.member)
+      Account.withdraw(amount)
     end
+
+  show() do
+    print("Savings account: ")
+    print(account_number)
+    print(" base balance via Account.balance = ")
+    print(Account.balance)
+    print(", rate = ")
+    print(interest_rate)
   end
 
 invariant
-  non_negative_balance: balance >= 0
-  valid_interest_rate: interest_rate >= 0 and interest_rate <= 1
-end
-
-class SavingsAccount
-  inherit
-    BankAccount
-    end
-  feature
-    minimum_balance: Decimal
-
-  create
-    make(initial: Decimal, number: String, min_balance: Decimal) do
-      create BankAccount.make(initial, number)
-      minimum_balance := min_balance
-      BankAccount.interest_rate := 0.07
-    end
-
-  feature
-    withdraw(amount: Decimal)
-      require
-        maintain_minimum: balance - amount >= minimum_balance
-      do
-        balance := balance - amount
-      ensure
-        above_minimum: balance >= minimum_balance
-      end
-
-  invariant
-    minimum_maintained: balance >= minimum_balance
+  valid_rate: interest_rate >= 0.0 and interest_rate <= 1.0
 end

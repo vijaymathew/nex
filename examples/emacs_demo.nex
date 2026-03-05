@@ -63,28 +63,24 @@ class DemoClass
     valid_rate: rate >= 0 and rate <= 1
 end
 
--- Inheritance with rename and redefine
+-- Inheritance and base feature access
 class ExtendedDemo
   inherit
     DemoClass
-      rename
-        process as parent_process
-      redefine
-        count_down
-      end
   feature
     extra_field: String
 
   create
     make(initial: Integer) do
-      let count := initial
-      let name := "demo"
-      let active := true
+      count := initial
+      name := "demo"
+      active := true
     end
 
   feature
     count_down(from_n: Integer) do
       print("Extended count down")
+      DemoClass.count_down(from_n)
       -- Now counting
       let i := from_n
     end
