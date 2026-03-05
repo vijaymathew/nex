@@ -112,11 +112,11 @@ The REPL supports:
 - ✓ Persistent variables across inputs
 - ✓ Multi-line class definitions (automatic detection)
 - ✓ All Nex language features (loops, conditionals, contracts)
-- ✓ Local AI generation with Ollama (`:ai`, `:ai-model`, `:ai-dry`)
+- ✓ AI generation via OpenAI/Anthropic (`:ai`, `:ai-provider`, `:ai-model`, `:ai-dry`)
 - ✓ Helpful commands (`:help`, `:classes`, `:vars`, `:clear`)
 
 See [examples/demo_repl.md](examples/demo_repl.md) for more examples.
-See [docs/AI_REPL.md](docs/AI_REPL.md) for local model setup and `:ai` usage.
+See [docs/AI_REPL.md](docs/AI_REPL.md) for API setup and `:ai` usage.
 
 ### Browser Web IDE
 
@@ -573,7 +573,7 @@ nex/
 
 - **[Syntax on a Postcard](docs/SYNTAX.md)** - The entire language at a glance
 - **[Web IDE Guide](docs/WEB_IDE.md)** - Start and use the browser-based Nex IDE
-- **[AI REPL (Local Ollama)](docs/AI_REPL.md)** - Generate Nex code from local models via `:ai`
+- **[AI REPL (OpenAI/Anthropic)](docs/AI_REPL.md)** - Generate Nex code via `:ai`
 - **[Project Structure](docs/PROJECT_STRUCTURE.md)** - Detailed project organization
 - **[Type System](docs/TYPES.md)** - Basic types and default initialization
 - **[Generic Types](docs/GENERICS.md)** - Parameterized classes with constraints

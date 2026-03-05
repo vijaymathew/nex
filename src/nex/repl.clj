@@ -4,7 +4,8 @@
             [nex.interpreter :as interp]
             [nex.typechecker :as tc]
             [clojure.string :as str]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [clojure.data.json :as json])
   (:import [org.jline.reader LineReaderBuilder LineReader LineReader$Option Completer Candidate]
            [org.jline.reader.impl DefaultParser]
            [org.jline.terminal TerminalBuilder]
@@ -24,8 +25,29 @@
 (defonce ^:dynamic *repl-context* nil)
 (defonce ^:dynamic *type-checking-enabled* (atom false))
 (defonce ^:dynamic *repl-var-types* (atom {}))
-(defonce ^:dynamic *ai-model* (atom (or (System/getenv "NEX_OLLAMA_MODEL") "qwen2.5-coder:7b")))
 (defonce ^:dynamic *ai-dry-run* (atom false))
+
+(defn- normalize-ai-provider [s]
+  (let [p (some-> s str str/trim str/lower-case)]
+    (when (contains? #{"openai" "anthropic"} p)
+      p)))
+
+(defn- pick-default-ai-provider []
+  (or (normalize-ai-provider (System/getenv "NEX_AI_PROVIDER"))
+      (when (System/getenv "OPENAI_API_KEY") "openai")
+      (when (System/getenv "ANTHROPIC_API_KEY") "anthropic")
+      "openai"))
+
+(defn- default-ai-model-for-provider [provider]
+  (let [provider (or (normalize-ai-provider provider) "openai")]
+    (or (System/getenv "NEX_AI_MODEL")
+        (case provider
+          "openai" (or (System/getenv "NEX_OPENAI_MODEL") "gpt-4o-mini")
+          "anthropic" (or (System/getenv "NEX_ANTHROPIC_MODEL") "claude-3-5-sonnet-latest")
+          "gpt-4o-mini"))))
+
+(defonce ^:dynamic *ai-provider* (atom (pick-default-ai-provider)))
+(defonce ^:dynamic *ai-model* (atom (default-ai-model-for-provider @*ai-provider*)))
 
 (def ai-reference-files
   ["docs/SYNTAX.md"
@@ -77,8 +99,13 @@
         ordered (concat ["docs/SYNTAX.md" "examples/sample.nex"] picked)]
     (vec (distinct (filter (set ai-reference-files) ordered)))))
 
-(defn- ollama-timeout-seconds []
-  (let [raw (System/getenv "NEX_OLLAMA_TIMEOUT_SECONDS")
+(defn- ai-timeout-seconds []
+  (let [provider (or (normalize-ai-provider @*ai-provider*) "openai")
+        raw (or (System/getenv "NEX_AI_TIMEOUT_SECONDS")
+                (case provider
+                  "openai" (System/getenv "NEX_OPENAI_TIMEOUT_SECONDS")
+                  "anthropic" (System/getenv "NEX_ANTHROPIC_TIMEOUT_SECONDS")
+                  nil))
         parsed (try
                  (Integer/parseInt (or raw ""))
                  (catch Exception _ nil))]
@@ -86,7 +113,16 @@
       (and parsed (>= parsed 30)) parsed
       :else 180)))
 
-(defn- build-ollama-system-prompt [prompt]
+(defn- ai-max-repairs []
+  (let [raw (System/getenv "NEX_AI_MAX_REPAIRS")
+        parsed (try
+                 (Integer/parseInt (or raw ""))
+                 (catch Exception _ nil))]
+    (cond
+      (and parsed (>= parsed 0) (<= parsed 8)) parsed
+      :else 3)))
+
+(defn- build-ai-system-prompt [prompt]
   (let [header (str
                 "You are a Nex language code generator.\n"
                 "Return only valid Nex code. Do not use markdown fences. Do not include explanations.\n"
@@ -96,9 +132,39 @@
                 "When asked to modify code, preserve style and only change what is needed.\n")
         selected (select-reference-files prompt)
         refs (->> selected
-                  (map #(load-reference-snippet % (if (= % "docs/SYNTAX.md") 9000 2500)))
+                  (map #(load-reference-snippet % (if (= % "docs/SYNTAX.md") 6000 1400)))
                   (str/join "\n\n"))]
     (str header "\nReference material from this Nex repository:\n\n" refs)))
+
+(defn- wait-with-progress
+  "Wait for a future while printing periodic progress so :ai doesn't look hung."
+  [fut timeout-seconds]
+  (let [hard-cap-ms (* 1000 (+ timeout-seconds 30))
+        start-ms (System/currentTimeMillis)]
+    (loop [last-progress-sec -1]
+      (if (realized? fut)
+        @fut
+        (let [elapsed-ms (- (System/currentTimeMillis) start-ms)
+              elapsed-sec (quot elapsed-ms 1000)]
+          (cond
+            (> elapsed-ms hard-cap-ms)
+            (do
+                              (future-cancel fut)
+                              (throw (ex-info (str "AI generation exceeded local wait limit (" (+ timeout-seconds 30) "s). "
+                                   "Try a smaller prompt or increase NEX_AI_TIMEOUT_SECONDS.")
+                              {:elapsed-seconds elapsed-sec
+                               :timeout-seconds timeout-seconds})))
+
+            (and (>= elapsed-sec 5) (not= elapsed-sec last-progress-sec) (zero? (mod elapsed-sec 5)))
+            (do
+              (println (str "Still generating... " elapsed-sec "s elapsed"))
+              (Thread/sleep 250)
+              (recur elapsed-sec))
+
+            :else
+            (do
+              (Thread/sleep 250)
+              (recur last-progress-sec))))))))
 
 (def nex-keywords
   ["class" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
@@ -117,7 +183,7 @@
 
 (def nex-repl-commands
   [":help" ":quit" ":exit" ":clear" ":reset" ":classes" ":vars"
-   ":typecheck" ":load" ":ai" ":ai-model" ":ai-dry"])
+   ":typecheck" ":load" ":ai" ":ai-provider" ":ai-model" ":ai-dry"])
 
 (defonce ^:dynamic *completer-ctx* (atom nil))
 
@@ -257,9 +323,11 @@
   (println "  :typecheck off    - Disable type checking (default)")
   (println "  :typecheck status - Show current type checking status")
   (println "  :load <path>      - Load and evaluate a .nex file")
-  (println "  :ai <prompt>      - Generate Nex code via local Ollama model")
-  (println "  :ai-model         - Show active Ollama model")
-  (println "  :ai-model <name>  - Set active Ollama model")
+  (println "  :ai <prompt>      - Generate Nex code via configured AI provider")
+  (println "  :ai-provider      - Show active AI provider (openai|anthropic)")
+  (println "  :ai-provider <p>  - Set provider for this REPL session")
+  (println "  :ai-model         - Show active AI model")
+  (println "  :ai-model <name>  - Set active AI model")
   (println "  :ai-dry on|off    - Preview generated code without executing")
   (println)
   (println "Navigation:")
@@ -358,32 +426,51 @@
               (println "Warning: expected a .nex file"))
             (eval-code ctx (slurp file))))))))
 
-(defn- ollama-host []
-  (or (System/getenv "NEX_OLLAMA_HOST")
-      "http://localhost:11434"))
+(defn- openai-base-url []
+  (or (System/getenv "NEX_OPENAI_BASE_URL")
+      "https://api.openai.com/v1"))
 
-(defn- json-escape [s]
-  (-> (str s)
-      (str/replace "\\" "\\\\")
-      (str/replace "\"" "\\\"")
-      (str/replace "\n" "\\n")
-      (str/replace "\r" "\\r")
-      (str/replace "\t" "\\t")))
+(defn- anthropic-base-url []
+  (or (System/getenv "NEX_ANTHROPIC_BASE_URL")
+      "https://api.anthropic.com"))
 
-(defn- json-unescape [s]
-  ;; Minimal unescape for Ollama response payloads.
-  (-> (str s)
-      (str/replace "\\\"" "\"")
-      (str/replace "\\n" "\n")
-      (str/replace "\\r" "\r")
-      (str/replace "\\t" "\t")
-      (str/replace "\\\\" "\\")))
+(defn- require-api-key! [provider]
+  (let [k (case provider
+            "openai" (System/getenv "OPENAI_API_KEY")
+            "anthropic" (System/getenv "ANTHROPIC_API_KEY")
+            nil)]
+    (when (str/blank? k)
+      (throw (ex-info (case provider
+                        "openai" "Missing OPENAI_API_KEY. Set it before starting the REPL."
+                        "anthropic" "Missing ANTHROPIC_API_KEY. Set it before starting the REPL."
+                        "Missing AI API key.")
+                      {:provider provider})))
+    k))
 
-(defn- json-string-field [k body]
-  (when-let [[_ raw] (re-find (re-pattern (str "\"" (java.util.regex.Pattern/quote k)
-                                               "\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\""))
-                              body)]
-    (json-unescape raw)))
+(defn- parse-json-body [body]
+  (try
+    (json/read-str (or body "{}") :key-fn keyword)
+    (catch Exception _
+      {})))
+
+(defn- http-post-json
+  [url headers payload timeout-seconds]
+  (let [client (-> (HttpClient/newBuilder)
+                   (.connectTimeout (Duration/ofSeconds 10))
+                   .build)
+        request-builder (-> (HttpRequest/newBuilder)
+                            (.uri (URI/create url))
+                            (.timeout (Duration/ofSeconds timeout-seconds))
+                            (.POST (HttpRequest$BodyPublishers/ofString (json/write-str payload))))
+        request-builder (reduce (fn [b [k v]] (.header b k v))
+                                request-builder
+                                headers)
+        request (.build request-builder)
+        response (.send client request (HttpResponse$BodyHandlers/ofString))
+        status (.statusCode response)
+        body-str (.body response)
+        body (parse-json-body body-str)]
+    {:status status :body body :raw-body body-str}))
 
 (defn- strip-code-fences [s]
   (let [t (str/trim (or s ""))]
@@ -394,47 +481,86 @@
           str/trim)
       t)))
 
-(defn- ollama-generate
+(defn- openai-extract-text [body]
+  (let [content (get-in body [:choices 0 :message :content])]
+    (cond
+      (string? content) content
+      (vector? content) (->> content
+                             (map #(or (:text %) ""))
+                             (str/join ""))
+      :else nil)))
+
+(defn- anthropic-extract-text [body]
+  (->> (get body :content)
+       (filter map?)
+       (map #(or (:text %) ""))
+       (str/join "")))
+
+(defn- openai-generate
   [prompt]
-  (let [host (str/replace (ollama-host) #"/+$" "")
-        url (str host "/api/generate")
-        timeout-seconds (ollama-timeout-seconds)
-        payload (str "{"
-                     "\"model\":\"" (json-escape @*ai-model*) "\","
-                     "\"system\":\"" (json-escape (build-ollama-system-prompt prompt)) "\","
-                     "\"prompt\":\"" (json-escape prompt) "\","
-                     "\"stream\":false,"
-                     "\"options\":{\"temperature\":0.2}"
-                     "}")
-        client (-> (HttpClient/newBuilder)
-                   (.connectTimeout (Duration/ofSeconds 10))
-                   .build)
-        request (-> (HttpRequest/newBuilder)
-                    (.uri (URI/create url))
-                    (.timeout (Duration/ofSeconds timeout-seconds))
-                    (.header "Content-Type" "application/json")
-                    (.POST (HttpRequest$BodyPublishers/ofString payload))
-                    .build)]
+  (let [timeout-seconds (ai-timeout-seconds)
+        key (require-api-key! "openai")
+        url (str (str/replace (openai-base-url) #"/+$" "") "/chat/completions")
+        payload {:model @*ai-model*
+                 :messages [{:role "system" :content (build-ai-system-prompt prompt)}
+                            {:role "user" :content prompt}]
+                 :temperature 0.2}
+        {:keys [status body raw-body]} (http-post-json url
+                                                       {"Content-Type" "application/json"
+                                                        "Authorization" (str "Bearer " key)}
+                                                       payload
+                                                       timeout-seconds)]
+    (if (= 200 status)
+      (if-let [generated (some-> (openai-extract-text body) strip-code-fences not-empty)]
+        generated
+        (throw (ex-info "OpenAI returned no response text." {:body body :raw-body raw-body})))
+      (throw (ex-info (str "OpenAI request failed (" status "). "
+                           (or (get-in body [:error :message]) raw-body))
+                      {:status status :body body :raw-body raw-body})))))
+
+(defn- anthropic-generate
+  [prompt]
+  (let [timeout-seconds (ai-timeout-seconds)
+        key (require-api-key! "anthropic")
+        url (str (str/replace (anthropic-base-url) #"/+$" "") "/v1/messages")
+        payload {:model @*ai-model*
+                 :max_tokens 4096
+                 :temperature 0.2
+                 :system (build-ai-system-prompt prompt)
+                 :messages [{:role "user" :content prompt}]}
+        {:keys [status body raw-body]} (http-post-json url
+                                                       {"Content-Type" "application/json"
+                                                        "x-api-key" key
+                                                        "anthropic-version" "2023-06-01"}
+                                                       payload
+                                                       timeout-seconds)]
+    (if (= 200 status)
+      (if-let [generated (some-> (anthropic-extract-text body) strip-code-fences not-empty)]
+        generated
+        (throw (ex-info "Anthropic returned no response text." {:body body :raw-body raw-body})))
+      (throw (ex-info (str "Anthropic request failed (" status "). "
+                           (or (get-in body [:error :message]) raw-body))
+                      {:status status :body body :raw-body raw-body})))))
+
+(defn- ai-generate
+  [prompt]
+  (let [provider (or (normalize-ai-provider @*ai-provider*) "openai")]
     (try
-      (let [resp (.send client request (HttpResponse$BodyHandlers/ofString))
-            status (.statusCode resp)
-            body (.body resp)]
-        (if (= 200 status)
-          (if-let [generated (json-string-field "response" body)]
-            (strip-code-fences generated)
-            (throw (ex-info "Ollama returned no response text." {:body body})))
-          (throw (ex-info (str "Ollama request failed (" status "). "
-                               (or (json-string-field "error" body) body))
-                          {:status status :body body}))))
+      (case provider
+        "openai" (openai-generate prompt)
+        "anthropic" (anthropic-generate prompt)
+        (throw (ex-info (str "Unsupported AI provider: " provider)
+                        {:provider provider})))
       (catch ConnectException _
-        (throw (ex-info "Cannot connect to Ollama at http://localhost:11434. Start Ollama and retry."
-                        {:host host})))
+        (throw (ex-info (str "Cannot connect to " provider " API. Check network connectivity and base URL.")
+                        {:provider provider})))
       (catch HttpTimeoutException _
-        (throw (ex-info (str "Ollama request timed out after " timeout-seconds "s. "
-                             "Try a smaller prompt, a faster model, or set NEX_OLLAMA_TIMEOUT_SECONDS to a higher value.")
-                        {:host host :timeout-seconds timeout-seconds})))
+        (throw (ex-info (str provider " request timed out after " (ai-timeout-seconds) "s. "
+                             "Try a smaller prompt or increase NEX_AI_TIMEOUT_SECONDS.")
+                        {:provider provider :timeout-seconds (ai-timeout-seconds)})))
       (catch Exception e
-        (throw (ex-info (or (.getMessage e) "Ollama request failed.") {:cause e}))))))
+        (throw (ex-info (or (.getMessage e) (str provider " request failed."))
+                        {:provider provider :cause e})))))) 
 
 (defn- build-augmented-ast
   [ctx ast]
@@ -474,24 +600,42 @@
        :kind :other
        :message (or (.getMessage e) (str e))})))
 
+(defn- build-repair-prompt
+  [user-prompt prev-code validation attempt]
+  (str
+   "You generated Nex code that failed validation.\n"
+   "Fix it and return only corrected Nex code with no markdown or explanations.\n"
+   "Attempt: " attempt "\n\n"
+   "Original user request:\n" user-prompt "\n\n"
+   "Validation error (" (name (:kind validation)) "):\n" (:message validation) "\n\n"
+   "Previous code:\n" prev-code))
+
 (defn- ai-generate-code
   [ctx prompt]
-  (let [first-pass (ollama-generate prompt)
-        first-validation (validate-generated-code ctx first-pass)]
+  (let [max-repairs (ai-max-repairs)
+        first-code (ai-generate prompt)
+        first-validation (validate-generated-code ctx first-code)]
+    (println first-code)
     (if (:ok? first-validation)
-      {:code first-pass :repaired? false}
-      (let [repair-prompt (str "Fix the Nex code below so it parses and type-checks.\n"
-                               "Return only corrected Nex code.\n"
-                               "Error:\n" (:message first-validation) "\n\n"
-                               "Code:\n" first-pass)
-            second-pass (ollama-generate repair-prompt)
-            second-validation (validate-generated-code ctx second-pass)]
-        (if (:ok? second-validation)
-          {:code second-pass :repaired? true}
-          (throw (ex-info (str "AI output could not be validated.\n"
-                               "First error:\n" (:message first-validation) "\n\n"
-                               "Second error:\n" (:message second-validation))
-                          {:first first-validation :second second-validation})))))))
+      {:code first-code :repair-count 0}
+      (loop [attempt 1
+             prev-code first-code
+             last-validation first-validation]
+        (if (> attempt max-repairs)
+          (throw (ex-info (str "AI output could not be validated after "
+                               (inc max-repairs) " attempt(s).\n"
+                               "Last error:\n" (:message last-validation))
+                          {:attempts (inc max-repairs)
+                           :last last-validation}))
+          (do
+            (println (str "Repair attempt " attempt "/" max-repairs "..."))
+            (let [repair-prompt (build-repair-prompt prompt prev-code last-validation attempt)
+                  next-code (ai-generate repair-prompt)
+                  next-validation (validate-generated-code ctx next-code)]
+              (println next-code)              
+              (if (:ok? next-validation)
+                {:code next-code :repair-count attempt}
+                (recur (inc attempt) next-code next-validation)))))))))
 
 (defn- run-ai-command
   [ctx raw-prompt]
@@ -501,11 +645,14 @@
         (println "Usage: :ai <prompt>")
         ctx)
       (try
+        (println (str "AI provider: " @*ai-provider*))
         (println (str "AI model: " @*ai-model*))
         (println "Generating Nex code...")
-        (let [{:keys [code repaired?]} (ai-generate-code ctx prompt)]
-          (when repaired?
-            (println "Applied one repair pass based on parse/type errors."))
+        (let [timeout-seconds (ai-timeout-seconds)
+              task (future (ai-generate-code ctx prompt))
+              {:keys [code repair-count]} (wait-with-progress task timeout-seconds)]
+          (when (pos? repair-count)
+            (println (str "Applied " repair-count " repair pass(es) based on parse/type errors.")))
           (println "Generated code:")
           (println "-----")
           (println code)
@@ -570,8 +717,28 @@
         (load-file-into-repl ctx path))
 
       ;; AI model commands
+      (= input-lower ":ai-provider")
+      (do
+        (println (str "Active AI provider: " @*ai-provider*))
+        ctx)
+
+      (str/starts-with? input-lower ":ai-provider ")
+      (let [raw-provider (str/trim (subs input (count ":ai-provider")))
+            provider (normalize-ai-provider raw-provider)]
+        (if (nil? provider)
+          (do
+            (println "Usage: :ai-provider openai|anthropic")
+            ctx)
+          (do
+            (reset! *ai-provider* provider)
+            (reset! *ai-model* (default-ai-model-for-provider provider))
+            (println (str "AI provider set to: " provider))
+            (println (str "AI model set to: " @*ai-model*))
+            ctx)))
+
       (= input-lower ":ai-model")
       (do
+        (println (str "AI provider: " @*ai-provider*))
         (println (str "Active AI model: " @*ai-model*))
         ctx)
 

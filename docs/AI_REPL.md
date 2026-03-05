@@ -1,44 +1,58 @@
-# AI REPL Integration (Local Ollama)
+# AI REPL Integration (OpenAI and Anthropic)
 
-Nex REPL can generate Nex code using a local Ollama model, without fine-tuning.
+Nex REPL can generate Nex code via OpenAI or Anthropic APIs.
 
 ## Requirements
 
-1. Install and run Ollama locally.
-2. Pull at least one model (example):
+Set API keys before starting the REPL:
 
-```bash
-ollama pull qwen2.5-coder:7b
-```
+- OpenAI: `OPENAI_API_KEY`
+- Anthropic: `ANTHROPIC_API_KEY`
 
-3. Start Ollama server (if not already running):
-
-```bash
-ollama serve
-```
-
-Default endpoint used by Nex REPL: `http://localhost:11434`.
+You can set one or both keys.
 
 ## Optional Environment Variables
 
-- `NEX_OLLAMA_MODEL`  
-  Default model used by `:ai` if `:ai-model` was not set in REPL.  
-  Default fallback: `qwen2.5-coder:7b`
+- `NEX_AI_PROVIDER`  
+  Default AI provider at REPL startup. Values: `openai`, `anthropic`.  
+  If omitted, Nex auto-selects: `openai` if `OPENAI_API_KEY` is set, else `anthropic` if `ANTHROPIC_API_KEY` is set.
 
-- `NEX_OLLAMA_HOST`  
-  Override Ollama host URL.  
-  Default: `http://localhost:11434`
+- `NEX_AI_MODEL`  
+  Overrides model for both providers.
 
-- `NEX_OLLAMA_TIMEOUT_SECONDS`  
+- `NEX_OPENAI_MODEL`  
+  Default model when provider is `openai`.  
+  Default fallback: `gpt-4o-mini`
+
+- `NEX_ANTHROPIC_MODEL`  
+  Default model when provider is `anthropic`.  
+  Default fallback: `claude-3-5-sonnet-latest`
+
+- `NEX_AI_TIMEOUT_SECONDS`  
   Request timeout for `:ai` calls (minimum honored value is 30).  
   Default: `180`
+
+- `NEX_AI_MAX_REPAIRS`  
+  Maximum number of repair retries after the first generated output fails parse/type validation.  
+  Range: `0..8`, default: `3`
+
+- `NEX_OPENAI_TIMEOUT_SECONDS` / `NEX_ANTHROPIC_TIMEOUT_SECONDS`  
+  Provider-specific timeout override when `NEX_AI_TIMEOUT_SECONDS` is not set.
+
+- `NEX_OPENAI_BASE_URL`  
+  Override OpenAI base URL. Default: `https://api.openai.com/v1`
+
+- `NEX_ANTHROPIC_BASE_URL`  
+  Override Anthropic base URL. Default: `https://api.anthropic.com`
 
 Example:
 
 ```bash
-export NEX_OLLAMA_MODEL=qwen2.5-coder:7b
-export NEX_OLLAMA_HOST=http://localhost:11434
-export NEX_OLLAMA_TIMEOUT_SECONDS=240
+export OPENAI_API_KEY=...
+export ANTHROPIC_API_KEY=...
+export NEX_AI_PROVIDER=openai
+export NEX_OPENAI_MODEL=gpt-4o-mini
+export NEX_AI_TIMEOUT_SECONDS=240
 ```
 
 ## REPL Commands
@@ -46,11 +60,17 @@ export NEX_OLLAMA_TIMEOUT_SECONDS=240
 - `:ai <prompt>`  
   Generate Nex code from your prompt. By default, generated code is executed.
 
+- `:ai-provider`  
+  Show active provider.
+
+- `:ai-provider <openai|anthropic>`  
+  Set active provider for current REPL session.
+
 - `:ai-model`  
   Show active model.
 
 - `:ai-model <model-name>`  
-  Set active model for the current REPL session.
+  Set active model for current REPL session.
 
 - `:ai-dry`  
   Show dry-run status.
@@ -60,30 +80,32 @@ export NEX_OLLAMA_TIMEOUT_SECONDS=240
 
 ## How It Works
 
-1. REPL sends your prompt to Ollama `POST /api/generate` with a Nex-focused system prompt.
-   The system prompt is built dynamically from repository references, including:
+1. REPL sends your prompt to the selected provider with a Nex-focused system prompt.
+2. The system prompt is built dynamically from repository references, including:
    - `docs/SYNTAX.md`
    - selected `.nex` examples under `examples/`
-2. REPL strips markdown fences if present.
-3. REPL validates generated code:
+3. REPL strips markdown fences if present.
+4. REPL validates generated code:
    - parse validation always
    - typecheck validation when `:typecheck on`
-4. If validation fails, REPL runs one repair pass by giving the parse/type errors back to the model.
-5. If valid:
+5. If validation fails, REPL runs one repair pass with parse/type errors.
+6. If valid:
    - prints generated code
    - executes it unless `:ai-dry on`
 
 ## Example Session
 
 ```text
-nex> :ai-model qwen2.5-coder:7b
-AI model set to: qwen2.5-coder:7b
+nex> :ai-provider openai
+AI provider set to: openai
+AI model set to: gpt-4o-mini
 
 nex> :typecheck on
 Type checking enabled. Code will be validated before execution.
 
 nex> :ai write a Stack class for Integer with push, pop and top
-AI model: qwen2.5-coder:7b
+AI provider: openai
+AI model: gpt-4o-mini
 Generating Nex code...
 Generated code:
 -----
@@ -96,11 +118,11 @@ Class(es) registered: Stack
 
 ## Troubleshooting
 
-- `Cannot connect to Ollama...`  
-  Start Ollama (`ollama serve`) and confirm host/port.
+- `Missing OPENAI_API_KEY` / `Missing ANTHROPIC_API_KEY`  
+  Export the required key before starting REPL.
 
-- `model not found` / request failure  
-  Pull model first (`ollama pull <name>`) and retry.
+- `request timed out`  
+  Use a smaller prompt/model, or increase `NEX_AI_TIMEOUT_SECONDS`.
 
-- Generated code fails repeatedly  
-  Use a more constrained prompt (explicit class names, field types, method signatures), or enable `:typecheck on` and keep prompts small.
+- `request failed (...)`  
+  Check model name, account access, network, and base URL overrides.
