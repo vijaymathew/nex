@@ -5,7 +5,7 @@
 class Box [T]
   create
     make(initial: T) do
-      let value := initial
+      value := initial
     end
 
   feature
@@ -24,7 +24,7 @@ end
 class Stack [G]
   create
     make() do
-      let count := 0
+      count := 0
     end
 
   feature
@@ -89,8 +89,8 @@ end
 class Pair [F, S]
   create
     make(first_val: F, second_val: S) do
-      let first := first_val
-      let second := second_val
+      first := first_val
+      second := second_val
     end
 
   feature
