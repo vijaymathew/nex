@@ -1,6 +1,7 @@
 (ns nex.interpreter
   (:require [clojure.string :as str]
             #?(:clj [nex.parser :as parser])
+            #?(:clj [clojure.data.json :as json])
             #?(:clj [nex.turtle :as turtle]
                :cljs [nex.turtle-browser :as turtle])))
 
@@ -24,6 +25,7 @@
 (defn nex-array-reverse [arr] #?(:clj (java.util.ArrayList. (.reversed arr)) :cljs (js/Array.from (.reverse (.slice arr)))))
 (defn nex-array-sort [arr] #?(:clj (.sort arr nil) :cljs (.sort arr)))
 (defn nex-array-slice [arr start end] #?(:clj (.subList arr start end) :cljs (.slice arr start end)))
+(defn nex-array-str [arr] (str "[" (str/join ", " arr) "]"))
 
 ;; Map helpers
 (defn nex-map [] #?(:clj (java.util.HashMap.) :cljs (js/Map.)))
@@ -39,6 +41,7 @@
 (defn nex-map-keys [m] #?(:clj (vec (.keySet m)) :cljs (vec (es6-iterator-seq (.keys m)))))
 (defn nex-map-values [m] #?(:clj (vec (.values m)) :cljs (vec (es6-iterator-seq (.values m)))))
 (defn nex-map-remove [m key] #?(:clj (.remove m key) :cljs (.delete m key)))
+(defn nex-map-str [m] #?(:clj (json/write-str m :indent true) :cljs (->> m (js/Object.fromEntries) (js/JSON.stringify))))
 
 ;; Math helpers
 (defn nex-abs [n] #?(:clj (Math/abs (double n)) :cljs (js/Math.abs n)))
@@ -495,6 +498,12 @@
     "nil"
 
     ;; Collections
+    (nex-map? value)
+    (nex-map-str value)
+
+    (nex-array? value)
+    (nex-array-str value)
+
     (coll? value)
     (pr-str value)
 
@@ -729,8 +738,8 @@
    :Array
    {"get"         (fn [arr index & _] (nex-array-get arr index))
     "add"         (fn [arr value & _] (nex-array-add arr value))
-    "at"          (fn [arr index value & _] (nex-array-add-at arr index value))
-    "set"         (fn [arr index value & _] (nex-array-set arr index value))
+    "add_at"      (fn [arr index value & _] (nex-array-add-at arr index value))
+    "put"         (fn [arr index value & _] (nex-array-set arr index value))
     "length"      (fn [arr & _] (nex-array-size arr))
     "is_empty"    (fn [arr & _] (nex-array-empty? arr))
     "contains"    (fn [arr elem & _] (nex-array-contains arr elem))
@@ -757,7 +766,7 @@
                       (if (nil? v)
                         default
                         v)))
-    "at"           (fn [m key val & _] (nex-map-put m key val))
+    "put"          (fn [m key val & _] (nex-map-put m key val))
     "size"         (fn [m & _] (nex-map-size m))
     "is_empty"     (fn [m & _] (nex-map-empty? m))
     "contains_key" (fn [m key & _] (nex-map-contains-key m key))

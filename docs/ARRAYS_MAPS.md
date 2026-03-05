@@ -55,6 +55,8 @@ class Demo
     demo() do
       let numbers := [1, 2, 3, 4, 5]
       let names := ["Alice", "Bob", "Charlie"]
+	  across numbers as n do print(n) end
+	  across names as n do print(n) end
       let empty := []
     end
 end
@@ -62,7 +64,7 @@ end
 
 ### Accessing Elements
 
-Use the `at` method to read elements and `set` method to update them:
+Use the `get` method to read elements and `put` method to update them:
 
 ```nex
 class Demo
@@ -70,14 +72,21 @@ class Demo
     items: Array [Integer]
 
     demo() do
-      let first := items.at(0)              -- Get first element
-      let second := items.at(1)             -- Get second element
-      let last := items.at(items.length - 1) -- Last element
+      let first := items.get(0)              -- Get first element
+      let second := items.get(1)             -- Get second element
+      let last := items.get(items.length - 1) -- Last element
+	  print(first + second + last)
 
       -- Update elements (returns new array)
-      items := items.set(0, 99)             -- Set first element to 99
-      items := items.set(1, 77)             -- Set second element to 77
+      items.put(0, 99)             -- Set first element to 99
+      items.put(1, 77)             -- Set second element to 77
+	  print(items)
     end
+
+	create
+	  make(arr: Array[Integer]) do
+	    items := arr
+	  end
 end
 ```
 
@@ -144,13 +153,20 @@ class Demo
     prices: Map [String, Decimal]
 
     demo() do
-      let applePrice := prices.at("apple")
-      let orangePrice := prices.at("orange")
+      let applePrice := prices.get("apple")
+      let orangePrice := prices.get("orange")
+	  print(applePrice + orangePrice)
 
       -- Update entries (returns new map)
-      prices := prices.set("apple", 1.99)
-      prices := prices.set("banana", 0.59)
+      prices.put("apple", 1.99)
+      prices.put("banana", 0.59)
+	  print(prices)
     end
+
+	create
+	  make(prices: Map[String, Decimal]) do
+	    this.prices := prices
+	  end
 end
 ```
 
@@ -162,12 +178,12 @@ Both arrays and maps use method calls for element access: `at` for reading and `
 
 ```nex
 let items: Array [String] := ["a", "b", "c"]
-let x := items.at(0)        -- Access by index
-let y := items.at(i)        -- Variable index
+let x := items.get(0)        -- Access by index
+let y := items.get(i)        -- Variable index
 
 -- Update array (returns new array)
-items := items.set(0, "z")  -- Set first element
-items := items.set(i, "x")  -- Set element at index i
+items := items.put(0, "z")  -- Set first element
+items := items.put(i, "x")  -- Set element at index i
 ```
 
 **Generated Java:**
@@ -183,12 +199,12 @@ items.set(i, "x");
 
 ```nex
 let data: Map [String, Integer] := {"a": 1, "b": 2}
-let x := data.at("a")          -- Access by key
-let y := data.at(key)          -- Variable key
+let x := data.get("a")          -- Access by key
+let y := data.get(key)          -- Variable key
 
 -- Update map (returns new map)
-data := data.set("a", 99)      -- Set value for key "a"
-data := data.set(key, value)   -- Set value for variable key
+data.put("a", 99)      -- Set value for key "a"
+data.put(key, value)   -- Set value for variable key
 ```
 
 **Generated Java:**
@@ -210,7 +226,7 @@ class Grid
     matrix: Array [Array [Integer]]
 
     demo() do
-      let cell := matrix.at(0).at(1)  -- Access nested array
+      let cell := matrix.get(0).get(1)  -- Access nested array
     end
 end
 ```
@@ -279,10 +295,10 @@ ages = new HashMap<>() {{ put("Alice", 30); put("Bob", 25); }};
 
 **Nex:**
 ```nex
-let x := arr.at(0)
-let y := map.at("key")
-arr := arr.set(0, 99)
-map := map.set("key", 42)
+let x := arr.get(0)
+let y := map.get("key")
+arr.put(0, 99)
+map.put("key", 42)
 ```
 
 **Java:**
@@ -309,15 +325,15 @@ class NumberList
 
   feature
     get_first() do
-      print(numbers.at(0))
+      print(numbers.get(0))
     end
 
     get_at(index: Integer) do
-      print(numbers.at(index))
+      print(numbers.get(index))
     end
 
     set_at(index: Integer, value: Integer) do
-      numbers := numbers.set(index, value)
+      numbers.put(index, value)
     end
 end
 ```
@@ -359,11 +375,11 @@ class PriceList
 
   feature
     get_price(item: String) do
-      print(prices.at(item))
+      print(prices.get(item))
     end
 
     update_price(item: String, new_price: Decimal) do
-      prices := prices.set(item, new_price)
+      prices.put(item, new_price)
     end
 end
 ```
@@ -409,8 +425,8 @@ class Store
       until
         i >= items.length
       do
-        let item := items.at(i)
-        let price := prices.at(item)
+        let item := items.get(i)
+        let price := prices.get(item)
         print(item)
         print(": ")
         print(price)
@@ -434,13 +450,13 @@ class Grid
 
   feature
     get_cell(row, col: Integer) do
-      print(matrix.at(row).at(col))
+      print(matrix.get(row).get(col))
     end
 
     set_cell(row, col, value: Integer) do
-      let row_arr := matrix.at(row)
-      let updated_row := row_arr.set(col, value)
-      matrix := matrix.set(row, updated_row)
+      let row_arr := matrix.get(row)
+      let updated_row := row_arr.put(col, value)
+      matrix := matrix.put(row, updated_row)
     end
 end
 ```
@@ -462,12 +478,12 @@ class Categories
 
   feature
     get_category(name: String) do
-      let category := items.at(name)
+      let category := items.get(name)
       print(category)
     end
 
     get_item(category: String, index: Integer) do
-      print(items.at(category).at(index))
+      print(items.get(category).get(index))
     end
 end
 ```
@@ -494,15 +510,15 @@ class Classroom
 
   feature
     add_student(s: Student) do
-      students := students.append(s)
+      students := students.add(s)
     end
 
     get_grade(name: String) do
-      print(grades.at(name))
+      print(grades.get(name))
     end
 
     set_grade(name: String, grade: Integer) do
-      grades := grades.set(name, grade)
+      grades := grades.put(name, grade)
     end
 end
 ```
@@ -515,12 +531,12 @@ Arrays and maps can be used as method parameter types:
 class Processor
   feature
     process_list(items: Array [String]) do
-      let first := items.at(0)
+      let first := items.get(0)
       print(first)
     end
 
     process_map(data: Map [String, Integer]) do
-      let value := data.at("key")
+      let value := data.get("key")
       print(value)
     end
 end
@@ -535,12 +551,12 @@ class Demo
       let items: Array [String] := ["a", "b", "c"]
       let data: Map [String, Integer] := {"x": 1, "y": 2}
 
-      let x := items.at(0)
-      let y := data.at("x")
+      let x := items.get(0)
+      let y := data.get("x")
 
       -- Update collections
-      items := items.set(0, "z")
-      data := data.set("x", 99)
+      items.put(0, "z")
+      data.put("x", 99)
     end
 end
 ```
@@ -593,18 +609,18 @@ let lookup: Map [String, Array [Student]]
 
 ### Array Methods
 
-- `at(index)` - Get element at index
-- `set(index, value)` - Set element at index (returns new array)
+- `get(index)` - Get element at index
+- `put(index, value)` - Set element at index (returns new array)
 - `length` - Number of elements
-- `append(elem)` - Add element to end
+- `add(elem)` - Add element to end
 - `is_empty()` - Check if array is empty
 - `first()` - Get first element
 - `last()` - Get last element
 
 ### Map Methods
 
-- `at(key)` - Get value for key
-- `set(key, value)` - Set value for key (returns new map)
+- `get(key)` - Get value for key
+- `put(key, value)` - Set value for key (returns new map)
 - `size()` - Number of entries
 - `contains_key(key)` - Check if key exists
 - `keys()` - Get array of all keys
