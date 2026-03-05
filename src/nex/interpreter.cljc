@@ -386,6 +386,9 @@
 (declare get-all-fields)
 (declare eval-body-with-rescue)
 (declare lookup-constructor)
+(declare get-parent-classes)
+(declare combine-assertions)
+(declare combine-preconditions)
 
 ;;
 ;; Contract Checking
@@ -415,8 +418,25 @@
 (defn check-class-invariant
   "Check the class invariant for an object or class context."
   [ctx class-def]
-  (when-let [invariant-assertions (:invariant class-def)]
-    (check-assertions ctx invariant-assertions Class-invariant)))
+  (letfn [(collect-invariants [class-def seen]
+            (let [class-name (:name class-def)
+                  already-seen? (and class-name (contains? seen class-name))
+                  seen' (if class-name (conj seen class-name) seen)]
+              (if already-seen?
+                [[] seen]
+                (let [[parent-invariants seen'']
+                      (if-let [parents (get-parent-classes ctx class-def)]
+                        (reduce (fn [[acc seen-so-far] {parent-class-def :class-def}]
+                                  (let [[inv seen-next] (collect-invariants parent-class-def seen-so-far)]
+                                    [(into acc inv) seen-next]))
+                                [[] seen']
+                                parents)
+                        [[] seen'])
+                      local-invariants (or (:invariant class-def) [])]
+                  [(vec (concat parent-invariants local-invariants)) seen'']))))]
+    (let [[invariant-assertions _] (collect-invariants class-def #{})]
+      (when (seq invariant-assertions)
+        (check-assertions ctx invariant-assertions Class-invariant)))))
 
 ;;
 ;; Inheritance Support
@@ -449,7 +469,18 @@
   [ctx class-def method-name]
   ;; First look in the current class
   (if-let [method (lookup-method-in-class class-def method-name)]
-    {:method method :source-class class-def}
+    (let [base-lookup (when-let [parents (get-parent-classes ctx class-def)]
+                        (some (fn [parent-info]
+                                (lookup-method-with-inheritance ctx (:class-def parent-info) method-name))
+                              parents))
+          effective-require (combine-preconditions (:effective-require base-lookup)
+                                                   (:require method))
+          effective-ensure (combine-assertions (:effective-ensure base-lookup)
+                                               (:ensure method))]
+      {:method method
+       :source-class class-def
+       :effective-require effective-require
+       :effective-ensure effective-ensure})
     ;; If not found, search parent classes
     (when-let [parents (get-parent-classes ctx class-def)]
       (some (fn [parent-info]
@@ -468,6 +499,43 @@
   "Combine assertions from parent and child methods (for contracts)."
   [parent-assertions child-assertions]
   (vec (concat (or parent-assertions []) (or child-assertions []))))
+
+(defn assertions->condition
+  "Collapse a list of assertions into a single condition using logical AND."
+  [assertions]
+  (when (seq assertions)
+    (reduce (fn [acc {:keys [condition]}]
+              (if acc
+                {:type :binary
+                 :operator "and"
+                 :left acc
+                 :right condition}
+                condition))
+            nil
+            assertions)))
+
+(defn combine-preconditions
+  "Combine parent and child preconditions as:
+   (parent-require) OR (child-require)."
+  [parent-assertions child-assertions]
+  (let [parent-assertions (seq parent-assertions)
+        child-assertions (seq child-assertions)]
+    (cond
+      (and parent-assertions child-assertions)
+      [{:label "inherited_or_local_require"
+        :condition {:type :binary
+                    :operator "or"
+                    :left (assertions->condition parent-assertions)
+                    :right (assertions->condition child-assertions)}}]
+
+      parent-assertions
+      (vec parent-assertions)
+
+      child-assertions
+      (vec child-assertions)
+
+      :else
+      nil)))
 
 (defn nex-format-value
   "Format a value as-per Nex syntax rules."
@@ -1168,7 +1236,9 @@
                                   {:method method :params (mapv :name params)})))
                 (let [source-class (:source-class method-lookup)
                     all-fields (get-all-fields ctx class-def)
-                    has-postconditions? (seq (:ensure method-def))
+                    effective-require (:effective-require method-lookup)
+                    effective-ensure (:effective-ensure method-lookup)
+                    has-postconditions? (seq effective-ensure)
                     old-values (when has-postconditions? (:fields obj))]
                 (let [method-env (make-env (or (:closure-env obj) (:current-env ctx)))
                       param-names (set (map :name params))
@@ -1192,7 +1262,7 @@
                                  (assoc :current-class-name (:class-name obj))
                                  (assoc :old-values old-values)
                                  (assoc :modified-fields modified-fields))
-                      _ (when-let [require-assertions (:require method-def)]
+                      _ (when-let [require-assertions effective-require]
                           (check-assertions new-ctx require-assertions Precondition))
                       _ (if-let [rescue (:rescue method-def)]
                           (eval-body-with-rescue new-ctx (:body method-def) rescue)
@@ -1228,7 +1298,7 @@
                                    res
                                    nil)))]
                   (try
-                    (when-let [ensure-assertions (:ensure method-def)]
+                    (when-let [ensure-assertions effective-ensure]
                       (check-assertions new-ctx ensure-assertions Postcondition))
                     (check-class-invariant new-ctx class-def)
                     (when target-name
@@ -1742,12 +1812,11 @@
     ;; Check class invariant with object fields in scope
     (if class-def
       (do
-        (when-let [invariant (:invariant class-def)]
-          (let [inv-env (make-env (:current-env ctx))
-                _ (doseq [[field-name field-val] final-field-map]
-                    (env-define inv-env (name field-name) field-val))
-                inv-ctx (assoc ctx :current-env inv-env)]
-            (check-class-invariant inv-ctx class-def)))
+        (let [inv-env (make-env (:current-env ctx))
+              _ (doseq [[field-name field-val] final-field-map]
+                  (env-define inv-env (name field-name) field-val))
+              inv-ctx (assoc ctx :current-env inv-env)]
+          (check-class-invariant inv-ctx class-def))
         ;; Return the object
         obj)
       ;; Java interop fallback (CLJ only)

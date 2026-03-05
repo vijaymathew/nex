@@ -68,6 +68,70 @@ end"
       (is (str/includes? js-code "Precondition"))
       (is (str/includes? js-code "Postcondition")))))
 
+(deftest inherited-class-invariants-deduped-test
+  (testing "Inherited class invariants are generated recursively and deduped by ancestor class"
+    (let [nex-code "class A
+  invariant
+    a_ok: true
+end
+
+class B inherit A
+  invariant
+    b_ok: true
+end
+
+class C inherit A
+  invariant
+    c_ok: true
+end
+
+class D inherit B, C
+feature
+  ping() do
+    print(\"ok\")
+  end
+  invariant
+    d_ok: true
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "Class invariant violation: a_ok"))
+      (is (str/includes? js-code "Class invariant violation: b_ok"))
+      (is (str/includes? js-code "Class invariant violation: c_ok"))
+      (is (str/includes? js-code "Class invariant violation: d_ok"))
+      ;; a_ok should appear once (deduped in diamond inheritance)
+      (is (= 1 (count (re-seq #"Class invariant violation: a_ok" js-code)))))))
+
+(deftest inherited-method-contract-composition-test
+  (testing "Overridden feature contracts use require OR and ensure AND"
+    (let [nex-code "class A
+  feature
+    f(x: Integer): Integer
+      require
+        base_positive: x > 0
+      do
+        result := 5
+      ensure
+        base_non_negative: result >= 0
+      end
+end
+
+class B inherit A
+  feature
+    f(x: Integer): Integer
+      require
+        local_negative: x < 0
+      do
+        result := 11
+      ensure
+        local_lt_ten: result < 10
+      end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "Precondition violation: inherited_or_local_require"))
+      (is (str/includes? js-code "||"))
+      (is (str/includes? js-code "Postcondition violation: base_non_negative"))
+      (is (str/includes? js-code "Postcondition violation: local_lt_ten")))))
+
 (deftest nil-literal-test
   (testing "Nil literal translation"
     (let [nex-code "class Test
