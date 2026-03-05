@@ -26,9 +26,9 @@ private feature
 
 create
   make(initial: Integer, name: String) do
-      let balance := initial
-      let owner := name
-      let internal_id := "ACC-001"
+      balance := initial
+      owner := name
+      internal_id := "ACC-001"
   end
 
 invariant

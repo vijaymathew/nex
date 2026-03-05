@@ -17,7 +17,7 @@ class Account
       require
         non_negative: initial >= 0
       do
-        let balance := initial
+        balance := initial
       ensure
         balance_set: balance = initial
       end
@@ -27,8 +27,8 @@ class Account
         non_negative: initial >= 0
         has_name: owner_name /= ""
       do
-        let owner := owner_name
-        let balance := initial
+        owner := owner_name
+        balance := initial
       ensure
         owner_set: owner = owner_name
         balance_set: balance = initial
@@ -63,8 +63,8 @@ class Rectangle
         positive_width: w > 0
         positive_height: h > 0
       do
-        let width := w
-        let height := h
+        width := w
+        height := h
       ensure
         width_set: width = w
         height_set: height = h

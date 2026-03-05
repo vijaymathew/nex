@@ -23,10 +23,10 @@ private feature
 
 create
   make(initial: Integer, name: String) do
-      let balance := initial
-      let owner := name
-      let internal_id := "ID-001"
-      let audit_log := "Created"
+      balance := initial
+      owner := name
+      internal_id := "ID-001"
+      audit_log := "Created"
   end
 invariant
   positive_balance: nil
