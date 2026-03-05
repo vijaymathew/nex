@@ -12,6 +12,7 @@
 (def ^:dynamic *own-fields* #{})        ;; field names defined on current class
 (def ^:dynamic *local-names* #{})       ;; method params + loop vars
 (def ^:dynamic *field-types* {})        ;; field-name -> type
+(def ^:dynamic *class-invariants* [])   ;; effective class invariants (inherited + local, deduped)
 
 (defn class-name-to-local
   "Convert a class name to a local variable name (e.g., 'Point' -> 'point')"
@@ -165,8 +166,8 @@
   [id-name]
   (cond
     (contains? *local-names* id-name) id-name
-    (contains? *all-method-names* id-name) (str "this." id-name "()")
-    (contains? *own-fields* id-name) (str "this." id-name)
+    (contains? *all-method-names* id-name) (str *this-name* "." id-name "()")
+    (contains? *own-fields* id-name) (str *this-name* "." id-name)
     (contains? *function-names* id-name) (str "NexGlobals." id-name)
     :else id-name))
 
@@ -712,6 +713,43 @@
                         "throw new Error(\"" contract-type " violation: " label "\");")))
          assertions)))
 
+(defn assertions->condition
+  "Collapse a list of assertions into a single condition using logical AND."
+  [assertions]
+  (when (seq assertions)
+    (reduce (fn [acc {:keys [condition]}]
+              (if acc
+                {:type :binary
+                 :operator "and"
+                 :left acc
+                 :right condition}
+                condition))
+            nil
+            assertions)))
+
+(defn combine-preconditions
+  "Combine inherited and local preconditions as:
+   (base-require) OR (local-require)."
+  [base-assertions local-assertions]
+  (let [base-assertions (seq base-assertions)
+        local-assertions (seq local-assertions)]
+    (cond
+      (and base-assertions local-assertions)
+      [{:label "inherited_or_local_require"
+        :condition {:type :binary
+                    :operator "or"
+                    :left (assertions->condition base-assertions)
+                    :right (assertions->condition local-assertions)}}]
+
+      base-assertions
+      (vec base-assertions)
+
+      local-assertions
+      (vec local-assertions)
+
+      :else
+      nil)))
+
 ;;
 ;; Visibility Conversion
 ;;
@@ -781,6 +819,7 @@
                          [(generate-rescue (+ level 1) body rescue #{})]
                          (map #(generate-statement (+ level 1) %) body))
             postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)
+            class-invariant-checks (generate-assertions (+ level 1) *class-invariants* "Class invariant" opts)
             ;; Add return statement if method has return type
             return-stmt (when return-type
                          [(indent (+ level 1) "return result;")])
@@ -808,6 +847,7 @@
                    preconditions
                    statements
                    postconditions
+                   class-invariant-checks
                    return-stmt
                    [(indent level "}")]))))))
 
@@ -848,13 +888,20 @@
   (let [local-name (class-name-to-local class-name)
         param-names (set (map :name params))
         params-code (str/join ", " (map :name params))
-        preconditions (generate-assertions (+ level 1) require "Precondition" opts)
+        preconditions (binding [*this-name* local-name
+                                *local-names* (into *local-names* param-names)]
+                        (generate-assertions (+ level 1) require "Precondition" opts))
         statements (binding [*this-name* local-name
                              *local-names* (into *local-names* param-names)]
                      (if rescue
                        [(generate-rescue (+ level 1) body rescue #{})]
                        (mapv #(generate-statement (+ level 1) %) body)))
-        postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)]
+        postconditions (binding [*this-name* local-name
+                                 *local-names* (into *local-names* param-names)]
+                         (generate-assertions (+ level 1) ensure "Postcondition" opts))
+        class-invariant-checks (binding [*this-name* local-name
+                                         *local-names* (into *local-names* param-names)]
+                                 (generate-assertions (+ level 1) *class-invariants* "Class invariant" opts))]
     (str/join "\n"
               (concat
                [(indent level (str "static " name "(" params-code ") {"))]
@@ -862,6 +909,7 @@
                preconditions
                statements
                postconditions
+               class-invariant-checks
                [(indent (+ level 1) (str "return " local-name ";"))]
                [(indent level "}")]))))
 
@@ -875,6 +923,30 @@
   (if (empty? parents)
     {:extends nil}
     {:extends (:parent (first parents))}))
+
+(defn collect-effective-class-invariants
+  "Collect effective class invariants as:
+   inherited invariants from all parent chains (deduped by ancestor class) + local invariants."
+  [class-def classes-by-name]
+  (letfn [(collect [cls seen]
+            (let [class-name (:name cls)
+                  already-seen? (and class-name (contains? seen class-name))
+                  seen' (if class-name (conj seen class-name) seen)]
+              (if already-seen?
+                [[] seen]
+                (let [[parent-invariants seen'']
+                      (if-let [parents (:parents cls)]
+                        (reduce (fn [[acc seen-so-far] {:keys [parent]}]
+                                  (if-let [parent-def (get classes-by-name parent)]
+                                    (let [[inv seen-next] (collect parent-def seen-so-far)]
+                                      [(into acc inv) seen-next])
+                                    [acc seen-so-far]))
+                                [[] seen']
+                                parents)
+                        [[] seen'])
+                      local-invariants (or (:invariant cls) [])]
+                  [(vec (concat parent-invariants local-invariants)) seen'']))))]
+    (first (collect class-def #{}))))
 
 (defn generate-generic-comment
   "Generate JSDoc comment for generic parameters"
@@ -929,6 +1001,32 @@
     (let [{:keys [methods]} (extract-members (:body parent-def))]
       (map :name methods))))
 
+(defn lookup-method-effective-contracts
+  "Lookup method in class hierarchy and compute effective contracts:
+   require = base OR local
+   ensure = base AND local"
+  [class-def method-name classes-by-name]
+  (let [{:keys [methods]} (extract-members (:body class-def))
+        local-method (first (filter #(= (:name %) method-name) methods))]
+    (if local-method
+      (let [base-lookup (when-let [parents (:parents class-def)]
+                          (some (fn [{:keys [parent]}]
+                                  (when-let [parent-def (get classes-by-name parent)]
+                                    (lookup-method-effective-contracts parent-def method-name classes-by-name)))
+                                parents))
+            effective-require (combine-preconditions (:effective-require base-lookup)
+                                                     (:require local-method))
+            effective-ensure (vec (concat (or (:effective-ensure base-lookup) [])
+                                          (or (:ensure local-method) [])))]
+        {:method local-method
+         :effective-require effective-require
+         :effective-ensure effective-ensure})
+      (when-let [parents (:parents class-def)]
+        (some (fn [{:keys [parent]}]
+                (when-let [parent-def (get classes-by-name parent)]
+                  (lookup-method-effective-contracts parent-def method-name classes-by-name)))
+              parents)))))
+
 (defn build-field-types-js
   "Build field-name -> type map from own + parent fields"
   [fields parent-names classes-by-name]
@@ -949,32 +1047,42 @@
   "Generate JavaScript code for a Nex class"
   ([class-def] (generate-class class-def {} {}))
   ([class-def opts] (generate-class class-def opts {}))
-  ([{:keys [name generic-params parents body invariant note]} opts classes-by-name]
-   (let [{:keys [fields methods constructors]} (extract-members body)
+  ([class-def opts classes-by-name]
+   (let [{:keys [name generic-params parents body note]} class-def
+         {:keys [fields methods constructors]} (extract-members body)
          parent-names (mapv :parent parents)
          own-flds (set (map :name fields))
          own-method-names (set (map :name methods))
          all-methods (into own-method-names
                            (mapcat #(get-parent-method-names % classes-by-name)
                                    parent-names))
-         fld-types (build-field-types-js fields parent-names classes-by-name)]
+         fld-types (build-field-types-js fields parent-names classes-by-name)
+         effective-invariants (collect-effective-class-invariants class-def classes-by-name)]
      (binding [*all-method-names* all-methods
                *own-fields* own-flds
-               *field-types* fld-types]
+               *field-types* fld-types
+               *class-invariants* effective-invariants]
        (let [;; Generate class JSDoc if note present
              class-jsdoc (when note
                           [(generate-jsdoc 0 note)])
              generic-comment (generate-generic-comment generic-params)
              class-header (generate-class-header name generic-params parents)
-             invariant-comment (when (and invariant (not (:skip-contracts opts)))
+             invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
                                 (indent 1 (str "// Class invariant: "
-                                              (str/join ", " (map :label invariant)))))
+                                              (str/join ", " (map :label effective-invariants)))))
              ;; Always generate a default no-arg constructor for field initialization
              has-parent? (some? (:extends (analyze-inheritance parents)))
              default-constructor (generate-default-constructor 1 fields has-parent?)
              ;; All Nex constructors become static factory methods
              factory-methods (map #(generate-factory-constructor 1 name % opts) constructors)
-             methods-code (map #(generate-method 1 % opts) methods)]
+             methods-with-effective-contracts
+             (map (fn [m]
+                    (let [effective (lookup-method-effective-contracts class-def (:name m) classes-by-name)]
+                      (assoc m
+                             :require (:effective-require effective)
+                             :ensure (:effective-ensure effective))))
+                  methods)
+             methods-code (map #(generate-method 1 % opts) methods-with-effective-contracts)]
          (str/join "\n"
                    (concat
                     class-jsdoc
