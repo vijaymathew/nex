@@ -413,3 +413,88 @@ end"
                       (reset! labels-seen (mapv :label assertions)))]
         (interp/check-class-invariant ctx d-class))
       (is (= ["a_ok" "b_ok" "c_ok" "d_ok"] @labels-seen)))))
+
+(deftest inherited-method-preconditions-use-or-test
+  (testing "Overridden feature preconditions are base OR local"
+    (let [code "class A
+feature
+  f(x: Integer)
+  require
+    base_positive: x > 0
+  do
+    print(\"A\")
+  end
+end
+
+class B inherit A
+feature
+  f(x: Integer)
+  require
+    local_negative: x < 0
+  do
+    print(\"B\")
+  end
+end"
+          ast (p/ast code)
+          ctx (interp/make-context)]
+      (doseq [class-node (:classes ast)]
+        (interp/register-class ctx class-node))
+      (let [obj (interp/make-object "B" {})
+            env (interp/make-env (:globals ctx))
+            _ (interp/env-define env "b" obj)
+            ctx-with-b (assoc ctx :current-env env)]
+        ;; base require true
+        (is (nil? (interp/eval-node ctx-with-b {:type :call
+                                                :target "b"
+                                                :method "f"
+                                                :args [{:type :integer :value 1}]})))
+        ;; local require true
+        (is (nil? (interp/eval-node ctx-with-b {:type :call
+                                                :target "b"
+                                                :method "f"
+                                                :args [{:type :integer :value -1}]})))
+        ;; both false -> precondition violation
+        (is (thrown-with-msg?
+              Exception
+              #"Precondition violation"
+              (interp/eval-node ctx-with-b {:type :call
+                                            :target "b"
+                                            :method "f"
+                                            :args [{:type :integer :value 0}]})))))))
+
+(deftest inherited-method-postconditions-use-and-test
+  (testing "Overridden feature postconditions are base AND local"
+    (let [code "class A
+feature
+  g(): Integer
+  do
+    result := 5
+  ensure
+    base_non_negative: result >= 0
+  end
+end
+
+class B inherit A
+feature
+  g(): Integer
+  do
+    result := 11
+  ensure
+    local_lt_ten: result < 10
+  end
+end"
+          ast (p/ast code)
+          ctx (interp/make-context)]
+      (doseq [class-node (:classes ast)]
+        (interp/register-class ctx class-node))
+      (let [obj (interp/make-object "B" {})
+            env (interp/make-env (:globals ctx))
+            _ (interp/env-define env "b" obj)
+            ctx-with-b (assoc ctx :current-env env)]
+        (is (thrown-with-msg?
+              Exception
+              #"Postcondition violation: local_lt_ten"
+              (interp/eval-node ctx-with-b {:type :call
+                                            :target "b"
+                                            :method "g"
+                                            :args []})))))))

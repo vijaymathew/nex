@@ -256,6 +256,37 @@ end"
       ;; a_ok should appear once (deduped in diamond inheritance)
       (is (= 1 (count (re-seq #"Class invariant violation: a_ok" java-code)))))))
 
+(deftest inherited-method-contract-composition-test
+  (testing "Overridden feature contracts use require OR and ensure AND"
+    (let [nex-code "class A
+  feature
+    f(x: Integer): Integer
+      require
+        base_positive: x > 0
+      do
+        result := 5
+      ensure
+        base_non_negative: result >= 0
+      end
+end
+
+class B inherit A
+  feature
+    f(x: Integer): Integer
+      require
+        local_negative: x < 0
+      do
+        result := 11
+      ensure
+        local_lt_ten: result < 10
+      end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "Precondition violation: inherited_or_local_require"))
+      (is (str/includes? java-code "||"))
+      (is (str/includes? java-code "Postcondition violation: base_non_negative"))
+      (is (str/includes? java-code "Postcondition violation: local_lt_ten")))))
+
 (deftest if-then-else-test
   (testing "If-then-else statement"
     (let [nex-code "class Test

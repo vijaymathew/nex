@@ -713,6 +713,43 @@
                         "throw new Error(\"" contract-type " violation: " label "\");")))
          assertions)))
 
+(defn assertions->condition
+  "Collapse a list of assertions into a single condition using logical AND."
+  [assertions]
+  (when (seq assertions)
+    (reduce (fn [acc {:keys [condition]}]
+              (if acc
+                {:type :binary
+                 :operator "and"
+                 :left acc
+                 :right condition}
+                condition))
+            nil
+            assertions)))
+
+(defn combine-preconditions
+  "Combine inherited and local preconditions as:
+   (base-require) OR (local-require)."
+  [base-assertions local-assertions]
+  (let [base-assertions (seq base-assertions)
+        local-assertions (seq local-assertions)]
+    (cond
+      (and base-assertions local-assertions)
+      [{:label "inherited_or_local_require"
+        :condition {:type :binary
+                    :operator "or"
+                    :left (assertions->condition base-assertions)
+                    :right (assertions->condition local-assertions)}}]
+
+      base-assertions
+      (vec base-assertions)
+
+      local-assertions
+      (vec local-assertions)
+
+      :else
+      nil)))
+
 ;;
 ;; Visibility Conversion
 ;;
@@ -964,6 +1001,32 @@
     (let [{:keys [methods]} (extract-members (:body parent-def))]
       (map :name methods))))
 
+(defn lookup-method-effective-contracts
+  "Lookup method in class hierarchy and compute effective contracts:
+   require = base OR local
+   ensure = base AND local"
+  [class-def method-name classes-by-name]
+  (let [{:keys [methods]} (extract-members (:body class-def))
+        local-method (first (filter #(= (:name %) method-name) methods))]
+    (if local-method
+      (let [base-lookup (when-let [parents (:parents class-def)]
+                          (some (fn [{:keys [parent]}]
+                                  (when-let [parent-def (get classes-by-name parent)]
+                                    (lookup-method-effective-contracts parent-def method-name classes-by-name)))
+                                parents))
+            effective-require (combine-preconditions (:effective-require base-lookup)
+                                                     (:require local-method))
+            effective-ensure (vec (concat (or (:effective-ensure base-lookup) [])
+                                          (or (:ensure local-method) [])))]
+        {:method local-method
+         :effective-require effective-require
+         :effective-ensure effective-ensure})
+      (when-let [parents (:parents class-def)]
+        (some (fn [{:keys [parent]}]
+                (when-let [parent-def (get classes-by-name parent)]
+                  (lookup-method-effective-contracts parent-def method-name classes-by-name)))
+              parents)))))
+
 (defn build-field-types-js
   "Build field-name -> type map from own + parent fields"
   [fields parent-names classes-by-name]
@@ -1012,7 +1075,14 @@
              default-constructor (generate-default-constructor 1 fields has-parent?)
              ;; All Nex constructors become static factory methods
              factory-methods (map #(generate-factory-constructor 1 name % opts) constructors)
-             methods-code (map #(generate-method 1 % opts) methods)]
+             methods-with-effective-contracts
+             (map (fn [m]
+                    (let [effective (lookup-method-effective-contracts class-def (:name m) classes-by-name)]
+                      (assoc m
+                             :require (:effective-require effective)
+                             :ensure (:effective-ensure effective))))
+                  methods)
+             methods-code (map #(generate-method 1 % opts) methods-with-effective-contracts)]
          (str/join "\n"
                    (concat
                     class-jsdoc
