@@ -1,113 +1,114 @@
 -- Sample Nex program demonstrating syntax
 -- This file is great for testing nex-mode.el in Emacs
 
+class Account
+feature
+  balance: Decimal
+  account_number: String
+  is_active: Boolean
+create
+  make(balance: Decimal, account_number: String) do
+    this.balance := balance
+    this.account_number := account_number
+    is_active := true
+  end
+end
+
 class BankAccount
-  inherit
-    Account
-      rename
-        balance as account_balance
-      redefine
-        withdraw
-      end
-  feature
-    balance: Integer
-    account_number: String
-    interest_rate: Real
-    is_active: Boolean
+inherit
+  Account
+feature
+  interest_rate: Real
+create
+  make(initial_balance: Decimal, number: String) do
+create Account.make(initial_balance, number)
+interest_rate := 0.05
+end
 
-  create
-    make(initial_balance: Integer, number: String) do
-      let balance := initial_balance
-      let account_number := number
-      let interest_rate := 0.05
-      let is_active := true
+feature
+  -- Deposit money into account
+  deposit(amount: Decimal)
+  require
+    positive_amount: amount > 0
+    account_active: is_active
+  do
+    balance := balance + amount
+    print("Deposited:", amount)
+    print("New balance:", balance)
+    ensure
+      balance_increased: balance = old balance + amount
+      still_active: is_active
+  end
+    
+  -- Withdraw money from account
+  withdraw(amount: Decimal)
+  require
+    sufficient_funds: balance >= amount
+    positive_amount: amount > 0
+    account_active: is_active
+  do
+    balance := balance - amount
+    print("Withdrawn:", amount)
+    print("New balance:", balance)
+    ensure
+      balance_decreased: balance = old balance - amount
+      non_negative: balance >= 0
+  end
+      
+  -- Apply interest to account
+  apply_interest() do
+    let interest := balance * interest_rate
+    balance := balance + interest
+    print("Interest applied:", interest)
+  end
+      
+  -- Calculate compound interest over time
+  project_balance(years: Decimal)
+  require
+    positive_years: years > 0
+  do
+    from
+      let year := 1
+      let projected := balance
+      invariant
+        year_positive: year > 0
+        projected_positive: projected > 0
+      variant
+        years - year + 1
+      until
+        year > years
+      do
+        projected := projected * (1 + interest_rate)
+        print("Year", year, ":", projected)
+        year := year + 1
+      end
     end
-
-  feature
-    -- Deposit money into account
-    deposit(amount: Integer)
-      require
-        positive_amount: amount > 0
-        account_active: is_active
-      do
-        balance := balance + amount
-        print("Deposited:", amount)
-        print("New balance:", balance)
-      ensure
-        balance_increased: balance = old balance + amount
-        still_active: is_active
-      end
-
-    -- Withdraw money from account
-    withdraw(amount: Integer)
-      require
-        sufficient_funds: balance >= amount
-        positive_amount: amount > 0
-        account_active: is_active
-      do
-        balance := balance - amount
-        print("Withdrawn:", amount)
-        print("New balance:", balance)
-      ensure
-        balance_decreased: balance = old balance - amount
-        non_negative: balance >= 0
-      end
-
-    -- Apply interest to account
-    apply_interest() do
-      let interest := balance * interest_rate
-      balance := balance + interest
-      print("Interest applied:", interest)
-    end
-
-    -- Calculate compound interest over time
-    project_balance(years: Integer)
-      require
-        positive_years: years > 0
-      do
-        from
-          let year := 1
-          let projected := balance
-        invariant
-          year_positive: year > 0
-          projected_positive: projected > 0
-        variant
-          years - year + 1
-        until
-          year > years
-        do
-          projected := projected * (1 + interest_rate)
-          print("Year", year, ":", projected)
-          year := year + 1
-        end
-      end
 
     -- Check if account needs attention
     status() do
       if balance < 100 then
         print("Low balance warning!")
+      elseif balance > 10000 then
+        print("High balance - consider investment")
       else
-        if balance > 10000 then
-          print("High balance - consider investment")
-        else
-          print("Account status: Normal")
-        end
+        print("Account status: Normal")
       end
     end
+  end
 
-    -- Activate or deactivate account
-    set_active(active: Boolean) do
-      let is_active := active
-      if active then
-        print("Account activated")
-      else
-        print("Account deactivated")
-      end
+  -- Activate or deactivate account
+  set_active(active: Boolean) do
+    let is_active := active
+    if active then
+      print("Account activated")
+    else
+      print("Account deactivated")
     end
+  end
 
-  invariant
-    non_negative_balance: balance >= 0
-    valid_interest_rate: interest_rate >= 0 and interest_rate <= 1
+invariant
+  non_negative_balance: balance >= 0
+  valid_interest_rate: interest_rate >= 0 and interest_rate <= 1
 end
 
 class SavingsAccount
@@ -115,18 +116,17 @@ class SavingsAccount
     BankAccount
     end
   feature
-    minimum_balance: Integer
+    minimum_balance: Decimal
 
   create
-    make(initial: Integer, number: String, min_balance: Integer) do
-      let balance := initial
-      let account_number := number
-      let minimum_balance := min_balance
-      let interest_rate := 0.07
+    make(initial: Decimal, number: String, min_balance: Decimal) do
+      create BankAccount.make(initial, number)
+      minimum_balance := min_balance
+      BankAccount.interest_rate := 0.07
     end
 
   feature
-    withdraw(amount: Integer)
+    withdraw(amount: Decimal)
       require
         maintain_minimum: balance - amount >= minimum_balance
       do

@@ -10,6 +10,10 @@
            [org.jline.terminal TerminalBuilder]
            [org.jline.reader.impl.history DefaultHistory]
            [java.io EOFException]
+           [java.net URI ConnectException]
+           [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers]
+           [java.net.http HttpTimeoutException]
+           [java.time Duration]
            [clj_antlr ParseError])
   (:gen-class))
 
@@ -20,6 +24,81 @@
 (defonce ^:dynamic *repl-context* nil)
 (defonce ^:dynamic *type-checking-enabled* (atom false))
 (defonce ^:dynamic *repl-var-types* (atom {}))
+(defonce ^:dynamic *ai-model* (atom (or (System/getenv "NEX_OLLAMA_MODEL") "qwen2.5-coder:7b")))
+(defonce ^:dynamic *ai-dry-run* (atom false))
+
+(def ai-reference-files
+  ["docs/SYNTAX.md"
+   "examples/sample.nex"
+   "examples/stack.nex"
+   "examples/generics_example.nex"
+   "examples/arrays_maps_example.nex"
+   "examples/create_example.nex"])
+
+(def ai-reference-keywords
+  {"generic" ["examples/generics_example.nex"]
+   "linked" ["examples/generics_example.nex" "examples/stack.nex"]
+   "list" ["examples/generics_example.nex" "examples/stack.nex"]
+   "stack" ["examples/stack.nex"]
+   "array" ["examples/arrays_maps_example.nex"]
+   "map" ["examples/arrays_maps_example.nex"]
+   "create" ["examples/create_example.nex"]
+   "constructor" ["examples/create_example.nex"]
+   "window" ["examples/sample.nex"]
+   "turtle" ["examples/sample.nex"]})
+
+(defn- repo-root-dir []
+  (let [cwd (io/file ".")
+        nex-home (System/getenv "NEX_HOME")
+        nex-user-dir (System/getProperty "nex.user.dir")]
+    (cond
+      (and nex-home (not (str/blank? nex-home))) (io/file nex-home)
+      (and nex-user-dir (not (str/blank? nex-user-dir))) (io/file nex-user-dir)
+      :else cwd)))
+
+(defn- load-reference-snippet [rel-path max-chars]
+  (let [f (io/file (repo-root-dir) rel-path)]
+    (if (.exists f)
+      (let [content (slurp f)
+            trimmed (if (> (count content) max-chars)
+                      (str (subs content 0 max-chars)
+                           "\n... [truncated]")
+                      content)]
+        (str "### " rel-path "\n" trimmed))
+      (str "### " rel-path "\n" "[missing file]"))))
+
+(defn- select-reference-files [prompt]
+  (let [p (str/lower-case (or prompt ""))
+        picked (->> ai-reference-keywords
+                    (filter (fn [[k _]] (str/includes? p k)))
+                    (mapcat second)
+                    distinct)
+        ;; Always include syntax + sample, then picked files.
+        ordered (concat ["docs/SYNTAX.md" "examples/sample.nex"] picked)]
+    (vec (distinct (filter (set ai-reference-files) ordered)))))
+
+(defn- ollama-timeout-seconds []
+  (let [raw (System/getenv "NEX_OLLAMA_TIMEOUT_SECONDS")
+        parsed (try
+                 (Integer/parseInt (or raw ""))
+                 (catch Exception _ nil))]
+    (cond
+      (and parsed (>= parsed 30)) parsed
+      :else 180)))
+
+(defn- build-ollama-system-prompt [prompt]
+  (let [header (str
+                "You are a Nex language code generator.\n"
+                "Return only valid Nex code. Do not use markdown fences. Do not include explanations.\n"
+                "Prefer complete compilable snippets using Nex syntax.\n"
+                "Respect nil-safety rules: attachable types by default, ?T for detachable, "
+                "and guard detachable feature access with `if obj /= nil then ... end`.\n"
+                "When asked to modify code, preserve style and only change what is needed.\n")
+        selected (select-reference-files prompt)
+        refs (->> selected
+                  (map #(load-reference-snippet % (if (= % "docs/SYNTAX.md") 9000 2500)))
+                  (str/join "\n\n"))]
+    (str header "\nReference material from this Nex repository:\n\n" refs)))
 
 (def nex-keywords
   ["class" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
@@ -38,7 +117,7 @@
 
 (def nex-repl-commands
   [":help" ":quit" ":exit" ":clear" ":reset" ":classes" ":vars"
-   ":typecheck" ":load"])
+   ":typecheck" ":load" ":ai" ":ai-model" ":ai-dry"])
 
 (defonce ^:dynamic *completer-ctx* (atom nil))
 
@@ -178,6 +257,10 @@
   (println "  :typecheck off    - Disable type checking (default)")
   (println "  :typecheck status - Show current type checking status")
   (println "  :load <path>      - Load and evaluate a .nex file")
+  (println "  :ai <prompt>      - Generate Nex code via local Ollama model")
+  (println "  :ai-model         - Show active Ollama model")
+  (println "  :ai-model <name>  - Set active Ollama model")
+  (println "  :ai-dry on|off    - Preview generated code without executing")
   (println)
   (println "Navigation:")
   (println "  Up/Down arrows    - Navigate command history")
@@ -275,6 +358,167 @@
               (println "Warning: expected a .nex file"))
             (eval-code ctx (slurp file))))))))
 
+(defn- ollama-host []
+  (or (System/getenv "NEX_OLLAMA_HOST")
+      "http://localhost:11434"))
+
+(defn- json-escape [s]
+  (-> (str s)
+      (str/replace "\\" "\\\\")
+      (str/replace "\"" "\\\"")
+      (str/replace "\n" "\\n")
+      (str/replace "\r" "\\r")
+      (str/replace "\t" "\\t")))
+
+(defn- json-unescape [s]
+  ;; Minimal unescape for Ollama response payloads.
+  (-> (str s)
+      (str/replace "\\\"" "\"")
+      (str/replace "\\n" "\n")
+      (str/replace "\\r" "\r")
+      (str/replace "\\t" "\t")
+      (str/replace "\\\\" "\\")))
+
+(defn- json-string-field [k body]
+  (when-let [[_ raw] (re-find (re-pattern (str "\"" (java.util.regex.Pattern/quote k)
+                                               "\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\""))
+                              body)]
+    (json-unescape raw)))
+
+(defn- strip-code-fences [s]
+  (let [t (str/trim (or s ""))]
+    (if (re-matches #"(?s)^```.*```$" t)
+      (-> t
+          (str/replace #"(?s)^```[a-zA-Z0-9_-]*\s*" "")
+          (str/replace #"(?s)\s*```$" "")
+          str/trim)
+      t)))
+
+(defn- ollama-generate
+  [prompt]
+  (let [host (str/replace (ollama-host) #"/+$" "")
+        url (str host "/api/generate")
+        timeout-seconds (ollama-timeout-seconds)
+        payload (str "{"
+                     "\"model\":\"" (json-escape @*ai-model*) "\","
+                     "\"system\":\"" (json-escape (build-ollama-system-prompt prompt)) "\","
+                     "\"prompt\":\"" (json-escape prompt) "\","
+                     "\"stream\":false,"
+                     "\"options\":{\"temperature\":0.2}"
+                     "}")
+        client (-> (HttpClient/newBuilder)
+                   (.connectTimeout (Duration/ofSeconds 10))
+                   .build)
+        request (-> (HttpRequest/newBuilder)
+                    (.uri (URI/create url))
+                    (.timeout (Duration/ofSeconds timeout-seconds))
+                    (.header "Content-Type" "application/json")
+                    (.POST (HttpRequest$BodyPublishers/ofString payload))
+                    .build)]
+    (try
+      (let [resp (.send client request (HttpResponse$BodyHandlers/ofString))
+            status (.statusCode resp)
+            body (.body resp)]
+        (if (= 200 status)
+          (if-let [generated (json-string-field "response" body)]
+            (strip-code-fences generated)
+            (throw (ex-info "Ollama returned no response text." {:body body})))
+          (throw (ex-info (str "Ollama request failed (" status "). "
+                               (or (json-string-field "error" body) body))
+                          {:status status :body body}))))
+      (catch ConnectException _
+        (throw (ex-info "Cannot connect to Ollama at http://localhost:11434. Start Ollama and retry."
+                        {:host host})))
+      (catch HttpTimeoutException _
+        (throw (ex-info (str "Ollama request timed out after " timeout-seconds "s. "
+                             "Try a smaller prompt, a faster model, or set NEX_OLLAMA_TIMEOUT_SECONDS to a higher value.")
+                        {:host host :timeout-seconds timeout-seconds})))
+      (catch Exception e
+        (throw (ex-info (or (.getMessage e) "Ollama request failed.") {:cause e}))))))
+
+(defn- build-augmented-ast
+  [ctx ast]
+  (let [prev-classes (remove #(or (= "__ReplTemp__" (:name %))
+                                  (.startsWith ^String (:name %) "AnonymousFunction_"))
+                             (vals @(:classes ctx)))
+        prev-imports @(:imports ctx)]
+    (cond
+      (and (seq prev-classes) (seq prev-imports))
+      (assoc ast :classes (concat prev-classes (:classes ast))
+             :imports (concat prev-imports (:imports ast)))
+      (seq prev-classes)
+      (assoc ast :classes (concat prev-classes (:classes ast)))
+      (seq prev-imports)
+      (assoc ast :imports (concat prev-imports (:imports ast)))
+      :else ast)))
+
+(defn- validate-generated-code
+  [ctx code]
+  (try
+    (let [ast (p/ast code)]
+      (if @*type-checking-enabled*
+        (let [result (tc/type-check (build-augmented-ast ctx ast)
+                                    {:var-types @*repl-var-types*})]
+          (if (:success result)
+            {:ok? true :code code}
+            {:ok? false
+             :kind :type
+             :message (str/join "\n" (map tc/format-type-error (:errors result)))}))
+        {:ok? true :code code}))
+    (catch ParseError e
+      {:ok? false
+       :kind :parse
+       :message (str (.getMessage e))})
+    (catch Exception e
+      {:ok? false
+       :kind :other
+       :message (or (.getMessage e) (str e))})))
+
+(defn- ai-generate-code
+  [ctx prompt]
+  (let [first-pass (ollama-generate prompt)
+        first-validation (validate-generated-code ctx first-pass)]
+    (if (:ok? first-validation)
+      {:code first-pass :repaired? false}
+      (let [repair-prompt (str "Fix the Nex code below so it parses and type-checks.\n"
+                               "Return only corrected Nex code.\n"
+                               "Error:\n" (:message first-validation) "\n\n"
+                               "Code:\n" first-pass)
+            second-pass (ollama-generate repair-prompt)
+            second-validation (validate-generated-code ctx second-pass)]
+        (if (:ok? second-validation)
+          {:code second-pass :repaired? true}
+          (throw (ex-info (str "AI output could not be validated.\n"
+                               "First error:\n" (:message first-validation) "\n\n"
+                               "Second error:\n" (:message second-validation))
+                          {:first first-validation :second second-validation})))))))
+
+(defn- run-ai-command
+  [ctx raw-prompt]
+  (let [prompt (str/trim raw-prompt)]
+    (if (str/blank? prompt)
+      (do
+        (println "Usage: :ai <prompt>")
+        ctx)
+      (try
+        (println (str "AI model: " @*ai-model*))
+        (println "Generating Nex code...")
+        (let [{:keys [code repaired?]} (ai-generate-code ctx prompt)]
+          (when repaired?
+            (println "Applied one repair pass based on parse/type errors."))
+          (println "Generated code:")
+          (println "-----")
+          (println code)
+          (println "-----")
+          (if @*ai-dry-run*
+            (do
+              (println "AI dry-run is ON; generated code was not executed.")
+              ctx)
+            (eval-code ctx code)))
+        (catch Exception e
+          (println "AI error:" (.getMessage e))
+          ctx)))))
+
 (defn handle-command [ctx input]
   (let [input-lower (str/lower-case input)]
     (cond
@@ -324,6 +568,44 @@
       (str/starts-with? input-lower ":load")
       (let [path (subs input (min (count input) (count ":load")))]
         (load-file-into-repl ctx path))
+
+      ;; AI model commands
+      (= input-lower ":ai-model")
+      (do
+        (println (str "Active AI model: " @*ai-model*))
+        ctx)
+
+      (str/starts-with? input-lower ":ai-model ")
+      (let [model (str/trim (subs input (count ":ai-model")))]
+        (if (str/blank? model)
+          (do (println "Usage: :ai-model <model-name>") ctx)
+          (do
+            (reset! *ai-model* model)
+            (println (str "AI model set to: " model))
+            ctx)))
+
+      ;; AI dry-run toggle
+      (= input-lower ":ai-dry")
+      (do
+        (println (str "AI dry-run is currently: " (if @*ai-dry-run* "ON" "OFF")))
+        ctx)
+
+      (= input-lower ":ai-dry on")
+      (do
+        (reset! *ai-dry-run* true)
+        (println "AI dry-run enabled. Generated code will not execute.")
+        ctx)
+
+      (= input-lower ":ai-dry off")
+      (do
+        (reset! *ai-dry-run* false)
+        (println "AI dry-run disabled. Generated code will execute.")
+        ctx)
+
+      ;; AI generation command
+      (str/starts-with? input-lower ":ai")
+      (let [prompt (subs input (min (count input) (count ":ai")))]
+        (run-ai-command ctx prompt))
 
       ;; Unknown command
       :else

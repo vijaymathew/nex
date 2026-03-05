@@ -78,7 +78,7 @@ end
 class Account
   create
     with_balance(initial: Integer) do
-      let balance := initial
+      balance := initial
     end
 
   feature
