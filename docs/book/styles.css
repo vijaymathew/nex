@@ -1,0 +1,137 @@
+:root {
+  --book-bg: #f8f7f4;
+  --ink: #1d232b;
+  --muted: #5b6673;
+  --accent: #1f5f8b;
+  --rule: #d9dee5;
+  --code-bg: #f2f4f7;
+  --callout-bg: #eef4f9;
+  --callout-border: #bfd2e3;
+}
+
+body {
+  background: var(--book-bg);
+  color: var(--ink);
+  line-height: 1.72;
+  font-size: 1.06rem;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--ink);
+  letter-spacing: 0.01em;
+}
+
+h1.title {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.quarto-title-meta,
+.subtitle,
+.date {
+  color: var(--muted);
+}
+
+#quarto-content main {
+  max-width: 860px;
+}
+
+p,
+li {
+  max-width: 72ch;
+}
+
+a {
+  color: var(--accent);
+  text-decoration-thickness: 0.08em;
+}
+
+a:hover {
+  text-decoration-thickness: 0.13em;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  margin: 2rem 0;
+}
+
+pre,
+code {
+  font-size: 0.93em;
+}
+
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 0.95rem 1rem;
+}
+
+blockquote {
+  border-left: 4px solid var(--accent);
+  padding-left: 1rem;
+  color: var(--muted);
+}
+
+.sidebar nav[role="doc-toc"] {
+  border-left: 1px solid var(--rule);
+  padding-left: 0.9rem;
+}
+
+@media (max-width: 900px) {
+  body {
+    font-size: 1rem;
+  }
+
+  #quarto-content main {
+    max-width: 100%;
+  }
+}
+
+/* Consistent visual language for Lab / Studio / Exercise / Takeaways blocks */
+.note-lab,
+.note-studio,
+.note-exercise,
+.note-takeaways {
+  border: 1px solid var(--callout-border);
+  border-left: 4px solid var(--accent);
+  background: var(--callout-bg);
+  border-radius: 8px;
+  padding: 0.8rem 0.9rem 0.8rem 3rem;
+  margin: 1rem 0;
+  position: relative;
+}
+
+.note-lab::before,
+.note-studio::before,
+.note-exercise::before,
+.note-takeaways::before {
+  content: "";
+  position: absolute;
+  left: 0.8rem;
+  top: 0.75rem;
+  width: 1.4rem;
+  height: 1.4rem;
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+.note-lab::before {
+  background-image: url("assets/icons/lab.svg");
+}
+
+.note-studio::before {
+  background-image: url("assets/icons/studio.svg");
+}
+
+.note-exercise::before {
+  background-image: url("assets/icons/exercise.svg");
+}
+
+.note-takeaways::before {
+  background-image: url("assets/icons/takeaways.svg");
+}
