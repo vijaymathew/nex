@@ -423,8 +423,3 @@ account.show
 3. Define a generic `Pair [A, B]` class with `first` and `second`.
 4. Add contracts to a `transfer(amount)` method between two accounts.
 5. Create two files and load one class from the other with `intern`.
-
-## 17. Reference Pointers
-
-- Syntax postcard: [../SYNTAX.md](../SYNTAX.md)
-- Formal grammar: [../../grammar/nexlang.g4](../../grammar/nexlang.g4)
