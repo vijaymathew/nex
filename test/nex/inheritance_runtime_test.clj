@@ -498,3 +498,27 @@ end"
                                             :target "b"
                                             :method "g"
                                             :args []})))))))
+
+(deftest inherited-constructor-create-test
+  (testing "Child class can use constructor inherited from parent"
+    (let [code "class A
+  feature
+    x: Integer
+  create
+    make(x: Integer) do
+      this.x := x
+    end
+end
+
+class B inherit A
+end"
+          ast (p/ast code)
+          ctx (interp/make-context)]
+      (doseq [class-node (:classes ast)]
+        (interp/register-class ctx class-node))
+      (let [b-obj (interp/eval-node ctx {:type :create
+                                         :class-name "B"
+                                         :constructor "make"
+                                         :args [{:type :integer :value 20}]})]
+        (is (= "B" (:class-name b-obj)))
+        (is (= 20 (get-in b-obj [:fields :x])))))))

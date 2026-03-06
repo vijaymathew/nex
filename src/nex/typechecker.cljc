@@ -331,6 +331,27 @@
                 (lookup-class-method env parent method-name))
               (:parents class-def)))))
 
+(defn lookup-class-constructors
+  "Collect constructors declared on a class and inherited parent chain."
+  [env class-name]
+  (letfn [(collect-ctors [cn visited]
+            (if (contains? visited cn)
+              []
+              (let [class-def (env-lookup-class env cn)
+                    visited' (conj visited cn)
+                    own (if class-def
+                          (->> (:body class-def)
+                               (filter #(= :constructors (:type %)))
+                               (mapcat :constructors))
+                          [])
+                    inherited (if class-def
+                                (mapcat (fn [{:keys [parent]}]
+                                          (collect-ctors parent visited'))
+                                        (:parents class-def))
+                                [])]
+                (concat own inherited))))]
+    (collect-ctors class-name #{})))
+
 (defn check-identifier
   "Check the type of an identifier"
   [env {:keys [name] :as expr}]
@@ -598,13 +619,11 @@
         (if (and class-def (:import class-def))
           target-type
           (do
-            (let [constructors (->> (:body class-def)
-                                    (filter #(= :constructors (:type %)))
-                                    (mapcat :constructors))
+            (let [constructors (lookup-class-constructors env class-name)
                   has-constructors? (seq constructors)
                   type-map (build-generic-type-map env target-type)
                   ctor-name (or constructor "make")
-                  ctor-sig (env-lookup-method env class-name ctor-name)]
+                  ctor-sig (lookup-class-method env class-name ctor-name)]
               ;; If class defines constructors, disallow implicit default create.
               (when (and has-constructors?
                          (nil? constructor)

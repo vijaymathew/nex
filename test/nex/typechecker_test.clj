@@ -828,3 +828,28 @@ end"
           result (tc/type-check ast)]
       (is (:success result))
       (is (empty? (:errors result))))))
+
+(deftest test-inherited-constructor-create
+  (testing "Constructor lookup in create() supports inheritance"
+    (let [code "class A
+  feature
+    x: Integer
+  create
+    make(x: Integer) do
+      this.x := x
+    end
+end
+
+class B inherit A
+end
+
+class Test
+  feature
+    demo() do
+      let b: A := create B.make(20)
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
