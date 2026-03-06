@@ -149,7 +149,7 @@ end")
       ctx-with-env (assoc ctx :current-env method-env)]
   (doseq [stmt (:body method-def)]
     (interp/eval-node ctx-with-env stmt))
-  (println "Result:" (first @(:output ctx-with-env))))
+  (println "result:" (first @(:output ctx-with-env))))
 
 (println)
 (println "╔════════════════════════════════════════════════════════════╗")

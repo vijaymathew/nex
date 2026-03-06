@@ -19,7 +19,7 @@ internStmt
     ;
 
 classDecl
-    : CLASS IDENTIFIER genericParams?
+    : DEFERRED? CLASS IDENTIFIER genericParams?
       noteClause?
       inheritClause?
       classBody
@@ -392,6 +392,7 @@ mapEntry
  */
 
 CLASS        : 'class';
+DEFERRED     : 'deferred';
 FUNCTION     : 'function';
 FN           : 'fn';
 FEATURE      : 'feature';

@@ -198,6 +198,52 @@
                       :note nil :require nil :body [] :ensure nil}]}]
    :invariant nil})
 
+(defn- build-comparable-base-class
+  "Create the built-in deferred Comparable class."
+  []
+  {:type :class
+   :name "Comparable"
+   :deferred? true
+   :generic-params nil
+   :note nil
+   :parents nil
+   :body [{:type :feature-section
+           :visibility {:type :public}
+           :members [{:type :method :name "compare"
+                      :params [{:name "a" :type "Any"}]
+                      :return-type "Integer"
+                      :note nil :require nil :body [] :ensure nil}]}]
+   :invariant nil})
+
+(defn- build-hashable-base-class
+  "Create the built-in deferred Hashable class."
+  []
+  {:type :class
+   :name "Hashable"
+   :deferred? true
+   :generic-params nil
+   :note nil
+   :parents nil
+   :body [{:type :feature-section
+           :visibility {:type :public}
+           :members [{:type :method :name "hash"
+                      :params nil
+                      :return-type "Integer"
+                      :note nil :require nil :body [] :ensure nil}]}]
+   :invariant nil})
+
+(defn- build-builtin-scalar-class
+  "Create a built-in scalar class definition that implements Comparable and Hashable."
+  [name]
+  {:type :class
+   :name name
+   :deferred? false
+   :generic-params nil
+   :note nil
+   :parents [{:parent "Comparable"} {:parent "Hashable"}]
+   :body []
+   :invariant nil})
+
 (defn make-context
   "Create a new runtime context."
   []
@@ -212,6 +258,10 @@
       ;; Register built-in base classes
       (register-class ctx (build-function-base-class))
       (register-class ctx (build-cursor-base-class))
+      (register-class ctx (build-comparable-base-class))
+      (register-class ctx (build-hashable-base-class))
+      (doseq [scalar ["String" "Integer" "Integer64" "Real" "Decimal" "Boolean" "Char"]]
+        (register-class ctx (build-builtin-scalar-class scalar)))
       ctx)))
 
 (defn register-class
@@ -678,6 +728,23 @@
 
 (def builtin-type-methods
   "Methods available on built-in types"
+  (letfn [(nex-compare [x y]
+            (cond
+              (= x y) 0
+              :else
+              (try
+                (let [c (compare x y)]
+                  (cond
+                    (neg? c) -1
+                    (pos? c) 1
+                    :else 0))
+                (catch #?(:clj Exception :cljs :default) _
+                  (let [sx (str x)
+                        sy (str y)]
+                    (cond
+                      (= sx sy) 0
+                      (neg? (compare sx sy)) -1
+                      :else 1))))))]
   {:String
    {"length"      (fn [s & _] (count s))
     "index_of"    (fn [s ch & _]
@@ -709,6 +776,8 @@
     "less_than_or_equal" (fn [s other & _] (<= (compare s other) 0))
     "greater_than" (fn [s other & _] (pos? (compare s other)))
     "greater_than_or_equal" (fn [s other & _] (>= (compare s other) 0))
+    "compare"     (fn [s other & _] (nex-compare s other))
+    "hash"        (fn [s & _] (hash s))
     "cursor"      (fn [s & _]
                     {:nex-builtin-type :StringCursor
                      :source s
@@ -731,7 +800,9 @@
     "less_than"         (fn [n other & _] (< n other))
     "less_than_or_equal" (fn [n other & _] (<= n other))
     "greater_than"      (fn [n other & _] (> n other))
-    "greater_than_or_equal" (fn [n other & _] (>= n other))}
+    "greater_than_or_equal" (fn [n other & _] (>= n other))
+    "compare"           (fn [n other & _] (nex-compare n other))
+    "hash"              (fn [n & _] (hash n))}
 
    :Integer64
    {"to_string"         (fn [n & _] (str n))
@@ -749,7 +820,9 @@
     "less_than"         (fn [n other & _] (< n other))
     "less_than_or_equal" (fn [n other & _] (<= n other))
     "greater_than"      (fn [n other & _] (> n other))
-    "greater_than_or_equal" (fn [n other & _] (>= n other))}
+    "greater_than_or_equal" (fn [n other & _] (>= n other))
+    "compare"           (fn [n other & _] (nex-compare n other))
+    "hash"              (fn [n & _] (hash n))}
 
    :Real
    {"to_string"         (fn [n & _] (str n))
@@ -768,7 +841,9 @@
     "less_than"         (fn [n other & _] (< n other))
     "less_than_or_equal" (fn [n other & _] (<= n other))
     "greater_than"      (fn [n other & _] (> n other))
-    "greater_than_or_equal" (fn [n other & _] (>= n other))}
+    "greater_than_or_equal" (fn [n other & _] (>= n other))
+    "compare"           (fn [n other & _] (nex-compare n other))
+    "hash"              (fn [n & _] (hash n))}
 
    :Decimal
    {"to_string"         (fn [n & _] (str n))
@@ -787,12 +862,16 @@
     "less_than"         (fn [n other & _] (< n other))
     "less_than_or_equal" (fn [n other & _] (<= n other))
     "greater_than"      (fn [n other & _] (> n other))
-    "greater_than_or_equal" (fn [n other & _] (>= n other))}
+    "greater_than_or_equal" (fn [n other & _] (>= n other))
+    "compare"           (fn [n other & _] (nex-compare n other))
+    "hash"              (fn [n & _] (hash n))}
 
    :Char
    {"to_string"   (fn [c & _] (str c))
     "to_upper"    (fn [c & _] (str/upper-case (str c)))
-    "to_lower"    (fn [c & _] (str/lower-case (str c)))}
+    "to_lower"    (fn [c & _] (str/lower-case (str c)))
+    "compare"     (fn [c other & _] (nex-compare c other))
+    "hash"        (fn [c & _] (hash c))}
 
    :Boolean
    {"to_string"   (fn [b & _] (str b))
@@ -801,7 +880,9 @@
     "or"          (fn [b other & _] (or b other))
     "not"         (fn [b & _] (not b))
     "equals"      (fn [b other & _] (= b other))
-    "not_equals"  (fn [b other & _] (not= b other))}
+    "not_equals"  (fn [b other & _] (not= b other))
+    "compare"     (fn [b other & _] (nex-compare b other))
+    "hash"        (fn [b & _] (hash b))}
 
    :Array
    {"get"         (fn [arr index & _] (nex-array-get arr index))
@@ -970,7 +1051,7 @@
     "hide"       (fn [t & _] (turtle/turtle-hide t))
     "xpos"       (fn [t & _] (turtle/turtle-x t))
     "ypos"       (fn [t & _] (turtle/turtle-y t))
-    "show"       (fn [t & _] (turtle/turtle-show t))}})
+    "show"       (fn [t & _] (turtle/turtle-show t))}}))
 
 (defn get-type-name
   "Get the type name for a value"
@@ -1755,6 +1836,10 @@
                   spec-name))))
           class-name)
         class-def (lookup-class-if-exists ctx effective-class-name)
+        _ (when (and class-def (:deferred? class-def))
+            (throw (ex-info (str "Cannot instantiate deferred class: " class-name)
+                            {:class-name class-name
+                             :deferred? true})))
         ;; Get all fields (including inherited)
         all-fields (when class-def (get-all-fields ctx class-def))
         ;; Initialize fields with default values

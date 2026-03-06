@@ -58,6 +58,46 @@ end"
       (is (= "with_balance" (:constructor create-expr)))
       (is (= 1 (count (:args create-expr)))))))
 
+(deftest deferred-class-parsing-test
+  (testing "Parse deferred class declaration"
+    (let [code "deferred class A
+  feature
+    f(i: Integer): Boolean do end
+end
+
+class B inherit A
+  feature
+    f(i: Integer): Boolean do
+      result := i > 0
+    end
+end"
+          ast (p/ast code)
+          a-class (first (:classes ast))
+          b-class (second (:classes ast))]
+      (is (= "A" (:name a-class)))
+      (is (true? (:deferred? a-class)))
+      (is (= "B" (:name b-class)))
+      (is (not (true? (:deferred? b-class)))))))
+
+(deftest deferred-class-runtime-instantiation-guard-test
+  (testing "Interpreter rejects direct creation of deferred class"
+    (let [code "deferred class A
+  feature
+    f(i: Integer): Boolean do end
+end"
+          ast (p/ast code)
+          ctx (interp/make-context)]
+      (doseq [class-node (:classes ast)]
+        (interp/register-class ctx class-node))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Cannot instantiate deferred class: A"
+           (interp/eval-node ctx {:type :create
+                                  :class-name "A"
+                                  :generic-args nil
+                                  :constructor nil
+                                  :args []}))))))
+
 (deftest simple-create-java-generation-test
   (testing "Generate Java code for simple create"
     (let [code "class Test

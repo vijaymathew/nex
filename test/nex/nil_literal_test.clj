@@ -44,7 +44,6 @@ end"
 (deftest nil-default-object-field-test
   (testing "Uninitialized object fields default to nil and compare correctly"
     (let [code "class B
-  feature
 end
 
 class A
@@ -66,14 +65,14 @@ end"
     enabled: Boolean
 
     disable() do
-      enabled := false
+      this.enabled := false
     end
 
     demo() do
-      enabled := true
-      disable
-      print(enabled)
+      let f: Flag := create Flag
+      f.disable()
+      print(f.enabled)
     end
 end"
           output (execute-method code "Flag" "demo")]
-      (is (= [\"false\"] output)))))
+      (is (= ["false"] output)))))

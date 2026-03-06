@@ -144,8 +144,12 @@
         :source source}))
 
    :classDecl
-   (fn [[_ _class-kw name & rest]]
-     (let [;; Filter out "end" keyword
+   (fn [[_ & tokens]]
+     (let [[deferred? _class-kw name rest]
+           (if (= "deferred" (token-text (first tokens)))
+             [true (second tokens) (nth tokens 2) (drop 3 tokens)]
+             [false (first tokens) (second tokens) (drop 2 tokens)])
+           ;; Filter out "end" keyword
            cleaned (remove #(= "end" %) rest)
            ;; Find different clauses
            generic-params (first (filter #(and (sequential? %)
@@ -165,6 +169,7 @@
                                           cleaned))]
        {:type :class
         :name (token-text name)
+        :deferred? deferred?
         :generic-params (when generic-params (transform-node generic-params))
         :note (when note-clause (transform-node note-clause))
         :parents (when inherit-clause (transform-node inherit-clause))

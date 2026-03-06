@@ -54,6 +54,23 @@ end"
       ;; Delegation for speak()
       (is (str/includes? java-code "_parent_Animal.speak()")))))
 
+(deftest deferred-class-generation-test
+  (testing "Deferred class emits abstract Java class"
+    (let [nex-code "deferred class A
+  feature
+    f(i: Integer): Boolean do end
+end
+
+class B inherit A
+  feature
+    f(i: Integer): Boolean do
+      result := i > 0
+    end
+end"
+          java-code (java/translate nex-code {:skip-type-check true})]
+      (is (str/includes? java-code "public abstract class A"))
+      (is (str/includes? java-code "public class B")))))
+
 (deftest nil-literal-test
   (testing "Nil literal translation"
     (let [nex-code "class Test
