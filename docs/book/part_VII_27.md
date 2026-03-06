@@ -2,67 +2,198 @@
 
 ## 27. Preconditions and Postconditions
 
-## Chapter Purpose
+By Part VI, we can build modular software.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+Part VII focuses on trust: making behavior explicit, checkable, and dependable.
 
-## Narrative Setup
+Preconditions and postconditions are the first layer of that trust model.
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+---
 
-## Learning Goals
+## Why Contracts Matter
 
-By the end of this chapter, the reader should be able to:
+Every routine has assumptions and promises.
 
-* explain and apply **explicit assumptions**
-* reason about **observable guarantees**
-* design and evaluate solutions around **contract enforcement**
+A precondition (`require`) states what must be true before execution.
+A postcondition (`ensure`) states what must be true after execution.
 
-## Section Outline
+Without contracts, assumptions are implicit and failures appear far from the source.
 
-### 1. Conceptual Foundation
+---
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+## Practical Contract Rules
 
-### 2. Worked Design Path
+Use preconditions for caller obligations:
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+- input presence
+- valid ranges
+- required state before transition
 
-### 3. Nex Implementation Sketch
+Use postconditions for routine guarantees:
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+- result shape/value constraints
+- state transition outcomes
+- explicit failure semantics
 
-### 4. Common Mistakes and Recovery
+A useful rule:
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+- never use postconditions to check caller mistakes
+- never use preconditions to state routine results
 
-### 5. Reflection and Checkpoint
+---
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+## Worked Design Path
 
-## Studio Exercises
+Requirement:
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+> "Assign task to robot and return assignment status."
 
-## Assessment Signals
+### Step 1: Define caller obligations
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+- task id present
+- robot id present
+- task is assignable
 
-## Forward Link
+### Step 2: Define routine guarantees
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+- task has assigned robot on success
+- status is updated to `IN_TRANSIT`
+
+### Step 3: Define failure behavior
+
+- violation should fail fast with contract signal
+
+### Step 4: Encode in code
+
+- put input/state rules in `require`
+- put assignment guarantees in `ensure`
+
+---
+
+## Nex Implementation Sketch
+
+```nex
+class Delivery_Task
+feature
+  task_id: String
+  status: String
+  assigned_robot_id: String
+
+  assign(robot_id: String): String
+    require
+      task_id_present: task_id /= ""
+      robot_id_present: robot_id /= ""
+      can_assign: status = "PENDING" or status = "FAILED"
+    do
+      assigned_robot_id := robot_id
+      status := "IN_TRANSIT"
+      result := "ASSIGNED"
+    ensure
+      assigned: assigned_robot_id = robot_id
+      now_in_transit: status = "IN_TRANSIT"
+      known_result: result = "ASSIGNED"
+    end
+invariant
+  valid_status:
+    status = "PENDING" or
+    status = "IN_TRANSIT" or
+    status = "DELIVERED" or
+    status = "FAILED"
+end
+```
+
+The routine is now self-documenting: obligations and guarantees are executable.
+
+---
+
+## Contracts Across The Three Systems
+
+### Delivery
+
+- route inputs valid; output path/status guaranteed
+
+### Knowledge
+
+- query non-empty; ranked result format guaranteed
+
+### Virtual World
+
+- step inputs valid; world bounds preserved after update
+
+Contracts turn informal expectations into runtime-checked behavior.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Missing preconditions for state transitions
+
+Symptom:
+
+- illegal transitions occur silently
+
+Recovery:
+
+- encode transition legality in `require`
+
+### Mistake 2: Weak postconditions
+
+Symptom:
+
+- success path does not guarantee meaningful result
+
+Recovery:
+
+- ensure key outputs and state changes explicitly
+
+### Mistake 3: Contract duplication drift
+
+Symptom:
+
+- similar routines have inconsistent assumptions
+
+Recovery:
+
+- centralize patterns and review contract consistency
+
+---
+
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
+## Quick Exercise (10 Minutes)
+
+Choose one routine and write:
+
+1. three preconditions
+2. three postconditions
+3. one invalid call case
+4. one valid call case
+
+Then verify your postconditions still hold after a refactor.
+
+---
+
+## Connection to Nex
+
+Nex supports contract-first design directly with `require` and `ensure`, making intent explicit in executable form.
+
+---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
+
+## Chapter Takeaways
+
+- Preconditions define caller obligations.
+- Postconditions define routine guarantees.
+- Contracts improve diagnostics and reduce hidden assumptions.
+- Trustworthy code starts with explicit behavior boundaries.
+
+---
+
+In Chapter 28, we move from routine-level guarantees to class-level guarantees: invariants.

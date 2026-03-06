@@ -2,67 +2,226 @@
 
 ## 33. Refactoring Without Fear
 
-## Chapter Purpose
+Growth requires change.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+Refactoring is how we improve structure without changing observable behavior.
 
-## Narrative Setup
+Fear appears when teams lack safety nets and clear process.
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+This chapter makes refactoring an engineering routine, not a risky event.
 
-## Learning Goals
+---
 
-By the end of this chapter, the reader should be able to:
+## Behavior Preservation First
 
-* explain and apply **behavior preservation**
-* reason about **incremental redesign**
-* design and evaluate solutions around **safety nets**
+Refactoring is valid only when behavior remains equivalent for intended contracts.
 
-## Section Outline
+Core safety tools:
 
-### 1. Conceptual Foundation
+- contract checks
+- regression tests
+- incremental scope
+- before/after comparators
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+Without these, "refactor" becomes disguised rewrite.
 
-### 2. Worked Design Path
+---
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+## Incremental Refactor Pattern
 
-### 3. Nex Implementation Sketch
+A reliable sequence:
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+1. capture current behavior with tests/contracts
+2. extract seam (interface/adapter/function boundary)
+3. move one responsibility at a time
+4. run parity checks after each step
+5. remove dead path only after confidence
 
-### 4. Common Mistakes and Recovery
+This pattern minimizes risk and improves reversibility.
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+---
 
-### 5. Reflection and Checkpoint
+## Worked Design Path
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+Requirement:
 
-## Studio Exercises
+> "Split one large knowledge service into retrieval and ranking services."
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+Plan:
 
-## Assessment Signals
+1. add tests for existing outputs
+2. extract `retrieve_candidates` method
+3. extract `rank_candidates` method
+4. wire through coordinator
+5. run before/after result comparison
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+Outcome: improved structure with preserved external behavior.
 
-## Forward Link
+---
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+## Nex Implementation Sketch
+
+```nex
+class Legacy_Knowledge_Service
+feature
+  query(q: String): String
+    require
+      query_present: q /= ""
+    do
+      if q = "graphs" then
+        result := "DOC:G-1"
+      else
+        result := "DOC:GENERIC"
+      end
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+class Retrieval_Service
+feature
+  retrieve(q: String): String
+    require
+      query_present: q /= ""
+    do
+      if q = "graphs" then
+        result := "CAND:G-1"
+      else
+        result := "CAND:GENERIC"
+      end
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+class Ranking_Service
+feature
+  rank(candidate: String): String
+    require
+      candidate_present: candidate /= ""
+    do
+      if candidate = "CAND:G-1" then
+        result := "DOC:G-1"
+      else
+        result := "DOC:GENERIC"
+      end
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+class Refactored_Knowledge_Service
+feature
+  retrieval: Retrieval_Service
+  ranking: Ranking_Service
+
+  query(q: String): String
+    require
+      query_present: q /= ""
+    do
+      let c: String := retrieval.retrieve(q)
+      result := ranking.rank(c)
+    ensure
+      non_empty: result /= ""
+    end
+end
+```
+
+Both services expose the same outward query contract while internal structure improves.
+
+---
+
+## Refactoring Risks Across The Three Systems
+
+### Delivery
+
+- transition logic moved incorrectly across components
+
+### Knowledge
+
+- retrieval/ranking split changes subtle ordering behavior
+
+### Virtual World
+
+- update-loop extraction breaks deterministic order
+
+Refactoring safety depends on explicit behavior contracts and parity checks.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Big-bang refactor
+
+Symptom:
+
+- many failures with unclear root cause
+
+Recovery:
+
+- refactor in small verified slices
+
+### Mistake 2: Missing parity tests
+
+Symptom:
+
+- "cleaner" design changes business behavior unintentionally
+
+Recovery:
+
+- compare before/after outputs on representative cases
+
+### Mistake 3: Early deletion of old path
+
+Symptom:
+
+- no rollback option when regressions appear
+
+Recovery:
+
+- keep transitional path until confidence threshold
+
+---
+
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
+## Quick Exercise (12 Minutes)
+
+Choose one module and plan a refactor:
+
+1. current behavior contract
+2. seam to extract
+3. first small structural change
+4. parity check set
+5. rollback criterion
+
+Then execute only step 1 and step 2 before making deeper edits.
+
+---
+
+## Connection to Nex
+
+Nex contracts and invariants provide a built-in behavior guardrail for incremental refactoring, reducing fear and guesswork.
+
+---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
+
+## Chapter Takeaways
+
+- Refactoring is behavior-preserving structural improvement.
+- Incremental, contract-backed steps reduce risk.
+- Parity testing is the key confidence mechanism.
+- Fear decreases when rollback and verification are explicit.
+
+---
+
+Part VIII established growth discipline: complexity control, change-oriented design, and safe refactoring.
+
+Next is **System Milestone 6 — Evolution**, where these practices are applied to long-term system adaptation in Studio 6.

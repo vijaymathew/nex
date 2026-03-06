@@ -236,6 +236,11 @@ That keeps “what if?” questions visible in code, not only in design docs.
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (4 Minutes)
 
 Pick one simple feature from your current project and generate edge cases in three categories:
@@ -251,6 +256,11 @@ Then answer:
 - Which need explicit specification before implementation?
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

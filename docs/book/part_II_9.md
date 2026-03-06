@@ -209,6 +209,11 @@ Recovery:
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (10 Minutes)
 
 For one system, write a one-page data model brief:
@@ -235,6 +240,11 @@ Nex helps keep model decisions executable:
 This is the core teaching objective: align design decisions with enforceable behavior.
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

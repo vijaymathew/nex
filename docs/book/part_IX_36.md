@@ -2,67 +2,204 @@
 
 ## 36. Human Judgment in an AI World
 
-## Chapter Purpose
+AI can assist with implementation, refactoring, testing, and documentation.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+It cannot own accountability.
 
-## Narrative Setup
+Final responsibility for correctness, safety, ethics, and long-term system quality remains human.
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+---
 
-## Learning Goals
+## What Human Judgment Owns
 
-By the end of this chapter, the reader should be able to:
+Engineers must own decisions about:
 
-* explain and apply **engineering accountability**
-* reason about **design intent ownership**
-* design and evaluate solutions around **critical evaluation**
+- problem framing
+- architecture direction
+- contract definitions
+- risk acceptance
+- rollout and rollback policy
 
-## Section Outline
+AI can propose options. Humans choose and justify.
 
-### 1. Conceptual Foundation
+---
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+## Decision Quality In AI Workflows
 
-### 2. Worked Design Path
+A strong AI-era engineering loop:
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+1. define intent and constraints
+2. generate alternatives
+3. evaluate tradeoffs with evidence
+4. select and validate
+5. monitor and adapt in production
 
-### 3. Nex Implementation Sketch
+This is still engineering judgment, now with faster iteration support.
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+---
 
-### 4. Common Mistakes and Recovery
+## Worked Design Path
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+Requirement:
 
-### 5. Reflection and Checkpoint
+> "Enable v2 policy rollout for premium delivery routing."
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+Human decisions required:
 
-## Studio Exercises
+- what counts as success metric
+- rollout canary threshold
+- fallback/rollback trigger
+- deprecation timeline for v1
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+AI can draft code and tests, but these policy decisions are human governance work.
 
-## Assessment Signals
+---
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+## Nex Implementation Sketch
 
-## Forward Link
+```nex
+class Rollout_Governance
+feature
+  canary_success_rate: Integer
+  min_required_rate: Integer
+  rollback_triggered: Boolean
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+  decide(): String
+    require
+      rates_valid: canary_success_rate >= 0 and min_required_rate >= 0
+    do
+      if canary_success_rate >= min_required_rate then
+        rollback_triggered := false
+        result := "PROCEED"
+      else
+        rollback_triggered := true
+        result := "ROLLBACK"
+      end
+    ensure
+      known_result: result = "PROCEED" or result = "ROLLBACK"
+    end
+invariant
+  rate_bounds: canary_success_rate >= 0 and min_required_rate >= 0
+end
+
+class Engineering_Decision_Log
+feature
+  decision: String
+  rationale: String
+
+  record(d, r: String): String
+    require
+      inputs_present: d /= "" and r /= ""
+    do
+      decision := d
+      rationale := r
+      result := "RECORDED"
+    ensure
+      persisted: decision = d and rationale = r
+    end
+end
+```
+
+The point is explicit governance and traceable decision ownership.
+
+---
+
+## Human Judgment Across The Three Systems
+
+### Delivery
+
+- safety and service-level tradeoffs during policy evolution
+
+### Knowledge
+
+- ranking fairness, explainability, and fallback acceptability
+
+### Virtual World
+
+- determinism vs performance tradeoffs in simulation rules
+
+These are not purely technical optimizations. They are product and ethics decisions too.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Delegating decision ownership to AI
+
+Symptom:
+
+- unclear accountability after incidents
+
+Recovery:
+
+- document human owner for each critical decision
+
+### Mistake 2: Treating AI output as objective truth
+
+Symptom:
+
+- plausible but wrong design choices adopted quickly
+
+Recovery:
+
+- require evidence, tests, and tradeoff analysis
+
+### Mistake 3: Missing governance trail
+
+Symptom:
+
+- team cannot explain why risky rollout happened
+
+Recovery:
+
+- maintain lightweight decision logs and gate criteria
+
+---
+
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
+## Quick Exercise (12 Minutes)
+
+Pick one recent AI-assisted change and document:
+
+1. decision owner
+2. alternatives considered
+3. chosen option and rationale
+4. validation evidence
+5. rollback condition
+
+Then identify one governance improvement for future changes.
+
+---
+
+## Connection to Nex
+
+Nex encourages explicitness through contracts and invariants, which supports accountable, auditable human decisions in AI-assisted workflows.
+
+---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
+
+## Chapter Takeaways
+
+- AI accelerates implementation, not accountability transfer.
+- Human judgment owns intent, risk, and governance.
+- Reliable AI workflows require explicit constraints and evidence-based decisions.
+- Engineering maturity in the AI era is measured by decision quality.
+
+---
+
+This book’s central thread remains unchanged across every part:
+
+- model clearly
+- specify behavior explicitly
+- measure and verify continuously
+- evolve safely with accountable judgment
+
+That is the foundation of real-world software engineering, with or without AI.

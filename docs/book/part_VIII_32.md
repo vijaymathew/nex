@@ -2,67 +2,205 @@
 
 ## 32. Designing for Change
 
-## Chapter Purpose
+Managing complexity keeps today stable.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+Designing for change keeps tomorrow affordable.
 
-## Narrative Setup
+The goal is not predicting every future requirement. The goal is building seams where likely changes can land without system-wide rewrite.
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+---
 
-## Learning Goals
+## Change Seams
 
-By the end of this chapter, the reader should be able to:
+A change seam is a boundary where behavior can vary while contracts remain stable.
 
-* explain and apply **extensibility seams**
-* reason about **versioning strategy**
-* design and evaluate solutions around **safe evolution**
+Common seam locations:
 
-## Section Outline
+- policy/strategy interfaces
+- adapter boundaries
+- versioned data contracts
+- feature toggle points
 
-### 1. Conceptual Foundation
+Good seams isolate volatility.
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+---
 
-### 2. Worked Design Path
+## Versioning Strategy
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+Change-safe systems define explicit evolution policy:
 
-### 3. Nex Implementation Sketch
+- additive fields over breaking replacements
+- deprecation windows
+- compatibility adapters for old clients
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+Without versioning discipline, small improvements become migration crises.
 
-### 4. Common Mistakes and Recovery
+---
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+## Worked Design Path
 
-### 5. Reflection and Checkpoint
+Requirement:
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+> "Add new ranking strategy without breaking existing query clients."
 
-## Studio Exercises
+Design path:
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+1. keep stable query interface (`rank(query): result`)
+2. extract ranking strategy port
+3. implement V1 and V2 strategies behind same contract
+4. choose strategy via configuration/feature flag
 
-## Assessment Signals
+Clients remain unchanged while behavior evolves.
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+---
 
-## Forward Link
+## Nex Implementation Sketch
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+```nex
+class Rank_Strategy
+feature
+  rank(query: String): String
+    require
+      query_present: query /= ""
+    do
+      result := "NOT_IMPLEMENTED"
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+class Rank_V1
+feature
+  rank(query: String): String
+    require
+      query_present: query /= ""
+    do
+      result := "DOC:LEGACY-1"
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+class Rank_V2
+feature
+  rank(query: String): String
+    require
+      query_present: query /= ""
+    do
+      result := "DOC:MODERN-1"
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+class Rank_Service
+feature
+  strategy: Rank_V1
+
+  run(query: String): String
+    require
+      query_present: query /= ""
+    do
+      result := strategy.rank(query)
+    ensure
+      non_empty: result /= ""
+    end
+end
+```
+
+The seam is clear: change ranking behavior without breaking service contract.
+
+---
+
+## Designing For Change Across The Three Systems
+
+### Delivery
+
+- swap route policies without changing dispatch API
+
+### Knowledge
+
+- evolve ranking/scoring strategies behind stable query contract
+
+### Virtual World
+
+- add new simulation rules behind existing step interface
+
+Safe change depends on stable contracts and isolated variation points.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Premature abstraction
+
+Symptom:
+
+- many empty seams with no real variation
+
+Recovery:
+
+- add seams where volatility is likely and evidenced
+
+### Mistake 2: No compatibility story
+
+Symptom:
+
+- new version breaks existing consumers
+
+Recovery:
+
+- plan versioning and transitional adapters
+
+### Mistake 3: Hidden feature flags
+
+Symptom:
+
+- behavior varies silently across environments
+
+Recovery:
+
+- make strategy selection explicit and observable
+
+---
+
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
+## Quick Exercise (12 Minutes)
+
+Pick one likely future change and define:
+
+1. stable contract to preserve
+2. seam to introduce
+3. old/new implementation variants
+4. rollout plan
+5. rollback condition
+
+Then identify one compatibility test you must automate.
+
+---
+
+## Connection to Nex
+
+Nex contract checks keep seams honest: old and new variants can be validated against the same behavior guarantees.
+
+---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
+
+## Chapter Takeaways
+
+- Design for change means designing for controlled variation.
+- Stable contracts are the backbone of safe evolution.
+- Versioning and compatibility are architecture concerns, not release chores.
+- Seams should be intentional, not speculative.
+
+---
+
+In Chapter 33, we close Part VIII with refactoring practices that preserve behavior while restructuring systems.

@@ -238,6 +238,11 @@ That workflow mirrors real engineering: observe, model, test, revise.
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (3 Minutes)
 
 Pick one real system you use every day (maps, search, chat, payments, calendar).
@@ -255,6 +260,11 @@ Example:
 - Engineering question: “How should intent ambiguity be represented and ranked?”
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

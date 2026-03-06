@@ -2,67 +2,198 @@
 
 ## 31. Managing Complexity
 
-## Chapter Purpose
+By Studio 5, the systems are more reliable.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+Now the next challenge is growth: keeping the code understandable and changeable as teams, features, and integrations expand.
 
-## Narrative Setup
+Complexity is not just size. It is the cost of reasoning about behavior.
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+---
 
-## Learning Goals
+## Complexity As A Budget
 
-By the end of this chapter, the reader should be able to:
+Every system has a complexity budget.
 
-* explain and apply **architectural layering**
-* reason about **local reasoning**
-* design and evaluate solutions around **complexity budgets**
+When that budget is exceeded, symptoms appear:
 
-## Section Outline
+- fragile changes
+- long onboarding time
+- unclear dependency impact
+- rising incident rate after routine edits
 
-### 1. Conceptual Foundation
+Managing complexity means making structure intentional.
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+---
 
-### 2. Worked Design Path
+## Layered Reasoning
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+A practical layering model:
 
-### 3. Nex Implementation Sketch
+- domain layer: business rules and invariants
+- application layer: orchestration/use cases
+- interface/infrastructure layer: adapters, IO, transport
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+Key rule:
 
-### 4. Common Mistakes and Recovery
+- dependencies should flow inward toward domain intent
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+This supports local reasoning and safer change.
 
-### 5. Reflection and Checkpoint
+---
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+## Worked Design Path
 
-## Studio Exercises
+Requirement:
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+> "Add priority reroute for premium tasks without breaking normal dispatch."
 
-## Assessment Signals
+Without layering, reroute logic leaks into adapters and transport code.
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+With layering:
 
-## Forward Link
+1. domain service decides reroute eligibility
+2. app service orchestrates reroute flow
+3. adapter layer executes storage and notification
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+Result: policy change stays mostly in domain/application layers.
+
+---
+
+## Nex Implementation Sketch
+
+```nex
+class Task
+feature
+  task_id: String
+  tier: String
+  status: String
+invariant
+  id_present: task_id /= ""
+  valid_tier: tier = "STANDARD" or tier = "PREMIUM"
+end
+
+class Reroute_Policy
+feature
+  should_reroute(t: Task): Boolean
+    require
+      task_present: t.task_id /= ""
+    do
+      result := t.tier = "PREMIUM" and t.status = "IN_TRANSIT"
+    ensure
+      bool_result: result = true or result = false
+    end
+end
+
+class Dispatch_App_Service
+feature
+  policy: Reroute_Policy
+
+  process_reroute(t: Task): String
+    require
+      task_present: t.task_id /= ""
+    do
+      if policy.should_reroute(t) then
+        result := "REROUTE_TRIGGERED"
+      else
+        result := "NO_REROUTE"
+      end
+    ensure
+      known_result: result = "REROUTE_TRIGGERED" or result = "NO_REROUTE"
+    end
+end
+```
+
+This design keeps rule decisions separate from infrastructure actions.
+
+---
+
+## Complexity Signals Across The Three Systems
+
+### Delivery
+
+- dispatch logic split across too many modules
+
+### Knowledge
+
+- ranking, retrieval, and caching tangled
+
+### Virtual World
+
+- update, collision, and render logic interwoven
+
+Complexity management starts with explicit boundaries and dependency direction.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Layer bypasses
+
+Symptom:
+
+- UI or adapter code modifies domain state directly
+
+Recovery:
+
+- route state changes through domain/application services
+
+### Mistake 2: Shared utility dumping ground
+
+Symptom:
+
+- one module accumulates unrelated logic
+
+Recovery:
+
+- split by domain responsibility, not convenience
+
+### Mistake 3: Cyclic dependencies
+
+Symptom:
+
+- modules require each other to compile/change
+
+Recovery:
+
+- extract ports/interfaces and invert dependency
+
+---
+
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
+## Quick Exercise (12 Minutes)
+
+For one subsystem:
+
+1. map current modules
+2. mark domain/application/interface boundaries
+3. identify one dependency pointing the wrong direction
+4. define one seam to fix it
+5. estimate complexity impact
+
+---
+
+## Connection to Nex
+
+Nex contracts at layer boundaries make complexity-reduction refactors safer by preserving behavior intent while structure changes.
+
+---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
+
+## Chapter Takeaways
+
+- Complexity must be managed as an explicit engineering budget.
+- Layered boundaries improve local reasoning.
+- Dependency direction determines long-term maintainability.
+- Reliability degrades when complexity structure is ignored.
+
+---
+
+In Chapter 32, we focus on designing those boundaries to absorb future change safely.

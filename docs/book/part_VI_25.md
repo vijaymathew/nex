@@ -2,67 +2,211 @@
 
 ## 25. Object-Oriented Thinking
 
-## Chapter Purpose
+Functional design emphasizes transformations.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+Object-oriented design emphasizes responsibility and collaboration.
 
-## Narrative Setup
+When a system has rich state, lifecycle rules, and interacting actors, OOP can make behavior easier to organize.
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+---
 
-## Learning Goals
+## OOP As Responsibility Design
 
-By the end of this chapter, the reader should be able to:
+Useful OOP is not about classes for everything.
 
-* explain and apply **responsibility allocation**
-* reason about **collaboration protocols**
-* design and evaluate solutions around **behavior-centric design**
+It is about assigning behavior to the objects that own the relevant state and invariants.
 
-## Section Outline
+Good OOP boundaries answer:
 
-### 1. Conceptual Foundation
+- who owns this data?
+- who is allowed to change this state?
+- who enforces transition legality?
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+---
 
-### 2. Worked Design Path
+## Collaboration Protocols
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+Objects should collaborate through explicit protocols, not by reaching into each other's internal fields.
 
-### 3. Nex Implementation Sketch
+A robust collaboration model:
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+- object A asks object B for behavior via method contracts
+- object B enforces its own invariants
+- cross-object workflows happen in coordinators/services
 
-### 4. Common Mistakes and Recovery
+This keeps state integrity local and interactions predictable.
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+---
 
-### 5. Reflection and Checkpoint
+## Worked Design Path
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+Requirement:
 
-## Studio Exercises
+> "Assign a task to a robot and start movement only when both are ready."
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+Design:
 
-## Assessment Signals
+1. `Delivery_Task` owns assignment and status transitions
+2. `Robot` owns readiness state
+3. `Dispatch_Service` coordinates collaboration
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+Contracts:
 
-## Forward Link
+- task can be assigned only from legal states
+- robot must be ready before task starts
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+---
+
+## Nex Implementation Sketch
+
+```nex
+class Robot
+feature
+  robot_id: String
+  ready: Boolean
+
+  mark_ready() do
+    ready := true
+  ensure
+    now_ready: ready = true
+  end
+invariant
+  id_present: robot_id /= ""
+end
+
+class Delivery_Task
+feature
+  task_id: String
+  status: String
+  assigned_robot: String
+
+  assign(robot_id: String)
+    require
+      robot_present: robot_id /= ""
+      can_assign: status = "PENDING" or status = "FAILED"
+    do
+      assigned_robot := robot_id
+      status := "IN_TRANSIT"
+    ensure
+      assigned: assigned_robot = robot_id and status = "IN_TRANSIT"
+    end
+invariant
+  id_present: task_id /= ""
+  valid_status:
+    status = "PENDING" or
+    status = "IN_TRANSIT" or
+    status = "DELIVERED" or
+    status = "FAILED"
+end
+
+class Dispatch_Service
+feature
+  dispatch(task: Delivery_Task; robot: Robot): String
+    require
+      robot_ready: robot.ready = true
+      task_pending_or_failed: task.status = "PENDING" or task.status = "FAILED"
+    do
+      task.assign(robot.robot_id)
+      result := "DISPATCHED"
+    ensure
+      known_result: result = "DISPATCHED"
+    end
+end
+```
+
+This pattern keeps domain invariants inside domain objects while coordinating workflows externally.
+
+---
+
+## OOP Across The Three Systems
+
+### Delivery
+
+- task and robot behavior with explicit transition methods
+
+### Knowledge
+
+- document and link entities with relationship management methods
+
+### Virtual World
+
+- world objects owning update/collision state transitions
+
+Behavior ownership is the key strength of OOP in stateful domains.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Anemic models
+
+Symptom:
+
+- objects store data while logic lives in services only
+
+Recovery:
+
+- move invariant-related behavior to owning object
+
+### Mistake 2: God objects
+
+Symptom:
+
+- one class controls too much workflow and state
+
+Recovery:
+
+- split by responsibility and collaboration protocol
+
+### Mistake 3: Cross-object field mutation
+
+Symptom:
+
+- callers directly mutate internal state of other objects
+
+Recovery:
+
+- expose methods with contracts instead of raw mutation
+
+---
+
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
+## Quick Exercise (12 Minutes)
+
+Choose one workflow and identify:
+
+1. state-owning objects
+2. transitions each object should enforce
+3. coordinator/service role
+4. one illegal transition to block
+5. one collaboration contract to add
+
+Then refactor one anemic object to own one key behavior.
+
+---
+
+## Connection to Nex
+
+Nex supports OOP well through class invariants and contract-checked feature routines, making behavior ownership explicit and enforceable.
+
+---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
+
+## Chapter Takeaways
+
+- OOP is responsibility design, not class count.
+- Objects should own behavior tied to their invariants.
+- Coordinators should orchestrate collaboration, not own all state logic.
+- Contracts make collaboration protocols explicit.
+
+---
+
+In Chapter 26, we formalize interface design so component collaboration stays stable as systems evolve.

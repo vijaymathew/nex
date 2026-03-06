@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="13.155in" height="9.250in" viewBox="0 0 13.155 9.250">
+  <defs>
+    <style>
+      .bg-front { fill: #0f2438; }
+      .bg-back { fill: #132b43; }
+      .bg-spine { fill: #0b1a2a; }
+      .guide { fill: none; stroke: #e36; stroke-width: 0.01; stroke-dasharray: 0.04 0.04; }
+      .safe { fill: none; stroke: #2a7; stroke-width: 0.008; stroke-dasharray: 0.03 0.03; }
+      .txt-title { font-family: 'Georgia', serif; font-size: 0.36px; font-weight: 700; fill: #f5f7fb; letter-spacing: 0.01em; }
+      .txt-sub { font-family: 'Georgia', serif; font-size: 0.15px; fill: #d7e1ec; }
+      .txt-spine { font-family: 'Georgia', serif; font-size: 0.12px; font-weight: 700; fill: #f5f7fb; letter-spacing: 0.03em; }
+      .txt-meta { font-family: 'Georgia', serif; font-size: 0.095px; fill: #c8d2df; }
+      .label { font-family: monospace; font-size: 0.08px; fill: #ffd7df; }
+    </style>
+  </defs>
+
+  <!-- Bleed area background -->
+  <rect x="0" y="0" width="13.155" height="9.250" fill="#0a1826"/>
+
+  <!-- Back / Spine / Front panels -->
+  <rect class="bg-back" x="0.125" y="0.125" width="6" height="9"/>
+  <rect class="bg-spine" x="6.125" y="0.125" width="0.905" height="9"/>
+  <rect class="bg-front" x="7.030" y="0.125" width="6" height="9"/>
+
+  <!-- Front text -->
+  <text class="txt-title" x="7.580" y="2.35">Beyond Code</text>
+  <text class="txt-sub" x="7.580" y="2.78">Building Software Systems That Last</text>
+  <text class="txt-sub" x="7.580" y="3.08">From Modeling and Algorithms to Reliability,</text>
+  <text class="txt-sub" x="7.580" y="3.30">Evolution, and AI-Era Engineering</text>
+  <text class="txt-meta" x="7.580" y="4.10">Nex Book Team</text>
+
+  <!-- Spine text -->
+  <g transform="translate(6.577,8.3) rotate(-90)">
+    <text class="txt-spine" text-anchor="middle">BEYOND CODE</text>
+    <text class="txt-meta" y="0.2" text-anchor="middle">Nex Book Team</text>
+  </g>
+
+  <!-- Back copy placeholder -->
+  <text class="txt-sub" x="0.675" y="2.25">A practical guide to designing software systems</text>
+  <text class="txt-sub" x="0.675" y="2.47">that remain correct, reliable, and evolvable</text>
+  <text class="txt-sub" x="0.675" y="2.69">under real-world pressure.</text>
+  <rect x="4.325" y="6.95" width="1.25" height="1.05" fill="#f7f7f7" opacity="0.95"/>
+  <text class="txt-meta" x="4.375" y="8.13">Barcode</text>
+
+  <!-- Trim and safe guides -->
+  <rect class="guide" x="0.125" y="0.125" width="12.905" height="9.000"/>
+  <rect class="safe" x="0.375" y="0.375" width="12.405" height="8.500"/>
+
+  <!-- Panel boundaries -->
+  <line class="guide" x1="6.125" y1="0.125" x2="6.125" y2="9.125"/>
+  <line class="guide" x1="7.030" y1="0.125" x2="7.030" y2="9.125"/>
+
+  <!-- Technical labels -->
+  <text class="label" x="0.18" y="0.20">Trim: 6 x 9 in</text>
+  <text class="label" x="0.18" y="0.33">Bleed: 0.125 in</text>
+  <text class="label" x="0.18" y="0.46">Pages: 362</text>
+  <text class="label" x="0.18" y="0.59">Spine: 0.905 in (caliper 0.0025)</text>
+  <text class="label" x="0.18" y="0.72">Full cover: 13.155 x 9.250 in</text>
+</svg>

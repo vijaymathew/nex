@@ -2,67 +2,209 @@
 
 ## 30. Debugging Like an Engineer
 
-## Chapter Purpose
+Testing tells us something is wrong.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+Debugging determines why it is wrong and how to fix it without creating new faults.
 
-## Narrative Setup
+Engineering-grade debugging is a structured process, not trial-and-error edits.
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+---
 
-## Learning Goals
+## Debugging As Hypothesis Work
 
-By the end of this chapter, the reader should be able to:
+Effective debugging loop:
 
-* explain and apply **symptom-to-cause tracing**
-* reason about **reproducibility**
-* design and evaluate solutions around **hypothesis-driven diagnosis**
+1. reproduce reliably
+2. localize failure boundary
+3. form hypothesis
+4. run targeted check
+5. confirm cause
+6. patch and verify regression safety
 
-## Section Outline
+Skipping steps causes "fixes" that mask symptoms and move bugs elsewhere.
 
-### 1. Conceptual Foundation
+---
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+## Reproducibility First
 
-### 2. Worked Design Path
+A bug you cannot reproduce cannot be fixed confidently.
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+Before patching:
 
-### 3. Nex Implementation Sketch
+- capture exact inputs/state
+- minimize to a smallest failing case
+- note expected vs observed behavior
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+This transforms debugging from guesswork into evidence-driven analysis.
 
-### 4. Common Mistakes and Recovery
+---
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+## Worked Design Path
 
-### 5. Reflection and Checkpoint
+Bug report:
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+> "Some delivery tasks jump directly from PENDING to DELIVERED."
 
-## Studio Exercises
+Debug steps:
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+1. reproduce with minimal task flow
+2. inspect transition entry points
+3. hypothesize missing precondition on `complete()`
+4. confirm by calling `complete()` without `IN_TRANSIT`
+5. patch contract and rerun regression checks
 
-## Assessment Signals
+Result: illegal transition blocked at boundary.
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+---
 
-## Forward Link
+## Nex Implementation Sketch
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+```nex
+class Delivery_Task
+feature
+  status: String
+
+  start()
+    require
+      can_start: status = "PENDING" or status = "FAILED"
+    do
+      status := "IN_TRANSIT"
+    ensure
+      now_in_transit: status = "IN_TRANSIT"
+    end
+
+  complete()
+    require
+      in_transit: status = "IN_TRANSIT"
+    do
+      status := "DELIVERED"
+    ensure
+      delivered: status = "DELIVERED"
+    end
+invariant
+  valid_status:
+    status = "PENDING" or
+    status = "IN_TRANSIT" or
+    status = "DELIVERED" or
+    status = "FAILED"
+end
+
+class Debug_Smoke_Test
+feature
+  run(): String
+    do
+      let t: Delivery_Task := create Delivery_Task
+      t.status := "PENDING"
+      t.start
+      t.complete
+
+      if t.status = "DELIVERED" then
+        result := "PASS"
+      else
+        result := "FAIL"
+      end
+    ensure
+      known_result: result = "PASS" or result = "FAIL"
+    end
+end
+```
+
+This patch shape demonstrates contract-based bug prevention and regression confirmation.
+
+---
+
+## Debugging Across The Three Systems
+
+### Delivery
+
+- transition violations and route mismatches
+
+### Knowledge
+
+- ranking inconsistencies and stale index effects
+
+### Virtual World
+
+- non-deterministic update ordering and bound violations
+
+Debugging strategy is shared: isolate, hypothesize, verify, patch, regress.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Patching before reproducing
+
+Symptom:
+
+- bug returns in slightly different form
+
+Recovery:
+
+- establish minimal reproducible case first
+
+### Mistake 2: Multiple simultaneous changes
+
+Symptom:
+
+- cannot tell which edit fixed or broke behavior
+
+Recovery:
+
+- apply one hypothesis-driven change at a time
+
+### Mistake 3: No regression safety net
+
+Symptom:
+
+- fix introduces new failures elsewhere
+
+Recovery:
+
+- add targeted regression tests before merging
+
+---
+
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
+## Quick Exercise (12 Minutes)
+
+Take one recent bug and write:
+
+1. reproducible case
+2. observed vs expected behavior
+3. root-cause hypothesis
+4. confirming check
+5. patch summary
+6. regression tests added
+
+If any step is missing, the fix quality is uncertain.
+
+---
+
+## Connection to Nex
+
+Nex contracts and invariants accelerate debugging by making assumption violations explicit at runtime boundaries.
+
+---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
+
+## Chapter Takeaways
+
+- Debugging is hypothesis-driven engineering work.
+- Reproducibility is prerequisite to reliable fixes.
+- Contracts and invariants help localize root causes quickly.
+- Every fix needs regression evidence.
+
+---
+
+Part VII established trust mechanisms: contracts, invariants, testing, and debugging.
+
+Next is **System Milestone 5 — Reliability**, where these practices are applied end-to-end in Studio 5.

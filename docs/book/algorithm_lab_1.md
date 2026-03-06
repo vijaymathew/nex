@@ -4,6 +4,11 @@
 
 Testing algorithm ideas on small systems before formal complexity notation.
 
+::: {.note-lab}
+**Lab Focus**
+Run controlled experiments, collect evidence, and compare algorithm choices under explicit assumptions.
+:::
+
 ## 1. Why This Lab Exists
 
 Part III introduced algorithm thinking:

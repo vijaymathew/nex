@@ -2,67 +2,215 @@
 
 ## 21. Exploring Trees and Graphs
 
-## Chapter Purpose
+Once data is structured as trees or graphs, traversal becomes the core algorithmic operation.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+Traversal answers questions like:
 
-## Narrative Setup
+- what is reachable?
+- what is connected?
+- in what order should we process structure?
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+This chapter focuses on depth-first and breadth-first exploration patterns.
 
-## Learning Goals
+---
 
-By the end of this chapter, the reader should be able to:
+## DFS vs BFS
 
-* explain and apply **depth-first vs breadth-first**
-* reason about **frontier management**
-* design and evaluate solutions around **structure discovery**
+Two foundational traversal styles:
 
-## Section Outline
+- **Depth-first search (DFS)**: go deep along a branch before backtracking.
+- **Breadth-first search (BFS)**: visit level by level from a frontier.
 
-### 1. Conceptual Foundation
+They solve different problems efficiently:
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+- DFS is natural for exhaustive structure exploration and recursive decomposition.
+- BFS is natural for minimum-hop reachability in unweighted graphs.
 
-### 2. Worked Design Path
+---
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+## Traversal Safety Rules
 
-### 3. Nex Implementation Sketch
+Traversal correctness requires explicit controls:
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+- visited tracking (avoid repeated loops)
+- boundary conditions (depth/time/cost limits)
+- deterministic policy when order matters
 
-### 4. Common Mistakes and Recovery
+Without these, traversal may be correct on toy cases and unstable in real workloads.
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+---
 
-### 5. Reflection and Checkpoint
+## Worked Design Path
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+Requirement:
 
-## Studio Exercises
+> "From a starting document, discover connected documents up to depth 2."
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+### Step 1: Define reachability scope
 
-## Assessment Signals
+- max depth = 2
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+### Step 2: Choose traversal
 
-## Forward Link
+- BFS for depth-layer behavior
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+### Step 3: Define duplicate policy
+
+- each document visited once
+
+### Step 4: Define output semantics
+
+- return discovered ids in visit order
+
+### Step 5: Define failure behavior
+
+- unknown start id -> `INVALID_START`
+
+---
+
+## Nex Implementation Sketch
+
+```nex
+class Explore_Result
+feature
+  status: String
+  discovered: String
+invariant
+  status_present: status /= ""
+end
+
+class Graph_Explorer
+feature
+  -- Teaching-sized adjacency representation.
+  a_to_b: Boolean
+  a_to_c: Boolean
+  b_to_d: Boolean
+  c_to_d: Boolean
+
+  bfs_from_a_depth2(): Explore_Result
+    do
+      let r: Explore_Result := create Explore_Result
+
+      if not a_to_b and not a_to_c then
+        r.status := "ISOLATED"
+        r.discovered := "A"
+      elseif a_to_b and b_to_d then
+        r.status := "OK"
+        r.discovered := "A,B,D"
+      elseif a_to_c and c_to_d then
+        r.status := "OK"
+        r.discovered := "A,C,D"
+      elseif a_to_b then
+        r.status := "OK"
+        r.discovered := "A,B"
+      elseif a_to_c then
+        r.status := "OK"
+        r.discovered := "A,C"
+      else
+        r.status := "ISOLATED"
+        r.discovered := "A"
+      end
+
+      result := r
+    ensure
+      declared_status: result.status = "OK" or result.status = "ISOLATED"
+    end
+end
+```
+
+This simplified sketch emphasizes traversal outcomes and explicit status.
+
+---
+
+## Traversal Across The Three Systems
+
+### Delivery
+
+- explore route alternatives and reachable depots
+
+### Knowledge
+
+- walk linked documents/concepts
+
+### Virtual World
+
+- traverse scene/interactions for update and visibility
+
+Traversal design determines both correctness and cost behavior.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: No visited policy
+
+Symptom:
+
+- repeated processing or infinite loops
+
+Recovery:
+
+- track visited nodes explicitly
+
+### Mistake 2: Wrong traversal for goal
+
+Symptom:
+
+- DFS used where minimum-hop answer required
+
+Recovery:
+
+- choose traversal to match objective
+
+### Mistake 3: Implicit depth/cost bounds
+
+Symptom:
+
+- traversal growth surprises under dense connectivity
+
+Recovery:
+
+- define max depth or expansion budget
+
+---
+
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
+## Quick Exercise (12 Minutes)
+
+Pick one graph/tree operation and specify:
+
+1. traversal type (DFS/BFS)
+2. visited policy
+3. bound policy (depth/time)
+4. output order rule
+5. invalid-input behavior
+
+Then justify the choice in one paragraph.
+
+---
+
+## Connection to Nex
+
+Nex contracts make traversal assumptions explicit, especially around entry validity and result guarantees under bounded exploration.
+
+---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
+
+## Chapter Takeaways
+
+- Traversal is the primary algorithm over structured relationships.
+- DFS and BFS solve different classes of questions.
+- Visited and boundary policies are correctness requirements.
+- Traversal order should be explicit when behavior depends on it.
+
+---
+
+In Chapter 22, we build on traversal to solve best-path optimization problems.

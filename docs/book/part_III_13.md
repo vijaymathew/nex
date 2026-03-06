@@ -161,6 +161,11 @@ Recovery:
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (10 Minutes)
 
 Design one recursive routine for your project and write:
@@ -188,6 +193,11 @@ Nex contracts make recursive assumptions explicit and checkable, especially arou
 That tightens correctness early and reduces latent recursion bugs.
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

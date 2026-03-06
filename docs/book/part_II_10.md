@@ -204,6 +204,11 @@ Recovery:
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (10 Minutes)
 
 For one entity in your system, define:
@@ -230,6 +235,11 @@ That helps teams reason about change correctness before scaling complexity.
 The broader lesson: model transitions as first-class design objects, not incidental code paths.
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

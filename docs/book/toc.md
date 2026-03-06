@@ -230,7 +230,7 @@ We must redesign using better data structures.
 
 ---
 
-### Algorithm Lab — When Algorithms Compete
+### [Algorithm Lab — When Algorithms Compete](algorithm_lab_2.md)
 
 We pit algorithms against each other and watch the results.
 
@@ -372,7 +372,7 @@ The real test of good design.
 
 ---
 
-# Epilogue — The Systems Behind Everything
+# [Epilogue — The Systems Behind Everything](epilogue.md)
 
 We step back and realize something remarkable.
 
@@ -388,3 +388,25 @@ They are all variations of the **same underlying system**:
 * algorithms
 
 And now you know how to build them.
+
+---
+
+# Back Matter
+
+## [Glossary](glossary.md)
+
+Major terms used across the book:
+
+* algorithms
+* invariants
+* contracts
+* inheritance rules
+* complexity
+
+## [Index of Terms](index_terms.md)
+
+A practical topic index that points to the chapters where each concept is introduced and applied.
+
+## [References](references.md)
+
+A placeholder bibliography chapter and citation workflow.

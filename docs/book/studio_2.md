@@ -4,6 +4,11 @@
 
 Refactoring data models so systems can evolve without hidden state corruption.
 
+::: {.note-studio}
+**Studio Focus**
+This studio chapter is hands-on: implement, verify behavior, and document tradeoffs as you iterate.
+:::
+
 ## 1. The Situation
 
 Studio 1 proved we could ship tiny vertical slices.

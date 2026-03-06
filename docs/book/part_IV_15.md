@@ -188,6 +188,11 @@ Recovery:
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (10 Minutes)
 
 For one feature in your project:
@@ -208,6 +213,11 @@ Nex contracts help define what sequence operations guarantee, so behavior remain
 This allows incremental evolution from list-only designs to hybrid designs without losing correctness.
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

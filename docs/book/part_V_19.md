@@ -2,67 +2,221 @@
 
 ## 19. Searching for What Matters
 
-## Chapter Purpose
+Part IV gave us data-structure options.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+Part V focuses on algorithm families that use those structures effectively.
 
-## Narrative Setup
+We start with searching because most systems spend significant time answering one question:
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+- "Where is the thing we need?"
 
-## Learning Goals
+---
 
-By the end of this chapter, the reader should be able to:
+## Search Is A Design Decision
 
-* explain and apply **search strategy selection**
-* reason about **correctness criteria**
-* design and evaluate solutions around **performance envelopes**
+Search strategy should match data organization and workload.
 
-## Section Outline
+Common strategies:
 
-### 1. Conceptual Foundation
+- linear search for small or unsorted collections
+- binary search for sorted sequences
+- map/set lookup for keyed identity access
+- graph/tree traversal for structural discovery
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+Choosing a strategy by habit instead of operation profile creates hidden latency costs.
 
-### 2. Worked Design Path
+---
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+## Correctness Before Speed
 
-### 3. Nex Implementation Sketch
+A search algorithm is useful only if it clearly defines:
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+- what counts as a match
+- what happens when no match exists
+- what assumptions input must satisfy
 
-### 4. Common Mistakes and Recovery
+Without explicit miss semantics, search paths tend to leak null/empty ambiguity.
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+---
 
-### 5. Reflection and Checkpoint
+## Worked Design Path
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+Requirement:
 
-## Studio Exercises
+> "Given a task id, return current status quickly and safely."
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+### Step 1: Define match semantics
 
-## Assessment Signals
+- exact id equality
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+### Step 2: Define miss behavior
 
-## Forward Link
+- return `NOT_FOUND`
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+### Step 3: Check data properties
+
+- if unsorted sequence: linear search baseline
+- if sorted key list: binary search option
+- if direct index exists: keyed lookup preferred
+
+### Step 4: Choose first implementation
+
+Start with linear search if model is early and data is small.
+
+### Step 5: Define upgrade trigger
+
+When scans dominate hot path latency, move to indexed/keyed strategy.
+
+---
+
+## Nex Implementation Sketch
+
+```nex
+class Search_Result
+feature
+  status: String
+  steps: Integer
+invariant
+  status_present: status /= ""
+  steps_non_negative: steps >= 0
+end
+
+class Task_Search
+feature
+  id1: String
+  st1: String
+  id2: String
+  st2: String
+  id3: String
+  st3: String
+  id4: String
+  st4: String
+
+  linear_find(task_id: String): Search_Result
+    require
+      id_present: task_id /= ""
+    do
+      let r: Search_Result := create Search_Result
+      r.status := "NOT_FOUND"
+      r.steps := 0
+
+      r.steps := r.steps + 1
+      if task_id = id1 then
+        r.status := st1
+      elseif task_id = id2 then
+        r.steps := r.steps + 1
+        r.status := st2
+      elseif task_id = id3 then
+        r.steps := r.steps + 1
+        r.status := st3
+      elseif task_id = id4 then
+        r.steps := r.steps + 1
+        r.status := st4
+      else
+        r.steps := r.steps + 1
+      end
+
+      result := r
+    ensure
+      bounded_steps: result.steps >= 1 and result.steps <= 4
+    end
+end
+```
+
+This chapter example emphasizes explicit match/miss semantics and measurable behavior.
+
+---
+
+## Search Across The Three Systems
+
+### Delivery
+
+- locate task/robot/location by identity
+
+### Knowledge
+
+- locate candidate docs by token/id/tag
+
+### Virtual World
+
+- locate entity state by object id
+
+In each system, search is often the first scaling bottleneck.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: One search strategy everywhere
+
+Symptom:
+
+- growing latency on high-frequency operations
+
+Recovery:
+
+- classify operation profile first
+- use structure-appropriate search
+
+### Mistake 2: Undefined miss semantics
+
+Symptom:
+
+- null/empty meaning depends on caller
+
+Recovery:
+
+- return explicit status values
+
+### Mistake 3: Ignoring input assumptions
+
+Symptom:
+
+- binary search used on unsorted data
+
+Recovery:
+
+- enforce preconditions through contracts
+
+---
+
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
+## Quick Exercise (10 Minutes)
+
+Choose one search hotspot and document:
+
+1. match rule
+2. miss rule
+3. current strategy
+4. expected input size
+5. redesign trigger
+
+Then add one contract that prevents incorrect strategy use.
+
+---
+
+## Connection to Nex
+
+Nex contracts make search assumptions executable, reducing silent mismatches between caller expectations and implementation behavior.
+
+---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
+
+## Chapter Takeaways
+
+- Search strategy should follow operation profile and data organization.
+- Correctness semantics (match/miss) are part of algorithm design.
+- Linear search is often a baseline, not an end state.
+- Contracts help prevent invalid search usage.
+
+---
+
+In Chapter 20, we examine sorting, where ordering becomes a leverage point for downstream speed.

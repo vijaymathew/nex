@@ -207,6 +207,11 @@ Recovery:
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (12 Minutes)
 
 Pick one algorithm and create a cost brief:
@@ -230,6 +235,11 @@ Nex keeps cost-related decisions close to code and contracts, making strategy as
 The transferable lesson is language-independent: measure behavior against model assumptions before scale forces emergency redesign.
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

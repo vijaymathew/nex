@@ -2,67 +2,208 @@
 
 ## 35. Reviewing AI-Generated Code
 
-## Chapter Purpose
+AI can generate code quickly.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+Review determines whether that code is safe, correct, and maintainable.
 
-## Narrative Setup
+In AI workflows, review quality is the difference between acceleration and debt.
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+---
 
-## Learning Goals
+## What To Review First
 
-By the end of this chapter, the reader should be able to:
+Prioritize review by risk, not by line count.
 
-* explain and apply **semantic review**
-* reason about **contract validation**
-* design and evaluate solutions around **risk triage**
+High-priority review targets:
 
-## Section Outline
+- contract correctness
+- invariant preservation
+- behavior regressions
+- security/reliability implications
+- integration boundary violations
 
-### 1. Conceptual Foundation
+Cosmetic style issues come after behavioral safety.
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+---
 
-### 2. Worked Design Path
+## Review Checklist For AI Code
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+A practical checklist:
 
-### 3. Nex Implementation Sketch
+1. Does it satisfy stated requirement?
+2. Does it preserve existing contracts?
+3. Does it handle failure states explicitly?
+4. Does it introduce hidden coupling?
+5. Are tests added for changed behavior?
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+This checklist catches most high-impact problems early.
 
-### 4. Common Mistakes and Recovery
+---
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+## Worked Design Path
 
-### 5. Reflection and Checkpoint
+Requirement:
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+> "AI added retry logic to delivery dispatch."
 
-## Studio Exercises
+Review steps:
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+1. verify retry bound exists
+2. verify non-retryable errors do not loop
+3. verify idempotency guard remains correct
+4. verify existing success path unchanged
+5. add regression tests for retry and duplicate requests
 
-## Assessment Signals
+---
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+## Nex Implementation Sketch
 
-## Forward Link
+```nex
+class Dispatch_Port
+feature
+  fail_code: String
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+  send(task_id: String): String
+    require
+      id_present: task_id /= ""
+    do
+      if fail_code = "NONE" then
+        result := "SENT"
+      elseif fail_code = "TRANSIENT" then
+        result := "TRANSIENT_FAILURE"
+      else
+        result := "PERMANENT_FAILURE"
+      end
+    ensure
+      known_result:
+        result = "SENT" or
+        result = "TRANSIENT_FAILURE" or
+        result = "PERMANENT_FAILURE"
+    end
+end
+
+class Dispatch_With_Retry
+feature
+  port: Dispatch_Port
+
+  send(task_id: String; max_attempts: Integer): String
+    require
+      id_present: task_id /= ""
+      attempts_valid: max_attempts >= 1
+    do
+      let attempt: Integer := 1
+      let status: String := "TRANSIENT_FAILURE"
+
+      from
+      until attempt > max_attempts or status = "SENT" or status = "PERMANENT_FAILURE"
+      loop
+        status := port.send(task_id)
+        attempt := attempt + 1
+      end
+
+      result := status
+    ensure
+      known_result:
+        result = "SENT" or
+        result = "TRANSIENT_FAILURE" or
+        result = "PERMANENT_FAILURE"
+    end
+end
+```
+
+Review focus here is correctness under all failure paths, not syntax.
+
+---
+
+## AI Review Across The Three Systems
+
+### Delivery
+
+- transition legality and retry safety
+
+### Knowledge
+
+- ranking correctness and fallback semantics
+
+### Virtual World
+
+- deterministic update guarantees and bound safety
+
+Review must be domain-aware, not generic.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Style-first review
+
+Symptom:
+
+- severe behavioral bugs survive
+
+Recovery:
+
+- start with contracts, invariants, failure paths
+
+### Mistake 2: No regression focus
+
+Symptom:
+
+- existing behavior broken by new code
+
+Recovery:
+
+- compare before/after observable behavior explicitly
+
+### Mistake 3: Missing adversarial cases
+
+Symptom:
+
+- retry loops, edge crashes, or invalid outputs in production
+
+Recovery:
+
+- add failure-oriented tests before approval
+
+---
+
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
+## Quick Exercise (12 Minutes)
+
+Take one AI-generated patch and review it with this order:
+
+1. contract alignment
+2. invariant impact
+3. failure path handling
+4. regression test coverage
+5. maintainability concerns
+
+Document one blocker-level issue and one minor issue.
+
+---
+
+## Connection to Nex
+
+Nex contracts make semantic review more objective by converting behavior expectations into explicit checks.
+
+---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
+
+## Chapter Takeaways
+
+- AI-generated code requires risk-first review.
+- Contract and invariant validation should lead review order.
+- Regression safety is non-negotiable.
+- Review quality defines AI workflow reliability.
+
+---
+
+In Chapter 36, we close with the role of human engineering judgment in AI-assisted software development.

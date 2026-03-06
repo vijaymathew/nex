@@ -182,6 +182,11 @@ Recovery:
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (10 Minutes)
 
 Take one large function in your codebase and decompose it into 3-6 stages.
@@ -206,6 +211,11 @@ Nex contracts are especially useful at decomposition boundaries because they mak
 This is also where AI-assisted coding improves: clear stage contracts reduce incorrect glue code.
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

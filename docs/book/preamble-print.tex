@@ -1,0 +1,153 @@
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+% Font stack:
+% 1) Prefer Libertinus (if installed)
+% 2) Fallback to a stronger classic print face (mathpazo)
+\IfFileExists{libertinus.sty}{
+  \usepackage{libertinus}
+  \IfFileExists{zi4.sty}{\usepackage[scaled=0.94]{zi4}}{}
+}{
+  \usepackage{mathpazo}
+  \IfFileExists{courier.sty}{\usepackage{courier}}{}
+}
+\usepackage{microtype}
+\microtypesetup{protrusion=true,expansion=true}
+\usepackage{setspace}
+\setstretch{1.03}
+
+\clubpenalty=10000
+\widowpenalty=10000
+\displaywidowpenalty=10000
+\brokenpenalty=10000
+\predisplaypenalty=10000
+\tolerance=1600
+\emergencystretch=2em
+\hyphenpenalty=650
+\exhyphenpenalty=80
+\doublehyphendemerits=100000
+\finalhyphendemerits=100000
+\adjdemerits=12000
+
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{2}
+
+% Print-edition paragraph rhythm (book-style indent, no paragraph gaps)
+\setlength{\parskip}{0pt}
+\setlength{\parindent}{1.35em}
+\setlength{\skip\footins}{10pt}
+\setlength{\footnotesep}{8pt}
+
+% KOMA-Script tuning for chapter starts in print mode
+\KOMAoptions{headings=openright}
+\KOMAoptions{cleardoublepage=empty}
+\setkomafont{chapter}{\normalfont\bfseries\huge}
+\setkomafont{section}{\normalfont\bfseries\Large}
+\setkomafont{subsection}{\normalfont\bfseries\large}
+\setkomafont{pageheadfoot}{\normalfont\small}
+
+% Professional running headers/footers with separate front/main styles
+\usepackage[automark,headsepline=.25pt]{scrlayer-scrpage}
+\newpairofpagestyles{frontstyle}{
+  \clearpairofpagestyles
+  \cfoot*{\pagemark}
+}
+
+\newpairofpagestyles{mainstyle}{
+  \clearpairofpagestyles
+  \automark[section]{chapter}
+  \lehead{\small\itshape Beyond Code}
+  \rohead{\small\itshape \leftmark}
+  \lefoot{\pagemark}
+  \rofoot{\pagemark}
+}
+
+% Chapter opening pages: no running headers, page number only.
+\newpairofpagestyles{chapterstartstyle}{
+  \clearpairofpagestyles
+  \cfoot*{\pagemark}
+}
+\renewcommand*{\chapterpagestyle}{chapterstartstyle}
+
+% Keep code blocks legible in print while avoiding heavy boxes
+\definecolor{shadecolor}{gray}{0.96}
+
+% Use listings in print profile so long lines wrap instead of overrunning margins.
+\usepackage{listings}
+\usepackage{caption}
+\captionsetup{
+  font=small,
+  labelfont=bf,
+  labelsep=colon
+}
+\captionsetup[figure]{position=bottom}
+\captionsetup[table]{position=top}
+\captionsetup[lstlisting]{
+  position=top,
+  font=small,
+  labelfont=bf,
+  labelsep=colon
+}
+\renewcommand{\lstlistingname}{Listing}
+\renewcommand{\lstlistlistingname}{List of Listings}
+
+% Figures/tables/listings numbered by chapter for print readability.
+\counterwithin{figure}{chapter}
+\counterwithin{table}{chapter}
+
+% Source-note helper for figures/tables/listings.
+\newcommand{\SourceNote}[1]{\par\smallskip{\footnotesize\itshape Source: #1}\par}
+
+% Conservative float policy for cleaner pages in print.
+\setcounter{topnumber}{2}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{4}
+\renewcommand{\topfraction}{0.85}
+\renewcommand{\bottomfraction}{0.75}
+\renewcommand{\textfraction}{0.1}
+\renewcommand{\floatpagefraction}{0.7}
+\usepackage{flafter}
+\usepackage[section]{placeins}
+\lstset{
+  basicstyle=\ttfamily\scriptsize,
+  breaklines=true,
+  breakatwhitespace=false,
+  breakautoindent=true,
+  breakindent=0pt,
+  columns=flexible,
+  linewidth=\linewidth,
+  keepspaces=true,
+  showstringspaces=false,
+  frame=single,
+  framerule=0.15pt,
+  framesep=4pt,
+  xleftmargin=0pt,
+  xrightmargin=0pt,
+  framexleftmargin=0pt,
+  framexrightmargin=0pt,
+  postbreak=\mbox{\textcolor{gray}{$\hookrightarrow$}\space},
+  captionpos=t
+}
+
+% Ensure our listing style is the final active one.
+\AtBeginDocument{
+  \lstset{
+    basicstyle=\ttfamily\scriptsize,
+    breaklines=true,
+    breakatwhitespace=false,
+    breakautoindent=true,
+    breakindent=0pt,
+    columns=flexible,
+    linewidth=\linewidth,
+    keepspaces=true,
+    showstringspaces=false,
+    frame=single,
+    framerule=0.15pt,
+    framesep=4pt,
+    xleftmargin=0pt,
+    xrightmargin=0pt,
+    framexleftmargin=0pt,
+    framexrightmargin=0pt,
+    postbreak=\mbox{\textcolor{gray}{$\hookrightarrow$}\space},
+    captionpos=t
+  }
+}

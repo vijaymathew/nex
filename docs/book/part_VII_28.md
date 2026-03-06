@@ -2,67 +2,187 @@
 
 ## 28. Invariants: Rules That Must Never Break
 
-## Chapter Purpose
+Preconditions and postconditions protect individual routine calls.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+Invariants protect object validity across its whole lifetime.
 
-## Narrative Setup
+An invariant is a truth that must hold whenever an object is externally observable.
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+---
 
-## Learning Goals
+## Why Invariants Matter
 
-By the end of this chapter, the reader should be able to:
+Without invariants, systems can enter invalid intermediate states that later code assumes are impossible.
 
-* explain and apply **global consistency**
-* reason about **state integrity**
-* design and evaluate solutions around **invariant-preserving updates**
+Invariants provide persistent integrity constraints:
 
-## Section Outline
+- valid state domains
+- relationship consistency
+- safety bounds
 
-### 1. Conceptual Foundation
+They reduce bug surface by making illegal states hard to represent.
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+---
 
-### 2. Worked Design Path
+## Invariant Scope
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+Typical invariant categories:
 
-### 3. Nex Implementation Sketch
+- field-level: `id /= ""`
+- relationship-level: `in_transit -> assigned_robot_id /= ""`
+- range-level: `x >= 0 and x <= max_x`
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+Invariants should be strong enough to protect integrity but not so strict that normal transitions become impossible.
 
-### 4. Common Mistakes and Recovery
+---
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+## Worked Design Path
 
-### 5. Reflection and Checkpoint
+Requirement:
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+> "World objects move each tick but must always stay in legal bounds."
 
-## Studio Exercises
+### Step 1: Identify always-true rules
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+- object id must exist
+- position must remain within global limits
 
-## Assessment Signals
+### Step 2: Keep transition behavior flexible
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+- updates may change velocity and position
+- invariants should constrain outcomes, not forbid normal movement
 
-## Forward Link
+### Step 3: Enforce invariants at class level
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+- all routines must preserve those truths
+
+---
+
+## Nex Implementation Sketch
+
+```nex
+class World_Object
+feature
+  object_id: String
+  x: Integer
+  vx: Integer
+  max_x: Integer
+
+  step()
+    require
+      max_valid: max_x >= 0
+    do
+      let next: Integer := x + vx
+      if next < 0 then
+        x := 0
+      elseif next > max_x then
+        x := max_x
+      else
+        x := next
+      end
+    ensure
+      bounded_after_step: x >= 0 and x <= max_x
+    end
+invariant
+  id_present: object_id /= ""
+  max_non_negative: max_x >= 0
+  x_bounded: x >= 0 and x <= max_x
+end
+```
+
+Invariants and routine contracts reinforce each other: state never escapes legal bounds.
+
+---
+
+## Invariants Across The Three Systems
+
+### Delivery
+
+- task status must be one of declared statuses
+- in-transit tasks must have assigned robot
+
+### Knowledge
+
+- document ids are non-empty and unique in scope
+- links cannot self-reference when forbidden
+
+### Virtual World
+
+- entity positions within world bounds
+- illegal state combinations disallowed
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Invariants too weak
+
+Symptom:
+
+- invalid states still possible
+
+Recovery:
+
+- add relationship-aware constraints
+
+### Mistake 2: Invariants too strict
+
+Symptom:
+
+- legitimate transitions blocked
+
+Recovery:
+
+- move transition-specific checks into routine contracts
+
+### Mistake 3: Duplicate rule definitions
+
+Symptom:
+
+- invariant and routine rules drift apart
+
+Recovery:
+
+- define core truths once at class level
+
+---
+
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
+## Quick Exercise (12 Minutes)
+
+For one class, define:
+
+1. two field invariants
+2. one relationship invariant
+3. one routine that could violate them
+4. one test that confirms invariants hold after routine execution
+
+Then intentionally break one rule and observe failure diagnostics.
+
+---
+
+## Connection to Nex
+
+Nex class invariants are a direct mechanism for persistent state integrity and align naturally with contract-based design.
+
+---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
+
+## Chapter Takeaways
+
+- Invariants protect state integrity across object lifetime.
+- They complement preconditions/postconditions at routine boundaries.
+- Good invariants balance strength and evolvability.
+- Integrity rules belong near the data they protect.
+
+---
+
+In Chapter 29, we use tests to explore system behavior beyond obvious scenarios.

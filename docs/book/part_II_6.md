@@ -283,6 +283,11 @@ Recovery:
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (8 Minutes)
 
 Pick one of the three systems and produce a mini model draft with four parts:
@@ -330,6 +335,11 @@ That makes Nex a practical bridge between concept and implementation.
 The transferable lesson is broader: in any language, explicit models reduce accidental complexity.
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

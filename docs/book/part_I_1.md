@@ -256,6 +256,11 @@ The point is to practice engineering habits that transfer to any real-world stac
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (2 Minutes)
 
 Take one symptom and rewrite it as an underlying problem.
@@ -274,6 +279,11 @@ Now do your own:
 If this feels hard, that is normal. This is exactly the skill we are building.
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

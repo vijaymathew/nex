@@ -1,0 +1,112 @@
+project:
+  type: book
+  resources:
+    - assets/**
+
+book:
+  title: "Beyond Code -- Building Software Systems That Last"
+  author: "Nex Book Team"
+  date: today
+  date-format: "MMMM D, YYYY"
+  chapters:
+    - index.md
+    - prologue.md
+    - part: "Part I — Seeing The Problem"
+      chapters:
+        - part_I_1.md
+        - part_I_2.md
+        - part_I_3.md
+        - part_I_4.md
+        - part_I_5.md
+    - studio_1.md
+    - part: "Part II — Modeling the World"
+      chapters:
+        - part_II_6.md
+        - part_II_7.md
+        - part_II_8.md
+        - part_II_9.md
+        - part_II_10.md
+    - studio_2.md
+    - part: "Part III — The Shape of Algorithms"
+      chapters:
+        - part_III_11.md
+        - part_III_12.md
+        - part_III_13.md
+        - part_III_14.md
+    - algorithm_lab_1.md
+    - part: "Part IV — Organizing Data"
+      chapters:
+        - part_IV_15.md
+        - part_IV_16.md
+        - part_IV_17.md
+        - part_IV_18.md
+    - studio_3.md
+    - part: "Part V — Algorithms That Power Systems"
+      chapters:
+        - part_V_19.md
+        - part_V_20.md
+        - part_V_21.md
+        - part_V_22.md
+    - algorithm_lab_2.md
+    - part: "Part VI — Building Real Software"
+      chapters:
+        - part_VI_23.md
+        - part_VI_24.md
+        - part_VI_25.md
+        - part_VI_26.md
+    - studio_4.md
+    - part: "Part VII — Making Software Trustworthy"
+      chapters:
+        - part_VII_27.md
+        - part_VII_28.md
+        - part_VII_29.md
+        - part_VII_30.md
+    - studio_5.md
+    - part: "Part VIII — Systems That Grow"
+      chapters:
+        - part_VIII_31.md
+        - part_VIII_32.md
+        - part_VIII_33.md
+    - studio_6.md
+    - part: "Part IX — Programming in the Age of AI"
+      chapters:
+        - part_IX_34.md
+        - part_IX_35.md
+        - part_IX_36.md
+    - epilogue.md
+    - glossary.md
+    - index_terms.md
+    - references.md
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    smooth-scroll: true
+    link-external-newwindow: true
+    css: styles.css
+    code-copy: true
+    code-overflow: wrap
+  pdf:
+    output-file: beyond-code.pdf
+    pdf-engine: pdflatex
+    documentclass: scrbook
+    number-sections: true
+    toc: true
+    toc-depth: 2
+    include-in-header: preamble.tex
+  epub:
+    output-file: beyond-code.epub
+    toc: true
+    toc-depth: 2
+    number-sections: true
+
+crossref:
+  chapters: true
+
+bibliography: references.bib
+
+execute:
+  freeze: auto

@@ -4,6 +4,11 @@
 
 Building the smallest working versions of all three systems.
 
+::: {.note-studio}
+**Studio Focus**
+This studio chapter is hands-on: implement, verify behavior, and document tradeoffs as you iterate.
+:::
+
 ## 1. The Situation
 
 The team has finished Part I and has problem statements, example scenarios, and edge-case notes.

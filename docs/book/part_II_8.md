@@ -223,6 +223,11 @@ Recovery:
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (8 Minutes)
 
 Pick one system and write a relationship matrix:
@@ -246,6 +251,11 @@ Nex makes relationship rules easier to keep visible through invariants and expli
 The teaching value is not syntax. It is disciplined modeling: connections are modeled, constrained, and tested.
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

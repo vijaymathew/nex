@@ -210,6 +210,11 @@ This helps keep intent and implementation aligned as systems evolve.
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (6 Minutes)
 
 Take one story sentence and convert it into a mini specification.
@@ -249,6 +254,11 @@ Stories inspire the system.
 Specifications make it **buildable**.
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

@@ -246,6 +246,11 @@ The key habit is the same in any language: state the problem clearly before enco
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (5 Minutes)
 
 Choose one of the three systems (delivery robot, knowledge engine, virtual world) and write a mini problem statement with exactly three parts:
@@ -283,6 +288,11 @@ If the contract is precise, the entire development process becomes easier:
 * bugs are easier to detect
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

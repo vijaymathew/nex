@@ -238,6 +238,11 @@ Recovery:
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (8 Minutes)
 
 For one system, produce an entity sheet with:
@@ -264,6 +269,11 @@ You can begin with lightweight models, then strengthen guarantees as complexity 
 That mirrors real project evolution.
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

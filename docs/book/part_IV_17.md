@@ -180,6 +180,11 @@ Recovery:
 
 ---
 
+::: {.note-exercise}
+**Exercise**
+Apply the section task and record your results before reading the solution notes.
+:::
+
 ## Quick Exercise (10 Minutes)
 
 Model one small hierarchy in your domain as a tree.
@@ -203,6 +208,11 @@ Nex contracts and invariants are a strong fit for tree structure because they ke
 This is critical as tree code grows beyond toy depth.
 
 ---
+
+::: {.note-takeaways}
+**Takeaways**
+Capture the key principles from this chapter and one action you will apply immediately.
+:::
 
 ## Chapter Takeaways
 

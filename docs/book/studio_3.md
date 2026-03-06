@@ -4,6 +4,11 @@
 
 Refactoring Studio 2 models for scale without losing correctness.
 
+::: {.note-studio}
+**Studio Focus**
+This studio chapter is hands-on: implement, verify behavior, and document tradeoffs as you iterate.
+:::
+
 ## 1. The Situation
 
 Studio 2 gave us explicit entities, relationships, and invariants.
