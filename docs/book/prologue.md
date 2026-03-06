@@ -24,7 +24,6 @@ It was not solved by writing more code.
 
 The break happened earlier.
 
----
 
 ## What Actually Failed
 
@@ -49,7 +48,6 @@ The bottleneck was design clarity:
 
 These are engineering failures before they are programming failures.
 
----
 
 ## Why This Book Exists
 
@@ -69,7 +67,6 @@ You will still write code. You will still learn algorithms and data structures. 
 
 **turning ambiguous real-world problems into precise, durable software designs.**
 
----
 
 ## The Thread Through The Whole Book
 
@@ -93,7 +90,6 @@ By revisiting the same systems across many chapters, you will learn transfer: on
 
 That is what expert engineers do.
 
----
 
 ## How To Read This Book
 
@@ -111,31 +107,47 @@ Each part builds a layer:
 
 Every section is aimed at one practical outcome: better engineering decisions under real constraints.
 
----
 
-## Programming In The AI Era
+## Programming in the AI Era
 
 AI can generate code quickly.
 
-That changes workflows, but it does not eliminate engineering.
+That changes how software is written, but it does not eliminate engineering.
 
-AI can draft implementations. It can propose refactors. It can translate patterns.
+AI can draft implementations.
+It can suggest refactorings.
+It can translate ideas from one language or style to another.
 
-It cannot reliably do the full job of:
+What it cannot reliably do is the full work of software design:
 
-- defining the right problem
-- selecting the right model
-- setting robust invariants and contracts
-- balancing correctness, performance, and changeability
-- owning consequences when systems fail in production
+* identifying the **right problem**
+* choosing the **right model of the world**
+* defining clear **contracts, invariants, and guarantees**
+* balancing **correctness, performance, and evolvability**
+* taking responsibility when systems fail in production
 
-Those remain human responsibilities.
+Those responsibilities remain fundamentally human.
 
-If anything, AI makes design judgment more valuable, not less. Fast code generation amplifies both good and bad architecture.
+In fact, AI makes them **more important**, not less.
+
+When code becomes cheap to generate, the real risk shifts elsewhere.
+Poorly framed problems produce large amounts of useless code.
+Weak abstractions multiply quickly.
+Fragile systems grow faster.
+
+Fast code generation **amplifies architecture** — both good and bad.
 
 This book is written for that reality.
 
----
+It focuses on the skills that remain essential even in a world where code itself is increasingly easy to produce:
+
+* understanding problems clearly
+* modeling systems carefully
+* designing algorithms deliberately
+* building software that remains correct and adaptable as it grows
+
+In other words, it is a book about **thinking like a software engineer** in the age of AI.
+
 
 ## Why This Book Uses Nex
 
@@ -161,7 +173,6 @@ The goal is not to lock you into one language.
 
 The goal is to build transferable skills you can apply in any serious codebase.
 
----
 
 ## What You Will Practice
 
@@ -180,7 +191,6 @@ The goal is not just to become a faster coder.
 
 The goal is to become the engineer people trust with systems that matter.
 
----
 
 ## A Note On Style
 
@@ -194,7 +204,6 @@ If you are early in your programming journey, move slowly and implement often.
 
 If you are experienced, use the chapter prompts as a way to audit your defaults. Many senior failures come from invisible assumptions, not missing knowledge.
 
----
 
 ## Before Chapter 1
 
