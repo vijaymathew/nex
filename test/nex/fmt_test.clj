@@ -31,7 +31,7 @@ end"
           expected "class Test
 feature
   demo() do
-      print(42)
+    print(42)
   end
 end"]
       (is (= expected formatted)))))
@@ -48,7 +48,7 @@ end"
           expected "class Test
 -> Friend, Helper feature
   show() do
-      print(1)
+    print(1)
   end
 end"]
       (is (= expected formatted)))))
@@ -68,9 +68,9 @@ end"
 feature
   x: Integer
 
-create
+constructors
   make(px: Integer) do
-      let x := px
+    let x := px
   end
 end"]
       (is (= expected formatted)))))
@@ -87,7 +87,7 @@ end"
           expected "class Test
 feature
   demo() do
-      let x := 1 + 2
+    let x := 1 + 2
   end
 end"]
       (is (= expected formatted)))))

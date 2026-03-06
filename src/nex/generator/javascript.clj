@@ -216,6 +216,8 @@
     "trim"        (fn [target _] (str target ".trim()"))
     "replace"     (fn [target args] (str target ".replace(" args ")"))
     "char_at"     (fn [target args] (str target ".charAt(" args ")"))
+    "compare"     (fn [target args] (str "__nexCompare(" target ", " args ")"))
+    "hash"        (fn [target _] (str "__nexHash(" target ")"))
     "split"       (fn [target args] (str target ".split(" args ")"))
     ;; String operators
     "plus"        (fn [target args] (str "(" target " + " args ")"))
@@ -243,7 +245,9 @@
     "less_than" (fn [target args] (str "(" target " < " args ")"))
     "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
     "greater_than" (fn [target args] (str "(" target " > " args ")"))
-    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
+    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))
+    "compare"   (fn [target args] (str "__nexCompare(" target ", " args ")"))
+    "hash"      (fn [target _] (str "__nexHash(" target ")"))}
 
    :Integer64
    {"to_string" (fn [target _] (str target ".toString()"))
@@ -261,7 +265,9 @@
     "less_than" (fn [target args] (str "(" target " < " args ")"))
     "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
     "greater_than" (fn [target args] (str "(" target " > " args ")"))
-    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
+    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))
+    "compare"   (fn [target args] (str "__nexCompare(" target ", " args ")"))
+    "hash"      (fn [target _] (str "__nexHash(" target ")"))}
 
    :Real
    {"to_string" (fn [target _] (str target ".toString()"))
@@ -280,7 +286,9 @@
     "less_than" (fn [target args] (str "(" target " < " args ")"))
     "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
     "greater_than" (fn [target args] (str "(" target " > " args ")"))
-    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
+    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))
+    "compare"   (fn [target args] (str "__nexCompare(" target ", " args ")"))
+    "hash"      (fn [target _] (str "__nexHash(" target ")"))}
 
    :Decimal
    {"to_string" (fn [target _] (str target ".toString()"))
@@ -299,7 +307,26 @@
     "less_than" (fn [target args] (str "(" target " < " args ")"))
     "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
     "greater_than" (fn [target args] (str "(" target " > " args ")"))
-    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
+    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))
+    "compare"   (fn [target args] (str "__nexCompare(" target ", " args ")"))
+    "hash"      (fn [target _] (str "__nexHash(" target ")"))}
+
+   :Char
+   {"to_string" (fn [target _] (str "String(" target ")"))
+    "to_upper"  (fn [target _] (str "String(" target ").toUpperCase()"))
+    "to_lower"  (fn [target _] (str "String(" target ").toLowerCase()"))
+    "compare"   (fn [target args] (str "__nexCompare(" target ", " args ")"))
+    "hash"      (fn [target _] (str "__nexHash(" target ")"))}
+
+   :Boolean
+   {"to_string" (fn [target _] (str target ".toString()"))
+    "and"       (fn [target args] (str "(" target " && " args ")"))
+    "or"        (fn [target args] (str "(" target " || " args ")"))
+    "not"       (fn [target _] (str "(!" target ")"))
+    "equals"    (fn [target args] (str "(" target " === " args ")"))
+    "not_equals" (fn [target args] (str "(" target " !== " args ")"))
+    "compare"   (fn [target args] (str "__nexCompare(" target ", " args ")"))
+    "hash"      (fn [target _] (str "__nexHash(" target ")"))}
 
    :Array
    {"length"    (fn [target _] (str target ".length"))
@@ -871,14 +898,19 @@
 
 (defn generate-default-constructor
   "Generate a JavaScript default no-arg constructor with field initialization"
-  [level fields has-parent?]
+  [level class-name fields has-parent? deferred?]
   (let [super-call (when has-parent?
                      [(indent (+ level 1) "super();")])
+        deferred-guard (when deferred?
+                         [(indent (+ level 1) (str "if (new.target === " class-name ") {"))
+                          (indent (+ level 2) (str "throw new Error(\"Cannot instantiate deferred class: " class-name "\");"))
+                          (indent (+ level 1) "}")])
         field-inits (map #(generate-field-init (+ level 1) %) fields)]
     (str/join "\n"
               (concat
                [(indent level "constructor() {")]
                super-call
+               deferred-guard
                field-inits
                [(indent level "}")]))))
 
@@ -1085,7 +1117,7 @@
   ([class-def] (generate-class class-def {} {}))
   ([class-def opts] (generate-class class-def opts {}))
   ([class-def opts classes-by-name]
-   (let [{:keys [name generic-params parents body note]} class-def
+   (let [{:keys [name generic-params parents body note deferred?]} class-def
          {:keys [fields methods constructors]} (extract-members body)
          parent-names (mapv :parent parents)
          own-flds (set (map :name fields))
@@ -1109,7 +1141,7 @@
                                               (str/join ", " (map :label effective-invariants)))))
              ;; Always generate a default no-arg constructor for field initialization
              has-parent? (some? (:extends (analyze-inheritance parents)))
-             default-constructor (generate-default-constructor 1 fields has-parent?)
+             default-constructor (generate-default-constructor 1 name fields has-parent? deferred?)
              ;; All Nex constructors become static factory methods
              factory-methods (map #(generate-factory-constructor 1 name % opts) constructors)
              inherited-constructor-shims (when (seq parents)
@@ -1152,7 +1184,24 @@
 (defn generate-graphics-runtime
   "Generate browser graphics runtime classes for Window/Turtle/Image built-ins."
   []
-  (str "const __nexHasDom = (typeof document !== 'undefined');\n"
+  (str "function __nexCompare(a, b) {\n"
+       "  if (a === b) return 0;\n"
+       "  if (a < b) return -1;\n"
+       "  if (a > b) return 1;\n"
+       "  const sa = String(a), sb = String(b);\n"
+       "  if (sa === sb) return 0;\n"
+       "  return sa < sb ? -1 : 1;\n"
+       "}\n"
+       "function __nexHash(v) {\n"
+       "  const s = String(v);\n"
+       "  let h = 0;\n"
+       "  for (let i = 0; i < s.length; i++) {\n"
+       "    h = ((h << 5) - h) + s.charCodeAt(i);\n"
+       "    h |= 0;\n"
+       "  }\n"
+       "  return h;\n"
+       "}\n"
+       "const __nexHasDom = (typeof document !== 'undefined');\n"
        "function __nexParseColor(s) {\n"
        "  const named = {black:'#000000',white:'#ffffff',red:'#ff0000',green:'#008000',blue:'#0000ff',yellow:'#ffff00',orange:'#ffa500',purple:'#800080',cyan:'#00ffff',magenta:'#ff00ff',brown:'#8b4513',pink:'#ffc0cb',gray:'#808080',grey:'#808080'};\n"
        "  const key = String(s).trim().toLowerCase();\n"

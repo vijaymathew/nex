@@ -22,7 +22,7 @@
 (defonce ^:dynamic *repl-var-types* (atom {}))
 
 (def nex-keywords
-  ["class" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
+  ["class" "deferred" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
    "when" "from" "until" "invariant" "variant" "require" "ensure"
    "let" "create" "fn" "function" "and" "or" "old" "this" "note"
    "with" "import" "intern" "private" "raise" "rescue" "retry" "repeat" "across" "case" "of"

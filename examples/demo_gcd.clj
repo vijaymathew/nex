@@ -65,27 +65,27 @@ end")
     (first @(:output ctx-with-env))))
 
 (println "Test Case 1: gcd(48, 18)")
-(println "  Result:" (execute-gcd 48 18))
+(println "  result:" (execute-gcd 48 18))
 (println "  Expected: 6")
 (println)
 
 (println "Test Case 2: gcd(24, 18)")
-(println "  Result:" (execute-gcd 24 18))
+(println "  result:" (execute-gcd 24 18))
 (println "  Expected: 6")
 (println)
 
 (println "Test Case 3: gcd(100, 35)")
-(println "  Result:" (execute-gcd 100 35))
+(println "  result:" (execute-gcd 100 35))
 (println "  Expected: 5")
 (println)
 
 (println "Test Case 4: gcd(17, 19)")
-(println "  Result:" (execute-gcd 17 19))
+(println "  result:" (execute-gcd 17 19))
 (println "  Expected: 1 (coprime)")
 (println)
 
 (println "Test Case 5: gcd(54, 24)")
-(println "  Result:" (execute-gcd 54 24))
+(println "  result:" (execute-gcd 54 24))
 (println "  Expected: 6")
 (println)
 

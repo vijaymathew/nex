@@ -245,7 +245,7 @@ echo ""
 echo "Test 10: function syntax"
 echo "-------------------------"
 cat > /tmp/test_function.txt <<'EOF'
-function increment(x: Integer): Integer do Result := x + 1 end
+function increment(x: Integer): Integer do result := x + 1 end
 increment(10)
 :quit
 EOF

@@ -118,7 +118,7 @@ end")
 (println "│ Test (10, 2) - all conditions satisfied:")
 (let [result (execute-method-with-contracts code3 [10 2])]
   (if (:success result)
-    (println "│   ✓ Success - Result:" (first (:output result)))
+    (println "│   ✓ Success - result:" (first (:output result)))
     (println "│   ✗ Failed -" (:error result))))
 (println "│")
 (println "│ Test (10, 0) - division by zero:")
