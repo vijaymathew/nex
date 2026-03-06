@@ -237,6 +237,8 @@
     "trim"        (fn [target _] (str target ".trim()"))
     "replace"     (fn [target args] (str target ".replace(" args ")"))
     "char_at"     (fn [target args] (str target ".charAt(" args ")"))
+    "compare"     (fn [target args] (str "Integer.signum(" target ".compareTo(String.valueOf(" args ")))"))
+    "hash"        (fn [target _] (str target ".hashCode()"))
     "split"       (fn [target args] (str "new ArrayList<>(Arrays.asList(" target ".split(" args ")))"))
     ;; String operators
     "plus"        (fn [target args] (str "(" target " + " args ")"))
@@ -264,7 +266,9 @@
     "less_than" (fn [target args] (str "(" target " < " args ")"))
     "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
     "greater_than" (fn [target args] (str "(" target " > " args ")"))
-    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
+    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))
+    "compare"    (fn [target args] (str "Integer.compare(" target ", ((Number)" args ").intValue())"))
+    "hash"       (fn [target _] (str "Integer.hashCode(" target ")"))}
 
    :Integer64
    {"to_string" (fn [target _] (str "String.valueOf(" target ")"))
@@ -282,7 +286,9 @@
     "less_than" (fn [target args] (str "(" target " < " args ")"))
     "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
     "greater_than" (fn [target args] (str "(" target " > " args ")"))
-    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
+    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))
+    "compare"    (fn [target args] (str "Long.compare(" target ", ((Number)" args ").longValue())"))
+    "hash"       (fn [target _] (str "Long.hashCode(" target ")"))}
 
    :Real
    {"to_string" (fn [target _] (str "String.valueOf(" target ")"))
@@ -301,7 +307,9 @@
     "less_than" (fn [target args] (str "(" target " < " args ")"))
     "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
     "greater_than" (fn [target args] (str "(" target " > " args ")"))
-    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))}
+    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))
+    "compare"    (fn [target args] (str "Double.compare(" target ", ((Number)" args ").doubleValue())"))
+    "hash"       (fn [target _] (str "Double.hashCode(" target ")"))}
 
    :Decimal
    {"to_string" (fn [target _] (str "String.valueOf(" target ")"))
@@ -320,7 +328,26 @@
     "less_than" (fn [target args] (str "(" target ".compareTo(" args ") < 0)"))
     "less_than_or_equal" (fn [target args] (str "(" target ".compareTo(" args ") <= 0)"))
     "greater_than" (fn [target args] (str "(" target ".compareTo(" args ") > 0)"))
-    "greater_than_or_equal" (fn [target args] (str "(" target ".compareTo(" args ") >= 0)"))}
+    "greater_than_or_equal" (fn [target args] (str "(" target ".compareTo(" args ") >= 0)"))
+    "compare"    (fn [target args] (str "Integer.signum(" target ".compareTo((java.math.BigDecimal)" args "))"))
+    "hash"       (fn [target _] (str target ".hashCode()"))}
+
+   :Char
+   {"to_string"  (fn [target _] (str "String.valueOf(" target ")"))
+    "to_upper"   (fn [target _] (str "Character.toUpperCase(" target ")"))
+    "to_lower"   (fn [target _] (str "Character.toLowerCase(" target ")"))
+    "compare"    (fn [target args] (str "Character.compare(" target ", (char)" args ")"))
+    "hash"       (fn [target _] (str "Character.hashCode(" target ")"))}
+
+   :Boolean
+   {"to_string"  (fn [target _] (str "String.valueOf(" target ")"))
+    "and"        (fn [target args] (str "(" target " && " args ")"))
+    "or"         (fn [target args] (str "(" target " || " args ")"))
+    "not"        (fn [target _] (str "(!" target ")"))
+    "equals"     (fn [target args] (str "(" target " == " args ")"))
+    "not_equals" (fn [target args] (str "(" target " != " args ")"))
+    "compare"    (fn [target args] (str "Boolean.compare(" target ", (boolean)" args ")"))
+    "hash"       (fn [target _] (str "Boolean.hashCode(" target ")"))}
 
    :Array
    {"length"    (fn [target _] (str target ".size()"))

@@ -120,7 +120,7 @@ class Calculator
     end
 
     show() do
-      print("Result: ")
+      print("result: ")
       print(result)
     end
 

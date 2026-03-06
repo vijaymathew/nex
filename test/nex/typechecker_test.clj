@@ -9,7 +9,7 @@
                   feature
                     add(x, y: Integer): Integer
                     do
-                      Result := x + y
+                      result := x + y
                     end
                   end"
           ast (p/ast code)
@@ -39,7 +39,7 @@
                   feature
                     get_number(): Integer
                     do
-                      Result := \"not a number\"
+                      result := \"not a number\"
                     end
                   end"
           ast (p/ast code)
@@ -67,7 +67,7 @@
                   feature
                     compare(x, y: Integer): Boolean
                     do
-                      Result := x < y
+                      result := x < y
                     end
                   end"
           ast (p/ast code)
@@ -90,13 +90,74 @@
       (is (not (:success result)))
       (is (seq (:errors result))))))
 
+(deftest test-unary-minus-literal-typechecks
+  (testing "Unary minus on numeric literal should typecheck"
+    (let [code "class Test
+                  feature
+                    neg(): Integer
+                    do
+                      result := -1
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-member-field-access-types-correctly
+  (testing "Field access via obj.field should resolve declared field type"
+    (let [code "class A
+                  inherit Comparable
+                  feature
+                    x: Integer
+                    compare(a: A): Integer
+                    do
+                      if x < a.x then
+                        result := -1
+                      elseif x > a.x then
+                        result := 1
+                      else
+                        result := 0
+                      end
+                    end
+                  create
+                    make(x: Integer)
+                    do
+                      this.x := x
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-member-field-access-inherited-field
+  (testing "Field access via obj.field should resolve inherited field type"
+    (let [code "class A
+                  feature
+                    x: Integer
+                  end
+
+                class B
+                  inherit A
+                  feature
+                    gt(other: B): Boolean
+                    do
+                      result := other.x > 0
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-nil-equality
   (testing "Equality comparison with nil should type check"
     (let [code "class Test
                   feature
                     is_nil(x: String): Boolean
                     do
-                      Result := x = nil
+                      result := x = nil
                     end
                   end"
           ast (p/ast code)
@@ -177,7 +238,7 @@ end"
   (testing "Function definitions and calls should typecheck"
     (let [code "function increment(x: Integer): Integer
 do
-  Result := x + 1
+  result := x + 1
 end
 class Test
   feature
@@ -193,7 +254,7 @@ end"
   (testing "Function call with wrong argument type should fail"
     (let [code "function increment(x: Integer): Integer
 do
-  Result := x + 1
+  result := x + 1
 end
 class Test
   feature
@@ -212,7 +273,7 @@ end"
                   feature
                     bool_op(x, y: Boolean): Boolean
                     do
-                      Result := x and y
+                      result := x and y
                     end
                   end"
           ast (p/ast code)
@@ -261,9 +322,9 @@ end"
                     require
                       non_zero: y /= 0
                     do
-                      Result := x / y
+                      result := x / y
                     ensure
-                      positive: Result >= 0
+                      positive: result >= 0
                     end
                   end"
           ast (p/ast code)
@@ -444,12 +505,12 @@ end"
 ;; Mandatory return type tests
 
 (deftest test-method-using-result-without-return-type-fails
-  (testing "Method using Result without return type should fail"
+  (testing "Method using result without return type should fail"
     (let [code "class Test
                   feature
                     compute(x: Integer)
                     do
-                      Result := x + 1
+                      result := x + 1
                     end
                   end"
           ast (p/ast code)
@@ -460,12 +521,12 @@ end"
                 (map tc/format-type-error (:errors result)))))))
 
 (deftest test-method-using-result-with-return-type-succeeds
-  (testing "Method using Result with return type should pass"
+  (testing "Method using result with return type should pass"
     (let [code "class Test
                   feature
                     compute(x: Integer): Integer
                     do
-                      Result := x + 1
+                      result := x + 1
                     end
                   end"
           ast (p/ast code)
@@ -473,7 +534,7 @@ end"
       (is (:success result)))))
 
 (deftest test-method-without-result-no-return-type-succeeds
-  (testing "Method not using Result without return type should pass"
+  (testing "Method not using result without return type should pass"
     (let [code "class Test
                   private feature
                     x: Integer
@@ -488,14 +549,14 @@ end"
       (is (:success result)))))
 
 (deftest test-method-result-in-postcondition-requires-return-type
-  (testing "Method referencing Result in postcondition must declare return type"
+  (testing "Method referencing result in postcondition must declare return type"
     (let [code "class Test
                   feature
                     compute(x: Integer)
                     do
-                      Result := x * 2
+                      result := x * 2
                     ensure
-                      positive: Result > 0
+                      positive: result > 0
                     end
                   end"
           ast (p/ast code)
@@ -891,6 +952,40 @@ class Main
   feature
     demo() do
       let a: A := create B
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-builtin-comparable-hashable-constraints
+  (testing "Built-in scalar types satisfy Comparable and Hashable generic constraints"
+    (let [code "class Sorted_Box [T -> Comparable]
+  feature
+    value: T
+  create
+    make(v: T) do
+      value := v
+    end
+end
+
+class Hash_Box [T -> Hashable]
+  feature
+    value: T
+  create
+    make(v: T) do
+      value := v
+    end
+end
+
+class Main
+  feature
+    demo() do
+      let s1: Sorted_Box[String] := create Sorted_Box[String].make(\"x\")
+      let s2: Sorted_Box[Integer] := create Sorted_Box[Integer].make(10)
+      let h1: Hash_Box[Boolean] := create Hash_Box[Boolean].make(true)
+      let h2: Hash_Box[Char] := create Hash_Box[Char].make(#A)
     end
 end"
           ast (p/ast code)

@@ -1,29 +1,31 @@
 #!/usr/bin/env clojure
 
 (require '[clojure.test :as test])
+(require '[clojure.java.io :as io])
 
-;; Load all test namespaces
-(require 'nex.loops-test)
-(require 'nex.if-conditions-test)
-(require 'nex.scoped-blocks-test)
-(require 'nex.param-syntax-test)
-(require 'nex.inheritance-test)
-(require 'nex.inheritance-runtime-test)
-(require 'nex.generator.java-test)
-(require 'nex.generator.javascript_test)
-(require 'nex.typed-let-test)
-(require 'nex.visibility-test)
-(require 'nex.types-test)
-(require 'nex.create-test)
-(require 'nex.generics-test)
-(require 'nex.parameterless-call-test)
-(require 'nex.arrays-maps-test)
-(require 'nex.exception-test)
-(require 'nex.cursor-test)
-(require 'nex.contracts-runtime-test)
-(require 'nex.contracts-with-let-test)
-(require 'nex.invariants-runtime-test)
-(require 'nex.loop-contract-violations-test)
+(defn test-file?
+  [^java.io.File f]
+  (and (.isFile f)
+       (.endsWith (.getName f) "_test.clj")))
+
+(defn ns-from-test-file
+  [^java.io.File f]
+  (let [content (slurp f)
+        m (re-find #"\(ns\s+([^\s\)]+)" content)]
+    (when-not m
+      (throw (ex-info (str "Could not find ns declaration in " (.getPath f)) {})))
+    (symbol (second m))))
+
+(def all-test-namespaces
+  (->> (file-seq (io/file "test/nex"))
+       (filter test-file?)
+       (sort-by #(.getPath ^java.io.File %))
+       (map ns-from-test-file)
+       vec))
+
+;; Load all discovered test namespaces
+(doseq [ns-sym all-test-namespaces]
+  (require ns-sym))
 
 (println "╔════════════════════════════════════════════════════════════╗")
 (println "║                    RUNNING ALL TESTS                       ║")
@@ -31,32 +33,13 @@
 (println)
 
 ;; Run all tests
-(let [results (test/run-tests 'nex.loops-test
-                               'nex.if-conditions-test
-                               'nex.scoped-blocks-test
-                               'nex.param-syntax-test
-                               'nex.inheritance-test
-                               'nex.inheritance-runtime-test
-                               'nex.generator.java-test
-                               'nex.generator.javascript_test
-                               'nex.typed-let-test
-                               'nex.visibility-test
-                               'nex.types-test
-                               'nex.create-test
-                               'nex.generics-test
-                               'nex.parameterless-call-test
-                               'nex.arrays-maps-test
-                               'nex.exception-test
-                               'nex.cursor-test
-                               'nex.contracts-runtime-test
-                               'nex.contracts-with-let-test
-                               'nex.invariants-runtime-test
-                               'nex.loop-contract-violations-test)]
+(let [results (apply test/run-tests all-test-namespaces)]
   (println)
   (println "╔════════════════════════════════════════════════════════════╗")
   (println "║                    TEST SUMMARY                            ║")
   (println "╚════════════════════════════════════════════════════════════╝")
   (println)
+  (println "Namespaces:" (count all-test-namespaces))
   (println "Total tests:" (:test results))
   (println "Passed:" (:pass results))
   (println "Failed:" (:fail results))

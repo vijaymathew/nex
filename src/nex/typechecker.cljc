@@ -331,6 +331,30 @@
                 (lookup-class-method env parent method-name))
               (:parents class-def)))))
 
+(defn lookup-class-field
+  "Look up a field on a class and its parent chain."
+  [env class-name field-name]
+  (letfn [(lookup-field [cn visited]
+            (when (and cn (not (contains? visited cn)))
+              (let [class-def (env-lookup-class env cn)
+                    visited' (conj visited cn)
+                    own-field-type
+                    (when class-def
+                      (some (fn [section]
+                              (when (= (:type section) :feature-section)
+                                (some (fn [member]
+                                        (when (and (= (:type member) :field)
+                                                   (= (:name member) field-name))
+                                          (:field-type member)))
+                                      (:members section))))
+                            (:body class-def)))]
+                (or own-field-type
+                    (when class-def
+                      (some (fn [{:keys [parent]}]
+                              (lookup-field parent visited'))
+                            (:parents class-def)))))))]
+    (lookup-field class-name #{})))
+
 (defn lookup-class-constructors
   "Collect constructors declared on a class and inherited parent chain."
   [env class-name]
@@ -418,8 +442,9 @@
 
 (defn check-unary-op
   "Check the type of a unary operation"
-  [env {:keys [operator operand] :as expr}]
-  (let [operand-type (check-expression env operand)]
+  [env {:keys [operator operand expr] :as unary-expr}]
+  (let [operand-node (or operand expr)
+        operand-type (check-expression env operand-node)]
     (case operator
       "-" (if (is-numeric-type? operand-type)
             operand-type
@@ -495,7 +520,7 @@
 
 (defn check-call
   "Check the type of a method call"
-  [env {:keys [target method args] :as expr}]
+  [env {:keys [target method args has-parens] :as expr}]
   (if target
     ;; Method call on object
     (let [target-type (if (string? target)
@@ -516,7 +541,7 @@
                                  (str "Cannot call feature '" method "' on detachable "
                                       (display-type normalized-target)
                                       ". Wrap with: if <obj> /= nil then <obj>." method "(...) end"))})))
-      (if-let [method-sig (env-lookup-method env base-type method)]
+      (if-let [method-sig (lookup-class-method env base-type method)]
         (do
           ;; Check argument types
           (when (not= (count args) (count (:params method-sig)))
@@ -534,8 +559,13 @@
                                 {:error (type-error
                                          (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
           (resolve-generic-type (:return-type method-sig) type-map))
-        ;; Method not found - might be built-in method, return Any for now
-        "Any"))
+        ;; If this is member access without parens, attempt field lookup.
+        (if (false? has-parens)
+          (if-let [field-type (lookup-class-field env base-type method)]
+            (resolve-generic-type field-type type-map)
+            "Any")
+          ;; Method not found - might be built-in method, return Any for now
+          "Any")))
     ;; Function call (built-in like print) or function object call
     (if-let [var-type (env-lookup-var env method)]
       (let [base-type (if (map? var-type) (:base-type var-type) var-type)
@@ -1125,6 +1155,39 @@
 (defn register-builtin-methods
   "Register method signatures for built-in types."
   [env]
+  ;; Built-in deferred protocol classes
+  (env-add-class env "Comparable" {:name "Comparable"
+                                   :deferred? true
+                                   :generic-params nil
+                                   :parents nil
+                                   :body []})
+  (env-add-method env "Comparable" "compare"
+                  {:params [{:name "a" :type "Any"}]
+                   :return-type "Integer"})
+
+  (env-add-class env "Hashable" {:name "Hashable"
+                                 :deferred? true
+                                 :generic-params nil
+                                 :parents nil
+                                 :body []})
+  (env-add-method env "Hashable" "hash"
+                  {:params []
+                   :return-type "Integer"})
+
+  ;; Built-in scalar classes implement Comparable + Hashable
+  (doseq [scalar ["String" "Integer" "Integer64" "Real" "Decimal" "Boolean" "Char"]]
+    (env-add-class env scalar {:name scalar
+                               :deferred? false
+                               :generic-params nil
+                               :parents [{:parent "Comparable"} {:parent "Hashable"}]
+                               :body []})
+    (env-add-method env scalar "compare"
+                    {:params [{:name "a" :type "Any"}]
+                     :return-type "Integer"})
+    (env-add-method env scalar "hash"
+                    {:params []
+                     :return-type "Integer"}))
+
   (doseq [[method-name sig]
           {"length"      {:params [] :return-type "Integer"}
            "index_of"    {:params [{:name "substr" :type "String"}] :return-type "Integer"}
@@ -1141,6 +1204,8 @@
            "trim"        {:params [] :return-type "String"}
            "replace"     {:params [{:name "old" :type "String"} {:name "new" :type "String"}] :return-type "String"}
            "char_at"     {:params [{:name "index" :type "Integer"}] :return-type "Char"}
+           "compare"     {:params [{:name "a" :type "Any"}] :return-type "Integer"}
+           "hash"        {:params [] :return-type "Integer"}
            "split"       {:params [{:name "delimiter" :type "String"}]
                           :return-type {:base-type "Array" :type-params ["String"]}}}]
     (env-add-method env "String" method-name sig))
