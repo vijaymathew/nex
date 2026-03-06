@@ -5,7 +5,7 @@
 % 2) Fallback to a stronger classic print face (mathpazo)
 \IfFileExists{libertinus.sty}{
   \usepackage{libertinus}
-  \IfFileExists{zi4.sty}{\usepackage[scaled=0.94]{zi4}}{}
+  \IfFileExists{zi4.sty}{\usepackage[scaled=1.00]{zi4}}{}
 }{
   \usepackage{mathpazo}
   \IfFileExists{courier.sty}{\usepackage{courier}}{}
@@ -13,7 +13,7 @@
 \usepackage{microtype}
 \microtypesetup{protrusion=true,expansion=true}
 \usepackage{setspace}
-\setstretch{1.03}
+\setstretch{1.2}
 
 \clubpenalty=10000
 \widowpenalty=10000
