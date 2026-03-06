@@ -232,6 +232,38 @@ Clear examples help both humans and machines understand what the system must do.
 
 ---
 
+## Connection to Nex
+
+Nex is a good fit for this stage because it encourages explicit problem expression.
+
+As we move from statements to implementation, Nex lets us keep intent visible through:
+
+- clear type annotations when we need precision
+- optional flexibility when we are still exploring
+- contracts and invariants when behavior must be guaranteed
+
+The key habit is the same in any language: state the problem clearly before encoding a solution.
+
+---
+
+## Quick Exercise (5 Minutes)
+
+Choose one of the three systems (delivery robot, knowledge engine, virtual world) and write a mini problem statement with exactly three parts:
+
+1. Inputs: what information enters the system?
+2. Required behavior: what must the system do?
+3. Constraints: what conditions must always be respected?
+
+Then add:
+
+- one normal example
+- one edge case
+- one failure case
+
+If your statement prescribes a specific algorithm, rewrite it to focus on outcomes instead.
+
+---
+
 ## A Problem Statement Is a Contract
 
 At its core, a problem statement is a **contract**.
@@ -250,10 +282,16 @@ If the contract is precise, the entire development process becomes easier:
 * tests are easier to write
 * bugs are easier to detect
 
-In the next chapter, we will take the next major step.
+---
 
-Once a problem is clearly specified, we must decide **how to represent the world inside a program**.
+## Chapter Takeaways
 
-This is where programming truly begins.
+- A strong problem statement is precise about outcomes, not rigid about implementation.
+- Vague statements create misalignment; over-detailed statements lock in bad decisions.
+- Examples, edge cases, and counterexamples expose missing requirements early.
+- Problem statements function as contracts between intent, design, and code.
+- Clear statements make algorithm selection and testing substantially easier.
 
-We will learn how to turn problems into **data models** — the structures that allow software to reason about complex systems.
+---
+
+In Chapter 4, we stress-test problem statements with edge cases and failure conditions. If Chapter 3 defines the contract, Chapter 4 tries to break it.
