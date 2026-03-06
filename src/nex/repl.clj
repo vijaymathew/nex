@@ -124,7 +124,43 @@
 (defn continue-reading?
   "Check if we need to continue reading (unclosed block)"
   [lines]
-  (let [text (str/join "\n" lines)
+  (let [sanitize-line
+        (fn [line]
+          (let [n (count line)]
+            (loop [i 0
+                   in-string? false
+                   escaped? false
+                   out (StringBuilder.)]
+              (if (>= i n)
+                (str out)
+                (let [ch (.charAt ^String line i)
+                      next-ch (when (< (inc i) n) (.charAt ^String line (inc i)))]
+                  (cond
+                    in-string?
+                    (cond
+                      escaped? (do (.append out \space)
+                                   (recur (inc i) true false out))
+                      (= ch \\) (do (.append out \space)
+                                    (recur (inc i) true true out))
+                      (= ch \") (do (.append out \space)
+                                    (recur (inc i) false false out))
+                      :else (do (.append out \space)
+                                (recur (inc i) true false out)))
+
+                    (and (= ch \-) (= next-ch \-))
+                    ;; Rest of the line is a comment.
+                    (str out)
+
+                    (= ch \")
+                    (do (.append out \space)
+                        (recur (inc i) true false out))
+
+                    :else
+                    (do (.append out ch)
+                        (recur (inc i) false false out))))))))
+        text (->> lines
+                  (map sanitize-line)
+                  (str/join "\n"))
         ;; Count keyword pairs that need to be closed
         class-count (count (re-seq #"\bclass\b" text))
         feature-count (count (re-seq #"\bfeature\b" text))
