@@ -224,6 +224,48 @@ It is also **investigation**.
 
 ---
 
+## Connection to Nex
+
+In this book, Nex helps us keep observation and implementation connected.
+
+Because Nex supports both fast exploration and structured design, we can move from:
+
+- rough hypotheses about real behavior
+- to explicit rules, contracts, and invariants
+- to executable prototypes we can test quickly
+
+That workflow mirrors real engineering: observe, model, test, revise.
+
+---
+
+## Quick Exercise (3 Minutes)
+
+Pick one real system you use every day (maps, search, chat, payments, calendar).
+
+Write:
+
+1. One observable failure: “Sometimes it does X.”
+2. One hidden assumption behind that failure.
+3. One concrete question engineers should answer before coding a fix.
+
+Example:
+
+- Failure: “Search returns too many irrelevant results.”
+- Hidden assumption: “All users mean the same thing by the same query terms.”
+- Engineering question: “How should intent ambiguity be represented and ranked?”
+
+---
+
+## Chapter Takeaways
+
+- Real environments are dynamic; static specs never capture everything.
+- Users are part of system behavior, not external noise.
+- Constraints are not obstacles after design; they shape design from the start.
+- Hidden assumptions create mysterious failures.
+- Strong engineering starts by turning messy observations into precise questions.
+
+---
+
 ## From Observation to Understanding
 
 The goal of observing the real world is not to capture every detail.
@@ -232,14 +274,8 @@ That would be impossible.
 
 Instead, the goal is to identify the **essential structure** hidden inside messy reality.
 
-In the next chapter, we will begin developing a way to do exactly that.
+In the next chapter, we will convert these observations into something engineers can execute against: a **problem statement**.
 
-We will learn how to build **models**.
+If Chapter 2 is about seeing reality clearly, Chapter 3 is about expressing that reality precisely.
 
-Models allow us to take complex systems and represent them in ways that make reasoning possible.
-
-Without models, reality is overwhelming.
-
-With the right models, it becomes **understandable**.
-
-And once something becomes understandable, writing the code becomes far easier than it first appeared.
+That written precision is what later enables strong models, better algorithms, and safer implementations.

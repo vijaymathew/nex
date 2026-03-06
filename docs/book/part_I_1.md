@@ -242,6 +242,49 @@ And clear thinking begins with **good questions**.
 
 ---
 
+## Connection to Nex
+
+Throughout this book, we will implement ideas in Nex.
+
+That choice is intentional.
+
+Nex is designed to support this exact workflow: think clearly about problems first, then express solutions with strong structure, explicit contracts, and flexible modeling styles.
+
+The language is not the point.
+
+The point is to practice engineering habits that transfer to any real-world stack.
+
+---
+
+## Quick Exercise (2 Minutes)
+
+Take one symptom and rewrite it as an underlying problem.
+
+Example prompt:
+
+- Symptom: “Search is slow.”
+- Rewrite: “Our data model and indexing strategy do not match actual query patterns.”
+
+Now do your own:
+
+1. Pick one symptom from your current project (or from the table above).
+2. Write one sentence describing the structural cause.
+3. Write one constraint that any valid solution must satisfy.
+
+If this feels hard, that is normal. This is exactly the skill we are building.
+
+---
+
+## Chapter Takeaways
+
+- Symptoms are visible failures; problems are structural causes.
+- Most costly software mistakes happen before implementation starts.
+- Problem shape determines solution shape.
+- Good engineering begins by clarifying goals, assumptions, and constraints.
+- If the problem is clear, architecture and algorithms become far easier to choose.
+
+---
+
 ## A Preview of What Comes Next
 
 In the next chapters, we will develop a set of tools for understanding problems before writing code.
@@ -260,3 +303,5 @@ And when that happens, programming becomes something remarkable:
 
 > Not the art of writing code,
 > but the discipline of **making complex problems understandable**.
+
+In Chapter 2, we begin with a concrete observation method: how to look at real-world behavior, identify hidden assumptions, and capture constraints before design starts.
