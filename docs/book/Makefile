@@ -24,11 +24,15 @@ html:
 pdf:
 	@mkdir -p $(CACHE_DIR) $(TEXMF_VAR) $(TEXMF_CONFIG) $(TEXMF_HOME)
 	$(RENDER_ENV) $(QUARTO) render --to pdf
+	@pdf_file=$$(ls -1 _book/*.pdf 2>/dev/null | head -n1); \
+	if [ -n "$$pdf_file" ]; then cp "$$pdf_file" _book/beyond-code.pdf; fi
 	@rm -f _book/$(INTERMEDIATE_STEM).pdf
 
 epub:
 	@mkdir -p $(CACHE_DIR) $(TEXMF_VAR) $(TEXMF_CONFIG) $(TEXMF_HOME)
 	$(RENDER_ENV) $(QUARTO) render --to epub
+	@epub_file=$$(ls -1 _book/*.epub 2>/dev/null | head -n1); \
+	if [ -n "$$epub_file" ]; then cp "$$epub_file" _book/beyond-code.epub; fi
 	@rm -f _book/$(INTERMEDIATE_STEM).epub
 
 print:
