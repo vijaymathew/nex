@@ -615,6 +615,11 @@
                             (validate-generic-args env class-name generic-args)
                             {:base-type class-name :type-args generic-args})
                           class-name)]
+        (when (:deferred? class-def)
+          (throw (ex-info (str "Cannot instantiate deferred class: " class-name)
+                          {:error (type-error
+                                   (str "Cannot instantiate deferred class " class-name
+                                        "; instantiate a concrete child class instead"))})))
         ;; Imported Java classes have no Nex constructor signatures; skip validation.
         (if (and class-def (:import class-def))
           target-type

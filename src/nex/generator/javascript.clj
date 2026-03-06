@@ -871,14 +871,19 @@
 
 (defn generate-default-constructor
   "Generate a JavaScript default no-arg constructor with field initialization"
-  [level fields has-parent?]
+  [level class-name fields has-parent? deferred?]
   (let [super-call (when has-parent?
                      [(indent (+ level 1) "super();")])
+        deferred-guard (when deferred?
+                         [(indent (+ level 1) (str "if (new.target === " class-name ") {"))
+                          (indent (+ level 2) (str "throw new Error(\"Cannot instantiate deferred class: " class-name "\");"))
+                          (indent (+ level 1) "}")])
         field-inits (map #(generate-field-init (+ level 1) %) fields)]
     (str/join "\n"
               (concat
                [(indent level "constructor() {")]
                super-call
+               deferred-guard
                field-inits
                [(indent level "}")]))))
 
@@ -1085,7 +1090,7 @@
   ([class-def] (generate-class class-def {} {}))
   ([class-def opts] (generate-class class-def opts {}))
   ([class-def opts classes-by-name]
-   (let [{:keys [name generic-params parents body note]} class-def
+   (let [{:keys [name generic-params parents body note deferred?]} class-def
          {:keys [fields methods constructors]} (extract-members body)
          parent-names (mapv :parent parents)
          own-flds (set (map :name fields))
@@ -1109,7 +1114,7 @@
                                               (str/join ", " (map :label effective-invariants)))))
              ;; Always generate a default no-arg constructor for field initialization
              has-parent? (some? (:extends (analyze-inheritance parents)))
-             default-constructor (generate-default-constructor 1 fields has-parent?)
+             default-constructor (generate-default-constructor 1 name fields has-parent? deferred?)
              ;; All Nex constructors become static factory methods
              factory-methods (map #(generate-factory-constructor 1 name % opts) constructors)
              inherited-constructor-shims (when (seq parents)

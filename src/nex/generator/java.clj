@@ -1045,9 +1045,9 @@
 
 (defn generate-class-header
   "Generate Java class header (no extends/implements - uses composition)"
-  [class-name generic-params _parents]
+  [class-name generic-params _parents deferred?]
   (let [generics (generate-generic-params generic-params)]
-    (str "public class " class-name generics " {")))
+    (str "public " (when deferred? "abstract ") "class " class-name generics " {")))
 
 (declare extract-members)
 
@@ -1270,7 +1270,7 @@
   "Generate Java code for a Nex class"
   ([class-def] (generate-class class-def {}))
   ([class-def opts]
-   (let [{:keys [name generic-params parents body note]} class-def
+   (let [{:keys [name generic-params parents body note deferred?]} class-def
          {:keys [fields methods constructors]} (extract-members body)
          parent-names (mapv :parent parents)
          parent-fm (build-parent-field-map parent-names)
@@ -1289,7 +1289,7 @@
            ;; Generate class Javadoc if note present
            class-javadoc (when note
                           [(generate-javadoc 0 note)])
-           class-header (generate-class-header name generic-params parents)
+           class-header (generate-class-header name generic-params parents deferred?)
            ;; Composition fields for parent classes
            composition-fields (when (seq parents)
                                 (generate-composition-fields 1 parents))

@@ -50,6 +50,24 @@ end"
       (is (str/includes? js-code "class Animal"))
       (is (str/includes? js-code "class Dog extends Animal")))))
 
+(deftest deferred-class-generation-test
+  (testing "Deferred class emits runtime instantiation guard in constructor"
+    (let [nex-code "deferred class A
+  feature
+    f(i: Integer): Boolean do end
+end
+
+class B inherit A
+  feature
+    f(i: Integer): Boolean do
+      result := i > 0
+    end
+end"
+          js-code (js/translate nex-code {:skip-type-check true})]
+      (is (str/includes? js-code "class A"))
+      (is (str/includes? js-code "if (new.target === A)"))
+      (is (str/includes? js-code "Cannot instantiate deferred class: A")))))
+
 (deftest contracts-test
   (testing "Methods with contracts"
     (let [nex-code "class Account

@@ -24,7 +24,7 @@
        "t.forward(80.0)\n"))
 
 (def nex-keywords
-  #{"class" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
+  #{"class" "deferred" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
     "when" "from" "until" "invariant" "variant" "require" "ensure"
     "let" "as" "and" "or" "not" "fn" "old" "create" "private" "note"
     "with" "import" "intern" "function" "raise" "rescue" "retry"

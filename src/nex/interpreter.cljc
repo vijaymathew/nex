@@ -1755,6 +1755,10 @@
                   spec-name))))
           class-name)
         class-def (lookup-class-if-exists ctx effective-class-name)
+        _ (when (and class-def (:deferred? class-def))
+            (throw (ex-info (str "Cannot instantiate deferred class: " class-name)
+                            {:class-name class-name
+                             :deferred? true})))
         ;; Get all fields (including inherited)
         all-fields (when class-def (get-all-fields ctx class-def))
         ;; Initialize fields with default values

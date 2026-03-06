@@ -853,3 +853,47 @@ end"
           result (tc/type-check ast)]
       (is (:success result))
       (is (empty? (:errors result))))))
+
+(deftest test-deferred-class-direct-instantiation-disallowed
+  (testing "create A should fail when A is deferred"
+    (let [code "deferred class A
+  feature
+    f(i: Integer): Boolean do end
+end
+
+class Main
+  feature
+    demo() do
+      let a: A := create A
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"Cannot instantiate deferred class A" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-deferred-parent-child-instantiation-allowed
+  (testing "create B is valid when B inherits deferred A and assigned to A"
+    (let [code "deferred class A
+  feature
+    f(i: Integer): Boolean do end
+end
+
+class B inherit A
+  feature
+    f(i: Integer): Boolean do
+      result := i > 0
+    end
+end
+
+class Main
+  feature
+    demo() do
+      let a: A := create B
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
