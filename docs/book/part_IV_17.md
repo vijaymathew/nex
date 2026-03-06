@@ -2,67 +2,215 @@
 
 ## 17. Trees: Structured Data
 
-## Chapter Purpose
+Lists give order. Maps and sets give direct access.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+Trees add hierarchy.
 
-## Narrative Setup
+A tree is a structure where parent-child relationships represent layered organization and enable structured search.
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+Trees are useful when relationships are naturally nested and queries can exploit that shape.
 
-## Learning Goals
+---
 
-By the end of this chapter, the reader should be able to:
+## Why Trees Matter
 
-* explain and apply **hierarchical modeling**
-* reason about **search invariants**
-* design and evaluate solutions around **balanced growth concerns**
+Trees can make operations faster and clearer when:
 
-## Section Outline
+- data has hierarchical meaning (category -> subcategory -> item)
+- you need ordered search over keys
+- you need bounded-depth traversal rather than full scans
 
-### 1. Conceptual Foundation
+Common tree use cases include indexes, configuration scopes, scene graphs, and expression structures.
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+---
 
-### 2. Worked Design Path
+## Tree Invariants
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+A tree is only useful if its structure remains valid.
 
-### 3. Nex Implementation Sketch
+Typical invariants include:
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+- no cycles
+- every non-root node has exactly one parent
+- ordering rule for search trees (left < node < right)
 
-### 4. Common Mistakes and Recovery
+Without structural invariants, tree logic degrades into graph-like ambiguity.
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+---
 
-### 5. Reflection and Checkpoint
+## Worked Design Path
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+Requirement:
 
-## Studio Exercises
+> "Organize notes by topic hierarchy and find the first matching topic quickly."
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+### Step 1: Identify hierarchy
 
-## Assessment Signals
+- root topic
+- subtopics
+- leaf notes
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+### Step 2: Choose tree representation
 
-## Forward Link
+A simple teaching shape:
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+- node with key
+- optional left child
+- optional right child
+
+### Step 3: Define lookup behavior
+
+- if key matches current node -> return found
+- if target smaller -> traverse left
+- otherwise -> traverse right
+
+### Step 4: Define miss behavior
+
+- return explicit `NOT_FOUND`
+
+### Step 5: Preserve invariants on insert/update
+
+- keep ordering rule valid
+- reject duplicate policy violations where required
+
+---
+
+## Nex Implementation Sketch
+
+```nex
+class Topic_Node
+feature
+  key: Integer
+  label: String
+  left_key: Integer
+  right_key: Integer
+invariant
+  label_present: label /= ""
+  no_self_child: left_key /= key and right_key /= key
+end
+
+class Topic_Tree
+feature
+  root: Topic_Node
+  left: Topic_Node
+  right: Topic_Node
+
+  find_label(target: Integer): String
+    do
+      if target = root.key then
+        result := root.label
+      elseif target < root.key and target = left.key then
+        result := left.label
+      elseif target > root.key and target = right.key then
+        result := right.label
+      else
+        result := "NOT_FOUND"
+      end
+    ensure
+      non_empty: result /= ""
+    end
+end
+```
+
+This minimal sketch demonstrates tree-style branching decisions and explicit miss semantics.
+
+---
+
+## Trees in the Three Systems
+
+### Delivery
+
+- region hierarchy for dispatch zones
+
+### Knowledge
+
+- taxonomy and topic classification trees
+
+### Virtual World
+
+- scene graph or containment hierarchy
+
+In each case, hierarchy encodes meaning, not just storage.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Using trees without hierarchy need
+
+Symptom:
+
+- unnecessary complexity over flat keyed access
+
+Recovery:
+
+- validate that operations truly benefit from parent-child structure
+
+### Mistake 2: Ignoring balancing concerns
+
+Symptom:
+
+- deep skewed trees behave like linked lists
+
+Recovery:
+
+- monitor depth distribution
+- consider balanced variants when needed
+
+### Mistake 3: Violating ordering invariants
+
+Symptom:
+
+- search misses existing values
+
+Recovery:
+
+- enforce insertion/update rules
+- add invariant-focused tests
+
+### Mistake 4: Confusing tree with graph
+
+Symptom:
+
+- multiple parents/cycles appear silently
+
+Recovery:
+
+- enforce single-parent and acyclic constraints
+
+---
+
+## Quick Exercise (10 Minutes)
+
+Model one small hierarchy in your domain as a tree.
+
+Write:
+
+1. node identity key
+2. parent-child rule
+3. one search operation
+4. one structural invariant
+5. one invalid state to reject
+
+Then explain why a map-only model would lose useful structure.
+
+---
+
+## Connection to Nex
+
+Nex contracts and invariants are a strong fit for tree structure because they keep parent-child and ordering assumptions explicit.
+
+This is critical as tree code grows beyond toy depth.
+
+---
+
+## Chapter Takeaways
+
+- Trees represent hierarchy with structured search paths.
+- Tree invariants are mandatory for correctness.
+- Unbalanced trees can erase expected performance gains.
+- Use trees when structure carries semantic value.
+
+---
+
+In Chapter 18, we generalize from hierarchy to networks using graphs.

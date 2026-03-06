@@ -2,67 +2,226 @@
 
 ## 11. What Is an Algorithm?
 
-## Chapter Purpose
+Part II established models: entities, relationships, and constraints.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+Part III turns those models into behavior.
 
-## Narrative Setup
+An **algorithm** is a finite, explicit procedure that transforms valid input into output while preserving declared guarantees.
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+That definition matters because teams often blur three different things:
 
-## Learning Goals
+- a requirement (“find best route”)
+- an algorithm (BFS, Dijkstra, A*)
+- an implementation detail (language, library, runtime)
 
-By the end of this chapter, the reader should be able to:
+When those are mixed together, correctness is hard to reason about and changes become expensive.
 
-* explain and apply **procedure guarantees**
-* reason about **determinism and correctness**
-* design and evaluate solutions around **algorithmic intent**
+---
 
-## Section Outline
+## Algorithm vs Requirement vs Implementation
 
-### 1. Conceptual Foundation
+Keep these layers distinct:
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+- **Requirement**: what outcome the system must deliver.
+- **Algorithm**: the step-by-step logic used to deliver it.
+- **Implementation**: concrete code in Nex/JavaScript/Java and platform choices.
 
-### 2. Worked Design Path
+One requirement can have multiple valid algorithms. One algorithm can have multiple implementations.
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+Example:
 
-### 3. Nex Implementation Sketch
+- Requirement: “Return a valid path or report unreachable.”
+- Algorithm A: BFS for minimum hops in unweighted graphs.
+- Algorithm B: Dijkstra for weighted cost.
+- Implementation: generated JS for browser simulation, generated Java for backend service.
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+This separation keeps design conversations precise.
 
-### 4. Common Mistakes and Recovery
+---
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+## Correctness First
 
-### 5. Reflection and Checkpoint
+A procedure that “usually works” is not an algorithmic success.
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+An algorithm is acceptable only when its guarantees are explicit and checkable.
 
-## Studio Exercises
+For our running systems:
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+### Delivery
 
-## Assessment Signals
+- Returned route uses valid, traversable links.
+- If no route exists, report explicit failure (`UNREACHABLE`).
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+### Knowledge
 
-## Forward Link
+- Ranking follows declared scoring rules.
+- Missing evidence is handled intentionally, not silently.
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+### Virtual World
+
+- Transition steps preserve world invariants.
+- Update order is deterministic when required by design.
+
+The right question is not “Does it run?” but “What does it guarantee?”
+
+---
+
+## Worked Design Path
+
+Requirement:
+
+> “Find the best route quickly.”
+
+### Step 1: Define valid input
+
+- start and destination identifiers must exist
+- graph snapshot must be internally consistent
+
+### Step 2: Define output contract
+
+- `FOUND(path)` where each edge is legal
+- or `UNREACHABLE`
+- or `INVALID_INPUT`
+
+### Step 3: Define objective explicitly
+
+For this version: “best” means minimum hops.
+
+### Step 4: Pick algorithm to match objective
+
+Minimum hops on unweighted graph suggests BFS.
+
+### Step 5: Declare failure semantics
+
+- unknown nodes -> `INVALID_INPUT`
+- disconnected graph -> `UNREACHABLE`
+
+### Step 6: Encode in contracts
+
+- `require`: inputs are present
+- `ensure`: output status is always valid
+
+Now the team has algorithmic intent, not vague search behavior.
+
+---
+
+## Nex Implementation Sketch
+
+```nex
+class Route_Result
+feature
+  status: String
+  path: String
+invariant
+  valid_status:
+    status = "FOUND" or
+    status = "UNREACHABLE" or
+    status = "INVALID_INPUT"
+end
+
+class Route_Algorithm
+feature
+  compute(start_loc, dest_loc: String): Route_Result
+    require
+      inputs_present: start_loc /= "" and dest_loc /= ""
+    do
+      let r: Route_Result := create Route_Result
+
+      if start_loc = dest_loc then
+        r.status := "FOUND"
+        r.path := start_loc
+      elseif start_loc = "A" and dest_loc = "C" then
+        r.status := "FOUND"
+        r.path := "A->B->C"
+      else
+        r.status := "UNREACHABLE"
+        r.path := ""
+      end
+
+      result := r
+    ensure
+      status_is_declared:
+        result.status = "FOUND" or
+        result.status = "UNREACHABLE" or
+        result.status = "INVALID_INPUT"
+    end
+end
+```
+
+The sketch is intentionally small. The chapter point is the contract shape around the algorithm, not graph implementation details.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Calling any script an algorithm
+
+Symptom:
+
+- behavior depends on accidental control flow
+
+Recovery:
+
+- write language-agnostic steps first
+- state guarantees before coding
+
+### Mistake 2: Undefined failure behavior
+
+Symptom:
+
+- empty/null outputs with no meaning
+
+Recovery:
+
+- declare explicit failure statuses
+- test each status path
+
+### Mistake 3: Ambiguous objective
+
+Symptom:
+
+- team argues later about what “best” meant
+
+Recovery:
+
+- encode one objective now
+- document deferred objectives
+
+---
+
+## Quick Exercise (8-10 Minutes)
+
+Choose one operation in your project and write:
+
+1. valid input definition
+2. output contract (success + failure)
+3. objective function
+4. 5-step language-agnostic algorithm
+5. one contract you will enforce in code
+
+If two engineers would implement your sketch differently, the algorithm description is still too loose.
+
+---
+
+## Connection to Nex
+
+Nex makes algorithm intent concrete because contracts and invariants live next to behavior.
+
+This reinforces a reliable engineering sequence:
+
+- specify
+- implement
+- verify
+
+---
+
+## Chapter Takeaways
+
+- Algorithms are procedures with explicit guarantees, not just executable code.
+- Requirement, algorithm, and implementation should stay separate.
+- Correctness and failure semantics must be declared up front.
+- Contracts are a practical mechanism for preserving algorithm intent.
+
+---
+
+In Chapter 12, we study decomposition: how to break hard algorithmic work into manageable, testable pieces.

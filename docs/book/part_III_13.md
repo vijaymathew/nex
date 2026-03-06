@@ -2,67 +2,200 @@
 
 ## 13. Thinking Recursively
 
-## Chapter Purpose
+Recursion is not an advanced trick.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+It is a decomposition approach for problems where the structure of the whole resembles the structure of its parts.
 
-## Narrative Setup
+A recursive algorithm has two essential components:
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+1. a base case solved directly
+2. a reduction step that transforms the problem into smaller instances
 
-## Learning Goals
+If either component is weak, recursion becomes fragile.
 
-By the end of this chapter, the reader should be able to:
+---
 
-* explain and apply **self-similar structure**
-* reason about **base/recursive cases**
-* design and evaluate solutions around **structural induction intuition**
+## When Recursion Is Appropriate
 
-## Section Outline
+Recursion is often a good fit when data is hierarchical or graph-like:
 
-### 1. Conceptual Foundation
+- nested structures
+- trees
+- bounded graph traversals
+- divide-and-conquer problems
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+Recursion is often a poor fit for simple linear workflows where iteration is clearer and cheaper.
 
-### 2. Worked Design Path
+Choose recursion based on problem shape, not style preference.
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+---
 
-### 3. Nex Implementation Sketch
+## The Base Case Is the Safety Boundary
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+Most recursion bugs come from incorrect base cases or missing progress.
 
-### 4. Common Mistakes and Recovery
+A robust recursive design must prove:
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+- base case is reachable
+- each recursive step moves toward base case
+- output contract holds for both base and recursive branches
 
-### 5. Reflection and Checkpoint
+For graph-like domains, you also need cycle guards (`visited` set, depth limit, or both).
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+---
 
-## Studio Exercises
+## Worked Design Path
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+Requirement:
 
-## Assessment Signals
+> “Count reachable locations from a starting node.”
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+Recursive DFS concept:
 
-## Forward Link
+1. if node already visited -> return 0
+2. mark node visited
+3. total := 1
+4. for each neighbor -> total := total + count(neighbor)
+5. return total
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+This design is concise, but only safe with explicit visited tracking.
+
+---
+
+## Nex Implementation Sketch
+
+```nex
+class Reachability
+feature
+  visited: String
+
+  count_from(node: String): Integer
+    require
+      node_present: node /= ""
+    do
+      -- Teaching sketch: visited is encoded as a simple string marker set.
+      -- A full implementation would use a dedicated collection type.
+      if visited = node then
+        result := 0
+      elseif node = "Z" then
+        visited := node
+        result := 1
+      else
+        visited := node
+        result := 1 + count_from("Z")
+      end
+    ensure
+      non_negative_count: result >= 0
+    end
+end
+```
+
+This snippet emphasizes recursive structure, not production-grade graph storage.
+
+---
+
+## Recursion Across the Three Systems
+
+### Delivery
+
+- explore alternate path branches
+- must guard against route cycles
+
+### Knowledge
+
+- traverse related-document networks with depth bounds
+- must avoid revisiting nodes
+
+### Virtual World
+
+- process hierarchical containment (zone -> region -> object)
+- must maintain deterministic traversal policy
+
+In all three, recursion without bounds is unsafe.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Missing base case
+
+Symptom:
+
+- infinite recursion
+
+Recovery:
+
+- write and test base case first
+
+### Mistake 2: No progress metric
+
+Symptom:
+
+- recursive call does not reduce problem size
+
+Recovery:
+
+- define a decreasing metric (depth, remaining nodes, input size)
+
+### Mistake 3: Ignoring cycles
+
+Symptom:
+
+- repeated traversal of same nodes
+
+Recovery:
+
+- add visited tracking
+- optionally add max-depth guard
+
+### Mistake 4: Recomputing identical subproblems
+
+Symptom:
+
+- exponential runtime
+
+Recovery:
+
+- memoize repeated subproblems
+- consider dynamic programming if needed
+
+---
+
+## Quick Exercise (10 Minutes)
+
+Design one recursive routine for your project and write:
+
+1. base case
+2. progress metric
+3. recursive step
+4. cycle guard
+5. worst-case depth assumption
+
+Then test with:
+
+- trivial input
+- normal input
+- adversarial cyclic input
+
+If adversarial input is unbounded, redesign before implementation.
+
+---
+
+## Connection to Nex
+
+Nex contracts make recursive assumptions explicit and checkable, especially around base-case guarantees and non-negative/valid outputs.
+
+That tightens correctness early and reduces latent recursion bugs.
+
+---
+
+## Chapter Takeaways
+
+- Recursion is decomposition over self-similar structure.
+- Base case and progress metric are non-negotiable.
+- Graph recursion requires cycle and depth controls.
+- Elegant recursion is not enough; bounded recursion is the goal.
+
+---
+
+In Chapter 14, we shift from correctness to cost: how algorithm behavior changes as inputs grow.

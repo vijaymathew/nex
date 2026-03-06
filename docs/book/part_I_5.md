@@ -196,6 +196,41 @@ Later in this book, we will use contracts extensively to build systems that are 
 
 ---
 
+## Connection to Nex
+
+Nex is designed to make this story-to-specification transition concrete.
+
+In practice, that means you can encode the specification directly through:
+
+- explicit structure for inputs and outputs
+- contracts (`require`, `ensure`) for operation-level guarantees
+- invariants for system-level consistency rules
+
+This helps keep intent and implementation aligned as systems evolve.
+
+---
+
+## Quick Exercise (6 Minutes)
+
+Take one story sentence and convert it into a mini specification.
+
+Template:
+
+1. Story sentence: “The system should ...”
+2. Inputs:
+3. Outputs:
+4. Guarantee:
+5. One precondition, one postcondition, one invariant.
+
+Example starter:
+
+- Story: “The robot should deliver packages efficiently.”
+- Guarantee rewrite: “Given a valid map, start, and destination, return a valid route if one exists.”
+
+Keep algorithm choices out of this draft. Focus on behavior and correctness.
+
+---
+
 ## From Story to Engineering
 
 By the end of this chapter, we have transformed our narrative systems into something more precise:
@@ -215,10 +250,22 @@ Specifications make it **buildable**.
 
 ---
 
-In the next part of the book, we will take another crucial step.
+## Chapter Takeaways
+
+- Stories provide context and goals; specifications provide executable precision.
+- Every specification needs clear inputs, outputs, and guarantees.
+- Ambiguous terms (“best,” “relevant,” “realistic”) must be made explicit.
+- Contracts are a disciplined way to formalize expectations and correctness.
+- Better specifications reduce design churn, testing ambiguity, and implementation drift.
+
+---
+
+In the next part of the book, we take the next engineering step.
 
 Once we know **what problem we are solving**, we must decide how the program will **represent the world**.
 
 This is the beginning of **data modeling**.
 
 And as we will soon discover, the way we represent data often determines which algorithms are possible.
+
+Part II opens with that exact question in Chapter 6: why software needs models before it needs optimization.

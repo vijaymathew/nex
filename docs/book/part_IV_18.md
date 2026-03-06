@@ -2,67 +2,222 @@
 
 ## 18. Graphs: Networks of Everything
 
-## Chapter Purpose
+Trees model hierarchy.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+Graphs model networks.
 
-## Narrative Setup
+A graph represents entities as nodes and relationships as edges, allowing cycles, cross-links, and many-to-many structure.
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+Most real systems eventually require graph thinking.
 
-## Learning Goals
+---
 
-By the end of this chapter, the reader should be able to:
+## Why Graphs Are Essential
 
-* explain and apply **node-edge reasoning**
-* reason about **reachability**
-* design and evaluate solutions around **graph traversal strategy**
+Graphs appear whenever relationships are not strictly hierarchical:
 
-## Section Outline
+- roads between locations
+- citations between documents
+- interactions between world entities
 
-### 1. Conceptual Foundation
+If you force these domains into lists or trees only, you lose expressive power and introduce fragile workarounds.
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+---
 
-### 2. Worked Design Path
+## Core Graph Questions
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+Graph-driven systems frequently ask:
 
-### 3. Nex Implementation Sketch
+- reachability: can we get from A to B?
+- path quality: what is the best route by some objective?
+- neighborhood: what is connected to this node?
+- connectivity changes: what broke when an edge disappeared?
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+Data structure choice should follow these queries.
 
-### 4. Common Mistakes and Recovery
+---
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+## Worked Design Path
 
-### 5. Reflection and Checkpoint
+Requirement:
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+> "Given two locations, return a valid route or report unreachable."
 
-## Studio Exercises
+### Step 1: Define graph elements
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+- node: location id
+- edge: traversable connection between two locations
 
-## Assessment Signals
+### Step 2: Define correctness contract
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+- returned path uses only valid edges
+- first node equals source
+- last node equals destination
+- failure is explicit (`UNREACHABLE`)
 
-## Forward Link
+### Step 3: Pick traversal for first version
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+- BFS for minimum hops in unweighted graph
+
+### Step 4: Add safety rules
+
+- visited tracking to avoid cycles
+- guard unknown nodes as invalid input
+
+### Step 5: Keep representation explicit
+
+- adjacency structure as first-class model element
+
+---
+
+## Nex Implementation Sketch
+
+```nex
+class Route_Graph
+feature
+  -- Teaching-sized adjacency for four nodes.
+  a_to_b: Boolean
+  b_to_c: Boolean
+  c_to_d: Boolean
+  a_to_d: Boolean
+
+  has_edge(from_node, to_node: String): Boolean
+    require
+      non_empty_nodes: from_node /= "" and to_node /= ""
+    do
+      if from_node = "A" and to_node = "B" then
+        result := a_to_b
+      elseif from_node = "B" and to_node = "C" then
+        result := b_to_c
+      elseif from_node = "C" and to_node = "D" then
+        result := c_to_d
+      elseif from_node = "A" and to_node = "D" then
+        result := a_to_d
+      else
+        result := false
+      end
+    ensure
+      bool_result: result = true or result = false
+    end
+
+  route_a_to_d(): String
+    do
+      if has_edge("A", "D") then
+        result := "A->D"
+      elseif has_edge("A", "B") and has_edge("B", "C") and has_edge("C", "D") then
+        result := "A->B->C->D"
+      else
+        result := "UNREACHABLE"
+      end
+    ensure
+      declared_result:
+        result = "A->D" or
+        result = "A->B->C->D" or
+        result = "UNREACHABLE"
+    end
+end
+```
+
+This sketch keeps graph intent explicit: edges define legal movement; route logic must respect them.
+
+---
+
+## Graphs in the Three Systems
+
+### Delivery
+
+- location network and route computation
+
+### Knowledge
+
+- citation/relevance links among documents
+
+### Virtual World
+
+- interaction network between entities and zones
+
+Graphs are often the hidden structure behind system complexity.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Implicit graph representation
+
+Symptom:
+
+- connectivity logic scattered across code paths
+
+Recovery:
+
+- centralize adjacency representation
+- expose graph operations explicitly
+
+### Mistake 2: Missing cycle protection in traversal
+
+Symptom:
+
+- infinite loops or repeated work
+
+Recovery:
+
+- add visited tracking
+- bound traversal depth when appropriate
+
+### Mistake 3: Conflating reachability with best path
+
+Symptom:
+
+- any found route treated as optimal
+
+Recovery:
+
+- define objective separately (hops, cost, risk)
+- choose traversal/search accordingly
+
+### Mistake 4: Weak failure semantics
+
+Symptom:
+
+- partial/empty path with no meaning
+
+Recovery:
+
+- return explicit unreachable/invalid status
+
+---
+
+## Quick Exercise (12 Minutes)
+
+For one networked feature in your project:
+
+1. define nodes and edges
+2. define one reachability query
+3. define one path-quality objective
+4. define failure status
+5. list one cycle-related risk and mitigation
+
+Then decide whether current code treats the graph explicitly or accidentally.
+
+---
+
+## Connection to Nex
+
+Nex contracts make graph assumptions explicit at operation boundaries, especially around valid inputs, declared failure modes, and route correctness guarantees.
+
+That is essential for systems where graph mistakes become production incidents.
+
+---
+
+## Chapter Takeaways
+
+- Graphs model real-world networks more faithfully than tree-only designs.
+- Reachability and optimality are different questions.
+- Traversal safety requires cycle-aware logic.
+- Explicit graph models improve correctness and maintainability.
+
+---
+
+Part IV established the core data-structure families that underpin scalable software.
+
+In Part V, we apply them to core algorithm families: searching, sorting, traversals, and path finding.

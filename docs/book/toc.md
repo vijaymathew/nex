@@ -151,7 +151,7 @@ Lessons learned:
 
 ---
 
-### Algorithm Lab — The First Experiments
+### [Algorithm Lab — The First Experiments](algorithm_lab_1.md)
 
 We test different approaches and observe:
 

@@ -2,67 +2,245 @@
 
 ## 10. Modeling Change
 
-## Chapter Purpose
+Static models are necessary.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+Real systems are dynamic.
 
-## Narrative Setup
+Most severe bugs do not happen because stored state is wrong at rest. They happen during transitions:
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+- two updates race
+- one step succeeds, next step fails
+- event order changes outcomes
+- partial writes leave inconsistent state
 
-## Learning Goals
+If your model does not include change semantics, correctness is accidental.
 
-By the end of this chapter, the reader should be able to:
+---
 
-* explain and apply **state transitions**
-* reason about **event thinking**
-* design and evaluate solutions around **time-aware design**
+## State + Transition = Real Behavior
 
-## Section Outline
+A robust model includes:
 
-### 1. Conceptual Foundation
+- state definitions
+- legal transitions
+- transition preconditions
+- transition postconditions
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+Think in terms of state machines, even for simple systems.
 
-### 2. Worked Design Path
+Example delivery task transitions:
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+- `PENDING -> IN_TRANSIT`
+- `IN_TRANSIT -> DELIVERED`
+- `IN_TRANSIT -> FAILED`
 
-### 3. Nex Implementation Sketch
+Illegal transition example:
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+- `DELIVERED -> PENDING`
 
-### 4. Common Mistakes and Recovery
+Explicit transition modeling prevents this class of bugs from becoming runtime surprises.
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+---
 
-### 5. Reflection and Checkpoint
+## Time And Ordering
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+Change introduces time.
 
-## Studio Exercises
+Time introduces ordering problems.
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+### Knowledge Engine Example
 
-## Assessment Signals
+If relevance scores update after indexing events arrive out-of-order, ranking may oscillate unexpectedly.
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+### Virtual World Example
 
-## Forward Link
+If collision resolution happens before movement for some objects and after movement for others, simulation becomes nondeterministic.
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+### Delivery Example
+
+If reassignment happens before failure status commits, two robots may both claim the same task.
+
+Modeling change means defining deterministic order and conflict policy.
+
+---
+
+## Worked Design Path
+
+Requirement:
+
+> “When a robot fails mid-delivery, tasks should be reassigned automatically.”
+
+### Step 1: Identify Transition Events
+
+- robot heartbeat missed
+- robot status set to failed
+- active tasks discovered
+- reassignment attempted
+
+### Step 2: Define Transition Preconditions
+
+For task reassignment:
+
+- task status is `IN_TRANSIT` or `FAILED`
+- old robot is failed/unavailable
+- candidate replacement exists
+
+### Step 3: Define Transition Postconditions
+
+- task assigned to exactly one robot
+- task status remains valid
+- reassignment decision is auditable
+
+### Step 4: Define Failure Behavior
+
+If no replacement exists:
+
+- mark task as `FAILED`
+- surface actionable reason
+
+Do not leave ambiguous half-state.
+
+### Step 5: Add Idempotency Where Needed
+
+If the same failure event is processed twice, outcome should remain consistent.
+
+Idempotent transitions are a practical reliability multiplier.
+
+---
+
+## Nex Implementation Sketch
+
+```nex
+class Task_Transition
+feature
+  status: String
+  assigned_robot_id: String
+
+  reassign(new_robot_id: String)
+    require
+      robot_present: new_robot_id /= ""
+      transition_allowed: status = "IN_TRANSIT" or status = "FAILED"
+    do
+      assigned_robot_id := new_robot_id
+      status := "IN_TRANSIT"
+    ensure
+      reassigned: assigned_robot_id = new_robot_id and status = "IN_TRANSIT"
+    end
+
+  mark_delivered()
+    require
+      must_be_in_transit: status = "IN_TRANSIT"
+    do
+      status := "DELIVERED"
+    ensure
+      delivered: status = "DELIVERED"
+    end
+invariant
+  valid_status:
+    status = "PENDING" or status = "IN_TRANSIT" or status = "DELIVERED" or status = "FAILED"
+end
+```
+
+This keeps change rules explicit and enforceable.
+
+---
+
+## Common Mistakes In Modeling Change
+
+### Mistake 1: Transition Logic Scattered Everywhere
+
+Symptom:
+
+- no single source of truth for legal changes
+
+Recovery:
+
+- centralize transitions in model operations/services
+- codify pre/post contracts
+
+### Mistake 2: Silent Partial Failure
+
+Symptom:
+
+- operation updates one field, then exits on error
+
+Recovery:
+
+- define atomic boundaries where possible
+- add compensation/fallback states where not possible
+
+### Mistake 3: Ignoring Event Reprocessing
+
+Symptom:
+
+- duplicate events create duplicate effects
+
+Recovery:
+
+- design idempotent transition handling
+- track event identity when applicable
+
+### Mistake 4: Undefined Conflict Policy
+
+Symptom:
+
+- concurrent updates produce nondeterministic outcomes
+
+Recovery:
+
+- define winner rule (timestamp/version/priority)
+- enforce ordering at model boundary
+
+### Mistake 5: No Change Audit Trail
+
+Symptom:
+
+- impossible to explain how state became invalid
+
+Recovery:
+
+- log transition intent and result
+- retain failure reasons for diagnosis
+
+---
+
+## Quick Exercise (10 Minutes)
+
+For one entity in your system, define:
+
+1. All legal states
+2. Allowed transitions
+3. One illegal transition
+4. Preconditions for one transition
+5. Postconditions for one transition
+6. Failure behavior when transition cannot complete
+
+Then ask: can this transition be safely retried?
+
+If not, what must be added for idempotency?
+
+---
+
+## Connection to Nex
+
+Nex encourages explicit transition modeling with contracts and invariants close to operations.
+
+That helps teams reason about change correctness before scaling complexity.
+
+The broader lesson: model transitions as first-class design objects, not incidental code paths.
+
+---
+
+## Chapter Takeaways
+
+- Most real failures occur during state transitions.
+- Legal transitions must be explicit and enforced.
+- Ordering, conflict policy, and idempotency are model concerns.
+- Partial failure handling must be designed, not improvised.
+- Reliable systems treat change as structured behavior.
+
+---
+
+Part II has now established a modeling foundation.
+
+In Part III, we shift from representation to computation: what an algorithm is, how to decompose problems, and how to reason about algorithm behavior under load.

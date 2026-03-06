@@ -2,67 +2,227 @@
 
 ## 16. Sets and Maps
 
-## Chapter Purpose
+Chapter 15 showed why list-only designs eventually slow down.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+This chapter introduces two structures built for direct access:
 
-## Narrative Setup
+- **set**: fast membership (is this present?)
+- **map**: fast retrieval by key (get value by identity)
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+These structures are foundational for scalable software.
 
-## Learning Goals
+---
 
-By the end of this chapter, the reader should be able to:
+## Sets vs Maps
 
-* explain and apply **membership semantics**
-* reason about **hash-based lookup**
-* design and evaluate solutions around **key design**
+Think in terms of the question you ask most often.
 
-## Section Outline
+Use a set when the question is:
 
-### 1. Conceptual Foundation
+- "Have we seen this already?"
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+Use a map when the question is:
 
-### 2. Worked Design Path
+- "Give me the object for this key."
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+If your dominant query is keyed retrieval and you are scanning a list, you are paying avoidable cost.
 
-### 3. Nex Implementation Sketch
+---
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+## Key Design Matters
 
-### 4. Common Mistakes and Recovery
+Maps and sets are only as good as their keys.
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+A good key is:
 
-### 5. Reflection and Checkpoint
+- stable over time
+- unique for the intended scope
+- cheap to compare
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+Weak key design causes collisions, accidental overwrites, and stale lookups.
 
-## Studio Exercises
+---
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+## Worked Design Path
 
-## Assessment Signals
+Requirement:
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+> "For each query, avoid re-scoring the same document and fetch metadata by id quickly."
 
-## Forward Link
+### Step 1: Identify operations
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+- dedupe candidate ids -> membership
+- fetch document by id -> keyed lookup
+
+### Step 2: Choose structures
+
+- `seen_ids` as set
+- `documents_by_id` as map
+
+### Step 3: Define contracts
+
+- adding id to set preserves uniqueness semantics
+- map lookup returns document or explicit `NOT_FOUND`
+
+### Step 4: Preserve display behavior
+
+If result order still matters, keep an ordered list for output and use set/map for control/lookups.
+
+This hybrid pattern is common in real systems.
+
+---
+
+## Nex Implementation Sketch
+
+```nex
+class Doc_Record
+feature
+  doc_id: String
+  title: String
+invariant
+  id_present: doc_id /= ""
+  title_present: title /= ""
+end
+
+class Doc_Index
+feature
+  k1: String
+  v1: Doc_Record
+  k2: String
+  v2: Doc_Record
+  k3: String
+  v3: Doc_Record
+
+  contains(doc_id: String): Boolean
+    require
+      id_present: doc_id /= ""
+    do
+      result := doc_id = k1 or doc_id = k2 or doc_id = k3
+    ensure
+      bool_result: result = true or result = false
+    end
+
+  fetch_title(doc_id: String): String
+    require
+      id_present: doc_id /= ""
+    do
+      if doc_id = k1 then
+        result := v1.title
+      elseif doc_id = k2 then
+        result := v2.title
+      elseif doc_id = k3 then
+        result := v3.title
+      else
+        result := "NOT_FOUND"
+      end
+    ensure
+      non_empty: result /= ""
+    end
+end
+```
+
+This chapter sketch emulates map/set behavior in a minimal teaching form.
+
+---
+
+## Sets and Maps in the Three Systems
+
+### Delivery
+
+- set: blocked locations visited this cycle
+- map: `task_id -> task`
+
+### Knowledge
+
+- set: dedupe candidate document ids
+- map: `doc_id -> document metadata`
+
+### Virtual World
+
+- set: active entities in current frame
+- map: `entity_id -> entity state`
+
+The pattern is consistent: membership control + keyed state access.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Bad key choice
+
+Symptom:
+
+- updates overwrite wrong record
+
+Recovery:
+
+- define key policy explicitly
+- use stable identity keys only
+
+### Mistake 2: Assuming order from map/set
+
+Symptom:
+
+- inconsistent user-facing output order
+
+Recovery:
+
+- keep ordered sequence separately when needed
+
+### Mistake 3: Duplicate source of truth
+
+Symptom:
+
+- list and map diverge silently
+
+Recovery:
+
+- define one authoritative write path
+- verify sync invariants in tests
+
+### Mistake 4: Treating missing as impossible
+
+Symptom:
+
+- null or crash on lookup miss
+
+Recovery:
+
+- define explicit miss behavior (`NOT_FOUND`/option type)
+
+---
+
+## Quick Exercise (10-12 Minutes)
+
+Pick one list-scan hotspot and redesign it using set/map semantics.
+
+Write:
+
+1. chosen key
+2. membership operation
+3. keyed lookup operation
+4. miss behavior
+5. one invariant that protects index consistency
+
+Then compare before/after on at least one medium-size input.
+
+---
+
+## Connection to Nex
+
+Nex contracts make key and lookup assumptions explicit, which is critical when data structures become central to correctness and speed.
+
+This is where many scaling bugs are prevented early.
+
+---
+
+## Chapter Takeaways
+
+- Sets answer membership questions efficiently.
+- Maps answer keyed retrieval questions efficiently.
+- Key design is a correctness decision, not just a performance detail.
+- Ordered output often requires sequence + map/set hybrid designs.
+
+---
+
+In Chapter 17, we move to trees, where hierarchy and ordered search behavior become first-class concerns.

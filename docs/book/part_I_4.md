@@ -222,12 +222,50 @@ In other words, systems often become stronger **at their edges**.
 
 ---
 
-In the next chapter we will take a major step forward.
+## Connection to Nex
 
-Once we understand the problem — including its tricky edge cases — we must decide **how to represent it inside a program**.
+Nex encourages this edge-case mindset by making behavior contracts explicit.
 
-This brings us to one of the most fundamental ideas in programming:
+As we move from problem understanding to implementation, we can encode edge expectations using:
 
-**data modeling**.
+- preconditions for valid inputs
+- postconditions for expected outcomes
+- invariants for rules that must always hold
 
-Before we can design algorithms, we must decide **what the world looks like to our program**.
+That keeps “what if?” questions visible in code, not only in design docs.
+
+---
+
+## Quick Exercise (4 Minutes)
+
+Pick one simple feature from your current project and generate edge cases in three categories:
+
+1. Input edge: empty, null-like, malformed, or unexpected format.
+2. Size edge: smallest and largest realistic values.
+3. State edge: partial failure, race/conflict, or contradictory data.
+
+Then answer:
+
+- Which of these are already handled?
+- Which would currently fail?
+- Which need explicit specification before implementation?
+
+---
+
+## Chapter Takeaways
+
+- Edge cases are not rare exceptions; they define reliability boundaries.
+- Boundary conditions expose logical errors hidden by normal inputs.
+- “Almost correct” systems fail at the edges first.
+- Thinking like a breaker improves design quality.
+- Edge analysis refines the problem statement itself.
+
+---
+
+In the next chapter we will take the next refinement step.
+
+We will move from narrative descriptions to formal specifications: turning stories, examples, and edge cases into precise requirements.
+
+If Chapter 4 asks “What can go wrong?”, Chapter 5 asks “How do we write requirements so everyone builds the same system?”
+
+That transition is what makes design and implementation reliable instead of accidental.

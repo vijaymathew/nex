@@ -2,67 +2,218 @@
 
 ## 12. Breaking Problems Apart
 
-## Chapter Purpose
+Complex algorithms rarely fail because a single line is wrong.
 
-This chapter deepens the reader's engineering judgment by connecting problem framing to implementation choices in Nex.
+They fail because too many responsibilities are packed into one block, making behavior hard to reason about and harder to change safely.
 
-## Narrative Setup
+Decomposition is the discipline of splitting a problem into subproblems with clear interfaces and guarantees.
 
-The delivery network, knowledge engine, and virtual world each expose a new failure mode that can only be resolved by improving system design, not by patching isolated code.
+A strong decomposition gives you:
 
-## Learning Goals
+- local reasoning (understand one piece at a time)
+- independent testing (verify each stage in isolation)
+- replaceability (swap strategy without rewriting everything)
 
-By the end of this chapter, the reader should be able to:
+---
 
-* explain and apply **decomposition**
-* reason about **stepwise refinement**
-* design and evaluate solutions around **composable subproblems**
+## A Practical Decomposition Rule
 
-## Section Outline
+For each part, be able to answer three questions:
 
-### 1. Conceptual Foundation
+1. What input does it require?
+2. What output does it guarantee?
+3. What is the one responsibility it owns?
 
-* Define the central idea in practical engineering terms.
-* Contrast beginner intuition with production realities.
-* Show how the idea appears in all three running systems.
+If a part has multiple reasons to change, decomposition is incomplete.
 
-### 2. Worked Design Path
+---
 
-* Start from an ambiguous requirement.
-* Derive a structured model/algorithm/interface step by step.
-* Discuss tradeoffs, failure modes, and explicit assumptions.
+## Common Decomposition Patterns
 
-### 3. Nex Implementation Sketch
+### Pipeline
 
-* Identify key Nex classes/functions needed.
-* Draft contracts (`require`, `ensure`, invariants) where relevant.
-* Show a minimal but extensible implementation skeleton.
+A sequence of stages where output from stage `n` feeds stage `n+1`.
 
-### 4. Common Mistakes and Recovery
+Good for search, ranking, transformation, and simulation loops.
 
-* List high-frequency design mistakes for this topic.
-* Provide diagnostics to detect each mistake early.
-* Provide refactoring moves that restore correctness and clarity.
+### Strategy Boundary
 
-### 5. Reflection and Checkpoint
+Stable interface, swappable algorithm.
 
-* What changed in our model of the system?
-* What decisions are still provisional?
-* What evidence do we have that the design works?
+Good when objective or scale may evolve.
 
-## Studio Exercises
+### Guard -> Core -> Commit
 
-* **Core**: implement the minimal version needed for one system.
-* **Extension**: generalize to all three systems with shared abstractions.
-* **Stress Test**: construct adversarial inputs and validate behavior.
+- validate assumptions
+- perform core computation
+- apply state changes
 
-## Assessment Signals
+Good for state transitions with side effects.
 
-* correctness under normal and edge conditions
-* explicit handling of assumptions and invariants
-* quality of decomposition and naming
-* ability to explain why this design was chosen over alternatives
+### Domain vs Infrastructure Split
 
-## Forward Link
+Keep algorithm logic separate from storage/transport/UI concerns.
 
-This chapter prepares the next chapter by establishing the abstractions and evidence needed for larger-scale design decisions.
+Good for testability and maintainability.
+
+---
+
+## Worked Design Path
+
+Requirement:
+
+> “Return top relevant notes for a query.”
+
+Naive implementation often mixes all concerns in one method:
+
+- parsing
+- candidate generation
+- scoring
+- ranking
+- filtering
+- formatting
+
+A decomposed design:
+
+1. `tokenize_query(query)`
+2. `collect_candidates(tokens, index)`
+3. `score_candidate(candidate, tokens)`
+4. `rank_candidates(scored)`
+5. `filter_by_threshold(ranked, min_score)`
+6. `render_results(filtered)`
+
+Now each stage has explicit contracts and can be tested independently.
+
+---
+
+## Nex Implementation Sketch
+
+```nex
+class Search_Algorithm
+feature
+  tokenize(query: String): String
+    require
+      query_present: query /= ""
+    do
+      result := query
+    ensure
+      non_empty_tokens: result /= ""
+    end
+
+  score(doc_text, tokens: String): Integer
+    require
+      inputs_present: doc_text /= "" and tokens /= ""
+    do
+      if doc_text = tokens then
+        result := 100
+      else
+        result := 10
+      end
+    ensure
+      non_negative: result >= 0
+    end
+
+  choose_top(doc1, doc2, query: String): String
+    require
+      docs_present: doc1 /= "" and doc2 /= "" and query /= ""
+    do
+      let t: String := tokenize(query)
+      let s1: Integer := score(doc1, t)
+      let s2: Integer := score(doc2, t)
+
+      if s1 >= s2 then
+        result := doc1
+      else
+        result := doc2
+      end
+    ensure
+      from_inputs: result = doc1 or result = doc2
+    end
+end
+```
+
+Even this small sketch shows decomposition: tokenization and scoring are separate, then composed.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Decomposing by syntax, not responsibility
+
+Symptom:
+
+- helper names like `process`, `handle`, `do_stuff`
+
+Recovery:
+
+- rename functions by responsibility
+- enforce one reason to change per stage
+
+### Mistake 2: Over-fragmentation
+
+Symptom:
+
+- many tiny wrappers with no semantic value
+
+Recovery:
+
+- merge layers that do not improve reasoning
+
+### Mistake 3: Hidden coupling between stages
+
+Symptom:
+
+- stage B depends on internals of stage A
+
+Recovery:
+
+- pass explicit values only
+- eliminate implicit shared state where possible
+
+### Mistake 4: Missing stage contracts
+
+Symptom:
+
+- malformed intermediate data causes late failures
+
+Recovery:
+
+- add pre/post conditions at key boundaries
+
+---
+
+## Quick Exercise (10 Minutes)
+
+Take one large function in your codebase and decompose it into 3-6 stages.
+
+For each stage, write:
+
+1. input contract
+2. output contract
+3. failure behavior
+4. one test case
+
+Then identify one stage you could replace without touching others.
+
+If nothing is replaceable, coupling is still too strong.
+
+---
+
+## Connection to Nex
+
+Nex contracts are especially useful at decomposition boundaries because they make handoff assumptions explicit and executable.
+
+This is also where AI-assisted coding improves: clear stage contracts reduce incorrect glue code.
+
+---
+
+## Chapter Takeaways
+
+- Decomposition is an engineering necessity, not style preference.
+- Each stage should have one responsibility and explicit contracts.
+- Replaceable components require stable interfaces.
+- Good decomposition lowers change risk and improves test quality.
+
+---
+
+In Chapter 13, we apply decomposition to self-similar problems through recursion.
