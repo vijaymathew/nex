@@ -1681,6 +1681,14 @@
        (filter #(= (:name %) constructor-name))
        first))
 
+(defn lookup-constructor-with-inheritance
+  "Look up a constructor by name in a class and its parent chain."
+  [ctx class-def constructor-name]
+  (or (lookup-constructor class-def constructor-name)
+      (some (fn [{:keys [class-def]}]
+              (lookup-constructor-with-inheritance ctx class-def constructor-name))
+            (get-parent-classes ctx class-def))))
+
 (defmethod eval-node :create
   [ctx {:keys [class-name generic-args constructor args]}]
   ;; Handle built-in IO types
@@ -1759,9 +1767,9 @@
         ;; If a constructor is specified, call it and update fields
         final-field-map (when class-def
                           (if constructor
-                            (let [ctor-def (lookup-constructor class-def constructor)]
+                            (let [ctor-def (lookup-constructor-with-inheritance ctx class-def constructor)]
                               (when-not ctor-def
-                                (throw (ex-info (str "Constructor not found: " constructor)
+                                (throw (ex-info (str "Constructor not found: " class-name "." constructor)
                                                 {:class-name class-name :constructor constructor})))
                               ;; Create environment for constructor execution
                               (let [ctor-env (make-env (:current-env ctx))

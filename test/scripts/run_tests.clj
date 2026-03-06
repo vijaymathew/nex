@@ -20,6 +20,10 @@
 (require 'nex.arrays-maps-test)
 (require 'nex.exception-test)
 (require 'nex.cursor-test)
+(require 'nex.contracts-runtime-test)
+(require 'nex.contracts-with-let-test)
+(require 'nex.invariants-runtime-test)
+(require 'nex.loop-contract-violations-test)
 
 (println "╔════════════════════════════════════════════════════════════╗")
 (println "║                    RUNNING ALL TESTS                       ║")
@@ -43,7 +47,11 @@
                                'nex.parameterless-call-test
                                'nex.arrays-maps-test
                                'nex.exception-test
-                               'nex.cursor-test)]
+                               'nex.cursor-test
+                               'nex.contracts-runtime-test
+                               'nex.contracts-with-let-test
+                               'nex.invariants-runtime-test
+                               'nex.loop-contract-violations-test)]
   (println)
   (println "╔════════════════════════════════════════════════════════════╗")
   (println "║                    TEST SUMMARY                            ║")

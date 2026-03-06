@@ -573,3 +573,20 @@ end"]
             clojure.lang.ExceptionInfo
             #"Type checking failed"
             (java/translate nex-code))))))
+
+(deftest inherited-constructor-shim-test
+  (testing "Child class gets inherited constructor shim for parent constructor"
+    (let [nex-code "class A
+  feature
+    x: Integer
+  create
+    make(x: Integer) do
+      this.x := x
+    end
+end
+
+class B inherit A
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "public static B make(int x)"))
+      (is (str/includes? java-code "b._parent_A = A.make(x)")))))
