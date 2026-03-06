@@ -294,7 +294,7 @@ print(x)                        -- 10
 ## Anonymous Functions
 
 ```nex
-let add: fn := fn (a, b: Integer): Integer do result := a + b end
+let add: Function := fn (a, b: Integer): Integer do result := a + b end
 print(add(3, 4))                -- 7
 ```
 
@@ -304,10 +304,12 @@ print(add(3, 4))                -- 7
 class Box [T]
   feature
     value: T
+  create
+    make(v: T) do value := v end
 end
 
-let b: Box [Integer] := create Box [Integer]
-b.value := 42
+let b: Box [Integer] := create Box [Integer].make(42)
+b.value -- 42
 ```
 
 ## Assignment
