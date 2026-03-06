@@ -188,7 +188,7 @@ print(xs.get(0))
 
 ```nex
 let m: Map [String, String] := {"name": "Nex", "kind": "language"}
-print(m.at("name"))
+print(m.get("name"))
 ```
 
 Array and map literals are expressions, so they can be nested.
@@ -265,6 +265,10 @@ class Animal
     speak do
       print(name)
     end
+  create
+    named(name: String) do
+	  this.name := name
+	end
 end
 
 class Dog
@@ -274,6 +278,11 @@ class Dog
       print(name + " says woof")
     end
 end
+
+let a: A := create Animal.named("Ko")
+a.speak -- "Ko"
+let d: A := create Dog.named("Ki")
+d.speak -- "Ki says woof"
 ```
 
 Nex also supports adaptation in inheritance (`rename`, `redefine`) for precise reuse.
@@ -297,9 +306,22 @@ class Wallet
         decreased: money = old money - amount
       end
 
+    create
+	   with_balance(amount: Real) do
+	     money := amount
+	   end
+
   invariant
     never_negative: money >= 0.0
 end
+
+let w: Wallet := create Wallet.with_balance(-10)
+Error: Class invariant violation: never_negative
+
+let w: Wallet := create Wallet.with_balance(10.2)
+w.spend(9)
+w.money -- 1.1999999999999993
+w.spend(2) -- Error: Precondition violation: enough
 ```
 
 Use contracts to state assumptions (`require`), guarantees (`ensure`), and global consistency rules (`invariant`).
@@ -406,6 +428,3 @@ account.show
 
 - Syntax postcard: [../SYNTAX.md](../SYNTAX.md)
 - Formal grammar: [../../grammar/nexlang.g4](../../grammar/nexlang.g4)
-- Types: [../TYPES.md](../TYPES.md)
-- Contracts: [../CONTRACTS.md](../CONTRACTS.md)
-- Arrays and maps: [../ARRAYS_MAPS.md](../ARRAYS_MAPS.md)
