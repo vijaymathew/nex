@@ -9,7 +9,7 @@ The Web IDE has 4 sections:
 1. REPL: evaluate Nex expressions and statements interactively.
 2. Nex Editor: write larger programs and run them in one click.
 3. Canvas: render `Window` and `Turtle` graphics output.
-4. Documentation: in-app tutorial pages.
+4. Documentation: in-app tutorial pages derived from `docs/md/TUTORIAL.md`.
 
 ## Prerequisites
 
@@ -88,6 +88,10 @@ Graphics output appears in the Canvas panel automatically when `Window`/`Turtle`
 
 Use `Previous` / `Next` to browse built-in tutorial pages.
 
+The in-app tutorial content is based on:
+
+- [`docs/md/TUTORIAL.md`](TUTORIAL.md)
+
 ## Troubleshooting
 
 ### IDE shows old behavior
@@ -133,4 +137,5 @@ If you only deploy `public/js`, parser loading will fail in the browser.
 ## Related Docs
 
 - [ClojureScript Support](CLOJURESCRIPT.md)
+- [A Short Tutorial to Nex](TUTORIAL.md)
 - [Syntax on a Postcard](SYNTAX.md)
