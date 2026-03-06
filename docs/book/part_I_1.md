@@ -13,7 +13,6 @@ But most software failures begin **before any of that**.
 
 They begin with a misunderstanding of the problem.
 
----
 
 ## The Most Expensive Mistake in Software
 
@@ -51,7 +50,6 @@ The team solved the **symptom**.
 
 They missed the **problem**.
 
----
 
 ## Symptoms vs Problems
 
@@ -74,7 +72,6 @@ Good programmers fix symptoms.
 
 Great engineers **find the real problem first**.
 
----
 
 ## The Three Systems We Will Build
 
@@ -104,7 +101,6 @@ This is not just pathfinding.
 
 It is **decision-making under uncertainty**.
 
----
 
 ### 2. The Knowledge Engine
 
@@ -126,7 +122,6 @@ This is not just retrieval.
 
 It is **reasoning about knowledge**.
 
----
 
 ### 3. The Virtual World
 
@@ -149,7 +144,6 @@ This is not just simulation.
 
 It is **managing complexity through structure**.
 
----
 
 ## A Pattern You Should Notice
 
@@ -167,7 +161,6 @@ It is **understanding the problem deeply enough that the code becomes obvious**.
 
 This is the central theme of this book.
 
----
 
 ## Why Most Software Fails Before the First Line of Code
 
@@ -196,7 +189,6 @@ before asking the most important question:
 
 > **What kind of problem is this?**
 
----
 
 ## Problems Have Shapes
 
@@ -221,7 +213,6 @@ Experienced engineers recognize the shape **first**.
 
 Then they design the solution.
 
----
 
 ## The Discipline of Problem Seeing
 
@@ -240,21 +231,6 @@ Good programming begins with **clear thinking**.
 
 And clear thinking begins with **good questions**.
 
----
-
-## Connection to Nex
-
-Throughout this book, we will implement ideas in Nex.
-
-That choice is intentional.
-
-Nex is designed to support this exact workflow: think clearly about problems first, then express solutions with strong structure, explicit contracts, and flexible modeling styles.
-
-The language is not the point.
-
-The point is to practice engineering habits that transfer to any real-world stack.
-
----
 
 ::: {.note-exercise}
 **Exercise**
@@ -278,8 +254,6 @@ Now do your own:
 
 If this feels hard, that is normal. This is exactly the skill we are building.
 
----
-
 ::: {.note-takeaways}
 **Takeaways**
 Capture the key principles from this chapter and one action you will apply immediately.
@@ -293,7 +267,6 @@ Capture the key principles from this chapter and one action you will apply immed
 - Good engineering begins by clarifying goals, assumptions, and constraints.
 - If the problem is clear, architecture and algorithms become far easier to choose.
 
----
 
 ## A Preview of What Comes Next
 
