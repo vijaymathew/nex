@@ -1,8 +1,6 @@
 # A Short Tutorial to Nex
 
-This tutorial is a compact, linear introduction to Nex, in the spirit of *Programming in Oberon*: small steps, complete examples, and a focus on clear structure.
-
-Target size: about 30-45 printed pages, depending on formatting.
+This tutorial is a compact, linear introduction to Nex in small steps, with complete examples.
 
 Unless noted otherwise, snippets are REPL-friendly fragments.
 
@@ -32,7 +30,7 @@ let height: Real := 1.52
 let ok: Boolean := true
 ```
 
-Type annotations are optional in many places:
+In the REPL, type annotations are optional by default:
 
 ```nex
 let x := 10
@@ -183,7 +181,7 @@ print(inc(10))
 
 ```nex
 let xs: Array [Integer] := [1, 2, 3]
-print(xs.at(0))
+print(xs.get(0))
 ```
 
 ### 7.2 Maps

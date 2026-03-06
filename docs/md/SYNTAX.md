@@ -138,17 +138,17 @@ print(double(5))                 -- 10
 
 ```nex
 let colors: Array [String] := ["red", "green", "blue"]
-print(colors.at(0))              -- "red"
-colors.push("yellow")            -- add to the end
-print(colors.size)               -- 4
+print(colors.get(0))            -- "red"
+colors.add("yellow")            -- add to the end
+print(colors.length)            -- 4
 ```
 
 ## Maps
 
 ```nex
-let pet: Map [String, String] := {name: "Max", kind: "dog"}
-print(pet.at("name"))            -- "Max"
-pet.set("kind", "cat")           -- update a value
+let pet: Map [String, String] := {"name": "Max", "kind": "dog"}
+print(pet.get("name"))            -- "Max"
+pet.put("kind", "cat")            -- update a value
 ```
 
 ## Classes
@@ -161,18 +161,23 @@ class Pet
     name: String
     sound: String
 
+  create
+    make(name: String, sound: String) do
+	  this.name := name
+	  this.sound := sound
+	end
+
+  feature
     speak do
-      print(name + " says " + sound)
-    end
+       print(name + " says " + sound)
+     end
 end
 ```
 
 ## Creating Objects
 
 ```nex
-let cat: Pet := create Pet
-cat.name := "Mimi"
-cat.sound := "meow"
+let cat: Pet := create Pet.make("Mimi", "meow")
 cat.speak                        -- "Mimi says meow"
 ```
 
@@ -191,7 +196,7 @@ class Circle
     radius: Real
 
     area(): Real do
-      result := 3.14159 * radius ^ 2
+      result := 3.14159 * (radius ^ 2)
     end
 end
 
@@ -208,6 +213,8 @@ class Animal
   feature
     name: String
     speak do print(name) end
+  create
+    with_name(n: String) do name := n end
 end
 
 class Dog
@@ -216,6 +223,8 @@ class Dog
     speak do
       print(name + " says Woof!")
     end
+  create
+    with_name(n: String) do Animal.with_name(n) end
 end
 ```
 
@@ -254,7 +263,7 @@ do
   print("done on attempt " + attempts)
 rescue
   print("failed, trying again...")
-  retry                          -- jump back to do and try again
+  retry                        -- jump back to do and try again
 end
 ```
 
