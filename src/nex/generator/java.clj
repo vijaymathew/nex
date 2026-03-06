@@ -1066,6 +1066,13 @@
     (let [{:keys [methods]} (extract-members (:body parent-def))]
       methods)))
 
+(defn get-parent-constructors
+  "Get constructor definitions from a direct parent class."
+  [parent-name]
+  (when-let [parent-def (get *class-registry* parent-name)]
+    (let [{:keys [constructors]} (extract-members (:body parent-def))]
+      constructors)))
+
 (defn lookup-method-effective-contracts
   "Lookup method in class hierarchy and compute effective contracts:
    require = base OR local
@@ -1193,6 +1200,45 @@
     (let [{:keys [constructors]} (extract-members (:body parent-def))]
       (some #(= (:name %) method-name) constructors))))
 
+(defn generate-inherited-constructor-shims
+  "Generate child static factory constructors that forward to direct parent constructors."
+  [level class-name parents own-constructor-names opts]
+  (let [all-parent-ctors (mapcat (fn [{:keys [parent]}]
+                                   (map (fn [ctor] {:parent parent :ctor ctor})
+                                        (or (get-parent-constructors parent) [])))
+                                 parents)
+        ;; Avoid duplicates and do not override constructors declared on the child.
+        selected (vals (reduce (fn [m {:keys [ctor] :as entry}]
+                                 (let [ctor-name (:name ctor)]
+                                   (if (or (contains? own-constructor-names ctor-name)
+                                           (contains? m ctor-name))
+                                     m
+                                     (assoc m ctor-name entry))))
+                               {}
+                               all-parent-ctors))]
+    (vec
+     (map (fn [{:keys [parent ctor]}]
+            (let [{:keys [name params]} ctor
+                  local-name (class-name-to-local class-name)
+                  param-names (set (map :name params))
+                  params-code (str/join ", "
+                                        (map (fn [{:keys [name type]}]
+                                               (str (nex-type-to-java type) " " name))
+                                             params))
+                  args-code (str/join ", " (map :name params))
+                  class-invariant-checks (binding [*this-name* local-name
+                                                   *local-names* (into *local-names* param-names)]
+                                           (generate-assertions (+ level 1) *class-invariants* "Class invariant" opts))]
+              (str/join "\n"
+                        (concat
+                         [(indent level (str "public static " class-name " " name "(" params-code ") {"))]
+                         [(indent (+ level 1) (str class-name " " local-name " = new " class-name "();"))]
+                         [(indent (+ level 1) (str local-name "._parent_" parent " = " parent "." name "(" args-code ");"))]
+                         class-invariant-checks
+                         [(indent (+ level 1) (str "return " local-name ";"))]
+                         [(indent level "}")]))))
+          selected))))
+
 ;;
 ;; Class Generation
 ;;
@@ -1255,6 +1301,8 @@
            delegation-methods (when (seq parents)
                                 (generate-delegation-methods 1 parents own-method-names opts))
            constructors-code (map #(generate-constructor 1 name % opts) constructors)
+           inherited-constructor-shims (when (seq parents)
+                                         (generate-inherited-constructor-shims 1 name parents (set (map :name constructors)) opts))
            methods-with-effective-contracts
            (map (fn [m]
                   (let [effective (lookup-method-effective-contracts class-def (:name m))]
@@ -1276,6 +1324,8 @@
                   (when (seq delegation-methods) [""])
                   constructors-code
                   (when (seq constructors) [""])
+                  (when (seq inherited-constructor-shims) inherited-constructor-shims)
+                  (when (seq inherited-constructor-shims) [""])
                   methods-code
                   ["}"])))))))
 

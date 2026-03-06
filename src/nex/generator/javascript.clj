@@ -1001,6 +1001,43 @@
     (let [{:keys [methods]} (extract-members (:body parent-def))]
       (map :name methods))))
 
+(defn get-parent-constructors-js
+  "Get constructor definitions from a direct parent class."
+  [parent-name classes-by-name]
+  (when-let [parent-def (get classes-by-name parent-name)]
+    (let [{:keys [constructors]} (extract-members (:body parent-def))]
+      constructors)))
+
+(defn generate-inherited-constructor-shims-js
+  "Generate child static factory constructors that forward to direct parent constructors."
+  [level class-name parents own-constructor-names classes-by-name]
+  (let [all-parent-ctors (mapcat (fn [{:keys [parent]}]
+                                   (map (fn [ctor] {:parent parent :ctor ctor})
+                                        (or (get-parent-constructors-js parent classes-by-name) [])))
+                                 parents)
+        selected (vals (reduce (fn [m {:keys [ctor] :as entry}]
+                                 (let [ctor-name (:name ctor)]
+                                   (if (or (contains? own-constructor-names ctor-name)
+                                           (contains? m ctor-name))
+                                     m
+                                     (assoc m ctor-name entry))))
+                               {}
+                               all-parent-ctors))]
+    (vec
+     (map (fn [{:keys [parent ctor]}]
+            (let [{:keys [name params]} ctor
+                  local-name (class-name-to-local class-name)
+                  params-code (str/join ", " (map :name params))
+                  args-code (str/join ", " (map :name params))]
+              (str/join "\n"
+                        [(indent level (str "static " name "(" params-code ") {"))
+                         (indent (+ level 1) (str "let __parent = " parent "." name "(" args-code ");"))
+                         (indent (+ level 1) (str "let " local-name " = new " class-name "();"))
+                         (indent (+ level 1) (str "Object.assign(" local-name ", __parent);"))
+                         (indent (+ level 1) (str "return " local-name ";"))
+                         (indent level "}")])))
+          selected))))
+
 (defn lookup-method-effective-contracts
   "Lookup method in class hierarchy and compute effective contracts:
    require = base OR local
@@ -1075,6 +1112,8 @@
              default-constructor (generate-default-constructor 1 fields has-parent?)
              ;; All Nex constructors become static factory methods
              factory-methods (map #(generate-factory-constructor 1 name % opts) constructors)
+             inherited-constructor-shims (when (seq parents)
+                                           (generate-inherited-constructor-shims-js 1 name parents (set (map :name constructors)) classes-by-name))
              methods-with-effective-contracts
              (map (fn [m]
                     (let [effective (lookup-method-effective-contracts class-def (:name m) classes-by-name)]
@@ -1092,6 +1131,8 @@
                     [default-constructor ""]
                     factory-methods
                     (when (seq factory-methods) [""])
+                    (when (seq inherited-constructor-shims) inherited-constructor-shims)
+                    (when (seq inherited-constructor-shims) [""])
                     methods-code
                     ["}"])))))))
 
