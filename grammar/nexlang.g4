@@ -19,7 +19,7 @@ internStmt
     ;
 
 classDecl
-    : DEFERRED? CLASS IDENTIFIER genericParams?
+    : DEFERRED? CLASS (IDENTIFIER | CONVERT | TO) genericParams?
       noteClause?
       inheritClause?
       classBody
@@ -28,7 +28,7 @@ classDecl
     ;
 
 functionDecl
-    : FUNCTION IDENTIFIER '(' paramList? ')' (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
+    : FUNCTION (IDENTIFIER | CONVERT | TO) '(' paramList? ')' (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
     ;
 
 genericParams
@@ -48,7 +48,7 @@ inheritClause
     ;
 
 inheritEntry
-    : IDENTIFIER inheritAdaptation?
+    : (IDENTIFIER | CONVERT | TO) inheritAdaptation?
     ;
 
 inheritAdaptation
@@ -61,11 +61,11 @@ renameClause
     ;
 
 renameItem
-    : IDENTIFIER AS IDENTIFIER
+    : (IDENTIFIER | CONVERT | TO) AS (IDENTIFIER | CONVERT | TO)
     ;
 
 redefineClause
-    : IDENTIFIER (',' IDENTIFIER)*
+    : (IDENTIFIER | CONVERT | TO) (',' (IDENTIFIER | CONVERT | TO))*
     ;
 
 featureSection
@@ -74,7 +74,7 @@ featureSection
 
 visibilityModifier
     : PRIVATE
-    | ARROW IDENTIFIER (',' IDENTIFIER)*
+    | ARROW (IDENTIFIER | CONVERT | TO) (',' (IDENTIFIER | CONVERT | TO))*
     ;
 
 constructorSection
@@ -87,15 +87,15 @@ featureMember
     ;
 
 fieldDecl
-    : IDENTIFIER ':' type noteClause?
+    : (IDENTIFIER | CONVERT | TO) ':' type noteClause?
     ;
 
 constructorDecl
-    : IDENTIFIER ('(' paramList? ')')? requireClause? DO block ensureClause? rescueClause? END
+    : (IDENTIFIER | CONVERT | TO) ('(' paramList? ')')? requireClause? DO block ensureClause? rescueClause? END
     ;
 
 methodDecl
-    : IDENTIFIER ('(' paramList? ')')? (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
+    : (IDENTIFIER | CONVERT | TO) ('(' paramList? ')')? (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
     ;
 
 paramList
@@ -103,7 +103,7 @@ paramList
     ;
 
 param
-    : IDENTIFIER (',' IDENTIFIER)* (':' type)?
+    : (IDENTIFIER | CONVERT | TO) (',' (IDENTIFIER | CONVERT | TO))* (':' type)?
     ;
 
 type
@@ -115,7 +115,7 @@ type
     | CHAR_TYPE
     | BOOLEAN_TYPE
     | STRING_TYPE
-    | IDENTIFIER typeArgs?
+    | (IDENTIFIER | CONVERT | TO) typeArgs?
     ;
 
 typeArgs
@@ -197,7 +197,7 @@ repeatStatement
     ;
 
 acrossStatement
-    : ACROSS expression AS IDENTIFIER DO block END
+    : ACROSS expression AS (IDENTIFIER | CONVERT | TO) DO block END
     ;
 
 withStatement
@@ -217,17 +217,17 @@ variantClause
     ;
 
 assignment
-    : IDENTIFIER ASSIGN expression
-    | THIS '.' IDENTIFIER ASSIGN expression
+    : (IDENTIFIER | CONVERT | TO) ASSIGN expression
+    | THIS '.' (IDENTIFIER | CONVERT | TO) ASSIGN expression
     ;
 
 localVarDecl
-    : LET IDENTIFIER (':' type)? ASSIGN expression
+    : LET (IDENTIFIER | CONVERT | TO) (':' type)? ASSIGN expression
     ;
 
 methodCall
     : primary callChain
-    | IDENTIFIER
+    | (IDENTIFIER | CONVERT | TO)
     ;
 
 callChain
@@ -289,7 +289,7 @@ postfixPart
     ;
 
 memberAccess
-    : '.' IDENTIFIER ('(' argumentList? ')')?
+    : '.' (IDENTIFIER | CONVERT | TO) ('(' argumentList? ')')?
     ;
 
 callSuffix
@@ -303,12 +303,17 @@ subscript
 primary
     : literal
     | createExpression
+    | convertExpression
     | anonymousFunction
     | whenExpression
     | oldExpression
     | THIS
-    | IDENTIFIER
+    | (IDENTIFIER | CONVERT | TO)
     | '(' expression ')'
+    ;
+
+convertExpression
+    : CONVERT expression TO (IDENTIFIER | CONVERT | TO) ':' type
     ;
 
 whenExpression
@@ -324,7 +329,7 @@ oldExpression
     ;
 
 createExpression
-    : CREATE IDENTIFIER genericArgs? ('.' IDENTIFIER ('(' argumentList? ')')?)?
+    : CREATE (IDENTIFIER | CONVERT | TO) genericArgs? ('.' (IDENTIFIER | CONVERT | TO) ('(' argumentList? ')')?)?
     ;
 
 genericArgs
@@ -332,7 +337,7 @@ genericArgs
     ;
 
 genericArg
-    : IDENTIFIER | type
+    : (IDENTIFIER | CONVERT | TO) | type
     ;
 
 literal
@@ -423,6 +428,8 @@ OLD          : 'old';
 THIS         : 'this';
 NOTE         : 'note';
 WITH         : 'with';
+CONVERT      : 'convert';
+TO           : 'to';
 RAISE        : 'raise';
 RESCUE       : 'rescue';
 RETRY        : 'retry';

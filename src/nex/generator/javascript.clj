@@ -508,6 +508,133 @@
                                    entries))]
     (str "new Map([" entries-code "])")))
 
+(defn any-type?
+  [t]
+  (or (= t "Any")
+      (and (map? t) (= (:base-type t) "Any"))))
+
+(defn dedupe-convert-bindings
+  "Dedupe convert bindings by variable name, preserving first occurrence order."
+  [bindings]
+  (second
+   (reduce (fn [[seen acc] {:keys [name] :as binding}]
+             (if (contains? seen name)
+               [seen acc]
+               [(conj seen name) (conj acc binding)]))
+           [#{} []]
+           bindings)))
+
+(defn collect-convert-bindings-expr
+  "Collect convert target bindings used by an expression."
+  [expr]
+  (letfn [(walk [e]
+            (cond
+              (nil? e) []
+              (not (map? e)) []
+              :else
+              (case (:type e)
+                :convert (into (walk (:value e))
+                               [{:name (:var-name e) :target-type (:target-type e)}])
+                :binary (into (walk (:left e)) (walk (:right e)))
+                :unary (walk (:expr e))
+                :call (into (if (map? (:target e)) (walk (:target e)) [])
+                            (mapcat walk (:args e)))
+                :create (mapcat walk (:args e))
+                :subscript (into (walk (:target e)) (walk (:index e)))
+                :array-literal (mapcat walk (:elements e))
+                :map-literal (mapcat (fn [{:keys [key value]}]
+                                       (into (walk key) (walk value)))
+                                     (:entries e))
+                :when (concat (walk (:condition e))
+                              (walk (:consequent e))
+                              (walk (:alternative e)))
+                :old (walk (:expr e))
+                [])))]
+    (dedupe-convert-bindings (walk expr))))
+
+(declare collect-convert-bindings-stmt)
+
+(defn collect-convert-bindings-block
+  "Collect convert bindings from statements in the current lexical block."
+  [stmts]
+  (dedupe-convert-bindings (mapcat collect-convert-bindings-stmt stmts)))
+
+(defn collect-convert-bindings-stmt
+  "Collect convert bindings from statement expressions in the current scope."
+  [stmt]
+  (case (:type stmt)
+    :let (collect-convert-bindings-expr (:value stmt))
+    :assign (collect-convert-bindings-expr (:value stmt))
+    :member-assign (collect-convert-bindings-expr (:value stmt))
+    :call (mapcat collect-convert-bindings-expr (:args stmt))
+    :loop (concat
+           (collect-convert-bindings-block (:init stmt))
+           (collect-convert-bindings-expr (:until stmt))
+           (collect-convert-bindings-block (:body stmt)))
+    :case (concat
+           (collect-convert-bindings-expr (:expr stmt))
+           (mapcat (fn [{:keys [values body]}]
+                     (concat (mapcat collect-convert-bindings-expr values)
+                             (collect-convert-bindings-stmt body)))
+                   (:clauses stmt))
+           (when-let [else-stmt (:else stmt)]
+             (collect-convert-bindings-stmt else-stmt)))
+    ;; If guard convert variables are scoped to the if-construct itself.
+    :if (concat
+         (collect-convert-bindings-block (:then stmt))
+         (mapcat (fn [clause] (collect-convert-bindings-block (:then clause)))
+                 (:elseif stmt))
+         (when-let [else-block (:else stmt)]
+           (collect-convert-bindings-block else-block)))
+    ;; Nested scoped blocks manage their own convert declarations.
+    :scoped-block []
+    :with (collect-convert-bindings-block (:body stmt))
+    []))
+
+(defn collect-if-guard-convert-bindings
+  "Collect convert bindings introduced by an if/elseif condition chain."
+  [{:keys [condition elseif]}]
+  (dedupe-convert-bindings
+   (concat (collect-convert-bindings-expr condition)
+           (mapcat (fn [clause]
+                     (collect-convert-bindings-expr (:condition clause)))
+                   elseif))))
+
+(defn generate-convert-declarations
+  [level bindings]
+  (map (fn [{:keys [name]}]
+         (indent level (str "let " name " = null;")))
+       bindings))
+
+(defn js-convert-check
+  [temp-name target-type]
+  (if (map? target-type)
+    (js-convert-check temp-name (:base-type target-type))
+    (case target-type
+      "Any" "true"
+      "Integer" (str "(typeof " temp-name " === \"number\")")
+      "Integer64" (str "(typeof " temp-name " === \"number\")")
+      "Real" (str "(typeof " temp-name " === \"number\")")
+      "Decimal" (str "(typeof " temp-name " === \"number\")")
+      "String" (str "(typeof " temp-name " === \"string\")")
+      "Boolean" (str "(typeof " temp-name " === \"boolean\")")
+      "Char" (str "((typeof " temp-name " === \"string\") && " temp-name ".length === 1)")
+      (str temp-name " instanceof " target-type))))
+
+(defn generate-convert-expr
+  [{:keys [value var-name target-type]}]
+  (let [value-code (generate-expression value)
+        temp-name (str (gensym "__nex_conv_tmp_"))
+        cond-code (if (any-type? target-type)
+                    "true"
+                    (js-convert-check temp-name target-type))]
+    (str "(() => { "
+         "const " temp-name " = " value-code "; "
+         "if (" cond-code ") { "
+         var-name " = " temp-name "; return true; } "
+         var-name " = null; return false; "
+         "})()")))
+
 (defn generate-expression
   "Generate JavaScript code for an expression"
   [expr]
@@ -526,6 +653,7 @@
     :subscript (generate-subscript-expr expr)
     :array-literal (generate-array-literal (:elements expr))
     :map-literal (generate-map-literal (:entries expr))
+    :convert (generate-convert-expr expr)
     :anonymous-function (let [class-def (:class-def expr)
                               ;; Extract the callN method definition
                               method-def (first (:members (first (:body class-def))))]
@@ -562,23 +690,35 @@
 (defn generate-if
   "Generate JavaScript code for if/elseif/else"
   ([level node] (generate-if level node #{}))
-  ([level {:keys [condition then elseif else]} var-names]
-   (let [cond-code (generate-expression condition)
-         then-code (map #(generate-statement (+ level 1) % var-names) then)
-         elseif-parts (mapcat (fn [clause]
-                                [(indent level (str "} else if (" (generate-expression (:condition clause)) ") {"))
-                                 (str/join "\n" (map #(generate-statement (+ level 1) % var-names) (:then clause)))])
-                              elseif)
-         else-part (when else
-                     [(indent level "} else {")
-                      (str/join "\n" (map #(generate-statement (+ level 1) % var-names) else))])]
-     (str/join "\n"
-               (concat
-                [(indent level (str "if (" cond-code ") {"))
-                 (str/join "\n" then-code)]
-                elseif-parts
-                else-part
-                [(indent level "}")])))))
+  ([level {:keys [condition then elseif else] :as node} var-names]
+   (let [guard-bindings (collect-if-guard-convert-bindings node)
+         guard-var-names (set (map :name guard-bindings))
+         statement-code
+         (binding [*local-names* (into *local-names* guard-var-names)]
+           (let [cond-code (generate-expression condition)
+                 then-code (map #(generate-statement (+ level 1) % var-names) then)
+                 elseif-parts (mapcat (fn [clause]
+                                        [(indent level (str "} else if (" (generate-expression (:condition clause)) ") {"))
+                                         (str/join "\n" (map #(generate-statement (+ level 1) % var-names) (:then clause)))])
+                                      elseif)
+                 else-part (when else
+                             [(indent level "} else {")
+                              (str/join "\n" (map #(generate-statement (+ level 1) % var-names) else))])]
+             (str/join "\n"
+                       (concat
+                        [(indent level (str "if (" cond-code ") {"))
+                         (str/join "\n" then-code)]
+                        elseif-parts
+                        else-part
+                        [(indent level "}")]))))]
+     (if (seq guard-bindings)
+       (str/join "\n"
+                 (concat
+                  [(indent level "{")]
+                  (generate-convert-declarations (+ level 1) guard-bindings)
+                  [statement-code
+                   (indent level "}")]))
+       statement-code))))
 
 (defn has-retry?
   "Check if statements contain a :retry node"
@@ -634,13 +774,23 @@
   "Generate JavaScript code for scoped block"
   ([level node] (generate-scoped-block level node #{}))
   ([level {:keys [body rescue]} var-names]
-   (if rescue
-     (generate-rescue level body rescue var-names)
-     (let [statements (map #(generate-statement (+ level 1) % var-names) body)]
-       (str/join "\n"
-                 [(indent level "{")
-                  (str/join "\n" statements)
-                  (indent level "}")])))))
+   (let [convert-bindings (collect-convert-bindings-block (concat body (or rescue [])))
+         convert-names (set (map :name convert-bindings))]
+     (binding [*local-names* (into *local-names* convert-names)]
+       (if rescue
+         (str/join "\n"
+                   (concat
+                    [(indent level "{")]
+                    (generate-convert-declarations (+ level 1) convert-bindings)
+                    [(generate-rescue (+ level 1) body rescue var-names)
+                     (indent level "}")]))
+         (let [statements (map #(generate-statement (+ level 1) % var-names) body)]
+           (str/join "\n"
+                     (concat
+                      [(indent level "{")]
+                      (generate-convert-declarations (+ level 1) convert-bindings)
+                      [(str/join "\n" statements)
+                       (indent level "}")]))))))))
 
 (defn extract-var-names-js
   "Extract variable names from let statements"
@@ -822,7 +972,9 @@
   "Generate JavaScript code for a method"
   [level {:keys [name params return-type body require ensure rescue visibility note]} opts]
   (let [param-names (set (map :name params))
-        local-names (cond-> param-names
+        convert-bindings (collect-convert-bindings-block (concat body (or rescue [])))
+        convert-var-names (set (map :name convert-bindings))
+        local-names (cond-> (into param-names convert-var-names)
                       return-type (conj "result"))]
     (binding [*local-names* (into *local-names* local-names)]
       (let [params-code (str/join ", " (map :name params))
@@ -834,6 +986,7 @@
             result-init (when return-type
                          [(indent (+ level 1)
                                  (str "let result = " (default-value return-type) ";"))])
+            convert-decls (generate-convert-declarations (+ level 1) convert-bindings)
             ;; Extract old references and generate capture statements
             old-refs (when ensure (extract-old-references ensure))
             old-captures (when (seq old-refs)
@@ -870,6 +1023,7 @@
                    (when jsdoc [jsdoc])
                    [(indent level (str method-name "(" params-code ") {"))]
                    result-init
+                   convert-decls
                    old-captures
                    preconditions
                    statements
@@ -919,25 +1073,29 @@
   [level class-name {:keys [name params body require ensure rescue]} opts]
   (let [local-name (class-name-to-local class-name)
         param-names (set (map :name params))
+        convert-bindings (collect-convert-bindings-block (concat body (or rescue [])))
+        convert-var-names (set (map :name convert-bindings))
+        local-names (into param-names convert-var-names)
         params-code (str/join ", " (map :name params))
         preconditions (binding [*this-name* local-name
-                                *local-names* (into *local-names* param-names)]
+                                *local-names* (into *local-names* local-names)]
                         (generate-assertions (+ level 1) require "Precondition" opts))
         statements (binding [*this-name* local-name
-                             *local-names* (into *local-names* param-names)]
+                             *local-names* (into *local-names* local-names)]
                      (if rescue
                        [(generate-rescue (+ level 1) body rescue #{})]
                        (mapv #(generate-statement (+ level 1) %) body)))
         postconditions (binding [*this-name* local-name
-                                 *local-names* (into *local-names* param-names)]
+                                 *local-names* (into *local-names* local-names)]
                          (generate-assertions (+ level 1) ensure "Postcondition" opts))
         class-invariant-checks (binding [*this-name* local-name
-                                         *local-names* (into *local-names* param-names)]
+                                         *local-names* (into *local-names* local-names)]
                                  (generate-assertions (+ level 1) *class-invariants* "Class invariant" opts))]
     (str/join "\n"
               (concat
                [(indent level (str "static " name "(" params-code ") {"))]
                [(indent (+ level 1) (str "let " local-name " = new " class-name "();"))]
+               (generate-convert-declarations (+ level 1) convert-bindings)
                preconditions
                statements
                postconditions

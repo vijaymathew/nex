@@ -439,6 +439,7 @@
 (declare get-parent-classes)
 (declare combine-assertions)
 (declare combine-preconditions)
+(declare get-type-name)
 
 ;;
 ;; Debugger Hooks
@@ -563,6 +564,22 @@
     (when-let [parents (:parents class-def)]
       (or (some #(= (:parent %) parent-name) parents)
           (some #(is-parent? ctx (:parent %) parent-name) parents)))))
+
+(defn- runtime-type-name
+  "Return runtime type/class name as string for convert checks."
+  [value]
+  (cond
+    (nil? value) "Nil"
+    (nex-object? value) (:class-name value)
+    :else (some-> (get-type-name value) name)))
+
+(defn- convert-compatible-runtime?
+  "Java-style runtime conversion relation:
+   value must be an instance of target type (or target supertype)."
+  [ctx runtime-type target-type]
+  (or (= target-type "Any")
+      (= runtime-type target-type)
+      (and runtime-type (is-parent? ctx runtime-type target-type))))
 
 (defn combine-assertions
   "Combine assertions from parent and child methods (for contracts)."
@@ -1622,6 +1639,17 @@
   (if (eval-node ctx condition)
     (eval-node ctx consequent)
     (eval-node ctx alternative)))
+
+(defmethod eval-node :convert
+  [ctx {:keys [value var-name target-type]}]
+  (let [v (eval-node ctx value)
+        target-name (if (map? target-type) (:base-type target-type) target-type)
+        runtime-name (runtime-type-name v)
+        ok? (and (some? v)
+                 (string? target-name)
+                 (convert-compatible-runtime? ctx runtime-name target-name))]
+    (env-define (:current-env ctx) var-name (if ok? v nil))
+    ok?))
 
 (defmethod eval-node :if
   [ctx {:keys [condition then elseif else]}]
