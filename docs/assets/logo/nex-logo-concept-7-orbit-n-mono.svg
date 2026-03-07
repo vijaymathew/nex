@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
   <title id="title">Nex Logo Concept 7 - Orbit N (Mono)</title>
   <desc id="desc">A minimal N stabilized by an orbit and checkpoint, monochrome.</desc>
-  <circle cx="256" cy="256" r="136" fill="none" stroke="#000" stroke-width="16"/>
+  <circle cx="256" cy="256" r="136" fill="none" stroke="#000" stroke-width="24"/>
   <path d="M180 338V174L332 338V174" fill="none" stroke="#000" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
   <circle cx="366" cy="194" r="18" fill="#000"/>
 </svg>

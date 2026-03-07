@@ -2,7 +2,7 @@
   <title id="title">Nex Logo Concept 7 - Orbit N (Dark)</title>
   <desc id="desc">A minimal N stabilized by an orbit and highlighted checkpoint.</desc>
   <rect width="512" height="512" rx="72" fill="#0b1220"/>
-  <circle cx="256" cy="256" r="136" fill="none" stroke="#e2e8f0" stroke-width="16"/>
+  <circle cx="256" cy="256" r="136" fill="none" stroke="#e2e8f0" stroke-width="24"/>
   <path d="M180 338V174L332 338V174" fill="none" stroke="#f8fafc" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
   <circle cx="366" cy="194" r="18" fill="#22d3ee" stroke="#0b1220" stroke-width="8"/>
 </svg>
