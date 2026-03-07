@@ -2,9 +2,9 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo/nex-logo-concept-4-contract-orbit-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo/nex-logo-concept-4-contract-orbit-light.svg">
-    <img src="docs/assets/logo/nex-logo-concept-4-contract-orbit-light.svg" alt="Nex logo" width="160" />
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo/nex-logo-concept-7-orbit-n-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo/nex-logo-concept-7-orbit-n-light.svg">
+    <img src="docs/assets/logo/nex-logo-concept-7-orbit-n-light.svg" alt="Nex logo" width="160" />
   </picture>
 </p>
 
