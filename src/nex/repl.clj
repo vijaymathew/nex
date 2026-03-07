@@ -2,6 +2,7 @@
   "Interactive REPL for the Nex programming language"
   (:require [nex.parser :as p]
             [nex.interpreter :as interp]
+            [nex.debugger :as dbg]
             [nex.typechecker :as tc]
             [clojure.string :as str]
             [clojure.java.io :as io])
@@ -38,7 +39,8 @@
 
 (def nex-repl-commands
   [":help" ":quit" ":exit" ":clear" ":reset" ":classes" ":vars"
-   ":typecheck" ":load"])
+   ":typecheck" ":load"
+   ":debug" ":break" ":breaks" ":clearbreak" ":breakon"])
 
 (defonce ^:dynamic *completer-ctx* (atom nil))
 
@@ -214,6 +216,15 @@
   (println "  :typecheck off    - Disable type checking (default)")
   (println "  :typecheck status - Show current type checking status")
   (println "  :load <path>      - Load and evaluate a .nex file")
+  (println "  :debug on|off     - Enable/disable debugger")
+  (println "  :debug status     - Show debugger status")
+  (println "  :break <spec>     - Breakpoint: n | Class.method | Class.method:line | file.nex:line")
+  (println "  :breaks           - List breakpoints")
+  (println "  :clearbreak <spec>- Remove a breakpoint by the same spec")
+  (println "  :clearbreak all   - Remove all breakpoints")
+  (println "  :breakon exception on|off - Pause when an exception is raised")
+  (println "  :breakon contract on|off  - Pause on contract violations")
+  (println "  :breakon status           - Show break-on toggles")
   (println)
   (println "Navigation:")
   (println "  Up/Down arrows    - Navigate command history")
@@ -309,7 +320,7 @@
           (do
             (when-not (.endsWith (.getName file) ".nex")
               (println "Warning: expected a .nex file"))
-            (eval-code ctx (slurp file))))))))
+            (eval-code ctx (slurp file) (.getPath file))))))))
 
 (defn handle-command [ctx input]
   (let [input-lower (str/lower-case input)]
@@ -327,6 +338,7 @@
       (do
         (println "Context cleared.")
         (reset! *repl-var-types* {})
+        (dbg/reset-run-state!)
         (init-repl-context))
 
       ;; Classes command
@@ -360,6 +372,105 @@
       (str/starts-with? input-lower ":load")
       (let [path (subs input (min (count input) (count ":load")))]
         (load-file-into-repl ctx path))
+
+      ;; Debugger commands
+      (= input-lower ":debug on")
+      (do
+        (dbg/set-enabled! true)
+        (println "Debugger enabled.")
+        ctx)
+
+      (= input-lower ":debug off")
+      (do
+        (dbg/set-enabled! false)
+        (println "Debugger disabled.")
+        ctx)
+
+      (or (= input-lower ":debug") (= input-lower ":debug status"))
+      (do
+        (println (str "Debugger is currently: " (if (dbg/enabled?) "ENABLED" "DISABLED")))
+        (println (str "Breakpoints: "
+                      (if (seq (dbg/breakpoint-entries))
+                        (str/join ", " (map dbg/breakpoint-entry->str (dbg/breakpoint-entries)))
+                        "(none)")))
+        ctx)
+
+      (str/starts-with? input-lower ":break ")
+      (let [parsed (dbg/parse-break-command (subs input (count ":break ")))]
+        (if parsed
+          (do
+            (let [bp (cond-> (:spec parsed)
+                       (:condition parsed) (assoc :condition (:condition parsed)))
+                  id (dbg/add-breakpoint! bp)]
+              (println (str "Added breakpoint [" id "] " (dbg/breakpoint->str bp)
+                            (when-let [cond-expr (:condition bp)]
+                              (str " if " cond-expr)))))
+            ctx)
+          (do
+            (println "Usage: :break <spec> [if <expr>]")
+            (println "  spec: n | Class.method | Class.method:line | file.nex:line")
+            ctx)))
+
+      (= input-lower ":breaks")
+      (do
+        (if (seq (dbg/breakpoint-entries))
+          (do
+            (println "Breakpoints:")
+            (doseq [entry (dbg/breakpoint-entries)]
+              (println (str "  " (dbg/breakpoint-entry->str entry)))))
+          (println "No breakpoints set."))
+        ctx)
+
+      (str/starts-with? input-lower ":clearbreak")
+      (let [arg (str/trim (subs input (count ":clearbreak")))]
+        (cond
+          (= (str/lower-case arg) "all")
+          (do (dbg/clear-breakpoints!)
+              (println "Cleared all breakpoints.")
+              ctx)
+          :else
+          (if-let [id (dbg/parse-positive-int arg)]
+            (let [removed (dbg/remove-breakpoint! id)]
+              (if (pos? removed)
+                (println (str "Cleared breakpoint [" id "]"))
+                (println (str "No breakpoint with id [" id "]")))
+              ctx)
+            (if-let [parsed (dbg/parse-break-command arg)]
+              (let [bp (cond-> (:spec parsed)
+                         (:condition parsed) (assoc :condition (:condition parsed)))
+                    removed (dbg/remove-breakpoint! bp)]
+                (println (str "Cleared " removed " breakpoint(s) matching " (dbg/breakpoint->str bp)
+                              (when-let [cond-expr (:condition bp)]
+                                (str " if " cond-expr))))
+                ctx)
+              (do
+                (println "Usage: :clearbreak <id|spec|all>")
+                (println "  spec: n | Class.method | Class.method:line | file.nex:line")
+                ctx)))))
+
+      (or (= input-lower ":breakon") (= input-lower ":breakon status"))
+      (let [{:keys [exception contract]} (dbg/break-on-status)]
+        (println (str "break-on exception: " (if exception "on" "off")))
+        (println (str "break-on contract: " (if contract "on" "off")))
+        ctx)
+
+      (str/starts-with? input-lower ":breakon ")
+      (let [rest-arg (str/trim (subs input (count ":breakon ")))
+            parts (remove str/blank? (str/split rest-arg #"\s+"))
+            kind (first parts)
+            flag (second parts)]
+        (cond
+          (and (#{"exception" "contract"} (str/lower-case (or kind "")))
+               (#{"on" "off"} (str/lower-case (or flag ""))))
+          (let [k (keyword (str/lower-case kind))
+                on? (= "on" (str/lower-case flag))]
+            (dbg/set-break-on! k on?)
+            (println (str "break-on " (name k) " set to " (if on? "on" "off")))
+            ctx)
+          :else
+          (do
+            (println "Usage: :breakon <exception|contract> <on|off>")
+            ctx)))
 
       ;; Unknown command
       :else
@@ -542,13 +653,30 @@
            (re-find #"^\s*print\(" input)
            (re-find #"^\s*create\s+" input))))
 
-(defn eval-code [ctx input]
-  (try
+(defn eval-code
+  ([ctx input]
+   (eval-code ctx input "<repl>"))
+  ([ctx input source-id]
+  (let [exec-ctx* (atom ctx)]
+    (try
     ;; Clear output from previous evaluation
     (reset! (:output ctx) [])
+    (dbg/reset-run-state!)
+    (let [base-ctx (assoc ctx
+                          :debug-source source-id
+                          :debug-stack [{:class "<repl>"
+                                         :method "<top>"
+                                         :source source-id}])
+          exec-ctx (if (dbg/enabled?)
+                     (assoc base-ctx
+                            :debug-hook (dbg/make-debug-hook {:read-line-fn read-line-safe
+                                                              :wrap-expression-fn wrap-expression})
+                            :debug-depth 0)
+                     base-ctx)]
+      (reset! exec-ctx* exec-ctx)
 
-    ;; Determine if we need to wrap the input
-    (let [code-to-parse (cond
+      ;; Determine if we need to wrap the input
+      (let [code-to-parse (cond
                           ;; Class definition - parse as is
                           (looks-like-class? input)
                           input
@@ -562,7 +690,7 @@
                           input)
 
           ;; Try to parse, track if we wrapped
-          [ast was-wrapped? is-expression?] (try
+            [ast was-wrapped? is-expression?] (try
                                               ;; Bare identifiers parse as methodCall but should
                                               ;; evaluate as expressions (return their value)
                                               (if (and (= code-to-parse input)
@@ -583,8 +711,8 @@
                                                           ;; so line numbers reference the user's actual code
                                                           (throw e)))))
                                                   (throw e))))]
-      ;; Type check if enabled
-      (when (and @*type-checking-enabled*
+        ;; Type check if enabled
+        (when (and @*type-checking-enabled*
                  (= (:type ast) :program)
                  (or (seq (:classes ast)) (seq (:calls ast))))
         ;; Create an augmented AST that includes previously defined classes
@@ -613,15 +741,15 @@
               (println (tc/format-type-error error)))
             (throw (ex-info "Type checking failed" {:errors (:errors result)})))))
 
-      ;; Evaluate based on type
-      (cond
+        ;; Evaluate based on type
+        (cond
         ;; If we wrapped the code, execute the temp method in GLOBAL context
         was-wrapped?
         (let [class-def (first (:classes ast))
               method-def (-> class-def :body first :members first)
               ;; Execute directly in the current context (preserves global vars)
-              result (last (map #(interp/eval-node ctx %) (:body method-def)))
-              output @(:output ctx)]
+              result (last (map #(interp/eval-node exec-ctx %) (:body method-def)))
+              output @(:output exec-ctx)]
           ;; Persist variable types from let statements (for future type checking)
           (when @*type-checking-enabled*
             (doseq [stmt (:body method-def)]
@@ -629,7 +757,7 @@
                 (swap! *repl-var-types* assoc (:name stmt) (:var-type stmt)))))
           ;; Infer type of the result expression when typechecking is on
           (let [type-str (when is-expression?
-                           (infer-result-type ctx (-> method-def :body first :args first)))]
+                           (infer-result-type exec-ctx (-> method-def :body first :args first)))]
             ;; Show output from print statements
             (when (seq output)
               (if type-str
@@ -642,7 +770,7 @@
               (if type-str
                 (println (str type-str " " (format-value result)))
                 (println (format-value result)))))
-          ctx)
+          exec-ctx)
 
         ;; If it's a program, handle it based on content
         (= (:type ast) :program)
@@ -654,14 +782,14 @@
               function-names (map :name (filter map? functions))]
           ;; If there are classes or functions, evaluate the program to register them
           (when (or (seq real-class-names) (seq function-names))
-            (interp/eval-node ctx ast)
+            (interp/eval-node exec-ctx ast)
             (when @*type-checking-enabled*
               (doseq [fn-def (filter map? functions)]
                 (swap! *repl-var-types* assoc (:name fn-def) (:class-name fn-def)))))
           ;; If there are calls/expressions and no classes, evaluate them to get result
           (let [result (when (and (seq calls) (empty? real-class-names) (empty? function-names))
-                        (last (map #(interp/eval-node ctx %) calls)))
-                output @(:output ctx)]
+                        (last (map #(interp/eval-node exec-ctx %) calls)))
+                output @(:output exec-ctx)]
             ;; Show any output
             (when (seq output)
               (doseq [line output]
@@ -670,15 +798,15 @@
             ;; Always show false/0 results too.
             (when (and (some? result) (empty? output) (empty? real-class-names) (empty? function-names))
               (if-let [type-str (when (seq calls)
-                                  (infer-result-type ctx (last calls)))]
+                                  (infer-result-type exec-ctx (last calls)))]
                 (println (str type-str " " (format-value result)))
                 (println (format-value result)))))
-          ctx)
+          exec-ctx)
 
         ;; Single expression or statement
         :else
-        (let [result (interp/eval-node ctx ast)
-              output @(:output ctx)]
+        (let [result (interp/eval-node exec-ctx ast)
+              output @(:output exec-ctx)]
           ;; Show output from print statements
           (when (seq output)
             (doseq [line output]
@@ -686,10 +814,10 @@
           ;; Show result if it's not nil and not from a print
           ;; Always show false/0 results too.
           (when (and (some? result) (empty? output))
-            (if-let [type-str (infer-result-type ctx ast)]
+            (if-let [type-str (infer-result-type exec-ctx ast)]
               (println (str type-str " " (format-value result)))
               (println (format-value result))))
-          ctx)))
+          exec-ctx))))
 
     (catch ParseError e
       (println "Syntax error:")
@@ -705,11 +833,15 @@
       (when-let [data (ex-data e)]
         (when (contains? data :line)
           (println "  at line" (:line data))))
+      (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
+                                               :wrap-expression-fn wrap-expression})
       ctx)
 
     (catch Exception e
+      (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
+                                               :wrap-expression-fn wrap-expression})
       (println "Error:" (.getMessage e))
-      ctx)))
+      ctx)))))
 
 ;;
 ;; Main REPL Loop

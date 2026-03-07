@@ -441,6 +441,25 @@
 (declare combine-preconditions)
 
 ;;
+;; Debugger Hooks
+;;
+
+(def ^:private debuggable-node-types
+  #{:call :member-assign :assign :let :if :case :loop :raise :retry :scoped-block})
+
+(defn debuggable-node?
+  "Whether this node should trigger debugger pause checks."
+  [node]
+  (and (map? node)
+       (contains? debuggable-node-types (:type node))))
+
+(defn maybe-debug-pause
+  "Invoke optional debugger hook before executing a debuggable node."
+  [ctx node]
+  (when (and (debuggable-node? node) (:debug-hook ctx))
+    ((:debug-hook ctx) ctx node)))
+
+;;
 ;; Contract Checking
 ;;
 
@@ -1247,7 +1266,13 @@
                        (assoc :current-env method-env)
                        (assoc :current-object current-obj)
                        (assoc :current-target (:current-target ctx))
-                       (assoc :current-class-name (:class-name current-obj)))
+                       (assoc :current-class-name (:class-name current-obj))
+                       (assoc :current-method-name method)
+                       (update :debug-stack (fnil conj [])
+                               {:class (:class-name current-obj)
+                                :method method
+                                :source (:debug-source ctx)})
+                       (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
             _ (if-let [rescue (:rescue callable)]
                 (eval-body-with-rescue new-ctx (:body callable) rescue)
                 (doseq [stmt (:body callable)]
@@ -1287,6 +1312,7 @@
 
 (defmethod eval-node :call
   [ctx {:keys [target method args has-parens]}]
+  (maybe-debug-pause ctx {:type :call :target target :method method :args args :has-parens has-parens})
   (let [arg-values (mapv #(eval-node ctx %) args)]
     (if target
       (let [target-name (when (string? target) target)
@@ -1341,8 +1367,14 @@
                                  (assoc :current-object obj)
                                  (assoc :current-target target-name)
                                  (assoc :current-class-name (:class-name obj))
+                                 (assoc :current-method-name method)
                                  (assoc :old-values old-values)
-                                 (assoc :modified-fields modified-fields))
+                                 (assoc :modified-fields modified-fields)
+                                 (update :debug-stack (fnil conj [])
+                                         {:class (:class-name obj)
+                                          :method method
+                                          :source (:debug-source ctx)})
+                                 (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
                       _ (when-let [require-assertions effective-require]
                           (check-assertions new-ctx require-assertions Precondition))
                       _ (if-let [rescue (:rescue method-def)]
@@ -1483,6 +1515,7 @@
 
 (defmethod eval-node :member-assign
   [ctx {:keys [object-type field value]}]
+  (maybe-debug-pause ctx {:type :member-assign :object-type object-type :field field :value value})
   (let [val (eval-node ctx value)]
     ;; Track that this field was explicitly modified via this.field :=
     (when-let [mf (:modified-fields ctx)]
@@ -1494,6 +1527,7 @@
 
 (defmethod eval-node :assign
   [ctx {:keys [target value]}]
+  (maybe-debug-pause ctx {:type :assign :target target :value value})
   (let [val (eval-node ctx value)]
     ;; Assignment (without let) ONLY updates existing variables
     ;; It should fail if the variable doesn't exist
@@ -1506,6 +1540,7 @@
 
 (defmethod eval-node :let
   [ctx {:keys [name value]}]
+  (maybe-debug-pause ctx {:type :let :name name :value value})
   (let [val (eval-node ctx value)]
     ;; Always define a new binding in the current scope (can shadow outer scopes)
     (env-define (:current-env ctx) name val)
@@ -1523,11 +1558,13 @@
 
 (defmethod eval-node :raise
   [ctx {:keys [value]}]
+  (maybe-debug-pause ctx {:type :raise :value value})
   (let [val (eval-node ctx value)]
     (throw (ex-info (str val) {:type :nex-exception :value val}))))
 
 (defmethod eval-node :retry
-  [_ctx _node]
+  [ctx _node]
+  (maybe-debug-pause ctx {:type :retry})
   (throw (ex-info "retry" {:type :nex-retry})))
 
 (defn eval-body-with-rescue
@@ -1565,6 +1602,7 @@
 
 (defmethod eval-node :scoped-block
   [ctx {:keys [body rescue]}]
+  (maybe-debug-pause ctx {:type :scoped-block :body body :rescue rescue})
   ;; Create a new lexical scope
   (let [new-env (make-env (:current-env ctx))
         new-ctx (assoc ctx :current-env new-env)]
@@ -1581,6 +1619,7 @@
 
 (defmethod eval-node :if
   [ctx {:keys [condition then elseif else]}]
+  (maybe-debug-pause ctx {:type :if :condition condition :then then :elseif elseif :else else})
   ;; Evaluate condition, then elseif chain, then optional else
   (let [cond-val (eval-node ctx condition)]
     (if cond-val
@@ -1595,6 +1634,7 @@
 
 (defmethod eval-node :case
   [ctx {:keys [expr clauses else]}]
+  (maybe-debug-pause ctx {:type :case :expr expr :clauses clauses :else else})
   (let [val (eval-node ctx expr)
         matched (loop [cs clauses]
                   (if (empty? cs)
@@ -1612,6 +1652,7 @@
 
 (defmethod eval-node :loop
   [ctx {:keys [init invariant variant until body]}]
+  (maybe-debug-pause ctx {:type :loop :init init :invariant invariant :variant variant :until until :body body})
   ;; Execute initialization statements
   (doseq [stmt init]
     (eval-node ctx stmt))
@@ -1871,7 +1912,13 @@
                                     new-ctx (-> ctx
                                                (assoc :current-env ctor-env)
                                                (assoc :current-object temp-obj)
-                                               (assoc :current-class-name effective-class-name))
+                                               (assoc :current-class-name effective-class-name)
+                                               (assoc :current-method-name constructor)
+                                               (update :debug-stack (fnil conj [])
+                                                       {:class effective-class-name
+                                                        :method (or constructor "make")
+                                                        :source (:debug-source ctx)})
+                                               (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
                                     ;; Check pre-conditions
                                     _ (when-let [require-assertions (:require ctor-def)]
                                         (check-assertions new-ctx require-assertions Precondition))
