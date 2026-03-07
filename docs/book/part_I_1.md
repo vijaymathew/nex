@@ -1,6 +1,4 @@
-# Part I — Seeing the Problem Clearly
-
-## 1. What Problem Are We Actually Solving?
+# What Problem Are We Actually Solving?
 
 A team designing a delivery robot for a large office building faces what appears to be a well-defined problem: compute shortest paths through the building and execute them. The path-finding algorithms are well-understood; the implementation is straightforward. After several months the robot navigates reliably — and delivers packages to the wrong destinations.
 

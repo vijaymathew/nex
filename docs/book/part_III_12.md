@@ -1,10 +1,9 @@
-# Chapter 12: Breaking Problems Apart
+# Breaking Problems Apart
 
 Complex algorithms rarely fail because a single line is wrong. They fail because too many responsibilities have been packed into one place, until the code can no longer be read as an account of what it does. The logic is present, but it is not separable — understanding any one part requires understanding all the others simultaneously, and changing any one part risks breaking something that was never intended to change at all.
 
 Decomposition is the discipline of dividing a problem into subproblems, each with a clear responsibility and an explicit contract governing what it receives and what it returns. A well-decomposed algorithm can be understood one piece at a time, tested in isolation, and extended by adding or replacing pieces rather than rewriting the whole. These are not stylistic virtues. They are the properties that determine whether an algorithm can be maintained as requirements change.
 
----
 
 ## The Test of a Decomposition
 
@@ -18,7 +17,6 @@ Three questions test whether a decomposition is genuine:
 
 *What is the one responsibility it owns?* If a piece has two reasons to change — if updating the scoring logic and updating the output format both require touching the same code — the decomposition is incomplete. A piece with multiple responsibilities is multiple pieces that have not yet been separated.
 
----
 
 ## Four Decomposition Patterns
 
@@ -32,7 +30,6 @@ Certain problem structures recur often enough that their decompositions have nam
 
 **Domain and infrastructure split.** Algorithm logic and storage, transport, or rendering concerns belong in separate pieces. An algorithm that directly queries a database or formats its output for a specific UI is an algorithm whose behavior cannot be tested without the database or the UI. Separating domain logic from infrastructure concerns is not just a testing convenience — it is what makes the algorithm's correctness independent of the platform it runs on.
 
----
 
 ## A Pipeline in Practice
 
@@ -53,7 +50,6 @@ A decomposed design names each stage and gives it an explicit contract:
 
 Each stage now has a single responsibility. The scoring logic lives entirely in stage 3 and can be replaced — substituting a weighted term-frequency model for a simple match counter — without touching any other stage. The filtering threshold in stage 5 can be adjusted without affecting scoring. The output format in stage 6 can change without affecting the ranking. The decomposition has made each axis of change independent of the others.
 
----
 
 ## A Decomposition in Code
 
@@ -105,7 +101,6 @@ end
 
 Notice that `choose_top` does not know how tokenization works or how scoring is computed. It knows only what each operation guarantees. This is what makes composition safe: each piece can be reasoned about through its contract, and a piece that satisfies its contract can be replaced by any other piece that satisfies the same contract.
 
----
 
 ## Four Ways Decomposition Goes Wrong
 
@@ -117,7 +112,6 @@ Notice that `choose_top` does not know how tokenization works or how scoring is 
 
 **Missing contracts at stage boundaries.** A decomposed algorithm whose stages do not have explicit contracts has most of the costs of decomposition and few of its benefits. When an intermediate result is malformed — when `tokenize` returns an empty string for a non-empty query, or when `score` returns a negative value — the failure will propagate through subsequent stages and surface far from its origin. Contracts at stage boundaries catch these failures at the point where they occur, before they have been compounded by later processing.
 
----
 
 ## Quick Exercise
 
@@ -125,7 +119,6 @@ Take one function in your current codebase that mixes more than one concern — 
 
 For each stage, write: the input contract, the output contract, and the single responsibility it owns. Then identify which stage you could replace with a different implementation without changing any other stage. If no stage is independently replaceable, the decomposition still has hidden coupling that the exercise has not yet surfaced.
 
----
 
 ## Takeaways
 
@@ -135,6 +128,5 @@ For each stage, write: the input contract, the output contract, and the single r
 - Composition is safe when it is based on contracts, not on knowledge of implementation details. A piece that knows only what its dependencies guarantee can be reasoned about independently of how those dependencies are implemented.
 - A stage boundary without a contract is a seam that looks like decomposition and behaves like coupling.
 
----
 
 h*Chapter 13 applies the decomposition principle to a specific and important class of problems: those whose structure is self-similar. Recursive algorithms are decompositions in which a problem is divided into a smaller instance of the same problem. Understanding recursion as a special case of decomposition — rather than as a separate technique — is what makes it a reliable tool rather than an occasional trick.*

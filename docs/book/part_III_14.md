@@ -1,10 +1,9 @@
-# Chapter 14: Measuring Algorithm Behavior
+# Measuring Algorithm Behavior
 
 An algorithm can be correct and still fail. Correctness means the algorithm produces the right answer for every valid input. It says nothing about how long that takes, or how much memory is consumed, or what happens when the inputs are larger or more numerous than the developer imagined when writing the code. A correct algorithm that takes thirty seconds to respond to a user query is not a usable algorithm. A correct algorithm that processes a hundred records perfectly and exhausts available memory on a hundred thousand is not a deployable one.
 
 Algorithm engineering has two gates, and a candidate must pass both. The first gate is correctness — the subject of Chapters 11 through 13. The second is cost: how does the algorithm's resource consumption grow as inputs grow, and does that growth remain acceptable under the conditions the system will actually face? This chapter is about the second gate.
 
----
 
 ## What Cost Means
 
@@ -20,7 +19,6 @@ Cost is not a single number. It is a profile of several distinct quantities, eac
 
 **Tail behavior** is the distribution of costs at the high end — the P95 and P99 latencies, the requests that take far longer than the median. Average latency can be acceptable while the slowest five percent of requests take long enough to damage the user experience. Tail behavior is often more important than average behavior for systems with interactive users.
 
----
 
 ## Two Kinds of Reasoning
 
@@ -32,7 +30,6 @@ Understanding algorithmic cost requires two complementary forms of reasoning, ne
 
 The discipline is to use asymptotic reasoning to avoid structurally bad choices, and to use measurement to validate that the remaining candidates behave acceptably on real workloads. Neither alone is sufficient. Asymptotic analysis without measurement is theory that may not match practice. Measurement without asymptotic analysis is benchmarking without the ability to predict behavior outside the cases measured.
 
----
 
 ## From Requirement to Cost Model
 
@@ -52,7 +49,6 @@ The following requirement will serve as a worked example:
 
 **Step 5: Define a redesign trigger.** Acceptable performance today may become unacceptable as the document collection grows. The cost model should include an explicit condition — a collection size, a query rate, a latency measurement — at which the current design is expected to stop meeting its targets and must be revisited. Without this, the system will be redesigned in response to a crisis rather than in anticipation of one.
 
----
 
 ## A Strategy Choice in Code
 
@@ -96,7 +92,6 @@ The `estimate_linear` and `estimate_indexed` operations are simplified models of
 
 What matters most in this sketch is that the strategy selection is explicit and testable. A strategy choice buried in conditional logic inside the main algorithm is invisible: it cannot be reasoned about independently, cannot be tested in isolation, and cannot be swapped out when a new approach becomes available. An explicit strategy selector has all three properties. It makes the cost model a first-class element of the design rather than an assumption hidden in the implementation.
 
----
 
 ## Five Ways Cost Reasoning Fails
 
@@ -110,7 +105,6 @@ What matters most in this sketch is that the strategy selection is explicit and 
 
 **No capacity narrative.** An algorithm that meets its performance targets today on a collection of one million documents may fail to meet them next year on a collection of ten million. Without a model of how costs grow and an explicit threshold at which the current design must be reconsidered, the team will discover this failure in production. A capacity narrative — a documented projection of when current performance targets will be exceeded under expected growth — converts a future crisis into a scheduled engineering decision.
 
----
 
 ## Quick Exercise
 
@@ -118,7 +112,6 @@ Choose one algorithm in your system and write a cost brief with seven components
 
 Then apply this test: give the brief to a teammate and ask them to predict the failure mode — the condition under which the algorithm will first become unacceptable. If they cannot predict it from the brief, the brief is not yet a cost model. Find what is missing and add it.
 
----
 
 ## Takeaways
 
@@ -128,6 +121,5 @@ Then apply this test: give the brief to a teammate and ask them to predict the f
 - Tail behavior is often more important than average behavior. Design to the distribution, not the median.
 - A capacity narrative — a projection of when current performance targets will be exceeded — converts a future crisis into a scheduled decision.
 
----
 
 *Part III has now built the algorithmic toolkit: a precise definition of what an algorithm is, the discipline of decomposition, recursive design over self-similar structure, and the cost reasoning that determines whether a correct algorithm is also a practical one. Part IV applies these tools to data structures — the concrete representations that make algorithms efficient at scale.*

@@ -1,12 +1,9 @@
-# Part IX: Programming in the Age of AI
-
-# Chapter 34: Working With AI Coding Assistants
+# Working With AI Coding Assistants
 
 The arrival of AI coding assistants represents one of the most significant shifts in the history of software development. For the first time, we have collaborators that can draft implementation, suggest refactors, and generate tests in seconds. But this speed comes with a profound risk: if we use AI to bypass the rigors of software engineering, we will simply build fragile systems faster.
 
 The key to effective AI collaboration is not learning the right "magic words." It is applying the same engineering constraints to the AI that we apply to ourselves. When we treat the AI as a junior implementation partner working within a strictly defined architectural sandbox, it becomes a powerful accelerator. When we treat it as an oracle that defines our architecture, it becomes a source of systemic debt.
 
----
 
 ## AI as a Collaborator, Not an Authority
 
@@ -20,7 +17,6 @@ A successful collaborator provides context and constraints. The AI needs to know
 - **What are the invariants?** (The rules it must not break).
 - **What are the acceptance criteria?** (The tests it must pass).
 
----
 
 ## Constraint-Driven Prompting
 
@@ -34,7 +30,6 @@ A robust prompt follows a structured pattern:
 
 By anchoring the AI in your system's existing contracts, you force its output to be "born" into your architecture rather than imported as a foreign body.
 
----
 
 ## From Requirement to AI-Assisted Implementation
 
@@ -50,7 +45,6 @@ An undisciplined prompt might just ask for "fallback logic." A disciplined workf
 
 The AI is now working in a very small, well-defined space. The resulting code is much more likely to be correct, maintainable, and aligned with your system’s existing patterns.
 
----
 
 ## Implementation in Nex
 
@@ -94,7 +88,6 @@ end
 
 By providing the `Knowledge_Query_Service` as the context, we ensure the AI understands the `require` and `ensure` expectations. The `Knowledge_Fallback_Wrapper` is then generated to respect those same expectations, preserving the system's trustworthiness.
 
----
 
 ## AI Workflow Across the Three Systems
 
@@ -106,7 +99,6 @@ In the **virtual world**, we might use an AI to draft a new set of "NPC interact
 
 In each case, the engineer’s role is to define the "sandbox" and the AI’s role is to explore the implementation within it.
 
----
 
 ## Three Ways AI Collaboration Fails
 
@@ -116,7 +108,6 @@ In each case, the engineer’s role is to define the "sandbox" and the AI’s ro
 
 **Asking for too much at once.** Asking an AI to "redesign the entire dispatch system" is a recipe for a high-risk, unreviewable mess. The remedy is to scope your AI tasks to small, bounded changes — the same kind of slices you would use in a manual refactor.
 
----
 
 ## Quick Exercise
 
@@ -128,7 +119,6 @@ Pick a small feature you need to implement. Write an AI prompt that includes:
 
 Compare the quality of the AI's output with what you might have gotten from a one-sentence prompt.
 
----
 
 ## Takeaways
 
@@ -138,6 +128,5 @@ Compare the quality of the AI's output with what you might have gotten from a on
 - AI is best used for bounded implementation tasks, not for high-level architectural design.
 - The faster an AI can write code, the more important your verification safety nets become.
 
----
 
 *Chapter 35 moves from generation to validation: how to rigorously review AI-generated code to ensure it meets our standards for safety and correctness.*

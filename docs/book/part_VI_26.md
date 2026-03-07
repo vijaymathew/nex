@@ -1,10 +1,9 @@
-# Chapter 26: Designing Interfaces
+# Designing Interfaces
 
 The preceding chapters of Part VI established the tools for assembling algorithms into software: component boundaries that separate responsibilities, functional decomposition that isolates pure computation from effects, object-oriented design that assigns behavior to the objects that own the relevant state. Each of these tools produces pieces that work correctly in isolation. Interfaces are what determine whether those pieces work correctly together — and whether they continue to work correctly together as each piece evolves independently.
 
 An interface is a promise. It is the commitment a component makes to every piece of code that calls it: *these are the inputs I require, this is what I guarantee in return, and this is what I will tell you when I cannot deliver.* A component that fulfills this promise can be changed internally without affecting its callers. A component that violates it — by changing what it returns, by introducing new preconditions it previously did not require, by altering the meaning of its failure codes — forces every caller to change with it. The quality of an interface is the quality of the promise it makes, and the stability of a system is the stability of its interfaces.
 
----
 
 ## Four Properties of a Good Interface
 
@@ -18,7 +17,6 @@ A good interface has four properties, and a weakness in any one of them will eve
 
 **Testable.** The interface's behavior can be fully validated through its contract, without knowledge of the implementation. An integration test that verifies a `plan_route` call returns `FOUND` with a valid path for a connected graph, `UNREACHABLE` for a disconnected one, and `INVALID_INPUT` for an empty identifier is a test that will continue to hold across any number of internal implementation changes. An integration test that validates the structure of the internal route buffer is a test that will break the next time the buffer is refactored.
 
----
 
 ## What an Interface Contract Contains
 
@@ -32,7 +30,6 @@ The contract of an interface operation has four parts. All four must be present 
 
 **Cross-call invariants** specify properties that remain true across multiple calls to the interface. A route planner that returns different paths for the same inputs on consecutive calls — without any change to the underlying graph — is not a stable interface. If determinism is not guaranteed, it must be documented as not guaranteed, and callers must not depend on it. If it is guaranteed, the guarantee must be stated.
 
----
 
 ## From Requirement to Interface Design
 
@@ -48,7 +45,6 @@ Three callers with different purposes make different demands on the interface. T
 
 Under this design, the route algorithm can change from BFS to Dijkstra, the graph can change from an adjacency list to a different representation, the internal cost model can be revised — none of these affect any caller. What callers depend on is the contract, and the contract has not changed.
 
----
 
 ## An Interface in Code
 
@@ -120,7 +116,6 @@ end
 
 The postcondition on `Route_Client.request` — `result /= ""` — is weaker than the postconditions on the interface itself. This is correct: `request` is a consumer of the interface contract, and its own contract is a consequence of what the interface guarantees. A stronger postcondition that asserted specific result strings would couple `request` to the exact status values of the interface, reducing the interface's ability to change its status vocabulary in the future.
 
----
 
 ## Interfaces in the Three Systems
 
@@ -132,7 +127,6 @@ In the virtual world, the state query interface is consumed by the collision det
 
 In all three systems, the interface is the line at which internal freedom is traded for external stability. Behind the interface, the implementation can change. In front of it, callers can depend on a promise that holds.
 
----
 
 ## Four Ways Interface Design Fails
 
@@ -144,7 +138,6 @@ In all three systems, the interface is the line at which internal freedom is tra
 
 **Versioning by breakage.** An interface that changes its existing contract — redefining what a status code means, removing a field from a response object, tightening a precondition — breaks every caller simultaneously. Breakage is sometimes necessary, but it must be a deliberate decision with a migration plan, not a consequence of an implementation change that happened to affect the contract. The discipline of additive evolution — adding new operations and new status values rather than modifying existing ones — preserves the contract for existing callers while extending it for new ones.
 
----
 
 ## Quick Exercise
 
@@ -152,7 +145,6 @@ Choose one interface in your system that is consumed by more than one caller and
 
 Then write one integration test that validates the contract without inspecting the implementation. The test should remain valid across any internal change that does not alter the contract. If the test would break when the internal algorithm changes, it is testing the implementation rather than the interface.
 
----
 
 ## Takeaways
 
@@ -162,6 +154,5 @@ Then write one integration test that validates the contract without inspecting t
 - Leaking internals, ambiguous failure modes, over-wide interfaces, and versioning by breakage are the four failure modes of interface design. All four are preventable by contract-first thinking.
 - The line between what is behind the interface and what is in front of it is the line between internal freedom and external stability. Stable interfaces are what make internal evolution possible.
 
----
 
 *Part VI has now assembled the complete toolkit for building real software: components, functional thinking, object-oriented responsibility design, and stable interfaces. These are the tools that connect the algorithmic correctness of Parts III and V to the architectural quality of the systems that algorithms ultimately inhabit.*

@@ -1,12 +1,9 @@
-# Part IX: Programming in the Age of AI
-
-# Chapter 35: Reviewing AI-Generated Code
+# Reviewing AI-Generated Code
 
 The power of an AI assistant is its ability to generate code at a speed that exceeds human writing. But in software engineering, writing code is only a fraction of the work. The more important work is ensuring that the code is safe, correct, and fits the architecture. In an AI-assisted workflow, the burden of this responsibility shifts from *authoring* to *reviewing*.
 
 A common mistake in AI workflows is treating the output as "pre-verified." Because the code often looks clean, follows style guides, and compiles on the first try, there is a temptation to give it a superficial review. But AI-generated code can be subtly wrong in ways that manual code is not. It can satisfy the happy path while ignoring the edge cases, or it can introduce hidden couplings that only become apparent during a production incident. Review is the single most important line of defense.
 
----
 
 ## What to Review First: The Risk-First Hierarchy
 
@@ -20,7 +17,6 @@ When reviewing AI-generated code, don't start with the syntax or the variable na
 
 If the code fails any of the first four checks, the fifth check doesn't matter. You shouldn't polish code that is behaviorally broken.
 
----
 
 ## The AI Review Checklist
 
@@ -32,7 +28,6 @@ To make review a routine discipline, use a focused checklist for every AI-genera
 - [ ] **Hidden Coupling:** Does it import a class it shouldn't, or depend on an implementation detail?
 - [ ] **Validation Evidence:** Did the AI also provide the tests that prove its work? Have you run them yourself?
 
----
 
 ## From Draft to Verified Implementation
 
@@ -48,7 +43,6 @@ The AI provides a loop that retries on failure. A naive reviewer sees "it retrie
 
 By asking these questions, you move from "it looks like it works" to "I have proven it is safe."
 
----
 
 ## Implementation in Nex
 
@@ -87,7 +81,6 @@ end
 
 A reviewer looking at this Nex implementation can immediately see the logic's boundaries. They can see that the loop is bounded by `max_attempts`. They can see that it stops correctly on a `PERMANENT_FAILURE`. The `ensure` clause makes the expected outcomes explicit. The review task is transformed from "understanding the code" to "validating the contract."
 
----
 
 ## AI Review Across the Three Systems
 
@@ -99,7 +92,6 @@ In the **virtual world**, review focuses on determinism. Did the AI introduce a 
 
 In each case, the reviewer is the guardian of the system's core principles.
 
----
 
 ## Three Ways AI Review Fails
 
@@ -109,7 +101,6 @@ In each case, the reviewer is the guardian of the system's core principles.
 
 **The "Rubber Stamp" Problem.** Approving an AI-generated patch because you are in a hurry. The remedy is to acknowledge that AI code is "guilty until proven innocent." If you don't have time to review it properly, you don't have time to merge it.
 
----
 
 ## Quick Exercise
 
@@ -121,7 +112,6 @@ Take one recent AI-generated patch (even a small one) and apply the Risk-First H
 
 Did you find anything that a "style-only" review would have missed?
 
----
 
 ## Takeaways
 
@@ -131,6 +121,5 @@ Did you find anything that a "style-only" review would have missed?
 - A review checklist is the best tool for maintaining consistency and catching common AI optimistic biases.
 - Review quality is the ultimate throttle on the speed of AI-assisted development.
 
----
 
 *Chapter 36 closes the book with the final piece of the puzzle: the role of human judgment and accountability in a world where AI is doing more and more of the work.*

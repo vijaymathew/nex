@@ -1,6 +1,4 @@
-# Part III: The Shape of Algorithms
-
-# Chapter 11: What Is an Algorithm?
+# What Is an Algorithm?
 
 Part II gave us a model: a precise account of what exists in a system, how the pieces relate, and what must remain true as they change. Part III turns that model into behavior. The question is no longer *what is the system about?* but *how does it compute?*
 
@@ -8,7 +6,6 @@ We begin with a definition. An algorithm is a finite, explicit procedure that tr
 
 Teams that skip this definition do not avoid it. They implement it informally, inconsistently, and invisibly, and then discover its consequences when the system fails in a way nobody can explain.
 
----
 
 ## Three Things That Are Not the Same
 
@@ -31,7 +28,6 @@ For our running systems, the separation looks like this:
 
 The requirement is the same across all four. The algorithms answer different versions of "best." The implementations are interchangeable as far as the model is concerned.
 
----
 
 ## Correctness Is Not Approximate
 
@@ -45,7 +41,6 @@ For the knowledge engine: does the ranking follow a defined scoring rule, or doe
 
 For the virtual world: does each update step preserve the world's invariants? When multiple objects must be updated in the same tick, is the order deterministic? An algorithm whose output depends on update order is not an algorithm with a correctness guarantee. It is a procedure whose behavior is a function of timing.
 
----
 
 ## From Requirement to Algorithm
 
@@ -67,7 +62,6 @@ This sentence is a starting point, not a specification. "Best" is undefined. "Qu
 
 **Step 6: Encode the contract.** The algorithm's preconditions become `require` clauses. Its output guarantee becomes an `ensure` clause. The set of valid status values becomes an invariant on the result type. The contract is now part of the code, not a comment in a design document that may or may not reflect what the code actually does.
 
----
 
 ## An Algorithm in Code
 
@@ -118,7 +112,6 @@ This sketch is deliberately minimal — the hardcoded paths are a placeholder fo
 
 This is the pattern: specify the contract first, implement the interior second, verify that the contract holds regardless of what the interior does.
 
----
 
 ## Three Ways Algorithm Design Goes Wrong
 
@@ -128,7 +121,6 @@ This is the pattern: specify the contract first, implement the interior second, 
 
 **Ambiguous objectives.** An algorithm chosen to optimize for one criterion will perform incorrectly by the standard of a different one. When "best route" is never defined to mean fewest hops, minimum cost, or fastest traversal, the team cannot agree on which algorithm is correct because they are not yet asking the same question. The recovery is to encode one objective explicitly in the current specification, document the alternatives that were considered and deferred, and treat a change in objective as a design decision that requires revisiting the algorithm — not a bug fix in the existing one.
 
----
 
 ## Quick Exercise
 
@@ -136,7 +128,6 @@ Choose one operation in your system and write a complete algorithm specification
 
 Then apply this test: give your specification to another engineer and ask them to implement it independently. If their implementation makes different choices about failure behavior, output representation, or what the objective optimizes for, the specification is not yet precise enough to be called an algorithm description. Find the ambiguity and resolve it before writing code.
 
----
 
 ## Takeaways
 
@@ -146,6 +137,5 @@ Then apply this test: give your specification to another engineer and ask them t
 - Failure semantics are part of the algorithm's contract. Each distinguishable failure mode deserves a distinct, named output.
 - The objective an algorithm optimizes must be stated before an algorithm is chosen. Different objectives require different algorithms; changing the objective silently is a design error, not an implementation detail.
 
----
 
 *Chapter 12 examines decomposition: how to take a complex algorithmic problem and divide it into pieces that can be designed, implemented, and tested independently. The discipline of decomposition is what separates algorithms that can be reasoned about from algorithms that can only be run.*

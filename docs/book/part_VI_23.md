@@ -1,12 +1,9 @@
-# Part VI: Building Real Software
-
-# Chapter 23: From Algorithms to Components
+# From Algorithms to Components
 
 Part V gave us a toolkit: precise definitions of algorithms, decomposition discipline, recursive design, cost reasoning, and the core algorithm families that operate on organized data. Each of these tools was developed in relative isolation — an algorithm defined, a data structure chosen, a traversal specified. Part VI asks what it takes to assemble these pieces into software that holds together over time.
 
 An algorithm can be correct and efficient and still fail in production. The failure is not in the algorithm itself but in how it is embedded in the surrounding system. When algorithms are not bounded by clear component interfaces, the system becomes a surface where every change is globally visible and every change carries global risk. A modification to the route computation logic must not require understanding the notification delivery code. A change to the task state model must not require re-reading the ranking algorithm. The discipline that makes these separations possible is component design.
 
----
 
 ## What a Component Is
 
@@ -20,7 +17,6 @@ Two properties define a well-designed component boundary.
 
 These two properties reinforce each other. A component with high cohesion is easier to give a stable contract, because its responsibilities are clear. A component with a stable contract is easier to keep loosely coupled, because callers depend on the contract rather than on the implementation.
 
----
 
 ## Boundaries and Their Direction
 
@@ -32,7 +28,6 @@ The direction of dependency matters as much as the separation itself. The route 
 
 This principle — that core domain logic should not depend on delivery, persistence, or presentation concerns — appears under different names in different design traditions, but its content is always the same: the direction of dependency should follow the direction of abstraction, from the concrete and changeable toward the stable and abstract.
 
----
 
 ## From Requirement to Component Design
 
@@ -54,7 +49,6 @@ A componentized design separates the concerns:
 
 This separation means that the route algorithm can be replaced — upgraded from BFS to Dijkstra, or tuned for a new cost model — without touching the notification or task components. A failure in notification can be diagnosed without reading route computation code. Each component can be tested in isolation by providing a controlled implementation of its dependencies.
 
----
 
 ## A Component Design in Code
 
@@ -114,7 +108,6 @@ Read this sketch against the component design above. `Route_Component` and `Noti
 
 This derivability is the signature of a well-designed coordinator. Its output contract is not an independent specification — it is a composition of the contracts of the components it calls. When `Route_Component`'s contract is understood and `Notify_Component`'s contract is understood, `Delivery_Coordinator`'s contract follows without additional information. A coordinator whose contract cannot be derived from its components' contracts is a coordinator that has absorbed logic it should have delegated.
 
----
 
 ## Components in the Three Systems
 
@@ -126,7 +119,6 @@ In the virtual world, simulation logic, collision detection, and event output ar
 
 In all three systems, the component boundaries follow the same principle: a component owns one concern, exposes a stable contract, and depends on the contracts of other components rather than their implementations.
 
----
 
 ## Three Ways Component Design Fails
 
@@ -136,7 +128,6 @@ In all three systems, the component boundaries follow the same principle: a comp
 
 **Dependency direction inversions.** When a core domain component depends on a delivery, persistence, or presentation component — when the route algorithm imports the notification client, or when the ranking model directly queries the database — the domain is coupled to infrastructure. Testing the domain requires the infrastructure. Changing the infrastructure requires the domain. The correct direction is for infrastructure to depend on domain contracts, not the reverse. This inversion may require introducing an interface or adapter, but the cost of that indirection is small compared to the cost of domain code that cannot be tested or evolved independently of the systems it is deployed alongside.
 
----
 
 ## Quick Exercise
 
@@ -144,7 +135,6 @@ Choose one workflow in your system that currently mixes more than one concern �
 
 For each component, write the precondition and postcondition of its primary operation. Then identify one place in the current implementation where a dependency flows in the wrong direction — where a domain concern depends on an infrastructure detail — and describe what would need to change to invert it.
 
----
 
 ## Takeaways
 
@@ -154,6 +144,5 @@ For each component, write the precondition and postcondition of its primary oper
 - Dependency direction matters as much as component separation. Domain logic must not depend on delivery, persistence, or presentation details. The direction of dependency should follow the direction of abstraction.
 - Component boundaries make algorithmic quality into software quality. A correct algorithm embedded in a tangled system is not a reliable system.
 
----
 
 *Chapter 24 examines functional thinking as a strategy for designing components that are composable and testable by construction — components whose behavior can be understood and verified from their types and contracts alone, without reference to shared state or execution order.*

@@ -1,4 +1,4 @@
-# Chapter 30: Debugging Like an Engineer
+# Debugging Like an Engineer
 
 Chapter 29 showed how tests discover failures. A failed test is evidence that something is wrong — that some input produces output inconsistent with the contract. Debugging begins where testing ends. Its task is to answer two questions: why does the failure occur, and how can it be corrected without introducing new failures?
 
@@ -6,7 +6,6 @@ These questions admit engineering answers. Debugging is not a search through a c
 
 The alternative to this discipline is not faster debugging. It is debugging that terminates without certainty — fixes that silence symptoms without addressing causes, changes that introduce new failures while correcting old ones, and a growing accumulation of "fixed" bugs that return in slightly different forms.
 
----
 
 ## The Six-Step Process
 
@@ -24,7 +23,6 @@ A reliable debugging process has six steps, and each one serves a purpose that t
 
 **Step 6: Patch and verify regression safety.** Apply the minimal change that corrects the cause. Minimal means: the change is no larger than the confirmed cause requires. Then run the full existing test suite and add a new test that would have caught the bug before the fix was applied. The new test is not optional — it is evidence that the cause has been corrected and that the same failure cannot recur without detection.
 
----
 
 ## Reproducibility as a Prerequisite
 
@@ -34,7 +32,6 @@ Reproducibility requires capturing three things: the exact inputs to the failing
 
 When a failure is not immediately reproducible — when it depends on timing, concurrency, or accumulated state — the path to reproducibility is to simplify the context until the variable factors are eliminated. Remove the concurrency and see if the failure persists. Replace the accumulated state with a constructed minimal state that produces the same failure. Reduce the inputs until the smallest failing case is found. Each simplification either preserves the failure — confirming that the removed factor is not the cause — or eliminates it — revealing that the removed factor is the cause.
 
----
 
 ## Contracts as Localization Tools
 
@@ -44,7 +41,6 @@ The worked case in this chapter illustrates this. The bug report is: *"Some deli
 
 In a system where `complete` has a precondition `status = "IN_TRANSIT"`, the debugging path is different. The bug indicates that `complete` is being called on tasks that are not `IN_TRANSIT`. The precondition should have prevented this; if it did not, either the precondition is missing or the code does not enforce it. Checking whether the precondition is present and enforced is the targeted check for the most likely hypothesis — and if the precondition is absent, the fix is precisely to add it.
 
----
 
 ## From Bug Report to Fix
 
@@ -64,7 +60,6 @@ Consider the report:
 
 **Step 6: Patch.** Add the precondition `in_transit: status = "IN_TRANSIT"` to `complete`. Add a regression test that attempts to call `complete` on a `PENDING` task and verifies that it is rejected. Run the full existing test suite to confirm no regression.
 
----
 
 ## A Patched Contract in Code
 
@@ -124,7 +119,6 @@ The `complete` operation now carries the precondition `in_transit: status = "IN_
 
 The `start` operation also has a precondition: `status = "PENDING" or status = "FAILED"`. This is the transition contract from Chapter 10's model: the complete legal transition graph, encoded as preconditions on each operation. The bug exposed by the failing report was a gap in this graph — `complete` without its precondition allowed a transition the model declared illegal. The fix closes the gap.
 
----
 
 ## Debugging in the Three Systems
 
@@ -136,7 +130,6 @@ In the virtual world, the most common debugging challenges are non-deterministic
 
 In all three systems, contracts and invariants are the primary localization tools. They convert debugging from a search through an unknown codebase into a directed investigation of a known boundary violation.
 
----
 
 ## Three Ways Debugging Goes Wrong
 
@@ -146,7 +139,6 @@ In all three systems, contracts and invariants are the primary localization tool
 
 **No regression safety net.** A fix without a regression test is a fix without evidence of permanence. The same bug can be reintroduced by a future change that does not know the previous fix was needed. The regression test is the record of the bug — its existence says: a failure at this boundary was found here, was fixed here, and must be detected here if it recurs. A codebase whose bug fixes are systematically accompanied by regression tests is a codebase that becomes harder to break over time, rather than one that maintains a constant defect rate despite continuous repair.
 
----
 
 ## Quick Exercise
 
@@ -154,7 +146,6 @@ Take one recent bug — a failure that was observed, diagnosed, and fixed — an
 
 If any step is missing from the reconstruction — if the fix was applied without a confirmed hypothesis, or without a regression test — identify what evidence that step would have provided and what risk its absence created. The reconstruction is not retrospective documentation; it is a test of whether the debugging process that was used was engineering-grade or trial-and-error.
 
----
 
 ## Takeaways
 
@@ -164,6 +155,5 @@ If any step is missing from the reconstruction — if the fix was applied withou
 - One hypothesis, one change, one check. Multiple simultaneous changes produce results that cannot be interpreted. Each hypothesis must be tested independently.
 - Every fix needs a regression test. The test is the record of the bug — the evidence that the same failure cannot recur without detection.
 
----
 
 *Part VII has established the complete trustworthiness toolkit: preconditions and postconditions that define behavioral contracts, invariants that enforce object-level consistency, tests that provide evidence that contracts hold, and debugging that addresses causes rather than symptoms. These are the practices that make software dependable not just at completion but over the full arc of its evolution.*

@@ -1,10 +1,9 @@
-# Chapter 17: Trees — Structured Data
+# Trees — Structured Data
 
 Lists preserve order. Maps and sets provide direct access by key. Both are flat: their elements have no structural relationship to one another beyond position or association. Trees introduce a third kind of organization, one that neither flat structure offers — hierarchy.
 
 A tree is a collection in which elements stand in parent-child relationships, forming a layered structure from a single root down through branches to leaves. This hierarchy is not merely a way of storing data. It encodes meaning about the data — that one thing contains or governs another, that a search can be focused by branching in one direction rather than the other, that the depth at which something lives reflects something real about the domain. When that meaning is genuine, a tree makes it explicit and exploits it. When it is not, a tree is unnecessary complexity layered over a problem that a map would have solved more simply.
 
----
 
 ## When Hierarchy Is Real
 
@@ -18,7 +17,6 @@ In the virtual world, objects exist within regions, regions within zones, zones 
 
 In each case, the hierarchy is not a storage convenience — it is a fact about the domain that the data structure makes computationally exploitable.
 
----
 
 ## Tree Invariants
 
@@ -28,7 +26,6 @@ Three invariants define the basic tree structure. First, there are no cycles: fo
 
 Maintaining these invariants requires that every insertion and update operation enforces them, not just checks them. An insertion that places a new node without verifying the ordering rule produces a tree that looks correct and searches incorrectly.
 
----
 
 ## From Requirement to Tree Design
 
@@ -48,7 +45,6 @@ Two things are embedded here. The first is a structural question: what is the sh
 
 **Step 5: Preserve invariants on modification.** Every insertion must place the new node in the position that preserves the ordering invariant. If the tree is allowed to receive insertions that violate the ordering rule — a new node placed on the wrong side of its parent — subsequent searches will fail to find elements that are structurally present.
 
----
 
 ## A Tree in Code
 
@@ -91,7 +87,6 @@ end
 
 `find_label` demonstrates the branching search that trees make possible. The comparison at each level directs the search toward the relevant subtree. In this three-node sketch, the depth is fixed at two and the cost is constant. In a full implementation over a balanced tree with a million nodes, the same logic would require at most twenty comparisons. A linear scan over a million elements would require up to a million. The invariant is what makes that difference real: without the ordering rule, the branching decision at each node is meaningless, and the search degenerates to a scan.
 
----
 
 ## Balance and Its Consequences
 
@@ -101,7 +96,6 @@ A tree built by inserting elements in sorted order — first the smallest key, t
 
 This is the most common tree performance failure, and it occurs silently. The structure is correct — the invariants hold, the searches return the right results — but the performance guarantee that motivated the use of a tree has evaporated. The fix is either to use a self-balancing tree variant — one that restructures itself after insertions to maintain approximate balance — or to monitor the depth distribution of the tree in production and restructure it when the distribution degrades.
 
----
 
 ## Four Ways Tree Design Goes Wrong
 
@@ -113,7 +107,6 @@ This is the most common tree performance failure, and it occurs silently. The st
 
 **Confusing trees with graphs.** A node that acquires two parents, or a sequence of nodes that forms a cycle, is no longer a tree node. The tree algorithms — depth-first search, binary search, hierarchical aggregation — do not handle multiple parents or cycles correctly, and the failures they produce are often difficult to reproduce because they depend on the order in which the problematic structure was created. Enforcing the single-parent and acyclic invariants at insertion time is what prevents the tree from silently becoming a graph.
 
----
 
 ## Quick Exercise
 
@@ -121,7 +114,6 @@ Choose one place in your system where data has genuine hierarchical structure �
 
 Then answer this question: why would a map from key to value lose information that the tree preserves? If you cannot give a specific answer — if the map would serve just as well — reconsider whether the hierarchy is genuine.
 
----
 
 ## Takeaways
 
@@ -131,6 +123,5 @@ Then answer this question: why would a map from key to value lose information th
 - Tree algorithms depend on three structural invariants: no cycles, single parent for every non-root node, and (for search trees) the ordering rule. Violations produce silent correctness failures.
 - Use a tree when the parent-child relationship corresponds to something real in the domain and when search can exploit that structure. When neither is true, a map is simpler and sufficient.
 
----
 
 *Chapter 18 generalizes from trees to graphs — structures in which the restriction to a single parent is lifted and cycles are permitted. Graphs model the most general form of connected data, and they are the natural representation for routing, dependency, and reachability problems that trees cannot express.*

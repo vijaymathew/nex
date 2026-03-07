@@ -9,7 +9,7 @@ Testing algorithm ideas on small systems before formal complexity notation.
 Run controlled experiments, collect evidence, and compare algorithm choices under explicit assumptions.
 :::
 
-## 1. Why This Lab Exists
+## Why This Lab Exists
 
 Part III introduced algorithm thinking:
 
@@ -22,9 +22,8 @@ Now we run controlled experiments.
 
 The goal is not to chase micro-optimizations. The goal is to build engineering intuition by observing how different algorithm choices behave on the same task.
 
----
 
-## 2. Lab Objectives
+## Lab Objectives
 
 By the end of this lab, you should be able to:
 
@@ -33,9 +32,8 @@ By the end of this lab, you should be able to:
 - explain when an approach is acceptable and when it breaks down
 - preserve correctness contracts while changing strategy
 
----
 
-## 3. Experiment Theme
+## Experiment Theme
 
 Use one task, multiple strategies:
 
@@ -54,9 +52,8 @@ Strategies:
 
 We will track an explicit step counter to observe behavior directly.
 
----
 
-## 4. Nex Implementation
+## Nex Implementation
 
 Suggested file names:
 
@@ -65,7 +62,7 @@ Suggested file names:
 
 If using the web IDE, place everything in one file and run `App.run`.
 
-### 4.1 Result Type
+### Result Type
 
 ```nex
 class Search_Result
@@ -79,7 +76,7 @@ invariant
 end
 ```
 
-### 4.2 Linear Search With Step Counter
+### Linear Search With Step Counter
 
 ```nex
 class Linear_Search_Algo
@@ -135,7 +132,7 @@ feature
 end
 ```
 
-### 4.3 Binary Search With Step Counter
+### Binary Search With Step Counter
 
 ```nex
 class Binary_Search_Algo
@@ -193,7 +190,7 @@ feature
 end
 ```
 
-### 4.4 Driver: Compare Behaviors
+### Driver: Compare Behaviors
 
 ```nex
 class App
@@ -222,9 +219,8 @@ Expected pattern:
 - binary search usually uses fewer steps on sorted inputs
 - binary search depends on stronger preconditions (`sorted_input`)
 
----
 
-## 5. Lab Tasks
+## Lab Tasks
 
 ### Task A — Correctness Check
 
@@ -259,9 +255,8 @@ Add one more strategy for comparison:
 
 Keep the same `Search_Result` format so results remain comparable.
 
----
 
-## 6. Reflection Prompts
+## Reflection Prompts
 
 Use evidence from your run logs:
 
@@ -270,18 +265,16 @@ Use evidence from your run logs:
 3. At what scale would you stop using linear search for this task?
 4. Which contract prevented the most dangerous misuse?
 
----
 
-## 7. Deliverables
+## Deliverables
 
 - runnable Nex code for at least two strategies
 - output log showing hit/miss comparisons
 - short write-up of strategy tradeoffs
 - one paragraph on how contracts influenced your design
 
----
 
-## 8. Forward Link
+## Forward Link
 
 This lab gives you concrete intuition for why data structures matter.
 

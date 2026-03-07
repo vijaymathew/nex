@@ -9,7 +9,7 @@ Evolving Studio 3 optimizations into stable component architecture.
 This studio chapter is hands-on: implement, verify behavior, and document tradeoffs as you iterate.
 :::
 
-## 1. The Situation
+## The Situation
 
 Studio 3 improved performance by adding indexes and targeted access paths over the Studio 2 model classes.
 
@@ -24,9 +24,8 @@ Typical symptoms:
 
 Studio 4 is the natural next step: keep Studio 3 behavior gains, but move to explicit architectural boundaries.
 
----
 
-## 2. Engineering Brief
+## Engineering Brief
 
 Refactor around components, ports, and contracts without changing externally visible behavior.
 
@@ -44,9 +43,8 @@ Implementation guidance:
 - create seams first, then move logic behind seams
 - prove behavior parity with before/after run checks
 
----
 
-## 3. Implementation In Nex
+## Implementation In Nex
 
 Suggested files:
 
@@ -58,7 +56,7 @@ Suggested files:
 
 If using the web IDE, place all classes in one file and run `App.run`.
 
-### 3.1 Shared Ports (Interfaces By Contract)
+### Shared Ports (Interfaces By Contract)
 
 These ports abstract over concrete V3 storage/index implementations from Studio 3.
 
@@ -100,7 +98,7 @@ feature
 end
 ```
 
-### 3.2 Delivery Refactor (Using Studio 3 V3 Store)
+### Delivery Refactor (Using Studio 3 V3 Store)
 
 Before (Studio 3): callers directly used `Delivery_Task_Store_V3`.
 
@@ -164,7 +162,7 @@ feature
 end
 ```
 
-### 3.3 Knowledge Refactor (Port + Validator Service)
+### Knowledge Refactor (Port + Validator Service)
 
 ```nex
 class Doc_Index_V3
@@ -218,7 +216,7 @@ feature
 end
 ```
 
-### 3.4 World Refactor (Port + Use Case Service)
+### World Refactor (Port + Use Case Service)
 
 ```nex
 class World_Model_V3
@@ -270,7 +268,7 @@ feature
 end
 ```
 
-### 3.5 Studio Driver (Behavior Parity Check)
+### Studio Driver (Behavior Parity Check)
 
 ```nex
 class App
@@ -325,9 +323,8 @@ Expected outcome:
 - clearer component boundaries
 - easier component-level testing due to port seams
 
----
 
-## 4. Studio Challenges
+## Studio Challenges
 
 ### Level 1 — One Architectural Seam
 
@@ -348,9 +345,8 @@ Expected outcome:
   - feature modules with internal adapters
 - evaluate maintainability and migration cost
 
----
 
-## 5. Postmortem
+## Postmortem
 
 Discuss with evidence:
 
@@ -359,7 +355,6 @@ Discuss with evidence:
 - Which components are still doing too much?
 - What is the next architecture risk if the system doubles again?
 
----
 
 ## Deliverables
 
@@ -368,7 +363,6 @@ Discuss with evidence:
 - behavior-parity run log (before/after outputs)
 - short ADR-style note with chosen architecture and rejected alternative
 
----
 
 ## Exit Criteria
 

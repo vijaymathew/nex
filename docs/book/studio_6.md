@@ -9,7 +9,7 @@ Evolving the reliable Studio 5 system into a long-lived platform.
 This studio chapter is hands-on: implement, verify behavior, and document tradeoffs as you iterate.
 :::
 
-## 1. The Situation
+## The Situation
 
 Studio 5 made the architecture reliable: retries, idempotency, fallback behavior, and reproducible regression checks.
 
@@ -24,9 +24,8 @@ Typical pressure points:
 
 Studio 6 is the logical next step: evolve safely without losing reliability or architectural clarity.
 
----
 
-## 2. Engineering Brief
+## Engineering Brief
 
 Deliver new capabilities while preserving Studio 5 trust guarantees.
 
@@ -45,9 +44,8 @@ Implementation guidance:
 - treat migration as code, not informal operations notes
 - gate rollout with measurable signals and exit criteria
 
----
 
-## 3. Implementation In Nex
+## Implementation In Nex
 
 Suggested files:
 
@@ -60,7 +58,7 @@ Suggested files:
 
 If using the web IDE, place all classes in one file and run `App.run`.
 
-### 3.1 Shared Evolution Types
+### Shared Evolution Types
 
 ```nex
 class Evolution_Result
@@ -81,7 +79,7 @@ feature
 end
 ```
 
-### 3.2 Delivery Evolution (Policy V1 -> V2)
+### Delivery Evolution (Policy V1 -> V2)
 
 Continuation from Studio 5 delivery reliability flow.
 
@@ -154,7 +152,7 @@ feature
 end
 ```
 
-### 3.3 Knowledge Evolution (Compatibility Adapter)
+### Knowledge Evolution (Compatibility Adapter)
 
 Continuation from Studio 5 safe query + fallback logic.
 
@@ -235,7 +233,7 @@ feature
 end
 ```
 
-### 3.4 World Evolution (Feature Flagged Rule Extension)
+### World Evolution (Feature Flagged Rule Extension)
 
 Continuation from Studio 5 safe world-step behavior.
 
@@ -316,7 +314,7 @@ feature
 end
 ```
 
-### 3.5 Migration Runner + Rollback Trigger
+### Migration Runner + Rollback Trigger
 
 ```nex
 class Migration_Runner
@@ -396,9 +394,8 @@ Expected outcomes:
 - migration continues only when canary checks pass
 - rollback condition is explicit and executable
 
----
 
-## 4. Studio Challenges
+## Studio Challenges
 
 ### Level 1 — One Evolution Path
 
@@ -418,9 +415,8 @@ Expected outcomes:
 - evaluate if current seams absorb them cleanly
 - define deprecation timeline and ownership
 
----
 
-## 5. Postmortem
+## Postmortem
 
 Discuss with evidence:
 
@@ -429,7 +425,6 @@ Discuss with evidence:
 - What should be deprecated next, and when?
 - Which metrics should gate future rollouts?
 
----
 
 ## Deliverables
 
@@ -439,7 +434,6 @@ Discuss with evidence:
 - updated Nex code and evolution run logs
 - deprecation roadmap with dates and owners
 
----
 
 ## Exit Criteria
 

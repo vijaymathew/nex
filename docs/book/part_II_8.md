@@ -1,4 +1,4 @@
-# Chapter 8: Relationships — How Things Connect
+# Relationships — How Things Connect
 
 Entities give us the vocabulary of a system. Relationships give it grammar.
 
@@ -6,7 +6,6 @@ A model composed only of entities is a list of nouns with no verbs, no dependenc
 
 Relationships deserve the same deliberate treatment we gave entities in Chapter 7. That means making them explicit, naming their properties, and encoding the rules that govern them before those rules get buried in application code.
 
----
 
 ## What a Relationship Is
 
@@ -20,7 +19,6 @@ In each case, the link is not decorative. It defines which operations are permit
 
 When these implications are left implicit — encoded nowhere in the model, enforced nowhere in the code — they do not disappear. They simply become assumptions that every developer must independently discover and manually respect. That is the source of most subtle, long-lived bugs in large systems.
 
----
 
 ## Five Dimensions of a Relationship
 
@@ -36,7 +34,6 @@ To make a relationship fully explicit, five questions must be answered.
 
 **Constraint rules.** What must always be true across the relationship? A link must reference entities that actually exist. Certain link types may forbid self-reference. Traversal graphs for certain relationship types may forbid cycles. These constraints are invariants of the relationship itself, and they belong in the model for the same reason that entity invariants do.
 
----
 
 ## Relationships in the Three Systems
 
@@ -50,7 +47,6 @@ Applying these dimensions to our three systems reveals both the specific relatio
 
 In all three cases, relationships are first-class elements of the model. They are not incidental fields on entities; they are structures with their own properties, constraints, and lifecycle rules.
 
----
 
 ## When to Use a Relationship Entity
 
@@ -66,7 +62,6 @@ The stronger model names the relationship explicitly. Start with the entities: `
 
 The discipline is to model for real query patterns, not for theoretical elegance. A model that supports forward lookup efficiently but makes reverse lookup expensive or impossible is a model that was designed without asking how the data would actually be used.
 
----
 
 ## A Relationship in Code
 
@@ -95,7 +90,6 @@ This is minimal by design. It captures the three invariants that any link must s
 
 The same structure generalizes: `Path` in the delivery network is a relationship entity between locations; typed interaction edges in the virtual world are relationship entities between object types.
 
----
 
 ## Four Ways Relationship Modeling Goes Wrong
 
@@ -107,7 +101,6 @@ The same structure generalizes: `Path` in the delivery network is a relationship
 
 **Hidden lifecycle rules.** When an entity is removed and the links that referenced it are not updated, the system accumulates broken references that will produce failures at some unpredictable future point. The lifecycle policy — cascade, orphan, or preserve — must be defined explicitly at the model level and verified by tests that exercise entity removal, not just entity creation.
 
----
 
 ## Quick Exercise
 
@@ -115,7 +108,6 @@ Choose one of the three running systems and construct a relationship matrix. For
 
 Then identify one reverse query that your model must support — a query that traverses the relationship in the direction opposite to how you first defined it. If that reverse query is expensive or ambiguous under your current model, the model needs refinement before implementation begins.
 
----
 
 ## Takeaways
 
@@ -125,6 +117,5 @@ Then identify one reverse query that your model must support — a query that tr
 - Model for real access patterns. A relationship that supports only forward traversal is only half a relationship.
 - Lifecycle rules must be explicit. The choice between cascade, orphan, and preserve has consequences that compound over the lifetime of a system.
 
----
 
 *Chapter 9 brings entities and relationships together into a complete data model, and examines the tradeoffs that arise when a model must serve multiple competing concerns simultaneously.*

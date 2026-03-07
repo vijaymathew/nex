@@ -1,10 +1,9 @@
-# Chapter 21: Exploring Trees and Graphs
+# Exploring Trees and Graphs
 
 Sorting organizes data for efficient access. Traversal navigates structure to answer questions about it. Once data is represented as a tree or graph, nearly every meaningful computation over that data — finding connected components, determining reachability, discovering paths, computing aggregates over hierarchies — is some form of traversal: a systematic visit to the nodes of the structure according to a defined order.
 
 Two fundamental orders exist, and they are not interchangeable. The right choice between them depends on what the traversal is trying to compute. A team that uses depth-first search where breadth-first is required will produce correct code that answers the wrong question.
 
----
 
 ## Depth-First Search
 
@@ -16,7 +15,6 @@ DFS is naturally expressed as a recursive algorithm. The recursive structure mir
 
 DFS is also the natural choice for exhaustive exploration — when the goal is to visit every reachable node, not to find a specific one quickly. The connected-components problem, the cycle-detection problem, and topological sorting of a directed acyclic graph are all DFS computations. They require visiting all reachable nodes, and DFS's commitment to depth makes it efficient for this class of problem.
 
----
 
 ## Breadth-First Search
 
@@ -28,7 +26,6 @@ BFS is naturally implemented iteratively, using a queue. The queue holds the fro
 
 For the delivery system's route-finding problem, BFS over an unweighted graph finds the route with fewest hops. For the knowledge engine's document discovery problem, BFS finds documents within a defined hop count in the order they would be reached — first documents directly linked to the query result, then documents one hop further. For the virtual world's region traversal, BFS starting from a region visits nearby regions before distant ones, which is the natural processing order when distance from a source matters.
 
----
 
 ## Traversal Safety: Three Required Controls
 
@@ -40,7 +37,6 @@ A traversal that visits the right nodes in the right order is correct. A travers
 
 **Deterministic ordering** is the third required control for traversals whose output order matters. The order in which a node's neighbors are processed during traversal may depend on the order in which they appear in the adjacency structure, which may depend on insertion order, which may depend on when entities were created. A traversal that produces different output on different runs, or different output on different machines, is not a correct implementation of a deterministic algorithm — it is an algorithm whose correctness depends on an assumption it never stated. When the traversal's output order is meaningful, the ordering must be declared explicitly and enforced.
 
----
 
 ## From Requirement to Traversal Design
 
@@ -58,7 +54,6 @@ Consider the requirement:
 
 **Step 5: Define failure behavior.** An unknown start identifier produces `INVALID_START`. A start document with no outgoing links produces a result containing only the start document itself with status `ISOLATED`. Both cases are declared outcomes.
 
----
 
 ## A Traversal in Code
 
@@ -116,7 +111,6 @@ The adjacency fields — `a_to_b`, `a_to_c`, `b_to_d`, `c_to_d` — are the expl
 
 What the sketch does not show — and cannot, at this size — is the visited set and the queue that BFS requires in a general implementation. In a full implementation over an arbitrary graph, both are essential. The sketch's fixed size and hardcoded structure mean the cases are enumerable; in production, the structure must be traversed programmatically, and the safety controls are what prevent the traversal from becoming incorrect when the graph grows.
 
----
 
 ## Traversal in the Three Systems
 
@@ -128,7 +122,6 @@ In the virtual world, DFS over the containment hierarchy processes nested struct
 
 In all three systems, the traversal algorithm is chosen to match the structure of the computation, not the structure of the graph. The same graph may be traversed with DFS for one purpose and BFS for another.
 
----
 
 ## Three Ways Traversal Design Fails
 
@@ -138,7 +131,6 @@ In all three systems, the traversal algorithm is chosen to match the structure o
 
 **Implicit or absent bounds.** A traversal with no depth or expansion limit will process the entire reachable component of the starting node. For a knowledge engine document graph where any document may be linked to any other, this can mean processing the entire collection. For a delivery network where the graph is fully connected, this means processing every location. Bounds must be chosen deliberately based on what the computation needs, not omitted because the test graphs are small. When a bound is required, its value must be visible in the design — a configurable parameter or a named constant — not buried in a loop condition.
 
----
 
 ## Quick Exercise
 
@@ -146,7 +138,6 @@ Choose one graph or tree operation in your system and specify its traversal desi
 
 Then consider: would swapping DFS for BFS, or BFS for DFS, produce incorrect results, slower results, or the same results? If the answer is "the same results," the traversal type may not have been chosen for a principled reason.
 
----
 
 ## Takeaways
 
@@ -156,6 +147,5 @@ Then consider: would swapping DFS for BFS, or BFS for DFS, produce incorrect res
 - When traversal output order matters, the ordering must be declared and enforced. An ordering that depends on insertion order or machine state is not a deterministic algorithm.
 - The graph structure and the traversal algorithm are separate concerns. The traversal's correctness depends on what the adjacency structure reports, not on how it is implemented.
 
----
 
 *Chapter 22 builds on traversal to address a more demanding question: not just which nodes are reachable, but which path to a destination is best by some defined criterion. Path optimization requires both traversal and a cost model, and the interplay between the two determines which algorithms are applicable and what guarantees they can provide.*

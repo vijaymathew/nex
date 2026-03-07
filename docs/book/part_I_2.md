@@ -1,4 +1,4 @@
-# 2. Looking at the Real World
+# Looking at the Real World
 
 A specification describes how a system is supposed to behave. An observation describes how it actually behaves. These are rarely the same thing, and the gap between them is where most software failures live.
 

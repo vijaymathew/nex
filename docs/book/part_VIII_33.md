@@ -1,12 +1,9 @@
-# Part VIII: Systems That Grow
-
-# Chapter 33: Refactoring Without Fear
+# Refactoring Without Fear
 
 A system that grows must change its structure. The elegant abstractions of yesterday often become the bottlenecks of today. But change is dangerous. In a complex system, a structural modification can have unintended behavioral consequences that ripple through unrelated modules. This danger often leads to "architectural paralysis," where teams avoid necessary improvements because they fear breaking the system.
 
 Refactoring is the engineering discipline that addresses this fear. It is the process of improving the internal structure of code without changing its observable behavior. When done correctly, refactoring is not a high-risk event; it is a routine, verified, and reversible part of the development lifecycle.
 
----
 
 ## Behavior Preservation First
 
@@ -19,7 +16,6 @@ To ensure behavior preservation, we rely on safety nets. In the Nex philosophy, 
 
 Without these safety nets, refactoring is guesswork. With them, it is a controlled transformation.
 
----
 
 ## The Incremental Refactor Pattern
 
@@ -36,7 +32,6 @@ A more reliable sequence is the Incremental Refactor Pattern:
 
 This pattern minimizes the "distance" between a mistake and its discovery. If step 4 fails, you know exactly what caused the regression: the small change you just made in step 3.
 
----
 
 ## From Problem to Refactored Design
 
@@ -52,7 +47,6 @@ A naive approach might be to create two new classes and move code between them. 
 
 The outward contract of the search system — "given a query, return ranked results" — remains unchanged. The internal structure — "how those results are retrieved and ranked" — is now more modular and maintainable.
 
----
 
 ## Implementation in Nex
 
@@ -114,7 +108,6 @@ end
 
 The `Refactored_Knowledge_Service.query()` has the exact same `require` and `ensure` as the legacy version. Any client using the legacy service can switch to the refactored one without knowing that the internal implementation has changed from a single tangled block to a clean two-service architecture.
 
----
 
 ## Refactoring Across the Three Systems
 
@@ -126,7 +119,6 @@ In the **virtual world**, refactoring might involve extracting the "collision de
 
 In every case, the goal is to improve the "how" while strictly preserving the "what."
 
----
 
 ## Three Ways Refactoring Fails
 
@@ -136,7 +128,6 @@ In every case, the goal is to improve the "how" while strictly preserving the "w
 
 **Early Deletion.** Deleting the legacy code before the new path has survived a production workload is a common source of "no-way-back" incidents. The remedy is to keep both paths alive for a short period — perhaps behind a feature flag — so that you can roll back instantly if a subtle behavioral difference is discovered.
 
----
 
 ## Quick Exercise
 
@@ -145,7 +136,6 @@ Identify one "tangled" method in your system that performs more than one respons
 2.  What is the first small move (e.g., extracting one responsibility into its own method)?
 3.  How will you prove that the behavior is still identical after the move?
 
----
 
 ## Takeaways
 
@@ -155,6 +145,5 @@ Identify one "tangled" method in your system that performs more than one respons
 - Parity testing — comparing the outputs of old and new paths — is the ultimate confidence mechanism for structural change.
 - Fear of change is a symptom of a system without safety nets. Building those nets is the first step toward a system that can grow.
 
----
 
 *Part VIII established the discipline of growth. In Part IX, we look toward the future: how these engineering principles apply in an age where AI assistants are helping us write and review the code we build.*

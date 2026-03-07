@@ -1,20 +1,40 @@
 # References
 
-This chapter is a placeholder for citations and bibliography.
+This bibliography collects core references that inform the book's approach to:
 
-Current status:
+- programming pedagogy
+- algorithm and data-structure reasoning
+- object-oriented design and contracts
+- software engineering practice
+- formal correctness foundations
 
-- No formal citations have been added yet.
-- Chapter references are currently embedded as narrative links.
+## Programming and Pedagogy
 
-Planned bibliography policy:
+- *Structure and Interpretation of Computer Programs* [@sicp1996]
+- *How to Design Programs* [@htdp2018]
+- *Programming in Oberon* [@wirth2004oberon]
 
-- Add primary sources for algorithms and data structures.
-- Add references for software design by contract and reliability engineering.
-- Add references for programming language design and pedagogy where relevant to Nex.
+## Object-Oriented Design and Contracts
 
-Citation workflow (planned):
+- *Object-Oriented Software Construction* [@meyer1997oosc]
+- *Touch of Class* [@meyer2009touch]
+- *Design Patterns* [@gamma1994patterns]
 
-1. Add BibTeX entries to `docs/book/references.bib`.
-2. Cite in chapters using `[@citation_key]`.
-3. Rebuild with `make book` or `make print`.
+## Algorithms and Data Structures
+
+- *Algorithms* [@sedgewick2011algorithms]
+- *Introduction to Algorithms* [@cormen2009clrs]
+
+## Software Engineering Practice
+
+- *The Mythical Man-Month* [@brooks1995mythical]
+- *The Pragmatic Programmer* [@hunt2000pragmatic]
+
+## Formal Foundations
+
+- Hoare's axiomatic basis for program correctness [@hoare1969axiomatic]
+
+## Notes
+
+- Add chapter-local citations as needed using `[@citation_key]`.
+- Rebuild with `make book` or `make print` to refresh bibliography output.

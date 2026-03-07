@@ -1,6 +1,4 @@
-# Part IX: Programming in the Age of AI
-
-# Chapter 36: Human Judgment in an AI World
+# Human Judgment in an AI World
 
 We have reached the end of our journey. We began in Part I by exploring the fundamental nature of complexity and why software systems so often fail to live up to our expectations. We journeyed through modeling, algorithms, data organization, and the discipline of building trustworthy systems. In this final part, we have looked at how these classic engineering principles intersect with the era of AI-assisted development.
 
@@ -8,7 +6,6 @@ There is a common anxiety that as AI becomes more capable, the role of the softw
 
 The answer is the most critical part of the process: **judgment and accountability.** An AI can assist with implementation, but it cannot own the outcome. It can generate alternatives, but it cannot decide which tradeoff is acceptable for *your* specific users, *your* specific business, and *your* specific ethical context. Final responsibility for the correctness, safety, and long-term quality of a system remains — and must remain — human.
 
----
 
 ## What Human Judgment Owns
 
@@ -19,7 +16,6 @@ In an AI-assisted world, the engineer’s role evolves from "author" to "governo
 3.  **Risk Acceptance:** Every design choice involves tradeoffs. A human must decide when a risk is worth taking and when it is not.
 4.  **Policy and Ethics:** AI models reflect the data they were trained on, which may include biases or unsafe patterns. A human must define the ethical boundaries of the system — fairness, privacy, and safety — and ensure those boundaries are enforced.
 
----
 
 ## Decision Quality in AI Workflows
 
@@ -33,7 +29,6 @@ In the AI era, the measure of an engineer is not how many lines of code they can
 
 This is still the same engineering loop we’ve discussed throughout this book. AI simply makes the iteration between steps 2 and 3 much faster.
 
----
 
 ## Implementation in Nex: A Governance Log
 
@@ -85,7 +80,6 @@ end
 
 The point of this code is not its complexity, but its explicitness. It forces the human to state the criteria for success (`min_required_rate`) and to own the decision (`owner`). Even in an AI-assisted workflow, the record of *why* something happened is a human responsibility.
 
----
 
 ## Human Judgment Across the Three Systems
 
@@ -97,7 +91,6 @@ In the **virtual world**, human judgment determines the balance between "realism
 
 In every system, the most important parameters are the ones that only a human can set.
 
----
 
 ## The Path Forward
 
@@ -114,7 +107,6 @@ The tools will change. The languages will evolve. The assistants will become mor
 
 That engineer is you. Go forth and build systems that last.
 
----
 
 ## Quick Exercise
 
@@ -125,7 +117,6 @@ Pick one AI-assisted change you’ve made recently. Write a 3-sentence "Decision
 
 If you can't answer all three, your governance process needs more human judgment.
 
----
 
 ## Takeaways
 
@@ -135,6 +126,5 @@ If you can't answer all three, your governance process needs more human judgment
 - Reliable AI workflows require explicit constraints, rigorous review, and traceable decision-making.
 - The core principles of this book — modeling, specification, verification, and disciplined evolution — are your most valuable assets in an AI-driven world.
 
----
 
 *This concludes **Beyond Code — Building Software Systems That Last**. May your systems be trustworthy, your complexity be managed, and your engineering judgment be sharp.*

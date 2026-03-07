@@ -1,4 +1,4 @@
-## 5. From Stories to Specifications
+# From Stories to Specifications
 
 So far in this book, we have described our systems mostly through **stories**.
 
@@ -25,7 +25,6 @@ into something far more precise:
 
 This transformation—from story to specification—is where software engineering truly begins.
 
----
 
 ## Turning Narratives Into Rules
 
@@ -60,7 +59,6 @@ Notice what happened.
 The story introduced the idea.
 The specification introduced **formal elements** we can reason about.
 
----
 
 ## Identifying the Inputs
 
@@ -91,7 +89,6 @@ Once we clearly identify the inputs, the problem becomes far easier to analyze.
 
 Without clear inputs, algorithms have nothing to operate on.
 
----
 
 ## Defining the Outputs
 
@@ -111,7 +108,6 @@ In the virtual world, the output might be:
 
 The moment we clearly define outputs, we begin to understand what the algorithm must accomplish.
 
----
 
 ## Guarantees and Expectations
 
@@ -137,7 +133,6 @@ Guarantees are important because they establish **what correctness means**.
 
 Without them, we cannot determine whether a system behaves properly.
 
----
 
 ## The Limits of Stories
 
@@ -160,7 +155,6 @@ Stories leave these questions unanswered.
 
 Specifications force us to **make decisions explicit**.
 
----
 
 ## A First Glimpse of Contracts
 
@@ -194,7 +188,6 @@ This structure allows programmers to reason about correctness with much greater 
 
 Later in this book, we will use contracts extensively to build systems that are **predictable, reliable, and easier to maintain**.
 
----
 
 ## Connection to Nex
 
@@ -208,7 +201,6 @@ In practice, that means you can encode the specification directly through:
 
 This helps keep intent and implementation aligned as systems evolve.
 
----
 
 ::: {.note-exercise}
 **Exercise**
@@ -234,7 +226,6 @@ Example starter:
 
 Keep algorithm choices out of this draft. Focus on behavior and correctness.
 
----
 
 ## From Story to Engineering
 
@@ -253,7 +244,6 @@ Programming lives in the space between those two things.
 Stories inspire the system.
 Specifications make it **buildable**.
 
----
 
 ::: {.note-takeaways}
 **Takeaways**
@@ -268,7 +258,6 @@ Capture the key principles from this chapter and one action you will apply immed
 - Contracts are a disciplined way to formalize expectations and correctness.
 - Better specifications reduce design churn, testing ambiguity, and implementation drift.
 
----
 
 In the next part of the book, we take the next engineering step.
 

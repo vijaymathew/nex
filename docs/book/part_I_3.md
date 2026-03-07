@@ -1,4 +1,4 @@
-# Chapter 3: Writing a Problem Statement
+# Writing a Problem Statement
 
 Once we have observed the real world and identified the actual problem, a new challenge emerges.
 
@@ -10,7 +10,6 @@ A good problem statement is not a wish list or a vague description of desired ou
 
 Get it wrong in either direction and the project suffers. Too vague, and every programmer builds something different. Too rigid, and the system becomes impossible to evolve. Writing a strong problem statement is therefore one of the most important skills in programming — and one of the least taught.
 
----
 
 ## Two Ways to Get It Wrong
 
@@ -41,7 +40,6 @@ What if the building turns out to be very large? What if the map changes frequen
 
 A good problem statement describes **what must be achieved**, not how it must be implemented. Implementation is the programmer's job; the problem statement is not the place for it.
 
----
 
 ## What a Strong Problem Statement Does
 
@@ -59,7 +57,6 @@ Here is a clearer version of the delivery robot problem:
 
 Notice what this does well. It defines the inputs (map, starting location, destination), the expected behavior (find a valid route), and leaves all implementation decisions open. Multiple algorithms could solve this problem correctly. That flexibility is intentional.
 
----
 
 ## Specifications in Practice
 
@@ -73,7 +70,6 @@ The phrase "relevant answers" is ambiguous. Two programmers reading this indepen
 
 Now we know the input (a query), the output (ranked documents), and the goal (relevance ranking). Plenty of design decisions remain open — which is exactly what we want.
 
----
 
 **Weak:** *"Objects in the virtual world should interact realistically."*
 
@@ -83,7 +79,6 @@ What does "realistically" mean here? Physics simulation? Game-style rules? Simpl
 
 Now the problem is algorithmically meaningful. We can start thinking about spatial data structures, collision detection, and interaction systems. The work can begin.
 
----
 
 ## The Power of Examples
 
@@ -104,7 +99,6 @@ Expected route: A → B → C → D
 
 This confirms the basic behavior. But examples become truly powerful when they explore what happens at the edges.
 
----
 
 ## Edge Cases and Counterexamples
 
@@ -128,7 +122,6 @@ Every good specification should be stress-tested with three kinds of examples:
 
 By the time the specification is written, the system's behavior should already have been explored through examples. The writing merely captures what the examples revealed.
 
----
 
 ## A Note on AI-Assisted Development
 
@@ -136,7 +129,6 @@ Examples matter even more in the current era of AI coding assistants. A vague de
 
 The habits that make specifications useful to human teammates make them equally useful to machine ones.
 
----
 
 ## The Problem Statement as Contract
 
@@ -150,7 +142,6 @@ Vague contracts produce unpredictable systems. Precise ones make every downstrea
 
 When something goes wrong — and something always does — a well-written problem statement tells you whether the implementation violated the contract or the contract itself was wrong. Either way, you know where to look.
 
----
 
 ## Quick Exercise
 
@@ -164,7 +155,6 @@ Then add one normal example, one edge case, and one failure case.
 
 If your statement specifies an algorithm or data structure, rewrite it to focus on outcomes instead.
 
----
 
 ## Takeaways
 
@@ -174,6 +164,5 @@ If your statement specifies an algorithm or data structure, rewrite it to focus 
 - A problem statement is a contract between intent, design, and code.
 - Clear contracts make algorithm selection, testing, and debugging substantially easier.
 
----
 
 *In Chapter 4, we stress-test problem statements systematically — probing edge cases, failure conditions, and contradictions. If Chapter 3 defines the contract, Chapter 4 tries to break it.*

@@ -1,10 +1,9 @@
-# Chapter 9: Designing a Good Data Model
+# Designing a Good Data Model
 
 Chapters 7 and 8 gave us the two building blocks of a model: entities, which carry identity and state, and relationships, which encode the structure between them. A data model is what these pieces become when assembled into a coherent design — one that must hold together not just on paper, but under the pressure of real queries, real load, and real change.
 
 The goal is not the most abstract model or the most general one. It is the model that keeps the system correct, understandable, and evolvable as usage evolves. Those three properties are in genuine tension, and resolving that tension requires making explicit choices rather than deferring them.
 
----
 
 ## Five Properties of a Good Model
 
@@ -20,7 +19,6 @@ A data model that serves a system well over time satisfies five properties.
 
 **It remains explainable to new engineers.** A model that can only be understood by the person who built it is a liability. Explainability is not a soft requirement; it is what determines whether the model continues to be used correctly as the team changes.
 
----
 
 ## Model from Operations, Not from Nouns Alone
 
@@ -36,7 +34,6 @@ The corrective practice is to ask three questions before the model is finalized:
 
 Designing from operations does not mean ignoring the domain. It means ensuring that the domain model and the operational reality stay aligned from the beginning, rather than diverging and requiring reconciliation later.
 
----
 
 ## Tradeoffs That Must Be Made Explicit
 
@@ -48,7 +45,6 @@ No model of a real system is free of tradeoffs. The failure is not in making tra
 
 **Strictness versus flexibility.** Strict constraints prevent invalid states. They also mean that workflows requiring temporarily incomplete data — a delivery task created before a robot is assigned, a document link created before its target exists — must be designed explicitly. Relaxing constraints to accommodate these workflows trades correctness guarantees for operational convenience. This tradeoff is real and sometimes the right one; what matters is that it is chosen deliberately and that the consequences are understood.
 
----
 
 ## From Requirement to Data Model
 
@@ -70,7 +66,6 @@ Two distinct operations are embedded in this sentence: a read operation (show li
 
 **Step 6: Plan for evolution.** Future requirements already visible on the horizon include multi-robot cooperative delivery, regional routing constraints, and service-level classes. The current model should not implement these, but it should not foreclose them either. The task's assignment relationship should accommodate multiple assignees when that requirement arrives. The priority field should be defined broadly enough that SLA classes can be expressed through it. The goal is not to build for the future now — it is to avoid building something today that prevents the future from being built at all.
 
----
 
 ## A Data Model in Code
 
@@ -110,7 +105,6 @@ This sketch is worth reading against the six steps above. The status and priorit
 
 What the sketch does not address is the storage backend, the query execution strategy, or the index layout. Those are implementation concerns. The model's job is to define what is true; the implementation's job is to enforce and compute it efficiently.
 
----
 
 ## Four Ways Data Model Design Fails
 
@@ -122,7 +116,6 @@ What the sketch does not address is the storage backend, the query execution str
 
 **No versioning strategy.** Models change. Fields are added, relationships are restructured, invariants are tightened or relaxed. A model that was not designed with change in mind will require migrations that break compatibility with existing data or existing clients. The recovery is to make model changes additive where possible — adding fields rather than modifying them, extending enumerations rather than replacing them — and to document the compatibility assumptions that each version of the model relies on.
 
----
 
 ## Quick Exercise
 
@@ -132,7 +125,6 @@ Then name one tradeoff your model makes — between normalization and duplicatio
 
 If you cannot name a tradeoff, look harder. A model with no visible tradeoffs is a model whose tradeoffs have not yet been examined.
 
----
 
 ## Takeaways
 
@@ -142,6 +134,5 @@ If you cannot name a tradeoff, look harder. A model with no visible tradeoffs is
 - Transition rules are part of the data model. A model that defines states without defining legal transitions between them is incomplete.
 - The test of a model's quality is not how it looks at design time but how well it absorbs change over the life of the system.
 
----
 
 *Chapter 10 examines the dimension of data modeling that most designs underestimate: change over time. A model that handles its initial requirements correctly may still fail as the system evolves. Chapter 10 makes the patterns of temporal change explicit and shows how to design for them.*
