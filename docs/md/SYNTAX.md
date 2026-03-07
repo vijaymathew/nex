@@ -291,6 +291,31 @@ end
 print(x)                        -- 10
 ```
 
+## Type Conversion: convert
+
+```nex
+convert <value> to <name>:<Type>
+```
+
+- Returns `true` if conversion succeeds, else `false`.
+- On success, `<name>` is bound to the converted value.
+- On failure, `<name>` is bound to `nil`.
+- Conversion follows Java-style related-type rules:
+  `<Type>` must be a supertype or subtype of the runtime type of `<value>`.
+
+```nex
+do
+  convert vehicle_1 to my_car:Car
+  -- my_car is visible in this block
+end
+```
+
+```nex
+if convert vehicle_1 to my_car:Car then
+  my_car.sound_horn
+end
+```
+
 ## Anonymous Functions
 
 ```nex

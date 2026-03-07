@@ -51,6 +51,12 @@
       :nil "nil"
       :identifier (:name expr)
       :old (str "old " (format-expression (:expr expr)))
+      :convert (str "convert "
+                    (format-expression (:value expr))
+                    " to "
+                    (:var-name expr)
+                    ":"
+                    (format-type (:target-type expr)))
       :binary (str (format-expression (:left expr))
                    " " (:operator expr) " "
                    (format-expression (:right expr)))

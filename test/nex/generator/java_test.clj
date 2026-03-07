@@ -240,6 +240,36 @@ end"
       (is (str/includes? java-code "Precondition"))
       (is (str/includes? java-code "Postcondition")))))
 
+(deftest convert-expression-test
+  (testing "Convert expression in if-guard emits Java runtime type check and binding"
+    (let [nex-code "class Vehicle
+  feature
+    sound() do
+      print(\"v\")
+    end
+end
+
+class Car inherit Vehicle
+  feature
+    sound_horn() do
+      print(\"beep\")
+    end
+end
+
+class Test
+  feature
+    demo(vehicle_1: Vehicle) do
+      if convert vehicle_1 to my_car:Car then
+        my_car.sound_horn
+      end
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "Car my_car = null;"))
+      (is (str/includes? java-code "instanceof Car"))
+      (is (str/includes? java-code "my_car = (Car)"))
+      (is (str/includes? java-code "my_car = null;")))))
+
 (deftest inherited-class-invariants-deduped-test
   (testing "Inherited class invariants are generated recursively and deduped by ancestor class"
     (let [nex-code "class A

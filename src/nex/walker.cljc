@@ -1106,9 +1106,16 @@
         :class-name (token-text class-name)
         :generic-args generic-args
         :constructor (when has-constructor? constructor-name)
-        :args (if args-node
+       :args (if args-node
                (transform-node args-node)
                [])}))
+
+   :convertExpression
+   (fn [[_ _convert-kw value-expr _to-kw var-name _colon type-expr]]
+     {:type :convert
+      :value (transform-node value-expr)
+      :var-name (token-text var-name)
+      :target-type (transform-node type-expr)})
 
    :oldExpression
    (fn [[_ _old-kw expr]]

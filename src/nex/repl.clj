@@ -26,7 +26,7 @@
 (def nex-keywords
   ["class" "deferred" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
    "when" "from" "until" "invariant" "variant" "require" "ensure"
-   "let" "create" "fn" "function" "and" "or" "old" "this" "note"
+   "let" "create" "convert" "to" "fn" "function" "and" "or" "old" "this" "note"
    "with" "import" "intern" "private" "raise" "rescue" "retry" "repeat" "across" "case" "of"
    "true" "false" "nil"
    ;; strictly 'result' is not a keyword, but a pre-defined variable name.

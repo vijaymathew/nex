@@ -518,6 +518,43 @@
         (and right-id (nil-literal? left)) right-id
         :else nil))))
 
+(defn convert-guard-binding
+  "Extract convert-bound variable info from condition of form:
+   convert <expr> to <var>:<Type>"
+  [condition]
+  (when (and (map? condition) (= :convert (:type condition)))
+    {:name (:var-name condition)
+     :type (attachable-type (:target-type condition))}))
+
+(defn detachable-version
+  "Return a detachable type version for variable bindings that may be nil."
+  [t]
+  (let [n (normalize-type t)]
+    (if (map? n)
+      (assoc n :detachable true)
+      {:base-type n :detachable true})))
+
+(defn check-convert
+  "Type-check convert expression:
+   convert <value> to <var>:<Type>
+   Returns Boolean and binds <var> as detachable <Type> in current scope."
+  [env {:keys [value var-name target-type]}]
+  (validate-type-annotation env target-type)
+  (let [value-type (check-expression env value)
+        target-type (normalize-type target-type)
+        compatible? (or (types-compatible? env value-type target-type)
+                        (types-compatible? env target-type value-type))]
+    (when-not compatible?
+      (throw (ex-info "Invalid convert type relation"
+                      {:error (type-error
+                               (str "convert requires related types, got "
+                                    (display-type value-type)
+                                    " and "
+                                    (display-type target-type)))})))
+    ;; convert may fail at runtime, so variable is detachable in this scope.
+    (env-add-var env var-name (detachable-version target-type))
+    "Boolean"))
+
 (defn check-call
   "Check the type of a method call"
   [env {:keys [target method args has-parens] :as expr}]
@@ -773,6 +810,7 @@
                                           (str "when condition has type " cond-type ", expected Boolean"))})))
                cons-type)
       :old (check-expression env (:expr expr))
+      :convert (check-convert env expr)
       :this (or (env-lookup-var env "__current_class__") "Any")
       "Any")
     :else "Any"))
@@ -826,6 +864,9 @@
   (let [then-env (make-type-env env)]
     (when-let [non-nil-var (guarded-non-nil-var condition)]
       (env-mark-non-nil then-env non-nil-var))
+    (when-let [{:keys [name type]} (convert-guard-binding condition)]
+      (env-add-var then-env name type)
+      (env-mark-non-nil then-env name))
     (doseq [stmt then]
       (check-statement then-env stmt)))
   (doseq [clause elseif]
@@ -837,6 +878,9 @@
     (let [elseif-env (make-type-env env)]
       (when-let [non-nil-var (guarded-non-nil-var (:condition clause))]
         (env-mark-non-nil elseif-env non-nil-var))
+      (when-let [{:keys [name type]} (convert-guard-binding (:condition clause))]
+        (env-add-var elseif-env name type)
+        (env-mark-non-nil elseif-env name))
       (doseq [stmt (:then clause)]
         (check-statement elseif-env stmt))))
   (when else
@@ -867,7 +911,8 @@
       :if (check-if env stmt)
       :loop (check-loop env stmt)
       :scoped-block (do
-                      (doseq [s (:body stmt)] (check-statement env s))
+                      (let [block-env (make-type-env env)]
+                        (doseq [s (:body stmt)] (check-statement block-env s)))
                       (when-let [rescue (:rescue stmt)]
                         (let [rescue-env (make-type-env env)]
                           (env-add-var rescue-env "exception" "Any")

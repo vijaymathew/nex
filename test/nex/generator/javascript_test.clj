@@ -86,6 +86,36 @@ end"
       (is (str/includes? js-code "Precondition"))
       (is (str/includes? js-code "Postcondition")))))
 
+(deftest convert-expression-test
+  (testing "Convert expression in if-guard emits JavaScript runtime type check and binding"
+    (let [nex-code "class Vehicle
+  feature
+    sound() do
+      print(\"v\")
+    end
+end
+
+class Car inherit Vehicle
+  feature
+    sound_horn() do
+      print(\"beep\")
+    end
+end
+
+class Test
+  feature
+    demo(vehicle_1: Vehicle) do
+      if convert vehicle_1 to my_car:Car then
+        my_car.sound_horn
+      end
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "let my_car = null;"))
+      (is (str/includes? js-code "instanceof Car"))
+      (is (str/includes? js-code "my_car = __nex_conv_tmp_"))
+      (is (str/includes? js-code "my_car = null;")))))
+
 (deftest inherited-class-invariants-deduped-test
   (testing "Inherited class invariants are generated recursively and deduped by ancestor class"
     (let [nex-code "class A
