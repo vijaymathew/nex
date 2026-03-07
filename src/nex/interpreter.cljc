@@ -1271,6 +1271,9 @@
                        (update :debug-stack (fnil conj [])
                                {:class (:class-name current-obj)
                                 :method method
+                                :env method-env
+                                :arg-names (set (map :name (or params [])))
+                                :field-names (set (map :name all-fields))
                                 :source (:debug-source ctx)})
                        (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
             _ (if-let [rescue (:rescue callable)]
@@ -1373,6 +1376,9 @@
                                  (update :debug-stack (fnil conj [])
                                          {:class (:class-name obj)
                                           :method method
+                                          :env method-env
+                                          :arg-names (set (map :name (or params [])))
+                                          :field-names (set (map name (keys (:fields obj))))
                                           :source (:debug-source ctx)})
                                  (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
                       _ (when-let [require-assertions effective-require]
@@ -1917,6 +1923,9 @@
                                                (update :debug-stack (fnil conj [])
                                                        {:class effective-class-name
                                                         :method (or constructor "make")
+                                                        :env ctor-env
+                                                        :arg-names (set (map :name (or params [])))
+                                                        :field-names (set (map name (keys initial-field-map)))
                                                         :source (:debug-source ctx)})
                                                (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
                                     ;; Check pre-conditions

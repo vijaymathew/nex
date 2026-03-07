@@ -5,6 +5,7 @@
             [nex.debugger :as dbg]
             [nex.typechecker :as tc]
             [clojure.string :as str]
+            [clojure.edn :as edn]
             [clojure.java.io :as io])
   (:import [org.jline.reader LineReaderBuilder LineReader LineReader$Option Completer Candidate]
            [org.jline.reader.impl DefaultParser]
@@ -40,7 +41,11 @@
 (def nex-repl-commands
   [":help" ":quit" ":exit" ":clear" ":reset" ":classes" ":vars"
    ":typecheck" ":load"
-   ":debug" ":break" ":breaks" ":clearbreak" ":breakon"])
+   ":debug" ":break" ":tbreak" ":breaks" ":clearbreak" ":breakon"
+   ":enable" ":disable" ":watch" ":watches" ":clearwatch"
+   ":enablewatch" ":disablewatch"
+   ":ignore" ":every"
+   ":breaksave" ":breakload" ":debugscript"])
 
 (defonce ^:dynamic *completer-ctx* (atom nil))
 
@@ -218,13 +223,28 @@
   (println "  :load <path>      - Load and evaluate a .nex file")
   (println "  :debug on|off     - Enable/disable debugger")
   (println "  :debug status     - Show debugger status")
-  (println "  :break <spec>     - Breakpoint: n | Class.method | Class.method:line | file.nex:line")
+  (println "  :break <spec>     - Breakpoint: n | Class.method | Class.method:line | file.nex:line | field:name | Class#field")
+  (println "  :tbreak <spec>    - Temporary breakpoint (auto-clears after first hit)")
   (println "  :breaks           - List breakpoints")
-  (println "  :clearbreak <spec>- Remove a breakpoint by the same spec")
+  (println "  :clearbreak <id|spec>- Remove one/matching breakpoints")
   (println "  :clearbreak all   - Remove all breakpoints")
+  (println "  :enable <id|all>  - Enable one/all breakpoints")
+  (println "  :disable <id|all> - Disable one/all breakpoints")
+  (println "  :watch <expr>     - Add watchpoint (pause when value changes)")
+  (println "  :watches          - List watchpoints")
+  (println "  :clearwatch <id|all> - Remove watchpoint(s)")
+  (println "  :enablewatch <id|all>  - Enable watchpoint(s)")
+  (println "  :disablewatch <id|all> - Disable watchpoint(s)")
+  (println "  :ignore <id> <n> - Ignore first n hits for a breakpoint")
+  (println "  :every <id> <n>  - Break every n-th hit for a breakpoint")
   (println "  :breakon exception on|off - Pause when an exception is raised")
   (println "  :breakon contract on|off  - Pause on contract violations")
+  (println "  :breakon <kind> filter <value> - Set break-on filter")
+  (println "  :breakon <kind> clear         - Clear break-on filter")
   (println "  :breakon status           - Show break-on toggles")
+  (println "  :breaksave <path> - Save breakpoints/watchpoints")
+  (println "  :breakload <path> - Load breakpoints/watchpoints")
+  (println "  :debugscript <path|off|status> - Script dbg prompt commands")
   (println)
   (println "Navigation:")
   (println "  Up/Down arrows    - Navigate command history")
@@ -294,6 +314,14 @@
       (subs trimmed 1 (dec (count trimmed)))
       trimmed)))
 
+(defn resolve-user-path [path]
+  (let [f (io/file path)]
+    (if (.isAbsolute f)
+      f
+      (if-let [user-dir (System/getProperty "nex.user.dir")]
+        (io/file user-dir path)
+        f))))
+
 (defn load-file-into-repl
   "Load and evaluate a .nex file, returning updated context."
   [ctx path]
@@ -307,12 +335,7 @@
       :else
       (let [;; Resolve relative paths against the user's original working directory
             ;; (NEX_USER_DIR is set by the nex shell script before cd-ing to NEX_HOME)
-            file (let [f (io/file path)]
-                   (if (.isAbsolute f)
-                     f
-                     (if-let [user-dir (System/getProperty "nex.user.dir")]
-                       (io/file user-dir path)
-                       f)))]
+            file (resolve-user-path path)]
         (if-not (.exists file)
           (do
             (println (str "File not found: " (.getPath file)))
@@ -321,6 +344,14 @@
             (when-not (.endsWith (.getName file) ".nex")
               (println "Warning: expected a .nex file"))
             (eval-code ctx (slurp file) (.getPath file))))))))
+
+(defn parse-contract-filter [s]
+  (let [v (str/lower-case (str/trim s))]
+    (case v
+      "pre" :pre
+      "post" :post
+      "invariant" :invariant
+      s)))
 
 (defn handle-command [ctx input]
   (let [input-lower (str/lower-case input)]
@@ -393,6 +424,11 @@
                       (if (seq (dbg/breakpoint-entries))
                         (str/join ", " (map dbg/breakpoint-entry->str (dbg/breakpoint-entries)))
                         "(none)")))
+        (println (str "Watchpoints: "
+                      (if (seq (dbg/watchpoint-entries))
+                        (str/join ", " (map dbg/watchpoint-entry->str (dbg/watchpoint-entries)))
+                        "(none)")))
+        (println (str "Debug script: " (if (dbg/debug-script-active?) "loaded" "off")))
         ctx)
 
       (str/starts-with? input-lower ":break ")
@@ -408,7 +444,23 @@
             ctx)
           (do
             (println "Usage: :break <spec> [if <expr>]")
-            (println "  spec: n | Class.method | Class.method:line | file.nex:line")
+            (println "  spec: n | Class.method | Class.method:line | file.nex:line | field:name | Class#field")
+            ctx)))
+
+      (str/starts-with? input-lower ":tbreak ")
+      (let [parsed (dbg/parse-break-command (subs input (count ":tbreak ")))]
+        (if parsed
+          (do
+            (let [bp (cond-> (assoc (:spec parsed) :temporary true)
+                       (:condition parsed) (assoc :condition (:condition parsed)))
+                  id (dbg/add-breakpoint! bp)]
+              (println (str "Added temporary breakpoint [" id "] " (dbg/breakpoint->str bp)
+                            (when-let [cond-expr (:condition bp)]
+                              (str " if " cond-expr)))))
+            ctx)
+          (do
+            (println "Usage: :tbreak <spec> [if <expr>]")
+            (println "  spec: n | Class.method | Class.method:line | file.nex:line | field:name | Class#field")
             ctx)))
 
       (= input-lower ":breaks")
@@ -445,32 +497,277 @@
                 ctx)
               (do
                 (println "Usage: :clearbreak <id|spec|all>")
-                (println "  spec: n | Class.method | Class.method:line | file.nex:line")
+                (println "  spec: n | Class.method | Class.method:line | file.nex:line | field:name | Class#field")
                 ctx)))))
 
+      (str/starts-with? input-lower ":enable ")
+      (let [arg (str/trim (subs input (count ":enable ")))
+            arg-lower (str/lower-case arg)]
+        (cond
+          (= arg-lower "all")
+          (do
+            (dbg/set-all-breakpoints-enabled! true)
+            (println "Enabled all breakpoints.")
+            ctx)
+          :else
+          (if-let [id (dbg/parse-positive-int arg)]
+            (do
+              (if (dbg/set-breakpoint-enabled! id true)
+                (println (str "Enabled breakpoint [" id "]"))
+                (println (str "No breakpoint with id [" id "]")))
+              ctx)
+            (do
+              (println "Usage: :enable <id|all>")
+              ctx))))
+
+      (str/starts-with? input-lower ":disable ")
+      (let [arg (str/trim (subs input (count ":disable ")))
+            arg-lower (str/lower-case arg)]
+        (cond
+          (= arg-lower "all")
+          (do
+            (dbg/set-all-breakpoints-enabled! false)
+            (println "Disabled all breakpoints.")
+            ctx)
+          :else
+          (if-let [id (dbg/parse-positive-int arg)]
+            (do
+              (if (dbg/set-breakpoint-enabled! id false)
+                (println (str "Disabled breakpoint [" id "]"))
+                (println (str "No breakpoint with id [" id "]")))
+              ctx)
+            (do
+              (println "Usage: :disable <id|all>")
+              ctx))))
+
+      (str/starts-with? input-lower ":watch ")
+      (let [parsed (dbg/parse-watch-command (subs input (count ":watch ")))]
+        (if-not parsed
+          (do
+            (println "Usage: :watch <expr> [if <expr>]")
+            ctx)
+          (let [id (dbg/add-watchpoint! parsed)]
+            (println (str "Added watchpoint [" id "] " (:expr parsed)
+                          (when-let [cond-expr (:condition parsed)]
+                            (str " if " cond-expr))))
+            ctx)))
+
+      (= input-lower ":watches")
+      (do
+        (if (seq (dbg/watchpoint-entries))
+          (do
+            (println "Watchpoints:")
+            (doseq [entry (dbg/watchpoint-entries)]
+              (println (str "  " (dbg/watchpoint-entry->str entry)))))
+          (println "No watchpoints set."))
+        ctx)
+
+      (str/starts-with? input-lower ":clearwatch")
+      (let [arg (str/trim (subs input (count ":clearwatch")))]
+        (cond
+          (= (str/lower-case arg) "all")
+          (do
+            (dbg/clear-watchpoints!)
+            (println "Cleared all watchpoints.")
+            ctx)
+          :else
+          (if-let [id (dbg/parse-positive-int arg)]
+            (do
+              (if (pos? (dbg/remove-watchpoint! id))
+                (println (str "Cleared watchpoint [" id "]"))
+                (println (str "No watchpoint with id [" id "]")))
+              ctx)
+            (do
+              (println "Usage: :clearwatch <id|all>")
+              ctx))))
+
+      (str/starts-with? input-lower ":enablewatch ")
+      (let [arg (str/trim (subs input (count ":enablewatch ")))
+            arg-lower (str/lower-case arg)]
+        (cond
+          (= arg-lower "all")
+          (do
+            (dbg/set-all-watchpoints-enabled! true)
+            (println "Enabled all watchpoints.")
+            ctx)
+          :else
+          (if-let [id (dbg/parse-positive-int arg)]
+            (do
+              (if (dbg/set-watchpoint-enabled! id true)
+                (println (str "Enabled watchpoint [" id "]"))
+                (println (str "No watchpoint with id [" id "]")))
+              ctx)
+            (do
+              (println "Usage: :enablewatch <id|all>")
+              ctx))))
+
+      (str/starts-with? input-lower ":disablewatch ")
+      (let [arg (str/trim (subs input (count ":disablewatch ")))
+            arg-lower (str/lower-case arg)]
+        (cond
+          (= arg-lower "all")
+          (do
+            (dbg/set-all-watchpoints-enabled! false)
+            (println "Disabled all watchpoints.")
+            ctx)
+          :else
+          (if-let [id (dbg/parse-positive-int arg)]
+            (do
+              (if (dbg/set-watchpoint-enabled! id false)
+                (println (str "Disabled watchpoint [" id "]"))
+                (println (str "No watchpoint with id [" id "]")))
+              ctx)
+            (do
+              (println "Usage: :disablewatch <id|all>")
+              ctx))))
+
+      (str/starts-with? input-lower ":ignore ")
+      (let [parts (remove str/blank? (str/split (str/trim (subs input (count ":ignore "))) #"\s+"))
+            id (dbg/parse-positive-int (first parts))
+            n (try
+                (let [v (Integer/parseInt (or (second parts) ""))]
+                  (when (>= v 0) v))
+                (catch Exception _ nil))]
+        (if (and id (some? n))
+          (do
+            (if (dbg/set-breakpoint-after! id n)
+              (println (str "Breakpoint [" id "] will ignore first " n " hit(s)."))
+              (println (str "No breakpoint with id [" id "]")))
+            ctx)
+          (do
+            (println "Usage: :ignore <id> <n>")
+            ctx)))
+
+      (str/starts-with? input-lower ":every ")
+      (let [parts (remove str/blank? (str/split (str/trim (subs input (count ":every "))) #"\s+"))
+            id (dbg/parse-positive-int (first parts))
+            n (dbg/parse-positive-int (second parts))]
+        (if (and id n)
+          (do
+            (if (dbg/set-breakpoint-every! id n)
+              (println (str "Breakpoint [" id "] will break every " n " hit(s)."))
+              (println (str "No breakpoint with id [" id "]")))
+            ctx)
+          (do
+            (println "Usage: :every <id> <n>")
+            ctx)))
+
       (or (= input-lower ":breakon") (= input-lower ":breakon status"))
-      (let [{:keys [exception contract]} (dbg/break-on-status)]
+      (let [{:keys [exception contract]} (dbg/break-on-status)
+            filters (dbg/break-on-filters)
+            exf (:exception filters)
+            cf (:contract filters)]
         (println (str "break-on exception: " (if exception "on" "off")))
+        (println (str "  exception filter: " (or exf "none")))
         (println (str "break-on contract: " (if contract "on" "off")))
+        (println (str "  contract filter: " (or cf "none")))
         ctx)
 
       (str/starts-with? input-lower ":breakon ")
       (let [rest-arg (str/trim (subs input (count ":breakon ")))
             parts (remove str/blank? (str/split rest-arg #"\s+"))
             kind (first parts)
-            flag (second parts)]
+            flag (second parts)
+            extra (str/join " " (drop 2 parts))]
         (cond
           (and (#{"exception" "contract"} (str/lower-case (or kind "")))
-               (#{"on" "off"} (str/lower-case (or flag ""))))
+               (#{"on" "off"} (str/lower-case (or flag "")))
+               (or (str/blank? extra) (= "on" (str/lower-case (or flag "")))))
           (let [k (keyword (str/lower-case kind))
                 on? (= "on" (str/lower-case flag))]
             (dbg/set-break-on! k on?)
+            (when (and on? (not (str/blank? extra)))
+              (dbg/set-break-on-filter! k (if (= k :contract) (parse-contract-filter extra) extra)))
             (println (str "break-on " (name k) " set to " (if on? "on" "off")))
+            ctx)
+          (and (#{"exception" "contract"} (str/lower-case (or kind "")))
+               (= "filter" (str/lower-case (or flag "")))
+               (not (str/blank? extra)))
+          (let [k (keyword (str/lower-case kind))
+                filter-val (if (= k :contract) (parse-contract-filter extra) extra)]
+            (dbg/set-break-on-filter! k filter-val)
+            (println (str "break-on " (name k) " filter set to " filter-val))
+            ctx)
+          (and (#{"exception" "contract"} (str/lower-case (or kind "")))
+               (= "clear" (str/lower-case (or flag ""))))
+          (let [k (keyword (str/lower-case kind))]
+            (dbg/clear-break-on-filter! k)
+            (println (str "break-on " (name k) " filter cleared"))
             ctx)
           :else
           (do
-            (println "Usage: :breakon <exception|contract> <on|off>")
+            (println "Usage: :breakon <exception|contract> <on|off> [filter]")
+            (println "   or: :breakon <exception|contract> filter <value>")
+            (println "   or: :breakon <exception|contract> clear")
             ctx)))
+
+      (str/starts-with? input-lower ":breaksave ")
+      (let [path (normalize-load-path (subs input (count ":breaksave ")))
+            file (resolve-user-path path)]
+        (if (str/blank? path)
+          (do
+            (println "Usage: :breaksave <path>")
+            ctx)
+          (do
+            (spit file (pr-str (dbg/snapshot-breakpoints-and-watchpoints)))
+            (println (str "Saved breakpoints/watchpoints to " (.getPath file)))
+            ctx)))
+
+      (str/starts-with? input-lower ":breakload ")
+      (let [path (normalize-load-path (subs input (count ":breakload ")))
+            file (resolve-user-path path)]
+        (cond
+          (str/blank? path)
+          (do
+            (println "Usage: :breakload <path>")
+            ctx)
+          (not (.exists file))
+          (do
+            (println (str "File not found: " (.getPath file)))
+            ctx)
+          :else
+          (try
+            (let [snapshot (edn/read-string (slurp file))]
+              (if (map? snapshot)
+                (do
+                  (dbg/restore-breakpoints-and-watchpoints! snapshot)
+                  (println (str "Loaded breakpoints/watchpoints from " (.getPath file)))
+                  ctx)
+                (do
+                  (println "Invalid breakpoint snapshot format.")
+                  ctx)))
+            (catch Exception e
+              (println (str "Error loading snapshot: " (.getMessage e)))
+              ctx))))
+
+      (or (= input-lower ":debugscript") (= input-lower ":debugscript status"))
+      (do
+        (println (str "debugscript: " (if (dbg/debug-script-active?) "loaded" "off")))
+        ctx)
+
+      (str/starts-with? input-lower ":debugscript ")
+      (let [arg (str/trim (subs input (count ":debugscript ")))
+            arg-lower (str/lower-case arg)]
+        (cond
+          (= arg-lower "off")
+          (do
+            (dbg/clear-debug-script!)
+            (println "Debugger script cleared.")
+            ctx)
+          (= arg-lower "status")
+          (do
+            (println (str "debugscript: " (if (dbg/debug-script-active?) "loaded" "off")))
+            ctx)
+          :else
+          (let [file (resolve-user-path (normalize-load-path arg))]
+            (if-not (.exists file)
+              (do
+                (println (str "File not found: " (.getPath file)))
+                ctx)
+              (do
+                (dbg/set-debug-script! (str/split-lines (slurp file)))
+                (println (str "Loaded debugger script: " (.getPath file)))
+                ctx)))))
 
       ;; Unknown command
       :else
@@ -662,11 +959,12 @@
     ;; Clear output from previous evaluation
     (reset! (:output ctx) [])
     (dbg/reset-run-state!)
-    (let [base-ctx (assoc ctx
-                          :debug-source source-id
-                          :debug-stack [{:class "<repl>"
-                                         :method "<top>"
-                                         :source source-id}])
+	    (let [base-ctx (assoc ctx
+	                          :debug-source source-id
+	                          :debug-stack [{:class "<repl>"
+	                                         :method "<top>"
+	                                         :env (:current-env ctx)
+	                                         :source source-id}])
           exec-ctx (if (dbg/enabled?)
                      (assoc base-ctx
                             :debug-hook (dbg/make-debug-hook {:read-line-fn read-line-safe

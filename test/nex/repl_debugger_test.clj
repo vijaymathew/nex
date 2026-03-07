@@ -76,7 +76,11 @@
     (is (= {:kind :cm-line :class "OrderService" :method "place" :line 42}
            (dbg/parse-breakpoint-spec "OrderService.place:42")))
     (is (= {:kind :file-line :source "examples/demo.nex" :line 10}
-           (dbg/parse-breakpoint-spec "examples/demo.nex:10")))))
+           (dbg/parse-breakpoint-spec "examples/demo.nex:10")))
+    (is (= {:kind :field-write :field "status"}
+           (dbg/parse-breakpoint-spec "field:status")))
+    (is (= {:kind :class-field-write :class "Order" :field "status"}
+           (dbg/parse-breakpoint-spec "Order#status")))))
 
 (deftest test-break-command-parse
   (testing "Parse conditional break command"
@@ -85,6 +89,30 @@
            (dbg/parse-break-command "A.f if x > 0")))
     (is (= {:spec {:kind :hit :n 10}}
            (dbg/parse-break-command "10")))))
+
+(deftest test-watch-command-parse
+  (testing "Parse conditional watch command"
+    (is (= {:expr "x" :condition "x > 0"}
+           (dbg/parse-watch-command "x if x > 0")))
+    (is (= {:expr "this.status"}
+           (dbg/parse-watch-command "this.status")))))
+
+(deftest test-breakpoint-enable-disable
+  (testing "Breakpoints can be toggled enabled/disabled by id"
+    (dbg/clear-breakpoints!)
+    (let [id (dbg/add-breakpoint! {:kind :hit :n 2})]
+      (is (= 1 (count (dbg/breakpoint-entries))))
+      (is (dbg/set-breakpoint-enabled! id false))
+      (is (.contains (dbg/breakpoint-entry->str (first (dbg/breakpoint-entries))) "(disabled)"))
+      (is (dbg/set-breakpoint-enabled! id true)))))
+
+(deftest test-watchpoint-basics
+  (testing "Watchpoints are created and rendered"
+    (dbg/clear-watchpoints!)
+    (let [id (dbg/add-watchpoint! "x")]
+      (is (= 1 (count (dbg/watchpoint-entries))))
+      (is (= id (ffirst (dbg/watchpoint-entries))))
+      (is (= "[1] x" (dbg/watchpoint-entry->str (first (dbg/watchpoint-entries))))))))
 
 (deftest test-breakpoint-hit-matching
   (testing "Class.method and Class.method:line breakpoints match runtime context"
