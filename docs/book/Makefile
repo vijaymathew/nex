@@ -1,4 +1,4 @@
-.PHONY: book html pdf epub print cover clean
+.PHONY: book html pdf epub print cover clean init-texmf ensure-pdflatex
 
 QUARTO ?= quarto
 CACHE_DIR := $(CURDIR)/.cache
@@ -8,8 +8,19 @@ TEXMF_HOME := $(CACHE_DIR)/texmf-home
 RENDER_ENV := XDG_CACHE_HOME=$(CACHE_DIR) TEXMFVAR=$(TEXMF_VAR) TEXMFCONFIG=$(TEXMF_CONFIG) TEXMFHOME=$(TEXMF_HOME)
 INTERMEDIATE_STEM := Beyond-Code----Building-Software-Systems-That-Last
 
-book:
+init-texmf:
 	@mkdir -p $(CACHE_DIR) $(TEXMF_VAR) $(TEXMF_CONFIG) $(TEXMF_HOME)
+	@if [ ! -f "$(TEXMF_HOME)/tlpkg/texlive.tlpdb" ]; then \
+		$(RENDER_ENV) tlmgr init-usertree; \
+	fi
+
+ensure-pdflatex:
+	@if ! command -v pdflatex >/dev/null 2>&1; then \
+		echo "pdflatex not found; installing TinyTeX via Quarto..."; \
+		$(RENDER_ENV) $(QUARTO) install tinytex --no-prompt; \
+	fi
+
+book: init-texmf ensure-pdflatex
 	$(RENDER_ENV) $(QUARTO) render
 	@epub_file=$$(ls -1 _book/*.epub 2>/dev/null | head -n1); \
 	if [ -n "$$epub_file" ]; then cp "$$epub_file" _book/beyond-code.epub; fi
@@ -17,26 +28,22 @@ book:
 	if [ -n "$$pdf_file" ]; then cp "$$pdf_file" _book/beyond-code.pdf; fi
 	@rm -f _book/$(INTERMEDIATE_STEM).pdf _book/$(INTERMEDIATE_STEM).epub
 
-html:
-	@mkdir -p $(CACHE_DIR) $(TEXMF_VAR) $(TEXMF_CONFIG) $(TEXMF_HOME)
+html: init-texmf
 	$(RENDER_ENV) $(QUARTO) render --to html
 
-pdf:
-	@mkdir -p $(CACHE_DIR) $(TEXMF_VAR) $(TEXMF_CONFIG) $(TEXMF_HOME)
+pdf: init-texmf ensure-pdflatex
 	$(RENDER_ENV) $(QUARTO) render --to pdf
 	@pdf_file=$$(ls -1 _book/*.pdf 2>/dev/null | head -n1); \
 	if [ -n "$$pdf_file" ]; then cp "$$pdf_file" _book/beyond-code.pdf; fi
 	@rm -f _book/$(INTERMEDIATE_STEM).pdf
 
-epub:
-	@mkdir -p $(CACHE_DIR) $(TEXMF_VAR) $(TEXMF_CONFIG) $(TEXMF_HOME)
+epub: init-texmf
 	$(RENDER_ENV) $(QUARTO) render --to epub
 	@epub_file=$$(ls -1 _book/*.epub 2>/dev/null | head -n1); \
 	if [ -n "$$epub_file" ]; then cp "$$epub_file" _book/beyond-code.epub; fi
 	@rm -f _book/$(INTERMEDIATE_STEM).epub
 
-print:
-	@mkdir -p $(CACHE_DIR) $(TEXMF_VAR) $(TEXMF_CONFIG) $(TEXMF_HOME)
+print: init-texmf ensure-pdflatex
 	$(RENDER_ENV) $(QUARTO) render --profile print --to pdf
 	@print_pdf=$$(ls -1 _book/print/*.pdf 2>/dev/null | head -n1); \
 	if [ -n "$$print_pdf" ]; then cp "$$print_pdf" _book/print/beyond-code-print.pdf; fi
