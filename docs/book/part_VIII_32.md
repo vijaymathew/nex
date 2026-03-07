@@ -1,12 +1,9 @@
-# Part VIII: Systems That Grow
-
-# Chapter 32: Designing for Change
+# Designing for Change
 
 Managing complexity, as we saw in Chapter 31, is the discipline of keeping a system understandable today. It is about drawing boundaries so that the cost of reasoning remains within our budget. But a system that is easy to understand today may still be prohibitively expensive to change tomorrow. Requirements evolve, technology stacks shift, and business models pivot. If every such change requires reaching across boundaries and rewriting stable logic, the system has failed a fundamental engineering test.
 
 Designing for change is the practice of building "seams" into a system — locations where behavior can vary without breaking the contracts that surround them. The goal is not to predict the future, which is impossible, but to build a system that can absorb it.
 
----
 
 ## The Concept of Change Seams
 
@@ -18,7 +15,6 @@ A seam decouples them. By defining a stable contract — `Notification_Transport
 
 Good seams isolate volatility. They allow the stable parts of the system (the "what") to remain unchanged while the volatile parts (the "how") evolve independently.
 
----
 
 ## Stable Contracts and the Cost of Evolution
 
@@ -33,7 +29,6 @@ To minimize this cost, we adopt a discipline of additive evolution:
 
 Without versioning discipline and contract stability, every "improvement" to the system becomes a migration crisis for the rest of the team.
 
----
 
 ## From Requirement to Flexible Design
 
@@ -50,7 +45,6 @@ With a seam, we design for variation:
 
 The search service remains unchanged. Its contract is satisfied by any object that knows how to rank. We can now swap algorithms, run A/B tests, or roll back a failure without touching the core search orchestration.
 
----
 
 ## Implementation in Nex
 
@@ -107,7 +101,6 @@ end
 
 The `deferred` class `Ranking_Strategy` acts as the port. The `Search_Service` depends only on this abstraction. Whether the `strategy` is an instance of `Legacy_Ranking` or `Modern_Ranking` is a configuration detail. The search logic is protected from the volatility of the ranking algorithm.
 
----
 
 ## Designing for Change Across the Three Systems
 
@@ -119,7 +112,6 @@ In the **virtual world**, the seam is the `Entity_Behavior`. A "Player" and an "
 
 In all three cases, the pattern is the same: identify the part that is likely to vary, wrap it in a stable contract, and allow the rest of the system to depend on the contract rather than the variation.
 
----
 
 ## Three Ways Design for Change Fails
 
@@ -129,7 +121,6 @@ In all three cases, the pattern is the same: identify the part that is likely to
 
 **The "Big Bang" Migration.** Designing for change implies that the system will evolve. If a team introduces a new version of a service but provides no compatibility for old clients, they haven't designed for change — they've designed for disruption. The remedy is to make compatibility a first-class architectural requirement, using adapters and versioned interfaces to bridge the gap.
 
----
 
 ## Quick Exercise
 
@@ -139,7 +130,6 @@ Pick one part of your system that you expect to change in the next six months. D
 2.  What are its `require` and `ensure` conditions?
 3.  What information must stay *out* of the contract to keep it implementation-agnostic?
 
----
 
 ## Takeaways
 
@@ -149,6 +139,5 @@ Pick one part of your system that you expect to change in the next six months. D
 - Over-engineering is as dangerous as under-engineering. Build seams where change is likely, not where it is merely possible.
 - Compatibility is not a release chore; it is an architectural discipline that allows a system to grow without leaving its users behind.
 
----
 
 *Chapter 33 examines the practical discipline of refactoring — how to move a system from its current structure to a better one while proving that its behavior remains unchanged.*

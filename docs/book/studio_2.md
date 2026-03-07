@@ -9,7 +9,7 @@ Refactoring data models so systems can evolve without hidden state corruption.
 This studio chapter is hands-on: implement, verify behavior, and document tradeoffs as you iterate.
 :::
 
-## 1. The Situation
+## The Situation
 
 Studio 1 proved we could ship tiny vertical slices.
 
@@ -31,9 +31,8 @@ Part II gave us the tools to fix this:
 
 Your job in Studio 2 is to redesign all three systems using those principles.
 
----
 
-## 2. Engineering Brief
+## Engineering Brief
 
 Redesign the core data models for all three systems (delivery, knowledge, virtual world).
 
@@ -51,9 +50,8 @@ Implementation guidance:
 - keep model boundaries obvious
 - make failure behavior explicit (not silent)
 
----
 
-## 3. Implementation In Nex
+## Implementation In Nex
 
 Use Nex to encode model assumptions directly in code.
 
@@ -66,7 +64,7 @@ Suggested files:
 
 If using the web IDE, place all classes in one file and run `App.run`.
 
-### 3.1 Delivery Model V2
+### Delivery Model V2
 
 Focus: identity + legal transitions + assignment relationship.
 
@@ -118,7 +116,7 @@ invariant
 end
 ```
 
-### 3.2 Knowledge Model V2
+### Knowledge Model V2
 
 Focus: relationship as first-class entity (`Doc_Link`) rather than ad hoc references.
 
@@ -154,7 +152,7 @@ invariant
 end
 ```
 
-### 3.3 Virtual World Model V2
+### Virtual World Model V2
 
 Focus: deterministic update transition with explicit bounds.
 
@@ -185,7 +183,7 @@ invariant
 end
 ```
 
-### 3.4 Studio Driver
+### Studio Driver
 
 Use one driver to validate nominal + edge behavior.
 
@@ -223,9 +221,8 @@ feature
 end
 ```
 
----
 
-## 4. Studio Challenges
+## Studio Challenges
 
 ### Level 1 — Core Implementation
 
@@ -257,9 +254,8 @@ Evaluate:
 - testability impact
 - failure-mode clarity
 
----
 
-## 5. Postmortem
+## Postmortem
 
 Discuss:
 
@@ -270,7 +266,6 @@ Discuss:
 
 Use concrete evidence from your runs, not just opinions.
 
----
 
 ## Deliverables
 
@@ -283,7 +278,6 @@ Use concrete evidence from your runs, not just opinions.
 - nominal + edge test output logs
 - one before/after comparison showing reduced accidental complexity
 
----
 
 ## Exit Criteria
 

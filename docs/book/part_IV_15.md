@@ -1,12 +1,9 @@
-# Part IV: Organizing Data
-
-# Chapter 15: Lists and Sequences
+# Lists and Sequences
 
 Part III developed the tools for algorithmic thinking: what an algorithm is, how to decompose one, how to design recursive algorithms safely, and how to reason about cost. Part IV asks a different question. Algorithms do not operate in the abstract — they operate on data that has been organized in some particular way, and the organization chosen determines which operations are cheap and which are expensive. The same algorithm can be fast or slow depending entirely on how its data is arranged.
 
 We begin with lists and sequences, because they are the structure most teams reach for first. This is not always wrong — lists are genuinely the right choice for certain problems — but it is often unreflective. A team that uses lists because they are familiar, rather than because they fit the operations the system requires, will eventually discover the mismatch through degraded performance. The goal of this chapter is to make that choice conscious: to understand what lists are good at, where they become expensive, and how to recognize early which situation applies.
 
----
 
 ## What a List Is
 
@@ -16,7 +13,6 @@ Order gives lists their characteristic strengths. Iterating from start to finish
 
 Order also defines the limits of a list's usefulness. A list organizes elements by position. It has no mechanism for organizing them by content. Finding an element by a property — by its identifier, by a key — requires examining elements one at a time until the matching one is found. For a list of ten elements, this is inconsequential. For a list of ten million, it is the dominant cost of every lookup operation, and it grows linearly with the size of the collection.
 
----
 
 ## The Cost of What Lists Cannot Do
 
@@ -32,7 +28,6 @@ These are not obscure operations. They are the dominant operations in a large cl
 
 This is the first scaling failure many systems encounter. It is also one of the most avoidable.
 
----
 
 ## Choosing a Structure by Its Operations
 
@@ -44,7 +39,6 @@ The mismatch between these two operations and a single list structure is the cen
 
 The resolution — keeping a list for ordered display and introducing a separate index for keyed lookup — is the subject of Chapter 16. This chapter holds the tension open deliberately, because understanding why the list alone is insufficient is a prerequisite for understanding what the index adds.
 
----
 
 ## A Sequence in Code
 
@@ -103,7 +97,6 @@ end
 
 The postcondition on `find_by_id` matters. It guarantees that the result is always one of five declared values — the four valid status strings or `NOT_FOUND` — and never an undefined or ambiguous return. This is the contract that makes `find_by_id` composable: callers can depend on the declared output without inspecting the implementation. When the implementation is later replaced by one that uses an index, the contract remains the same, and callers need not change.
 
----
 
 ## Lists in the Three Systems
 
@@ -115,7 +108,6 @@ In the virtual world, the order in which entities are updated each tick is a nat
 
 In all three cases, the list earns its place by providing order. In all three cases, the question of whether another structure is also needed — for keyed lookup, for membership testing, for efficient modification — depends on what other operations the system must support. The list is the right answer to the ordering question. It may not be the complete answer to all questions.
 
----
 
 ## Three Ways List Usage Goes Wrong
 
@@ -125,7 +117,6 @@ In all three cases, the list earns its place by providing order. In all three ca
 
 **Silent duplicate identity.** A list that accepts any element at append time, without checking whether an element with the same identifier already exists, will accumulate duplicates if the calling code ever appends the same logical entity twice. Depending on how `find_by_id` is implemented, it will find the first match, the last match, or all matches — and different callers may have different assumptions about which they will receive. The remedy is to define a uniqueness policy for each collection and to enforce it at the point of insertion.
 
----
 
 ## Quick Exercise
 
@@ -133,7 +124,6 @@ Choose one collection in your system — a collection of tasks, documents, objec
 
 Then write one contract for the most frequent operation — a precondition that rejects invalid inputs and a postcondition that declares what valid output looks like. If the contract cannot be stated without reference to the implementation, the operation's interface is not yet well-defined.
 
----
 
 ## Takeaways
 
@@ -143,6 +133,5 @@ Then write one contract for the most frequent operation — a precondition that 
 - The cost of a linear scan is invisible at small scale and dominant at large scale. Recognizing which operations will become bottlenecks before they do is a design skill.
 - Contracts on collection operations make later structure changes safe: when the implementation changes, the contract remains, and callers do not need to change.
 
----
 
 *Chapter 16 introduces sets and maps — the structures that make membership testing and keyed lookup efficient. Where this chapter identified the cost of what lists cannot do, Chapter 16 introduces the structures designed to do exactly those things.*

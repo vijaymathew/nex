@@ -1,10 +1,9 @@
-# Chapter 22: Finding the Best Path
+# Finding the Best Path
 
 Chapter 21 drew the line between reachability and path quality. Traversal answers whether a destination can be reached at all. Best-path algorithms answer a harder question: among all paths that reach the destination, which one is optimal?
 
 The word *optimal* has no meaning without a cost model. A path that minimizes the number of hops is not necessarily the path that minimizes travel time, and neither is necessarily the path that minimizes risk or energy consumption. Different objectives require different algorithms, and an algorithm that is correct under one cost model may produce wrong answers under another. This is the central discipline of best-path design: the cost model must be declared before the algorithm is chosen, because the algorithm's correctness guarantees are relative to the cost model, not absolute.
 
----
 
 ## The Cost Model
 
@@ -14,7 +13,6 @@ The choice of combination function has consequences for which algorithms apply. 
 
 If edge costs can be negative, a different algorithm is required. If edge costs are all equal — if the graph is unweighted — breadth-first search from Chapter 21 finds the minimum-hop path more efficiently than Dijkstra. The algorithm choice follows from the cost model, and the cost model must be determined first.
 
----
 
 ## Priority-Driven Frontier Management
 
@@ -30,7 +28,6 @@ Three design questions arise from this structure.
 
 **When is a node finalized?** Under Dijkstra's algorithm with non-negative edge costs, a node is finalized the first time it is removed from the frontier. Its cost at that moment is the minimum possible cost from the source. This finalization rule is what allows the algorithm to terminate without exploring all possible paths; it relies on non-negativity to guarantee that no unprocessed path can improve on the finalized cost.
 
----
 
 ## Local Optimality Does Not Imply Global Optimality
 
@@ -40,7 +37,6 @@ Consider a graph where the cheapest edge from the source leads to a node with on
 
 The lesson generalizes: local cheapness is not global optimality. An algorithm that makes irrevocable local choices, without maintaining the possibility of backtracking to less-promising-looking paths, will fail on inputs where the globally optimal path requires temporarily accepting a locally suboptimal edge. The priority-driven frontier is precisely what prevents this: every discovered node remains a candidate until it is finalized, and finalization is deferred until no remaining path could improve on the current cost.
 
----
 
 ## From Requirement to Best-Path Design
 
@@ -58,7 +54,6 @@ Consider the requirement:
 
 **Step 5: Define a tie-break rule.** When two paths to the destination have equal total costs, the algorithm must return one of them consistently. The tie-break criterion — lexicographic order of node identifiers, the path that uses fewer edges, or any other stable criterion — must be declared so that the output is deterministic.
 
----
 
 ## A Best-Path Algorithm in Code
 
@@ -117,7 +112,6 @@ The body computes the costs of the three candidate paths — `A→D` directly, `
 
 `Path_Result`'s invariant `non_negative_cost` is a consequence of the precondition: if all edge costs are non-negative and path cost is the sum of edge costs, no valid path can have a negative total cost. The invariant makes this consequence explicit and checkable independently of the algorithm that produced the result.
 
----
 
 ## Best-Path in the Three Systems
 
@@ -129,7 +123,6 @@ In the virtual world, entity navigation through a weighted interaction space fin
 
 In all three systems, the path algorithm is a direct consequence of the cost model. The cost model is a direct consequence of the domain's definition of "best."
 
----
 
 ## Four Ways Best-Path Design Fails
 
@@ -141,7 +134,6 @@ In all three systems, the path algorithm is a direct consequence of the cost mod
 
 **Undefined unreachable semantics.** A path algorithm that returns an empty path, a zero-cost result, or a null when the destination is unreachable is indistinguishable, from the caller's perspective, from an algorithm that found an empty path that is the optimal path. The `UNREACHABLE` status must be a distinct, declared outcome. Every caller must handle it explicitly.
 
----
 
 ## Quick Exercise
 
@@ -149,7 +141,6 @@ Choose one routing problem in your system and define its best-path specification
 
 Then construct one adversarial input — a graph where a locally greedy choice produces a suboptimal global result — and verify that your chosen algorithm handles it correctly.
 
----
 
 ## Takeaways
 
@@ -159,6 +150,5 @@ Then construct one adversarial input — a graph where a locally greedy choice p
 - Edge validity must be checked during expansion, not just at the start. In dynamic environments, an edge that was valid when the search began may become invalid before it is reached.
 - Unreachability is a distinct outcome that must be declared explicitly. An empty path is not an unreachable status.
 
----
 
 *Part V has now covered the core algorithm families: search, sorting, traversal, and path optimization. Part VI applies these tools to the problems of system design at scale — where algorithms and data structures must be composed into architectures that are correct, efficient, and maintainable under real conditions.*

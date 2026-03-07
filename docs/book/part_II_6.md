@@ -1,6 +1,4 @@
-# Part II: Modeling the World
-
-# Chapter 6: Why Software Needs Models
+# Why Software Needs Models
 
 Part I taught us to write better problem statements. Given a system to build, we can now describe its inputs, its required behavior, and its constraints with enough precision that implementation can begin. That is genuine progress.
 
@@ -10,7 +8,6 @@ Teams that move directly from specification to code — even from a good specifi
 
 The missing layer is a **model**.
 
----
 
 ## What a Model Is
 
@@ -28,7 +25,6 @@ A model prevents this by forcing structure to become explicit before implementat
 
 When the middle layer is weak or absent, the other two layers drift apart. The specification describes a system that the code does not quite implement. The relationship can be found only by reading the code very carefully — if it can be found at all.
 
----
 
 ## The Same Structure in Three Domains
 
@@ -42,7 +38,6 @@ Our three running systems look very different on the surface. Modeling them reve
 
 The domains differ. The modeling move is the same: name stable structure before writing algorithms over it.
 
----
 
 ## From Ambiguous Requirement to Model
 
@@ -71,7 +66,6 @@ This is still small. It is already more useful than the original sentence.
 
 **Step 5: Delay algorithm commitment.** At this stage, do not choose between BFS, Dijkstra, A*, or any other pathfinding strategy. The right algorithm depends on access patterns and performance requirements that the model has not yet fully revealed. Choosing early is choosing blind.
 
----
 
 ## A Model in Code
 
@@ -114,7 +108,6 @@ end
 
 This sketch is intentionally small. What it does is more important than what it omits: it defines state explicitly, expresses behavior in terms of that state, and encodes guarantees as verifiable contracts. The pathfinding algorithm is not here yet. It can be added later, in any form, without disturbing the model. The same approach applies to the knowledge engine and the virtual world: model first, optimize second.
 
----
 
 ## Five Ways Modeling Goes Wrong
 
@@ -130,7 +123,6 @@ Knowing the pattern does not prevent all mistakes. The following five failures a
 
 **Treating the model as documentation only.** The symptom is diagrams that exist and code that disagrees with them. A model that lives only in a design document is not enforced by anything. The recovery is to encode model assumptions in types, contracts, and tests — and to keep them synchronized with the implementation.
 
----
 
 ## Quick Exercise
 
@@ -145,7 +137,6 @@ Then ask two questions about your current implementation of that system: which p
 
 The gap between those two answers is where reliability work should start.
 
----
 
 ## Takeaways
 
@@ -155,6 +146,5 @@ The gap between those two answers is where reliability work should start.
 - Most failures at scale are model failures before they are code failures.
 - A model that exists only in documentation is not enforced. Encode model assumptions in types, contracts, and tests.
 
----
 
 *Chapter 7 develops the first modeling primitive in depth: entities. We will distinguish identity from state, assign responsibilities, and choose representations that remain stable as the system grows.*

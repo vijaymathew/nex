@@ -1,10 +1,9 @@
-# Chapter 24: Functional Thinking
+# Functional Thinking
 
 Chapter 23 established that component boundaries determine where responsibilities live and how changes propagate. This chapter examines a complementary question: within those boundaries, how should behavior be structured so that it is easy to reason about, easy to test, and resistant to a specific class of errors that boundary design alone cannot prevent?
 
 The answer is functional thinking — the practice of representing logic as explicit transformations over data, with no hidden state and no side effects. This is not a requirement to work in a functional programming language or to eliminate all mutable state from a system. It is a discipline of design: separate the code that computes from the code that acts, and keep the computing parts testable in isolation.
 
----
 
 ## Pure Functions and Why They Matter
 
@@ -14,7 +13,6 @@ The value of this testability is not merely convenience. It is a form of correct
 
 The parallel with the contract discipline from earlier chapters is direct. A contract specifies what a function requires (preconditions) and what it guarantees (postconditions). A pure function's contract is especially strong: the postcondition holds for every call with inputs satisfying the precondition, regardless of execution context. An impure function's contract may be technically correct and practically unreliable if the hidden state it depends on is not in the expected configuration.
 
----
 
 ## The Pure Core, Effectful Shell
 
@@ -26,7 +24,6 @@ The **effectful shell** contains the operations that interact with the outside w
 
 The benefit of this split is not architectural elegance. It is that the system's most important behavior — the ranking, the routing, the state transitions — lives in a layer that is testable without infrastructure, reproducible across environments, and understandable without knowing the deployment context. Infrastructure changes — a new database, a different message queue, a revised logging format — require changing the shell. They do not require touching the core.
 
----
 
 ## Composition of Pure Functions
 
@@ -48,7 +45,6 @@ A functional decomposition separates the pipeline into stages:
 
 Stages one through four are pure. Each can be tested in isolation: `tokenize` can be verified to produce consistent normalized output, `score` can be verified to return non-negative results with the correct relative ordering, `sort_by_score` can be verified against the sort invariant from Chapter 20. Stage five is effectful, but it is also thin: it receives the computed result and delivers it. When stage five fails, the failure is in delivery. When stages one through four produce wrong results, the failure is in computation. The separation makes diagnosis local.
 
----
 
 ## A Functional Design in Code
 
@@ -107,7 +103,6 @@ end
 
 The postcondition on `pick_top` — `result = doc1 or result = doc2 or result = doc3` — is the contract a caller depends on. Whatever the scoring logic produces, the result is always one of the three input documents. This guarantee holds independently of the scoring values and independently of any external state. It is the kind of guarantee that is only possible for a pure function: a function that depends on hidden state cannot make unconditional guarantees about its output.
 
----
 
 ## Functional Thinking in the Three Systems
 
@@ -119,7 +114,6 @@ In the virtual world, the next-state computation — given the current state of 
 
 In all three systems, the pure core is the locus of correctness and the effectful shell is the locus of integration. Keeping them separate makes both easier to reason about and easier to test.
 
----
 
 ## Three Ways Functional Thinking Goes Wrong
 
@@ -129,7 +123,6 @@ In all three systems, the pure core is the locus of correctness and the effectfu
 
 **Dogmatic purity in the wrong places.** Some operations are inherently effectful, and structuring them as pure functions requires contortions that reduce clarity without improving testability. Logging is inherently effectful. Rendering is inherently effectful. Forcing these into a pure functional style — by threading state through every function or returning effect descriptions rather than performing effects — produces code that is harder to read and harder to modify than a pragmatic effectful implementation would be. The discipline is to apply functional thinking where it provides leverage — in the domain logic, the ranking, the route computation, the state transitions — and to use straightforward effectful code where effects are unavoidable and the goal is clarity.
 
----
 
 ## Quick Exercise
 
@@ -137,7 +130,6 @@ Choose one feature in your system that currently mixes computation and effects �
 
 Write one contract for each part. Then run tests for the two pure functions without any external systems — no databases, no network calls, no file writes. If the tests require external systems, the boundary between pure and effectful has not been fully established.
 
----
 
 ## Takeaways
 
@@ -147,6 +139,5 @@ Write one contract for each part. Then run tests for the two pure functions with
 - Functional decomposition should follow semantic boundaries, not minimize function size. Stages with independent meaning — tokenization, scoring, sorting — are the right unit of decomposition.
 - Pragmatic purity beats dogmatic purity. Apply functional thinking where it provides the most leverage: in the domain logic that determines what the system does. Use straightforward effectful code where effects are unavoidable and clarity matters more than purism.
 
----
 
 *Chapter 25 turns to object-oriented thinking — the complementary approach to organizing behavior around entities that own state and expose operations through defined interfaces. Where functional thinking decomposes computation into transformations, object-oriented thinking decomposes a system into collaborating agents, each responsible for its own state and behavior.*

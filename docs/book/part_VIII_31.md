@@ -1,12 +1,9 @@
-# Part VIII: Systems That Grow
-
-# Chapter 31: Managing Complexity
+# Managing Complexity
 
 Part VII gave us the tools to make software trustworthy: contracts that make assumptions explicit, invariants that enforce object-level consistency, tests that provide evidence, and debugging that addresses causes. A system built with these tools is more reliable than one built without them. But reliability at a moment in time is not the same as reliability over time. As requirements grow, as teams expand, as integrations multiply, a system faces a different class of challenge — not whether the current behavior is correct, but whether the system can be understood and changed without destroying what is already correct.
 
 This is the challenge of complexity, and it requires a different kind of engineering discipline.
 
----
 
 ## What Complexity Actually Costs
 
@@ -18,7 +15,6 @@ Every system has something like a complexity budget. The budget is not a fixed q
 
 Managing complexity is not a refactoring task that can be deferred until convenient. It is an ongoing engineering practice — the accumulation of structural decisions that determine whether a system's complexity stays within its budget as it grows.
 
----
 
 ## Layered Reasoning
 
@@ -36,7 +32,6 @@ The rule that makes this structure useful is the direction of dependency: all de
 
 When this rule is violated — when the domain layer imports an infrastructure detail, or when the application layer reaches directly into storage implementation — the benefit of layering disappears. The layers exist as a naming convention but not as a reasoning boundary.
 
----
 
 ## From Requirement to Layered Design
 
@@ -50,7 +45,6 @@ With layered structure, the eligibility decision belongs in the domain layer. It
 
 When the eligibility rules change, the domain layer changes. The application layer changes only if the workflow structure changes. The infrastructure layer does not change. The impact of the requirement change is contained to the layer that owns the relevant concern.
 
----
 
 ## A Layered Design in Code
 
@@ -102,7 +96,6 @@ end
 
 The invariant on `Task` — `valid_tier: tier = "STANDARD" or tier = "PREMIUM"` — is a domain constraint. It asserts that the tier field always holds one of the two declared values. When a new tier is introduced, this invariant must be updated, which forces the developer to consider every piece of code that depends on the tier field being one of the current values. The invariant is a change-impact prompt as well as a correctness check.
 
----
 
 ## Complexity in the Three Systems
 
@@ -114,7 +107,6 @@ In the virtual world, the rules that govern entity transitions and interaction o
 
 In all three systems, the complexity problems are the same in form: a decision that should be localized to one layer has been implemented in another, and the two concerns are tangled enough that neither can change without involving the other.
 
----
 
 ## Three Ways Complexity Management Fails
 
@@ -124,7 +116,6 @@ In all three systems, the complexity problems are the same in form: a decision t
 
 **Cyclic dependencies.** When module A depends on module B and module B depends on module A, neither can be changed, compiled, or deployed without the other. The cycle is an architectural symptom: the two modules have not been separated at a semantically coherent boundary, and the dependency structure reflects tangled responsibilities rather than intentional design. The remedy is to extract an interface or shared abstraction that both modules depend on, breaking the cycle by introducing a dependency that points in one direction only.
 
----
 
 ## Quick Exercise
 
@@ -132,7 +123,6 @@ Choose one subsystem in your system and map its current module structure with fo
 
 For each module, ask: does this module's behavior need to change when domain rules change, when the orchestration workflow changes, or when the infrastructure implementation changes? A module that would need to change for all three reasons is a module whose responsibilities span more than one layer.
 
----
 
 ## Takeaways
 
@@ -142,6 +132,5 @@ For each module, ask: does this module's behavior need to change when domain rul
 - Dependencies must flow inward. A domain layer that imports infrastructure, or an application layer that bypasses the domain, destroys the separation that makes layering useful.
 - The three failure modes — layer bypasses, utility dumping grounds, and cyclic dependencies — all have the same root cause: responsibilities that were not assigned to a coherent layer before the code was written.
 
----
 
 *Chapter 32 examines how to design boundaries that absorb future change safely — the discipline of identifying the seams at which a system is most likely to change and structuring those seams so that changes on one side do not force changes on the other.*

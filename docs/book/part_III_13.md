@@ -1,4 +1,4 @@
-# Chapter 13: Thinking Recursively
+# Thinking Recursively
 
 Chapter 12 established that decomposition means dividing a problem into subproblems with clear interfaces and distinct responsibilities. Recursion is a special and important case of this principle: it applies when the subproblem has the same shape as the original problem, only smaller.
 
@@ -6,7 +6,6 @@ This is not a trick or an advanced technique reserved for difficult cases. It is
 
 The two are not always interchangeable in practice. A recursive algorithm that operates on deeply nested data may exhaust the call stack before it reaches a base case. A recursive algorithm that revisits already-explored nodes in a graph may run forever. Understanding recursion well means understanding not just how to write recursive algorithms, but when they are safe, when they are not, and what must be in place to make them reliable.
 
----
 
 ## The Shape of a Recursive Algorithm
 
@@ -18,7 +17,6 @@ The **recursive step** reduces the original problem to one or more smaller insta
 
 The relationship between these two components mirrors the structure of a proof by induction: the base case establishes correctness for the smallest input; the recursive step establishes that correctness for any input of size *n* follows from correctness for inputs smaller than *n*. An algorithm that satisfies both components is correct for all valid inputs. An algorithm that satisfies only one is not an algorithm — it is a procedure that works on some inputs by accident.
 
----
 
 ## When Recursion Fits
 
@@ -30,7 +28,6 @@ Iteration tends to be the more natural expression for linear workflows: processi
 
 Choosing recursion for a linear workflow, or iteration for a hierarchical one, produces code that works but does not communicate. The algorithm's structure and the problem's structure are misaligned, and a reader must work to find the correspondence that the code does not make visible.
 
----
 
 ## Graph Recursion and the Necessity of Bounds
 
@@ -44,7 +41,6 @@ In the virtual world, processing the containment hierarchy — zones contain reg
 
 In all three domains, recursion without bounds is unsafe. The pattern that makes graph recursion safe is always the same: maintain a set of visited nodes, check it before recursing, and update it before proceeding. Optionally, enforce a depth limit as a second line of defense against graphs that are technically acyclic but are too deep for the call stack to handle.
 
----
 
 ## From Requirement to Recursive Algorithm
 
@@ -64,7 +60,6 @@ The problem has a self-similar structure. A node is reachable from the start if 
 
 These four elements — base case, recursive step, progress metric, cycle guard — are the complete specification of the algorithm. The implementation follows directly from them.
 
----
 
 ## A Recursive Algorithm in Code
 
@@ -98,7 +93,6 @@ Read this sketch against the four elements above. The first branch of the condit
 
 The postcondition `result >= 0` is minimal but meaningful. A negative count is nonsensical, and guaranteeing non-negativity allows the caller to depend on this property rather than defensively check for it. As with the decomposed stages in Chapter 12, the contract at the boundary is what allows the piece to be composed with other pieces safely.
 
----
 
 ## Four Ways Recursive Algorithms Fail
 
@@ -110,7 +104,6 @@ The postcondition `result >= 0` is minimal but meaningful. A negative count is n
 
 **Recomputing identical subproblems.** Some recursive algorithms naturally decompose a problem into overlapping subproblems — the same subproblem arises from multiple different paths through the recursion. Without memoization, each instance is recomputed independently, and the total work grows exponentially in the number of overlapping subproblems. The signature of this failure is an algorithm that is correct on small inputs and runs for an unacceptable amount of time on larger ones. The remedy is to record the result of each subproblem the first time it is computed and return the recorded result on subsequent calls.
 
----
 
 ## Quick Exercise
 
@@ -118,7 +111,6 @@ Design one recursive routine for a problem in your system and specify it complet
 
 Then test it against three inputs: a trivial input that exercises only the base case, a normal input that exercises the recursive step, and an adversarial input that contains a cycle or approaches the depth bound. If the adversarial input produces unbounded behavior, the specification is incomplete. Revise it before writing the implementation.
 
----
 
 ## Takeaways
 
@@ -128,6 +120,5 @@ Then test it against three inputs: a trivial input that exercises only the base 
 - Overlapping subproblems require memoization. An algorithm that recomputes the same subproblem repeatedly is correct but not acceptable; recognizing the overlap is the first step toward fixing it.
 - The four elements of a safe recursive design — base case, recursive step, progress metric, cycle guard — are a complete specification. The implementation follows from them directly.
 
----
 
 *Chapter 14 shifts from the correctness of algorithms to their cost. A correct algorithm that is too slow for its inputs is not a usable algorithm. Understanding how algorithmic cost grows with input size is what makes it possible to choose between correct alternatives — and to predict, before deployment, whether an algorithm will hold up under real conditions.*

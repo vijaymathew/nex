@@ -1,4 +1,4 @@
-# Chapter 16: Sets and Maps
+# Sets and Maps
 
 Chapter 15 arrived at a tension: lists preserve order well but answer keyed questions poorly, and the dominant operations in many real systems are keyed. This chapter introduces the two structures designed to resolve that tension.
 
@@ -6,7 +6,6 @@ A **set** is a collection with no duplicates that answers one question efficient
 
 Understanding when to use each, and how to design the keys they depend on, is what separates systems that scale from systems that degrade.
 
----
 
 ## The Question Each Structure Answers
 
@@ -18,7 +17,6 @@ A map answers: *given this key, what is the associated value?* Fetching a delive
 
 If the dominant operation on a collection is a membership question and the structure is a list, the cost is avoidable. If the dominant operation is keyed retrieval and the structure is a list, the cost is equally avoidable. The structures that avoid it exist precisely because these two questions are asked frequently enough in real systems to justify structures organized around answering them efficiently.
 
----
 
 ## Key Design Is a Correctness Decision
 
@@ -32,7 +30,6 @@ A good key has three properties.
 
 **Cheapness.** A key that is expensive to compute or compare is a key that makes every lookup expensive. A short, fixed-length identifier is cheaper to compare than a long variable-length string; a numeric identifier is cheaper than either. This is a performance consideration rather than a correctness one, but it compounds: in a system that performs millions of lookups per second, the cost of key comparison accumulates.
 
----
 
 ## Combining Structures for Different Operations
 
@@ -50,7 +47,6 @@ This hybrid pattern — an ordered sequence for presentation, a map for identity
 
 The hybrid works only if there is one authoritative write path that keeps the structures synchronized. A system that updates the map without updating the sequence, or updates the sequence without updating the map, will produce inconsistencies that are difficult to diagnose because the failure appears at read time, far from where the write error occurred.
 
----
 
 ## A Map in Code
 
@@ -107,7 +103,6 @@ The explicit `"NOT_FOUND"` return is not defensive programming — it is part of
 
 The precondition on both operations — `doc_id /= ""` — rejects the empty string as a key. An empty string is not a stable, unique identifier; it is the absence of a value masquerading as one. Rejecting it at the boundary prevents a class of errors that would otherwise produce confusing behavior deep in the lookup logic.
 
----
 
 ## Sets and Maps in the Three Systems
 
@@ -121,7 +116,6 @@ In the virtual world, a set of active entity identifiers tracks which entities a
 
 In every case, the set and the map are not replacements for the list that holds the ordered collection — they are complements to it, each handling the operation the list cannot.
 
----
 
 ## Four Ways Set and Map Usage Goes Wrong
 
@@ -133,7 +127,6 @@ In every case, the set and the map are not replacements for the list that holds 
 
 **Treating a missing key as impossible.** An operation that assumes a key will always be present, and crashes or returns a meaningless default when it is not, has made an assumption that the domain does not guarantee. Keys are absent for legitimate reasons: a task has been completed and removed, a document has not yet been indexed, an entity has been destroyed. The correct response to a missing key is a declared behavior — an explicit miss result, an error status, an optional return type — that the caller can depend on. A crash is not a declared behavior.
 
----
 
 ## Quick Exercise
 
@@ -141,7 +134,6 @@ Identify one place in your system where a collection is currently searched by a 
 
 Then compare the asymptotic cost of the original scan with the cost of the direct access operation. If the collection is currently small, estimate the input size at which the difference would first become visible in latency measurements.
 
----
 
 ## Takeaways
 
@@ -151,6 +143,5 @@ Then compare the asymptotic cost of the original scan with the cost of the direc
 - Order and direct access are different properties that often require different structures. The hybrid of an ordered sequence with a map for keyed access is the normal pattern for collections that must support both.
 - A missing key is a legitimate outcome. Declaring a distinct miss behavior in the operation's contract is what makes the operation usable without forcing the caller to inspect its implementation.
 
----
 
 *Chapter 17 introduces trees — structures that organize data hierarchically and make ordered search efficient. Where sets and maps provide direct access by key, trees provide something different: efficient navigation through data that has natural structure, and efficient answers to range queries that neither lists nor maps can serve well.*

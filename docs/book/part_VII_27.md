@@ -1,6 +1,4 @@
-# Part VII: Making Software Trustworthy
-
-# Chapter 27: Preconditions and Postconditions
+# Preconditions and Postconditions
 
 Parts I through VI gave us the tools to build software that is correct by design: clear problem statements, explicit models, well-chosen algorithms, organized data structures, and components with stable interfaces. Part VII asks a harder question. Given software that was built with care, how do we make its behavior dependable as it changes — as requirements evolve, as new developers join the team, as algorithms are replaced and data models are extended? The answer is to make the software's assumptions explicit and verifiable at every boundary where those assumptions matter.
 
@@ -8,7 +6,6 @@ Every routine in a system makes two kinds of implicit commitments. It assumes ce
 
 A precondition is the formal statement of an assumption: what must be true of the inputs and the current state before this routine may be called. A postcondition is the formal statement of a promise: what will be true of the outputs and the resulting state when this routine returns, given that the precondition was satisfied.
 
----
 
 ## Preconditions: Caller Obligations
 
@@ -24,7 +21,6 @@ What belongs in a precondition? Three categories cover most cases.
 
 **Relationship constraints.** Some operations require that two or more inputs stand in a certain relationship — that a start location and a destination both exist in the same graph, that an update refers to an entity that has been previously registered. When these relationships are required, stating them as preconditions makes the requirement visible and checkable.
 
----
 
 ## Postconditions: Routine Guarantees
 
@@ -40,7 +36,6 @@ Three categories cover most postconditions.
 
 **Derivable consequences.** Some postconditions follow from the combination of the precondition and the routine's action. If a precondition requires non-negative edge costs and the routine computes a sum of edge costs, the postcondition can assert that the result is non-negative — not because the routine checks it explicitly, but because it follows from the combination of the precondition and the computation. Stating derivable consequences explicitly makes them checkable and makes the chain of reasoning visible.
 
----
 
 ## From Requirement to Contract
 
@@ -56,7 +51,6 @@ Consider the requirement:
 
 **Step 4: Verify the contract is complete.** A contract is complete when the precondition and postcondition together fully specify the routine's behavior for all valid inputs. A contract with a precondition that permits inputs the postcondition cannot deliver is incomplete. A contract with a postcondition that leaves the new state underspecified is incomplete. Completeness is the test.
 
----
 
 ## A Contract in Code
 
@@ -96,7 +90,6 @@ The three preconditions address different responsibilities. `task_id_present` is
 
 The postcondition closes the loop: every claim made in the `do` block has a corresponding assertion in the `ensure` block. The assignment is checked, the status is checked, the result is checked. A future refactor that modifies the `do` block must satisfy all three assertions, which means the postcondition is both documentation and test specification.
 
----
 
 ## Contracts in the Three Systems
 
@@ -108,7 +101,6 @@ In the virtual world, the state update operation for each tick has a preconditio
 
 In all three systems, contracts turn the informal expectations that developers carry in their heads — "this must be non-empty," "this transition is only legal from PENDING" — into executable statements that are checked automatically and fail close to their source.
 
----
 
 ## Three Ways Contract Design Fails
 
@@ -118,7 +110,6 @@ In all three systems, contracts turn the informal expectations that developers c
 
 **Contract drift between similar operations.** A codebase with many similar operations — multiple transition operations, multiple search operations, multiple update operations — will accumulate contracts that began as consistent and gradually diverged through independent modifications. One transition requires non-empty task id; another was written later and omits it. One search guarantees `NOT_FOUND` on miss; another returns an empty string. The inconsistency is invisible until a caller that works correctly with one operation fails with another. The remedy is to review contracts across similar operations periodically and to establish conventions — all transitions require non-empty identifiers, all searches declare an explicit miss status — that future contracts are written to match.
 
----
 
 ## Quick Exercise
 
@@ -126,7 +117,6 @@ Choose one routine in your system — one that is called from multiple places an
 
 Then verify that the postconditions still hold after one plausible refactor of the routine body. If a refactor that improves the implementation without changing the observable behavior would break a postcondition, the postcondition is specifying implementation rather than guarantees.
 
----
 
 ## Takeaways
 
@@ -136,6 +126,5 @@ Then verify that the postconditions still hold after one plausible refactor of t
 - A contract is complete when the precondition and postcondition together fully specify the routine's behavior for all valid inputs.
 - Contracts turn implicit assumptions into explicit, executable statements that fail close to their source when violated.
 
----
 
 *Chapter 28 extends the contract discipline from individual routines to entire objects. Where postconditions specify what is true after a single operation, invariants specify what is true at all times — before every call and after every return. Invariants are the class-level counterpart of postconditions, and they are what make it possible to reason about an object's state without reading every operation that might have modified it.*

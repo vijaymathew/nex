@@ -1,4 +1,4 @@
-# Chapter 7: Entities — The Things That Exist
+# Entities — The Things That Exist
 
 Chapter 6 established that a model is the necessary layer between specification and implementation. Now we build the first element of that model.
 
@@ -8,7 +8,6 @@ That definition sounds simple. It is one of the most consequential distinctions 
 
 The question that entity modeling forces us to answer is: **what are the actual things in this system that deserve an identity of their own?**
 
----
 
 ## Identity and State
 
@@ -28,7 +27,6 @@ Applied to our three systems, the separation looks like this:
 
 **Virtual world.** The entities are `WorldObject`, `Player`, and `InteractionRule`. An object's position changes every tick. Its identity does not.
 
----
 
 ## Responsibilities Belong to Entities
 
@@ -42,7 +40,6 @@ In concrete terms: `DeliveryTask` should validate its own status transitions —
 
 This is not about strict encapsulation as a stylistic preference. It is about making invariants enforceable rather than merely conventional.
 
----
 
 ## From Requirement to Entity Model
 
@@ -66,7 +63,6 @@ It mentions things — packages, status, presumably robots and locations — but
 
 At the end of this process, we have entity structure rather than feature prose. Implementation can begin with a clear target.
 
----
 
 ## An Entity in Code
 
@@ -110,7 +106,6 @@ Read this sketch against the six steps above. `task_id` is the identity key from
 
 The pathfinding logic, the ranking algorithm, the notification system — none of that appears here, because none of it belongs to this entity. The entity model and the algorithm are separate concerns. Keeping them separate is what makes both easier to change.
 
----
 
 ## Four Ways Entity Modeling Goes Wrong
 
@@ -122,7 +117,6 @@ The pathfinding logic, the ranking algorithm, the notification system — none o
 
 **Unchecked state transitions.** A delivered task that can become pending again through a misapplied patch is a symptom of transitions that exist only as informal agreements between developers. The recovery is to model transitions explicitly and to enforce them with contracts and tests — not because developers cannot be trusted, but because explicit enforcement scales and informal agreement does not.
 
----
 
 ## Quick Exercise
 
@@ -138,7 +132,6 @@ Then ask: which fields in your current implementation are being used as identity
 
 Those two gaps are where entity modeling work should begin.
 
----
 
 ## Takeaways
 
@@ -148,6 +141,5 @@ Those two gaps are where entity modeling work should begin.
 - Transitions and invariants are part of the entity model itself, not implementation details to be added later.
 - Strong entity models reduce friction at every downstream stage: algorithm design, testing, and refactoring.
 
----
 
 *Chapter 8 moves from things to connections. Entities alone are not enough — behavior emerges from the relationships between them.*

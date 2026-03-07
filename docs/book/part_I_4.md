@@ -1,10 +1,9 @@
-# Chapter 4: Edge Cases — Where Systems Break
+# Edge Cases — Where Systems Break
 
 In the previous chapter, we wrote a contract: a precise statement of what a system must do. In this chapter, we try to break it.
 
 This is not destructiveness for its own sake. Breaking a specification is the fastest way to find out whether it is complete. Every gap that an edge case exposes is a requirement that would otherwise be discovered in production — which is to say, discovered expensively.
 
----
 
 ## The Structure of a Failure
 
@@ -21,7 +20,6 @@ This pattern repeats across every system:
 
 The failure is not in the algorithm. It is in the **boundary of the algorithm's applicability** — the unstated preconditions that the algorithm relied upon but nobody wrote down.
 
----
 
 ## Boundaries
 
@@ -51,7 +49,6 @@ may process element `n`, which lies one step beyond the end of a zero-indexed ar
 
 Almost correct is a category of wrong.
 
----
 
 ## Thinking Like a Tester
 
@@ -75,7 +72,6 @@ Applied to our three systems, this mindset produces specific, answerable questio
 
 These questions may seem adversarial. They are. That is the point. The adversary is reality, and reality will ask every one of these questions eventually. Better to ask them now, in a design document, than later, in a crash report.
 
----
 
 ## Edge Cases Refine the Specification
 
@@ -95,7 +91,6 @@ Each question extends the specification. After answering them, we have a richer,
 
 This is the double value of edge analysis: it improves the design *and* makes the design testable.
 
----
 
 ## The Three-Category Inventory
 
@@ -109,7 +104,6 @@ When examining any feature or system, edge cases can be organized into three cat
 
 For the delivery robot: the empty map is an input edge; a building with ten thousand rooms is a size edge; a map update that arrives while a route is being computed is a state edge. Each category exposes a different class of assumption.
 
----
 
 ## Edge Cases as Design Instruments
 
@@ -123,7 +117,6 @@ Choosing between them forces a decision about the meaning of a route. That decis
 
 The edge case did not complicate the design. It completed it.
 
----
 
 ## Quick Exercise
 
@@ -137,7 +130,6 @@ For each category — input edges, size edges, state edges — identify at least
 
 If your specification handles every case you can identify without modification, push harder. In our experience, a specification that survives its first edge analysis without revision is one whose edges were not examined closely enough.
 
----
 
 ## Takeaways
 
@@ -147,6 +139,5 @@ If your specification handles every case you can identify without modification, 
 - Edge analysis refines the specification: every gap it exposes is a requirement that was always there, waiting to be written down.
 - Almost correct is a category of wrong.
 
----
 
 *Chapter 5 takes the next step: turning problem statements, examples, and edge analyses into formal specifications — requirements precise enough that two programmers, working independently, build the same system.*

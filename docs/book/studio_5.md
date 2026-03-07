@@ -9,7 +9,7 @@ Hardening the Studio 4 architecture for failure, recovery, and operational trust
 This studio chapter is hands-on: implement, verify behavior, and document tradeoffs as you iterate.
 :::
 
-## 1. The Situation
+## The Situation
 
 Studio 4 gave us clear architectural seams: ports, adapters, and services.
 
@@ -24,9 +24,8 @@ Current symptoms:
 
 Studio 5 is the logical continuation: keep Studio 4 architecture, add reliability guarantees around it.
 
----
 
-## 2. Engineering Brief
+## Engineering Brief
 
 Build reliability mechanisms on top of Studio 4 components without breaking behavior contracts.
 
@@ -45,9 +44,8 @@ Implementation guidance:
 - separate transient failures from permanent failures
 - make each retry policy explicit and testable
 
----
 
-## 3. Implementation In Nex
+## Implementation In Nex
 
 Suggested files:
 
@@ -59,7 +57,7 @@ Suggested files:
 
 If using the web IDE, place all classes in one file and run `App.run`.
 
-### 3.1 Shared Reliability Types
+### Shared Reliability Types
 
 ```nex
 class Op_Result
@@ -88,7 +86,7 @@ feature
 end
 ```
 
-### 3.2 Delivery Reliability: Retry + Idempotent Dispatch
+### Delivery Reliability: Retry + Idempotent Dispatch
 
 Continuation from Studio 4 `Delivery_Workflow` idea.
 
@@ -165,7 +163,7 @@ feature
 end
 ```
 
-### 3.3 Knowledge Reliability: Safe Query Fallback
+### Knowledge Reliability: Safe Query Fallback
 
 Continuation from Studio 4 query/validation services.
 
@@ -218,7 +216,7 @@ feature
 end
 ```
 
-### 3.4 World Reliability: Guarded Update + Recovery Status
+### World Reliability: Guarded Update + Recovery Status
 
 Continuation from Studio 4 world update service.
 
@@ -266,7 +264,7 @@ feature
 end
 ```
 
-### 3.5 Reliability Driver + Regression Checks
+### Reliability Driver + Regression Checks
 
 ```nex
 class App
@@ -332,9 +330,8 @@ Expected outcomes:
 - knowledge service degrades gracefully with fallback
 - world updates preserve invariants under extreme deltas
 
----
 
-## 4. Studio Challenges
+## Studio Challenges
 
 ### Level 1 — Single Reliability Mechanism
 
@@ -357,9 +354,8 @@ Expected outcomes:
 - patch through service boundary
 - add regression checks to prevent recurrence
 
----
 
-## 5. Postmortem
+## Postmortem
 
 Discuss with evidence:
 
@@ -368,7 +364,6 @@ Discuss with evidence:
 - Which fallback behavior is acceptable vs dangerous?
 - Which diagnostics made root-cause fastest?
 
----
 
 ## Deliverables
 
@@ -377,7 +372,6 @@ Discuss with evidence:
 - incident playbook with reproduction + fix + regression tests
 - release gate checklist for reliability sign-off
 
----
 
 ## Exit Criteria
 

@@ -9,7 +9,7 @@ Benchmarking competing algorithm choices under realistic workload shapes.
 Run controlled experiments, collect evidence, and compare algorithm choices under explicit assumptions.
 :::
 
-## 1. Why This Lab Exists
+## Why This Lab Exists
 
 The first algorithm lab built intuition that different strategies behave differently.
 
@@ -21,9 +21,8 @@ The goal is to answer engineering questions with evidence:
 - Where does each algorithm break down?
 - Which assumptions must hold for the chosen strategy?
 
----
 
-## 2. Lab Objectives
+## Lab Objectives
 
 By the end of this lab, you should be able to:
 
@@ -32,9 +31,8 @@ By the end of this lab, you should be able to:
 - separate asymptotic reasoning from measured behavior
 - justify a strategy choice with explicit tradeoffs
 
----
 
-## 3. Competition Setup
+## Competition Setup
 
 Use one concrete problem:
 
@@ -51,9 +49,8 @@ Why this setup works:
 - same success/failure contract
 - different quality/cost behavior
 
----
 
-## 4. Nex Implementation
+## Nex Implementation
 
 Suggested files:
 
@@ -62,7 +59,7 @@ Suggested files:
 
 If using the web IDE, place everything in one file and run `App.run`.
 
-### 4.1 Shared Result Type
+### Shared Result Type
 
 ```nex
 class Path_Run_Result
@@ -80,7 +77,7 @@ invariant
 end
 ```
 
-### 4.2 Graph Fixture
+### Graph Fixture
 
 ```nex
 class Graph_Fixture
@@ -109,7 +106,7 @@ feature
 end
 ```
 
-### 4.3 DFS-Style Competitor
+### DFS-Style Competitor
 
 ```nex
 class DFS_Competitor
@@ -143,7 +140,7 @@ feature
 end
 ```
 
-### 4.4 BFS-Style Competitor
+### BFS-Style Competitor
 
 ```nex
 class BFS_Competitor
@@ -177,7 +174,7 @@ feature
 end
 ```
 
-### 4.5 Driver: Run Competitions
+### Driver: Run Competitions
 
 ```nex
 class App
@@ -212,9 +209,8 @@ Expected observations:
 - BFS-style competitor returns shorter route in default fixture
 - DFS-style competitor can return longer-but-valid route depending on branch order
 
----
 
-## 5. Lab Tasks
+## Lab Tasks
 
 ### Task A — Nominal Competition
 
@@ -241,9 +237,8 @@ Introduce an explicit depth cap and evaluate:
 - when DFS fails due to depth bound
 - when BFS frontier growth becomes expensive
 
----
 
-## 6. Decision Template
+## Decision Template
 
 Use this template for final strategy choice:
 
@@ -253,18 +248,16 @@ Use this template for final strategy choice:
 4. preferred algorithm and why
 5. fallback strategy under stress
 
----
 
-## 7. Deliverables
+## Deliverables
 
 - runnable Nex code for both competitors
 - experiment table across at least 3 graph variants
 - one-page decision note with selected strategy
 - explicit list of assumptions that must remain true
 
----
 
-## 8. Forward Link
+## Forward Link
 
 This lab closes Part V by turning algorithm choice into measurable engineering practice.
 

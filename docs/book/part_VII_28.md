@@ -1,10 +1,9 @@
-# Chapter 28: Invariants — Rules That Must Never Break
+# Invariants — Rules That Must Never Break
 
 Chapter 27 introduced contracts at the level of individual operations: preconditions that state what must be true before a routine is called, and postconditions that state what will be true when it returns. These are powerful tools for reasoning about individual calls. They do not, by themselves, answer a broader question: what is always true about an object, regardless of which sequence of operations has been applied to it, and regardless of what state it was in before any particular call?
 
 This is the question invariants answer. An invariant is a property that holds for every observable state of an object — after construction, before every operation call, and after every operation return. It is not a claim about one call or one transition; it is a claim about the object's entire lifetime. Where a postcondition says "after this operation, the status is `IN_TRANSIT`," an invariant says "at all times, the status is one of four declared values." The postcondition is a consequence of a specific operation; the invariant is a constraint on the entire state space.
 
----
 
 ## What an Invariant Is
 
@@ -14,7 +13,6 @@ An invariant is what prevents invalid states from being created. It is a constra
 
 The relationship between invariants and contracts is additive: invariants operate at the class level, contracts operate at the operation level, and together they provide complementary coverage. A contract without an invariant can ensure that each operation leaves the object in a correct state given the state it was in on entry, but cannot prevent the object from being constructed in an invalid state. An invariant without contracts can ensure the object's state is always valid but cannot specify the relationship between inputs and outputs for any particular operation. Both are necessary.
 
----
 
 ## Three Categories of Invariant
 
@@ -26,7 +24,6 @@ Invariants fall into three categories, corresponding to different levels of the 
 
 **Range and bound invariants** constrain fields to stay within operational limits. A position must remain between zero and the world's maximum extent. A score must remain non-negative. A collection must not exceed its defined capacity. These invariants are particularly important for systems where values are computed dynamically — where positions are updated by velocity, scores are computed by summing term weights, priorities are modified by rules — because the computation may produce values outside the valid range without the error being visible at the computation site.
 
----
 
 ## Invariants and Transitions
 
@@ -38,7 +35,6 @@ An invariant that is too strict forbids states that are legitimately intermediat
 
 The principle is: invariants should constrain the outcomes of transitions, not the inputs to them. Inputs to transitions belong in preconditions. The states that are permanently forbidden belong in invariants.
 
----
 
 ## From Requirement to Invariant Design
 
@@ -52,7 +48,6 @@ Consider the requirement:
 
 **Step 3: Confirm that every operation preserves the invariant.** For `World_Object`, the only operation that modifies position is `step`. The postcondition on `step` asserts `x >= 0 and x <= max_x`. Since this assertion matches the invariant's spatial constraint, any execution of `step` that satisfies its postcondition will leave the invariant intact. The two assertions reinforce each other: the postcondition ensures the specific operation preserves the invariant, and the invariant ensures no other operation — including direct field assignment — can violate the constraint.
 
----
 
 ## An Invariant in Code
 
@@ -91,7 +86,6 @@ The interaction between the invariant and the postcondition on `step` is the cen
 
 The precondition on `step` — `max_valid: max_x >= 0` — might look redundant given the class invariant `max_non_negative`. It is not redundant for the same reason the `task_id_present` precondition in Chapter 27 was not redundant: the invariant guarantees the condition for any correctly constructed object; the precondition is a defensive assertion that makes the assumption visible in the operation's own contract. As the class evolves and `step` is read in isolation, the precondition communicates the operation's requirements without requiring the reader to consult the class invariant.
 
----
 
 ## Invariants in the Three Systems
 
@@ -103,7 +97,6 @@ In the virtual world, every `WorldObject` carries a spatial invariant: position 
 
 In all three systems, invariants are not defensive checks added to make buggy code safer. They are assertions about the system's design: states that the model never intends to permit, properties that every correct operation must preserve, constraints that exist because the system's reasoning depends on them.
 
----
 
 ## Three Ways Invariant Design Fails
 
@@ -113,7 +106,6 @@ In all three systems, invariants are not defensive checks added to make buggy co
 
 **Duplicate rule definitions that drift apart.** When the same constraint appears in both a class invariant and the postconditions of multiple operations, the two definitions may diverge over time. One operation's postcondition is updated to reflect a new understanding of the constraint; the invariant is not. Another operation is added with a postcondition that was written to match the updated understanding; the old operations are not updated. The invariant and the operations now describe different constraints, and the system enforces whichever one the checker happens to evaluate. The remedy is to treat the class invariant as the single authoritative statement of each constraint and to write postconditions that reference or derive from the invariant rather than restating it independently.
 
----
 
 ## Quick Exercise
 
@@ -121,7 +113,6 @@ Choose one class in your system and define its complete invariant with three par
 
 Then write one test that calls the potentially violating operation with inputs designed to produce a boundary case and verifies that the invariants hold afterward. If the test requires reading the implementation to write, the invariants are not yet strong enough to specify the boundary independently.
 
----
 
 ## Takeaways
 
@@ -131,6 +122,5 @@ Then write one test that calls the potentially violating operation with inputs d
 - Invariants should constrain the outcomes of transitions, not their inputs. Transition inputs belong in preconditions; permanently forbidden states belong in invariants.
 - Duplicate rule definitions drift apart. The class invariant is the authoritative statement of each constraint; operation postconditions should derive from it, not independently restate it.
 
----
 
 *Chapter 29 examines how testing extends the guarantees established by contracts and invariants. Where contracts specify what must be true, tests provide evidence that the specifications have been met — and they do so by exploring behavior across the full range of inputs, not just the ones the developer thought of first.*

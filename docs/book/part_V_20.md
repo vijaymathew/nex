@@ -1,10 +1,9 @@
-# Chapter 20: Sorting the World
+# Sorting the World
 
 Chapter 19 showed that search strategy depends on how data is organized. Sorting is often what creates that organization. A sorted collection is not just a collection in a particular display order — it is a collection with a structure that algorithms can exploit. Binary search requires sorted input. Efficient merging of two result sets requires sorted input. Detecting duplicates in a large collection becomes a linear scan through sorted data rather than a quadratic comparison of every pair. In each case, sorting is not the end of the computation but the preparation that makes efficient computation possible downstream.
 
 The distinction matters because it changes how we think about sorting's cost. The upfront cost of sorting a collection is not paid for the sort itself — it is paid for every subsequent operation that benefits from the ordered structure. When that structure is used many times, the upfront cost is amortized across all those uses. When it is used once or not at all, the sort was unnecessary work.
 
----
 
 ## What Sorting Guarantees
 
@@ -16,7 +15,6 @@ A sort operation, like any algorithm, is defined by its contract rather than by 
 
 **The output invariant.** The output of a sort is a permutation of the input in which no element appears out of order under the comparison rule. This sounds obvious, but stating it explicitly as an invariant has practical value: it is a property that tests can verify mechanically, and it is the property that callers depend on when they use the sorted output to perform binary search, merge, or any other operation that requires sorted input.
 
----
 
 ## Stability as a Correctness Requirement
 
@@ -28,7 +26,6 @@ The same situation arises in the knowledge engine. Search results with equal rel
 
 The principle is this: when the order of equivalent elements matters to any caller, stability is part of the sort's contract. When no caller cares about the order of equivalent elements, stability is not required. Both conclusions must come from examining what callers actually need, not from an assumption that equal elements are interchangeable.
 
----
 
 ## Sort Strategy and Its Constraints
 
@@ -42,7 +39,6 @@ A **comparison-based sort** derives element order entirely from pairwise compari
 
 The practical advice for most systems is to use the standard library's sort — which is typically an optimized hybrid that handles the common cases well — unless domain constraints require custom behavior. The cases that require custom sorting are those where the comparison rule is non-standard, where stability matters in a way the library does not guarantee, or where the data has known structure (such as near-sortedness) that a specialized algorithm can exploit.
 
----
 
 ## From Requirement to Sort Design
 
@@ -60,7 +56,6 @@ Consider the requirement:
 
 **Step 5: Define the scale transition.** When the task collection grows large enough that the sort's cost appears in latency measurements, the baseline sort should be replaced by an optimized stable sort — most likely the standard library's stable sort. The output contract does not change; only the implementation does.
 
----
 
 ## A Sort Operation in Code
 
@@ -117,7 +112,6 @@ end
 
 The three-swap comparison network is a sorting network for exactly three elements: it correctly sorts any combination of three values using exactly three comparisons. It is not a general sorting algorithm — it does not scale beyond three elements — but for a teaching sketch of fixed size it has the virtue of making every comparison explicit. A reader can trace the execution for any input and verify that the output is correctly ordered. That traceability is what makes it useful here.
 
----
 
 ## Sorting in the Three Systems
 
@@ -129,7 +123,6 @@ In the virtual world, entities must be processed in a deterministic order each t
 
 In all three systems, sorting sits between raw data and high-value operations. The sort's cost is paid once; the benefits of structured output are collected by every operation that follows.
 
----
 
 ## Three Ways Sorting Goes Wrong
 
@@ -139,7 +132,6 @@ In all three systems, sorting sits between raw data and high-value operations. T
 
 **Re-sorting too frequently.** A full sort of a large collection is an O(N log N) operation. Performing it in a hot loop — once per incoming event, once per request, once per tick — when the collection changes only occasionally is work that compounds quickly. The alternatives are to maintain a sorted order incrementally, inserting new elements in sorted position rather than re-sorting the full collection; to batch updates and sort once per batch; or to use a data structure that maintains order intrinsically. The choice depends on the relative frequency of insertions and reads.
 
----
 
 ## Quick Exercise
 
@@ -147,7 +139,6 @@ Choose one ordered output in your system and define its sort contract completely
 
 Then write one test case using two elements with equal primary keys that verifies the tie-break behavior. If the test cannot be written without knowing the implementation, the tie-break rule is not yet explicit enough to be part of the contract.
 
----
 
 ## Takeaways
 
@@ -157,6 +148,5 @@ Then write one test case using two elements with equal primary keys that verifie
 - The right sort strategy is determined by collection size, stability requirements, memory constraints, and whether the input has known structure. Defaulting to the standard library's sort is appropriate for most cases.
 - Re-sorting a large collection more often than it changes is avoidable cost. Define the sort frequency alongside the sort strategy.
 
----
 
 *Chapter 21 turns from sorting data to traversing structures — the algorithms that systematically visit every node in a tree or graph. Traversal is the basis for search, analysis, and transformation of structured data, and the order in which nodes are visited determines what the traversal can compute.*

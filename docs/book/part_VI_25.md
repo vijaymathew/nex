@@ -1,10 +1,9 @@
-# Chapter 25: Object-Oriented Thinking
+# Object-Oriented Thinking
 
 Chapter 24 showed that functional thinking organizes a system as a pipeline of transformations: data flows in, computations happen, results flow out, effects are confined to the edges. This model is powerful for systems where the dominant question is *what should be computed?* But many systems also have to answer a different kind of question: *who is responsible for maintaining this constraint?* When a delivery task transitions to a delivered state, something must ensure that it cannot transition back to pending. When a robot is assigned to a task, something must ensure that the robot existed when the assignment was made. When two world objects interact, something must ensure that the interaction rules for their types are consulted.
 
 These are questions about ownership and responsibility, and they are the domain where object-oriented thinking provides its clearest value. Not the value of classes and inheritance as syntactic features, but the value of a design discipline that assigns behavior to the objects that own the relevant state — that makes each object responsible for the invariants it is best positioned to enforce, rather than scattering that responsibility across the system.
 
----
 
 ## Responsibility as the Organizing Principle
 
@@ -14,7 +13,6 @@ This principle has a name in the design literature: the *information expert* —
 
 The three questions that a good object-oriented boundary answers are: who owns this data, who is permitted to change this state, and who enforces the legality of transitions? If the same answer applies to all three, the boundary is in the right place.
 
----
 
 ## Collaboration Through Protocols
 
@@ -24,7 +22,6 @@ A well-designed collaboration protocol has two sides. The requesting object asks
 
 When collaborations become complex — when multiple objects must participate in a single workflow — a coordinator is the right structure. The coordinator calls each object's methods in the right order, handles the cases where any call fails, and passes results between objects. It does not own any domain state, enforce any domain invariants, or contain any domain logic. Its only responsibility is orchestration. This is the same coordinator design from Chapter 23, now applied to object collaboration rather than component assembly: the coordinator orchestrates, the objects enforce, and neither responsibility leaks into the other's domain.
 
----
 
 ## From Requirement to Object Design
 
@@ -42,7 +39,6 @@ The two entities involved — a delivery task and a robot — each have state th
 
 This design enforces two distinct invariant layers. The task's invariants — valid status, legal transitions — are enforced by the task. The workflow preconditions — robot must be ready, task must be assignable — are enforced by the coordinator. Neither layer depends on the other's internals.
 
----
 
 ## An Object Collaboration in Code
 
@@ -107,7 +103,6 @@ The precondition on `Dispatch_Service.dispatch` — `robot.ready = true` and the
 
 What the sketch does not show is equally important. No code outside `Robot` sets `robot.ready` directly. No code outside `Delivery_Task` sets `task.status` directly. The objects' internal fields are accessible to them through their own operations and to no one else. This constraint — that state changes flow through defined operations rather than through direct field assignment — is what makes the invariants enforceable. An invariant that can be bypassed by direct field mutation is an invariant in name only.
 
----
 
 ## Object-Oriented Thinking in the Three Systems
 
@@ -119,7 +114,6 @@ In the virtual world, each `WorldObject` owns its position, its current state, a
 
 In all three systems, the design question is the same: who owns which state, and which operations are that owner's responsibility to expose and enforce? The answer to that question determines the object boundaries, and the object boundaries determine where invariants live and who is responsible for maintaining them.
 
----
 
 ## Three Ways Object-Oriented Thinking Goes Wrong
 
@@ -129,7 +123,6 @@ In all three systems, the design question is the same: who owns which state, and
 
 **Cross-object field mutation.** Code that modifies another object's fields directly — reaching past the object's interface to set internal state — bypasses the invariants those fields are meant to maintain. A status field set to an undeclared value by external code is a status field whose invariant has been violated. A readiness flag cleared by a coordinator without going through the robot's interface is a readiness flag whose semantics have been overridden. The discipline is to expose state changes only through defined operations with contracts, and to treat direct field mutation from outside an object as a design error.
 
----
 
 ## Quick Exercise
 
@@ -137,7 +130,6 @@ Choose one workflow in your system that involves two or more collaborating entit
 
 For each object, identify one transition it must enforce and write the precondition and postcondition for the operation that performs it. For the coordinator, write the precondition that it must check before calling each object's operations. Then identify one place in your current implementation where domain state is being modified by code outside the owning object, and describe what would be required to route that modification through the object's interface instead.
 
----
 
 ## Takeaways
 
@@ -147,6 +139,5 @@ For each object, identify one transition it must enforce and write the precondit
 - Coordinators orchestrate without owning. A coordinator that accumulates domain logic or domain state has violated the separation that makes both the coordinator and the domain objects independently understandable.
 - Anemic models and god objects are opposite failures of the same principle. In both cases, responsibility and the state it governs are in different places.
 
----
 
 *Chapter 26 formalizes interface design — the discipline of defining stable contracts between components that allows each side of a boundary to evolve independently. An interface is the promise a component makes to its callers, and the quality of that promise determines how much of the system must be understood before any part of it can be changed.*

@@ -1,12 +1,9 @@
-# Part V: Algorithms That Power Systems
-
-# Chapter 19: Searching for What Matters
+# Searching for What Matters
 
 Part IV organized data into structures suited to different operations. Part V asks what algorithms bring those structures to life. We begin with search, because nearly every system spends significant time answering a single question in one form or another: where is the thing we need?
 
 That question sounds simple. The answer is not. The right search strategy depends on how the data is organized, how frequently the search occurs, and what the system must do when the thing being sought is not there. A search algorithm chosen by habit rather than by these factors will work correctly for small inputs and become a performance problem as the system grows. More subtly, a search algorithm whose failure behavior is undefined will work correctly when things are found and produce confusion when they are not.
 
----
 
 ## Four Search Strategies
 
@@ -20,7 +17,6 @@ Different data organizations admit different search strategies, and the choice b
 
 **Graph and tree traversal** finds elements by navigating the connections between them. A depth-first or breadth-first traversal discovers nodes reachable from a starting point; a binary search tree traversal finds an element whose key satisfies an ordering criterion; a shortest-path algorithm finds the element (or path) that optimizes some quality measure. These are the right strategies when the data has genuine structure — hierarchy, network connectivity — and when the answer to the search question depends on that structure rather than on a single key comparison.
 
----
 
 ## Correctness Before Speed
 
@@ -32,7 +28,6 @@ The miss semantics specify what the algorithm returns when no match exists. This
 
 The input assumptions specify what the algorithm requires to operate correctly. Binary search requires a sorted collection. Keyed lookup requires a valid, non-empty key. Graph traversal with cycle detection requires a visited set. These are preconditions, and they belong in the algorithm's contract. A caller that violates a precondition is not guaranteed any particular behavior; a caller that satisfies it is guaranteed the declared output. Writing the preconditions down — in the code, not just in documentation — is what makes the contract enforceable.
 
----
 
 ## From Requirement to Search Design
 
@@ -52,7 +47,6 @@ The word "safely" is doing more work than it appears. It implies that missing ta
 
 **Step 5: Define the upgrade trigger.** The linear search should be replaced when identifier lookup appears as a significant contributor to latency on the hot path. This trigger should be stated explicitly — a collection size, a latency measurement, a throughput target — so that the replacement is a scheduled decision rather than an emergency response to a performance incident.
 
----
 
 ## A Search Operation in Code
 
@@ -114,7 +108,6 @@ end
 
 The `steps` field deserves particular attention. A search algorithm that returns only a result status produces a black box: the caller knows what was found, but has no information about how hard the search was. An algorithm that also returns a step count makes its cost observable and testable. For the worked design path above, this observability is what makes it possible to detect when linear search is becoming a bottleneck: the steps count grows with the collection size, and when it grows large enough to affect latency, the upgrade trigger fires.
 
----
 
 ## Search in the Three Systems
 
@@ -126,7 +119,6 @@ In the virtual world, locating entity state by identifier is a per-tick operatio
 
 In all three systems, the search operation that looks trivial at small scale is the one most likely to become the first bottleneck at large scale.
 
----
 
 ## Three Ways Search Design Goes Wrong
 
@@ -136,7 +128,6 @@ In all three systems, the search operation that looks trivial at small scale is 
 
 **Violated preconditions.** Binary search applied to an unsorted collection does not return slow results — it returns wrong ones. A keyed lookup called with an empty string does not degrade gracefully — it returns a result that was never intended. Preconditions are not optional documentation. They are the boundary conditions under which the algorithm's guarantees hold, and violating them voids the guarantee. Enforcing preconditions in the code — with require clauses, assertions, or type constraints — is what makes the contract reliable rather than advisory.
 
----
 
 ## Quick Exercise
 
@@ -144,7 +135,6 @@ Choose one search operation in your system and document it completely with five 
 
 Then write the precondition and postcondition for that operation. If the postcondition cannot distinguish the found case from the not-found case without reading the implementation, the miss semantics are not yet explicit.
 
----
 
 ## Takeaways
 
@@ -153,6 +143,5 @@ Then write the precondition and postcondition for that operation. If the postcon
 - Linear search, binary search, keyed lookup, and structural traversal are not interchangeable techniques for the same problem. Each is the right choice for a specific combination of data organization and operation profile.
 - The search operation that looks trivial at small scale is often the first bottleneck at large scale. Define the upgrade trigger before the bottleneck arrives.
 
----
 
 *Chapter 20 examines sorting — the operation that turns unordered data into a form where faster search, efficient merge, and reliable comparison become possible. Understanding sorting as a prerequisite for other algorithms, rather than as a standalone operation, is what connects it to the system design concerns of this part.*

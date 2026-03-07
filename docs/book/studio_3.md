@@ -9,7 +9,7 @@ Refactoring Studio 2 models for scale without losing correctness.
 This studio chapter is hands-on: implement, verify behavior, and document tradeoffs as you iterate.
 :::
 
-## 1. The Situation
+## The Situation
 
 Studio 2 gave us explicit entities, relationships, and invariants.
 
@@ -23,9 +23,8 @@ Symptoms observed:
 
 This studio is a direct continuation of Studio 2: same core model classes, new access structures and algorithm choices.
 
----
 
-## 2. Engineering Brief
+## Engineering Brief
 
 Keep the Studio 2 model semantics. Improve runtime behavior.
 
@@ -42,9 +41,8 @@ Implementation guidance:
 - use explicit failure statuses (`NOT_FOUND`, `NO_MATCH`, etc.)
 - keep model classes intact; add indexing/organization layers around them
 
----
 
-## 3. Implementation In Nex
+## Implementation In Nex
 
 Use operation counts to compare baseline and refactored paths.
 
@@ -57,7 +55,7 @@ Suggested files:
 
 If using the web IDE, place all classes in one file and run `App.run`.
 
-### 3.1 Reused Studio 2 Models (Unchanged)
+### Reused Studio 2 Models (Unchanged)
 
 ```nex
 class Delivery_Task
@@ -108,7 +106,7 @@ invariant
 end
 ```
 
-### 3.2 Delivery Refactor: Task Lookup
+### Delivery Refactor: Task Lookup
 
 Before (Studio 2-style collection usage): linear scan over `Delivery_Task` objects.
 
@@ -198,7 +196,7 @@ feature
 end
 ```
 
-### 3.3 Knowledge Refactor: Link Validation + Document Lookup
+### Knowledge Refactor: Link Validation + Document Lookup
 
 Before: for each `Doc_Link`, document existence check scans document list.
 
@@ -275,7 +273,7 @@ feature
 end
 ```
 
-### 3.4 Virtual World Refactor: Targeted Update
+### Virtual World Refactor: Targeted Update
 
 Before: scan all `World_Object` entries to find target.
 
@@ -349,7 +347,7 @@ feature
 end
 ```
 
-### 3.5 Studio Driver (Before/After on Studio 2 Models)
+### Studio Driver (Before/After on Studio 2 Models)
 
 ```nex
 class App
@@ -439,9 +437,8 @@ Expected pattern:
 - V3 keeps the same model objects and adds index layers for critical operations
 - behavior stays consistent; operation counts improve
 
----
 
-## 4. Studio Challenges
+## Studio Challenges
 
 ### Level 1 — One Refactor
 
@@ -462,9 +459,8 @@ Expected pattern:
   - batch/partition approach
 - state when each approach wins
 
----
 
-## 5. Postmortem
+## Postmortem
 
 Discuss with evidence:
 
@@ -473,7 +469,6 @@ Discuss with evidence:
 - Which invariant or contract protected correctness during optimization?
 - Which optimization should be postponed until higher load?
 
----
 
 ## Deliverables
 
@@ -485,7 +480,6 @@ Discuss with evidence:
   - correctness safeguards
   - limitations and next trigger point
 
----
 
 ## Exit Criteria
 

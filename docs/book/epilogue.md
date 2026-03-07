@@ -6,7 +6,6 @@ Across these domains, we found that the problems were never just about syntax or
 
 As we close this book, we find ourselves at a fascinating intersection. We have the timeless principles of engineering — modeling, abstraction, verification — meeting the transformative power of AI. The question is no longer just "how do we build this?" but "how do we govern this?"
 
----
 
 ## The Unifying Thread: Intent and Verification
 
@@ -18,7 +17,6 @@ This is not a coincidence. **Explicit intent** is the foundation of all robust s
 
 The systems that failed in our stories were the ones where intent was implicit — hidden in the head of a developer or buried in a tangle of spaghetti code. The systems that succeeded were the ones where intent was explicit — written in `require` and `ensure` clauses, enforced by invariants, and verified by tests.
 
----
 
 ## The Three Systems, One Lesson
 
@@ -30,7 +28,6 @@ The **Virtual World** taught us that emergent behavior is powerful but dangerous
 
 In every case, the solution was not "more code." It was "better boundaries."
 
----
 
 ## Programming in the Age of AI
 
@@ -45,7 +42,6 @@ The engineer of the future is not a typist. The engineer of the future is a **ve
 
 AI is a powerful engine, but you are the steering wheel.
 
----
 
 ## The Role of Nex
 
@@ -56,7 +52,6 @@ We chose Nex for this book not because it is the only language that matters, but
 
 The lessons you learned here — about invariants, pre-conditions, seams, and layered architecture — will serve you in Python, Go, Rust, Java, or whatever language comes next. The syntax changes; the engineering does not.
 
----
 
 ## Final Thoughts
 

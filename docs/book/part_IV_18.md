@@ -1,4 +1,4 @@
-# Chapter 18: Graphs — Networks of Everything
+# Graphs — Networks of Everything
 
 Trees impose a discipline on connected data: one parent per node, no cycles, a single root from which all other nodes descend. This discipline is what makes tree algorithms efficient and predictable. It is also a constraint that many real domains do not satisfy.
 
@@ -6,7 +6,6 @@ A road network has no root and no notion of parent and child — every location 
 
 A graph is the structure for connected data in its most general form: nodes represent entities, edges represent relationships between them, and neither cycles nor multiple connections between a node and its neighbors are forbidden. Most real systems eventually require graph thinking. The question is whether that thinking happens deliberately, in the model, or accidentally, scattered across code paths that independently reconstruct the connectivity the model never made explicit.
 
----
 
 ## Four Questions Graphs Answer
 
@@ -22,7 +21,6 @@ Graph-driven systems return repeatedly to four questions. The data structure cho
 
 The data structures chosen to represent the graph, and the algorithms written to traverse it, should follow from which of these questions the system must answer and how frequently.
 
----
 
 ## Representing a Graph
 
@@ -34,7 +32,6 @@ An **adjacency list** represents the graph as a collection where each node maps 
 
 Real delivery networks, citation graphs, and interaction networks are all sparse. The adjacency list is the natural representation for all three. Making that choice explicit in the model — rather than leaving it implicit in however the code happens to store connections — is what makes the representation a design decision rather than an accident.
 
----
 
 ## From Requirement to Graph Algorithm
 
@@ -52,7 +49,6 @@ Consider the requirement:
 
 **Step 5: Keep the representation explicit.** The adjacency structure is a first-class element of the model, not a detail hidden inside the traversal algorithm. Exposing it explicitly makes the graph's content inspectable, testable, and modifiable independently of the algorithms that operate on it.
 
----
 
 ## A Graph in Code
 
@@ -108,7 +104,6 @@ The postcondition on `route_a_to_d` — three explicitly declared possible retur
 
 In a full implementation, the boolean fields would be replaced by an adjacency list, and `route_a_to_d` would be replaced by a BFS traversal over that list. The contracts would remain the same. This is the value of specifying the contract at the boundary rather than inside the implementation: when the implementation changes, the contract does not need to change with it.
 
----
 
 ## Graphs in the Three Systems
 
@@ -120,7 +115,6 @@ The virtual world's interaction structure forms a graph in which entities are no
 
 In all three systems, the graph is the natural representation of the domain's connectivity. In all three, treating it as implicit — as connectivity logic embedded in algorithm code rather than expressed as a data structure — produces systems that are harder to inspect, test, and modify.
 
----
 
 ## Four Ways Graph Design Goes Wrong
 
@@ -132,7 +126,6 @@ In all three systems, the graph is the natural representation of the domain's co
 
 **Weak failure semantics.** A traversal that returns an empty path when no route exists, or returns a partial path when traversal is interrupted, leaves the caller to infer what happened from an output that carries no explicit information about it. Two different failure conditions — unreachable destination, invalid input — look identical to a caller who receives an empty list in both cases. The remedy is to declare the full set of possible outcomes in the operation's contract and to return a distinct value for each.
 
----
 
 ## Quick Exercise
 
@@ -140,7 +133,6 @@ Choose one networked feature in your system — one where entities are connected
 
 Then examine how the current implementation represents connectivity. Is there an explicit adjacency structure, or is the connectivity implied by the traversal logic? If it is implied, identify what would need to change to make it explicit.
 
----
 
 ## Takeaways
 
@@ -150,6 +142,5 @@ Then examine how the current implementation represents connectivity. Is there an
 - The adjacency structure should be explicit and first-class in the model, not implied by traversal code. An implicit graph cannot be tested or modified independently of the algorithms over it.
 - Every graph operation needs declared failure semantics. An empty return is not a failure status.
 
----
 
 *Part IV has now built the complete data structure foundation: lists for ordered sequences, sets and maps for membership and keyed access, trees for hierarchical search, and graphs for general networks. Part V applies these structures to the core algorithm families — searching, sorting, traversal, and path-finding — that turn organized data into system behavior.*

@@ -1,4 +1,4 @@
-# Chapter 10: Modeling Change
+# Modeling Change
 
 The models built in Chapters 7 through 9 describe a system at rest: what entities exist, how they relate, what invariants must hold. This is necessary. It is not sufficient.
 
@@ -6,7 +6,6 @@ Real systems do not rest. Robots move, tasks are reassigned, documents are updat
 
 If a model does not describe change — not just what states are valid, but how the system may move between them — then correctness during transitions is accidental. The system works until it encounters a transition the model never considered, at which point it fails in a way no invariant will catch.
 
----
 
 ## States and Transitions
 
@@ -18,7 +17,6 @@ For the delivery task, the legal transitions form a directed graph: `PENDING →
 
 Think in terms of state machines, even for the simplest entities. The exercise of drawing the graph forces questions that informal descriptions leave unasked: can a failed task be retried? Can a pending task be cancelled before assignment? Each answer is a design decision, and each decision should appear in the model.
 
----
 
 ## The Problem of Ordering
 
@@ -34,7 +32,6 @@ In the delivery system, reassignment of a failed robot's tasks must be strictly 
 
 Modeling change means specifying deterministic ordering for sequences that must be deterministic, and specifying conflict policy for the cases where ordering cannot be guaranteed.
 
----
 
 ## From Requirement to Transition Model
 
@@ -54,7 +51,6 @@ This sentence describes an outcome. It conceals a sequence of events, each of wh
 
 **Step 5: Design for idempotency.** In any distributed system, events may be delivered more than once. A failure event that is processed twice should produce the same outcome as a failure event processed once. An idempotent reassignment operation — one that checks whether the task is already in the target state before acting — provides this property. Idempotency is not an optimization; it is a reliability multiplier that makes the entire event processing pipeline safer.
 
----
 
 ## A Transition Model in Code
 
@@ -93,7 +89,6 @@ The structure of this sketch mirrors the four elements of a complete transition 
 
 What is absent is also significant. There is no operation `mark_pending` that moves a delivered task back to the start. The absence is not an oversight; it is a design decision made explicit by the model. A developer reading this code understands not just what is permitted but, from what is missing, what is forbidden.
 
----
 
 ## Five Ways Change Modeling Fails
 
@@ -107,7 +102,6 @@ What is absent is also significant. There is no operation `mark_pending` that mo
 
 **No audit trail for transitions.** When a system reaches an invalid state and nobody can explain how it got there, the investigation begins from nothing. An audit trail that records the intent and outcome of each transition — which operation was attempted, what the preconditions were, whether the postconditions were verified — makes invalid states diagnosable. More importantly, it reveals which part of the transition model failed to prevent them.
 
----
 
 ## Quick Exercise
 
@@ -115,7 +109,6 @@ Choose one entity from your system and construct a complete transition model for
 
 Then ask: if the event that triggers this transition were delivered twice, would the second delivery produce a different outcome than the first? If yes, what must be added to make the operation idempotent?
 
----
 
 ## Takeaways
 
@@ -125,6 +118,5 @@ Then ask: if the event that triggers this transition were delivered twice, would
 - Partial failure must be designed for, not improvised around. Half-states that are invisible to monitoring are more dangerous than acknowledged failures.
 - Change is structured behavior. Treat it as such from the beginning.
 
----
 
 *Part II has now built a complete modeling foundation: entities, relationships, data models, and the semantics of change. Part III shifts from representation to computation — what algorithms are, how to decompose problems into them, and how to reason about their behavior under real conditions.*

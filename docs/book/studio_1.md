@@ -9,7 +9,7 @@ Building the smallest working versions of all three systems.
 This studio chapter is hands-on: implement, verify behavior, and document tradeoffs as you iterate.
 :::
 
-## 1. The Situation
+## The Situation
 
 The team has finished Part I and has problem statements, example scenarios, and edge-case notes.
 Now they must ship a tiny end-to-end version of each system to test whether the problem framing is actually usable.
@@ -20,7 +20,7 @@ Systems in scope:
 * note organizer (small collection, simple lookup)
 * virtual world (few entities, deterministic update loop)
 
-## 2. Engineering Brief
+## Engineering Brief
 
 Build minimal vertical slices that run from input to output.
 
@@ -151,7 +151,7 @@ You can evolve this starter in three directions:
 * replace fixed tag matching with indexed note structures
 * extend world updates to multiple entities per tick
 
-## 3. Studio Challenges
+## Studio Challenges
 
 ### Level 1 — Core Implementation
 
@@ -168,7 +168,7 @@ You can evolve this starter in three directions:
 * Replace one design choice with an alternative and compare outcomes.
 * Record what changed in complexity and failure behavior.
 
-## 4. Postmortem
+## Postmortem
 
 Discuss:
 

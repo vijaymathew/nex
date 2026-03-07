@@ -1,4 +1,4 @@
-# Chapter 29: Testing as Exploration
+# Testing as Exploration
 
 Contracts make assumptions explicit and promises verifiable. But a contract is a claim, not evidence. The precondition on `assign` asserts that the caller must provide a non-empty robot identifier; the postcondition asserts that the task will be in `IN_TRANSIT` afterward. These claims may be written correctly and violated by the implementation. A routine whose postcondition is stated correctly but whose body computes the wrong result does not fail because of a bad contract — it fails because the contract was never confronted with evidence.
 
@@ -6,7 +6,6 @@ Testing provides that evidence. A test is an experiment: choose inputs, call the
 
 The mindset that produces good tests is not confirmation — verifying that the routine works for the inputs you expect to appear. It is exploration — discovering the inputs for which the routine fails to satisfy its contract. Confirmation produces evidence of correctness for the cases you already understood. Exploration discovers the cases you did not.
 
----
 
 ## Three Kinds of Tests
 
@@ -18,7 +17,6 @@ A test portfolio that covers only one kind of input is a portfolio with gaps. Th
 
 **Property-based checks** assert truths that should hold across a range of inputs, rather than for a single specific input. If the route planner returns `FOUND`, the path must be non-empty. If the task's `assign` operation returns `"ASSIGNED"`, the task's status must be `IN_TRANSIT`. If the sort operation returns a sequence, no element should appear after any element with a strictly smaller priority. These are properties derivable from the contract, and they should hold for every input satisfying the precondition. Testing them across a range of inputs — generated programmatically, if the language permits, or across a set of representative cases otherwise — provides evidence that the contract holds generally, not just for the specific inputs of the example tests.
 
----
 
 ## Oracles: How a Test Decides
 
@@ -32,7 +30,6 @@ The strongest oracle for a component is its contract. If the postcondition of `p
 
 A test whose oracle is "the result equals what the implementation computed" is not a test at all. It is a transcript of execution. The oracle must be independent of the implementation: it must state what the correct output is, derived from the specification, before the implementation has run.
 
----
 
 ## From Requirement to Test Portfolio
 
@@ -54,7 +51,6 @@ The word "valid" is not self-defining. A valid route is a connected sequence of 
 
 Together, these five tests cover the three declared statuses, the boundaries between them, and a property that should hold globally. No single test could discover all the defects this portfolio can discover.
 
----
 
 ## A Test Suite in Code
 
@@ -102,7 +98,6 @@ What this sketch does not show — and what a full test suite for a production r
 
 The postcondition on `run_all` — `result = "PASS" or result = "FAIL"` — is the test framework's own contract: the test runner always returns a declared outcome, never an undefined one. This matters because a test runner that crashes or returns an undeclared value on a test failure provides weaker evidence than one whose own behavior is defined.
 
----
 
 ## Testing in the Three Systems
 
@@ -114,7 +109,6 @@ In the virtual world, the critical tests are bounded update tests: does the stat
 
 In all three systems, the test portfolio that matters is not the one that maximizes coverage of code paths. It is the one that maximizes coverage of failure modes — the portfolio designed from the contract outward, not from the implementation inward.
 
----
 
 ## Three Ways Testing Fails
 
@@ -124,7 +118,6 @@ In all three systems, the test portfolio that matters is not the one that maximi
 
 **Shared assumptions between test and implementation.** A test written by the same developer who wrote the implementation, immediately after writing the implementation, will often encode the same assumptions as the implementation. If the implementation misunderstands the requirement, the test will likely misunderstand it the same way. The oracle should be derived from the specification — the contract, the worked examples from Chapter 3, the edge cases from Chapter 4 — not from the implementation the developer just wrote. When possible, tests should be written before the implementation, so the oracle is derived from the requirement rather than from the code.
 
----
 
 ## Quick Exercise
 
@@ -132,7 +125,6 @@ Choose one routine in your system and design a test portfolio with five tests: t
 
 For each test, write the oracle explicitly — the specific property that the output must satisfy, stated without reference to the implementation. Then map each test to the specific failure mode it is designed to detect. If a test is not clearly targeted at a specific failure mode, revise it until it is.
 
----
 
 ## Takeaways
 
@@ -142,6 +134,5 @@ For each test, write the oracle explicitly — the specific property that the ou
 - The strongest oracles are derived from contracts. A test that verifies the postcondition holds for a range of inputs provides more evidence than a test that verifies a single expected value for a single input.
 - A test portfolio designed from the contract outward — asking what inputs would violate the contract — is more reliable than one designed from the implementation inward.
 
----
 
 *Chapter 30 examines debugging as a hypothesis-driven engineering process. When tests discover a failure, debugging is the discipline of reasoning from the failure to its cause — treating the failed test as an observation that constrains the set of possible explanations, and designing experiments to narrow that set until the cause is identified.*
