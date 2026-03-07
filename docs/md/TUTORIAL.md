@@ -318,6 +318,78 @@ end
 let w: Wallet := create Wallet.with_balance(-10)
 Error: Class invariant violation: never_negative
 
+## 12. Debugger Quickstart
+
+Enable debugger in REPL:
+
+```text
+:debug on
+```
+
+Set breakpoints and run:
+
+```text
+:break Wallet.spend
+:break Wallet.spend if amount > 100
+:break field:money
+:tbreak Wallet.spend:42
+```
+
+At `dbg>` prompt:
+
+```text
+:where
+:locals
+:print money
+:next
+:continue
+```
+
+Watch values change:
+
+```text
+:watch money
+:watch money if money > 100
+:watches
+```
+
+Tune breakpoint hit behavior:
+
+```text
+:ignore 1 2   -- breakpoint[1] ignores first 2 hits
+:every 1 3    -- breakpoint[1] pauses every 3rd hit
+```
+
+Control breakpoints without deleting:
+
+```text
+:disable 1
+:enable 1
+```
+
+Pause on failures:
+
+```text
+:breakon exception on
+:breakon contract on
+:breakon contract filter invariant
+```
+
+Save and restore debugger state:
+
+```text
+:breaksave .nex-debug.edn
+:breakload .nex-debug.edn
+```
+
+Script debugger commands from a file:
+
+```text
+:debugscript debug_commands.dbg
+```
+
+For full command reference, see `docs/md/DEBUGGER.md`.
+
 let w: Wallet := create Wallet.with_balance(10.2)
 w.spend(9)
 w.money -- 1.1999999999999993

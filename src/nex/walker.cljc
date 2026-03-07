@@ -18,6 +18,23 @@
   [node]
   (mapv transform-node (rest node)))
 
+(defn- node-pos
+  "Extract clj-antlr position metadata from a parse node."
+  [node]
+  (or (-> node meta :clj-antlr/position)
+      (-> node meta :clj-antlr/position)))
+
+(defn- attach-debug-pos
+  "Attach 1-based debug line/column metadata to AST maps."
+  [ast-node parse-node]
+  (if (and (map? ast-node) (contains? ast-node :type))
+    (if-let [{:keys [row column]} (node-pos parse-node)]
+      (cond-> ast-node
+        (integer? row) (assoc :dbg/line (inc row))
+        (integer? column) (assoc :dbg/col (inc column)))
+      ast-node)
+    ast-node))
+
 ;;
 ;; Reusable transformation functions
 ;;
@@ -1127,7 +1144,7 @@
     (let [node-type (first node)
           handler (get node-handlers node-type)]
       (if handler
-        (handler node)
+        (attach-debug-pos (handler node) node)
         (throw (ex-info (str "Unhandled node type: " node-type)
                         {:node-type node-type
                          :node node}))))))
