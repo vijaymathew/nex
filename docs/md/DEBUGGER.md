@@ -34,6 +34,7 @@ Set a breakpoint:
 
 ```text
 :break <spec>
+:break <spec> if <expr>
 ```
 
 Supported breakpoint specs:
@@ -47,15 +48,30 @@ Supported breakpoint specs:
 - `file.nex:42` or `path/to/file.nex:42`  
   Break on a specific source line for loaded code.
 
+Conditional breakpoint:
+
+- `Class.method if x > 0`
+- `file.nex:42 if this.count > 10`
+
+`<expr>` is evaluated in the paused runtime context. If it evaluates to true, execution pauses.
+
 List breakpoints:
 
 ```text
 :breaks
 ```
 
+Breakpoints are shown with stable IDs (for the current REPL session), for example:
+
+```text
+[1] OrderService.place:42
+[2] OrderService.place if this.retry_count > 0
+```
+
 Clear one breakpoint:
 
 ```text
+:clearbreak <id>
 :clearbreak <spec>
 ```
 
@@ -64,6 +80,12 @@ Clear all:
 ```text
 :clearbreak all
 ```
+
+`clearbreak` supports all three forms:
+
+- `:clearbreak <id>` removes one exact breakpoint ID.
+- `:clearbreak <spec>` removes all matching breakpoints for that spec.
+- `:clearbreak all` removes everything.
 
 ## 3) Break-On Policies
 
@@ -125,8 +147,10 @@ dbg> :continue
 
 - Stepping is statement-level (not expression-level).
 - `file:line` breakpoints are most useful for code loaded via `:load`.
+- Hit-count breakpoints (for example `:break 12`) are per evaluation run, and reset on each new REPL execution.
 - Breakpoints are in-memory for the REPL session; they are not persisted.
 - `:print <expr>` evaluates in the paused runtime context and may have side effects.
+- `:break <spec> if <expr>` conditions are expression checks, not assignment statements.
 
 ## 7) Related Test Coverage
 
@@ -140,4 +164,3 @@ Run full tests:
 ```bash
 clojure -M:test test/scripts/run_tests.clj
 ```
-
