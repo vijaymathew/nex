@@ -1,270 +1,117 @@
-# From Stories to Specifications
+# Chapter 5: From Stories to Specifications
 
-So far in this book, we have described our systems mostly through **stories**.
+Every system in this book began as a story. A robot navigates a building to deliver packages. A knowledge engine answers questions by searching a document collection. A virtual world simulates the interactions of objects governed by rules. These stories are genuinely useful — they communicate intent, establish context, and give purpose to the engineering work that follows. Without them, we would not know what we were building or why.
 
-A robot trying to deliver packages in a building.
-A knowledge engine trying to answer questions.
-A virtual world struggling to simulate interactions.
+But a story cannot be executed. A computer does not understand intent or purpose. It executes precise rules operating on precisely defined inputs, producing precisely defined outputs. The task that bridges these two things — the story that communicates what the system should do and the rules that a machine can follow — is specification: the transformation of a narrative into a formal description of behavior.
 
-Stories are powerful because they help us **understand the situation**.
-They capture context, motivation, and human goals.
+This transformation is where software engineering begins. Not in the choice of algorithm, not in the selection of data structure, but in the earlier and harder work of asking: what, precisely, is the system supposed to do?
 
-But stories alone are not enough for programming.
 
-Computers cannot execute stories.
+## What Specification Requires
 
-They execute **precise rules**.
+A story describes events and intentions. A specification describes rules and behaviors. The difference is precision — not as a stylistic preference but as a requirement imposed by the nature of computation. Anything left vague in a specification will be resolved by the implementation, which means it will be resolved by whoever writes the code, without necessarily consulting the people who understood the purpose of the system.
 
-The task of the programmer is to transform a narrative like:
+Consider the story:
 
-> “The robot should deliver packages efficiently”
+> *The robot should navigate through the building.*
 
-into something far more precise:
+This sentence communicates an intention clearly enough for a human reader. For a programmer, it raises questions that the sentence does not answer: what information does the robot have about the building? What counts as navigation? What does the system guarantee about the route it produces? Until these questions are answered, the programmer cannot write code — they can only guess, and the guesses will differ from one programmer to the next.
 
-> “Given a map, a start location, and a destination, the system must compute a valid route.”
+A specification answering these questions might say:
 
-This transformation—from story to specification—is where software engineering truly begins.
+> *The robot receives a map of locations connected by traversable paths, a current location, and a destination. The system must compute a sequence of locations from the current location to the destination, using only traversable connections, or report that no such route exists.*
 
+Every word in this specification does work. "Map of locations connected by traversable paths" defines the input structure. "Current location and destination" names the other inputs. "Sequence of locations" defines the output structure. "Using only traversable connections" states a correctness condition. "Or report that no such route exists" declares the failure behavior. The story introduced the idea; the specification introduced formal elements we can reason about and, eventually, test against.
 
-## Turning Narratives Into Rules
 
-Stories describe events and intentions.
 
-Specifications describe **rules and behaviors**.
+## Inputs: What the System Receives
 
-Consider the story of the delivery robot:
+Every computational problem begins with inputs — the information available to the system when it must produce a result. Identifying the inputs precisely is the first concrete step of specification work, because an algorithm cannot operate on information it does not have, and an algorithm that assumes information that will not always be available will fail on the inputs where that information is absent.
 
-> A robot receives a delivery request and navigates through the building to reach the destination.
+For the delivery system, the inputs to the navigation problem include the map of the building, the robot's current location, the destination, and the current state of each path — whether it is traversable or blocked. Each of these is a separate input with a separate type. The map is a structure. The locations are identifiers. The path states are properties of edges. Writing them down separately forces a question that the story left implicit: what is the format of each, and what constraints must each satisfy to be valid?
 
-To turn this story into a specification, we begin asking structured questions:
+For the knowledge engine, the inputs to a search operation include the query — the expression of what the user is looking for — the document collection, and whatever history or context is relevant to the ranking. The query is a string, but a string with constraints: it must be non-empty, and its format must be one the system knows how to process. The document collection has its own structure. History, if it is used, must be defined: what exactly is recorded, in what form, and how far back?
 
-* What information does the robot receive?
-* What decision must the robot make?
-* What outcome must the system guarantee?
+For the virtual world, the inputs to a simulation step include the current state of all objects — their positions, their types, their current status — and the interaction rules that govern what happens when objects of certain types encounter each other. The rules are themselves a kind of input: they define the system's behavior, and they can change.
 
-By answering these questions, we gradually transform the story into something more precise.
+In each case, the act of listing the inputs is also an act of discovery. Questions that the story left unanswered must be answered before the list can be completed.
 
-For example:
 
-**Narrative**
 
-> The robot should navigate through the building.
+## Outputs: What the System Must Produce
 
-**Specification**
+If inputs describe what enters the system, outputs describe what the system must deliver. Defining the output precisely is the second step of specification work, because the output definition is where the system's success condition lives — it is what we check when we ask whether the system worked correctly.
 
-> The robot receives a map of locations connected by traversable paths and must compute a route from its current location to a specified destination.
+For the navigation problem, the output is a route: a sequence of locations from the start to the destination. But "a sequence of locations" is not yet precise enough. The sequence must use only traversable connections — a sequence that teleports from one location to another is not a valid route. The first element must be the start location and the last must be the destination. And if no valid route exists, the output must say so explicitly, in a form that the caller can distinguish from a valid route.
 
-Notice what happened.
+Each of these constraints is a separate claim about the output, and each must be stated. An output specification that says only "a sequence of locations" permits outputs that would fail for the caller who depends on the first element being the start, or the caller who cannot distinguish an empty route from a failure.
 
-The story introduced the idea.
-The specification introduced **formal elements** we can reason about.
+For the knowledge engine, the output of a search is a ranked list of document identifiers. The ranking is ordered by relevance — but relevance must itself be defined. The output specification must state what criterion was used to order the results, so that callers can interpret the ordering correctly and tests can verify that the ordering satisfies the criterion.
 
 
-## Identifying the Inputs
 
-Every computational problem begins with **inputs**.
+## Guarantees: What the System Promises
 
-Inputs represent the information the system receives from the outside world.
+Beyond inputs and outputs, a specification states guarantees — the promises that the system makes about what it will do for any input satisfying the preconditions. Guarantees are what define correctness. Without a stated guarantee, we cannot say whether the system behaved correctly, because we have not said what correct behavior is.
 
-For the delivery robot, possible inputs include:
+For the navigation problem:
 
-* the map of the building
-* the robot’s current location
-* the destination location
-* information about blocked paths
+> *If a path exists between the start and destination, the system returns a sequence of traversable connections from start to destination. If no path exists, the system returns a declared failure status.*
 
-For the knowledge engine, inputs might include:
+For the knowledge engine:
 
-* the user’s query
-* the collection of documents
-* previous interaction history
+> *The system returns a ranked list of documents from the collection, ordered by estimated relevance to the query. A query that matches no documents returns an explicit empty result.*
 
-For the virtual world simulation:
+For the virtual world:
 
-* the list of objects
-* their positions
-* the rules governing their interactions
+> *After each simulation step, every object satisfies the invariants for its type. Objects interact only according to the rules defined for their type pairing.*
 
-Once we clearly identify the inputs, the problem becomes far easier to analyze.
+Each guarantee is a testable claim. A system that returns a sequence with a non-traversable connection has violated the navigation guarantee. A system that returns null instead of an empty result has violated the knowledge engine guarantee. The test does not need to know how the system works — it only needs the guarantee to know what to check.
 
-Without clear inputs, algorithms have nothing to operate on.
 
 
-## Defining the Outputs
+## The Ambiguity That Stories Leave
 
-If inputs describe what enters the system, **outputs** describe what the system must produce.
+Stories leave decisions unmade. This is not a deficiency — it is a feature of narrative that makes stories easy to understand and share. But every unmade decision in a story becomes a question that the implementation must answer, and when the implementation answers questions that the specification should have answered, the result is software whose behavior depends on implementation choices that were never reviewed, agreed upon, or tested.
 
-In the navigation problem, the output might be:
+The word "best" is the clearest example. The story says the robot should take the best path. The specification must decide what best means: shortest total distance, fewest connections, least time, least energy, greatest reliability. These are different objectives and they lead to different routes on most graphs. A specification that inherits "best" from the story without resolving it has deferred the decision to the implementation, where it will be resolved once, quietly, and almost certainly without the knowledge of the people who depend on the system to optimize the right thing.
 
-* a sequence of locations representing the route
+"Relevant" in the knowledge engine story has the same character. "Realistic" in the virtual world story has the same character. Any adjective in a story that carries evaluative weight — best, relevant, realistic, efficient, appropriate — must be replaced in the specification with a definition: the specific criterion by which the adjective will be evaluated and the specific method by which it will be computed.
 
-In the knowledge engine, the output might be:
+Making these decisions explicit is not bureaucratic overhead. It is the work that prevents the system from silently optimizing the wrong objective and the team from discovering the disagreement only when it becomes a production incident.
 
-* a ranked list of documents
 
-In the virtual world, the output might be:
 
-* the updated positions and states of objects after a simulation step
+## A First Look at Contracts
 
-The moment we clearly define outputs, we begin to understand what the algorithm must accomplish.
+As the systems in this book grow more complex, specifications will evolve into contracts — formal statements of the agreement between different parts of the system about what each part requires and what each part guarantees. Contracts are specifications made executable: they can be checked at runtime, violated visibly, and used as the basis for tests.
 
+A contract for the navigation function captures three things. The precondition states what must be true before the function is called: the map correctly represents the connections between locations, the start and destination are locations that exist in the map. The postcondition states what the function guarantees when it returns: if a path exists, the returned route is a valid connected sequence from start to destination; if no path exists, the returned status is the declared failure value. The invariant states a property that holds throughout and after the call: every step in the route corresponds to a connection that existed in the map at the time of the call.
 
-## Guarantees and Expectations
+This structure will appear throughout the rest of the book, in every design chapter and every code sketch. The precondition, postcondition, and invariant are not formalism for its own sake — they are the tools by which informal expectations become statements that can be reasoned about, tested against, and maintained as systems change. Every contract in the chapters ahead is a specification that was made precise enough to be enforced.
 
-Beyond inputs and outputs, specifications must describe **guarantees**.
 
-These guarantees define what the system promises to do.
 
-For example:
+## Quick Exercise
 
-**Navigation guarantee**
+Take one story sentence from your system and transform it into a mini-specification with four parts: the inputs the operation receives, the output it must produce, the guarantee it makes about the output for valid inputs, and one precondition, one postcondition, and one invariant.
 
-> If a path exists between the start and destination, the system must return a valid route.
+Start with the story sentence:
 
-**Search guarantee**
+> *"The system should deliver packages efficiently."*
 
-> The system must return documents ranked by estimated relevance to the query.
+Write out what efficient means in terms of a measurable criterion. State what information the system must have to apply that criterion. State what a correct output looks like and how you would verify it. Then find one word in your specification draft that is still ambiguous — a word that could be interpreted differently by two reasonable readers — and replace it with a definition.
 
-**Simulation guarantee**
 
-> Objects must follow the interaction rules defined for their types.
 
-Guarantees are important because they establish **what correctness means**.
+## Takeaways
 
-Without them, we cannot determine whether a system behaves properly.
+- Stories communicate intent; specifications define behavior. Both are necessary, and neither replaces the other — but software is built from specifications, not stories.
+- Every specification needs three elements stated precisely: the inputs the system receives, the outputs it must produce, and the guarantees it makes about the relationship between them.
+- Ambiguous terms in stories — best, relevant, efficient, realistic — become correctness failures in code. The specification's job is to replace them with definitions.
+- Contracts formalize specifications into executable agreements: preconditions state caller obligations, postconditions state routine guarantees, invariants state properties that must hold throughout. This structure appears everywhere in the chapters ahead.
 
 
-## The Limits of Stories
 
-Stories help us imagine how a system should behave.
-
-But stories often hide ambiguity.
-
-Consider the narrative:
-
-> The robot should take the best path.
-
-What does “best” mean?
-
-* shortest distance?
-* fastest travel time?
-* safest route?
-* least crowded hallway?
-
-Stories leave these questions unanswered.
-
-Specifications force us to **make decisions explicit**.
-
-
-## A First Glimpse of Contracts
-
-As systems become more complex, specifications evolve into something even more powerful: **contracts**.
-
-A contract describes the agreement between different parts of a system.
-
-It typically answers three questions:
-
-1. **What must be true before an operation begins?**
-2. **What will the operation produce?**
-3. **What conditions will remain true afterward?**
-
-For example, imagine a function that computes a route.
-
-We might describe its contract like this:
-
-**Precondition**
-
-> The map correctly represents connections between locations.
-
-**Postcondition**
-
-> If a path exists between the start and destination, the function returns a valid route.
-
-**Invariant**
-
-> Every step in the returned route corresponds to a valid connection in the map.
-
-This structure allows programmers to reason about correctness with much greater clarity.
-
-Later in this book, we will use contracts extensively to build systems that are **predictable, reliable, and easier to maintain**.
-
-
-## Connection to Nex
-
-Nex is designed to make this story-to-specification transition concrete.
-
-In practice, that means you can encode the specification directly through:
-
-- explicit structure for inputs and outputs
-- contracts (`require`, `ensure`) for operation-level guarantees
-- invariants for system-level consistency rules
-
-This helps keep intent and implementation aligned as systems evolve.
-
-
-::: {.note-exercise}
-**Exercise**
-Apply the section task and record your results before reading the solution notes.
-:::
-
-## Quick Exercise (6 Minutes)
-
-Take one story sentence and convert it into a mini specification.
-
-Template:
-
-1. Story sentence: “The system should ...”
-2. Inputs:
-3. Outputs:
-4. Guarantee:
-5. One precondition, one postcondition, one invariant.
-
-Example starter:
-
-- Story: “The robot should deliver packages efficiently.”
-- Guarantee rewrite: “Given a valid map, start, and destination, return a valid route if one exists.”
-
-Keep algorithm choices out of this draft. Focus on behavior and correctness.
-
-
-## From Story to Engineering
-
-By the end of this chapter, we have transformed our narrative systems into something more precise:
-
-* we know what information they receive
-* we know what results they must produce
-* we know the guarantees they must satisfy
-
-The story is still important—it gives the system purpose.
-
-But the specification gives it **structure**.
-
-Programming lives in the space between those two things.
-
-Stories inspire the system.
-Specifications make it **buildable**.
-
-
-::: {.note-takeaways}
-**Takeaways**
-Capture the key principles from this chapter and one action you will apply immediately.
-:::
-
-## Chapter Takeaways
-
-- Stories provide context and goals; specifications provide executable precision.
-- Every specification needs clear inputs, outputs, and guarantees.
-- Ambiguous terms (“best,” “relevant,” “realistic”) must be made explicit.
-- Contracts are a disciplined way to formalize expectations and correctness.
-- Better specifications reduce design churn, testing ambiguity, and implementation drift.
-
-
-In the next part of the book, we take the next engineering step.
-
-Once we know **what problem we are solving**, we must decide how the program will **represent the world**.
-
-This is the beginning of **data modeling**.
-
-And as we will soon discover, the way we represent data often determines which algorithms are possible.
-
-Part II opens with that exact question in Chapter 6: why software needs models before it needs optimization.
+*Part I has now established the full arc from problem understanding to precise specification: stories that identify the situation, problem statements that define the computational task, edge cases that test the boundaries of the definition, and specifications that transform intent into formal claims. Part II opens with the next question: before algorithms can operate on a problem, the world must be represented. Chapter 6 asks why software needs models before it needs optimization.*
