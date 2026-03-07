@@ -143,7 +143,34 @@
                "  retry\n"
                "end</code></pre>"
                "<p>In-app pages are synced to the flow in <code>docs/md/TUTORIAL.md</code>.</p>")]
+         :web-ide-pages
+         [(str "<h3>1) Web IDE Layout</h3>"
+               "<p>The browser IDE is split into three working areas:</p>"
+               "<ul><li><b>Editor</b>: write and run larger programs.</li>"
+               "<li><b>REPL</b>: test expressions quickly.</li>"
+               "<li><b>Canvas</b>: drawing output for Window/Turtle examples.</li></ul>")
+          (str "<h3>2) File Workflow</h3>"
+               "<p>Use the <code>File</code> menu for project-style editing in the browser:</p>"
+               "<ul><li><b>New File</b>: create a new buffer.</li>"
+               "<li><b>Open File</b>: load a local <code>.nex</code> file.</li>"
+               "<li><b>Save File</b>: save to the filesystem (or download fallback).</li></ul>"
+               "<p>Keyboard shortcuts: <code>Ctrl/Cmd+N</code>, <code>Ctrl/Cmd+O</code>, <code>Ctrl/Cmd+S</code>.</p>")
+          (str "<h3>3) Editor + REPL Usage</h3>"
+               "<p>Editor controls:</p>"
+               "<ul><li><b>Format</b>: auto-format the current buffer.</li>"
+               "<li><b>Run In REPL</b>: execute editor content through the REPL runtime.</li></ul>"
+               "<p>REPL tips:</p>"
+               "<ul><li>Press <code>Enter</code> in REPL input to evaluate.</li>"
+               "<li>Use <code>ArrowUp</code>/<code>ArrowDown</code> for REPL history.</li>"
+               "<li>Toggle <b>Typecheck</b> before evaluation if you want static checks.</li></ul>")
+          (str "<h3>4) Productivity Shortcuts</h3>"
+               "<ul><li><code>Ctrl+Enter</code> in editor: run editor buffer.</li>"
+               "<li><code>Ctrl+Shift+F</code> in editor: format buffer.</li>"
+               "<li><code>Tab</code>/<code>Shift+Tab</code>: indent/outdent selection.</li>"
+               "<li><code>Esc</code>: close open menus and the help pane.</li></ul>"
+               "<p>Use the Tutorial and this guide together: tutorial teaches language features, this guide teaches IDE workflow.</p>")]
          :docs-page 0
+         :docs-mode :tutorial
          :tutorial-visible false}))
 
 (defn- by-id [id]
@@ -852,15 +879,19 @@
             (append-line! "err" (str "Error: " (or (.-message e) (str e))))))))))
 
 (defn- update-docs! []
-  (let [{:keys [docs-pages docs-page]} @app-state
-        max-page (dec (count docs-pages))
+  (let [{:keys [docs-pages web-ide-pages docs-page docs-mode]} @app-state
+        pages (if (= docs-mode :web-ide) web-ide-pages docs-pages)
+        pane-title (if (= docs-mode :web-ide) "Web IDE Guide" "Tutorial")
+        max-page (dec (count pages))
         prev-btn (by-id "docs-prev")
         next-btn (by-id "docs-next")
+        pane-title-el (by-id "docs-pane-title")
         title-el (by-id "docs-title")
         body-el (by-id "docs-body")]
-    (when (and prev-btn next-btn title-el body-el)
-      (set! (.-textContent title-el) (str "Page " (inc docs-page) " / " (count docs-pages)))
-      (set! (.-innerHTML body-el) (nth docs-pages docs-page))
+    (when (and prev-btn next-btn pane-title-el title-el body-el)
+      (set! (.-textContent pane-title-el) pane-title)
+      (set! (.-textContent title-el) (str "Page " (inc docs-page) " / " (count pages)))
+      (set! (.-innerHTML body-el) (nth pages docs-page))
       (set! (.-disabled prev-btn) (zero? docs-page))
       (set! (.-disabled next-btn) (= docs-page max-page)))))
 
@@ -876,7 +907,12 @@
             (str "tutorial-pane " (if visible? "open" "closed"))))))
 
 (defn- open-tutorial! []
-  (swap! app-state assoc :tutorial-visible true :docs-page 0)
+  (swap! app-state assoc :tutorial-visible true :docs-mode :tutorial :docs-page 0)
+  (update-docs!)
+  (update-tutorial-visibility!))
+
+(defn- open-web-ide-guide! []
+  (swap! app-state assoc :tutorial-visible true :docs-mode :web-ide :docs-page 0)
   (update-docs!)
   (update-tutorial-visibility!))
 
@@ -914,6 +950,7 @@
                "    <details class='menu'><summary>Help</summary>"
                "      <div class='menu-items'>"
                "        <button id='menu-tutorial'>Tutorial</button>"
+               "        <button id='menu-webide-guide'>Web IDE Guide</button>"
                "      </div>"
                "    </details>"
                "    <span id='active-file-label' class='active-file-label'></span>"
@@ -929,7 +966,7 @@
                "        </div>"
                "        <aside id='tutorial-pane' class='tutorial-pane closed'>"
                "          <div class='tutorial-head'>"
-               "            <h2>Tutorial</h2>"
+               "            <h2 id='docs-pane-title'>Tutorial</h2>"
                "            <button id='tutorial-close'>Close</button>"
                "          </div>"
                "          <div class='docs-nav'>"
@@ -1034,6 +1071,7 @@
     (.addEventListener (by-id "menu-open") "click" (fn [_] (choose-file-to-open) (update-active-file-label!) (close-all-menus!)))
     (.addEventListener (by-id "menu-save") "click" (fn [_] (save-current-file!) (update-active-file-label!) (close-all-menus!)))
     (.addEventListener (by-id "menu-tutorial") "click" (fn [_] (open-tutorial!) (close-all-menus!)))
+    (.addEventListener (by-id "menu-webide-guide") "click" (fn [_] (open-web-ide-guide!) (close-all-menus!)))
     (.addEventListener (by-id "tutorial-close") "click" (fn [_] (close-tutorial!)))
     (.addEventListener (by-id "editor-format") "click" (fn [_] (format-editor!)))
     (.addEventListener (by-id "editor-run") "click" (fn [_] (run-editor!)))
@@ -1097,7 +1135,9 @@
                          (update-docs!)))
     (.addEventListener (by-id "docs-next") "click"
                        (fn [_]
-                         (let [last-page (dec (count (:docs-pages @app-state)))]
+                         (let [{:keys [docs-mode docs-pages web-ide-pages]} @app-state
+                               pages (if (= docs-mode :web-ide) web-ide-pages docs-pages)
+                               last-page (dec (count pages))]
                            (swap! app-state update :docs-page #(min last-page (inc %))))
                          (update-docs!)))
 

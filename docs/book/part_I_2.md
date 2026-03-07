@@ -1,291 +1,90 @@
-## 2. Looking at the Real World
+# 2. Looking at the Real World
 
-Before we design algorithms, we need to confront an uncomfortable truth:
+A specification describes how a system is supposed to behave. An observation describes how it actually behaves. These are rarely the same thing, and the gap between them is where most software failures live.
 
-**The real world is messy.**
+The previous chapter established that problems have structure, and that misidentifying the structure leads to systematically wrong solutions. This chapter asks a prior question: how do we discover the actual structure of a problem before we have committed to a design? The answer is observation — disciplined, skeptical attention to the real environment the system must inhabit.
 
-Requirements documents try to simplify it.
-Architecture diagrams try to structure it.
-Specifications try to freeze it into rules.
 
-But real systems live in environments that are:
+## Models and Their Limits
 
-* incomplete
-* unpredictable
-* full of human behavior
-* constantly changing
+Every software system embeds a model of the world it operates in. The delivery robot embeds a model of the building. The knowledge engine embeds a model of what users want. The virtual world embeds a model of physical interaction. These models are not incidental — they are load-bearing. Every algorithm in the system depends on them.
 
-If we ignore this, we build systems that work perfectly **in theory** and fail immediately **in practice**.
+A model is an abstraction: it retains some features of the world and discards others. A graph of hallways retains connectivity and discards the fact that hallways are occupied by people, blocked by deliveries, and occasionally closed for maintenance. This is not a flaw — every useful model discards something. The question is whether what was discarded matters.
 
-So the next step in programming is not writing code.
+It often does. Watch the building the robot must navigate for an hour. What the graph does not contain: people moving unpredictably through corridors, a door propped open on some days and locked on others, an elevator out of service without notice, a hallway narrowed by construction equipment. The algorithm operating on the graph is correct. The graph itself is an inadequate model of the environment. No improvement to the algorithm can fix this — the problem is upstream.
 
-It is **learning how to observe the real world carefully**.
+This is the first purpose of observation: to find what the model discards, and to ask whether that matters.
 
----
 
-## Observing How Systems Actually Behave
+## Users Are Inside the System
 
-Many programming problems appear straightforward when described abstractly.
+A second source of modeling failure is the treatment of users as inputs rather than participants. A system that accepts queries treats the user as a source of well-formed requests. Real users are not this.
 
-But the moment you observe the real environment, new complexities appear.
+Consider a user who asks a knowledge engine: *"What causes memory leaks?"* Taken literally, this is a retrieval problem — find documents about memory leaks. But the question is underdetermined. The user might mean memory leaks in C, where the cause is manual allocation without corresponding deallocation; in Java, where the garbage collector cannot reclaim objects with live references; in machine learning pipelines, where tensors accumulate across training steps. The same string of words points at structurally different problems in different contexts.
 
-Consider our **delivery robot** again.
+Users also ask questions that do not name what they mean at all: *"Why does my program keep growing?"* This is not a malformed query. It is a reasonable description of an experience, offered by someone who does not yet know the technical vocabulary for the phenomenon they are observing.
 
-A clean algorithmic description might say:
+A system designed for well-formed inputs will fail both of these users. The design failure is not in the retrieval mechanism — it is in the assumption that input arrives already interpreted. Real users bring incomplete information, wrong vocabulary, and implicit context. A model that excludes this is a model of a system that does not need to exist, because its users do not exist either.
 
-> “The robot moves along hallways represented as a graph.”
+::: {.note-exercise}
+**Exercise 2.1.** A calendar application allows users to schedule meetings. Describe three ways a real user's behavior might violate the assumptions embedded in a naive design. For each, state the hidden assumption explicitly.
+:::
 
-But if you watch a real building for an hour, you will notice things no graph contains:
+## Constraints Are Not Obstacles
 
-* People walking unpredictably
-* Temporary obstacles
-* Doors that sometimes remain closed
-* Elevators that are occasionally out of service
-* Hallways blocked by maintenance work
+A common pattern in early design is to solve the unconstrained version of the problem first, then "add constraints later." This produces systems that are elegant in principle and unworkable in practice, because the constraints are not obstacles laid on top of the solution — they are part of the problem's structure.
 
-The algorithm is correct.
+The virtual world illustrates this clearly. In an unconstrained simulation, every object interacts with every other: forces propagate, collisions are detected exactly, state is updated at every timestep. The computational cost is quadratic in the number of objects. At a thousand objects, this is infeasible in real time. The constraint — that the simulation must run at interactive speeds — is not a performance requirement to be met after the design is complete. It is a structural feature of the problem that determines which solutions are admissible.
 
-The **model of reality is incomplete**.
+A designer who ignores this constraint will produce an architecture that cannot be repaired by optimization. The data structures, the update strategy, the partitioning of the world — all of these must be chosen with the constraint in mind from the beginning. A spatial index that makes nearby-object queries fast, a fixed timestep that allows approximate but bounded computation, a distinction between objects that matter to the current frame and objects that do not — these design choices follow from the constraint. They are not refinements to a design; they are consequences of understanding the problem.
 
-Good engineers spend time observing how the system behaves **before deciding how it should behave**.
+The question is not *"What is the ideal solution, and how close can we get?"* It is *"What does a solution look like when the constraints are treated as given?"*
 
----
-
-## Users Are Part of the System
-
-Programmers often think of users as external to the system.
-
-But in reality, users are **part of the system’s behavior**.
-
-Consider the **knowledge engine** we will build later.
-
-Suppose a user asks:
-
-> “What causes memory leaks?”
-
-This looks like a simple search query.
-
-But users rarely behave like clean inputs to an algorithm.
-
-They may mean:
-
-* memory leaks in C
-* memory leaks in Java
-* memory leaks in operating systems
-* memory leaks in machine learning pipelines
-
-Or they may ask incomplete questions:
-
-> “Why does my program keep growing?”
-
-Users bring:
-
-* assumptions
-* misunderstandings
-* incomplete information
-
-If we design systems assuming perfect input, we create systems that **fail the moment they meet real people**.
-
-Understanding users is not a product-design concern alone.
-
-It is a **core programming concern**.
-
----
-
-## Constraints Shape the Problem
-
-Another aspect of the real world is constraints.
-
-In theory, many problems have elegant solutions.
-
-In reality, solutions must operate within limits.
-
-Consider again the **virtual world** system.
-
-In theory, every object could interact with every other object in perfect physical simulation.
-
-But reality imposes constraints:
-
-* limited CPU time
-* limited memory
-* network latency
-* thousands of simultaneous interactions
-
-A perfectly accurate simulation might be computationally impossible.
-
-So we must ask:
-
-* Which interactions matter most?
-* Which approximations are acceptable?
-* Where can we simplify without breaking the illusion?
-
-Constraints do not merely limit solutions.
-
-They **define the shape of the solution**.
-
----
 
 ## Hidden Assumptions
 
-One of the most dangerous sources of bugs in software is the **hidden assumption**.
+The most dangerous element of any model is what it assumes without stating. A hidden assumption is a condition the system requires in order to function correctly, which is neither documented nor tested, and which therefore fails silently when violated.
 
-A hidden assumption is something everyone believes to be true, but no one explicitly states.
+The delivery robot assumes its map is current. The knowledge engine assumes that documents in its collection are authoritative. The virtual world assumes that no two objects occupy the same position at the start of a frame. Each of these assumptions is reasonable under normal conditions. Each produces a failure mode that is difficult to diagnose, because the failure does not point to the assumption — it points to the code that depended on it.
 
-For example:
+When the robot reaches a hallway that no longer exists, it does not report "map out of date." It reports, if it reports anything coherent at all, that it cannot find a valid path. The assumption has been violated, but the violation is invisible to the system, which has no representation of map currency and therefore no way to detect its absence.
 
-* “The map of the building is accurate.”
-* “Users will ask clear questions.”
-* “Objects in the simulation interact in predictable ways.”
-
-These assumptions often remain invisible until they break.
-
-The robot reaches a hallway that does not exist on the map.
-
-A user asks a vague question.
-
-Two subsystems interact in a way no one predicted.
-
-At that moment, the system does not merely fail.
-
-It fails **mysteriously**, because the underlying assumption was never documented.
-
-Careful observation helps us discover these assumptions early.
-
----
-
-## Turning Reality Into Questions
-
-Reality is messy, ambiguous, and complicated.
-
-Programming requires something different:
-
-**clear, answerable questions.**
-
-This transformation—from observation to question—is one of the most important intellectual steps in engineering.
-
-For example:
-
-Messy observation:
-
-> “The robot sometimes gets stuck.”
-
-Better question:
-
-> “What information does the robot need to detect blocked paths?”
-
-Messy observation:
-
-> “Users get bad answers.”
-
-Better question:
-
-> “How can the system represent uncertainty in retrieved information?”
-
-Messy observation:
-
-> “The simulation becomes chaotic.”
-
-Better question:
-
-> “What rules govern interactions between objects?”
-
-A good engineering question has three properties:
-
-1. **It is precise enough to analyze.**
-2. **It focuses on causes, not symptoms.**
-3. **It suggests measurable outcomes.**
-
-Once we have questions like these, algorithms and designs begin to emerge naturally.
-
----
-
-## The Programmer as Observer
-
-Many people imagine programming as an activity that happens entirely inside a computer.
-
-But good programmers spend much of their time doing something else:
-
-* watching systems run
-* observing user behavior
-* investigating failures
-* questioning assumptions
-
-In other words, they act a little like scientists studying a complex phenomenon.
-
-They observe.
-
-They form hypotheses.
-
-They test those hypotheses through experiments and code.
-
-Programming is not just construction.
-
-It is also **investigation**.
-
----
-
-## Connection to Nex
-
-In this book, Nex helps us keep observation and implementation connected.
-
-Because Nex supports both fast exploration and structured design, we can move from:
-
-- rough hypotheses about real behavior
-- to explicit rules, contracts, and invariants
-- to executable prototypes we can test quickly
-
-That workflow mirrors real engineering: observe, model, test, revise.
-
----
+Observation surfaces hidden assumptions because observation confronts the model with the world. Watching the robot navigate exposes the assumption about the map. Watching users query the knowledge engine exposes the assumption about vocabulary. Running the simulation with two objects at the same position exposes the assumption about initial state. The assumptions do not reveal themselves in code review or specification analysis; they reveal themselves when the system meets conditions it was not built to handle.
 
 ::: {.note-exercise}
-**Exercise**
-Apply the section task and record your results before reading the solution notes.
+**Exercise 2.2.** Identify two hidden assumptions in the following specification: *"The payment system processes transactions in the order they are received."* For each assumption, describe the failure mode that results when it is violated.
 :::
 
-## Quick Exercise (3 Minutes)
+## From Observation to Question
 
-Pick one real system you use every day (maps, search, chat, payments, calendar).
+Observation produces raw material — a collection of behaviors, failures, and anomalies. Before this can inform a design, it must be transformed into questions precise enough to analyze.
 
-Write:
+This transformation is not automatic. The observations produced by watching a real system are messy and particular: the robot got stuck in corridor B3 on Tuesday afternoon; a user searching for "memory leak" clicked none of the top five results; two objects in the simulation passed through each other during a high-velocity collision. These are facts, but they are not yet questions. A question names a structural condition, not an instance of it.
 
-1. One observable failure: “Sometimes it does X.”
-2. One hidden assumption behind that failure.
-3. One concrete question engineers should answer before coding a fix.
+| Observation | Question |
+|---|---|
+| The robot got stuck in corridor B3. | What information does the robot need to detect that a path has become impassable? |
+| Users ignore the top search results. | How should the system represent the difference between topical relevance and user intent? |
+| Objects pass through each other at high velocity. | What invariant must the collision detection system maintain regardless of object velocity? |
 
-Example:
+The question is not a restatement of the observation. It identifies the structural condition the observation is evidence of, and names what a solution must address. A team that asks *"How do we fix the B3 incident?"* will produce a patch. A team that asks *"What information does the robot need to detect impassable paths?"* will produce a design.
 
-- Failure: “Search returns too many irrelevant results.”
-- Hidden assumption: “All users mean the same thing by the same query terms.”
-- Engineering question: “How should intent ambiguity be represented and ranked?”
+A well-formed engineering question has three properties. First, it is general enough to cover the class of cases the observation belongs to, not just the instance observed. Second, it is specific enough to admit a definite answer — or at least to make clear what evidence would constitute progress toward one. Third, it is stated in terms of the system's behavior and structure, not in terms of the symptom that motivated it.
 
----
+::: {.note-exercise}
+**Exercise 2.3.** The following are observations from a real system. For each, write a well-formed engineering question that names the structural condition the observation is evidence of.
 
-::: {.note-takeaways}
-**Takeaways**
-Capture the key principles from this chapter and one action you will apply immediately.
+1. *"The app crashes when two users edit the same document simultaneously."*
+2. *"The recommendation engine stops suggesting new items after a user has been active for several months."*
+3. *"The search index returns stale results for several minutes after content is updated."*
 :::
 
-## Chapter Takeaways
+## What Observation Cannot Do
 
-- Real environments are dynamic; static specs never capture everything.
-- Users are part of system behavior, not external noise.
-- Constraints are not obstacles after design; they shape design from the start.
-- Hidden assumptions create mysterious failures.
-- Strong engineering starts by turning messy observations into precise questions.
+Observation is not sufficient on its own. A system can be observed indefinitely without producing a design, because observation produces evidence but not explanations. The gap between them requires a model — a proposed account of the structure that produces the observed behavior.
 
----
+This is why observation and modeling must proceed together. An observation without a model is an anomaly without a cause. A model without observation is a hypothesis without evidence. The engineering process alternates between them: observe behavior, form a hypothesis about structure, derive predictions, test the predictions against further observation, revise the model.
 
-## From Observation to Understanding
+The three systems in this book will each undergo this process. In each case, careful observation will reveal that the naive model is inadequate, and the revised model will suggest a design that the naive model could not have produced.
 
-The goal of observing the real world is not to capture every detail.
-
-That would be impossible.
-
-Instead, the goal is to identify the **essential structure** hidden inside messy reality.
-
-In the next chapter, we will convert these observations into something engineers can execute against: a **problem statement**.
-
-If Chapter 2 is about seeing reality clearly, Chapter 3 is about expressing that reality precisely.
-
-That written precision is what later enables strong models, better algorithms, and safer implementations.
+The next chapter formalizes what a model must contain: a precise statement of the problem, the constraints that bound it, and the assumptions it makes explicit. That formalization is what converts the output of observation into something an algorithm can be built against.

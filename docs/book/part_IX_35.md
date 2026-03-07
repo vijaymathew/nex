@@ -1,92 +1,66 @@
-# Part IX — Programming in the Age of AI — Reviewing AI-Generated Code
+# Part IX: Programming in the Age of AI
 
-## 35. Reviewing AI-Generated Code
+# Chapter 35: Reviewing AI-Generated Code
 
-AI can generate code quickly.
+The power of an AI assistant is its ability to generate code at a speed that exceeds human writing. But in software engineering, writing code is only a fraction of the work. The more important work is ensuring that the code is safe, correct, and fits the architecture. In an AI-assisted workflow, the burden of this responsibility shifts from *authoring* to *reviewing*.
 
-Review determines whether that code is safe, correct, and maintainable.
-
-In AI workflows, review quality is the difference between acceleration and debt.
+A common mistake in AI workflows is treating the output as "pre-verified." Because the code often looks clean, follows style guides, and compiles on the first try, there is a temptation to give it a superficial review. But AI-generated code can be subtly wrong in ways that manual code is not. It can satisfy the happy path while ignoring the edge cases, or it can introduce hidden couplings that only become apparent during a production incident. Review is the single most important line of defense.
 
 ---
 
-## What To Review First
+## What to Review First: The Risk-First Hierarchy
 
-Prioritize review by risk, not by line count.
+When reviewing AI-generated code, don't start with the syntax or the variable names. Start with the behavior. A high-quality review follows a hierarchy of risk:
 
-High-priority review targets:
+1.  **Contract Correctness:** Does the code satisfy the `require` and `ensure` conditions of its own class and every class it calls? This is the most critical check.
+2.  **Invariant Preservation:** Does the code maintain the object-level and system-level invariants? AI is notorious for modifying state in ways that bypass the rules of the domain.
+3.  **Failure Path Handling:** Does the code handle transient failures, timeouts, and invalid inputs? AI tends to be optimistic. You must be the pessimist.
+4.  **Behavioral Regression:** Does the new code change the observable behavior of existing functions in unintended ways?
+5.  **Maintainability and Style:** Only once the code is proven safe and correct do you worry about whether the code is "idiomatic."
 
-- contract correctness
-- invariant preservation
-- behavior regressions
-- security/reliability implications
-- integration boundary violations
-
-Cosmetic style issues come after behavioral safety.
+If the code fails any of the first four checks, the fifth check doesn't matter. You shouldn't polish code that is behaviorally broken.
 
 ---
 
-## Review Checklist For AI Code
+## The AI Review Checklist
 
-A practical checklist:
+To make review a routine discipline, use a focused checklist for every AI-generated patch:
 
-1. Does it satisfy stated requirement?
-2. Does it preserve existing contracts?
-3. Does it handle failure states explicitly?
-4. Does it introduce hidden coupling?
-5. Are tests added for changed behavior?
-
-This checklist catches most high-impact problems early.
+- [ ] **Contract Alignment:** Does it honor the existing interfaces?
+- [ ] **State Safety:** Are all state transitions legal and through defined operations?
+- [ ] **Failure Resilience:** What happens if the network fails or the database is down? Is there retry logic, and is it bounded?
+- [ ] **Hidden Coupling:** Does it import a class it shouldn't, or depend on an implementation detail?
+- [ ] **Validation Evidence:** Did the AI also provide the tests that prove its work? Have you run them yourself?
 
 ---
 
-## Worked Design Path
+## From Draft to Verified Implementation
 
-Requirement:
+Consider a requirement:
+> *"The AI was asked to add retry logic to the delivery dispatch port."*
 
-> "AI added retry logic to delivery dispatch."
+The AI provides a loop that retries on failure. A naive reviewer sees "it retries" and approves. A rigorous reviewer asks the following:
 
-Review steps:
+1.  **Is the retry bounded?** (If not, we could have an infinite loop).
+2.  **Does it retry on *every* error?** (We should only retry on transient network errors, not on permanent domain errors like "invalid task ID").
+3.  **Is the operation idempotent?** (If the first request actually reached the server but the response was lost, does the retry cause a duplicate delivery?)
+4.  **Is the invariant preserved?** (Does the retry loop keep the task in the "DISPATCHING" state until it succeeds or finally fails?)
 
-1. verify retry bound exists
-2. verify non-retryable errors do not loop
-3. verify idempotency guard remains correct
-4. verify existing success path unchanged
-5. add regression tests for retry and duplicate requests
+By asking these questions, you move from "it looks like it works" to "I have proven it is safe."
 
 ---
 
-## Nex Implementation Sketch
+## Implementation in Nex
+
+In Nex, our explicit failure paths and contract checks provide the perfect framework for this kind of review.
 
 ```nex
-class Dispatch_Port
-feature
-  fail_code: String
-
-  send(task_id: String): String
-    require
-      id_present: task_id /= ""
-    do
-      if fail_code = "NONE" then
-        result := "SENT"
-      elseif fail_code = "TRANSIENT" then
-        result := "TRANSIENT_FAILURE"
-      else
-        result := "PERMANENT_FAILURE"
-      end
-    ensure
-      known_result:
-        result = "SENT" or
-        result = "TRANSIENT_FAILURE" or
-        result = "PERMANENT_FAILURE"
-    end
-end
-
+-- The AI-generated proposal for a dispatch port with retry
 class Dispatch_With_Retry
 feature
   port: Dispatch_Port
 
-  send(task_id: String; max_attempts: Integer): String
+  send_task(task_id: String; max_attempts: Integer): String
     require
       id_present: task_id /= ""
       attempts_valid: max_attempts >= 1
@@ -111,99 +85,52 @@ feature
 end
 ```
 
-Review focus here is correctness under all failure paths, not syntax.
+A reviewer looking at this Nex implementation can immediately see the logic's boundaries. They can see that the loop is bounded by `max_attempts`. They can see that it stops correctly on a `PERMANENT_FAILURE`. The `ensure` clause makes the expected outcomes explicit. The review task is transformed from "understanding the code" to "validating the contract."
 
 ---
 
-## AI Review Across The Three Systems
+## AI Review Across the Three Systems
 
-### Delivery
+In the **delivery system**, review focuses on state transition legality. Did the AI-generated code allow a task to skip a mandatory "verification" step?
 
-- transition legality and retry safety
+In the **knowledge engine**, review focuses on ranking correctness. Did the AI's "optimized" ranking algorithm accidentally exclude documents that were highly relevant but didn't match a new heuristic?
 
-### Knowledge
+In the **virtual world**, review focuses on determinism. Did the AI introduce a non-deterministic random number call into a simulation loop that must remain reproducible?
 
-- ranking correctness and fallback semantics
-
-### Virtual World
-
-- deterministic update guarantees and bound safety
-
-Review must be domain-aware, not generic.
+In each case, the reviewer is the guardian of the system's core principles.
 
 ---
 
-## Common Mistakes
+## Three Ways AI Review Fails
 
-### Mistake 1: Style-first review
+**Style-First Review.** Spending 15 minutes debating a variable name while missing a fatal race condition is the most common review failure. The remedy is to follow the hierarchy of risk: contracts first, style last.
 
-Symptom:
+**No Regression Focus.** Assuming that because the new feature works, the old features still work. The remedy is to compare the observable behavior of the system before and after the patch, ideally using automated parity tests.
 
-- severe behavioral bugs survive
-
-Recovery:
-
-- start with contracts, invariants, failure paths
-
-### Mistake 2: No regression focus
-
-Symptom:
-
-- existing behavior broken by new code
-
-Recovery:
-
-- compare before/after observable behavior explicitly
-
-### Mistake 3: Missing adversarial cases
-
-Symptom:
-
-- retry loops, edge crashes, or invalid outputs in production
-
-Recovery:
-
-- add failure-oriented tests before approval
+**The "Rubber Stamp" Problem.** Approving an AI-generated patch because you are in a hurry. The remedy is to acknowledge that AI code is "guilty until proven innocent." If you don't have time to review it properly, you don't have time to merge it.
 
 ---
 
-::: {.note-exercise}
-**Exercise**
-Apply the section task and record your results before reading the solution notes.
-:::
+## Quick Exercise
 
-## Quick Exercise (12 Minutes)
+Take one recent AI-generated patch (even a small one) and apply the Risk-First Hierarchy:
+1.  Check the contract (inputs/outputs).
+2.  Check the invariants (state safety).
+3.  Check the failure paths (what could go wrong?).
+4.  Check for hidden coupling.
 
-Take one AI-generated patch and review it with this order:
-
-1. contract alignment
-2. invariant impact
-3. failure path handling
-4. regression test coverage
-5. maintainability concerns
-
-Document one blocker-level issue and one minor issue.
+Did you find anything that a "style-only" review would have missed?
 
 ---
 
-## Connection to Nex
+## Takeaways
 
-Nex contracts make semantic review more objective by converting behavior expectations into explicit checks.
-
----
-
-::: {.note-takeaways}
-**Takeaways**
-Capture the key principles from this chapter and one action you will apply immediately.
-:::
-
-## Chapter Takeaways
-
-- AI-generated code requires risk-first review.
-- Contract and invariant validation should lead review order.
-- Regression safety is non-negotiable.
-- Review quality defines AI workflow reliability.
+- AI-generated code requires a more rigorous review than human code because its failure modes are often more subtle.
+- Use a Risk-First Hierarchy: contracts and invariants are the top priority.
+- Reviewing is not reading; it is validating behavior against expectations.
+- A review checklist is the best tool for maintaining consistency and catching common AI optimistic biases.
+- Review quality is the ultimate throttle on the speed of AI-assisted development.
 
 ---
 
-In Chapter 36, we close with the role of human engineering judgment in AI-assisted software development.
+*Chapter 36 closes the book with the final piece of the puzzle: the role of human judgment and accountability in a world where AI is doing more and more of the work.*
