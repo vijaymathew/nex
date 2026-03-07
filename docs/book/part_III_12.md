@@ -1,92 +1,61 @@
-# Part III — The Shape of Algorithms — Breaking Problems Apart
+# Chapter 12: Breaking Problems Apart
 
-## 12. Breaking Problems Apart
+Complex algorithms rarely fail because a single line is wrong. They fail because too many responsibilities have been packed into one place, until the code can no longer be read as an account of what it does. The logic is present, but it is not separable — understanding any one part requires understanding all the others simultaneously, and changing any one part risks breaking something that was never intended to change at all.
 
-Complex algorithms rarely fail because a single line is wrong.
-
-They fail because too many responsibilities are packed into one block, making behavior hard to reason about and harder to change safely.
-
-Decomposition is the discipline of splitting a problem into subproblems with clear interfaces and guarantees.
-
-A strong decomposition gives you:
-
-- local reasoning (understand one piece at a time)
-- independent testing (verify each stage in isolation)
-- replaceability (swap strategy without rewriting everything)
+Decomposition is the discipline of dividing a problem into subproblems, each with a clear responsibility and an explicit contract governing what it receives and what it returns. A well-decomposed algorithm can be understood one piece at a time, tested in isolation, and extended by adding or replacing pieces rather than rewriting the whole. These are not stylistic virtues. They are the properties that determine whether an algorithm can be maintained as requirements change.
 
 ---
 
-## A Practical Decomposition Rule
+## The Test of a Decomposition
 
-For each part, be able to answer three questions:
+A decomposition is not just a list of functions. Any working code can be broken into functions. The question is whether the pieces reflect the actual structure of the problem — whether each piece has a single, nameable responsibility, a contract that can be stated without reference to the implementation, and an interface that allows it to be understood and tested independently.
 
-1. What input does it require?
-2. What output does it guarantee?
-3. What is the one responsibility it owns?
+Three questions test whether a decomposition is genuine:
 
-If a part has multiple reasons to change, decomposition is incomplete.
+*What input does this piece require?* Not the inputs it happens to receive, but the inputs it actually depends on to do its job. A piece that reaches outside its inputs to consult shared state is not a piece with a clear interface — it is a piece with hidden dependencies that will produce surprises when the shared state changes.
 
----
+*What output does it guarantee?* Not what it usually returns, but what it is obligated to return for any valid input. A piece whose output format varies depending on internal conditions it does not expose is not a piece with a stable contract.
 
-## Common Decomposition Patterns
-
-### Pipeline
-
-A sequence of stages where output from stage `n` feeds stage `n+1`.
-
-Good for search, ranking, transformation, and simulation loops.
-
-### Strategy Boundary
-
-Stable interface, swappable algorithm.
-
-Good when objective or scale may evolve.
-
-### Guard -> Core -> Commit
-
-- validate assumptions
-- perform core computation
-- apply state changes
-
-Good for state transitions with side effects.
-
-### Domain vs Infrastructure Split
-
-Keep algorithm logic separate from storage/transport/UI concerns.
-
-Good for testability and maintainability.
+*What is the one responsibility it owns?* If a piece has two reasons to change — if updating the scoring logic and updating the output format both require touching the same code — the decomposition is incomplete. A piece with multiple responsibilities is multiple pieces that have not yet been separated.
 
 ---
 
-## Worked Design Path
+## Four Decomposition Patterns
 
-Requirement:
+Certain problem structures recur often enough that their decompositions have names. Recognizing these patterns reduces the work of decomposition from an act of invention to an act of identification.
 
-> “Return top relevant notes for a query.”
+**Pipeline.** A sequence of stages where each stage takes the output of the previous one as its input. The stages are ordered, each transforms its input in one defined way, and the final stage produces the result the caller needs. Pipelines are the natural decomposition for search, ranking, data transformation, and simulation loops — any problem where the solution is a chain of refinements applied to an initial input.
 
-Naive implementation often mixes all concerns in one method:
+**Strategy boundary.** A stable interface around a swappable algorithm. The caller knows what the interface promises; it does not know or care which algorithm sits behind it. This pattern is appropriate when the objective the algorithm optimizes may change — when the current requirement is fewest hops but a future requirement may be minimum cost — or when the algorithm must vary by deployment context. The strategy boundary keeps the interface stable while allowing the implementation to evolve.
 
-- parsing
-- candidate generation
-- scoring
-- ranking
-- filtering
-- formatting
+**Guard, core, commit.** Validate inputs and preconditions before any computation begins. Perform the core computation on verified data. Apply state changes only after the computation has succeeded. This separation prevents the most common class of partial-failure bugs: the operation that updates one piece of state and then fails before updating the rest. When the guard, core, and commit stages are distinct, it becomes possible to reason about each transition step — and to add compensation behavior when a commit cannot be completed.
 
-A decomposed design:
-
-1. `tokenize_query(query)`
-2. `collect_candidates(tokens, index)`
-3. `score_candidate(candidate, tokens)`
-4. `rank_candidates(scored)`
-5. `filter_by_threshold(ranked, min_score)`
-6. `render_results(filtered)`
-
-Now each stage has explicit contracts and can be tested independently.
+**Domain and infrastructure split.** Algorithm logic and storage, transport, or rendering concerns belong in separate pieces. An algorithm that directly queries a database or formats its output for a specific UI is an algorithm whose behavior cannot be tested without the database or the UI. Separating domain logic from infrastructure concerns is not just a testing convenience — it is what makes the algorithm's correctness independent of the platform it runs on.
 
 ---
 
-## Nex Implementation Sketch
+## A Pipeline in Practice
+
+The following requirement will serve as a worked example:
+
+> *"Return the top relevant notes for a query."*
+
+A naive implementation of this feature tends to mix all its concerns into a single method: parse the query, find candidate documents, score each one, sort by score, filter out weak matches, and format the results. This implementation may be correct, but it cannot be tested in pieces, cannot have its scoring logic replaced without touching the pipeline structure, and cannot be understood without reading the entire method.
+
+A decomposed design names each stage and gives it an explicit contract:
+
+1. `tokenize_query(query)` — convert the raw query string into a normalized set of search terms.
+2. `collect_candidates(tokens, index)` — retrieve the documents that contain at least one query term.
+3. `score_candidate(candidate, tokens)` — compute a relevance score for a single candidate document.
+4. `rank_candidates(scored)` — order the scored candidates from most to least relevant.
+5. `filter_by_threshold(ranked, min_score)` — remove candidates whose scores fall below an acceptable floor.
+6. `render_results(filtered)` — convert the filtered list into the format the caller expects.
+
+Each stage now has a single responsibility. The scoring logic lives entirely in stage 3 and can be replaced — substituting a weighted term-frequency model for a simple match counter — without touching any other stage. The filtering threshold in stage 5 can be adjusted without affecting scoring. The output format in stage 6 can change without affecting the ranking. The decomposition has made each axis of change independent of the others.
+
+---
+
+## A Decomposition in Code
 
 ```nex
 class Search_Algorithm
@@ -132,98 +101,40 @@ feature
 end
 ```
 
-Even this small sketch shows decomposition: tokenization and scoring are separate, then composed.
+`tokenize` and `score` are independent operations, each with its own contract. `choose_top` composes them: it calls `tokenize` to normalize the query, calls `score` twice to evaluate each candidate, and selects based on the scores. The postcondition on `choose_top` — `result = doc1 or result = doc2` — guarantees that the result comes from the inputs and not from some other source, which is a meaningful guarantee even in this simplified sketch.
+
+Notice that `choose_top` does not know how tokenization works or how scoring is computed. It knows only what each operation guarantees. This is what makes composition safe: each piece can be reasoned about through its contract, and a piece that satisfies its contract can be replaced by any other piece that satisfies the same contract.
 
 ---
 
-## Common Mistakes
+## Four Ways Decomposition Goes Wrong
 
-### Mistake 1: Decomposing by syntax, not responsibility
+**Decomposing by syntax rather than responsibility.** A function named `process`, `handle`, or `do_stuff` is not a decomposition — it is code divided at arbitrary boundaries without regard to the structure of the problem. The sign of genuine decomposition is that each piece's name states its responsibility, and its contract can be written without reading its implementation. If naming a piece requires describing what it does rather than what it is for, the boundary was drawn in the wrong place.
 
-Symptom:
+**Over-fragmentation.** The opposite error is to divide a problem into so many small pieces that the decomposition itself becomes an obstacle to understanding. When a function does nothing but delegate to another function of the same name with a slightly different signature, it adds a layer of indirection without adding a layer of meaning. The test for whether a layer is genuine is whether it improves the ability to reason about the problem. Layers that exist only to satisfy a structural preference should be merged back.
 
-- helper names like `process`, `handle`, `do_stuff`
+**Hidden coupling between stages.** A stage that depends on the internal state of the stage before it is not an independent piece with a clear interface — it is a piece that has been separated syntactically but remains coupled semantically. The only input a stage should depend on is what is passed to it explicitly. Implicit dependencies on shared mutable state, on call order, or on properties of the implementation above or below will produce failures that are difficult to localize because they cannot be reproduced by testing the stage in isolation.
 
-Recovery:
-
-- rename functions by responsibility
-- enforce one reason to change per stage
-
-### Mistake 2: Over-fragmentation
-
-Symptom:
-
-- many tiny wrappers with no semantic value
-
-Recovery:
-
-- merge layers that do not improve reasoning
-
-### Mistake 3: Hidden coupling between stages
-
-Symptom:
-
-- stage B depends on internals of stage A
-
-Recovery:
-
-- pass explicit values only
-- eliminate implicit shared state where possible
-
-### Mistake 4: Missing stage contracts
-
-Symptom:
-
-- malformed intermediate data causes late failures
-
-Recovery:
-
-- add pre/post conditions at key boundaries
+**Missing contracts at stage boundaries.** A decomposed algorithm whose stages do not have explicit contracts has most of the costs of decomposition and few of its benefits. When an intermediate result is malformed — when `tokenize` returns an empty string for a non-empty query, or when `score` returns a negative value — the failure will propagate through subsequent stages and surface far from its origin. Contracts at stage boundaries catch these failures at the point where they occur, before they have been compounded by later processing.
 
 ---
 
-::: {.note-exercise}
-**Exercise**
-Apply the section task and record your results before reading the solution notes.
-:::
+## Quick Exercise
 
-## Quick Exercise (10 Minutes)
+Take one function in your current codebase that mixes more than one concern — a function that validates, computes, and formats, or that queries, transforms, and updates — and decompose it into three to six stages.
 
-Take one large function in your codebase and decompose it into 3-6 stages.
-
-For each stage, write:
-
-1. input contract
-2. output contract
-3. failure behavior
-4. one test case
-
-Then identify one stage you could replace without touching others.
-
-If nothing is replaceable, coupling is still too strong.
+For each stage, write: the input contract, the output contract, and the single responsibility it owns. Then identify which stage you could replace with a different implementation without changing any other stage. If no stage is independently replaceable, the decomposition still has hidden coupling that the exercise has not yet surfaced.
 
 ---
 
-## Connection to Nex
+## Takeaways
 
-Nex contracts are especially useful at decomposition boundaries because they make handoff assumptions explicit and executable.
-
-This is also where AI-assisted coding improves: clear stage contracts reduce incorrect glue code.
-
----
-
-::: {.note-takeaways}
-**Takeaways**
-Capture the key principles from this chapter and one action you will apply immediately.
-:::
-
-## Chapter Takeaways
-
-- Decomposition is an engineering necessity, not style preference.
-- Each stage should have one responsibility and explicit contracts.
-- Replaceable components require stable interfaces.
-- Good decomposition lowers change risk and improves test quality.
+- Decomposition is a structural discipline, not a stylistic one. Its purpose is to make algorithms locally understandable, independently testable, and safely modifiable.
+- A genuine decomposition passes three tests: each piece has a nameable input, a guaranteed output, and a single responsibility.
+- Four patterns cover most cases: pipeline, strategy boundary, guard-core-commit, and domain-infrastructure split. Recognizing the pattern makes the decomposition easier to find.
+- Composition is safe when it is based on contracts, not on knowledge of implementation details. A piece that knows only what its dependencies guarantee can be reasoned about independently of how those dependencies are implemented.
+- A stage boundary without a contract is a seam that looks like decomposition and behaves like coupling.
 
 ---
 
-In Chapter 13, we apply decomposition to self-similar problems through recursion.
+h*Chapter 13 applies the decomposition principle to a specific and important class of problems: those whose structure is self-similar. Recursive algorithms are decompositions in which a problem is divided into a smaller instance of the same problem. Understanding recursion as a special case of decomposition — rather than as a separate technique — is what makes it a reliable tool rather than an occasional trick.*

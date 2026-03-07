@@ -2,289 +2,90 @@
 
 ## 1. What Problem Are We Actually Solving?
 
-Programming often begins with excitement.
+A team designing a delivery robot for a large office building faces what appears to be a well-defined problem: compute shortest paths through the building and execute them. The path-finding algorithms are well-understood; the implementation is straightforward. After several months the robot navigates reliably — and delivers packages to the wrong destinations.
 
-A new feature.
-A clever algorithm.
-A fresh framework.
-A blank editor window waiting for code.
+The algorithm was correct. The problem was wrong.
 
-But most software failures begin **before any of that**.
+Buildings change. Hallways become blocked, elevators fail, doors close. The engineers had modeled the building as a fixed graph and optimized movement through it. But the actual challenge was not path-finding in a known environment — it was decision-making in an uncertain one. These are structurally different problems, requiring different solutions. No improvement to the path-finding algorithm could have fixed the system, because the algorithm was not the source of the failure.
 
-They begin with a misunderstanding of the problem.
+This distinction — between the problem as initially described and the problem as it actually exists — is one of the most consequential in software engineering.
 
 
-## The Most Expensive Mistake in Software
+## Symptoms and Problems
 
-Imagine a team building a navigation system for a delivery robot.
+What the team described as their problem — "compute the shortest path from A to B" — was in fact a symptom: a visible manifestation of a deeper structural condition. The underlying problem was that the environment was dynamic and the system assumed it was not.
 
-They start with a clear technical goal:
+A symptom names the observable failure. A problem names the structural condition that makes the failure inevitable. Treating a symptom may eliminate the immediate manifestation while leaving the condition intact, producing either the same failure under different circumstances, or a different failure entirely.
 
-> “The robot must compute the shortest path from A to B.”
+The distinction appears throughout software:
 
-So they build:
+| Symptom | Underlying problem |
+|---|---|
+| "The database is slow." | The data model does not match the query patterns. |
+| "Search results are irrelevant." | The system does not model user intent. |
+| "The robot misdelivers packages." | The environment is dynamic; the model is static. |
+| "The system cannot scale." | The architecture assumes a fixed workload. |
 
-* a fast path-finding algorithm
-* a grid map of the building
-* a sophisticated movement controller
-
-After months of work, the robot moves beautifully.
-
-It just **delivers packages to the wrong places**.
-
-Why?
-
-Because the real problem was never “find the shortest path.”
-
-The real problem was:
-
-* Buildings change.
-* Hallways get blocked.
-* Elevators break.
-* People move furniture.
-* Doors close.
-
-The true problem was **operating in an unpredictable environment**, not computing an optimal path.
-
-The team solved the **symptom**.
-
-They missed the **problem**.
-
-
-## Symptoms vs Problems
-
-Many programming projects begin with a description that sounds precise but is actually only a symptom.
-
-For example:
-
-| Symptom                                  | Underlying Problem                          |
-| ---------------------------------------- | ------------------------------------------- |
-| “The database is slow.”                  | The data model doesn’t match the queries.   |
-| “Search results are irrelevant.”         | The system does not understand user intent. |
-| “The robot can't navigate the building.” | The environment is dynamic and uncertain.   |
-| “The system can't scale.”                | The architecture assumes a fixed workload.  |
-
-Symptoms are **visible failures**.
-
-Problems are **structural causes**.
-
-Good programmers fix symptoms.
-
-Great engineers **find the real problem first**.
-
-
-## The Three Systems We Will Build
-
-Throughout this book, we will repeatedly return to three systems.
-
-Each one looks like a programming challenge.
-
-But each one is actually a **problem-understanding challenge**.
-
-### 1. The Delivery Robot
-
-A robot must navigate a large office building and deliver packages.
-
-At first glance this looks like a classic algorithm problem:
-
-* shortest path
-* graph traversal
-* route optimization
-
-But very quickly the real issues appear:
-
-* What if the map is incomplete?
-* What if elevators become unavailable?
-* What if the robot must learn new routes?
-
-This is not just pathfinding.
-
-It is **decision-making under uncertainty**.
-
-
-### 2. The Knowledge Engine
-
-A system that answers questions using a large collection of documents.
-
-At first glance this seems like a search problem:
-
-* indexing
-* ranking
-* retrieval
-
-But the deeper problem emerges:
-
-* What does the user *really mean*?
-* What counts as a trustworthy answer?
-* When should the system say **“I don’t know”?**
-
-This is not just retrieval.
-
-It is **reasoning about knowledge**.
-
-
-### 3. The Virtual World
-
-A simulated world with thousands of interacting objects.
-
-The system must support:
-
-* characters
-* physics
-* events
-* behaviors
-
-At first this appears to be a scaling problem.
-
-But the deeper issue becomes clear:
-
-* How do you manage **complex interactions** without creating chaos?
-
-This is not just simulation.
-
-It is **managing complexity through structure**.
-
-
-## A Pattern You Should Notice
-
-These three systems appear unrelated:
-
-* robotics
-* knowledge systems
-* virtual worlds
-
-But they share the same hidden difficulty.
-
-The hardest part is **not writing code**.
-
-It is **understanding the problem deeply enough that the code becomes obvious**.
-
-This is the central theme of this book.
-
-
-## Why Most Software Fails Before the First Line of Code
-
-Software projects fail for many reasons.
-
-But the most common one is surprisingly simple:
-
-> The team never clearly defined the problem.
-
-This happens in subtle ways:
-
-* Requirements describe **features**, not **problems**.
-* Engineers optimize **performance**, not **correctness**.
-* Systems are designed around **tools**, not **needs**.
-
-In many projects, the first design decision is already a mistake.
-
-The team chooses:
-
-* a database
-* a framework
-* a programming language
-* a system architecture
-
-before asking the most important question:
-
-> **What kind of problem is this?**
-
-
-## Problems Have Shapes
-
-Different problems require different ways of thinking.
-
-Some problems are about:
-
-* **searching**
-* **optimization**
-* **classification**
-* **simulation**
-* **coordination**
-* **learning**
-
-Each shape suggests a different kind of solution.
-
-The mistake beginners make is assuming all problems have the same shape:
-
-> “Write some code and figure it out.”
-
-Experienced engineers recognize the shape **first**.
-
-Then they design the solution.
-
-
-## The Discipline of Problem Seeing
-
-Before designing algorithms, before choosing data structures, before writing code, we must learn a skill that is rarely taught:
-
-> **How to see the problem clearly.**
-
-This means learning to ask questions like:
-
-* What is the system *really trying to accomplish*?
-* What assumptions are hidden in the requirements?
-* What constraints shape the solution?
-* What kinds of failure are acceptable?
-
-Good programming begins with **clear thinking**.
-
-And clear thinking begins with **good questions**.
-
+In each case, the symptom suggests a local repair: tune a query, adjust a ranking, recalibrate a sensor, add a server. The problem demands a different kind of response: a change to the model, the architecture, or the representation. Conflating the two leads to systems that are locally optimized and globally broken.
 
 ::: {.note-exercise}
-**Exercise**
-Apply the section task and record your results before reading the solution notes.
+**Exercise 1.1.** Each description below names a symptom. Restate it as a structural problem, and identify one constraint that any valid solution must satisfy.
 :::
 
-## Quick Exercise (2 Minutes)
+1. "Our build times are too slow."
+2. "Users keep entering invalid data."
+3. "The recommendation engine suggests items users already own."
 
-Take one symptom and rewrite it as an underlying problem.
 
-Example prompt:
+## Three Systems
 
-- Symptom: “Search is slow.”
-- Rewrite: “Our data model and indexing strategy do not match actual query patterns.”
+Throughout this book we will return to three systems that appear unrelated but share a common difficulty: in each case, the problem as naively described obscures the problem as it actually exists.
 
-Now do your own:
+**A delivery robot** must move through a large office building and deliver packages. The naive formulation — find shortest paths, execute them — collapses once the map changes, the elevator fails, or a hallway is blocked. The actual problem is not path optimization. It is planning under uncertainty: how does an agent act rationally when its model of the world is incomplete or out of date?
 
-1. Pick one symptom from your current project (or from the table above).
-2. Write one sentence describing the structural cause.
-3. Write one constraint that any valid solution must satisfy.
+**A knowledge engine** answers questions using a large document collection. The naive formulation — index the documents, rank by relevance — breaks down immediately. Relevant to what? The system must model what the user is trying to accomplish, not merely what words they used. It must recognize when its sources disagree, and when its knowledge is insufficient to answer. The actual problem is not retrieval. It is reasoning about the reliability and scope of knowledge.
 
-If this feels hard, that is normal. This is exactly the skill we are building.
+**A virtual world** contains thousands of objects interacting in real time — characters, physics, events, behaviors. The naive formulation frames this as a performance problem: make it fast enough. But the real difficulty is structural. How can large numbers of independently evolving components interact without producing chaos? The actual problem is not throughput. It is managing complexity through representation.
 
-::: {.note-takeaways}
-**Takeaways**
-Capture the key principles from this chapter and one action you will apply immediately.
+In each system, the naive formulation leads to a dead end. The engineers who succeed are those who see past the initial description to the structure underneath.
+
+
+## The Shape of a Problem
+
+Different problems have different structures, and the structure of a problem constrains the space of reasonable solutions.
+
+Consider what distinguishes the three systems above. The delivery robot problem involves an agent acting over time in a changing environment — it belongs to a class of problems requiring state, perception, and recovery from failure. The knowledge engine problem involves reasoning under uncertainty — it belongs to a class where the system must represent not just what it knows, but the limits of what it knows. The virtual world problem involves the composition of many interacting components — it belongs to a class where the challenge is controlling emergent behavior.
+
+These structural differences are not incidental. A solution suited to one class will not transfer to another. Applying retrieval techniques to the robot problem, or path-planning techniques to the knowledge problem, will not produce a working system. The mismatch between problem structure and solution structure is the primary source of software that works technically while failing practically.
+
+Recognizing the structure of a problem is therefore not preliminary to engineering — it *is* the central act of engineering. The choice of algorithm, data structure, and architecture all follow from it. A team that misidentifies the structure will make systematically wrong choices throughout the project, and no amount of subsequent optimization will recover the loss.
+
+::: {.note-exercise}
+**Exercise 1.2.** For each of the three systems described above, identify one design decision that would be correct given the naive formulation but wrong given the actual problem structure.
 :::
 
-## Chapter Takeaways
+## Before the First Line of Code
 
-- Symptoms are visible failures; problems are structural causes.
-- Most costly software mistakes happen before implementation starts.
-- Problem shape determines solution shape.
-- Good engineering begins by clarifying goals, assumptions, and constraints.
-- If the problem is clear, architecture and algorithms become far easier to choose.
+Software projects fail for many reasons, but one cause appears with unusual regularity: the problem was never clearly defined. This failure rarely looks dramatic. It appears in small decisions made early, when the cost of changing direction seems low:
+
+- requirements specify features rather than goals
+- performance is optimized before correctness is established
+- tools and frameworks are chosen before the problem is understood
+
+Each of these is a form of the same error: beginning to construct a solution before the problem has been examined. The cost is not immediately visible, because early code still compiles, tests still pass, and progress still appears to be made. The failure emerges later, when the system meets the actual problem and the mismatch cannot be patched away.
+
+The discipline this book develops is the habit of stopping before that first line of code and asking a harder set of questions:
+
+- What is the system actually trying to accomplish?
+- What assumptions are hidden in the problem description?
+- What would constitute a failure, and what would cause it?
+- What is the structure of this problem, and what class of solutions does that structure admit?
+
+These questions slow the process at the beginning. They prevent a larger, costlier slowdown later.
+
+Programming begins with code. Engineering begins with understanding.
 
 
-## A Preview of What Comes Next
+## Looking Ahead
 
-In the next chapters, we will develop a set of tools for understanding problems before writing code.
-
-We will explore:
-
-* how to **separate goals from mechanisms**
-* how to **model systems with abstractions**
-* how to **identify the true sources of complexity**
-
-Only after that will we begin designing algorithms.
-
-Because by then, the algorithms will feel almost inevitable.
-
-And when that happens, programming becomes something remarkable:
-
-> Not the art of writing code,
-> but the discipline of **making complex problems understandable**.
-
-In Chapter 2, we begin with a concrete observation method: how to look at real-world behavior, identify hidden assumptions, and capture constraints before design starts.
+The next chapter introduces a concrete method for examining systems before designing them: how to observe real behavior, surface hidden assumptions, and state constraints precisely enough that they can be violated, tested, and refined. We will apply this method first to the delivery robot, where the gap between naive description and actual problem is clearest. By the end of Part I, the three systems will each have yielded a precise problem statement — and the algorithms we build in Part II will follow from those statements almost without choice.

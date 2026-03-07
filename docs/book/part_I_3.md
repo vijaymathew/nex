@@ -1,307 +1,179 @@
-## 3. Writing a Problem Statement
+# Chapter 3: Writing a Problem Statement
 
-Once we have observed the real world and identified the **actual problem**, we face a new challenge:
+Once we have observed the real world and identified the actual problem, a new challenge emerges.
 
-How do we describe that problem **clearly enough that a computer — and a team of programmers — can solve it?**
+How do we describe that problem clearly enough that a computer — and a team of programmers — can actually solve it?
 
-This is the role of the **problem statement**.
+This is the job of a **problem statement**.
 
-A good problem statement is not a vague description of what we want.
-It is a **precise description of the task the system must accomplish**.
+A good problem statement is not a wish list or a vague description of desired outcomes. It is a precise account of what a system must accomplish: the inputs it receives, the outputs it must produce, and the constraints it must respect. It sits between messy reality and precise algorithms, translating one into the other.
 
-It sits between messy reality and precise algorithms.
-
-Too vague, and no one knows what to build.
-Too rigid, and the system becomes impossible to evolve.
-
-Writing a good problem statement is therefore one of the most important skills in programming.
+Get it wrong in either direction and the project suffers. Too vague, and every programmer builds something different. Too rigid, and the system becomes impossible to evolve. Writing a strong problem statement is therefore one of the most important skills in programming — and one of the least taught.
 
 ---
 
-## Precision Without Overengineering
+## Two Ways to Get It Wrong
 
-Beginners often make one of two mistakes.
-
-### Mistake 1: Being Too Vague
+### Being Too Vague
 
 A vague problem statement might look like this:
 
-> “Build a robot that can deliver packages inside the building.”
+> *"Build a robot that can deliver packages inside the building."*
 
-This sounds reasonable, but it leaves critical questions unanswered:
+This sounds reasonable. It is not. It leaves critical questions completely open:
 
-* How does the robot know where it is?
-* What happens if a path is blocked?
-* How are delivery locations represented?
-* How fast must the robot respond?
+- How does the robot know where it is?
+- What happens when a path is blocked?
+- How are delivery locations represented?
+- What response time is acceptable?
 
-Without answers, every programmer imagines something different.
+Without answers, every programmer imagines something different. The result is confusion, incompatible code, and a system that satisfies no one.
 
-The result is confusion and incompatible code.
+### Being Overly Rigid
 
----
+At the other extreme, some specifications attempt to nail down every detail:
 
-### Mistake 2: Being Overly Detailed
+> *"The robot must represent the building as an adjacency matrix and compute shortest paths using Dijkstra's algorithm."*
 
-At the opposite extreme, some specifications attempt to describe **every tiny detail**:
+This feels precise. But it introduces a different kind of problem: it locks the solution in too early.
 
-* precise internal data structures
-* exact algorithms
-* specific implementation choices
+What if the building turns out to be very large? What if the map changes frequently, or real-time updates are required? The data structure chosen upfront may be entirely wrong for the actual task.
 
-For example:
-
-> “The robot must represent the building using an adjacency matrix and compute shortest paths using Dijkstra’s algorithm.”
-
-This sounds precise, but it introduces another problem.
-
-It **locks the solution too early**.
-
-Perhaps later we discover that:
-
-* the building is very large
-* the map changes frequently
-* real-time updates are needed
-
-Now the chosen data structure may be the wrong one.
-
-A good problem statement should describe **what must be achieved**, not **how it must be implemented**.
+A good problem statement describes **what must be achieved**, not how it must be implemented. Implementation is the programmer's job; the problem statement is not the place for it.
 
 ---
 
-### The Goal: Precise but Flexible
+## What a Strong Problem Statement Does
 
-A strong problem statement answers questions like:
+A well-written problem statement answers three questions clearly:
 
-* What information enters the system?
-* What output must the system produce?
-* What constraints must be respected?
+1. **What information enters the system?**
+2. **What output must the system produce?**
+3. **What constraints must always be respected?**
 
-But it avoids committing to specific algorithms or internal structures.
+It avoids prescribing specific algorithms or data structures. Think of it as describing the shape of the problem, not the shape of the solution.
 
-Think of it as describing **the shape of the problem**, not the solution.
+Here is a clearer version of the delivery robot problem:
 
----
+> *The system receives a map of the building consisting of locations connected by traversable paths. Given a starting location and a destination, the robot must find a route that reaches the destination while avoiding any blocked paths.*
 
-## Example: Delivery Robot Navigation
-
-A clearer problem statement might look like this:
-
-> The system receives a map of the building consisting of locations connected by traversable paths.
-> Given a starting location and a destination, the robot must determine a route that allows it to reach the destination while avoiding blocked paths.
-
-Notice what this statement does well:
-
-* It defines **inputs** (map, start, destination).
-* It defines **expected behavior** (find a route).
-* It allows multiple algorithms to solve the problem.
-
-This clarity makes algorithm design possible.
+Notice what this does well. It defines the inputs (map, starting location, destination), the expected behavior (find a valid route), and leaves all implementation decisions open. Multiple algorithms could solve this problem correctly. That flexibility is intentional.
 
 ---
 
-## Good Specifications vs Bad Specifications
+## Specifications in Practice
 
-Let us look at a few examples.
+Seeing the contrast between weak and strong specifications makes the principle concrete.
 
-### Bad Specification
+**Weak:** *"The knowledge engine should provide relevant answers to user questions."*
 
-> “The knowledge engine should provide relevant answers to user questions.”
+The phrase "relevant answers" is ambiguous. Two programmers reading this independently will produce two incompatible systems.
 
-The phrase **“relevant answers”** is ambiguous.
+**Stronger:** *Given a user query, the system retrieves documents containing information related to the query and ranks them by estimated relevance.*
 
-Different programmers might interpret this differently.
-
----
-
-### Better Specification
-
-> Given a user query, the system retrieves documents that contain information related to the query and ranks them according to their estimated relevance.
-
-This version clarifies:
-
-* the input (query)
-* the output (ranked documents)
-* the goal (estimated relevance)
-
-We still have many design choices left — which is exactly what we want.
+Now we know the input (a query), the output (ranked documents), and the goal (relevance ranking). Plenty of design decisions remain open — which is exactly what we want.
 
 ---
 
-### Another Bad Specification
+**Weak:** *"Objects in the virtual world should interact realistically."*
 
-> “Objects in the virtual world should interact realistically.”
+What does "realistically" mean here? Physics simulation? Game-style rules? Simplified abstractions?
 
-What does “realistically” mean?
+**Stronger:** *Objects in the world have positions and interaction rules. When two objects occupy overlapping space, the system applies the interaction rule associated with their types.*
 
-Physics simulation? Game-like interactions? Simplified rules?
-
----
-
-### Better Specification
-
-> Objects in the world have positions and interaction rules.
-> When two objects occupy overlapping space, the system must apply the interaction rule associated with their types.
-
-Now we can start thinking about:
-
-* spatial data structures
-* collision detection
-* interaction systems
-
-The problem has become **algorithmically meaningful**.
+Now the problem is algorithmically meaningful. We can start thinking about spatial data structures, collision detection, and interaction systems. The work can begin.
 
 ---
 
 ## The Power of Examples
 
-Even the best written specification can leave gaps.
+Even a well-written specification can leave gaps. That is why engineers rely heavily on examples.
 
-That is why engineers rely heavily on **examples**.
+Examples do something that abstract description cannot: they make expectations concrete and surface hidden assumptions before they become bugs.
 
-Examples help clarify expectations and reveal hidden assumptions.
-
-For instance, in the delivery robot system:
-
-**Example**
+For the delivery robot system, a simple example looks like this:
 
 ```
-Start: Office A
+Start:       Office A
 Destination: Office D
 
-Map:
-A → B → C → D
+Map: A → B → C → D
+
+Expected route: A → B → C → D
 ```
 
-Expected result:
+This confirms the basic behavior. But examples become truly powerful when they explore what happens at the edges.
+
+---
+
+## Edge Cases and Counterexamples
+
+A counterexample is an example designed to expose the limits of a naïve solution. Consider what happens when a path is blocked:
 
 ```
-Route: A → B → C → D
+Map: A → B → C → D
+             X
+     (B → C is blocked)
 ```
 
-Simple examples establish the basic behavior.
+Now the robot cannot follow the obvious route. Two questions immediately arise: can it find an alternative path? And if no alternative exists, what should it do?
 
-But examples become even more powerful when they show **edge cases**.
+These are not afterthoughts. They are requirements — and without counterexamples, they are easy to forget.
 
----
+Every good specification should be stress-tested with three kinds of examples:
 
-## Counterexamples and Edge Cases
+- **Normal cases** — the everyday behavior the system is built for
+- **Edge cases** — unusual but valid inputs that might trip up a simple implementation
+- **Failure cases** — situations where the system cannot succeed and must respond gracefully
 
-Counterexamples reveal situations where naïve solutions fail.
-
-Consider a blocked path.
-
-**Example**
-
-```
-A → B → C → D
-      X
-```
-
-If B → C is blocked, the robot must find an alternative route.
-
-If no alternative exists, the system must report failure.
-
-Counterexamples force us to ask important questions:
-
-* What happens when a destination is unreachable?
-* What if the map contains loops?
-* What if multiple routes exist?
-
-These questions often expose missing parts of the specification.
+By the time the specification is written, the system's behavior should already have been explored through examples. The writing merely captures what the examples revealed.
 
 ---
 
-## Example-Driven Thinking
+## A Note on AI-Assisted Development
 
-Many experienced engineers design systems by collecting examples first.
+Examples matter even more in the current era of AI coding assistants. A vague description gives an AI model almost nothing to work with. A precise specification with concrete examples — including edge cases — gives it a clear target.
 
-They ask:
-
-* What are the **normal cases**?
-* What are the **edge cases**?
-* What are the **failure cases**?
-
-By the time the specification is written, the system’s behavior has already been explored through examples.
-
-This approach has another advantage in the AI era.
-
-Examples are often the **best way to communicate intent to AI coding assistants**.
-
-Clear examples help both humans and machines understand what the system must do.
+The habits that make specifications useful to human teammates make them equally useful to machine ones.
 
 ---
 
-## Connection to Nex
+## The Problem Statement as Contract
 
-Nex is a good fit for this stage because it encourages explicit problem expression.
+At its core, a problem statement is a contract. It creates an agreement between:
 
-As we move from statements to implementation, Nex lets us keep intent visible through:
+- the **problem** we want solved
+- the **algorithms** we will design to solve it
+- the **code** we will eventually write
 
-- clear type annotations when we need precision
-- optional flexibility when we are still exploring
-- contracts and invariants when behavior must be guaranteed
+Vague contracts produce unpredictable systems. Precise ones make every downstream step easier: algorithms are easier to choose, tests are easier to write, bugs are easier to find and fix.
 
-The key habit is the same in any language: state the problem clearly before encoding a solution.
-
----
-
-::: {.note-exercise}
-**Exercise**
-Apply the section task and record your results before reading the solution notes.
-:::
-
-## Quick Exercise (5 Minutes)
-
-Choose one of the three systems (delivery robot, knowledge engine, virtual world) and write a mini problem statement with exactly three parts:
-
-1. Inputs: what information enters the system?
-2. Required behavior: what must the system do?
-3. Constraints: what conditions must always be respected?
-
-Then add:
-
-- one normal example
-- one edge case
-- one failure case
-
-If your statement prescribes a specific algorithm, rewrite it to focus on outcomes instead.
+When something goes wrong — and something always does — a well-written problem statement tells you whether the implementation violated the contract or the contract itself was wrong. Either way, you know where to look.
 
 ---
 
-## A Problem Statement Is a Contract
+## Quick Exercise
 
-At its core, a problem statement is a **contract**.
+Choose one of these three systems: the delivery robot, the knowledge engine, or the virtual world. Write a problem statement with exactly three parts:
 
-It establishes an agreement between:
+1. **Inputs** — what information enters the system?
+2. **Required behavior** — what must the system do with it?
+3. **Constraints** — what conditions must always hold?
 
-* the **problem** we want solved
-* the **algorithms** we will design
-* the **code** we will eventually write
+Then add one normal example, one edge case, and one failure case.
 
-If the contract is vague, the system becomes unpredictable.
-
-If the contract is precise, the entire development process becomes easier:
-
-* algorithms are easier to design
-* tests are easier to write
-* bugs are easier to detect
+If your statement specifies an algorithm or data structure, rewrite it to focus on outcomes instead.
 
 ---
 
-::: {.note-takeaways}
-**Takeaways**
-Capture the key principles from this chapter and one action you will apply immediately.
-:::
+## Takeaways
 
-## Chapter Takeaways
-
-- A strong problem statement is precise about outcomes, not rigid about implementation.
-- Vague statements create misalignment; over-detailed statements lock in bad decisions.
-- Examples, edge cases, and counterexamples expose missing requirements early.
-- Problem statements function as contracts between intent, design, and code.
-- Clear statements make algorithm selection and testing substantially easier.
+- A strong problem statement is precise about outcomes and silent about implementation.
+- Vague statements create misalignment; over-specified ones lock in decisions too early.
+- Examples, edge cases, and counterexamples surface missing requirements before they become costly mistakes.
+- A problem statement is a contract between intent, design, and code.
+- Clear contracts make algorithm selection, testing, and debugging substantially easier.
 
 ---
 
-In Chapter 4, we stress-test problem statements with edge cases and failure conditions. If Chapter 3 defines the contract, Chapter 4 tries to break it.
+*In Chapter 4, we stress-test problem statements systematically — probing edge cases, failure conditions, and contradictions. If Chapter 3 defines the contract, Chapter 4 tries to break it.*

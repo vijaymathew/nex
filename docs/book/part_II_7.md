@@ -1,147 +1,76 @@
-# Part II — Modeling the World — Entities: The Things That Exist
+# Chapter 7: Entities — The Things That Exist
 
-## 7. Entities: The Things That Exist
-
-In Chapter 6, we argued that software needs models.
-
-Now we build the first modeling primitive: **entities**.
+Chapter 6 established that a model is the necessary layer between specification and implementation. Now we build the first element of that model.
 
 An entity is something the system must track as a distinct thing over time.
 
-That definition sounds simple. It is one of the most important distinctions in software design.
+That definition sounds simple. It is one of the most consequential distinctions in software design. When a team misidentifies its entities — treating derived values as persistent things, or collapsing distinct identities into one — everything downstream suffers. Interfaces leak implementation details. Algorithms operate on the wrong units. Tests pass in isolation and fail across the system.
 
-When teams get entities wrong, everything downstream becomes unstable:
-
-- interfaces leak implementation details
-- algorithms operate on the wrong units
-- tests pass locally and fail system-wide
-
-The core question is:
-
-**What are the actual things in this system that deserve identity?**
+The question that entity modeling forces us to answer is: **what are the actual things in this system that deserve an identity of their own?**
 
 ---
 
-## Identity vs State
+## Identity and State
 
-A useful mental model:
+Before naming entities, we need a sharper vocabulary. Two concepts do most of the work.
 
-- **Identity** answers: “Which thing is this?”
-- **State** answers: “What is true about it now?”
+**Identity** answers: *which thing is this?* It is what remains stable across the entire lifetime of an entity — the thread of continuity that lets the system say "this is the same robot, even though it has moved."
 
-Example: delivery task
+**State** answers: *what is true about this thing right now?* It is everything that can change while identity stays fixed — position, status, assignment.
 
-- identity: `task_id`
-- state: destination, priority, status
+The separation is not cosmetic. If your model treats a state change as the creation of a new entity, you lose continuity: there is no way to say that the robot before the reroute and the robot after it are the same robot. If your model merges entities that are genuinely distinct, you corrupt behavior: two delivery tasks that happen to share a destination are not the same task.
 
-If state changes, identity stays.
+Applied to our three systems, the separation looks like this:
 
-This is critical. If your model treats state changes as new entities, you lose continuity. If your model merges distinct identities by accident, you corrupt behavior.
+**Delivery network.** The entities are `Robot`, `Location`, and `DeliveryTask`. A robot's identity persists across reroutes and retries; its current location is state. A delivery task's identity persists across status changes; whether it is pending or in transit is state.
 
-The same pattern appears in all three systems.
+**Knowledge engine.** The entities are `Document`, `Tag`, and `QuerySession`. A document can be edited, annotated, or re-indexed, but it remains the same document. Its content is state; its identity is not.
 
-### Delivery
-
-- Entity: `Robot`, `Location`, `DeliveryTask`
-- Identity survives reroutes and retries.
-
-### Knowledge
-
-- Entity: `Document`, `Tag`, `QuerySession`
-- A document can be edited, but remains the same document.
-
-### Virtual World
-
-- Entity: `WorldObject`, `Player`, `InteractionRule`
-- Position changes every tick; object identity should not.
+**Virtual world.** The entities are `WorldObject`, `Player`, and `InteractionRule`. An object's position changes every tick. Its identity does not.
 
 ---
 
-## Responsibilities Belong To Entities
+## Responsibilities Belong to Entities
 
-Once entities are named, assign responsibilities around them.
+Once entities are named, the next question is what they are responsible for.
 
-Bad pattern:
+The temptation — especially in codebases that grew without an explicit model — is to collect entity-related logic in global helper functions or service layers that reach into shared data structures and mutate them directly. This pattern works at small scale and degrades badly at large scale: ownership becomes unclear, invariants are enforced inconsistently, and changing one entity's representation requires finding and updating code in many places.
 
-- global helper functions mutate shared maps with weak ownership
+The better pattern is to assign each entity responsibility for the invariants that govern its own state, and to expose state changes only through explicit operations. An entity that controls its own transitions is an entity whose behavior can be reasoned about locally.
 
-Better pattern:
+In concrete terms: `DeliveryTask` should validate its own status transitions — it should not be possible for external code to move a delivered task back to pending. `Document` should guard the integrity of its own metadata. `WorldObject` should enforce whatever bounds constrain legal movement or state change.
 
-- each entity controls invariants related to its state
-- transitions happen through explicit operations
-
-Entity-centered responsibilities improve:
-
-- correctness
-- readability
-- refactoring safety
-
-Example:
-
-- `DeliveryTask` should validate status transitions.
-- `Document` should guard metadata integrity.
-- `WorldObject` should enforce legal bounds for movement/state.
+This is not about strict encapsulation as a stylistic preference. It is about making invariants enforceable rather than merely conventional.
 
 ---
 
-## Worked Design Path
+## From Requirement to Entity Model
 
-Ambiguous requirement:
+The path from an ambiguous requirement to a set of well-defined entities has a shape. Consider this requirement:
 
-> “Track package progress and show live status.”
+> *"Track package progress and show live status."*
 
-### Step 1: Extract Candidate Entities
+It mentions things — packages, status, presumably robots and locations — but gives them no structure. The following steps convert it into a model.
 
-Candidates:
+**Step 1: Extract candidate entities.** Read the requirement and list the nouns that might deserve persistent identity: package, robot, route, user notification. Do not commit yet.
 
-- package
-- robot
-- route
-- user notification
+**Step 2: Keep only stable identity carriers.** A route is often the output of a computation — a derived value, not a persistent thing. User notifications may be events rather than entities. After filtering: `DeliveryTask`, `Robot`, `Location` are likely stable identity carriers.
 
-### Step 2: Keep Only Stable Identity Carriers
+**Step 3: Define identity keys.** Assign each entity a field that uniquely identifies it across time: `DeliveryTask.task_id`, `Robot.robot_id`, `Location.location_id`. Choosing these fields early forces clarity about what makes two instances the same thing.
 
-`Route` is often a computation result, not always a persistent entity.
+**Step 4: Define minimal state.** For `DeliveryTask`: origin, destination, status (`PENDING`, `IN_TRANSIT`, `DELIVERED`, `FAILED`), and optionally an assigned robot identifier. Start small. State can be extended; a bloated initial model is harder to correct.
 
-Likely entities:
+**Step 5: Add invariants.** The task identifier must be non-empty. Origin and destination must be non-empty. A delivered task cannot return to pending. These are not validation rules to be added later — they are properties of the entity itself, and they belong in the model now.
 
-- `DeliveryTask`
-- `Robot`
-- `Location`
+**Step 6: Add transition operations.** Assign robot, mark in transit, mark delivered, mark failed. Each transition is an explicit operation, not a field assignment scattered across the codebase.
 
-### Step 3: Define Identity Keys
-
-- `DeliveryTask.task_id`
-- `Robot.robot_id`
-- `Location.location_id`
-
-### Step 4: Define Minimal State
-
-For `DeliveryTask`:
-
-- origin
-- destination
-- status (`PENDING`, `IN_TRANSIT`, `DELIVERED`, `FAILED`)
-- assigned_robot_id (optional)
-
-### Step 5: Add Invariants
-
-- task id non-empty
-- origin and destination non-empty
-- delivered task cannot go back to pending
-
-### Step 6: Add Transition Operations
-
-- assign robot
-- mark in transit
-- mark delivered
-- mark failed
-
-Now we have entity structure, not just feature text.
+At the end of this process, we have entity structure rather than feature prose. Implementation can begin with a clear target.
 
 ---
 
-## Nex Implementation Sketch
+## An Entity in Code
+
+The following sketch shows how the `DeliveryTask` entity might be expressed in Nex:
 
 ```nex
 class Delivery_Task
@@ -177,114 +106,48 @@ invariant
 end
 ```
 
-This sketch demonstrates:
+Read this sketch against the six steps above. `task_id` is the identity key from Step 3. The four status values are the minimal state from Step 4. The three invariants correspond directly to Step 5. `start` and `complete` are the transition operations from Step 6, each with a postcondition that rules out the illegal outcomes.
 
-- explicit identity (`task_id`)
-- mutable state (`status`)
-- behavior tied to entity transitions
-- invariants protecting impossible states
-
-The same approach scales to `Document` and `WorldObject` entities.
+The pathfinding logic, the ranking algorithm, the notification system — none of that appears here, because none of it belongs to this entity. The entity model and the algorithm are separate concerns. Keeping them separate is what makes both easier to change.
 
 ---
 
-## Common Mistakes
+## Four Ways Entity Modeling Goes Wrong
 
-### Mistake 1: Everything Is An Entity
+**Treating everything as an entity.** If every value in the system gets an identity and a lifecycle, the model bloats and the overhead of managing persistence overwhelms the work the model is supposed to simplify. The recovery is to reserve entity status for things that genuinely need to be tracked across time, and to treat derived or computed values as results — outputs of queries over entity state, not entities themselves.
 
-Symptom:
+**No identity, only fields.** A model that represents entities as plain records without stable identifiers makes it impossible to reason about continuity. Updates overwrite the wrong records; history cannot be reconstructed. The recovery is to define explicit, stable identity fields and to specify what equality means for each entity.
 
-- model bloats quickly
-- every helper value gets persistence and lifecycle burden
+**Mixed responsibilities.** When transition logic and validation are scattered across services, controllers, and helper functions, the entity's invariants are enforced only by convention — which means they are not reliably enforced at all. The recovery is to move entity-specific rules close to entity operations and to centralize transition checks.
 
-Recovery:
-
-- reserve entities for identity-bearing things
-- treat derived values as views/results
-
-### Mistake 2: No Identity, Only Fields
-
-Symptom:
-
-- updates overwrite wrong records
-- hard to reason about history
-
-Recovery:
-
-- add explicit stable identifiers
-- define equality/uniqueness rules
-
-### Mistake 3: Mixed Responsibilities
-
-Symptom:
-
-- validation scattered in services/controllers/helpers
-
-Recovery:
-
-- move entity-specific rules near entity operations
-- centralize transition checks
-
-### Mistake 4: Illegal State Transitions
-
-Symptom:
-
-- “delivered” tasks become “pending” due to patch logic
-
-Recovery:
-
-- model transitions explicitly
-- enforce with contracts and tests
+**Unchecked state transitions.** A delivered task that can become pending again through a misapplied patch is a symptom of transitions that exist only as informal agreements between developers. The recovery is to model transitions explicitly and to enforce them with contracts and tests — not because developers cannot be trusted, but because explicit enforcement scales and informal agreement does not.
 
 ---
 
-::: {.note-exercise}
-**Exercise**
-Apply the section task and record your results before reading the solution notes.
-:::
+## Quick Exercise
 
-## Quick Exercise (8 Minutes)
+Choose one of the three running systems and produce an entity sheet with five parts:
 
-For one system, produce an entity sheet with:
+1. **Entity name**
+2. **Identity field or fields**
+3. **Core state fields**
+4. **Allowed transitions** — which status or state changes are legal, and from which starting states?
+5. **Two invariants** — what must always be true?
 
-1. Entity name
-2. Identity field(s)
-3. Core state fields
-4. Allowed transitions
-5. Two invariants
+Then ask: which fields in your current implementation are being used as identity but were never explicitly designated as such? And which transitions are currently unchecked — possible to execute in any order, with no enforcement of preconditions?
 
-Then answer:
-
-- Which fields are identity vs state?
-- Which transitions are currently unchecked in your code?
+Those two gaps are where entity modeling work should begin.
 
 ---
 
-## Connection to Nex
+## Takeaways
 
-Nex helps here because entities can carry both data and behavior, while contracts/invariants keep assumptions explicit.
-
-You can begin with lightweight models, then strengthen guarantees as complexity grows.
-
-That mirrors real project evolution.
-
----
-
-::: {.note-takeaways}
-**Takeaways**
-Capture the key principles from this chapter and one action you will apply immediately.
-:::
-
-## Chapter Takeaways
-
-- Entities are identity-bearing things tracked over time.
-- Identity and state must be separated clearly.
-- Responsibilities should align to entities, not global utility sprawl.
-- Transitions and invariants are part of the entity model, not afterthoughts.
-- Strong entity modeling reduces downstream architectural friction.
+- Entities are identity-bearing things that the system must track over time. Not every value is an entity.
+- Identity and state are distinct: identity answers *which thing is this?*, state answers *what is true about it now?*
+- Responsibilities should be assigned to entities, not diffused across global helpers and service layers.
+- Transitions and invariants are part of the entity model itself, not implementation details to be added later.
+- Strong entity models reduce friction at every downstream stage: algorithm design, testing, and refactoring.
 
 ---
 
-In Chapter 8, we move from “things” to “connections.”
-
-Entities alone are not enough; behavior emerges from **relationships**.
+*Chapter 8 moves from things to connections. Entities alone are not enough — behavior emerges from the relationships between them.*

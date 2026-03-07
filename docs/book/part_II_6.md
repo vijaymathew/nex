@@ -1,177 +1,81 @@
-# Part II — Modeling the World — Why Software Needs Models
+# Part II: Modeling the World
 
-## 6. Why Software Needs Models
+# Chapter 6: Why Software Needs Models
 
-By the end of Part I, we learned to write better problem statements.
+Part I taught us to write better problem statements. Given a system to build, we can now describe its inputs, its required behavior, and its constraints with enough precision that implementation can begin. That is genuine progress.
 
-That was necessary.
+It is not enough.
 
-Now we hit the next wall.
+Teams that move directly from specification to code — even from a good specification — reliably produce systems that are brittle. The code compiles. The tests pass. The demo looks right. Then scale arrives, or requirements change, or two features interact in a way nobody anticipated, and the system begins to crack. New fixes introduce new inconsistencies. The codebase becomes a map of past decisions that nobody fully remembers making.
 
-Even with a clear specification, teams still fail when they move too quickly from requirements to code. The code may compile, tests may pass, and demos may look good. Then scale, ambiguity, and change arrive, and the system becomes fragile.
-
-What is missing?
-
-A **model**.
-
-A model is not the same as code. It is the structured representation of what exists in the system, how those things relate, and what rules govern change.
-
-Without a model, implementation becomes guesswork.
-With a model, implementation becomes engineering.
+The missing layer is a **model**.
 
 ---
 
-## Why Code Alone Is Not Enough
+## What a Model Is
 
-New engineers often assume this sequence is enough:
+A model is not code. It is the structured account of what exists in a system, how those things relate to one another, and what rules govern how they can change.
 
-1. Understand the feature request.
-2. Start implementing functions and classes.
-3. Refactor when problems appear.
+The distinction matters. Code answers the question: *how does the machine execute this?* A model answers a different question: *what is the system actually about?*
 
-In small tasks, this works.
+Consider what happens without one. Two teams, working from the same specification, represent the same concept in subtly different ways. Edge behavior ends up depending on call order rather than on explicit rules. Performance degrades because nobody thought carefully about how data would actually be accessed. Every new feature lands as a local patch, adding complexity without adding clarity.
 
-In real systems, it creates hidden inconsistencies:
+A model prevents this by forcing structure to become explicit before implementation decisions harden. It sits between specification and code as a third, distinct layer:
 
-- two teams represent the same concept differently
-- edge behavior depends on call order instead of rules
-- performance collapses because access patterns were never modeled
-- every new feature adds local patches and global confusion
+- The **specification** answers: *what must happen?*
+- The **model** answers: *what exists, and how can it change?*
+- The **algorithms** answer: *how do we compute efficiently within that model?*
 
-A model solves this by forcing explicit structure before implementation details harden.
-
-Think of it this way:
-
-- specification answers: “What must happen?”
-- model answers: “What exists, and how can it change?”
-- algorithms answer: “How do we compute efficiently within that model?”
-
-If the middle layer is weak, the rest of the system drifts.
+When the middle layer is weak or absent, the other two layers drift apart. The specification describes a system that the code does not quite implement. The relationship can be found only by reading the code very carefully — if it can be found at all.
 
 ---
 
-## Models Across Our Three Systems
+## The Same Structure in Three Domains
 
-The delivery network, knowledge engine, and virtual world still look different. Modeling reveals shared structure.
+Our three running systems look very different on the surface. Modeling them reveals that the same underlying structure appears in all three — and that the natural first model for each is too narrow.
 
-### Delivery Network
+**The delivery network.** A first pass might model only "find a route from A to B." This captures the nominal case and nothing else. A stronger model includes locations, the connections between them, the dynamic state of each connection (open or blocked), and the robot's current position and assigned task. With this model, route selection becomes a query against explicit state rather than a hardcoded behavior. Blocking a corridor is a state change; replanning is a response to that change. The system becomes something we can reason about.
 
-If we model only “route from A to B,” we miss reality.
+**The knowledge engine.** A first pass might model only "query string maps to result list." Quality degrades quickly under this model because there is no representation of what quality depends on. A stronger model includes documents, the terms and tags that characterize them, relevance signals, and a representation of confidence or uncertainty. With this model, ranking becomes a computation over explicit structure — one that can be adjusted, debugged, and improved.
 
-A stronger model includes:
+**The virtual world.** A first pass might model only "update all objects each frame." Interactions become chaotic because there is no account of what governs them. A stronger model includes entity identity, entity state, typed interaction rules, and the boundaries of each update step. With this model, correctness can be reasoned about one transition at a time, rather than observed at runtime and hoped for.
 
-- locations
-- traversable connections
-- dynamic path state (open/blocked)
-- robot position and task
-
-Now route choice is a query over model state, not a hard-coded behavior.
-
-### Knowledge Engine
-
-If we model only “query string -> results,” quality degrades quickly.
-
-A stronger model includes:
-
-- documents
-- terms/tags
-- relevance signals
-- uncertainty/confidence
-
-Now ranking can evolve because the model captures what ranking depends on.
-
-### Virtual World
-
-If we model only “update objects every frame,” interactions become chaotic.
-
-A stronger model includes:
-
-- entity identity
-- entity state
-- interaction rules by type
-- update boundaries per tick
-
-Now correctness can be reasoned about per transition, not only by runtime observation.
-
-The domains differ, but the modeling move is the same: name stable structure first.
+The domains differ. The modeling move is the same: name stable structure before writing algorithms over it.
 
 ---
 
-## Worked Design Path
+## From Ambiguous Requirement to Model
 
-Let us walk from ambiguous requirement to model.
+The path from a vague requirement to a working model has a shape. Walking through it concretely is more useful than describing it in the abstract.
 
-Ambiguous requirement:
+Start with this requirement:
 
-> “The robot should choose good routes and avoid getting stuck.”
+> *"The robot should choose good routes and avoid getting stuck."*
 
-That sentence is useful for product discussion and nearly useless for implementation.
+This sentence is useful in a product conversation. It is nearly useless for implementation — "good" and "stuck" carry no technical meaning. The five-step path below converts it into something buildable.
 
-### Step 1: Separate Nouns and Verbs
+**Step 1: Separate nouns from verbs.** Nouns suggest entities that need to be modeled. Verbs suggest operations that act on them. From the requirement above: nouns include robot, route, location, path, blockage; verbs include choose, avoid, move, re-plan. This separation is the first act of modeling.
 
-Nouns suggest modeled entities. Verbs suggest operations.
+**Step 2: Define state, not just behavior.** For each noun, ask what properties it has that can change over time. A minimal state model for the robot system:
 
-Nouns:
+- `Location`: an identifier
+- `Path`: a source, a destination, a status
+- `Robot`: a current location and a destination
+- `Map`: a set of locations and paths
 
-- robot
-- route
-- location
-- path
-- blockage
+This is still small. It is already more useful than the original sentence.
 
-Verbs:
+**Step 3: Add invariants early.** Before writing any algorithm, write down the truths that must hold at all times. Examples for this system: every path endpoint must reference a known location; the robot's current location must exist in the map; any returned route must use only open paths. These invariants are not implementation details. They are the system's reliability backbone, and they belong in the model.
 
-- choose
-- avoid
-- move
-- re-plan
+**Step 4: Make change explicit.** Most real failures happen during transitions, not in static state. What transitions are possible? A path becomes blocked. The robot receives a new destination. A replan request either succeeds or fails. A model that does not represent transitions will behave correctly in demos and incorrectly in production.
 
-### Step 2: Define State, Not Just Behavior
-
-A minimal state model:
-
-- `Location`: identifier
-- `Path`: `from`, `to`, `status`
-- `Robot`: `current_location`, `destination`
-- `Map`: set of locations and paths
-
-### Step 3: Add Invariants Early
-
-Before algorithms, define truths that must always hold.
-
-Examples:
-
-- every path endpoint must reference a known location
-- robot current location must exist in map
-- returned route (if present) must use only open paths
-
-These invariants become your reliability backbone.
-
-### Step 4: Make Change Explicit
-
-Most failures happen during change, not static state.
-
-Transitions:
-
-- path becomes blocked
-- robot receives new destination
-- route recomputation succeeds or fails
-
-A model that ignores transitions will pass demos and fail production.
-
-### Step 5: Delay Algorithm Commitment
-
-At this stage, do not lock to BFS, Dijkstra, A*, or custom heuristics.
-
-Pick algorithm after model and access patterns are clear.
-
-This preserves flexibility and prevents early overfitting.
+**Step 5: Delay algorithm commitment.** At this stage, do not choose between BFS, Dijkstra, A*, or any other pathfinding strategy. The right algorithm depends on access patterns and performance requirements that the model has not yet fully revealed. Choosing early is choosing blind.
 
 ---
 
-## Nex Implementation Sketch
+## A Model in Code
 
-Nex is a useful teaching language here because it lets us express contracts close to behavior.
+The following sketch shows how this model might be expressed in Nex. The point is not the specific syntax — it is the correspondence between the model we described and the structure of the code.
 
 ```nex
 class Path
@@ -208,149 +112,49 @@ invariant
 end
 ```
 
-This is intentionally small. It does three important things:
-
-- defines state explicitly
-- expresses behavior in terms of state
-- encodes guarantees as contracts/invariants
-
-The algorithm can be inserted later without changing the conceptual model.
-
-The same pattern applies to the knowledge engine and world simulation: model first, optimize second.
+This sketch is intentionally small. What it does is more important than what it omits: it defines state explicitly, expresses behavior in terms of that state, and encodes guarantees as verifiable contracts. The pathfinding algorithm is not here yet. It can be added later, in any form, without disturbing the model. The same approach applies to the knowledge engine and the virtual world: model first, optimize second.
 
 ---
 
-## Common Modeling Mistakes
+## Five Ways Modeling Goes Wrong
 
-### Mistake 1: Modeling Operations Before Entities
+Knowing the pattern does not prevent all mistakes. The following five failures appear regularly enough to be worth naming.
 
-Symptom:
+**Modeling operations before entities.** The symptom is a codebase full of utility functions with no clear home — data scattered across modules, ownership unclear. The recovery is to list stable entities first and attach operations to explicit state.
 
-- lots of utility functions
-- unclear ownership of data
+**Ignoring boundaries.** The symptom is unclear borders between subsystems, with the same concept represented differently in different places. The recovery is to define model boundaries in writing and make every conversion point explicit.
 
-Recovery:
+**Missing invariants.** The symptom is bugs described as "impossible states" — situations the code was never designed to handle because nobody wrote down what was always supposed to be true. The recovery is to express invariants at the class and operation level, and to fail fast when they are violated.
 
-- list stable entities first
-- attach operations to explicit state
+**Premature algorithm lock-in.** The symptom is an architecture that cannot adapt because an early performance guess became a structural assumption. The recovery is to keep the model stable while treating the algorithm as a replaceable component.
 
-### Mistake 2: Ignoring Boundaries
-
-Symptom:
-
-- unclear where one subsystem ends and another begins
-- duplicated representations across modules
-
-Recovery:
-
-- define model boundaries in writing
-- make conversion points explicit
-
-### Mistake 3: Missing Invariants
-
-Symptom:
-
-- bugs appear as “impossible states”
-- fixes add conditional checks everywhere
-
-Recovery:
-
-- write invariants at class/operation level
-- fail fast when invariants are violated
-
-### Mistake 4: Premature Algorithm Lock-In
-
-Symptom:
-
-- architecture constrained by early performance guess
-- hard to adapt when constraints change
-
-Recovery:
-
-- keep interface and model stable
-- treat algorithm as replaceable strategy
-
-### Mistake 5: Treating Models As Documentation Only
-
-Symptom:
-
-- diagrams exist, code disagrees
-
-Recovery:
-
-- encode model assumptions in types, contracts, and tests
-- keep model and implementation synchronized
+**Treating the model as documentation only.** The symptom is diagrams that exist and code that disagrees with them. A model that lives only in a design document is not enforced by anything. The recovery is to encode model assumptions in types, contracts, and tests — and to keep them synchronized with the implementation.
 
 ---
 
-::: {.note-exercise}
-**Exercise**
-Apply the section task and record your results before reading the solution notes.
-:::
+## Quick Exercise
 
-## Quick Exercise (8 Minutes)
+Choose one of the three running systems and produce a minimal model draft with four parts:
 
-Pick one of the three systems and produce a mini model draft with four parts:
+1. **Entities** — three to six things the system needs to track
+2. **Relationships** — how those entities connect to one another
+3. **Invariants** — two or three rules that must always hold
+4. **Transitions** — two or three important ways the state can change
 
-1. Entities (3-6 items)
-2. Relationships (how entities connect)
-3. Invariants (2-3 rules that must always hold)
-4. Transitions (2-3 important state changes)
+Then ask two questions about your current implementation of that system: which parts of the implementation are not represented in this model? And which parts of the model are not currently enforced in code?
 
-Then answer:
-
-- Which part of your current implementation is not represented in this model?
-- Which part of the model is not currently enforced in code?
-
-That gap is where reliability work should start.
+The gap between those two answers is where reliability work should start.
 
 ---
 
-## Reflection Checkpoint
+## Takeaways
 
-Before moving on, you should be able to explain:
-
-- Why your chosen entities are stable over time.
-- Which assumptions are encoded as invariants.
-- Which design decisions are still provisional.
-- What evidence shows your model handles nominal and edge behavior.
-
-If you cannot answer these clearly, do not add more features yet.
-
-Strengthen the model first.
+- A model is the missing layer between specification and implementation: it describes what exists and how it can change, independently of how the machine executes it.
+- Stable entities, explicit boundaries, invariants, and transitions are the core elements of any model.
+- The right algorithm depends on the model. Choose algorithms after the model is clear, not before.
+- Most failures at scale are model failures before they are code failures.
+- A model that exists only in documentation is not enforced. Encode model assumptions in types, contracts, and tests.
 
 ---
 
-## Connection to Nex
-
-Nex was chosen for this book because it supports this modeling discipline directly:
-
-- object-style structures for entities and responsibilities
-- functional-style decomposition for pure transformations
-- contracts and invariants for correctness guarantees
-- optional typing flexibility during exploration
-
-That makes Nex a practical bridge between concept and implementation.
-
-The transferable lesson is broader: in any language, explicit models reduce accidental complexity.
-
----
-
-::: {.note-takeaways}
-**Takeaways**
-Capture the key principles from this chapter and one action you will apply immediately.
-:::
-
-## Chapter Takeaways
-
-- Models are the missing layer between specification and implementation.
-- Stable entities, boundaries, invariants, and transitions are core modeling elements.
-- Algorithm choice should follow model clarity, not precede it.
-- Most scaling failures are model failures before they are code failures.
-- Encoding model assumptions in code prevents drift.
-
----
-
-In Chapter 7, we go deeper into the first modeling primitive: **entities**.
-
-We will separate identity from state, assign responsibilities, and choose representations that remain stable as the system grows.
+*Chapter 7 develops the first modeling primitive in depth: entities. We will distinguish identity from state, assign responsibilities, and choose representations that remain stable as the system grows.*
