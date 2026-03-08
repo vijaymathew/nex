@@ -1,0 +1,23 @@
+project:
+  type: book
+  output-dir: _site
+
+book:
+  title: "Nex Reference"
+  chapters:
+    - index.md
+    - functions.md
+    - foundational-classes.md
+    - scalar-types.md
+    - collection-types.md
+    - cursor-types.md
+    - system-classes.md
+    - graphics-classes.md
+
+format:
+  html:
+    theme: cosmo
+    css: styles.css
+    toc: true
+    toc-depth: 3
+    number-sections: false
