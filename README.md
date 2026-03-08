@@ -12,11 +12,6 @@ Nex is a programming language designed to make good software engineering habits 
 
 Nex is also a serious tool for teaching software engineering. Because contracts are woven into the language rather than bolted on, students learn to think about preconditions, postconditions, and invariants not as formalism but as ordinary practice — the way professional engineers think about code before they write it.
 
-## Online IDE
-
-Try Nex in the browser: https://schemer.in/nex.html
-
----
 
 ## What Makes Nex Distinctive
 
@@ -33,6 +28,12 @@ This has consequences that go beyond style.
 **Contracts can be stripped for production.** The Java and JavaScript translators support a `skip-contracts` flag that removes all contract checks from the generated output. Development builds run with full checking; production builds run without the overhead. The specification remains in the source as documentation and can be re-enabled for debugging at any time.
 
 **The language is designed for clarity at every level of abstraction.** From high-level system design — where classes represent domain entities and their invariants — down to individual routines, Nex's English-like syntax keeps intent visible. This makes Nex well-suited to contexts where code must be read and reasoned about carefully: education, specification-first development, and code review.
+
+---
+
+## Online IDE
+
+Try Nex in the browser: https://schemer.in/nex.html
 
 ---
 
