@@ -12,6 +12,10 @@ Nex is a programming language designed to make good software engineering habits 
 
 Nex is also a serious tool for teaching software engineering. Because contracts are woven into the language rather than bolted on, students learn to think about preconditions, postconditions, and invariants not as formalism but as ordinary practice — the way professional engineers think about code before they write it.
 
+## Online IDE
+
+Try Nex in the browser: https://schemer.in/nex.html
+
 ---
 
 ## What Makes Nex Distinctive
