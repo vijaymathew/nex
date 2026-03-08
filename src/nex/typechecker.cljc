@@ -603,8 +603,34 @@
             "Any")
           ;; Method not found - might be built-in method, return Any for now
           "Any")))
-    ;; Function call (built-in like print) or function object call
-    (if-let [var-type (env-lookup-var env method)]
+    ;; Function call (built-in like print/type_of/type_is) or function object call
+    (cond
+      (= method "type_of")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "type_of expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "type_of expects 1 argument, got " (count args)))})))
+        (check-expression env (first args))
+        "String")
+
+      (= method "type_is")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "type_is expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "type_is expects 2 arguments, got " (count args)))})))
+        (let [target-type-type (check-expression env (first args))]
+          (when-not (= (attachable-type target-type-type) "String")
+            (throw (ex-info "type_is first argument must be String"
+                            {:error (type-error
+                                     (str "type_is first argument must be String, got "
+                                          (display-type target-type-type)))}))))
+        (check-expression env (second args))
+        "Boolean")
+
+      :else
+      (if-let [var-type (env-lookup-var env method)]
       (let [base-type (if (map? var-type) (:base-type var-type) var-type)
             call-name (str "call" (count args))
             method-sig (env-lookup-method env base-type call-name)
@@ -627,24 +653,24 @@
                               {:error (type-error
                                        (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
         (resolve-generic-type (:return-type method-sig) type-map))
-      (if-let [current-class (env-lookup-var env "__current_class__")]
-        (if-let [method-sig (lookup-class-method env current-class method)]
-          (do
-            (when (not= (count args) (count (:params method-sig)))
-              (throw (ex-info (str "Method " method " expects " (count (:params method-sig))
-                                   " arguments, got " (count args))
-                              {:error (type-error
-                                       (str "Method " method " expects " (count (:params method-sig))
-                                            " arguments, got " (count args)))})))
-            (doseq [[arg param] (map vector args (:params method-sig))]
-              (let [arg-type (check-expression env arg)]
-                (when-not (types-compatible? env arg-type (:type param))
-                  (throw (ex-info (str "Argument type mismatch for method " method)
-                                  {:error (type-error
-                                           (str "Expected " (:type param) ", got " arg-type))})))))
-            (or (:return-type method-sig) "Void"))
-          (do (doseq [arg args] (check-expression env arg)) "Void"))
-        (do (doseq [arg args] (check-expression env arg)) "Void")))))
+        (if-let [current-class (env-lookup-var env "__current_class__")]
+          (if-let [method-sig (lookup-class-method env current-class method)]
+            (do
+              (when (not= (count args) (count (:params method-sig)))
+                (throw (ex-info (str "Method " method " expects " (count (:params method-sig))
+                                     " arguments, got " (count args))
+                                {:error (type-error
+                                         (str "Method " method " expects " (count (:params method-sig))
+                                              " arguments, got " (count args)))})))
+              (doseq [[arg param] (map vector args (:params method-sig))]
+                (let [arg-type (check-expression env arg)]
+                  (when-not (types-compatible? env arg-type (:type param))
+                    (throw (ex-info (str "Argument type mismatch for method " method)
+                                    {:error (type-error
+                                             (str "Expected " (:type param) ", got " arg-type))})))))
+              (or (:return-type method-sig) "Void"))
+            (do (doseq [arg args] (check-expression env arg)) "Void"))
+          (do (doseq [arg args] (check-expression env arg)) "Void"))))))
 
 (defn check-create
   "Check the type of a create expression"

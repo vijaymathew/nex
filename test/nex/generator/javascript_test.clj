@@ -116,6 +116,23 @@ end"
       (is (str/includes? js-code "my_car = __nex_conv_tmp_"))
       (is (str/includes? js-code "my_car = null;")))))
 
+(deftest type-functions-test
+  (testing "type_of and type_is map to runtime helpers"
+    (let [nex-code "class Vehicle end
+class Car inherit Vehicle end
+class Test
+  feature
+    demo(v: Vehicle) do
+      print(type_of(v))
+      print(type_is(\"Vehicle\", v))
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "function __nexTypeOf(v)"))
+      (is (str/includes? js-code "function __nexTypeIs(typeName, v)"))
+      (is (str/includes? js-code "__nexTypeOf(v)"))
+      (is (str/includes? js-code "__nexTypeIs(\"Vehicle\", v)")))))
+
 (deftest inherited-class-invariants-deduped-test
   (testing "Inherited class invariants are generated recursively and deduped by ancestor class"
     (let [nex-code "class A
