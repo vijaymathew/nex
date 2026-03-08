@@ -761,13 +761,18 @@
             (update-editor-highlight!)))))))
 
 (defn- fmt-value [v]
-  (cond
-    (and (map? v) (:nex-builtin-type v)) (str "#<" (name (:nex-builtin-type v)) ">")
-    (array? v) (pr-str (vec v))
-    (instance? js/Map v) (pr-str (into {} (for [entry (js/Array.from (.entries v))]
-                                            [(aget entry 0) (aget entry 1)])))
-    (string? v) v
-    :else (pr-str v)))
+  (try
+    ;; Reuse interpreter-safe formatting so REPL values like anonymous functions
+    ;; (NexObject with closure env) never recurse through cyclic runtime state.
+    (interp/nex-format-value v)
+    (catch :default _
+      (cond
+        (and (map? v) (:nex-builtin-type v)) (str "#<" (name (:nex-builtin-type v)) ">")
+        (array? v) (pr-str (vec v))
+        (instance? js/Map v) (pr-str (into {} (for [entry (js/Array.from (.entries v))]
+                                                [(aget entry 0) (aget entry 1)])))
+        (string? v) v
+        :else (str v)))))
 
 (defn- looks-like-definition? [input]
   (boolean (re-find #"^\s*(class|function|import|intern)\b" input)))
