@@ -216,6 +216,8 @@
   (case method
     "print" (str "System.out.print(" args-code ")")
     "println" (str "System.out.println(" args-code ")")
+    "type_of" (str "NexRuntime.typeOf(" args-code ")")
+    "type_is" (str "NexRuntime.typeIs(" args-code ")")
     ;; Default: use as-is (regular method call)
     (str method "(" args-code ")")))
 
@@ -1920,6 +1922,58 @@ public class NexTurtle {
          (str/join "\n" method-lines)
          "\n}")))
 
+(defn generate-runtime-helpers
+  "Generate runtime helpers for built-in global functions."
+  []
+  (str "public class NexRuntime {\n"
+       "  private static boolean hasParentType(Object value, String targetType, java.util.IdentityHashMap<Object, Boolean> seen) {\n"
+       "    if (value == null) return false;\n"
+       "    if (seen.containsKey(value)) return false;\n"
+       "    seen.put(value, Boolean.TRUE);\n"
+       "    for (java.lang.reflect.Field field : value.getClass().getDeclaredFields()) {\n"
+       "      String fieldName = field.getName();\n"
+       "      if (fieldName.startsWith(\"_parent_\")) {\n"
+       "        String parentType = fieldName.substring(\"_parent_\".length());\n"
+       "        if (parentType.equals(targetType)) return true;\n"
+       "        try {\n"
+       "          field.setAccessible(true);\n"
+       "          Object parentValue = field.get(value);\n"
+       "          if (hasParentType(parentValue, targetType, seen)) return true;\n"
+       "        } catch (Exception ignored) {\n"
+       "        }\n"
+       "      }\n"
+       "    }\n"
+       "    return false;\n"
+       "  }\n\n"
+       "  public static String typeOf(Object value) {\n"
+       "    if (value == null) return \"Nil\";\n"
+       "    if (value instanceof String) return \"String\";\n"
+       "    if (value instanceof Character) return \"Char\";\n"
+       "    if (value instanceof Boolean) return \"Boolean\";\n"
+       "    if (value instanceof java.math.BigDecimal) return \"Decimal\";\n"
+       "    if (value instanceof Byte || value instanceof Short || value instanceof Integer) return \"Integer\";\n"
+       "    if (value instanceof Long) return \"Integer64\";\n"
+       "    if (value instanceof Float || value instanceof Double) return \"Real\";\n"
+       "    if (value instanceof java.util.ArrayList) return \"Array\";\n"
+       "    if (value instanceof java.util.HashMap) return \"Map\";\n"
+       "    String simple = value.getClass().getSimpleName();\n"
+       "    return (simple == null || simple.isEmpty()) ? value.getClass().getName() : simple;\n"
+       "  }\n\n"
+       "  public static boolean typeIs(String targetType, Object value) {\n"
+       "    if (targetType == null) return false;\n"
+       "    String runtimeType = typeOf(value);\n"
+       "    if (\"Any\".equals(targetType)) return true;\n"
+       "    if (runtimeType.equals(targetType)) return true;\n"
+       "    if (\"Integer\".equals(runtimeType) && (\"Integer64\".equals(targetType) || \"Real\".equals(targetType) || \"Decimal\".equals(targetType))) return true;\n"
+       "    if (\"Integer64\".equals(runtimeType) && (\"Real\".equals(targetType) || \"Decimal\".equals(targetType))) return true;\n"
+       "    if (\"Real\".equals(runtimeType) && \"Decimal\".equals(targetType)) return true;\n"
+       "    if ((\"ArrayCursor\".equals(runtimeType) || \"StringCursor\".equals(runtimeType) || \"MapCursor\".equals(runtimeType)) && \"Cursor\".equals(targetType)) return true;\n"
+       "    if (value == null) return false;\n"
+       "    if (hasParentType(value, targetType, new java.util.IdentityHashMap<>())) return true;\n"
+       "    return false;\n"
+       "  }\n"
+       "}"))
+
 (defn generate-function-globals
   "Generate a globals holder for function instances."
   [functions]
@@ -1980,6 +2034,7 @@ public class NexTurtle {
          function-names (set (map :name functions))
          java-imports (keep generate-import imports)
          function-base (generate-function-base-class)
+         runtime-helpers (generate-runtime-helpers)
          function-globals (generate-function-globals functions)]
      (binding [*function-names* function-names
                *class-registry* (into {} (map (juxt :name identity) classes))]
@@ -1987,6 +2042,7 @@ public class NexTurtle {
              parts (concat java-imports
                            (when (seq java-imports) [""])
                            [function-base]
+                           ["" runtime-helpers]
                            (when function-globals [""])
                            (when function-globals [function-globals])
                            (when (seq java-classes) [""])

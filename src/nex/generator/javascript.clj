@@ -195,6 +195,8 @@
   (case method
     "print" (str "console.log(" args-code ")")
     "println" (str "console.log(" args-code ")")
+    "type_of" (str "__nexTypeOf(" args-code ")")
+    "type_is" (str "__nexTypeIs(" args-code ")")
     ;; Default: use as-is (regular method call)
     (str method "(" args-code ")")))
 
@@ -1342,7 +1344,50 @@
 (defn generate-graphics-runtime
   "Generate browser graphics runtime classes for Window/Turtle/Image built-ins."
   []
-  (str "function __nexCompare(a, b) {\n"
+  (str "function __nexTypeOf(v) {\n"
+       "  if (v === null || v === undefined) return 'Nil';\n"
+       "  if (typeof v === 'string') return (v.length === 1 ? 'Char' : 'String');\n"
+       "  if (typeof v === 'boolean') return 'Boolean';\n"
+       "  if (typeof v === 'number') return Number.isInteger(v) ? 'Integer' : 'Real';\n"
+       "  if (Array.isArray(v)) return 'Array';\n"
+       "  if (v instanceof Map) return 'Map';\n"
+       "  if (v && v._type) return String(v._type);\n"
+       "  const ctor = v && v.constructor;\n"
+       "  if (ctor && ctor.name) return ctor.name;\n"
+       "  return 'Any';\n"
+       "}\n"
+       "function __nexTypeIs(typeName, v) {\n"
+       "  if (typeof typeName !== 'string') return false;\n"
+       "  const runtime = __nexTypeOf(v);\n"
+       "  if (typeName === 'Any') return true;\n"
+       "  if (runtime === typeName) return true;\n"
+       "  if (runtime === 'Integer' && (typeName === 'Integer64' || typeName === 'Real' || typeName === 'Decimal')) return true;\n"
+       "  if (runtime === 'Integer64' && (typeName === 'Real' || typeName === 'Decimal')) return true;\n"
+       "  if (runtime === 'Real' && typeName === 'Decimal') return true;\n"
+       "  if ((runtime === 'ArrayCursor' || runtime === 'StringCursor' || runtime === 'MapCursor') && typeName === 'Cursor') return true;\n"
+       "  let cur = v;\n"
+       "  while (cur) {\n"
+       "    const ctor = cur.constructor;\n"
+       "    if (ctor && ctor.name === typeName) return true;\n"
+       "    cur = Object.getPrototypeOf(cur);\n"
+       "  }\n"
+       "  const seen = new Set();\n"
+       "  const stack = [v];\n"
+       "  while (stack.length > 0) {\n"
+       "    const obj = stack.pop();\n"
+       "    if (!obj || typeof obj !== 'object' || seen.has(obj)) continue;\n"
+       "    seen.add(obj);\n"
+       "    for (const key of Object.keys(obj)) {\n"
+       "      if (key.startsWith('_parent_')) {\n"
+       "        const parentType = key.substring('_parent_'.length);\n"
+       "        if (parentType === typeName) return true;\n"
+       "        stack.push(obj[key]);\n"
+       "      }\n"
+       "    }\n"
+       "  }\n"
+       "  return false;\n"
+       "}\n"
+       "function __nexCompare(a, b) {\n"
        "  if (a === b) return 0;\n"
        "  if (a < b) return -1;\n"
        "  if (a > b) return 1;\n"

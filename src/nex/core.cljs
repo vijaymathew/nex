@@ -38,7 +38,7 @@
   #{"true" "false" "nil"})
 
 (def nex-builtins
-  #{"print" "println" "result" "exception"})
+  #{"print" "println" "type_of" "type_is" "result" "exception"})
 
 (defonce app-state
   (atom {:ctx (interp/make-context)

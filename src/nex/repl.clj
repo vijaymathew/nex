@@ -36,7 +36,7 @@
   ["Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
    "Array" "Map" "Function" "Cursor" "Console" "File" "Process" "Window" "Turtle" "Image"])
 
-(def nex-builtins ["print" "println"])
+(def nex-builtins ["print" "println" "type_of" "type_is"])
 
 (def nex-repl-commands
   [":help" ":quit" ":exit" ":clear" ":reset" ":classes" ":vars"

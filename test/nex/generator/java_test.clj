@@ -270,6 +270,22 @@ end"
       (is (str/includes? java-code "my_car = (Car)"))
       (is (str/includes? java-code "my_car = null;")))))
 
+(deftest type-functions-test
+  (testing "type_of and type_is map to NexRuntime helpers"
+    (let [nex-code "class Vehicle end
+class Car inherit Vehicle end
+class Test
+  feature
+    demo(v: Vehicle) do
+      print(type_of(v))
+      print(type_is(\"Vehicle\", v))
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "public class NexRuntime"))
+      (is (str/includes? java-code "NexRuntime.typeOf(v)"))
+      (is (str/includes? java-code "NexRuntime.typeIs(\"Vehicle\", v)")))))
+
 (deftest inherited-class-invariants-deduped-test
   (testing "Inherited class invariants are generated recursively and deduped by ancestor class"
     (let [nex-code "class A

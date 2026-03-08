@@ -573,6 +573,36 @@
     (nex-object? value) (:class-name value)
     :else (some-> (get-type-name value) name)))
 
+(defn- numeric-subtype-runtime?
+  "Runtime numeric widening chain used by type_is:
+   Integer <: Integer64 <: Real <: Decimal."
+  [runtime-type target-type]
+  (or (and (= runtime-type "Integer")
+           (#{"Integer64" "Real" "Decimal"} target-type))
+      (and (= runtime-type "Integer64")
+           (#{"Real" "Decimal"} target-type))
+      (and (= runtime-type "Real")
+           (= target-type "Decimal"))))
+
+(defn- cursor-subtype-runtime?
+  [runtime-type target-type]
+  (and (#{"ArrayCursor" "StringCursor" "MapCursor"} runtime-type)
+       (= target-type "Cursor")))
+
+(defn- runtime-type-is?
+  "Whether value's runtime type is target-type or subtype of target-type."
+  [ctx target-type value]
+  (let [runtime-type (runtime-type-name value)]
+    (cond
+      (not (string? target-type)) false
+      (nil? runtime-type) false
+      (= target-type "Any") true
+      (= runtime-type target-type) true
+      (numeric-subtype-runtime? runtime-type target-type) true
+      (cursor-subtype-runtime? runtime-type target-type) true
+      (and runtime-type (is-parent? ctx runtime-type target-type)) true
+      :else false)))
+
 (defn- convert-compatible-runtime?
   "Java-style runtime conversion relation:
    value must be an instance of target type (or target supertype)."
@@ -683,7 +713,22 @@
    (fn [ctx & args]
      (let [output (str/join " " (map nex-format-value args))]
        (add-output ctx output)
-       nil))})
+       nil))
+
+   "type_of"
+   (fn [ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "type_of expects exactly 1 argument"
+                       {:function "type_of" :expected 1 :actual (count args)})))
+     (runtime-type-name (first args)))
+
+   "type_is"
+   (fn [ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "type_is expects exactly 2 arguments"
+                       {:function "type_is" :expected 2 :actual (count args)})))
+     (let [[target-type value] args]
+       (runtime-type-is? ctx target-type value)))})
 
 ;;
 ;; Operator Implementations
@@ -1094,9 +1139,12 @@
   [value]
   (cond
     (string? value) :String
+    #?(:clj (instance? java.math.BigDecimal value)
+       :cljs false) :Decimal
+    ;; Real literals are parsed as doubles on the JVM.
+    #?(:clj (or (double? value) (float? value))
+       :cljs (and (number? value) (not (integer? value)))) :Real
     (integer? value) :Integer
-    (float? value) :Real
-    (double? value) :Decimal
     (nex-char? value) :Char
     (boolean? value) :Boolean
     (nex-array? value) :Array
