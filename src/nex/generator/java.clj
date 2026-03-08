@@ -1991,23 +1991,42 @@ public class NexTurtle {
 ;;
 
 (defn generate-main
-  "Generate a Main class that instantiates the last user-defined class.
-   If the class has a no-arg named constructor, calls ClassName.ctorName().
-   Otherwise calls new ClassName()."
+  "Generate a Main class.
+   If top-level statements exist, execute them in-order.
+   Otherwise instantiate the last user-defined class (legacy behavior)."
   [ast]
-  (let [classes (:classes ast)
-        last-class (last classes)
-        class-name (:name last-class)
-        {:keys [constructors]} (extract-members (:body last-class))
-        no-arg-ctor (first (filter #(empty? (:params %)) constructors))
-        call (if no-arg-ctor
-               (str class-name "." (:name no-arg-ctor) "()")
-               (str "new " class-name "()"))]
-    (str "public class Main {\n"
-         "    public static void main(String[] args) {\n"
-         "        " call ";\n"
-         "    }\n"
-         "}")))
+  (let [statements (:statements ast)
+        classes (:classes ast)]
+    (if (seq statements)
+      (let [top-level-vars (extract-var-names statements)
+            statement-lines (binding [*local-names* (into *local-names* top-level-vars)]
+                              (map #(generate-statement 2 % #{}) statements))]
+        (str "public class Main {\n"
+             "    public static void main(String[] args) {\n"
+             (if (seq statement-lines)
+               (str/join "\n" statement-lines)
+               "        // no-op")
+             "\n"
+             "    }\n"
+             "}"))
+      (let [last-class (last classes)
+            class-name (:name last-class)
+            {:keys [constructors]} (if last-class
+                                     (extract-members (:body last-class))
+                                     {:constructors []})
+            no-arg-ctor (first (filter #(empty? (:params %)) constructors))
+            call (cond
+                   (and class-name no-arg-ctor)
+                   (str class-name "." (:name no-arg-ctor) "()")
+                   class-name
+                   (str "new " class-name "()")
+                   :else
+                   "/* no-op */")]
+        (str "public class Main {\n"
+             "    public static void main(String[] args) {\n"
+             "        " call ";\n"
+             "    }\n"
+             "}")))))
 
 ;;
 ;; Main Translation Function
@@ -2135,7 +2154,9 @@ public class NexTurtle {
          function-names (set (map :name functions))
          function-base (generate-function-base-class)
          function-globals (generate-function-globals functions)
-         main-code (generate-main ast)
+         main-code (binding [*function-names* function-names
+                             *class-registry* (into {} (map (juxt :name identity) classes))]
+                     (generate-main ast))
          class-codes (binding [*function-names* function-names
                               *class-registry* (into {} (map (juxt :name identity) classes))]
                        (mapv (fn [cls] [(:name cls) (generate-class cls opts)]) classes))

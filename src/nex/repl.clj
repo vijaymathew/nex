@@ -1012,7 +1012,8 @@
         ;; Type check if enabled
         (when (and @*type-checking-enabled*
                  (= (:type ast) :program)
-                 (or (seq (:classes ast)) (seq (:calls ast))))
+                 (or (seq (:classes ast)) (seq (:functions ast))
+                     (seq (:statements ast)) (seq (:calls ast))))
         ;; Create an augmented AST that includes previously defined classes
         ;; so the type checker knows about them
         (let [prev-classes (remove #(or (= "__ReplTemp__" (:name %))
@@ -1074,6 +1075,7 @@
         (= (:type ast) :program)
         (let [classes (:classes ast)
               functions (:functions ast)
+              statements (:statements ast)
               calls (:calls ast)
               real-class-names (filter #(not= % "__ReplTemp__")
                                       (map :name (filter map? classes)))
@@ -1084,9 +1086,11 @@
             (when @*type-checking-enabled*
               (doseq [fn-def (filter map? functions)]
                 (swap! *repl-var-types* assoc (:name fn-def) (:class-name fn-def)))))
-          ;; If there are calls/expressions and no classes, evaluate them to get result
-          (let [result (when (and (seq calls) (empty? real-class-names) (empty? function-names))
-                        (last (map #(interp/eval-node exec-ctx %) calls)))
+          ;; If there are top-level statements and no classes/functions, evaluate them in order.
+          ;; Fall back to legacy :calls-only programs when :statements is absent.
+          (let [top-nodes (if (seq statements) statements calls)
+                result (when (and (seq top-nodes) (empty? real-class-names) (empty? function-names))
+                         (last (map #(interp/eval-node exec-ctx %) top-nodes)))
                 output @(:output exec-ctx)]
             ;; Show any output
             (when (seq output)

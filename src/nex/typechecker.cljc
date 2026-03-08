@@ -1407,7 +1407,7 @@
   "Type check a complete program.
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([program] (check-program program {}))
-  ([{:keys [classes calls imports functions] :as program} opts]
+  ([{:keys [classes calls statements imports functions] :as program} opts]
    (let [env (make-type-env)]
      (try
        ;; Register imported Java classes (as placeholders)
@@ -1441,9 +1441,13 @@
        (doseq [class-def classes]
          (check-class env class-def))
 
-       ;; Check top-level calls
-       (doseq [call calls]
-         (check-expression env call))
+       ;; Check top-level statements in source order when available.
+       ;; Fall back to legacy :calls-only programs.
+       (if (seq statements)
+         (doseq [stmt statements]
+           (check-statement env stmt))
+         (doseq [call calls]
+           (check-expression env call)))
 
        {:success true
         :errors []}

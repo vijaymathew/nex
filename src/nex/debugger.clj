@@ -303,13 +303,23 @@
   (doseq [wp (:watchpoints snapshot)]
     (add-watchpoint! wp)))
 
+(defn- last-program-top-node
+  "Return last executable top-level node from a parsed program AST.
+   Prefer :statements, fall back to legacy :calls."
+  [ast]
+  (if (seq (:statements ast))
+    (last (:statements ast))
+    (last (:calls ast))))
+
 (defn- eval-breakpoint-condition?
   [ctx cond-expr]
   (let [eval-ctx (assoc ctx :debug-hook nil)]
     (try
     (let [ast (p/ast cond-expr)
-          v (if (and (= (:type ast) :program) (seq (:calls ast)))
-              (interp/eval-node eval-ctx (last (:calls ast)))
+          top-node (when (= (:type ast) :program)
+                     (last-program-top-node ast))
+          v (if top-node
+              (interp/eval-node eval-ctx top-node)
               false)]
       (boolean v))
     (catch Exception _
@@ -376,8 +386,8 @@
   (let [eval-ctx (assoc ctx :debug-hook nil)]
     (try
     (let [ast (p/ast expr)]
-      (if (and (= (:type ast) :program) (seq (:calls ast)))
-        (interp/eval-node eval-ctx (last (:calls ast)))
+      (if (and (= (:type ast) :program) (last-program-top-node ast))
+        (interp/eval-node eval-ctx (last-program-top-node ast))
         ::invalid))
     (catch Exception _
       (try
@@ -523,8 +533,8 @@
         (reset! (:output ctx) [])
         (let [ast (p/ast expr)]
           (cond
-            (and (= (:type ast) :program) (seq (:calls ast)))
-            (let [v (interp/eval-node ctx (last (:calls ast)))]
+            (and (= (:type ast) :program) (last-program-top-node ast))
+            (let [v (interp/eval-node ctx (last-program-top-node ast))]
               (println (interp/nex-format-value v)))
             :else
             (println "Could not evaluate expression in debugger context.")))

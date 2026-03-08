@@ -1520,20 +1520,34 @@
 ;;
 
 (defn generate-main
-  "Generate a main.js that requires and instantiates the last user-defined class.
-   If the class has a no-arg named constructor, calls ClassName.ctorName().
-   Otherwise calls new ClassName()."
+  "Generate main.js.
+   If top-level statements exist, emit them in-order.
+   Otherwise require and instantiate the last user-defined class (legacy behavior)."
   [ast]
-  (let [classes (:classes ast)
-        last-class (last classes)
-        class-name (:name last-class)
-        {:keys [constructors]} (extract-members (:body last-class))
-        no-arg-ctor (first (filter #(empty? (:params %)) constructors))
-        call (if no-arg-ctor
-               (str class-name "." (:name no-arg-ctor) "()")
-               (str "new " class-name "()"))]
-    (str "const { " class-name " } = require('./" class-name "');\n"
-         call ";\n")))
+  (let [statements (:statements ast)
+        classes (:classes ast)]
+    (if (seq statements)
+      (let [top-level-vars (extract-var-names-js statements)
+            statement-lines (binding [*local-names* (into *local-names* top-level-vars)]
+                              (map #(generate-statement 0 % #{}) statements))]
+        (str (str/join "\n" statement-lines)
+             (when (seq statement-lines) "\n")))
+      (let [last-class (last classes)
+            class-name (:name last-class)
+            {:keys [constructors]} (if last-class
+                                     (extract-members (:body last-class))
+                                     {:constructors []})
+            no-arg-ctor (first (filter #(empty? (:params %)) constructors))
+            call (cond
+                   (and class-name no-arg-ctor)
+                   (str class-name "." (:name no-arg-ctor) "()")
+                   class-name
+                   (str "new " class-name "()")
+                   :else
+                   "/* no-op */")]
+        (str (when class-name
+               (str "const { " class-name " } = require('./" class-name "');\n"))
+             call ";\n")))))
 
 ;;
 ;; Main Translation Function
@@ -1631,7 +1645,8 @@
          function-base (generate-function-base-class)
          graphics-runtime (generate-graphics-runtime)
          function-globals (generate-function-globals functions)
-         main-code (generate-main ast)
+         main-code (binding [*function-names* function-names]
+                     (generate-main ast))
          classes-by-name (into {} (map (juxt :name identity) classes))
          class-codes (binding [*function-names* function-names]
                        (mapv (fn [cls] [(:name cls) (generate-class cls opts classes-by-name)]) classes))

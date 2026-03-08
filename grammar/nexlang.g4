@@ -7,7 +7,7 @@ grammar nexlang;
  */
 
 program
-    : (importStmt | internStmt | classDecl | functionDecl | methodCall)* EOF
+    : (importStmt | internStmt | classDecl | functionDecl | statement)* EOF
     ;
 
 importStmt

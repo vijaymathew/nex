@@ -591,6 +591,15 @@ class nexlangListener extends antlr4.tree.ParseTreeListener {
 	}
 
 
+	// Enter a parse tree produced by nexlangParser#convertExpression.
+	enterConvertExpression(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#convertExpression.
+	exitConvertExpression(ctx) {
+	}
+
+
 	// Enter a parse tree produced by nexlangParser#whenExpression.
 	enterWhenExpression(ctx) {
 	}
