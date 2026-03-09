@@ -267,6 +267,20 @@ end"
       (is (not (:success result)))
       (is (seq (:errors result)))))) 
 
+(deftest test-string-concatenation-typecheck
+  (testing "String concatenation with + should typecheck"
+    (let [code "class Test
+                  feature
+                    greet(name: String): String
+                    do
+                      result := \"hello \" + name
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-boolean-operators
   (testing "Boolean operators should require Boolean operands"
     (let [code "class Test

@@ -4,7 +4,8 @@
             [clojure.string :as str]
             [nex.parser :as p]
             [nex.interpreter :as interp]
-            [nex.generator.java :as java]))
+            [nex.generator.java :as java]
+            [nex.repl :as repl]))
 
 (deftest typed-let-parsing-test
   (testing "Parse let with type annotation"
@@ -175,3 +176,16 @@ end"
       (is (= "x" (:name let-stmt)))
       (is (= "Integer" (:var-type let-stmt)))
       (is (= 100 (-> let-stmt :value :value))))))
+
+(deftest repl-typecheck-allows-string-concatenation
+  (testing "REPL typechecking accepts string concatenation with +"
+    (let [ctx (repl/init-repl-context)
+          output (try
+                   (reset! repl/*type-checking-enabled* true)
+                   (with-out-str
+                     (repl/eval-code ctx "\"hello\" + \" world\""))
+                   (finally
+                     (reset! repl/*type-checking-enabled* false)
+                     (reset! repl/*repl-var-types* {})))]
+      (is (str/includes? output "hello world"))
+      (is (not (str/includes? output "Type error:"))))))

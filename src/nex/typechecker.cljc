@@ -393,9 +393,28 @@
   "Check the type of a binary operation"
   [env {:keys [operator left right] :as expr}]
   (let [left-type (check-expression env left)
-        right-type (check-expression env right)]
+        right-type (check-expression env right)
+        left-base (let [t (attachable-type left-type)]
+                    (if (map? t) (:base-type t) t))
+        right-base (let [t (attachable-type right-type)]
+                     (if (map? t) (:base-type t) t))]
     (case operator
-      ("+" "-" "*" "/" "%" "^")
+      "+"
+      (cond
+        ;; Runtime supports string concatenation if either side is a string.
+        (or (= left-base "String") (= right-base "String"))
+        "String"
+
+        (and (is-numeric-type? left-type) (is-numeric-type? right-type))
+        left-type
+
+        :else
+        (throw (ex-info (str "Operator " operator " requires numeric or String operands")
+                        {:error (type-error
+                                 (str "Operator " operator " requires numeric or String operands, got "
+                                      (display-type left-type) " and " (display-type right-type)))})))
+
+      ("-" "*" "/" "%" "^")
       (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
         left-type
         (throw (ex-info (str "Operator " operator " requires numeric operands")
