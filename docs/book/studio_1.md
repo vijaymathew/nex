@@ -62,9 +62,11 @@ feature
     do
       if current = destination then
         result := current
-      elseif current = "A" and destination = "C" then
+      elseif current = "A"
+	         and destination = "C" then
         result := "B"
-      elseif current = "B" and destination = "C" then
+      elseif current = "B"
+	         and destination = "C" then
         result := "C"
       else
         result := "UNREACHABLE"
@@ -131,16 +133,26 @@ feature
     let w: World_Tiny := create World_Tiny
 
     -- Nominal
-    print(d.next_stop("A", "C"))        -- expected: "B"
-    print(n.find_by_tag("algorithms"))  -- expected: "note_001"
-    print(w.step(3, 2, 10))             -- expected: 5
+
+	-- expected: "B"
+    print(d.next_stop("A", "C"))
+    -- expected: "note_001"
+	print(n.find_by_tag("algorithms"))
+	-- expected: 5
+    print(w.step(3, 2, 10))
 
     -- Edge / failure-oriented checks
-    print(d.next_stop("C", "C"))        -- expected: "C"
-    print(d.next_stop("X", "C"))        -- expected: "UNREACHABLE"
-    print(n.find_by_tag("unknown"))     -- expected: "NOT_FOUND"
-    print(w.step(9, 5, 10))             -- expected: 10
-    print(w.step(1, -5, 10))            -- expected: 0
+
+	-- expected: "C"
+    print(d.next_stop("C", "C"))
+	-- expected: "UNREACHABLE"
+    print(d.next_stop("X", "C"))
+	-- expected: "NOT_FOUND"
+    print(n.find_by_tag("unknown"))
+	-- expected: 10
+    print(w.step(9, 5, 10))
+	-- expected: 0
+    print(w.step(1, -5, 10))
   end
 end
 ```
