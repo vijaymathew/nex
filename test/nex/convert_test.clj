@@ -140,3 +140,25 @@ end"
           result (tc/type-check (p/ast code))]
       (is (not (:success result)))
       (is (seq (:errors result))))))
+
+(deftest convert-standalone-statement-binds-in-scope
+  (testing "standalone convert statement binds its variable in the enclosing scope"
+    (let [code "class Pair [F, S]
+  create
+    make(first_val: F, second_val: S) do
+      first := first_val
+      second := second_val
+    end
+
+  feature
+    first: F
+    second: S
+
+    swap() do
+      convert second to f:F
+      let maybe_f: ?F := f
+    end
+end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result))
+      (is (empty? (:errors result))))))

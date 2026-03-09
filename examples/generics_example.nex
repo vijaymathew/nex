@@ -106,8 +106,10 @@ class Pair [F, S]
     end
 
     swap() do
-      let temp := first
-      first := second
+      let temp: F := first
+      if convert second to f:F then
+        first := f
+      end
     end
 end
 
