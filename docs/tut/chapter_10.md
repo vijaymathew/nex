@@ -1,9 +1,9 @@
-# Chapter 10: Maps
+# Maps
 
 An array is the right structure when you have an ordered sequence of values and access them by position. But many problems call for a different kind of lookup: given a name, find a phone number; given a word, find its definition; given a product code, find its price. These are not positional lookups — they are lookups by *key*. The map is the structure for this.
 
 
-## 10.1 What a Map Is
+## What a Map Is
 
 A map stores associations between keys and values. Each key maps to exactly one value. Given a key, a map returns the associated value in constant time — it does not matter whether the map has ten entries or ten thousand.
 
@@ -33,7 +33,7 @@ Note that `{}` is the empty map literal, just as `[]` is the empty array literal
 
 
 
-## 10.2 Adding and Updating Entries
+## Adding and Updating Entries
 
 The `put` method adds a new entry or replaces an existing one:
 
@@ -56,7 +56,7 @@ If the key `"Alice"` already exists, `put` replaces its value. If it does not ex
 
 
 
-## 10.3 Reading Values
+## Reading Values
 
 The `get` method retrieves the value associated with a key:
 
@@ -96,7 +96,7 @@ nex> print(scores.try_get("Alice", 0))
 
 
 
-## 10.4 Removing Entries
+## Removing Entries
 
 The `remove` method deletes an entry by key and returns the value that was associated with it:
 
@@ -113,7 +113,7 @@ Like `get`, `remove` raises an exception if the key does not exist. Check with `
 
 
 
-## 10.5 Querying a Map
+## Querying a Map
 
 Several methods provide information about a map's contents without modifying it:
 
@@ -150,7 +150,7 @@ Carol: 85
 
 
 
-## 10.6 Iterating with `across`
+## Iterating with `across`
 
 `across` iterates over a map's entries. Each element bound by the loop variable is a two-element array of type `Array[Any]`, where index 0 is the key and index 1 is the value. Because the element type is `Any`, you may need to be mindful of types when using the values in typed contexts:
 
@@ -159,11 +159,11 @@ nex> let capitals := {"France": "Paris", "Japan": "Tokyo", "Brazil": "Brasília"
 => {France: Paris, Japan: Tokyo, Brazil: Brasília}
 
 nex> across capitals as entry do
-       print(entry.get(0) + " → " + entry.get(1))
+       print(entry.get(0) + " -> " + entry.get(1))
     end
-France → Paris
-Japan → Tokyo
-Brazil → Brasília
+France -> Paris
+Japan -> Tokyo
+Brazil -> Brasilia
 ```
 
 When you only need the keys or only the values, iterate over `map.keys` or `map.values` instead:
@@ -179,7 +179,7 @@ Brazil
 
 
 
-## 10.7 Building Maps with Loops
+## Building Maps with Loops
 
 Like arrays, maps are often built programmatically. The pattern is an empty map and `put` inside a loop:
 
@@ -202,7 +202,7 @@ This builds a map from each word to its length. The loop body calls `put` once p
 
 
 
-## 10.8 Maps and Functions
+## Maps and Functions
 
 Maps are values and can be passed to and returned from functions:
 
@@ -225,7 +225,7 @@ Japan
 
 
 
-## 10.9 Choosing Between Arrays and Maps
+## Choosing Between Arrays and Maps
 
 Arrays and maps are both collections, but they suit different problems. The question to ask is: *how will this data be accessed?*
 
@@ -237,7 +237,7 @@ A common pattern is to use both together: an array to preserve order and a map t
 
 
 
-## 10.10 A Worked Example: Word Frequency Counter
+## A Worked Example: Word Frequency Counter
 
 A word frequency counter reads a string of text and counts how many times each word appears. Maps are the natural structure: the keys are words, the values are counts.
 

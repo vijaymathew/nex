@@ -1,9 +1,9 @@
-# Chapter 11: Nested and Composite Structures
+# Nested and Composite Structures
 
 Chapters 9 and 10 introduced arrays and maps as separate tools. Real data rarely fits neatly into one or the other. A gradebook is not just an array of scores, nor just a map from names to numbers — it is a map from student names to arrays of scores. A directory is not just a list of contacts — it is a collection of records, each containing multiple named fields. This chapter is about combining arrays and maps to model data that has genuine structure, and about what that combination makes possible.
 
 
-## 11.1 Arrays of Maps
+## Arrays of Maps
 
 An array of maps is useful when you have a sequence of records, each with the same set of named fields. Consider a list of books:
 
@@ -53,7 +53,7 @@ Foundation
 
 
 
-## 11.2 Maps of Arrays
+## Maps of Arrays
 
 A map of arrays is useful when you want to group items under named categories. Consider a timetable that maps each day of the week to a list of classes:
 
@@ -102,7 +102,7 @@ The outer loop iterates over days; the inner loop iterates over the classes for 
 
 
 
-## 11.3 Building Nested Structures Programmatically
+## Building Nested Structures Programmatically
 
 Nested structures are often built up incrementally rather than written as literals. The gradebook example: given a list of (student, score) pairs, build a map from each student to their array of scores.
 
@@ -141,7 +141,7 @@ The `try_get(name, [])` call retrieves the existing array for that student, or a
 
 
 
-## 11.4 When Flat Structures Are Enough
+## When Flat Structures Are Enough
 
 Nesting adds expressive power but also adds complexity. Before reaching for a nested structure, ask whether a flat one would serve equally well.
 
@@ -161,7 +161,7 @@ The rule of thumb: use the simplest structure that accurately represents the dat
 
 
 
-## 11.5 Tree-Shaped Data
+## Tree-Shaped Data
 
 Some data is genuinely hierarchical: file systems with directories containing files and subdirectories, organisation charts with managers having direct reports, category trees with subcategories. These are tree-shaped — each node may contain other nodes of the same kind.
 
@@ -195,7 +195,7 @@ Each node is a `Map[String, Any]`: a `"name"` field (string), a `"type"` field (
 
 
 
-## 11.6 Traversing a Tree
+## Traversing a Tree
 
 Traversing a tree — visiting every node — is a naturally recursive operation. The base case is a node with no children (a leaf). The recursive case processes the node and then recursively traverses each child.
 
@@ -231,7 +231,7 @@ This is the recursive structure from Chapter 8 applied to a tree: process the cu
 
 
 
-## 11.7 Searching a Tree
+## Searching a Tree
 
 Finding a node by name requires the same recursive structure:
 
@@ -270,7 +270,7 @@ This pattern — returning `nil` to signal "not found" — is the right use of d
 
 
 
-## 11.8 A Worked Example: Category Totals
+## A Worked Example: Category Totals
 
 Consider an expense tracker where expenses are grouped by category, and categories can contain subcategories. Each node has a `"label"`, an `"amount"` (its own expenses, not including children), and a `"children"` array of subcategory nodes.
 

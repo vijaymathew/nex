@@ -1,9 +1,9 @@
-# Chapter 8: Recursion
+# Recursion
 
 A function can call other functions — that much we established in Chapter 6. A function can also call itself. This is recursion, and it is one of the most powerful ideas in programming. It is also one of the most disorienting for beginners, because it seems circular: how can a function be defined in terms of itself? This chapter builds the mental model that makes recursive thinking natural.
 
 
-## 8.1 A Function That Calls Itself
+## A Function That Calls Itself
 
 Start with a familiar computation: summing the integers from 1 to n. Chapter 5 wrote this as a loop. Here is the recursive version:
 
@@ -27,7 +27,7 @@ Every correct recursive function has exactly this structure: a *base case* that 
 
 
 
-## 8.2 Tracing a Recursive Call
+## Tracing a Recursive Call
 
 The most effective way to understand recursion is to trace a call step by step. Here is `sum_to(4)` fully expanded:
 
@@ -50,12 +50,12 @@ This expansion — called the *call stack* — builds up as the recursion descen
 
 
 
-## 8.3 Identifying the Base Case and the Recursive Case
+## Identifying the Base Case and the Recursive Case
 
 Every recursive problem can be decomposed by asking two questions:
 
 1. *What is the simplest version of this problem, the one that can be answered immediately without further recursion?* This is the base case.
-2. *How can a problem of size n be expressed in terms of a problem of size n − 1 (or smaller)?* This is the recursive case.
+2. *How can a problem of size n be expressed in terms of a problem of size n - 1 (or smaller)?* This is the recursive case.
 
 For `sum_to`: the simplest version is `sum_to(0)`, which is `0`. A sum up to `n` is `n` plus the sum up to `n - 1`.
 
@@ -103,7 +103,7 @@ The pattern is always the same. Find the simplest instance. Express the general 
 
 
 
-## 8.4 Recursion on Lists
+## Recursion on Lists
 
 Recursion becomes particularly natural when working with lists and other recursive data structures. An array can be thought of recursively: it is either empty, or it has a first element followed by the rest of the array. Many operations on arrays have elegant recursive expressions.
 
@@ -153,7 +153,7 @@ Notice the structure: *process the first element, then recurse on the rest*. Thi
 
 
 
-## 8.5 Mutual Recursion
+## Mutual Recursion
 
 Two functions can be mutually recursive — each calling the other. A classic example is testing whether a number is even or odd without using `%`:
 
@@ -189,7 +189,7 @@ Mutual recursion is less common than direct recursion but appears naturally in p
 
 
 
-## 8.6 When Recursion Is Clearer Than a Loop
+## When Recursion Is Clearer Than a Loop
 
 Recursion and loops are interchangeable in the sense that anything computable by one is computable by the other. The question is which expresses the solution more clearly for a given problem.
 
@@ -211,7 +211,7 @@ nex> print(fibonacci(10))
 55
 ```
 
-The function body is almost identical to the mathematical definition: F(0) = 0, F(1) = 1, F(n) = F(n−1) + F(n−2). A loop-based Fibonacci requires two accumulator variables and careful bookkeeping. The recursive version states the definition and lets the language figure out the rest.
+The function body is almost identical to the mathematical definition: F(0) = 0, F(1) = 1, F(n) = F(n-1) + F(n-2). A loop-based Fibonacci requires two accumulator variables and careful bookkeeping. The recursive version states the definition and lets the language figure out the rest.
 
 **The data structure is recursive.** Trees, nested lists, and hierarchically structured data are defined recursively — each node contains sub-nodes of the same type. Functions that process them naturally follow the same shape. We will see this clearly in Chapter 11.
 
@@ -219,7 +219,7 @@ The function body is almost identical to the mathematical definition: F(0) = 0, 
 
 
 
-## 8.7 When a Loop Is Clearer Than Recursion
+## When a Loop Is Clearer Than Recursion
 
 Recursion is not always the right choice. Loops tend to be clearer when:
 
@@ -266,7 +266,7 @@ nex> print(total)
 
 
 
-## 8.8 Thinking Recursively: A Discipline
+## Thinking Recursively: A Discipline
 
 Beginners often try to trace through the full execution of a recursive function to convince themselves it is correct. This works for small inputs but becomes impractical quickly. The more powerful discipline is to *trust the recursive call*.
 
@@ -280,7 +280,7 @@ For `sum_to(n)`:
 
 This is the recursive analogue of mathematical induction, and it is the right way to verify a recursive function. You do not need to trace all the way down to the base case and back up again — you need to verify the base case and verify that the recursive step is correct given a correct sub-result.
 
-The same discipline applies to writing recursive functions. Define the base case clearly. Then define the recursive case by asking: *if I had the answer for n − 1, how would I construct the answer for n?* Write that construction. Trust that the recursive call provides the sub-answer.
+The same discipline applies to writing recursive functions. Define the base case clearly. Then define the recursive case by asking: *if I had the answer for n - 1, how would I construct the answer for n?* Write that construction. Trust that the recursive call provides the sub-answer.
 
 
 

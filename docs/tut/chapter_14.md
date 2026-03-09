@@ -1,9 +1,9 @@
-# Chapter 14: Inheritance and Polymorphism
+# Inheritance and Polymorphism
 
 Chapter 13 established that a class should model one concept well. Sometimes concepts form families — a `SavingsAccount` and a `CurrentAccount` are both bank accounts; a `Circle` and a `Rectangle` are both shapes. These families share common behaviour while differing in specifics. Inheritance is the mechanism for expressing that relationship in code.
 
 
-## 14.1 What Inheritance Is
+## What Inheritance Is
 
 Inheritance allows one class — the *subclass* — to extend another — the *superclass*. The subclass inherits all the fields and methods of the superclass and can add new ones or override existing ones.
 
@@ -66,7 +66,7 @@ Both `Circle` and `Rectangle` inherit the `colour` field from `Shape`. Each has 
 
 
 
-## 14.2 The `super` Call
+## The `super` Call
 
 When a subclass constructor runs, it must also initialise the fields inherited from the superclass. The `super.constructor_name(   )` call delegates to the superclass constructor:
 
@@ -91,7 +91,7 @@ This builds on `Shape`'s `describe` rather than duplicating it.
 
 
 
-## 14.3 Overriding Methods
+## Overriding Methods
 
 When a subclass defines a feature with the same name as a superclass feature, the subclass version *overrides* it. Calling `describe` on a `Circle` runs `Circle`'s version, not `Shape`'s:
 
@@ -107,7 +107,7 @@ A blue rectangle (4.0 x 3.0)
 
 
 
-## 14.4 Polymorphism
+## Polymorphism
 
 The most powerful consequence of inheritance is *polymorphism*: the ability to treat objects of different subclasses through a common superclass type.
 
@@ -133,7 +133,7 @@ Polymorphism means code written against the superclass type works correctly with
 
 
 
-## 14.5 When Inheritance Is the Right Tool
+## When Inheritance Is the Right Tool
 
 Inheritance is appropriate when:
 
@@ -153,7 +153,7 @@ Inheritance is not appropriate when:
 
 
 
-## 14.6 Abstract Methods
+## Abstract Methods
 
 Sometimes a superclass wants to declare the shape of an operation without providing an implementation, because there is no sensible default. Every shape has an area, but there is no general formula for "the area of a shape."
 
@@ -202,7 +202,7 @@ A class with at least one abstract method cannot be instantiated directly. Only 
 
 
 
-## 14.7 Inheritance and Contracts
+## Inheritance and Contracts
 
 When a subclass overrides a method, the override should honour the same contract as the superclass method: it should accept at least the same inputs and guarantee at least as much. This is the *Liskov Substitution Principle*: wherever a superclass instance is expected, a subclass instance should be usable without breaking anything.
 
@@ -212,7 +212,7 @@ When overriding a method: read the superclass method's contract first. The overr
 
 
 
-## 14.8 A Worked Example: An Account Hierarchy
+## A Worked Example: An Account Hierarchy
 
 ```
 nex> class Account

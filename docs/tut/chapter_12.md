@@ -1,11 +1,11 @@
-# Chapter 12: Classes
+# Classes
 
 Every value encountered so far — integers, strings, arrays, maps — has a type, and that type determines what operations are available on the value. `"hello".length` works because strings have a `length` method. `[1, 2, 3].sort` works because arrays have a `sort` method. The type is not just a label; it is a bundle of data and behaviour.
 
 Classes let you define your own types with the same structure: a bundle of data (fields) and behaviour (methods). Once a class is defined, you can create as many instances of it as you need, each carrying its own data, all sharing the same methods.
 
 
-## 12.1 Defining a Class
+## Defining a Class
 
 A class definition in Nex has two blocks: a `create` block containing constructors, and a `feature` block containing fields and methods:
 
@@ -32,7 +32,7 @@ Fields are declared inside `feature` as `name: Type` — no keyword needed. Meth
 
 
 
-## 12.2 Creating Objects
+## Creating Objects
 
 Objects are created with `create`, naming both the class and the constructor:
 
@@ -54,7 +54,7 @@ The `create` keyword appeared in Chapter 2 as `let con := create Console`. Now t
 
 
 
-## 12.3 Constructors
+## Constructors
 
 A constructor is a named entry in the `create` block. Its body initialises the object's fields. A class may have more than one constructor with different names:
 
@@ -91,7 +91,7 @@ Named constructors communicate intent. `create Point.origin` clearly creates a p
 
 
 
-## 12.4 Fields
+## Fields
 
 Fields are the data a class carries. Each instance gets its own independent copy of every field:
 
@@ -164,7 +164,7 @@ nex> print(c.value)
 
 
 
-## 12.5 Detachable Fields
+## Detachable Fields
 
 In strict type-checking mode, Nex requires that every field holding a non-basic type — any class, array, map, or other composite — must be initialised either with a default value in the `feature` block or in the constructor. The basic types (`Integer`, `Real`, `Boolean`, `String`, `Char`) have well-defined defaults and can be left uninitialised. Everything else must be explicitly set.
 
@@ -208,7 +208,7 @@ The rule: use a plain type when the field must always have a value; use `?Type` 
 
 
 
-## 12.6 Methods
+## Methods
 
 Methods are features that compute or act. They are declared inside `feature` with a parameter list and body:
 
@@ -262,7 +262,7 @@ Alice: 1300.0
 
 
 
-## 12.7 The `this` Reference
+## The `this` Reference
 
 Inside a method, `this` refers to the object on which the method was called. Most of the time you do not need it — fields and other methods are accessible directly by name. `this` is needed when a parameter name shadows a field name:
 
@@ -311,7 +311,7 @@ In `distance_to`, `this.x` and `this.y` refer to the fields of the object the me
 
 
 
-## 12.8 Uniform Access
+## Uniform Access
 
 Field reads and method calls use identical syntax:
 
@@ -356,7 +356,7 @@ nex> print(c.diameter)
 
 
 
-## 12.9 A Worked Example: A Simple Stack
+## A Worked Example: A Simple Stack
 
 ```
 nex> class Stack
@@ -417,7 +417,7 @@ nex> print(s.size)
 
 ## Exercises
 
-**1.** Define a class `Rectangle` with fields `width` and `height` (both `Real`) and a constructor `make`. Add methods `area(): Real`, `perimeter(): Real`, and `is_square(): Boolean`. Test with a 4.0 × 6.0 rectangle and a 5.0 × 5.0 square.
+**1.** Define a class `Rectangle` with fields `width` and `height` (both `Real`) and a constructor `make`. Add methods `area(): Real`, `perimeter(): Real`, and `is_square(): Boolean`. Test with a 4.0 x 6.0 rectangle and a 5.0 x 5.0 square.
 
 **2.** Define a class `Temperature` with a single field `celsius: Real`. Add methods `fahrenheit(): Real` and `kelvin(): Real`. Add `describe(): String` returning `"freezing"`, `"cold"`, `"mild"`, or `"warm"`. All derived values should be computed methods, not stored fields.
 

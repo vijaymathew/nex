@@ -1,11 +1,11 @@
-# Chapter 15: Generic Classes
+# Generic Classes
 
 Exercise 5 in Chapter 13 asked you to define `IntegerStack`, `StringStack`, and `RealStack` alongside each other. If you did it, you noticed something uncomfortable: the three classes are identical except for the element type. Every method has the same structure; only the type annotations differ. Any bug fixed in one must be fixed in all three. Any new method added to one should be added to all three.
 
 This is exactly the problem that generic classes solve. A generic class is parameterised by a type: you write the class once, and the type is supplied when the class is used. `Stack[Integer]`, `Stack[String]`, and `Stack[Real]` are all the same class, instantiated with different type arguments.
 
 
-## 15.1 A Generic Class
+## A Generic Class
 
 The type parameter is declared in square brackets after the class name:
 
@@ -43,7 +43,7 @@ The type parameter name is a convention. Single uppercase letters are common: `G
 
 
 
-## 15.2 Using a Generic Class
+## Using a Generic Class
 
 When creating an instance, supply the concrete type in square brackets:
 
@@ -68,7 +68,7 @@ Nex enforces type safety: pushing an `Integer` onto a `Stack[String]` is a type 
 
 
 
-## 15.3 Multiple Type Parameters
+## Multiple Type Parameters
 
 A class can have more than one type parameter:
 
@@ -112,7 +112,7 @@ nex> print(p2.describe)
 
 
 
-## 15.4 Type Constraints
+## Type Constraints
 
 Sometimes a generic class needs to call methods on its type parameter — and not all types support all methods. If `Stack` needed to sort its elements, `G` would need to support comparison. You cannot sort arbitrary types; you can only sort types that implement `Comparable`.
 
@@ -166,7 +166,7 @@ The built-in constraints available in Nex include:
 
 
 
-## 15.5 Constrained Multiple Parameters
+## Constrained Multiple Parameters
 
 Type constraints and multiple parameters combine naturally:
 
@@ -212,7 +212,7 @@ nex> print(dict.try_get("bananas", 0))
 
 
 
-## 15.6 Generic Classes and Inheritance
+## Generic Classes and Inheritance
 
 A generic class can inherit from another class, and a concrete class can inherit from an instantiated generic:
 
@@ -251,7 +251,7 @@ nex> print(s.size)
 
 
 
-## 15.7 The Standard Collections as Generic Classes
+## The Standard Collections as Generic Classes
 
 The built-in `Array[T]` and `Map[K, V]` that you have been using throughout the book are generic classes. `Array[Integer]`, `Array[String]`, and `Array[Real]` are all instances of the same `Array` class with different type arguments. `Map[String, Integer]` and `Map[Integer, String]` are instances of `Map` with different key and value types.
 
@@ -263,7 +263,7 @@ Understanding that the standard collections are generic classes clarifies the en
 
 
 
-## 15.8 A Worked Example: A Generic Result Type
+## A Worked Example: A Generic Result Type
 
 A common pattern in robust code is a result type that holds either a successful value or an error description — without raising an exception. This is naturally a two-parameter generic:
 

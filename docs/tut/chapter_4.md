@@ -1,9 +1,9 @@
-# Chapter 4: Making Decisions
+# Making Decisions
 
 Programs would not be very useful if they always did the same thing regardless of their inputs. The ability to choose between different courses of action — based on conditions that are evaluated at runtime — is what makes programs responsive to the world they operate in. This chapter covers the three constructs Nex provides for conditional execution: the `if` statement for general branching, the `when` expression for inline choices, and `case` for selecting among multiple specific values.
 
 
-## 4.1 The `if` Statement
+## The `if` Statement
 
 The simplest form of a conditional executes a block of code only when a condition is true:
 
@@ -61,7 +61,7 @@ This top-to-bottom evaluation means the order of conditions matters. If you reve
 
 
 
-## 4.2 Conditions Worth Writing
+## Conditions Worth Writing
 
 A condition is a `Boolean` expression, and the quality of the condition determines how easy the surrounding code is to read and verify. Some habits make conditions significantly clearer.
 
@@ -119,7 +119,7 @@ If the positive condition does not exist — if you genuinely only care about th
 
 
 
-## 4.3 Nested Conditions
+## Nested Conditions
 
 Conditions can be nested — an `if` can appear inside another `if`:
 
@@ -159,7 +159,7 @@ Both versions produce the same results, but the flat version is easier to read b
 
 
 
-## 4.4 The `when` Expression
+## The `when` Expression
 
 The `if` statement executes blocks of code. Sometimes what you want is not to execute code but to produce a value based on a condition. Nex provides the `when` expression for this purpose:
 
@@ -201,7 +201,7 @@ The `when` version is more concise and makes clear that the only purpose of the 
 
 
 
-## 4.5 `case` for Multiple Values
+## `case` for Multiple Values
 
 When a condition tests the same variable against several specific values, a chain of `elseif` comparisons is repetitive and harder to read than necessary:
 
@@ -263,7 +263,7 @@ We cover `do ... end` blocks fully in Chapter 12. For now, the rule is: use them
 
 
 
-## 4.6 Choosing the Right Construct
+## Choosing the Right Construct
 
 Three constructs for conditional logic might seem like two too many. Each has a clear home:
 
@@ -277,7 +277,7 @@ A practical test: if you find yourself writing `if x = a ... elseif x = b ...  e
 
 
 
-## 4.7 A Worked Example: Tax Brackets
+## A Worked Example: Tax Brackets
 
 Tax calculations are a classic example of tiered conditional logic. Suppose a simplified income tax has three brackets:
 

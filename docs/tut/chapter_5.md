@@ -1,9 +1,9 @@
-# Chapter 5: Repetition
+# Repetition
 
 A program that can only execute each statement once is severely limited. Most useful programs repeat operations: process every item in a collection, keep asking for input until a valid answer is given, compute a result by applying the same transformation many times. This chapter introduces the three constructs Nex provides for repetition, and the habits that make loops correct by construction.
 
 
-## 5.1 The `from ... until ... do ... end` Loop
+## The `from ... until ... do ... end` Loop
 
 The primary loop in Nex is the `from ... until ... do ... end` loop. It has four parts:
 
@@ -34,7 +34,7 @@ The structure is more verbose than loops in some other languages, and deliberate
 
 
 
-## 5.2 How a Loop Executes
+## How a Loop Executes
 
 It is worth tracing through a loop step by step to build a precise mental model of how execution proceeds.
 
@@ -69,7 +69,7 @@ After the loop, `total` holds `10` — the sum of 1 through 4. Tracing through a
 
 
 
-## 5.3 Common Loop Patterns
+## Common Loop Patterns
 
 Several patterns appear repeatedly across many programs. Recognising them makes writing new loops easier.
 
@@ -119,7 +119,7 @@ nex> print(product)
 120
 ```
 
-This computes 5 factorial: 1 × 2 × 3 × 4 × 5 = 120. The accumulator (`product`) starts at the identity value for multiplication (1) and is multiplied by each successive value of `i`.
+This computes 5 factorial: 1 * 2 * 3 * 4 * 5 = 120. The accumulator (`product`) starts at the identity value for multiplication (1) and is multiplied by each successive value of `i`.
 
 ### Searching
 
@@ -151,7 +151,7 @@ The termination condition `i > 10 or found` stops the loop either when the range
 
 
 
-## 5.4 The `repeat` Loop
+## The `repeat` Loop
 
 When you need to execute a block of code a fixed number of times without a counter variable, `repeat` is more concise than `from ... until ... do`:
 
@@ -182,7 +182,7 @@ nex> repeat 5 do
 
 
 
-## 5.5 The `across` Loop
+## The `across` Loop
 
 The `across` loop iterates over a collection — an array, a string, or a map — visiting each element in turn:
 
@@ -216,7 +216,7 @@ The `across` loop is the right choice whenever you need to process every element
 
 
 
-## 5.6 Off-by-One Errors
+## Off-by-One Errors
 
 The most common loop mistake is the off-by-one error: a loop that runs one iteration too many or one too few. It is common enough to have its own name, and it is worth examining carefully.
 
@@ -239,7 +239,7 @@ A useful check: trace through the loop mentally for the first and last expected 
 
 
 
-## 5.7 Infinite Loops
+## Infinite Loops
 
 A loop whose termination condition never becomes `true` runs forever. This is almost always a mistake:
 
@@ -263,7 +263,7 @@ Later in the book, when we introduce loop contracts, we will see a formal way to
 
 
 
-## 5.8 Nested Loops
+## Nested Loops
 
 Loops can be nested — a loop inside a loop:
 
@@ -296,11 +296,11 @@ nex> from
 
 The outer loop runs three times. On each run of the outer loop, the inner loop runs three times in full. Total iterations: nine. The inner loop's variables (`j`) are independent of the outer loop's variables (`i`) — each has its own counter, its own condition, its own body.
 
-Nested loops are useful for working with two-dimensional structures: grids, tables, pairs of elements. The number of iterations multiplies: a loop of `m` iterations nested inside a loop of `n` iterations produces `m × n` total iterations. For large values of `m` and `n`, this grows quickly. We will return to this observation in Part III when we discuss algorithm cost.
+Nested loops are useful for working with two-dimensional structures: grids, tables, pairs of elements. The number of iterations multiplies: a loop of `m` iterations nested inside a loop of `n` iterations produces `m * n` total iterations. For large values of `m` and `n`, this grows quickly. We will return to this observation in Part III when we discuss algorithm cost.
 
 
 
-## 5.9 A Worked Example: Number Guessing Game
+## A Worked Example: Number Guessing Game
 
 The following program combines a loop with conditional logic to make a simple interactive game. It generates a random target number and asks the player to guess it, giving feedback until the guess is correct.
 
@@ -342,7 +342,7 @@ This is a pattern you will see often: a loop that continues until some goal is a
 - `across collection as variable do     end` iterates over every element of an array, string, or map
 - Off-by-one errors arise from incorrect boundary conditions; verify by tracing the first and last expected iterations
 - A loop must make progress toward its termination condition on every iteration; a body that does not change the relevant variables will loop forever
-- Nested loops execute their bodies `m × n` times for an outer loop of `m` iterations and an inner loop of `n` iterations
+- Nested loops execute their bodies `m * n` times for an outer loop of `m` iterations and an inner loop of `n` iterations
 
 
 

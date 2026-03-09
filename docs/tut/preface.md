@@ -1,4 +1,4 @@
-# Preface
+# Preface {-}
 
 This book teaches programming through a language designed to make good habits unavoidable.
 

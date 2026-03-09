@@ -333,7 +333,7 @@ class Box [T]
     make(v: T) do value := v end
 end
 
-let b: Box [Integer] := create Box [Integer].make(42)
+let b: Box [Integer] := create Box[Integer].make(42)
 b.value -- 42
 ```
 

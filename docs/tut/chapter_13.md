@@ -1,9 +1,9 @@
-# Chapter 13: Designing Classes Well
+# Designing Classes Well
 
 Chapter 12 showed the mechanics of defining a class. This chapter is about judgment — the harder question of what a class should contain and why. Knowing how to write a class is a matter of an hour. Knowing how to design one well is a matter of years. This chapter cannot compress those years, but it can name the principles that guide good decisions and show what those principles look like in practice.
 
 
-## 13.1 One Class, One Responsibility
+## One Class, One Responsibility
 
 The most reliable principle in class design is also the simplest to state: a class should have one responsibility. It should model one concept, manage one piece of state, and give callers one reason to use it.
 
@@ -76,7 +76,7 @@ nex> class Student
 
 
 
-## 13.2 What Belongs Inside a Class
+## What Belongs Inside a Class
 
 A method belongs inside a class when it needs access to the class's private fields to do its work, or when it represents an operation intrinsic to the concept the class models.
 
@@ -92,7 +92,7 @@ The last point deserves emphasis. A `Student` class that sends email must depend
 
 
 
-## 13.3 Data and Behaviour Together
+## Data and Behaviour Together
 
 The insight that motivates object-oriented design is that data and the behaviour that naturally acts on it should live together. A `BankAccount` does not just hold a balance — it holds the balance and the rules for modifying it. Those rules are encoded in the methods. The data and its constraints are inseparable.
 
@@ -132,7 +132,7 @@ Class(es) registered: BankAccount
 
 
 
-## 13.4 Classes as Models
+## Classes as Models
 
 A well-designed class is a model of something: a real-world entity, a domain concept, or an abstraction. The fields are the properties that matter. The methods are the operations the model supports. Everything else is left out.
 
@@ -171,7 +171,7 @@ true
 
 
 
-## 13.5 The Difference Between Data Classes and Behaviour Classes
+## The Difference Between Data Classes and Behaviour Classes
 
 Not all classes have the same character. Some are primarily containers of data — their fields are the point, and methods exist to access or compute from those fields. Others are primarily engines of behaviour — their fields are implementation details that support the operations they expose.
 
@@ -183,7 +183,7 @@ The diagnostic question: *what does a caller need to know to use this class corr
 
 
 
-## 13.6 Naming Classes
+## Naming Classes
 
 A class name should be a noun or noun phrase that describes the concept being modelled. `BankAccount`, `Student`, `Card`, `Stack` — each names a thing.
 
@@ -195,7 +195,7 @@ A good test: read the class name aloud and ask whether a domain expert — someo
 
 
 
-## 13.7 A Worked Example: Redesigning a Class
+## A Worked Example: Redesigning a Class
 
 Consider an initial draft of a `Product` class for an online store:
 

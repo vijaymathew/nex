@@ -1,9 +1,9 @@
-# Chapter 3: Expressions
+# Expressions
 
 Every computation in a program is built from expressions. Understanding what an expression is — and how expressions are evaluated — is the foundation for everything that follows. This chapter examines expressions carefully: how they are constructed, how Nex decides the order in which to evaluate them, and how they differ from the statements that surround them.
 
 
-## 3.1 What an Expression Is
+## What an Expression Is
 
 An expression is a piece of code that produces a value. `42` is an expression — it produces the integer forty-two. `3 + 4` is an expression — it produces seven. `x > 5` is an expression — it produces either `true` or `false`. `"hello".length` is an expression — it produces an integer.
 
@@ -17,7 +17,7 @@ In practice, the boundary between expressions and statements in Nex is clean. If
 
 
 
-## 3.2 Arithmetic Expressions
+## Arithmetic Expressions
 
 The arithmetic operators in Nex are:
 
@@ -51,7 +51,7 @@ The unary minus — a `-` applied to a single value rather than between two valu
 
 
 
-## 3.3 Operator Precedence
+## Operator Precedence
 
 When an expression contains more than one operator, Nex must decide which to evaluate first. The rules that govern this are called *operator precedence*. They follow the conventions of ordinary mathematics:
 
@@ -87,7 +87,7 @@ The third example shows that `^` is also left-associative in Nex: `2 ^ 3 ^ 2` is
 
 
 
-## 3.4 Comparison Expressions
+## Comparison Expressions
 
 Comparison operators produce `Boolean` values:
 
@@ -148,7 +148,7 @@ Lexicographic order compares strings character by character, using the character
 
 
 
-## 3.5 Boolean Expressions
+## Boolean Expressions
 
 Boolean expressions combine `true` and `false` values using `and`, `or`, and `not`.
 
@@ -211,7 +211,7 @@ This evaluates as `true or (false and false)`, which is `true or false`, which i
 
 
 
-## 3.6 String Concatenation
+## String Concatenation
 
 Strings are joined with `+`:
 
@@ -242,7 +242,7 @@ This pattern — arithmetic value, converted to string, incorporated into a mess
 
 
 
-## 3.7 Expressions Involving Method Calls
+## Expressions Involving Method Calls
 
 Method calls are expressions. The call `n.abs` produces a value — the absolute value of `n` — just as `n * 2` does. This means method calls can appear anywhere an expression is expected:
 
@@ -270,7 +270,7 @@ Chains like this are readable when each step has a clear, single purpose. When a
 
 
 
-## 3.8 Building Complex Expressions
+## Building Complex Expressions
 
 Real programs rarely deal with simple two-operand expressions. More often, expressions are built from several parts. Consider computing the body mass index (BMI) — a person's weight in kilograms divided by the square of their height in metres:
 
@@ -294,7 +294,7 @@ The expression `bmi.round.to_string` chains two method calls. `round` converts t
 
 
 
-## 3.9 Expressions and Statements Together
+## Expressions and Statements Together
 
 The distinction between expressions and statements governs how Nex programs are structured. An assignment statement has an expression on the right:
 
@@ -345,7 +345,7 @@ A common source of confusion for beginners is treating a statement as though it 
 
 **2.** Write a single boolean expression that is `true` when a variable `n` is both greater than zero and even (divisible by two with no remainder). Test it with several values of `n`.
 
-**3.** The quadratic formula gives the roots of `ax² + bx + c = 0` as `(-b + sqrt) / (2 * a)` and `(-b - sqrt) / (2 * a)`, where `sqrt` is the square root of `b² - 4 * a * c`. Nex does not have a built-in square root, but `n ^ 0.5` computes it for positive `n`. For `a = 1.0`, `b = -5.0`, `c = 6.0`, compute both roots and print them. (The answers should be `3.0` and `2.0`.)
+**3.** The quadratic formula gives the roots of `a*x*x + b*x + c = 0` as `(-b + sqrt) / (2 * a)` and `(-b - sqrt) / (2 * a)`, where `sqrt` is the square root of `b*b - 4 * a * c`. Nex does not have a built-in square root, but `n ^ 0.5` computes it for positive `n`. For `a = 1.0`, `b = -5.0`, `c = 6.0`, compute both roots and print them. (The answers should be `3.0` and `2.0`.)
 
 **4.** Write an expression that takes a string variable `s` and produces a new string that is `s` trimmed, with its first character uppercased and the rest lowercased. Hint: use `substring` to separate the first character from the rest, and `to_upper`/`to_lower` on each part, then concatenate. Test it on `"  hELLO wORLD  "`.
 

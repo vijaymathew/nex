@@ -1,9 +1,9 @@
-# Chapter 2: Values, Types, and Variables
+# Values, Types, and Variables
 
 Chapter 1 introduced the REPL and the first things you can do in it: print output, perform arithmetic, store results in variables. This chapter looks more carefully at the values those variables hold — what kinds of values exist in Nex, what operations each kind supports, and what happens when you need to convert one kind into another.
 
 
-## 2.1 Types
+## Types
 
 Every value in Nex has a type. A type is a classification that determines two things: what the value represents, and what operations are valid on it. The number `42` and the string `"42"` look similar in print, but they are different kinds of thing. You can multiply `42` by two. You cannot multiply `"42"` by two. The type is what makes this distinction precise.
 
@@ -18,7 +18,7 @@ These four types cover the vast majority of what you will need in the early chap
 
 
 
-## 2.2 Integers
+## Integers
 
 An integer is a whole number. Integer arithmetic in Nex works as you would expect for addition, subtraction, and multiplication:
 
@@ -81,7 +81,7 @@ nex> print(6.pick)
 
 
 
-## 2.3 Real Numbers
+## Real Numbers
 
 A `Real` value is a number with a fractional part. Write real literals with a decimal point:
 
@@ -127,7 +127,7 @@ nex> print(1.2.max(4.7))
 
 
 
-## 2.4 Booleans
+## Booleans
 
 A `Boolean` value is either `true` or `false`. Booleans arise from comparisons:
 
@@ -182,7 +182,7 @@ Both forms are valid. The operator form — `and`, `or`, `not` used directly bet
 
 
 
-## 2.5 Strings
+## Strings
 
 A `String` is a sequence of characters. String literals are enclosed in double quotes:
 
@@ -255,7 +255,7 @@ nex> print(csv.split(","))
 
 
 
-## 2.6 Operators and Methods: Two Faces of the Same Thing
+## Operators and Methods: Two Faces of the Same Thing
 
 You have now seen two ways to express the same operations. Addition can be written as `7 + 5` or as `7.plus(5)`. Comparison can be written as `x > 5` or as `x.greater_than(5)`. Both forms produce identical results.
 
@@ -277,7 +277,7 @@ The operator form is shorter and more familiar. The method form is more explicit
 
 
 
-## 2.7 Type Annotations
+## Type Annotations
 
 When you write `let x := 10`, Nex infers that `x` is an `Integer` from the value on the right-hand side. Type inference is convenient, but writing the type explicitly is better practice:
 
@@ -301,7 +301,7 @@ In the REPL, annotations are optional. In functions and class definitions — wh
 
 
 
-## 2.8 Type Conversion
+## Type Conversion
 
 Nex does not convert between types automatically. If you have an integer and need a string, you must convert it explicitly. Each scalar type provides conversion methods for this purpose.
 
@@ -351,7 +351,7 @@ This is not a design flaw — it is the language being honest. The string `"hell
 
 
 
-## 2.9 Nil and Detachable Types
+## Nil and Detachable Types
 
 Every variable introduced so far holds a definite value. Nex enforces this by default: a variable of type `Integer` must hold an integer; it cannot hold "nothing." This guarantee is one of the most practical features of a typed language. It means that whenever you use a variable, you know it has a value.
 
@@ -379,7 +379,7 @@ For most variables in early chapters, you will not need detachable types. They b
 
 
 
-## 2.10 Reading Input: A First Interactive Program
+## Reading Input: A First Interactive Program
 
 All the programs so far have been self-contained — they produce output but never ask the user for anything. Reading input requires a `Console` object:
 

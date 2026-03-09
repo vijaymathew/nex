@@ -1,9 +1,9 @@
-# Chapter 7: Thinking with Functions
+# Thinking with Functions
 
 Chapter 6 showed how to define and call functions. This chapter is about how to think with them. The difference is significant. Knowing the syntax for a function definition is a matter of minutes. Developing the habit of reasoning about functions — what they require, what they guarantee, how they interact — is a matter of months. This chapter plants that habit early, because it shapes every programming decision that follows.
 
 
-## 7.1 A Function as a Contract
+## A Function as a Contract
 
 Every function makes two implicit commitments. It assumes certain things about its inputs — conditions that must be true for the function to behave as intended. And it promises certain things about its output — conditions that will be true when the function returns, given that the assumptions were met.
 
@@ -42,7 +42,7 @@ These two questions have names in software engineering. The conditions that must
 
 
 
-## 7.2 Pure Functions
+## Pure Functions
 
 A *pure function* is a function whose output depends only on its inputs and which has no observable effect on the world beyond returning a value. Given the same inputs, a pure function always returns the same output. It does not modify any variable outside itself, does not print anything, does not read from the console, does not write to a file.
 
@@ -67,7 +67,7 @@ No setup, no cleanup, no external dependencies. Each call is self-contained.
 
 
 
-## 7.3 Functions with Effects
+## Functions with Effects
 
 Not all functions are pure. A function that prints output, reads from the console, or modifies a variable outside itself has an *effect* — an observable change to the world beyond its return value. The `greet` function from Chapter 6 is an effectful function: it prints to the output, which is a change to the outside world.
 
@@ -89,11 +89,11 @@ nex> -- effectful throughout: harder to test
 nex> function report_temperature(c: Real)
      do
        if c < 0.0 then
-         print("Freezing: " + c.to_string + "°C")
+         print("Freezing: " + c.to_string + " deg C")
        elseif c < 15.0 then
-         print("Cold: " + c.to_string + "°C")
+         print("Cold: " + c.to_string + " deg C")
        else
-         print("Mild or warm: " + c.to_string + "°C")
+         print("Mild or warm: " + c.to_string + " deg C")
        end
      end
 ```
@@ -113,7 +113,7 @@ nex> function temperature_label(c: Real): String
 
 nex> function report_temperature(c: Real)
      do
-       print(temperature_label(c) + ": " + c.to_string + "°C")
+       print(temperature_label(c) + ": " + c.to_string + " deg C")
      end
 ```
 
@@ -134,7 +134,7 @@ The printing is left to the thin effectful wrapper, which is so simple it barely
 
 
 
-## 7.4 Writing Functions That Are Easy to Test
+## Writing Functions That Are Easy to Test
 
 A function is easy to test when its behaviour is fully determined by its inputs and its behaviour is stated precisely enough to verify. Several habits support this:
 
@@ -188,7 +188,7 @@ Each of these is a small, self-contained experiment. Together they provide evide
 
 
 
-## 7.5 Functions as Building Blocks
+## Functions as Building Blocks
 
 A program built from well-designed functions has a particular quality: the code that assembles the pieces is readable at a high level, without requiring the reader to follow the details of every piece. Consider a program that reads a temperature, converts it, classifies it, and reports it:
 
@@ -215,7 +215,7 @@ nex> function temperature_report(c: Real): String
      do
        let f := celsius_to_fahrenheit(c)
        let label := temperature_label(c)
-       result := label + ": " + c.to_string + "°C / " + f.to_string + "°F"
+       result := label + ": " + c.to_string + " deg C / " + f.to_string + " deg F"
      end
 ```
 
@@ -223,7 +223,7 @@ Now the top-level program is one line:
 
 ```
 nex> print(temperature_report(22.0))
-Mild: 22.0°C / 71.6°F
+Mild: 22.0 deg C / 71.6 deg F
 ```
 
 The reader of `temperature_report` does not need to know how Celsius-to-Fahrenheit conversion works or how temperature labels are determined. The function names carry that meaning. The body of `temperature_report` reads as a sequence of named steps rather than a block of arithmetic.
@@ -232,7 +232,7 @@ This is the promise of good function design: each function is a vocabulary word,
 
 
 
-## 7.6 Recognising When a Function Is Doing Too Much
+## Recognising When a Function Is Doing Too Much
 
 A function that is hard to name is often doing too much. If the best name you can find is something like `process_and_format_and_print`, the function has at least three responsibilities, and each deserves its own function.
 

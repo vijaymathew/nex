@@ -1,9 +1,9 @@
-# Chapter 9: Arrays
+# Arrays
 
 Every program so far has worked with individual values — one integer, one string, one boolean at a time. Most real problems involve collections: a list of scores, a sequence of names, a series of measurements. This chapter introduces the array, Nex's primary ordered collection, and the operations for creating, accessing, and processing arrays.
 
 
-## 9.1 What an Array Is
+## What an Array Is
 
 An array is an ordered sequence of values, all of the same type. The order matters — position zero comes before position one, position one before position two — and each position holds exactly one value. The number of elements in an array is its *length*.
 
@@ -31,7 +31,7 @@ nex> print(empty.length)
 
 
 
-## 9.2 Accessing Elements
+## Accessing Elements
 
 Elements are accessed by their index, which counts from zero:
 
@@ -70,7 +70,7 @@ nex> print(scores.get(0))
 
 
 
-## 9.3 Modifying Elements
+## Modifying Elements
 
 Individual elements can be updated by assigning to an indexed position:
 
@@ -84,7 +84,7 @@ The array itself is mutable — its elements can change — but its length canno
 
 
 
-## 9.4 Iterating with `across`
+## Iterating with `across`
 
 The most natural way to process every element of an array is `across`:
 
@@ -126,7 +126,7 @@ Note the termination condition `i >= scores.length` and the starting index `0`. 
 
 
 
-## 9.5 Growing and Shrinking Arrays
+## Growing and Shrinking Arrays
 
 Arrays can be extended with `add`:
 
@@ -174,7 +174,7 @@ nex> print(names)
 
 
 
-## 9.6 Common Array Operations
+## Common Array Operations
 
 **Checking membership:**
 
@@ -231,7 +231,7 @@ nex> print(scores.sort)
 
 
 
-## 9.7 Building Arrays with Loops
+## Building Arrays with Loops
 
 Often an array is built up element by element rather than written as a literal. Start with an empty array and call `add` inside a loop:
 
@@ -256,7 +256,7 @@ This pattern — empty array, loop, `add` — is the standard way to construct a
 
 
 
-## 9.8 Arrays and Functions
+## Arrays and Functions
 
 Arrays are values like any other and can be passed to and returned from functions:
 
@@ -314,7 +314,7 @@ nex> print(filter_above([85, 92, 78, 95, 60], 80))
 
 
 
-## 9.9 Thinking About Array Preconditions
+## Thinking About Array Preconditions
 
 Several array operations have preconditions worth stating explicitly:
 
@@ -330,7 +330,7 @@ This question — *who is responsible for ensuring the precondition?* — is one
 
 
 
-## 9.10 A Worked Example: Statistics
+## A Worked Example: Statistics
 
 Here is a small collection of functions that compute basic statistics on an array of real numbers:
 

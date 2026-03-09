@@ -1,11 +1,11 @@
-# Chapter 6: Functions
+# Functions
 
 Every program written so far has been a flat sequence of statements entered one at a time. This works for small experiments at the REPL, but it does not scale. Real programs have parts that need to be reused in multiple places, parts that are complex enough to deserve a name, and parts that can be developed and tested independently. Functions are the mechanism that provides all three of these things.
 
 A function is a named, reusable piece of code that takes inputs, performs a computation, and — optionally — returns a result. Defining a function does not execute it. It gives the computation a name that can be invoked later, as many times as needed, with different inputs each time.
 
 
-## 6.1 Defining a Function
+## Defining a Function
 
 Functions are defined with the `function` keyword:
 
@@ -32,7 +32,7 @@ The same computation — constructing and printing a greeting — runs twice, wi
 
 
 
-## 6.2 Parameters and Arguments
+## Parameters and Arguments
 
 A *parameter* is the name given to an input in the function definition. An *argument* is the value passed to the function when it is called. In `greet("Ada")`, `name` is the parameter and `"Ada"` is the argument.
 
@@ -63,7 +63,7 @@ Parameters are local to the function body — they exist only for the duration o
 
 
 
-## 6.3 Returning a Value
+## Returning a Value
 
 A function that only produces side effects — like printing — is useful, but a function that computes and *returns* a value is more versatile. The return value is assigned to the special variable `result`:
 
@@ -91,7 +91,7 @@ If a function body does not assign to `result`, the function returns no value �
 
 
 
-## 6.4 The `result` Variable
+## The `result` Variable
 
 The `result` variable is how Nex functions return values, and it behaves slightly differently from ordinary variables. It is pre-declared with the function's return type — you do not use `let` to introduce it. You simply assign to it:
 
@@ -143,7 +143,7 @@ The default `"other"` is never actually returned here because every integer is e
 
 
 
-## 6.5 Multiple Parameters
+## Multiple Parameters
 
 Functions can take any number of parameters:
 
@@ -183,7 +183,7 @@ nex> print(clamp(7, 0, 10))
 
 
 
-## 6.6 Functions Calling Functions
+## Functions Calling Functions
 
 A function body can call other functions. This is how larger computations are assembled from smaller ones:
 
@@ -206,7 +206,7 @@ nex> print(sum_of_squares(3, 4))
 
 
 
-## 6.7 Anonymous Functions
+## Anonymous Functions
 
 A function defined with `function` has a name and exists for the duration of the session. Sometimes a function is needed only in one place, and giving it a name would be more ceremony than it is worth. For these cases, Nex provides anonymous functions using `fn`:
 
@@ -239,7 +239,7 @@ This style — passing functions as arguments — becomes more powerful as progr
 
 
 
-## 6.8 When to Write a Function
+## When to Write a Function
 
 A function is worth writing whenever a computation has a name, when it is used in more than one place, or when naming it would make the code that calls it clearer. These three criteria are worth examining individually.
 
@@ -271,7 +271,7 @@ The threshold for writing a function should be low. Functions are not reserved f
 
 
 
-## 6.9 A Worked Example: Temperature Converter
+## A Worked Example: Temperature Converter
 
 Here is a small library of related functions, built up one at a time:
 
@@ -340,7 +340,7 @@ Each function does one thing. The code that uses them reads like a series of cle
 
 ## Exercises
 
-**1.** Define a function `fahrenheit_to_kelvin(f: Real): Real` that converts a Fahrenheit temperature to Kelvin. The formula is: subtract 32, multiply by 5/9, then add 273.15. Test it by verifying that 32°F converts to 273.15 K and 212°F converts to 373.15 K.
+**1.** Define a function `fahrenheit_to_kelvin(f: Real): Real` that converts a Fahrenheit temperature to Kelvin. The formula is: subtract 32, multiply by 5/9, then add 273.15. Test it by verifying that 32 deg F converts to 273.15 K and 212 deg F converts to 373.15 K.
 
 **2.** Define a function `is_leap_year(year: Integer): Boolean` that returns `true` if `year` is a leap year. A year is a leap year if it is divisible by 4, except that years divisible by 100 are not leap years, unless they are also divisible by 400. Test with 2000 (true), 1900 (false), 2024 (true), and 2023 (false).
 

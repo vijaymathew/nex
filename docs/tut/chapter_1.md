@@ -1,9 +1,9 @@
-# Chapter 1: Your First Programs
+# Your First Programs
 
 The best way to learn a programming language is to use it. Not to read about it, not to watch someone else use it, but to type things and see what happens. This chapter introduces the Nex REPL — the interactive environment where you will spend the first part of this book — and the first programs you will write in it.
 
 
-## 1.1 The REPL
+## The REPL
 
 REPL stands for Read-Eval-Print Loop. The name describes exactly what it does: it reads what you type, evaluates it, prints the result, and waits for you to type something else. This loop continues until you tell it to stop.
 
@@ -25,7 +25,7 @@ Think of the REPL as a laboratory. A laboratory is not a place where you go to d
 
 
 
-## 1.2 Printing Output
+## Printing Output
 
 The simplest thing a Nex program can do is print something. Try this:
 
@@ -60,7 +60,7 @@ The difference between `print(42)` and `print("42")` matters. The first prints t
 
 
 
-## 1.3 Comments
+## Comments
 
 A comment is a line — or part of a line — that the interpreter ignores. Comments are for human readers, not for the computer.
 
@@ -83,7 +83,7 @@ Comments become important as programs get longer. A comment that explains *why* 
 
 
 
-## 1.4 Arithmetic
+## Arithmetic
 
 The REPL can evaluate arithmetic expressions directly. Try these:
 
@@ -136,7 +136,7 @@ Without parentheses, multiplication and division are evaluated before addition a
 
 
 
-## 1.5 Variables
+## Variables
 
 A variable is a name for a value. You introduce a variable in Nex with `let`:
 
@@ -179,7 +179,7 @@ Variable names in Nex are case-sensitive. `x`, `X`, and `total_cost` are three d
 
 
 
-## 1.6 Types
+## Types
 
 Every value in Nex has a type — a classification that determines what operations are valid on it. The basic types are:
 
@@ -217,7 +217,7 @@ The error is not a punishment. It is information: the operation you attempted is
 
 
 
-## 1.7 String Operations
+## String Operations
 
 Strings can be joined together with `+`:
 
@@ -240,7 +240,7 @@ This is one of the most common operations in any program: constructing a message
 
 
 
-## 1.8 REPL Commands
+## REPL Commands
 
 The REPL has a small set of built-in commands for managing your session. They start with a colon:
 
@@ -280,7 +280,7 @@ Goodbye!
 
 
 
-## 1.9 Reading What the REPL Tells You
+## Reading What the REPL Tells You
 
 When something goes wrong, the REPL reports it. Learning to read these reports is a skill, and it is worth developing early.
 
@@ -306,7 +306,7 @@ The discipline of reading error messages carefully rather than guessing at a fix
 
 
 
-## 1.10 A First Complete Program
+## A First Complete Program
 
 Everything in this chapter so far has been fragments — individual expressions and statements entered one at a time. Here is a small but complete program: it introduces several variables, performs some computation, and prints a result.
 
@@ -346,10 +346,10 @@ This chapter introduced the fundamental tools for working in Nex:
 
 **1.** At the REPL, compute the number of seconds in a week. Use variables to hold the number of seconds in a minute, minutes in an hour, hours in a day, and days in a week. Print the result with a descriptive message.
 
-**2.** The area of a circle with radius *r* is π × r². Define a variable `radius` with the value `5.0` and a variable `pi` with the value `3.14159`. Compute and print the area.
+**2.** The area of a circle with radius *r* is `pi * r * r`. Define a variable `radius` with the value `5.0` and a variable `pi` with the value `3.14159`. Compute and print the area.
 
 **3.** Define two string variables, `first_name` and `last_name`, and print a greeting that uses both: `"Hello, Ada Lovelace"` (or whatever names you choose). Then use `:vars` to confirm both variables are in the session.
 
 **4.** What happens if you type `let x := 10` and then `let x := 20`? Does the second `let` update the existing variable or introduce a new one? Try it and observe the result.
 
-**5.\*** The formula to convert a temperature from Fahrenheit to Celsius is *(F − 32) × 5 / 9*. Write the inverse of the conversion program from Section 1.10: start with a Fahrenheit temperature, convert it to Celsius, and print both values in a readable message. Verify your result by converting 32°F (the freezing point of water) and 98.6°F (body temperature).
+**5.\*** The formula to convert a temperature from Fahrenheit to Celsius is `(F - 32) * 5 / 9`. Write the inverse of the conversion program from Section 1.10: start with a Fahrenheit temperature, convert it to Celsius, and print both values in a readable message. Verify your result by converting 32 deg F (the freezing point of water) and 98.6 deg F (body temperature).
