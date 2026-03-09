@@ -76,12 +76,23 @@ feature
   destination: String
   status: String
 
+create
+  pending(task_id, origin,
+          destination, status: String) do
+    this.task_id := task_id
+	this.origin := origin
+	this.destination := destination
+	this.status := "PENDING"
+  end
+
+feature
   start() do
     if status = "PENDING" then
       status := "IN_TRANSIT"
     end
   ensure
-    started_or_unchanged: status = "IN_TRANSIT" or status = "PENDING"
+    started_or_unchanged: status = "IN_TRANSIT"
+	                      or status = "PENDING"
   end
 
   complete() do
@@ -89,11 +100,13 @@ feature
       status := "DELIVERED"
     end
   ensure
-    delivered_or_unchanged: status = "DELIVERED" or status = "IN_TRANSIT"
+    delivered_or_unchanged: status = "DELIVERED"
+	                        or status = "IN_TRANSIT"
   end
 invariant
   id_present: task_id /= ""
-  endpoints_present: origin /= "" and destination /= ""
+  endpoints_present: origin /= ""
+                     and destination /= ""
   valid_status:
     status = "PENDING" or
     status = "IN_TRANSIT" or

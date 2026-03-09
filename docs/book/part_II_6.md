@@ -77,6 +77,14 @@ feature
   from_loc: String
   to_loc: String
   open: Boolean
+
+create
+  make(from_loc, to_loc: String) do
+    this.from_loc := from_loc
+	this.to_loc := to_loc
+	open := true
+  end
+
 invariant
   endpoints_present: from_loc /= "" and to_loc /= ""
 end
@@ -86,6 +94,13 @@ feature
   current: String
   destination: String
 
+create
+  make(current, destination: string) do
+    this.current := current
+	this.destination := destination
+  end
+
+feature
   request_replan(has_open_route: Boolean): String
     require
       current_known: current /= ""
