@@ -99,7 +99,9 @@ feature
         result := "UNREACHABLE"
       end
     ensure
-      status_defined: result = "ARRIVED" or result = "ROUTE_FOUND" or result = "UNREACHABLE"
+      status_defined: result = "ARRIVED" 
+	                  or result = "ROUTE_FOUND" 
+					  or result = "UNREACHABLE"
     end
 invariant
   state_valid: current /= "" and destination /= ""

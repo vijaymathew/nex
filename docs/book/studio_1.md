@@ -1,4 +1,4 @@
-# Studio 1 — Our First Tiny System
+# Studio 1 — Our First Tiny System {-}
 
 ## Subtitle
 

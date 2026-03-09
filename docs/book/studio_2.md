@@ -1,4 +1,4 @@
-# Studio 2 — The Model Redesign
+# Studio 2 — The Model Redesign {-}
 
 ## Subtitle
 

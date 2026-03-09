@@ -1,4 +1,4 @@
-# Studio 3 — The Scaling Crisis
+# Studio 3 — The Scaling Crisis {-}
 
 ## Subtitle
 

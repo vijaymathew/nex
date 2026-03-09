@@ -1,4 +1,4 @@
-# Studio 4 — The Architecture Refactor
+# Studio 4 — The Architecture Refactor {-}
 
 ## Subtitle
 

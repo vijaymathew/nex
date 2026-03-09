@@ -1,4 +1,4 @@
-# Studio 6 — Evolution
+# Studio 6 — Evolution {-}
 
 ## Subtitle
 
