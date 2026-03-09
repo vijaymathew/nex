@@ -31,7 +31,7 @@ chapters=(
 
 title="Beyond Code -- Building Software Systems That Last"
 subtitle=""
-author="Nex Book Team"
+author="Vijay Mathew"
 
 # HTML
 pandoc "${chapters[@]}" \

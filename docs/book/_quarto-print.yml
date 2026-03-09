@@ -3,6 +3,7 @@ project:
 
 book:
   chapters:
+    - forward.md
     - prologue.md
     - part: "Part I — Seeing The Problem"
       chapters:

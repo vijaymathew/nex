@@ -1,13 +1,13 @@
 Book: Beyond Code
 PDF source: _book/print/beyond-code-print.pdf
-Pages: 362
+Pages: 394
 Trim size (W x H): 6 x 9 in
 Bleed: 0.125 in
 Safe margin: 0.25 in
 Caliper: 0.0025 in/page
-Spine width: 0.905 in
-Full cover size (W x H): 13.155 x 9.250 in
+Spine width: 0.985 in
+Full cover size (W x H): 13.235 x 9.250 in
 Back panel x-range: 0.125 .. 6.125
-Spine x-range: 6.125 .. 7.030
-Front panel x-range: 7.030 .. 13.030
+Spine x-range: 6.125 .. 7.110
+Front panel x-range: 7.110 .. 13.110
 Panel y-range: 0.125 .. 9.125

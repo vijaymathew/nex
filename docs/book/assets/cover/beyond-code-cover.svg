@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="13.155in" height="9.250in" viewBox="0 0 13.155 9.250">
+<svg xmlns="http://www.w3.org/2000/svg" width="13.235in" height="9.250in" viewBox="0 0 13.235 9.250">
   <defs>
     <style>
       .bg-front { fill: #0f2438; }
@@ -15,24 +15,24 @@
   </defs>
 
   <!-- Bleed area background -->
-  <rect x="0" y="0" width="13.155" height="9.250" fill="#0a1826"/>
+  <rect x="0" y="0" width="13.235" height="9.250" fill="#0a1826"/>
 
   <!-- Back / Spine / Front panels -->
   <rect class="bg-back" x="0.125" y="0.125" width="6" height="9"/>
-  <rect class="bg-spine" x="6.125" y="0.125" width="0.905" height="9"/>
-  <rect class="bg-front" x="7.030" y="0.125" width="6" height="9"/>
+  <rect class="bg-spine" x="6.125" y="0.125" width="0.985" height="9"/>
+  <rect class="bg-front" x="7.110" y="0.125" width="6" height="9"/>
 
   <!-- Front text -->
-  <text class="txt-title" x="7.580" y="2.35">Beyond Code</text>
-  <text class="txt-sub" x="7.580" y="2.78">Building Software Systems That Last</text>
-  <text class="txt-sub" x="7.580" y="3.08">From Modeling and Algorithms to Reliability,</text>
-  <text class="txt-sub" x="7.580" y="3.30">Evolution, and AI-Era Engineering</text>
-  <text class="txt-meta" x="7.580" y="4.10">Nex Book Team</text>
+  <text class="txt-title" x="7.660" y="2.35">Beyond Code</text>
+  <text class="txt-sub" x="7.660" y="2.78">Building Software Systems That Last</text>
+  <text class="txt-sub" x="7.660" y="3.08">From Modeling and Algorithms to Reliability,</text>
+  <text class="txt-sub" x="7.660" y="3.30">Evolution, and AI-Era Engineering</text>
+  <text class="txt-meta" x="7.660" y="4.10">Vijay Mathew</text>
 
   <!-- Spine text -->
-  <g transform="translate(6.577,8.3) rotate(-90)">
+  <g transform="translate(6.617,8.3) rotate(-90)">
     <text class="txt-spine" text-anchor="middle">BEYOND CODE</text>
-    <text class="txt-meta" y="0.2" text-anchor="middle">Nex Book Team</text>
+    <text class="txt-meta" y="0.2" text-anchor="middle">Vijay Mathew</text>
   </g>
 
   <!-- Back copy placeholder -->
@@ -43,17 +43,17 @@
   <text class="txt-meta" x="4.375" y="8.13">Barcode</text>
 
   <!-- Trim and safe guides -->
-  <rect class="guide" x="0.125" y="0.125" width="12.905" height="9.000"/>
-  <rect class="safe" x="0.375" y="0.375" width="12.405" height="8.500"/>
+  <rect class="guide" x="0.125" y="0.125" width="12.985" height="9.000"/>
+  <rect class="safe" x="0.375" y="0.375" width="12.485" height="8.500"/>
 
   <!-- Panel boundaries -->
   <line class="guide" x1="6.125" y1="0.125" x2="6.125" y2="9.125"/>
-  <line class="guide" x1="7.030" y1="0.125" x2="7.030" y2="9.125"/>
+  <line class="guide" x1="7.110" y1="0.125" x2="7.110" y2="9.125"/>
 
   <!-- Technical labels -->
   <text class="label" x="0.18" y="0.20">Trim: 6 x 9 in</text>
   <text class="label" x="0.18" y="0.33">Bleed: 0.125 in</text>
-  <text class="label" x="0.18" y="0.46">Pages: 362</text>
-  <text class="label" x="0.18" y="0.59">Spine: 0.905 in (caliper 0.0025)</text>
-  <text class="label" x="0.18" y="0.72">Full cover: 13.155 x 9.250 in</text>
+  <text class="label" x="0.18" y="0.46">Pages: 394</text>
+  <text class="label" x="0.18" y="0.59">Spine: 0.985 in (caliper 0.0025)</text>
+  <text class="label" x="0.18" y="0.72">Full cover: 13.235 x 9.250 in</text>
 </svg>

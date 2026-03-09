@@ -15,6 +15,13 @@
 
 ---
 
+# [Forward](forward.md)
+
+* Why this book exists now
+* How to use it as a working guide
+
+---
+
 # [Prologue — The Day the System Broke](prologue.md)
 
 * Three small teams. Three ambitious systems.

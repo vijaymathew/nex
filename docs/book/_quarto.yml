@@ -5,11 +5,12 @@ project:
 
 book:
   title: "Beyond Code -- Building Software Systems That Last"
-  author: "Nex Book Team"
+  author: "Vijay Mathew"
   date: today
   date-format: "MMMM D, YYYY"
   chapters:
     - index.md
+    - forward.md
     - prologue.md
     - part: "Part I — Seeing The Problem"
       chapters:

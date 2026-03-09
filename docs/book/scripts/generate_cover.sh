@@ -66,12 +66,12 @@ cat > "$OUT_SVG" <<SVG
   <text class="txt-sub" x="$(awk -v x="$front_x" 'BEGIN{printf "%.3f", x+0.55}')" y="2.78">Building Software Systems That Last</text>
   <text class="txt-sub" x="$(awk -v x="$front_x" 'BEGIN{printf "%.3f", x+0.55}')" y="3.08">From Modeling and Algorithms to Reliability,</text>
   <text class="txt-sub" x="$(awk -v x="$front_x" 'BEGIN{printf "%.3f", x+0.55}')" y="3.30">Evolution, and AI-Era Engineering</text>
-  <text class="txt-meta" x="$(awk -v x="$front_x" 'BEGIN{printf "%.3f", x+0.55}')" y="4.10">Nex Book Team</text>
+  <text class="txt-meta" x="$(awk -v x="$front_x" 'BEGIN{printf "%.3f", x+0.55}')" y="4.10">Vijay Mathew</text>
 
   <!-- Spine text -->
   <g transform="translate($(awk -v x="$spine_x" -v s="$spine" 'BEGIN{printf "%.3f", x+(s/2)}'),8.3) rotate(-90)">
     <text class="txt-spine" text-anchor="middle">BEYOND CODE</text>
-    <text class="txt-meta" y="0.2" text-anchor="middle">Nex Book Team</text>
+    <text class="txt-meta" y="0.2" text-anchor="middle">Vijay Mathew</text>
   </g>
 
   <!-- Back copy placeholder -->
