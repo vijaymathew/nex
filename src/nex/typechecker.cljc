@@ -953,6 +953,7 @@
       :assign (check-assignment env stmt)
       :let (check-let env stmt)
       :call (check-expression env stmt)
+      :convert (check-expression env stmt)
       :if (check-if env stmt)
       :loop (check-loop env stmt)
       :scoped-block (do

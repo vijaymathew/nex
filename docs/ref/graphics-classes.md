@@ -6,7 +6,6 @@
 
 ```nex
 create Window
-create Window(width, height)
 create Window.with_title(title)
 create Window.with_title(title, width, height)
 ```

@@ -1,0 +1,341 @@
+# Nex Syntax Reference
+
+This appendix is a compact reference to the main Nex constructs used throughout the tutorial. It is derived from `docs/md/SYNTAX.md` and the grammar in `grammar/nexlang.g4`.
+
+
+## Lexical Basics
+
+Comments:
+
+```nex
+-- single-line comment
+```
+
+Common literal forms:
+
+```nex
+42
+3.14
+"hello"
+true
+false
+nil
+#a
+```
+
+
+## Variables and Assignment
+
+Declaration:
+
+```nex
+let name: String := "Ada"
+let count := 0
+```
+
+Assignment:
+
+```nex
+count := count + 1
+this.balance := this.balance + 10.0
+```
+
+
+## Expressions and Operators
+
+Arithmetic:
+
+```nex
++  -  *  /  %  ^
+```
+
+Comparison:
+
+```nex
+=  /=  <  <=  >  >=
+```
+
+Boolean:
+
+```nex
+and  or  not
+```
+
+Parentheses may be used to control grouping:
+
+```nex
+(a + b) * c
+```
+
+
+## Control Flow
+
+`if`:
+
+```nex
+if condition then
+  print("yes")
+elseif other_condition then
+  print("maybe")
+else
+  print("no")
+end
+```
+
+`when`:
+
+```nex
+let label := when age >= 18 "adult" else "minor" end
+```
+
+`case`:
+
+```nex
+case direction of
+  "up"   then print("going up")
+  "down" then print("going down")
+  else        print("still")
+end
+```
+
+
+## Loops
+
+`from ... until ... do`:
+
+```nex
+from
+  let i := 0
+until
+  i = 10
+do
+  print(i)
+  i := i + 1
+end
+```
+
+With loop contracts:
+
+```nex
+from
+  let i := 0
+invariant
+  in_range: i >= 0
+variant
+  10 - i
+until
+  i = 10
+do
+  i := i + 1
+end
+```
+
+`repeat`:
+
+```nex
+repeat 3 do
+  print("hello")
+end
+```
+
+`across`:
+
+```nex
+across [1, 2, 3] as x do
+  print(x)
+end
+```
+
+
+## Functions
+
+Function declaration:
+
+```nex
+function max(a, b: Integer): Integer
+do
+  if a >= b then
+    result := a
+  else
+    result := b
+  end
+end
+```
+
+Anonymous function:
+
+```nex
+let f := fn (x: Integer): Integer do
+  result := x * 2
+end
+```
+
+
+## Collections
+
+Array:
+
+```nex
+let xs: Array[Integer] := [1, 2, 3]
+xs.add(4)
+print(xs.get(0))
+```
+
+Map:
+
+```nex
+let m: Map[String, Integer] := {"a": 1, "b": 2}
+m.put("c", 3)
+print(m.get("a"))
+```
+
+
+## Classes
+
+Class skeleton:
+
+```nex
+class Point
+  create
+    make(px, py: Real) do
+      x := px
+      y := py
+    end
+  feature
+    x: Real
+    y: Real
+    move(dx, dy: Real) do
+      x := x + dx
+      y := y + dy
+    end
+end
+```
+
+Object creation:
+
+```nex
+let p := create Point.make(3.0, 4.0)
+```
+
+
+## Inheritance and Generics
+
+Inheritance:
+
+```nex
+class Dog inherit Animal
+  feature
+    speak do
+      print(name + " says woof")
+    end
+end
+```
+
+Generic class:
+
+```nex
+class Stack [G]
+  create
+    make() do
+      items := []
+    end
+  feature
+    items: Array[G]
+end
+```
+
+Generic constraint:
+
+```nex
+class Sorted_List [G -> Comparable]
+  create
+    make() do
+      items := []
+    end
+  feature
+    items: Array[G]
+end
+```
+
+
+## Contracts
+
+Preconditions, postconditions, invariants:
+
+```nex
+class Wallet
+  feature
+    money: Real
+
+    spend(amount: Real)
+      require
+        enough: amount <= money
+      do
+        money := money - amount
+      ensure
+        decreased: money = old money - amount
+      end
+
+  invariant
+    non_negative: money >= 0.0
+end
+```
+
+
+## Error Handling
+
+Raise:
+
+```nex
+raise "not ready"
+```
+
+Scoped recovery:
+
+```nex
+do
+  print("trying")
+rescue
+  print(exception)
+  retry
+end
+```
+
+Routine-level rescue:
+
+```nex
+function load_default(): String
+do
+  raise "missing"
+rescue
+  result := "fallback"
+end
+```
+
+
+## Modularity and Interop
+
+Load Nex classes:
+
+```nex
+intern math/Calculator
+intern math/Calculator as Calc
+```
+
+Import host symbols:
+
+```nex
+import java.util.Scanner
+import Math from './math.js'
+```
+
+
+## Notes
+
+- `result` is the implicit return variable in functions and query methods.
+- `old` is available in postconditions to refer to entry-state values.
+- `this` refers to the current object.
+- `nil` is used for detachable or absent values.
+- Arrays use `length`; maps use `size`.
+
+For a fuller tutorial presentation, return to Chapters 1 through 28. For implementation-level details, see `grammar/nexlang.g4`.

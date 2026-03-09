@@ -281,7 +281,7 @@ end
 
 let a: A := create Animal.named("Ko")
 a.speak -- "Ko"
-let d: A := create Dog.named("Ki")
+let d: Animal := create Dog.named("Ki")
 d.speak -- "Ki says woof"
 ```
 
@@ -317,6 +317,7 @@ end
 
 let w: Wallet := create Wallet.with_balance(-10)
 Error: Class invariant violation: never_negative
+```
 
 ## 12. Debugger Quickstart
 
@@ -390,6 +391,7 @@ Script debugger commands from a file:
 
 For full command reference, see `docs/md/DEBUGGER.md`.
 
+```nex
 let w: Wallet := create Wallet.with_balance(10.2)
 w.spend(9)
 w.money -- 1.1999999999999993
