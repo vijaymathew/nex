@@ -45,11 +45,6 @@ Try Nex in the browser: https://schemer.in/nex.html
 class Savings_Account
 inherit
   Account
-    rename
-      deposit as account_deposit
-    redefine
-      deposit
-    end
 create
   make(opening_balance: Real, current_interest_rate: Real) do
     balance := opening_balance
@@ -388,8 +383,6 @@ clojure examples/demo_nex_to_javascript.clj
 ### Object-Oriented Features
 
 - Single and multiple inheritance with `inherit`
-- Method renaming with `rename` to resolve conflicts
-- Explicit method redefinition with `redefine`
 - Deferred classes and features for abstract design
 - Explicit object construction with `create`
 

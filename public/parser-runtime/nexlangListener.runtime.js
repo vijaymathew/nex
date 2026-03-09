@@ -96,42 +96,6 @@ class nexlangListener extends antlr4.tree.ParseTreeListener {
 	}
 
 
-	// Enter a parse tree produced by nexlangParser#inheritAdaptation.
-	enterInheritAdaptation(ctx) {
-	}
-
-	// Exit a parse tree produced by nexlangParser#inheritAdaptation.
-	exitInheritAdaptation(ctx) {
-	}
-
-
-	// Enter a parse tree produced by nexlangParser#renameClause.
-	enterRenameClause(ctx) {
-	}
-
-	// Exit a parse tree produced by nexlangParser#renameClause.
-	exitRenameClause(ctx) {
-	}
-
-
-	// Enter a parse tree produced by nexlangParser#renameItem.
-	enterRenameItem(ctx) {
-	}
-
-	// Exit a parse tree produced by nexlangParser#renameItem.
-	exitRenameItem(ctx) {
-	}
-
-
-	// Enter a parse tree produced by nexlangParser#redefineClause.
-	enterRedefineClause(ctx) {
-	}
-
-	// Exit a parse tree produced by nexlangParser#redefineClause.
-	exitRedefineClause(ctx) {
-	}
-
-
 	// Enter a parse tree produced by nexlangParser#featureSection.
 	enterFeatureSection(ctx) {
 	}

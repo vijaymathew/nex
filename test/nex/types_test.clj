@@ -199,6 +199,13 @@ end"
               ast (p/ast code)]
           (is (some? ast) (str "Failed to parse type: " t)))))))
 
+(deftest convert-and-to-not-identifiers-test
+  (testing "'convert' and 'to' are reserved keywords, not identifiers"
+    (is (thrown? Exception (p/ast "let convert := 1")))
+    (is (thrown? Exception (p/ast "let to := 1")))
+    (is (thrown? Exception (p/ast "class convert end")))
+    (is (thrown? Exception (p/ast "class to end")))))
+
 (deftest real-vs-decimal-distinction-test
   (testing "Real (double) vs Decimal (BigDecimal) are distinct Java types"
     (let [code "class Test

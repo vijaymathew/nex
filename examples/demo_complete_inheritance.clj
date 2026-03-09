@@ -2,7 +2,7 @@
 (require '[nex.interpreter :as interp])
 
 (println "╔════════════════════════════════════════════════════════════╗")
-(println "║    COMPLETE INHERITANCE EXAMPLE FROM SPECIFICATION         ║")
+(println "║         COMPLETE INHERITANCE EXAMPLE                       ║")
 (println "╚════════════════════════════════════════════════════════════╝")
 (println)
 
@@ -21,11 +21,6 @@ end
 class SavingsAccount
 inherit
   Account
-    rename
-      deposit as account_deposit
-    redefine
-      deposit
-    end
 feature
   deposit(amount: Integer) do
     print(\"Savings deposit:\", amount)
@@ -37,20 +32,19 @@ feature
   end
 end")
 
-(println "This example demonstrates the complete inheritance feature")
-(println "as specified in the Nex language design:")
+(println "This example demonstrates inheritance and overriding")
+(println "in the current Nex language design:")
 (println)
 (println "class SavingsAccount")
 (println "inherit")
 (println "    Account")
-(println "        rename")
-(println "            deposit as account_deposit")
-(println "        redefine")
-(println "            deposit")
-(println "        end")
 (println "feature")
-(println "    deposit (amount: Real) is")
-(println "        -- Redefined deposit with additional logic")
+(println "    deposit(amount: Integer) do")
+(println "        print(\"Savings deposit:\", amount)")
+(println "    end")
+(println)
+(println "    update_interest() do")
+(println "        print(\"Interest calculation for savings\")")
 (println "    end")
 (println "end")
 (println)
@@ -67,13 +61,7 @@ end")
     (when-let [parents (:parents class-def)]
       (println "    Inherits from:")
       (doseq [parent parents]
-        (println "      - Parent:" (:parent parent))
-        (when (:renames parent)
-          (println "        Renames:")
-          (doseq [r (:renames parent)]
-            (println "          *" (:old-name r) "→" (:new-name r))))
-        (when (:redefines parent)
-          (println "        Redefines:" (:redefines parent))))))
+        (println "      - Parent:" (:parent parent)))))
   (println))
 
 (println "═══════════════════════════════════════════════════════════")
@@ -95,7 +83,7 @@ end")
 
     (println)
     (println "1. Calling deposit(500):")
-    (println "   This calls the REDEFINED version in SavingsAccount")
+    (println "   This calls the overridden version in SavingsAccount")
     (interp/eval-node ctx-obj {:type :call
                                 :target "account"
                                 :method "deposit"
@@ -133,21 +121,15 @@ end")
 (println "✓ INHERITANCE CLAUSE")
 (println "  Declare parent classes with 'inherit' keyword")
 (println)
-(println "✓ RENAME CLAUSE")
-(println "  Rename inherited methods to avoid conflicts:")
-(println "    rename")
-(println "      old_name as new_name")
-(println)
-(println "✓ REDEFINE CLAUSE")
-(println "  Declare which methods will be overridden:")
-(println "    redefine")
-(println "      method_name")
+(println "✓ METHOD OVERRIDING")
+(println "  Define a method in the child class with the same name")
+(println "  to override inherited behavior.")
 (println)
 (println "✓ MULTIPLE INHERITANCE")
 (println "  Inherit from multiple parent classes:")
 (println "    inherit")
-(println "      Parent1 ... end,")
-(println "      Parent2 ... end")
+(println "      Parent1,")
+(println "      Parent2")
 (println)
 (println "✓ INHERITANCE CHAINS")
 (println "  Grandparent methods accessible through parent chain")
@@ -155,11 +137,11 @@ end")
 (println "✓ METHOD LOOKUP")
 (println "  • First search in current class")
 (println "  • Then search parent classes recursively")
-(println "  • Apply renames when looking in renamed parents")
+(println "  • Child methods override inherited methods")
 (println)
 
 (println "╔════════════════════════════════════════════════════════════╗")
 (println "║              SPECIFICATION COMPLETE                        ║")
 (println "╚════════════════════════════════════════════════════════════╝")
 (println)
-(println "The Nex language now has full multiple inheritance support!")
+(println "The Nex language now has streamlined inheritance support!")

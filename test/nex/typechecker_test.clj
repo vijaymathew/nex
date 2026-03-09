@@ -395,11 +395,6 @@ end"
     (let [code "class Savings_Account
                 inherit
                   Account
-                    rename
-                      deposit as account_deposit
-                    redefine
-                      deposit
-                    end
                 feature
                   balance: Integer
                 end"
@@ -425,11 +420,6 @@ end"
                 class Savings_Account
                 inherit
                   Account
-                    rename
-                      deposit as account_deposit
-                    redefine
-                      deposit
-                    end
                 feature
                   interest_rate: Real
 
@@ -661,7 +651,7 @@ end"
   (testing "String conversion methods resolve to concrete numeric types"
     (let [code "class Test
   feature
-    convert() do
+    parse_values() do
       let i: Integer := \"123\".to_integer()
       let i64: Integer64 := \"123\".to_integer64()
       let r: Real := \"3.14\".to_real()

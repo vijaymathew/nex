@@ -19,7 +19,7 @@ This directory contains example programs demonstrating various features of the N
 
 - **demo_complete_inheritance.clj** - Complete inheritance example
   - Single and multiple inheritance
-  - Rename and redefine clauses
+  - Inheritance and specialization
   - Method overriding
 
 ### Data Structures

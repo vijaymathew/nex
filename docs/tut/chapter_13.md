@@ -291,7 +291,7 @@ class LibraryBook
 end
 ```
 
-**2.** Define a `Money` class with fields `amount: Real` and `currency: String`. Add methods `add(other: Money): Money` and `convert(rate: Real, target_currency: String): Money`. What preconditions do these methods have? State them as comments.
+**2.** Define a `Money` class with fields `amount: Real` and `currency: String`. Add methods `add(other: Money): Money` and `exchange(rate: Real, target_currency: String): Money`. What preconditions do these methods have? State them as comments.
 
 **3.** A `Deck` class represents a standard 52-card deck. Using `Card` from Section 13.4, define `Deck` with a `cards: Array[Card]` field and methods `make` (constructor building all 52 cards), `size(): Integer`, `draw(): Card`, and `is_empty(): Boolean`. State the precondition for `draw` as a comment.
 

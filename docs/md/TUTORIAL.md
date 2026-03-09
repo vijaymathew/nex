@@ -285,7 +285,7 @@ let d: Animal := create Dog.named("Ki")
 d.speak -- "Ki says woof"
 ```
 
-Nex also supports adaptation in inheritance (`rename`, `redefine`) for precise reuse.
+Nex supports inheritance with `inherit` for code reuse and specialization.
 
 ## 11. Design by Contract
 

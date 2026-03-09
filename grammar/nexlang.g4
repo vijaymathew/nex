@@ -19,7 +19,7 @@ internStmt
     ;
 
 classDecl
-    : DEFERRED? CLASS (IDENTIFIER | CONVERT | TO) genericParams?
+    : DEFERRED? CLASS IDENTIFIER genericParams?
       noteClause?
       inheritClause?
       classBody
@@ -28,7 +28,7 @@ classDecl
     ;
 
 functionDecl
-    : FUNCTION (IDENTIFIER | CONVERT | TO) '(' paramList? ')' (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
+    : FUNCTION IDENTIFIER '(' paramList? ')' (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
     ;
 
 genericParams
@@ -48,24 +48,7 @@ inheritClause
     ;
 
 inheritEntry
-    : (IDENTIFIER | CONVERT | TO) inheritAdaptation?
-    ;
-
-inheritAdaptation
-    : RENAME renameClause (REDEFINE redefineClause)? END
-    | REDEFINE redefineClause END
-    ;
-
-renameClause
-    : renameItem+
-    ;
-
-renameItem
-    : (IDENTIFIER | CONVERT | TO) AS (IDENTIFIER | CONVERT | TO)
-    ;
-
-redefineClause
-    : (IDENTIFIER | CONVERT | TO) (',' (IDENTIFIER | CONVERT | TO))*
+    : IDENTIFIER
     ;
 
 featureSection
@@ -74,7 +57,7 @@ featureSection
 
 visibilityModifier
     : PRIVATE
-    | ARROW (IDENTIFIER | CONVERT | TO) (',' (IDENTIFIER | CONVERT | TO))*
+    | ARROW IDENTIFIER (',' IDENTIFIER)*
     ;
 
 constructorSection
@@ -87,15 +70,15 @@ featureMember
     ;
 
 fieldDecl
-    : (IDENTIFIER | CONVERT | TO) ':' type noteClause?
+    : IDENTIFIER ':' type noteClause?
     ;
 
 constructorDecl
-    : (IDENTIFIER | CONVERT | TO) ('(' paramList? ')')? requireClause? DO block ensureClause? rescueClause? END
+    : IDENTIFIER ('(' paramList? ')')? requireClause? DO block ensureClause? rescueClause? END
     ;
 
 methodDecl
-    : (IDENTIFIER | CONVERT | TO) ('(' paramList? ')')? (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
+    : IDENTIFIER ('(' paramList? ')')? (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
     ;
 
 paramList
@@ -103,7 +86,7 @@ paramList
     ;
 
 param
-    : (IDENTIFIER | CONVERT | TO) (',' (IDENTIFIER | CONVERT | TO))* (':' type)?
+    : IDENTIFIER (',' IDENTIFIER)* (':' type)?
     ;
 
 type
@@ -115,7 +98,7 @@ type
     | CHAR_TYPE
     | BOOLEAN_TYPE
     | STRING_TYPE
-    | (IDENTIFIER | CONVERT | TO) typeArgs?
+    | IDENTIFIER typeArgs?
     ;
 
 typeArgs
@@ -197,7 +180,7 @@ repeatStatement
     ;
 
 acrossStatement
-    : ACROSS expression AS (IDENTIFIER | CONVERT | TO) DO block END
+    : ACROSS expression AS IDENTIFIER DO block END
     ;
 
 withStatement
@@ -217,17 +200,17 @@ variantClause
     ;
 
 assignment
-    : (IDENTIFIER | CONVERT | TO) ASSIGN expression
-    | THIS '.' (IDENTIFIER | CONVERT | TO) ASSIGN expression
+    : IDENTIFIER ASSIGN expression
+    | THIS '.' IDENTIFIER ASSIGN expression
     ;
 
 localVarDecl
-    : LET (IDENTIFIER | CONVERT | TO) (':' type)? ASSIGN expression
+    : LET IDENTIFIER (':' type)? ASSIGN expression
     ;
 
 methodCall
     : primary callChain
-    | (IDENTIFIER | CONVERT | TO)
+    | IDENTIFIER
     ;
 
 callChain
@@ -289,7 +272,7 @@ postfixPart
     ;
 
 memberAccess
-    : '.' (IDENTIFIER | CONVERT | TO) ('(' argumentList? ')')?
+    : '.' IDENTIFIER ('(' argumentList? ')')?
     ;
 
 callSuffix
@@ -308,12 +291,12 @@ primary
     | whenExpression
     | oldExpression
     | THIS
-    | (IDENTIFIER | CONVERT | TO)
+    | IDENTIFIER
     | '(' expression ')'
     ;
 
 convertExpression
-    : CONVERT expression TO (IDENTIFIER | CONVERT | TO) ':' type
+    : CONVERT expression TO IDENTIFIER ':' type
     ;
 
 whenExpression
@@ -329,7 +312,7 @@ oldExpression
     ;
 
 createExpression
-    : CREATE (IDENTIFIER | CONVERT | TO) genericArgs? ('.' (IDENTIFIER | CONVERT | TO) ('(' argumentList? ')')?)?
+    : CREATE IDENTIFIER genericArgs? ('.' IDENTIFIER ('(' argumentList? ')')?)?
     ;
 
 genericArgs
@@ -337,7 +320,7 @@ genericArgs
     ;
 
 genericArg
-    : (IDENTIFIER | CONVERT | TO) | type
+    : IDENTIFIER | type
     ;
 
 literal
@@ -402,10 +385,7 @@ FUNCTION     : 'function';
 FN           : 'fn';
 FEATURE      : 'feature';
 PRIVATE      : 'private';
-CONSTRUCTORS : 'constructors';
 INHERIT      : 'inherit';
-RENAME       : 'rename';
-REDEFINE     : 'redefine';
 AS           : 'as';
 DO           : 'do';
 END          : 'end';

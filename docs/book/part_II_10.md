@@ -63,15 +63,17 @@ feature
   reassign(new_robot_id: String)
     require
       robot_present: new_robot_id /= ""
-      transition_allowed: status = "IN_TRANSIT" or status = "FAILED"
+      transition_allowed: status = "IN_TRANSIT" 
+	                      or status = "FAILED"
     do
       assigned_robot_id := new_robot_id
       status := "IN_TRANSIT"
     ensure
-      reassigned: assigned_robot_id = new_robot_id and status = "IN_TRANSIT"
+      reassigned: assigned_robot_id = new_robot_id 
+	              and status = "IN_TRANSIT"
     end
 
-  mark_delivered()
+  mark_delivered
     require
       must_be_in_transit: status = "IN_TRANSIT"
     do
@@ -79,9 +81,14 @@ feature
     ensure
       delivered: status = "DELIVERED"
     end
+	
+create
+  pending do status := "PENDING" end
+  in_transit do status := "IN_TRANSIT" end
 invariant
   valid_status:
-    status = "PENDING" or status = "IN_TRANSIT" or status = "DELIVERED" or status = "FAILED"
+    status = "PENDING" or status = "IN_TRANSIT" 
+	or status = "DELIVERED" or status = "FAILED"
 end
 ```
 

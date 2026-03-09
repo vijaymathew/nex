@@ -77,31 +77,38 @@ feature
   status: String
   priority: Integer
 
-  can_reassign(): Boolean do
-    result := status = "PENDING" or status = "FAILED"
-  ensure
-    result_boolean: result = true or result = false
+  can_reassign: Boolean do
+    result := status = "PENDING" 
+	          or status = "FAILED"
   end
 
   mark_in_transit(robot_id: String)
     require
       has_robot: robot_id /= ""
-      legal_transition: status = "PENDING" or status = "FAILED"
+      legal_transition: can_reassign
     do
       assigned_robot_id := robot_id
       status := "IN_TRANSIT"
     ensure
-      transit_set: status = "IN_TRANSIT" and assigned_robot_id = robot_id
+      transit_set: status = "IN_TRANSIT" 
+	               and assigned_robot_id = robot_id
     end
+
+create
+  pending(task_id: String) do
+    this.task_id := task_id
+	status := "PENDING"
+  end
 invariant
   task_id_present: task_id /= ""
   priority_non_negative: priority >= 0
   valid_status:
-    status = "PENDING" or status = "IN_TRANSIT" or status = "DELIVERED" or status = "FAILED"
+    status = "PENDING" or status = "IN_TRANSIT" 
+	or status = "DELIVERED" or status = "FAILED"
 end
 ```
 
-This sketch is worth reading against the six steps above. The status and priority fields answer Step 4. The three invariants answer Step 5. The `can_reassign` operation answers the first part of Step 3 — it codifies the rule that only `PENDING` and `FAILED` tasks are available for reassignment, making that rule checkable before `mark_in_transit` is called. The precondition on `mark_in_transit` answers the second part: a transition into `IN_TRANSIT` requires both a valid robot identifier and a legal starting status.
+This sketch is worth reading against the six steps above. The status and priority fields answer Step 4. The three invariants answer Step 5. The `can_reassign` query answers the first part of Step 3 — it codifies the rule that only `PENDING` and `FAILED` tasks are available for reassignment, making that rule checkable before `mark_in_transit` is called. The precondition on `mark_in_transit` answers the second part: a transition into `IN_TRANSIT` requires both a valid robot identifier and a legal starting status.
 
 What the sketch does not address is the storage backend, the query execution strategy, or the index layout. Those are implementation concerns. The model's job is to define what is true; the implementation's job is to enforce and compute it efficiently.
 

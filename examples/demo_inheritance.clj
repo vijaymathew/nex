@@ -2,13 +2,12 @@
 (require '[nex.interpreter :as interp])
 
 (println "╔════════════════════════════════════════════════════════════╗")
-(println "║         MULTIPLE INHERITANCE WITH RENAME/REDEFINE          ║")
+(println "║              INHERITANCE AND SPECIALIZATION                ║")
 (println "╚════════════════════════════════════════════════════════════╝")
 (println)
 (println "The Nex language now supports multiple inheritance with:")
 (println "  • inherit clause listing parent classes")
-(println "  • rename clause to rename inherited methods")
-(println "  • redefine clause to declare method overriding")
+(println "  • child classes overriding inherited methods")
 (println "  • Multiple parents separated by commas")
 (println)
 
@@ -31,11 +30,6 @@ end
 class SavingsAccount
 inherit
   Account
-    rename
-      deposit as account_deposit
-    redefine
-      deposit
-    end
 feature
   deposit(amount: Integer) do
     print(\"SavingsAccount: depositing\", amount)
@@ -59,13 +53,7 @@ end")
       savings-class (second (:classes ast))]
   (println "  SavingsAccount inherits from:")
   (doseq [parent (:parents savings-class)]
-    (println "    • Parent:" (:parent parent))
-    (when (:renames parent)
-      (println "      Rename clauses:")
-      (doseq [rename (:renames parent)]
-        (println "        -" (:old-name rename) "as" (:new-name rename))))
-    (when (:redefines parent)
-      (println "      Redefines:" (:redefines parent)))))
+    (println "    • Parent:" (:parent parent))))
 
 (println)
 (println "Runtime Behavior:")
@@ -80,7 +68,7 @@ end")
         _ (interp/env-define env "mysavings" savings-obj)
         ctx-with-obj (assoc ctx :current-env env)]
 
-    (println "  1. Calling deposit() (redefined method):")
+    (println "  1. Calling deposit() (overridden method):")
     (interp/eval-node ctx-with-obj {:type :call
                                      :target "mysavings"
                                      :method "deposit"
@@ -90,7 +78,7 @@ end")
 
     (reset! (:output ctx-with-obj) [])
     (println)
-    (println "  2. Calling withdraw() (inherited, not redefined):")
+    (println "  2. Calling withdraw() (inherited):")
     (interp/eval-node ctx-with-obj {:type :call
                                      :target "mysavings"
                                      :method "withdraw"
@@ -142,19 +130,11 @@ end
 
 class Car
 inherit
-  Engine
-  end,
+  Engine,
   GPS
-    rename
-      navigate as gps_navigate
-    end
 feature
   drive() do
     print(\"Car is driving\")
-  end
-
-  navigate(dest: String) do
-    print(\"Car navigation system to:\", dest)
   end
 end")
 
@@ -164,8 +144,8 @@ end")
 (println)
 (println "Car inherits from both Engine and GPS")
 (println "  - Gets start() and stop() from Engine")
-(println "  - Renames GPS.navigate as gps_navigate")
-(println "  - Defines its own navigate() method")
+(println "  - Gets navigate() from GPS")
+(println "  - Defines its own drive() method")
 (println)
 
 (println "Runtime Behavior:")
@@ -200,7 +180,7 @@ end")
 
     (reset! (:output ctx-with-obj) [])
     (println)
-    (println "  3. Calling navigate() (own method, shadows GPS.navigate):")
+    (println "  3. Calling navigate() (inherited from GPS):")
     (interp/eval-node ctx-with-obj {:type :call
                                      :target "mycar"
                                      :method "navigate"

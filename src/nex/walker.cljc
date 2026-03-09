@@ -298,48 +298,8 @@
           (mapv transform-node)))
 
    :inheritEntry
-   (fn [[_ parent-name & rest]]
-     (let [adaptation-node (first (filter #(and (sequential? %)
-                                                (= :inheritAdaptation (first %)))
-                                          rest))
-           {:keys [renames redefines]} (when adaptation-node
-                                         (transform-node adaptation-node))]
-       (cond-> {:parent (token-text parent-name)}
-         (seq renames) (assoc :renames renames)
-         (seq redefines) (assoc :redefines redefines))))
-
-   :inheritAdaptation
-   (fn [[_ first-node & rest]]
-     ;; Structure:
-     ;; 1) RENAME renameClause (REDEFINE redefineClause)? END
-     ;; 2) REDEFINE redefineClause END
-     (let [parts (cons first-node rest)
-           rename-clause (first (filter #(and (sequential? %)
-                                              (= :renameClause (first %)))
-                                        parts))
-           redefine-clause (first (filter #(and (sequential? %)
-                                                (= :redefineClause (first %)))
-                                          parts))]
-       {:renames (when rename-clause (transform-node rename-clause))
-        :redefines (when redefine-clause (transform-node redefine-clause))}))
-
-   :renameClause
-   (fn [[_ & items]]
-     (->> items
-          (filter #(and (sequential? %)
-                        (= :renameItem (first %))))
-          (mapv transform-node)))
-
-   :renameItem
-   (fn [[_ from-name _as to-name]]
-     {:from (token-text from-name)
-      :to (token-text to-name)})
-
-   :redefineClause
-   (fn [[_ & names]]
-     (->> names
-          (remove #(= "," %))
-          (mapv token-text)))
+   (fn [[_ parent-name]]
+     {:parent (token-text parent-name)})
 
    :visibilityModifier
    (fn [node]

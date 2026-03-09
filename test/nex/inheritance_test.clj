@@ -72,7 +72,4 @@ end"
           child-class (second (:classes ast))]
       (is (= "Child" (:name child-class)))
       (is (= 1 (count (:parents child-class))))
-      (is (= "Base" (:parent (first (:parents child-class)))))
-      ;; No :renames or :redefines keys
-      (is (nil? (:renames (first (:parents child-class)))))
-      (is (nil? (:redefines (first (:parents child-class))))))))
+      (is (= "Base" (:parent (first (:parents child-class))))))))
