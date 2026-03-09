@@ -75,9 +75,18 @@ feature
   link_type: String
 
   is_structurally_valid(): Boolean do
-    result := from_id /= "" and to_id /= "" and link_type /= ""
+    result := from_id /= "" and to_id /= ""
+	          and link_type /= ""
   ensure
-    result_is_boolean: result = true or result = false
+    result_is_boolean: result = true
+	                   or result = false
+  end
+
+create
+  make(from_id, to_id, link_type: String) do
+    this.from_id := from_id
+	this.to_id := to_id
+	this.link_type := link_type
   end
 invariant
   endpoints_present: from_id /= "" and to_id /= ""
