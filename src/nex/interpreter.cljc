@@ -78,7 +78,7 @@
      :cljs (nex-set-from (concat (remove #(.has b %) (es6-iterator-seq (.values a)))
                                  (remove #(.has a %) (es6-iterator-seq (.values b)))))))
 (defn nex-set-str [s]
-  (str "{"
+  (str "#{"
        (str/join ", " #?(:clj (seq s) :cljs (es6-iterator-seq (.values s))))
        "}"))
 
@@ -1634,8 +1634,10 @@
 (defmethod eval-node :call
   [ctx {:keys [target method args has-parens]}]
   (maybe-debug-pause ctx {:type :call :target target :method method :args args :has-parens has-parens})
-  (let [arg-values (mapv #(eval-node ctx %) args)]
-    (if target
+  (if (and (map? target) (= :create (:type target)) (nil? method))
+    (eval-node ctx (assoc target :args args))
+    (let [arg-values (mapv #(eval-node ctx %) args)]
+      (if target
       (let [target-name (when (string? target) target)
             class-target (when target-name (lookup-class-if-exists ctx target-name))
             ;; Check if target is a parent class name (parent-qualified call: A.method())
@@ -1840,8 +1842,7 @@
             (if-let [builtin (get builtins method)]
               (apply builtin ctx arg-values)
               (throw (ex-info (str "Undefined function: " method)
-                              {:function method}))))))))
-    )
+                              {:function method}))))))))))
 
 (defmethod eval-node :this
   [ctx _]

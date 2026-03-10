@@ -564,6 +564,8 @@
     (contains? *function-names* id-name) (str "NexGlobals." id-name)
     :else id-name))
 
+(declare generate-create-expr)
+
 (defn generate-call-expr
   "Generate Java code for method call.
    NOTE: For operator methods (plus, less_than, etc.) that exist on multiple types,
@@ -578,11 +580,9 @@
             this-target? (and (map? target) (= :this (:type target)))
             has-parens (:has-parens call-node)]
         (if (nil? method)
-          ;; Check if target is a create expression for builtin types that accept constructor args
-          (if (and (map? target) (= :create (:type target))
-                   (#{"Window" "Turtle"} (:class-name target)))
-            (let [java-class (case (:class-name target) "Window" "NexWindow" "Turtle" "NexTurtle")]
-              (str "new " java-class "(" args-code ")"))
+          ;; Constructor-call syntax is parsed as a call whose target is :create and method is nil.
+          (if (and (map? target) (= :create (:type target)))
+            (generate-create-expr (assoc target :args args))
             ;; Calling an expression that returns a function
             (str target-code ".call" num-args "(" args-code ")"))
           ;; Check if target is a parent class name (composition delegation)

@@ -498,8 +498,10 @@
 
    :Process
    {"getenv"       (fn [_ a] (str "process.env[" a "]"))
-    "setenv"       (fn [_ a] (str "process.env[" a "]"))
-    "command_line" (fn [_ _] "process.argv")}})
+   "setenv"       (fn [_ a] (str "process.env[" a "]"))
+   "command_line" (fn [_ _] "process.argv")}})
+
+(declare generate-create-expr)
 
 (defn generate-call-expr
   "Generate JavaScript code for method call.
@@ -515,8 +517,11 @@
             this-target? (and (map? target) (= :this (:type target)))
             has-parens (:has-parens call-node)]
         (if (nil? method)
-          ;; Calling an expression that returns a function
-          (str target-code ".call" num-args "(" args-code ")")
+          ;; Constructor-call syntax is parsed as a call whose target is :create and method is nil.
+          (if (and (map? target) (= :create (:type target)))
+            (generate-create-expr (assoc target :args args))
+            ;; Calling an expression that returns a function
+            (str target-code ".call" num-args "(" args-code ")"))
           (if (and (string? target)
                    (false? has-parens)
                    (get *class-registry* target)

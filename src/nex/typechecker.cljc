@@ -249,7 +249,11 @@
       false
 
       :else
-      (or (types-equal? env a1 a2)
+      (or (and (map? a1) (map? a2)
+               (= (:base-type a1) "Set")
+               (= (:base-type a2) "Set")
+               (= (:type-params a1) ["__EmptySetElement"]))
+          (types-equal? env a1 a2)
           (and (string? a1) (string? a2) (class-subtype? env a1 a2))
           (and (map? a1) (string? a2) (class-subtype? env (:base-type a1) a2))
           (and (map? a1) (map? a2)
@@ -616,10 +620,14 @@
     (env-add-var env var-name (detachable-version target-type))
     "Boolean"))
 
+(declare check-create)
+
 (defn check-call
   "Check the type of a method call"
   [env {:keys [target method args has-parens] :as expr}]
-  (if target
+  (if (and (map? target) (= :create (:type target)) (nil? method))
+    (check-create env (assoc target :args args))
+    (if target
     ;; Method call on object
     (let [target-name (when (string? target) target)
           class-target (when target-name (env-lookup-class env target-name))
@@ -742,7 +750,7 @@
                                              (str "Expected " (:type param) ", got " arg-type))})))))
               (or (:return-type method-sig) "Void"))
             (do (doseq [arg args] (check-expression env arg)) "Void"))
-          (do (doseq [arg args] (check-expression env arg)) "Void"))))))
+          (do (doseq [arg args] (check-expression env arg)) "Void")))))))
 
 (defn check-create
   "Check the type of a create expression"
@@ -862,7 +870,7 @@
   "Check the type of a set literal"
   [env {:keys [elements] :as expr}]
   (if (empty? elements)
-    {:base-type "Set" :type-params ["Any"]}
+    {:base-type "Set" :type-params ["__EmptySetElement"]}
     (let [first-type (check-expression env (first elements))]
       (doseq [elem (rest elements)]
         (let [elem-type (check-expression env elem)]

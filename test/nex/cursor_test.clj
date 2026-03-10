@@ -185,7 +185,7 @@ main()")]
 (deftest set-cursor-basic-test
   (testing "Set cursor iterates set elements"
     (let [output (run-nex "function main() do
-  let s := {1, 2, 3}
+  let s := #{1, 2, 3}
   let c := s.cursor()
   c.start()
   let count := 0
@@ -202,7 +202,7 @@ main()")]
 (deftest set-cursor-restart-test
   (testing "Calling start resets set cursor"
     (let [output (run-nex "function main() do
-  let s := {4, 5}
+  let s := #{4, 5}
   let c := s.cursor()
   c.start()
   c.next()
@@ -251,7 +251,7 @@ main()")]
 (deftest across-set-test
   (testing "across iterates over set elements"
     (let [output (run-nex "function main() do
-  across {1, 2, 3} as x do
+  across #{1, 2, 3} as x do
     print(x)
   end
 end

@@ -377,7 +377,7 @@ mapEntry
     ;
 
 setLiteral
-    : '{' expression (',' expression)* '}'
+    : SET_START (expression (',' expression)*)? '}'
     ;
 
 /*
@@ -512,6 +512,10 @@ SPECIAL_CHAR  : 'nul' | 'space' | 'newline' | 'tab' | 'return'
  * #b
  * #65  (unicode code point)
  */
+SET_START
+    : '#{'
+    ;
+
 CHAR_LITERAL
     : '#' ( ~[0-9 \t\r\n] | SPECIAL_CHAR | DIGITS )
     ;

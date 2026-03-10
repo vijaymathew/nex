@@ -174,13 +174,15 @@ Construction:
 ```text
 create Set[Integer]
 create Set[Integer].from_array([1, 2, 3])
-{1, 2, 3}
+#{}
+#{1, 2, 3}
 ```
 
 Notes:
 
-- Non-empty brace literals such as `{1, 2, 3}` create sets.
-- The empty literal `{}` creates an empty map, not an empty set.
+- Set literals such as `#{1, 2, 3}` create sets.
+- The empty set literal is `#{}`.
+- The empty literal `{}` still creates an empty map.
 
 Main methods:
 

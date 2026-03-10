@@ -58,13 +58,11 @@ generic collection class pattern built on top of `Array[T]`.
 ### Construction
 
 ```nex
-{}
+#{}
 create Set[Integer].from_array([1, 2, 3])
 ```
 
-Non-empty brace literals such as `{1, 2, 3}` denote sets. The empty literal
-`{}` denotes an empty map, so use `create Set[T]` or `create Set[T].from_array(...)`
-when you need an empty set value.
+Set literals use `#{...}`. The empty map literal remains `{}`.
 
 ### Methods
 
@@ -151,9 +149,9 @@ print(m.get("lang"))              -- "Nex"
 print(m.try_get("missing", "n/a")) -- "n/a"
 print(m.contains_key("kind"))     -- true
 
-let s1 := {1, 2}
-let s2 := {2, 3}
-print(s1.union(s2))               -- {1, 2, 3}
+let s1 := #{1, 2}
+let s2 := #{2, 3}
+print(s1.union(s2))               -- #{1, 2, 3}
 
 let stack := create Stack[Integer].make
 stack.push(10)

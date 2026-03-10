@@ -264,7 +264,7 @@ end"
     (let [nex-code "class Test
   feature
     demo() do
-      let s: Set[Integer] := {1, 2, 3}
+      let s: Set[Integer] := #{1, 2, 3}
       let t: Set[Integer] := create Set[Integer].from_array([2, 3])
       print(s.union(t))
     end
@@ -279,7 +279,7 @@ end"
     (let [nex-code "class Test
   feature
     demo() do
-      across {1, 2} as x do
+      across #{1, 2} as x do
         print(x)
       end
     end

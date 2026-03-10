@@ -69,7 +69,7 @@
       :create (str "create " (:class-name expr) "." (:constructor expr)
                    "(" (str/join ", " (map format-expression (:args expr))) ")")
       :array-literal (str "[" (str/join ", " (map format-expression (:elements expr))) "]")
-      :set-literal (str "{" (str/join ", " (map format-expression (:elements expr))) "}")
+      :set-literal (str "#{" (str/join ", " (map format-expression (:elements expr))) "}")
       :map-literal (str "{" (str/join ", " (map (fn [{:keys [key value]}]
                                                    (str (format-expression key) " : "
                                                         (format-expression value)))

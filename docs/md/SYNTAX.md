@@ -151,6 +151,39 @@ print(pet.get("name"))            -- "Max"
 pet.put("kind", "cat")            -- update a value
 ```
 
+## Sets
+
+Use a set when you want an unordered collection of distinct values.
+
+```nex
+let evens: Set[Integer] := #{0, 2, 4}
+print(evens.contains(2))          -- true
+```
+
+An empty set uses the explicit set literal syntax:
+
+```nex
+let empty: Set[Integer] := #{}
+```
+
+You can also build a set from an array. Duplicate elements are removed:
+
+```nex
+let numbers: Set[Integer] := create Set[Integer].from_array([1, 2, 2, 3])
+print(numbers.size)               -- 3
+```
+
+Sets support the usual set operations:
+
+```nex
+let a: Set[Integer] := #{1, 2, 3}
+let b: Set[Integer] := #{3, 4}
+
+print(a.union(b))                 -- #{1, 2, 3, 4}
+print(a.intersection(b))          -- #{3}
+print(a.difference(b))            -- #{1, 2}
+```
+
 ## Classes
 
 A class bundles data and actions together:

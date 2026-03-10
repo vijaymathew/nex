@@ -698,5 +698,14 @@ export default class nexlangListener extends antlr4.tree.ParseTreeListener {
 	}
 
 
+	// Enter a parse tree produced by nexlangParser#setLiteral.
+	enterSetLiteral(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#setLiteral.
+	exitSetLiteral(ctx) {
+	}
+
+
 
 }

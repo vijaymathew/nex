@@ -1190,7 +1190,7 @@
 
                              :else nil))))
 
-    (append-line! "info" "Browser IDE build: 2026-03-03q")))
+    (append-line! "info" "Browser IDE build: 2026-03-10a")))
 
 (defn init []
   (render!))
