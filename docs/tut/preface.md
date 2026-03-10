@@ -43,13 +43,13 @@ The book is divided into eight parts.
 
 Read it with a REPL open.
 
-Every code example in this book can be typed at the Nex REPL and will produce the output shown. No example requires installation beyond accessing the browser-based IDE at [nex-lang.org/ide]. The exercises at the end of each chapter are meant to be done, not read. The ones marked with an asterisk extend the chapter's ideas into territory that is not fully covered — they are invitations to explore rather than tests of recall.
+Every code example in this book can be typed at the Nex REPL and will produce the output shown. No example requires installation beyond accessing the browser-based IDE at [schemer.in/nex]. The exercises at the end of each chapter are meant to be done, not read. The ones marked with an asterisk extend the chapter's ideas into territory that is not fully covered — they are invitations to explore rather than tests of recall.
 
 If you are new to programming, move through Parts I and II slowly. Implement every example yourself rather than reading past it. The understanding that comes from having run a piece of code is qualitatively different from the understanding that comes from having read it.
 
 If you are an experienced developer coming to Nex from another language, you may move quickly through Parts I through IV and spend more time on Part V. The contract system will be new even if the surrounding language features are familiar, and it is worth working through the examples carefully rather than skimming.
 
-If you are using this book as a companion to *Engineering Software That Lasts* — the design and engineering text that uses Nex throughout — the two books are complementary but independent. This book teaches the language; that one uses it to teach software engineering. You can read them in either order, though reading this one first will make the code in that one immediately accessible.
+If you are using this book as a companion to *Beyond Code – Building Software Systems That Last* — the design and engineering text that uses Nex throughout — the two books are complementary but independent. This book teaches the language; that one uses it to teach software engineering. You can read them in either order, though reading this one first will make the code in that one immediately accessible.
 
 
 
