@@ -97,7 +97,8 @@ feature
 
       result := r
     ensure
-      bounded_steps: result.steps >= 1 and result.steps <= 4
+      bounded_steps: result.steps >= 1 
+	                 and result.steps <= 4
     end
 end
 ```

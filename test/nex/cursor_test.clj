@@ -179,6 +179,40 @@ main()")]
       (is (= ["true" "false"] output)))))
 
 ;; ============================================================================
+;; SET CURSOR
+;; ============================================================================
+
+(deftest set-cursor-basic-test
+  (testing "Set cursor iterates set elements"
+    (let [output (run-nex "function main() do
+  let s := {1, 2, 3}
+  let c := s.cursor()
+  c.start()
+  let count := 0
+  from let x := 0 until c.at_end() do
+    count := count + c.item()
+    c.next()
+  end
+  print(count)
+  print(type_is(\"Cursor\", c))
+end
+main()")]
+      (is (= ["6" "true"] output)))))
+
+(deftest set-cursor-restart-test
+  (testing "Calling start resets set cursor"
+    (let [output (run-nex "function main() do
+  let s := {4, 5}
+  let c := s.cursor()
+  c.start()
+  c.next()
+  c.start()
+  print(c.item())
+end
+main()")]
+      (is (= ["4"] output)))))
+
+;; ============================================================================
 ;; ACROSS STATEMENT
 ;; ============================================================================
 
@@ -213,6 +247,16 @@ main()")]
 end
 main()")]
       (is (= ["\"x\"" "10"] output)))))
+
+(deftest across-set-test
+  (testing "across iterates over set elements"
+    (let [output (run-nex "function main() do
+  across {1, 2, 3} as x do
+    print(x)
+  end
+end
+main()")]
+      (is (= ["1" "2" "3"] output)))))
 
 (deftest across-empty-array-test
   (testing "across on empty collection does nothing"

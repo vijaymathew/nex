@@ -655,6 +655,7 @@
        {:type :loop
         :init [{:type :let
                 :name cursor-name
+                :synthetic true
                 :value {:type :call
                         :target collection-ast
                         :method "cursor"
@@ -672,6 +673,7 @@
         :body (vec (concat
                     [{:type :let
                       :name alias
+                      :synthetic true
                       :value {:type :call
                               :target cursor-name
                               :method "item"
@@ -1015,6 +1017,14 @@
                                    (= :expression (first %)))
                              elements)]
        {:type :array-literal
+        :elements (mapv transform-node expr-nodes)}))
+
+   :setLiteral
+   (fn [[_ _open-brace & elements]]
+     (let [expr-nodes (filter #(and (sequential? %)
+                                    (= :expression (first %)))
+                              elements)]
+       {:type :set-literal
         :elements (mapv transform-node expr-nodes)}))
 
    :mapLiteral

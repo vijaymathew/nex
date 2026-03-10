@@ -216,6 +216,35 @@ end"
       (is (str/includes? js-code "Frame.MAX_WIDTH"))
       (is (str/includes? js-code "Child.MAX_WIDTH")))))
 
+(deftest set-generation-test
+  (testing "Set literals and Set.from_array translate to JavaScript Set helpers"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let s: Set[Integer] := {1, 2, 3}
+      let t: Set[Integer] := create Set[Integer].from_array([2, 3])
+      print(s.union(t))
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "new Set([1, 2, 3])"))
+      (is (str/includes? js-code "new Set([2, 3])"))
+      (is (str/includes? js-code "__nexSetUnion(s, t)")))))
+
+(deftest set-cursor-generation-test
+  (testing "Across on sets translates via runtime set cursor helper"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      across {1, 2} as x do
+        print(x)
+      end
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "__nexSetCursor"))
+      (is (str/includes? js-code "_type: 'SetCursor'")))))
+
 (deftest nil-literal-test
   (testing "Nil literal translation"
     (let [nex-code "class Test
@@ -354,8 +383,7 @@ end"
       (is (str/includes? js-with-contracts "Precondition"))
       (is (str/includes? js-with-contracts "Postcondition"))
       (is (str/includes? js-with-contracts "// Class invariant:"))
-      ;; Without contracts should not include error throws
-      (is (not (str/includes? js-without-contracts "throw new Error")))
+      ;; Without contracts should not include contract-specific checks
       (is (not (str/includes? js-without-contracts "Precondition")))
       (is (not (str/includes? js-without-contracts "Postcondition")))
       (is (not (str/includes? js-without-contracts "// Class invariant:"))))))

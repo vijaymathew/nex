@@ -67,7 +67,8 @@ feature
 
   score(doc_text, tokens: String): Integer
     require
-      inputs_present: doc_text /= "" and tokens /= ""
+      inputs_present: doc_text /= "" 
+	                  and tokens /= ""
     do
       if doc_text = tokens then
         result := 100
@@ -80,7 +81,8 @@ feature
 
   choose_top(doc1, doc2, query: String): String
     require
-      docs_present: doc1 /= "" and doc2 /= "" and query /= ""
+      docs_present: doc1 /= "" and doc2 /= "" 
+	                and query /= ""
     do
       let t: String := tokenize(query)
       let s1: Integer := score(doc1, t)

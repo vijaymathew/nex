@@ -76,7 +76,7 @@
 
 (def builtin-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Any" "Void" "Nil" "Console" "File" "Process" "Function"
+    "Array" "Map" "Set" "Any" "Void" "Nil" "Console" "File" "Process" "Function"
     "Cursor" "Window" "Turtle" "Image"})
 
 (defn builtin-type? [type-name]
@@ -858,6 +858,21 @@
                                      "Map entries must have consistent types")})))))
       {:base-type "Map" :type-params [key-type val-type]})))
 
+(defn check-set-literal
+  "Check the type of a set literal"
+  [env {:keys [elements] :as expr}]
+  (if (empty? elements)
+    {:base-type "Set" :type-params ["Any"]}
+    (let [first-type (check-expression env (first elements))]
+      (doseq [elem (rest elements)]
+        (let [elem-type (check-expression env elem)]
+          (when-not (types-equal? env first-type elem-type)
+            (throw (ex-info "Set elements must have same type"
+                            {:error (type-error
+                                     (str "Set elements must have same type, got "
+                                          (display-type first-type) " and " (display-type elem-type)))})))))
+      {:base-type "Set" :type-params [first-type]})))
+
 (defn check-expression
   "Check the type of an expression"
   [env expr]
@@ -881,6 +896,7 @@
       :call (check-call env expr)
       :create (check-create env expr)
       :array-literal (check-array-literal env expr)
+      :set-literal (check-set-literal env expr)
       :map-literal (check-map-literal env expr)
       :subscript (let [target-type (check-expression env (:target expr))]
                        (if (map? target-type)
@@ -939,21 +955,23 @@
 
 (defn check-let
   "Check a let statement"
-  [env {:keys [name var-type value] :as stmt}]
-  (when-not var-type
-    (throw (ex-info (str "Type annotation required for variable '" name "'")
-                    {:error (type-error
-                             (str "Type annotation required for variable '" name
-                                  "'. Use: let " name ": <Type> := ..."))})))
-  (validate-type-annotation env var-type)
-  (let [val-type (check-expression env value)]
-    (when-not (types-compatible? env val-type var-type)
+  [env {:keys [name var-type value synthetic] :as stmt}]
+  (let [val-type (check-expression env value)
+        inferred-type (or var-type (when synthetic val-type))]
+    (when-not inferred-type
+      (throw (ex-info (str "Type annotation required for variable '" name "'")
+                      {:error (type-error
+                               (str "Type annotation required for variable '" name
+                                    "'. Use: let " name ": <Type> := ..."))})))
+    (when var-type
+      (validate-type-annotation env var-type))
+    (when-not (types-compatible? env val-type inferred-type)
       (throw (ex-info (str "Type mismatch in let binding for " name)
                       {:error (type-error
                                (str "Cannot assign " (display-type val-type)
                                     " to variable '" name "' of type "
-                                    (display-type var-type)))})))
-    (env-add-var env name var-type)))
+                                    (display-type inferred-type)))})))
+    (env-add-var env name inferred-type)))
 
 (defn check-if
   "Check an if statement"
@@ -1491,7 +1509,8 @@
                           :return-type {:base-type "Array" :type-params ["T"]}}
            "first"       {:params [] :return-type "T"}
            "last"        {:params [] :return-type "T"}
-           "join"        {:params [{:name "sep" :type "String"}] :return-type "String"}}]
+           "join"        {:params [{:name "sep" :type "String"}] :return-type "String"}
+           "cursor"      {:params [] :return-type "Cursor"}}]
     (env-add-method env "Array" method-name sig))
 
   ;; Register Map[K, V] class and methods
@@ -1507,8 +1526,31 @@
            "contains_key" {:params [{:name "key" :type "K"}] :return-type "Boolean"}
            "keys"         {:params [] :return-type {:base-type "Array" :type-params ["K"]}}
            "values"       {:params [] :return-type {:base-type "Array" :type-params ["V"]}}
-           "remove"       {:params [{:name "key" :type "K"}] :return-type "Void"}}]
+           "remove"       {:params [{:name "key" :type "K"}] :return-type "Void"}
+           "cursor"       {:params [] :return-type "Cursor"}}]
     (env-add-method env "Map" method-name sig))
+
+  ;; Register Set[T] class and methods
+  (env-add-class env "Set" {:name "Set"
+                            :generic-params [{:name "T"}]})
+  (env-add-method env "Set" "from_array"
+                  {:params [{:name "values"
+                             :type {:base-type "Array" :type-params ["T"]}}]
+                   :return-type {:base-type "Set" :type-params ["T"]}})
+  (doseq [[method-name sig]
+          {"contains"             {:params [{:name "value" :type "T"}] :return-type "Boolean"}
+           "union"                {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
+                                   :return-type {:base-type "Set" :type-params ["T"]}}
+           "difference"           {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
+                                   :return-type {:base-type "Set" :type-params ["T"]}}
+           "intersection"         {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
+                                   :return-type {:base-type "Set" :type-params ["T"]}}
+           "symmetric_difference" {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
+                                   :return-type {:base-type "Set" :type-params ["T"]}}
+           "size"                 {:params [] :return-type "Integer"}
+           "is_empty"             {:params [] :return-type "Boolean"}
+           "cursor"               {:params [] :return-type "Cursor"}}]
+    (env-add-method env "Set" method-name sig))
 
   ;; Built-in Function methods: call0..call32
   (doseq [n (range 0 33)]

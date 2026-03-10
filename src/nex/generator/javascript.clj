@@ -14,6 +14,7 @@
 (def ^:dynamic *own-fields* #{})        ;; field names defined on current class
 (def ^:dynamic *constant-names* #{})    ;; accessible class constants
 (def ^:dynamic *local-names* #{})       ;; method params + loop vars
+(def ^:dynamic *local-types* {})        ;; local/param name -> Nex type
 (def ^:dynamic *field-types* {})        ;; field-name -> type
 (def ^:dynamic *class-invariants* [])   ;; effective class invariants (inherited + local, deduped)
 
@@ -42,6 +43,7 @@
           js-base (case base-type
                     "Array" "Array"
                     "Map" "Map"
+                    "Set" "Set"
                     base-type)
           args (:type-args nex-type)]
       (if args
@@ -63,6 +65,7 @@
       "String" "string"
       "Array" "Array"
       "Map" "Map"
+      "Set" "Set"
       "Console" "Object"
       "File" "Object"
       "Process" "Object"
@@ -84,6 +87,7 @@
       (case base
         "Array" "[]"
         "Map" "new Map()"
+        "Set" "new Set()"
         "null"))
 
     ;; Handle basic types
@@ -98,6 +102,7 @@
       "String" "\"\""
       "Array" "[]"
       "Map" "new Map()"
+      "Set" "new Set()"
       "Console" "({_type: 'Console'})"
       "File" "null"
       "Process" "({_type: 'Process'})"
@@ -193,6 +198,61 @@
             "Any")
     "Any"))
 
+(defn infer-expression-type
+  "Infer a Nex type for code generation dispatch."
+  [expr]
+  (cond
+    (string? expr) (or (get *local-types* expr)
+                       (get *field-types* expr)
+                       "Any")
+    (not (map? expr)) "Any"
+    :else
+    (case (:type expr)
+      :string "String"
+      :integer "Integer"
+      :real "Real"
+      :boolean "Boolean"
+      :char "Char"
+      :array-literal "Array"
+      :map-literal "Map"
+      :set-literal "Set"
+      :create (:class-name expr)
+      :identifier (or (get *local-types* (:name expr))
+                      (get *field-types* (:name expr))
+                      "Any")
+      "Any")))
+
+(defn extract-typed-locals
+  "Collect typed local bindings from statements."
+  [stmts]
+  (reduce
+   (fn [acc stmt]
+     (if-not (map? stmt)
+       acc
+       (case (:type stmt)
+         :let (if-let [t (:var-type stmt)]
+                (assoc acc (:name stmt) t)
+                acc)
+         :if (merge acc
+                    (extract-typed-locals (:then stmt))
+                    (reduce merge {} (map #(extract-typed-locals (:then %)) (:elseif stmt)))
+                    (extract-typed-locals (:else stmt)))
+         :loop (merge acc
+                      (extract-typed-locals (:init stmt))
+                      (extract-typed-locals (:body stmt)))
+         :scoped-block (merge acc
+                              (extract-typed-locals (:body stmt))
+                              (extract-typed-locals (:rescue stmt)))
+         :with (merge acc (extract-typed-locals (:body stmt)))
+         :case (merge acc
+                      (reduce merge {} (map (fn [clause]
+                                              (extract-typed-locals [(:body clause)]))
+                                            (:clauses stmt)))
+                      (extract-typed-locals (when-let [else-stmt (:else stmt)] [else-stmt])))
+         acc)))
+   {}
+   (or stmts [])))
+
 (defn resolve-identifier
   "Resolve an identifier in expression context for JavaScript.
    Resolution order: locals -> methods -> fields -> functions -> bare name"
@@ -255,6 +315,7 @@
     "compare"     (fn [target args] (str "__nexCompare(" target ", " args ")"))
     "hash"        (fn [target _] (str "__nexHash(" target ")"))
     "split"       (fn [target args] (str target ".split(" args ")"))
+    "cursor"      (fn [target _] (str "__nexStringCursor(" target ")"))
     ;; String operators
     "plus"        (fn [target args] (str "(" target " + " args ")"))
     "equals"      (fn [target args] (str "(" target " === " args ")"))
@@ -376,7 +437,8 @@
     "remove"    (fn [target args] (str "(" target ".splice(" args ", 1), " target ")"))
     "reverse"   (fn [target _] (str "[..." target "].reverse()"))
     "sort"      (fn [target _] (str "[..." target "].sort()"))
-    "slice"     (fn [target args] (str target ".slice(" args ")"))}
+    "slice"     (fn [target args] (str target ".slice(" args ")"))
+    "cursor"    (fn [target _] (str "__nexArrayCursor(" target ")"))}
 
    :Map
    {"size"         (fn [target _] (str target ".size"))
@@ -387,7 +449,18 @@
     "contains_key" (fn [target args] (str target ".has(" args ")"))
     "keys"         (fn [target _] (str "Array.from(" target ".keys())"))
     "values"       (fn [target _] (str "Array.from(" target ".values())"))
-    "remove"       (fn [target args] (str "(" target ".delete(" args "), " target ")"))}
+    "remove"       (fn [target args] (str "(" target ".delete(" args "), " target ")"))
+    "cursor"       (fn [target _] (str "__nexMapCursor(" target ")"))}
+
+   :Set
+   {"contains"             (fn [target args] (str target ".has(" args ")"))
+    "union"                (fn [target args] (str "__nexSetUnion(" target ", " args ")"))
+    "difference"           (fn [target args] (str "__nexSetDifference(" target ", " args ")"))
+    "intersection"         (fn [target args] (str "__nexSetIntersection(" target ", " args ")"))
+    "symmetric_difference" (fn [target args] (str "__nexSetSymmetricDifference(" target ", " args ")"))
+    "size"                 (fn [target _] (str target ".size"))
+    "is_empty"             (fn [target _] (str "(" target ".size === 0)"))
+    "cursor"               (fn [target _] (str "__nexSetCursor(" target ")"))}
 
    :Image
    {"width"        (fn [target _] (str target ".width"))
@@ -452,6 +525,8 @@
                   (str target-code "." method "(" args-code ")")))
               ;; External object: try builtins, then default
               (or
+               (when-let [method-fn (get-in builtin-method-mappings [(keyword (infer-expression-type target)) method])]
+                 (method-fn target-code args-code))
                ;; Try Integer methods first (for operators, numeric is more common)
                (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
                  (method-fn target-code args-code))
@@ -472,6 +547,9 @@
                  (method-fn target-code args-code))
                ;; Try Map methods
                (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
+                 (method-fn target-code args-code))
+               ;; Try Set methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Set method])]
                  (method-fn target-code args-code))
                ;; Try Image methods
                (when-let [method-fn (get-in builtin-method-mappings [:Image method])]
@@ -511,6 +589,9 @@
       "Console" "({_type: 'Console'})"
       "File" (str "({_type: 'File', path: " args-code "})")
       "Process" "({_type: 'Process'})"
+      "Set" (if (= constructor "from_array")
+              (str "new Set(" args-code ")")
+              "new Set()")
       "Window" (str "new NexWindow(" args-code ")")
       "Turtle" (str "new NexTurtle(" args-code ")")
       "Image" (if (= constructor "from_file")
@@ -546,9 +627,14 @@
   (let [entries-code (str/join ", "
                                (map (fn [{:keys [key value]}]
                                      (str "[" (generate-expression key) ", "
-                                          (generate-expression value) "]"))
+                                     (generate-expression value) "]"))
                                    entries))]
     (str "new Map([" entries-code "])")))
+
+(defn generate-set-literal
+  "Generate JavaScript code for set literal"
+  [elements]
+  (str "new Set([" (str/join ", " (map generate-expression elements)) "])"))
 
 (defn any-type?
   [t]
@@ -694,6 +780,7 @@
     :create (generate-create-expr expr)
     :subscript (generate-subscript-expr expr)
     :array-literal (generate-array-literal (:elements expr))
+    :set-literal (generate-set-literal (:elements expr))
     :map-literal (generate-map-literal (:entries expr))
     :convert (generate-convert-expr expr)
     :anonymous-function (let [class-def (:class-def expr)
@@ -1014,11 +1101,19 @@
   "Generate JavaScript code for a method"
   [level {:keys [name params return-type body require ensure rescue visibility note]} opts]
   (let [param-names (set (map :name params))
+        param-types (into {} (map (juxt :name :type) params))
         convert-bindings (collect-convert-bindings-block (concat body (or rescue [])))
         convert-var-names (set (map :name convert-bindings))
+        convert-var-types (into {} (map (juxt :name :target-type) convert-bindings))
+        local-types (merge param-types
+                           convert-var-types
+                           (extract-typed-locals body)
+                           (extract-typed-locals rescue)
+                           (when return-type {"result" return-type}))
         local-names (cond-> (into param-names convert-var-names)
                       return-type (conj "result"))]
-    (binding [*local-names* (into *local-names* local-names)]
+    (binding [*local-names* (into *local-names* local-names)
+              *local-types* (merge *local-types* local-types)]
       (let [params-code (str/join ", " (map :name params))
             ;; Apply visibility naming convention
             method-name (if visibility
@@ -1119,23 +1214,33 @@
   [level class-name {:keys [name params body require ensure rescue]} opts]
   (let [local-name (class-name-to-local class-name)
         param-names (set (map :name params))
+        param-types (into {} (map (juxt :name :type) params))
         convert-bindings (collect-convert-bindings-block (concat body (or rescue [])))
         convert-var-names (set (map :name convert-bindings))
+        convert-var-types (into {} (map (juxt :name :target-type) convert-bindings))
+        local-types (merge param-types
+                           convert-var-types
+                           (extract-typed-locals body)
+                           (extract-typed-locals rescue))
         local-names (into param-names convert-var-names)
         params-code (str/join ", " (map :name params))
         preconditions (binding [*this-name* local-name
-                                *local-names* (into *local-names* local-names)]
+                                *local-names* (into *local-names* local-names)
+                                *local-types* (merge *local-types* local-types)]
                         (generate-assertions (+ level 1) require "Precondition" opts))
         statements (binding [*this-name* local-name
-                             *local-names* (into *local-names* local-names)]
+                             *local-names* (into *local-names* local-names)
+                             *local-types* (merge *local-types* local-types)]
                      (if rescue
                        [(generate-rescue (+ level 1) body rescue #{})]
                        (mapv #(generate-statement (+ level 1) %) body)))
         postconditions (binding [*this-name* local-name
-                                 *local-names* (into *local-names* local-names)]
+                                 *local-names* (into *local-names* local-names)
+                                 *local-types* (merge *local-types* local-types)]
                          (generate-assertions (+ level 1) ensure "Postcondition" opts))
         class-invariant-checks (binding [*this-name* local-name
-                                         *local-names* (into *local-names* local-names)]
+                                         *local-names* (into *local-names* local-names)
+                                         *local-types* (merge *local-types* local-types)]
                                  (generate-assertions (+ level 1) *class-invariants* "Class invariant" opts))]
     (str/join "\n"
               (concat
@@ -1446,6 +1551,7 @@
        "  if (typeof v === 'number') return Number.isInteger(v) ? 'Integer' : 'Real';\n"
        "  if (Array.isArray(v)) return 'Array';\n"
        "  if (v instanceof Map) return 'Map';\n"
+       "  if (v instanceof Set) return 'Set';\n"
        "  if (v && v._type) return String(v._type);\n"
        "  const ctor = v && v.constructor;\n"
        "  if (ctor && ctor.name) return ctor.name;\n"
@@ -1459,7 +1565,7 @@
        "  if (runtime === 'Integer' && (typeName === 'Integer64' || typeName === 'Real' || typeName === 'Decimal')) return true;\n"
        "  if (runtime === 'Integer64' && (typeName === 'Real' || typeName === 'Decimal')) return true;\n"
        "  if (runtime === 'Real' && typeName === 'Decimal') return true;\n"
-       "  if ((runtime === 'ArrayCursor' || runtime === 'StringCursor' || runtime === 'MapCursor') && typeName === 'Cursor') return true;\n"
+       "  if ((runtime === 'ArrayCursor' || runtime === 'StringCursor' || runtime === 'MapCursor' || runtime === 'SetCursor') && typeName === 'Cursor') return true;\n"
        "  let cur = v;\n"
        "  while (cur) {\n"
        "    const ctor = cur.constructor;\n"
@@ -1498,6 +1604,30 @@
        "    h |= 0;\n"
        "  }\n"
        "  return h;\n"
+       "}\n"
+       "function __nexSetUnion(a, b) {\n"
+       "  return new Set([...a, ...b]);\n"
+       "}\n"
+       "function __nexSetDifference(a, b) {\n"
+       "  return new Set([...a].filter(v => !b.has(v)));\n"
+       "}\n"
+       "function __nexSetIntersection(a, b) {\n"
+       "  return new Set([...a].filter(v => b.has(v)));\n"
+       "}\n"
+       "function __nexSetSymmetricDifference(a, b) {\n"
+       "  return new Set([...a].filter(v => !b.has(v)).concat([...b].filter(v => !a.has(v))));\n"
+       "}\n"
+       "function __nexArrayCursor(source) {\n"
+       "  return {_type: 'ArrayCursor', source, index: 0, start() { this.index = 0; }, item() { if (this.index >= this.source.length) throw new Error('Cursor is at end'); return this.source[this.index]; }, next() { if (this.index < this.source.length) this.index += 1; }, at_end() { return this.index >= this.source.length; }};\n"
+       "}\n"
+       "function __nexStringCursor(source) {\n"
+       "  return {_type: 'StringCursor', source, index: 0, start() { this.index = 0; }, item() { if (this.index >= this.source.length) throw new Error('Cursor is at end'); return this.source[this.index]; }, next() { if (this.index < this.source.length) this.index += 1; }, at_end() { return this.index >= this.source.length; }};\n"
+       "}\n"
+       "function __nexMapCursor(source) {\n"
+       "  return {_type: 'MapCursor', source, keys: Array.from(source.keys()), index: 0, start() { this.keys = Array.from(this.source.keys()); this.index = 0; }, item() { if (this.index >= this.keys.length) throw new Error('Cursor is at end'); const key = this.keys[this.index]; return [key, this.source.get(key)]; }, next() { if (this.index < this.keys.length) this.index += 1; }, at_end() { return this.index >= this.keys.length; }};\n"
+       "}\n"
+       "function __nexSetCursor(source) {\n"
+       "  return {_type: 'SetCursor', source, values: Array.from(source.values()), index: 0, start() { this.values = Array.from(this.source.values()); this.index = 0; }, item() { if (this.index >= this.values.length) throw new Error('Cursor is at end'); return this.values[this.index]; }, next() { if (this.index < this.values.length) this.index += 1; }, at_end() { return this.index >= this.values.length; }};\n"
        "}\n"
        "const __nexHasDom = (typeof document !== 'undefined');\n"
        "function __nexParseColor(s) {\n"

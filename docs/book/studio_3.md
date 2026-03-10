@@ -84,7 +84,8 @@ feature
   to_doc_id: String
   link_type: String
 invariant
-  endpoints_present: from_doc_id /= "" and to_doc_id /= ""
+  endpoints_present: from_doc_id /= "" 
+                     and to_doc_id /= ""
 end
 
 class World_Object
@@ -150,13 +151,15 @@ feature
 
       result := r
     ensure
-      bounded_steps: result.steps >= 1 and result.steps <= 5
+      bounded_steps: result.steps >= 1 
+	                 and result.steps <= 5
     end
 end
 
 class Delivery_Task_Store_V3
 feature
-  -- Index from task id to task object (teaching-sized map form).
+  -- Index from task id to 
+  -- task object (teaching-sized map form).
   k1: String
   v1: Delivery_Task
   k2: String
@@ -172,7 +175,8 @@ feature
     require
       id_present: task_id /= ""
     do
-      let r: Measure_Result := create Measure_Result
+      let r: Measure_Result 
+	   := create Measure_Result
       r.steps := 1
 
       if task_id = k1 then
@@ -216,10 +220,16 @@ feature
       let r: Measure_Result := create Measure_Result
       r.steps := 2
 
-      if (d1.doc_id = link.from_doc_id or d2.doc_id = link.from_doc_id or d3.doc_id = link.from_doc_id) and
-         (d1.doc_id = link.to_doc_id or d2.doc_id = link.to_doc_id or d3.doc_id = link.to_doc_id) then
+      if (d1.doc_id = link.from_doc_id 
+	      or d2.doc_id = link.from_doc_id 
+		  or d3.doc_id = link.from_doc_id) and
+         (d1.doc_id = link.to_doc_id 
+		  or d2.doc_id = link.to_doc_id 
+		  or d3.doc_id = link.to_doc_id) then
         r.value := "VALID"
-      elseif not (d1.doc_id = link.from_doc_id or d2.doc_id = link.from_doc_id or d3.doc_id = link.from_doc_id) then
+      elseif not (d1.doc_id = link.from_doc_id 
+	              or d2.doc_id = link.from_doc_id 
+				  or d3.doc_id = link.from_doc_id) then
         r.value := "MISSING_FROM"
       else
         r.value := "MISSING_TO"
@@ -245,9 +255,12 @@ feature
 
   has_doc(doc_id: String): Boolean
     do
-      result := doc_id = dk1 or doc_id = dk2 or doc_id = dk3
+      result := doc_id = dk1 
+	            or doc_id = dk2 
+				or doc_id = dk3
     ensure
-      bool_result: result = true or result = false
+      bool_result: result = true 
+	               or result = false
     end
 
   validate_link(link: Doc_Link): Measure_Result
@@ -287,7 +300,8 @@ feature
   w3: World_Object
   w4: World_Object
 
-  move_by_id(object_id: String; delta: Integer): Measure_Result
+  move_by_id(object_id: String; 
+             delta: Integer): Measure_Result
     require
       id_present: object_id /= ""
     do
@@ -317,7 +331,8 @@ feature
 
       result := r
     ensure
-      bounded_steps: result.steps >= 1 and result.steps <= 4
+      bounded_steps: result.steps >= 1 
+	                 and result.steps <= 4
     end
 end
 
@@ -326,11 +341,13 @@ feature
   wk1: String
   wv1: World_Object
 
-  move_by_id(object_id: String; delta: Integer): Measure_Result
+  move_by_id(object_id: String; 
+             delta: Integer): Measure_Result
     require
       id_present: object_id /= ""
     do
-      let r: Measure_Result := create Measure_Result
+      let r: Measure_Result 
+	   := create Measure_Result
       r.steps := 1
 
       if object_id = wk1 then
@@ -366,22 +383,29 @@ feature
     t4.task_id := "T-4"; t4.status := "DELIVERED"
     t5.task_id := "T-5"; t5.status := "PENDING"
 
-    let d_v2: Delivery_Task_Store_V2 := create Delivery_Task_Store_V2
-    d_v2.t1 := t1; d_v2.t2 := t2; d_v2.t3 := t3; d_v2.t4 := t4; d_v2.t5 := t5
+    let d_v2: Delivery_Task_Store_V2 
+	 := create Delivery_Task_Store_V2
+    d_v2.t1 := t1; d_v2.t2 := t2; 
+	d_v2.t3 := t3; d_v2.t4 := t4; 
+	d_v2.t5 := t5
 
-    let d_v3: Delivery_Task_Store_V3 := create Delivery_Task_Store_V3
+    let d_v3: Delivery_Task_Store_V3 
+	 := create Delivery_Task_Store_V3
     d_v3.k1 := t1.task_id; d_v3.v1 := t1
     d_v3.k2 := t2.task_id; d_v3.v2 := t2
     d_v3.k3 := t3.task_id; d_v3.v3 := t3
     d_v3.k4 := t4.task_id; d_v3.v4 := t4
     d_v3.k5 := t5.task_id; d_v3.v5 := t5
 
-    let d2r: Measure_Result := d_v2.find_status("T-5")
-    let d3r: Measure_Result := d_v3.find_status("T-5")
+    let d2r: Measure_Result 
+	 := d_v2.find_status("T-5")
+    let d3r: Measure_Result 
+	 := d_v3.find_status("T-5")
     print("Delivery V2 steps: " + d2r.steps)
     print("Delivery V3 steps: " + d3r.steps)
 
-    -- Knowledge documents + links (Studio 2 model objects)
+    -- Knowledge documents + links 
+	-- (Studio 2 model objects)
     let doc1: Document := create Document
     let doc2: Document := create Document
     let doc3: Document := create Document
@@ -394,18 +418,23 @@ feature
     link.to_doc_id := "D-3"
     link.link_type := "references"
 
-    let k_v2: Knowledge_Model_V2 := create Knowledge_Model_V2
-    k_v2.d1 := doc1; k_v2.d2 := doc2; k_v2.d3 := doc3; k_v2.l1 := link
+    let k_v2: Knowledge_Model_V2 
+	 := create Knowledge_Model_V2
+    k_v2.d1 := doc1; k_v2.d2 := doc2; 
+	k_v2.d3 := doc3; k_v2.l1 := link
 
-    let k_v3: Knowledge_Model_V3 := create Knowledge_Model_V3
+    let k_v3: Knowledge_Model_V3 
+	 := create Knowledge_Model_V3
     k_v3.dk1 := doc1.doc_id; k_v3.dv1 := doc1
     k_v3.dk2 := doc2.doc_id; k_v3.dv2 := doc2
     k_v3.dk3 := doc3.doc_id; k_v3.dv3 := doc3
 
     let k2r: Measure_Result := k_v2.validate_link(link)
     let k3r: Measure_Result := k_v3.validate_link(link)
-    print("Knowledge V2 status/steps: " + k2r.value + "/" + k2r.steps)
-    print("Knowledge V3 status/steps: " + k3r.value + "/" + k3r.steps)
+    print("Knowledge V2 status/steps: " + k2r.value 
+	      + "/" + k2r.steps)
+    print("Knowledge V3 status/steps: " + k3r.value 
+	      + "/" + k3r.steps)
 
     -- World objects (Studio 2 model objects)
     let o1: World_Object := create World_Object

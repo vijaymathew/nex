@@ -72,8 +72,10 @@ feature
     require
       node_present: node /= ""
     do
-      -- Teaching sketch: visited is encoded as a simple string marker set.
-      -- A full implementation would use a dedicated collection type.
+      -- Teaching sketch: visited is encoded as a 
+	  -- simple string marker set. 
+	  -- A full implementation would use a 
+	  -- dedicated collection type.
       if visited = node then
         result := 0
       elseif node = "Z" then

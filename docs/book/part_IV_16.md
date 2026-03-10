@@ -73,7 +73,8 @@ feature
     require
       id_present: doc_id /= ""
     do
-      result := doc_id = k1 or doc_id = k2 or doc_id = k3
+      result := doc_id = k1 or doc_id = k2 
+	            or doc_id = k3
     ensure
       bool_result: result = true or result = false
     end

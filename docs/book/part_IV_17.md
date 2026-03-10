@@ -57,7 +57,8 @@ feature
   right_key: Integer
 invariant
   label_present: label /= ""
-  no_self_child: left_key /= key and right_key /= key
+  no_self_child: left_key /= key 
+                 and right_key /= key
 end
 
 class Topic_Tree
@@ -70,9 +71,11 @@ feature
     do
       if target = root.key then
         result := root.label
-      elseif target < root.key and target = left.key then
+      elseif target < root.key 
+	         and target = left.key then
         result := left.label
-      elseif target > root.key and target = right.key then
+      elseif target > root.key 
+	         and target = right.key then
         result := right.label
       else
         result := "NOT_FOUND"

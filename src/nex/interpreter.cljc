@@ -43,6 +43,45 @@
 (defn nex-map-remove [m key] #?(:clj (.remove m key) :cljs (.delete m key)))
 (defn nex-map-str [m] #?(:clj (json/write-str m :indent true) :cljs (->> m (js/Object.fromEntries) (js/JSON.stringify))))
 
+(defn nex-set [] #?(:clj (java.util.LinkedHashSet.) :cljs (js/Set.)))
+(defn nex-set-from [coll]
+  #?(:clj (doto (java.util.LinkedHashSet.)
+            (#(doseq [v coll] (.add % v))))
+     :cljs (js/Set. (to-array coll))))
+(defn nex-set? [v] #?(:clj (instance? java.util.LinkedHashSet v) :cljs (instance? js/Set v)))
+(defn nex-set-contains [s v] #?(:clj (.contains s v) :cljs (.has s v)))
+(defn nex-set-size [s] #?(:clj (.size s) :cljs (.-size s)))
+(defn nex-set-empty? [s] #?(:clj (.isEmpty s) :cljs (zero? (.-size s))))
+(defn nex-set-union [a b]
+  #?(:clj (let [out (java.util.LinkedHashSet. a)]
+            (.addAll out b)
+            out)
+     :cljs (nex-set-from (concat (es6-iterator-seq (.values a))
+                                 (es6-iterator-seq (.values b))))))
+(defn nex-set-difference [a b]
+  #?(:clj (let [out (java.util.LinkedHashSet. a)]
+            (.removeAll out b)
+            out)
+     :cljs (nex-set-from (remove #(.has b %) (es6-iterator-seq (.values a))))))
+(defn nex-set-intersection [a b]
+  #?(:clj (let [out (java.util.LinkedHashSet. a)]
+            (.retainAll out b)
+            out)
+     :cljs (nex-set-from (filter #(.has b %) (es6-iterator-seq (.values a))))))
+(defn nex-set-symmetric-difference [a b]
+  #?(:clj (let [out (java.util.LinkedHashSet.)]
+            (doseq [v a]
+              (when-not (.contains b v) (.add out v)))
+            (doseq [v b]
+              (when-not (.contains a v) (.add out v)))
+            out)
+     :cljs (nex-set-from (concat (remove #(.has b %) (es6-iterator-seq (.values a)))
+                                 (remove #(.has a %) (es6-iterator-seq (.values b)))))))
+(defn nex-set-str [s]
+  (str "{"
+       (str/join ", " #?(:clj (seq s) :cljs (es6-iterator-seq (.values s))))
+       "}"))
+
 ;; Math helpers
 (defn nex-abs [n] #?(:clj (Math/abs (double n)) :cljs (js/Math.abs n)))
 (defn nex-round [n] #?(:clj (Math/round (double n)) :cljs (js/Math.round n)))
@@ -88,6 +127,7 @@
 (defn nex-array-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :ArrayCursor)))
 (defn nex-string-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :StringCursor)))
 (defn nex-map-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :MapCursor)))
+(defn nex-set-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :SetCursor)))
 
 ;; Subscript helper (works on both Array and Map)
 (defn nex-coll-get [coll idx]
@@ -641,7 +681,7 @@
 
 (defn- cursor-subtype-runtime?
   [runtime-type target-type]
-  (and (#{"ArrayCursor" "StringCursor" "MapCursor"} runtime-type)
+  (and (#{"ArrayCursor" "StringCursor" "MapCursor" "SetCursor"} runtime-type)
        (= target-type "Cursor")))
 
 (defn- runtime-type-is?
@@ -777,6 +817,9 @@
     (nex-array? value)
     (nex-array-str value)
 
+    (nex-set? value)
+    (nex-set-str value)
+
     (coll? value)
     (pr-str value)
 
@@ -786,6 +829,21 @@
     ;; Everything else
     :else
     (pr-str value)))
+
+(defn nex-display-value
+  "Format a value for Console output.
+   Scalars keep their user-facing form; structured values use Nex syntax."
+  [value]
+  (cond
+    (or (nex-map? value)
+        (nex-array? value)
+        (nex-set? value)
+        (nil? value)
+        (nex-object? value)
+        (and (map? value) (:nex-builtin-type value)))
+    (nex-format-value value)
+    :else
+    (str value)))
 
 ;;
 ;; Built-in Functions
@@ -870,6 +928,7 @@
     (case (:base-type field-type)
       "Array" (nex-array)
       "Map" (nex-map)
+      "Set" (nex-set)
       nil)
 
     ;; Handle simple types
@@ -1094,15 +1153,29 @@
     "remove"       (fn [m key & _] (nex-map-remove m key))
     "cursor"       (fn [m & _]
                      {:nex-builtin-type :MapCursor
-                      :source m
-                      :keys (atom (nex-map-keys m))
-                      :index (atom 0)})}
+                     :source m
+                     :keys (atom (nex-map-keys m))
+                     :index (atom 0)})}
+
+   :Set
+   {"contains"             (fn [s value & _] (nex-set-contains s value))
+    "union"                (fn [s other & _] (nex-set-union s other))
+    "difference"           (fn [s other & _] (nex-set-difference s other))
+    "intersection"         (fn [s other & _] (nex-set-intersection s other))
+    "symmetric_difference" (fn [s other & _] (nex-set-symmetric-difference s other))
+    "size"                 (fn [s & _] (nex-set-size s))
+    "is_empty"             (fn [s & _] (nex-set-empty? s))
+    "cursor"               (fn [s & _]
+                             {:nex-builtin-type :SetCursor
+                              :source s
+                              :values (atom #?(:clj (vec s) :cljs (vec (es6-iterator-seq (.values s)))))
+                              :index (atom 0)})}
 
    :Console
-   {"print"        (fn [_ msg & _] (nex-console-print (str msg)) nil)
-    "print_line"   (fn [_ msg & _] (nex-console-println (str msg)) nil)
+   {"print"        (fn [_ msg & _] (nex-console-print (nex-display-value msg)) nil)
+    "print_line"   (fn [_ msg & _] (nex-console-println (nex-display-value msg)) nil)
     "read_line"    (fn [_ & args] (when (seq args) (nex-console-print (str (first args)))) (nex-console-read-line))
-    "error"        (fn [_ msg & _] (nex-console-error (str msg)) nil)
+    "error"        (fn [_ msg & _] (nex-console-error (nex-display-value msg)) nil)
     "new_line"     (fn [_ & _] (nex-console-newline) nil)
     "read_integer" (fn [_ & _] (nex-parse-integer (nex-console-read-line)))
     "read_real"    (fn [_ & _] (nex-parse-real (nex-console-read-line)))}
@@ -1177,6 +1250,28 @@
     "at_end"  (fn [c & _]
                 (>= @(:index c) (count @(:keys c))))}
 
+   :SetCursor
+   {"start"   (fn [c & _]
+                (reset! (:values c) #?(:clj (vec (:source c))
+                                       :cljs (vec (es6-iterator-seq (.values (:source c)))))
+                )
+                (reset! (:index c) 0)
+                nil)
+    "item"    (fn [c & _]
+                (let [vals @(:values c)
+                      idx @(:index c)]
+                  (if (< idx (count vals))
+                    (nth vals idx)
+                    (throw (ex-info "Cursor is at end" {:index idx})))))
+    "next"    (fn [c & _]
+                (let [vals @(:values c)
+                      idx @(:index c)]
+                  (when (< idx (count vals))
+                    (swap! (:index c) inc))
+                  nil))
+    "at_end"  (fn [c & _]
+                (>= @(:index c) (count @(:values c))))}
+
    :Window
    {"show"          (fn [w & _] (turtle/show-window w))
     "close"         (fn [w & _] (turtle/close-window w))
@@ -1238,6 +1333,7 @@
     (boolean? value) :Boolean
     (nex-array? value) :Array
     (nex-map? value) :Map
+    (nex-set? value) :Set
     (nex-console? value) :Console
     (nex-file? value) :File
     (nex-process? value) :Process
@@ -1247,6 +1343,7 @@
     (nex-array-cursor? value) :ArrayCursor
     (nex-string-cursor? value) :StringCursor
     (nex-map-cursor? value) :MapCursor
+    (nex-set-cursor? value) :SetCursor
     :else nil))
 
 (defn call-builtin-method
@@ -1932,6 +2029,10 @@
   ;; Evaluate all elements and return as a mutable array
   (nex-array-from (mapv #(eval-node ctx %) elements)))
 
+(defmethod eval-node :set-literal
+  [ctx {:keys [elements]}]
+  (nex-set-from (mapv #(eval-node ctx %) elements)))
+
 (defmethod eval-node :map-literal
   [ctx {:keys [entries]}]
   ;; Evaluate all key-value pairs and return as a mutable map
@@ -2018,6 +2119,17 @@
                (throw (ex-info "File requires constructor: create File.open(path)" {:class-name "File"})))
              {:nex-builtin-type :File :path (first arg-values)})
     "Process" {:nex-builtin-type :Process}
+    "Set" (let [arg-values (mapv #(eval-node ctx %) args)]
+            (cond
+              (nil? constructor) (nex-set)
+              (= constructor "from_array") (let [source (first arg-values)]
+                                             (cond
+                                               (nex-array? source) (nex-set-from #?(:clj source :cljs (array-seq source)))
+                                               (sequential? source) (nex-set-from source)
+                                               :else (throw (ex-info "Set.from_array requires an array"
+                                                                     {:class-name "Set"}))))
+              :else (throw (ex-info (str "Constructor not found: Set." constructor)
+                                    {:class-name "Set" :constructor constructor}))))
     "Window" (let [arg-values (mapv #(eval-node ctx %) args)]
                (case constructor
                  "with_title"

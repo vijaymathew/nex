@@ -16,6 +16,7 @@
 (def ^:dynamic *own-fields* #{})        ;; field names defined on current class
 (def ^:dynamic *constant-names* #{})    ;; accessible class constants in current class
 (def ^:dynamic *local-names* #{})       ;; method params + loop vars (shadow parent fields)
+(def ^:dynamic *local-types* {})        ;; local/param name -> Nex type
 (def ^:dynamic *all-method-names* #{})  ;; own + delegated parent method names
 (def ^:dynamic *field-types* {})        ;; field-name -> type, own + parent
 (def ^:dynamic *class-invariants* [])   ;; effective class invariants (inherited + local, deduped)
@@ -47,6 +48,7 @@
       "String" "String"
       "Array" "ArrayList"
       "Map" "HashMap"
+      "Set" "LinkedHashSet"
       "Console" "Object"
       "File" "java.io.File"
       "Process" "Object"
@@ -72,6 +74,7 @@
            java-base (case base-type
                       "Array" "ArrayList"
                       "Map" "HashMap"
+                      "Set" "LinkedHashSet"
                       base-type)
            args (:type-args nex-type)]
        (if args
@@ -93,9 +96,10 @@
          "Decimal" "java.math.BigDecimal"
          "Char" "char"
          "Boolean" "boolean"
-         "String" "String"
-         "Array" "ArrayList"
-         "Map" "HashMap"
+        "String" "String"
+        "Array" "ArrayList"
+        "Map" "HashMap"
+        "Set" "LinkedHashSet"
         "Console" "Object"
         "File" "java.io.File"
         "Process" "Object"
@@ -118,6 +122,7 @@
         ;; Use Java diamond operator for type inference
         "Array" (str "new ArrayList<>()")
         "Map" (str "new HashMap<>()")
+        "Set" (str "new LinkedHashSet<>()")
         "null"))
 
     ;; Handle basic types
@@ -132,6 +137,7 @@
       "String" "\"\""
       "Array" "new ArrayList<>()"
       "Map" "new HashMap<>()"
+      "Set" "new LinkedHashSet<>()"
       "Console" "new Object() /* Console */"
       "File" "null"
       "Process" "new Object() /* Process */"
@@ -246,6 +252,7 @@
     "compare"     (fn [target args] (str "Integer.signum(" target ".compareTo(String.valueOf(" args ")))"))
     "hash"        (fn [target _] (str target ".hashCode()"))
     "split"       (fn [target args] (str "new ArrayList<>(Arrays.asList(" target ".split(" args ")))"))
+    "cursor"      (fn [target _] (str "NexRuntime.stringCursor(" target ")"))
     ;; String operators
     "plus"        (fn [target args] (str "(" target " + " args ")"))
     "equals"      (fn [target args] (str target ".equals(" args ")"))
@@ -367,7 +374,8 @@
     "remove"    (fn [target args] (str "(" target ".remove((int)" args "), " target ")"))
     "reverse"   (fn [target _] (str "new ArrayList<>(" target ".reversed())"))
     "sort"      (fn [target _] (str "(Collections.sort(" target "), " target ")"))
-    "slice"     (fn [target args] (str "new ArrayList<>(" target ".subList(" args "))"))}
+    "slice"     (fn [target args] (str "new ArrayList<>(" target ".subList(" args "))"))
+    "cursor"    (fn [target _] (str "NexRuntime.arrayCursor(" target ")"))}
 
    :Map
    {"get"          (fn [target args] (str target ".get(" args ")"))
@@ -378,7 +386,18 @@
     "contains_key" (fn [target args] (str target ".containsKey(" args ")"))
     "keys"         (fn [target _] (str "new ArrayList<>(" target ".keySet())"))
     "values"       (fn [target _] (str "new ArrayList<>(" target ".values())"))
-    "remove"       (fn [target args] (str "(" target ".remove(" args "), " target ")"))}
+    "remove"       (fn [target args] (str "(" target ".remove(" args "), " target ")"))
+    "cursor"       (fn [target _] (str "NexRuntime.mapCursor(" target ")"))}
+
+   :Set
+   {"contains"             (fn [target args] (str target ".contains(" args ")"))
+    "union"                (fn [target args] (str "NexRuntime.setUnion(" target ", " args ")"))
+    "difference"           (fn [target args] (str "NexRuntime.setDifference(" target ", " args ")"))
+    "intersection"         (fn [target args] (str "NexRuntime.setIntersection(" target ", " args ")"))
+    "symmetric_difference" (fn [target args] (str "NexRuntime.setSymmetricDifference(" target ", " args ")"))
+    "size"                 (fn [target _] (str target ".size()"))
+    "is_empty"             (fn [target _] (str target ".isEmpty()"))
+    "cursor"               (fn [target _] (str "NexRuntime.setCursor(" target ")"))}
 
    :Image
    {"width"        (fn [target _] (str target ".width()"))
@@ -441,6 +460,61 @@
             (get constants-by-name (:method expr) "Any")
             "Any")
     "Any"))
+
+(defn infer-expression-type
+  "Infer a Nex type for code generation dispatch."
+  [expr]
+  (cond
+    (string? expr) (or (get *local-types* expr)
+                       (get *field-types* expr)
+                       "Any")
+    (not (map? expr)) "Any"
+    :else
+    (case (:type expr)
+      :string "String"
+      :integer "Integer"
+      :real "Real"
+      :boolean "Boolean"
+      :char "Char"
+      :array-literal "Array"
+      :map-literal "Map"
+      :set-literal "Set"
+      :create (:class-name expr)
+      :identifier (or (get *local-types* (:name expr))
+                      (get *field-types* (:name expr))
+                      "Any")
+      "Any")))
+
+(defn extract-typed-locals
+  "Collect typed local bindings from statements."
+  [stmts]
+  (reduce
+   (fn [acc stmt]
+     (if-not (map? stmt)
+       acc
+       (case (:type stmt)
+         :let (if-let [t (:var-type stmt)]
+                (assoc acc (:name stmt) t)
+                acc)
+         :if (merge acc
+                    (extract-typed-locals (:then stmt))
+                    (reduce merge {} (map #(extract-typed-locals (:then %)) (:elseif stmt)))
+                    (extract-typed-locals (:else stmt)))
+         :loop (merge acc
+                      (extract-typed-locals (:init stmt))
+                      (extract-typed-locals (:body stmt)))
+         :scoped-block (merge acc
+                              (extract-typed-locals (:body stmt))
+                              (extract-typed-locals (:rescue stmt)))
+         :with (merge acc (extract-typed-locals (:body stmt)))
+         :case (merge acc
+                      (reduce merge {} (map (fn [clause]
+                                              (extract-typed-locals [(:body clause)]))
+                                            (:clauses stmt)))
+                      (extract-typed-locals (when-let [else-stmt (:else stmt)] [else-stmt])))
+         acc)))
+   {}
+   (or stmts [])))
 
 (defn get-parent-constants
   "Get recursively inherited public constants from a parent class."
@@ -525,6 +599,8 @@
                   (str target-code "." method "(" args-code ")")))
               ;; External object: try builtins, then default
               (or
+               (when-let [method-fn (get-in builtin-method-mappings [(keyword (infer-expression-type target)) method])]
+                 (method-fn target-code args-code))
                ;; Try Integer methods first (for operators, numeric is more common)
                (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
                  (method-fn target-code args-code))
@@ -545,6 +621,9 @@
                  (method-fn target-code args-code))
                ;; Try Map methods
                (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
+                 (method-fn target-code args-code))
+               ;; Try Set methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Set method])]
                  (method-fn target-code args-code))
                ;; Try Image methods
                (when-let [method-fn (get-in builtin-method-mappings [:Image method])]
@@ -589,6 +668,9 @@
       "Console" "new Object() /* Console */"
       "File" (str "new java.io.File(" args-code ")")
       "Process" "new Object() /* Process */"
+      "Set" (if (= constructor "from_array")
+              (str "NexRuntime.setFromArray(" args-code ")")
+              "new LinkedHashSet<>()")
       "Window" (str "new NexWindow(" args-code ")")
       "Turtle" (str "new NexTurtle(" args-code ")")
       "Image" (if (= constructor "from_file")
@@ -623,6 +705,12 @@
                                           (generate-expression value) ")"))
                                    entries))]
     (str "new HashMap<>() {{ " entries-code "; }}")))
+
+(defn generate-set-literal
+  "Generate Java code for set literal"
+  [elements]
+  (let [elements-code (str/join ", " (map generate-expression elements))]
+    (str "NexRuntime.setOf(" elements-code ")")))
 
 (defn java-convert-type
   "Return a nullable Java type suitable for convert bindings/casts."
@@ -762,6 +850,7 @@
     :create (generate-create-expr expr)
     :subscript (generate-subscript-expr expr)
     :array-literal (generate-array-literal (:elements expr))
+    :set-literal (generate-set-literal (:elements expr))
     :map-literal (generate-map-literal (:entries expr))
     :convert (generate-convert-expr expr)
     :anonymous-function (let [class-def (:class-def expr)
@@ -1118,11 +1207,19 @@
   "Generate Java code for a method"
   [level {:keys [name params return-type body require ensure rescue visibility note]} opts]
   (let [param-names (set (map :name params))
+        param-types (into {} (map (juxt :name :type) params))
         convert-bindings (collect-convert-bindings-block (concat body (or rescue [])))
         convert-var-names (set (map :name convert-bindings))
+        convert-var-types (into {} (map (juxt :name :target-type) convert-bindings))
+        local-types (merge param-types
+                           convert-var-types
+                           (extract-typed-locals body)
+                           (extract-typed-locals rescue)
+                           (when return-type {"result" return-type}))
         local-names (cond-> (into param-names convert-var-names)
                       return-type (conj "result"))]
-    (binding [*local-names* (into *local-names* local-names)]
+    (binding [*local-names* (into *local-names* local-names)
+              *local-types* (merge *local-types* local-types)]
       (let [java-return (if return-type
                           (nex-type-to-java return-type)
                           "void")
@@ -1205,26 +1302,36 @@
   [level class-name {:keys [name params body require ensure rescue]} opts]
   (let [local-name (class-name-to-local class-name)
         param-names (set (map :name params))
+        param-types (into {} (map (juxt :name :type) params))
         convert-bindings (collect-convert-bindings-block (concat body (or rescue [])))
         convert-var-names (set (map :name convert-bindings))
+        convert-var-types (into {} (map (juxt :name :target-type) convert-bindings))
+        local-types (merge param-types
+                           convert-var-types
+                           (extract-typed-locals body)
+                           (extract-typed-locals rescue))
         local-names (into param-names convert-var-names)
         params-code (str/join ", "
                               (map (fn [{:keys [name type]}]
                                      (str (nex-type-to-java type) " " name))
                                    params))
         preconditions (binding [*this-name* local-name
-                                *local-names* (into *local-names* local-names)]
+                                *local-names* (into *local-names* local-names)
+                                *local-types* (merge *local-types* local-types)]
                         (generate-assertions (+ level 1) require "Precondition" opts))
         statements (binding [*this-name* local-name
-                             *local-names* (into *local-names* local-names)]
+                             *local-names* (into *local-names* local-names)
+                             *local-types* (merge *local-types* local-types)]
                      (if rescue
                        [(generate-rescue (+ level 1) body rescue #{})]
                        (mapv #(generate-statement (+ level 1) %) body)))
         postconditions (binding [*this-name* local-name
-                                 *local-names* (into *local-names* local-names)]
+                                 *local-names* (into *local-names* local-names)
+                                 *local-types* (merge *local-types* local-types)]
                          (generate-assertions (+ level 1) ensure "Postcondition" opts))
         class-invariant-checks (binding [*this-name* local-name
-                                         *local-names* (into *local-names* local-names)]
+                                         *local-names* (into *local-names* local-names)
+                                         *local-types* (merge *local-types* local-types)]
                                  (generate-assertions (+ level 1) *class-invariants* "Class invariant" opts))]
     (str/join "\n"
               (concat
@@ -2047,6 +2154,7 @@ public class NexTurtle {
        "    if (value instanceof Float || value instanceof Double) return \"Real\";\n"
        "    if (value instanceof java.util.ArrayList) return \"Array\";\n"
        "    if (value instanceof java.util.HashMap) return \"Map\";\n"
+       "    if (value instanceof java.util.LinkedHashSet) return \"Set\";\n"
        "    String simple = value.getClass().getSimpleName();\n"
        "    return (simple == null || simple.isEmpty()) ? value.getClass().getName() : simple;\n"
        "  }\n\n"
@@ -2058,10 +2166,83 @@ public class NexTurtle {
        "    if (\"Integer\".equals(runtimeType) && (\"Integer64\".equals(targetType) || \"Real\".equals(targetType) || \"Decimal\".equals(targetType))) return true;\n"
        "    if (\"Integer64\".equals(runtimeType) && (\"Real\".equals(targetType) || \"Decimal\".equals(targetType))) return true;\n"
        "    if (\"Real\".equals(runtimeType) && \"Decimal\".equals(targetType)) return true;\n"
-       "    if ((\"ArrayCursor\".equals(runtimeType) || \"StringCursor\".equals(runtimeType) || \"MapCursor\".equals(runtimeType)) && \"Cursor\".equals(targetType)) return true;\n"
+       "    if ((\"ArrayCursor\".equals(runtimeType) || \"StringCursor\".equals(runtimeType) || \"MapCursor\".equals(runtimeType) || \"SetCursor\".equals(runtimeType)) && \"Cursor\".equals(targetType)) return true;\n"
        "    if (value == null) return false;\n"
        "    if (hasParentType(value, targetType, new java.util.IdentityHashMap<>())) return true;\n"
        "    return false;\n"
+       "  }\n\n"
+       "  @SafeVarargs\n"
+       "  public static <T> java.util.LinkedHashSet<T> setOf(T... values) {\n"
+       "    java.util.LinkedHashSet<T> out = new java.util.LinkedHashSet<>();\n"
+       "    for (T value : values) out.add(value);\n"
+       "    return out;\n"
+       "  }\n\n"
+       "  public static <T> java.util.LinkedHashSet<T> setFromArray(java.util.Collection<T> values) {\n"
+       "    return new java.util.LinkedHashSet<>(values);\n"
+       "  }\n\n"
+       "  public static <T> java.util.LinkedHashSet<T> setUnion(java.util.Set<T> a, java.util.Set<T> b) {\n"
+       "    java.util.LinkedHashSet<T> out = new java.util.LinkedHashSet<>(a);\n"
+       "    out.addAll(b);\n"
+       "    return out;\n"
+       "  }\n\n"
+       "  public static <T> java.util.LinkedHashSet<T> setDifference(java.util.Set<T> a, java.util.Set<T> b) {\n"
+       "    java.util.LinkedHashSet<T> out = new java.util.LinkedHashSet<>(a);\n"
+       "    out.removeAll(b);\n"
+       "    return out;\n"
+       "  }\n\n"
+       "  public static <T> java.util.LinkedHashSet<T> setIntersection(java.util.Set<T> a, java.util.Set<T> b) {\n"
+       "    java.util.LinkedHashSet<T> out = new java.util.LinkedHashSet<>(a);\n"
+       "    out.retainAll(b);\n"
+       "    return out;\n"
+       "  }\n\n"
+       "  public static <T> java.util.LinkedHashSet<T> setSymmetricDifference(java.util.Set<T> a, java.util.Set<T> b) {\n"
+       "    java.util.LinkedHashSet<T> out = new java.util.LinkedHashSet<>();\n"
+       "    for (T value : a) if (!b.contains(value)) out.add(value);\n"
+       "    for (T value : b) if (!a.contains(value)) out.add(value);\n"
+       "    return out;\n"
+       "  }\n\n"
+       "  public static class ArrayCursor<T> {\n"
+       "    private final java.util.List<T> source;\n"
+       "    private int index = 0;\n"
+       "    public ArrayCursor(java.util.List<T> source) { this.source = source; }\n"
+       "    public void start() { index = 0; }\n"
+       "    public T item() { if (index >= source.size()) throw new RuntimeException(\"Cursor is at end\"); return source.get(index); }\n"
+       "    public void next() { if (index < source.size()) index++; }\n"
+       "    public boolean at_end() { return index >= source.size(); }\n"
+       "  }\n\n"
+       "  public static class StringCursor {\n"
+       "    private final String source;\n"
+       "    private int index = 0;\n"
+       "    public StringCursor(String source) { this.source = source; }\n"
+       "    public void start() { index = 0; }\n"
+       "    public char item() { if (index >= source.length()) throw new RuntimeException(\"Cursor is at end\"); return source.charAt(index); }\n"
+       "    public void next() { if (index < source.length()) index++; }\n"
+       "    public boolean at_end() { return index >= source.length(); }\n"
+       "  }\n\n"
+       "  public static class MapCursor<K, V> {\n"
+       "    private final java.util.Map<K, V> source;\n"
+       "    private java.util.ArrayList<K> keys;\n"
+       "    private int index = 0;\n"
+       "    public MapCursor(java.util.Map<K, V> source) { this.source = source; this.keys = new java.util.ArrayList<>(source.keySet()); }\n"
+       "    public void start() { this.keys = new java.util.ArrayList<>(source.keySet()); index = 0; }\n"
+       "    public java.util.ArrayList<Object> item() { if (index >= keys.size()) throw new RuntimeException(\"Cursor is at end\"); K key = keys.get(index); return new java.util.ArrayList<>(java.util.Arrays.asList(key, source.get(key))); }\n"
+       "    public void next() { if (index < keys.size()) index++; }\n"
+       "    public boolean at_end() { return index >= keys.size(); }\n"
+       "  }\n\n"
+       "  public static class SetCursor<T> {\n"
+       "    private final java.util.Set<T> source;\n"
+       "    private java.util.ArrayList<T> values;\n"
+       "    private int index = 0;\n"
+       "    public SetCursor(java.util.Set<T> source) { this.source = source; this.values = new java.util.ArrayList<>(source); }\n"
+       "    public void start() { this.values = new java.util.ArrayList<>(source); index = 0; }\n"
+       "    public T item() { if (index >= values.size()) throw new RuntimeException(\"Cursor is at end\"); return values.get(index); }\n"
+       "    public void next() { if (index < values.size()) index++; }\n"
+       "    public boolean at_end() { return index >= values.size(); }\n"
+       "  }\n\n"
+       "  public static <T> ArrayCursor<T> arrayCursor(java.util.List<T> source) { return new ArrayCursor<>(source); }\n"
+       "  public static StringCursor stringCursor(String source) { return new StringCursor(source); }\n"
+       "  public static <K, V> MapCursor<K, V> mapCursor(java.util.Map<K, V> source) { return new MapCursor<>(source); }\n"
+       "  public static <T> SetCursor<T> setCursor(java.util.Set<T> source) { return new SetCursor<>(source); }\n"
        "  }\n"
        "}"))
 

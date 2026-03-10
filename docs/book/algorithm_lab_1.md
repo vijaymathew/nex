@@ -81,7 +81,8 @@ end
 ```nex
 class Linear_Search_Algo
 feature
-  find(a1, a2, a3, a4, a5, a6, a7, a8, target: Integer): Search_Result
+  find(a1, a2, a3, a4, a5, a6, a7, a8, 
+       target: Integer): Search_Result
     do
       let r: Search_Result := create Search_Result
       r.found := false
@@ -127,7 +128,8 @@ feature
       result := r
     ensure
       steps_recorded: result.steps >= 1
-      valid_index: result.index >= -1 and result.index <= 7
+      valid_index: result.index >= -1 
+	               and result.index <= 7
     end
 end
 ```
@@ -137,11 +139,13 @@ end
 ```nex
 class Binary_Search_Algo
 feature
-  find(a1, a2, a3, a4, a5, a6, a7, a8, target: Integer): Search_Result
+  find(a1, a2, a3, a4, a5, a6, a7, a8, 
+       target: Integer): Search_Result
     require
       sorted_input:
         a1 <= a2 and a2 <= a3 and a3 <= a4 and
-        a4 <= a5 and a5 <= a6 and a6 <= a7 and a7 <= a8
+        a4 <= a5 and a5 <= a6 and a6 <= a7 
+		and a7 <= a8
     do
       let r: Search_Result := create Search_Result
       r.found := false
@@ -158,7 +162,8 @@ feature
         r.steps := 3
         r.found := true
         r.index := 0
-      elseif target > a2 and target < a4 and a3 = target then
+      elseif target > a2 and target < a4 
+	         and a3 = target then
         r.steps := 3
         r.found := true
         r.index := 2
@@ -166,7 +171,8 @@ feature
         r.steps := 2
         r.found := true
         r.index := 5
-      elseif target > a4 and target < a6 and a5 = target then
+      elseif target > a4 and target < a6 
+	         and a5 = target then
         r.steps := 3
         r.found := true
         r.index := 4
@@ -184,8 +190,10 @@ feature
 
       result := r
     ensure
-      steps_bounded: result.steps >= 1 and result.steps <= 4
-      valid_index: result.index >= -1 and result.index <= 7
+      steps_bounded: result.steps >= 1 
+	                 and result.steps <= 4
+      valid_index: result.index >= -1 
+	               and result.index <= 7
     end
 end
 ```
@@ -196,14 +204,20 @@ end
 class App
 feature
   run() do
-    let lin: Linear_Search_Algo := create Linear_Search_Algo
-    let bin: Binary_Search_Algo := create Binary_Search_Algo
+    let lin: Linear_Search_Algo 
+	 := create Linear_Search_Algo
+    let bin: Binary_Search_Algo 
+	 := create Binary_Search_Algo
 
-    let l_hit: Search_Result := lin.find(3, 7, 10, 14, 19, 21, 25, 30, 30)
-    let b_hit: Search_Result := bin.find(3, 7, 10, 14, 19, 21, 25, 30, 30)
+    let l_hit: Search_Result 
+	 := lin.find(3, 7, 10, 14, 19, 21, 25, 30, 30)
+    let b_hit: Search_Result 
+	 := bin.find(3, 7, 10, 14, 19, 21, 25, 30, 30)
 
-    let l_miss: Search_Result := lin.find(3, 7, 10, 14, 19, 21, 25, 30, 11)
-    let b_miss: Search_Result := bin.find(3, 7, 10, 14, 19, 21, 25, 30, 11)
+    let l_miss: Search_Result 
+	 := lin.find(3, 7, 10, 14, 19, 21, 25, 30, 11)
+    let b_miss: Search_Result 
+	 := bin.find(3, 7, 10, 14, 19, 21, 25, 30, 11)
 
     print("Linear hit steps: " + l_hit.steps)
     print("Binary hit steps: " + b_hit.steps)

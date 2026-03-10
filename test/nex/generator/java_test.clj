@@ -259,6 +259,35 @@ end"
       (is (str/includes? java-code "Frame.MAX_WIDTH"))
       (is (str/includes? java-code "MAX_WIDTH")))))
 
+(deftest set-generation-test
+  (testing "Set literals and Set.from_array translate to Java helpers"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let s: Set[Integer] := {1, 2, 3}
+      let t: Set[Integer] := create Set[Integer].from_array([2, 3])
+      print(s.union(t))
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "NexRuntime.setOf(1, 2, 3)"))
+      (is (str/includes? java-code "NexRuntime.setFromArray(new ArrayList<>(Arrays.asList(2, 3)))"))
+      (is (str/includes? java-code "NexRuntime.setUnion(s, t)")))))
+
+(deftest set-cursor-generation-test
+  (testing "Across on sets translates via runtime set cursor helper"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      across {1, 2} as x do
+        print(x)
+      end
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "NexRuntime.setCursor"))
+      (is (str/includes? java-code "class SetCursor")))))
+
 (deftest convert-expression-test
   (testing "Convert expression in if-guard emits Java runtime type check and binding"
     (let [nex-code "class Vehicle

@@ -332,6 +332,7 @@ literal
     | nilLiteral
     | STRING
     | arrayLiteral
+    | setLiteral
     | mapLiteral
     ;
 
@@ -367,11 +368,16 @@ arrayLiteral
     ;
 
 mapLiteral
-    : '{' (mapEntry (',' mapEntry)*)? '}'
+    : '{' '}'
+    | '{' mapEntry (',' mapEntry)* '}'
     ;
 
 mapEntry
     : expression ':' expression
+    ;
+
+setLiteral
+    : '{' expression (',' expression)* '}'
     ;
 
 /*

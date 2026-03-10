@@ -86,7 +86,8 @@ feature
 
   ordered_ids(): String
     do
-      result := t1.id + " -> " + t2.id + " -> " + t3.id
+      result := t1.id + " -> " + t2.id 
+	            + " -> " + t3.id
     ensure
       non_empty: result /= ""
     end

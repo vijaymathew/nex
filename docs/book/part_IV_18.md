@@ -63,7 +63,8 @@ feature
 
   has_edge(from_node, to_node: String): Boolean
     require
-      non_empty_nodes: from_node /= "" and to_node /= ""
+      non_empty_nodes: from_node /= "" 
+	                   and to_node /= ""
     do
       if from_node = "A" and to_node = "B" then
         result := a_to_b
@@ -84,7 +85,8 @@ feature
     do
       if has_edge("A", "D") then
         result := "A->D"
-      elseif has_edge("A", "B") and has_edge("B", "C") and has_edge("C", "D") then
+      elseif has_edge("A", "B") and has_edge("B", "C") 
+	         and has_edge("C", "D") then
         result := "A->B->C->D"
       else
         result := "UNREACHABLE"
