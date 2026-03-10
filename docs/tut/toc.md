@@ -57,13 +57,13 @@ Arrays of maps. Maps of arrays. When flat structures are enough and when nesting
 ## Part IV: Classes and Objects
 
 ### Chapter 12: Classes
-Defining a class. Fields and methods. The `create` constructor. Object creation with `create`. The `this` reference. Uniform access — why `obj.field` and `obj.method` look the same.
+Defining a class. Fields, methods, and class constants. The `create` constructor. Object creation with `create`. The `this` reference. Uniform access — why `obj.field` and `obj.method` look the same.
 
 ### Chapter 13: Designing Classes Well
 One class, one responsibility. What belongs inside a class and what belongs outside. The difference between data and behavior. Classes as models of real things.
 
 ### Chapter 14: Inheritance
-Extending a class with `inherit`. Redefining methods. Renaming to resolve conflicts. When inheritance is the right tool and when it is not. Polymorphism and substitution.
+Extending a class with `inherit`. Redefining methods. Inherited public constants. Renaming to resolve conflicts. When inheritance is the right tool and when it is not. Polymorphism and substitution.
 
 ### Chapter 15: Generic Classes
 Parameterised classes with `[T]`. Writing classes that work for any type. Type constraints with `->`. The standard collection classes as examples of good generic design.

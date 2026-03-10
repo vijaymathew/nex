@@ -211,6 +211,22 @@ class Point
 end
 ```
 
+Class constants:
+
+```nex
+class Layout
+  feature
+    HELLO: String = "hello"
+    MAX_WIDTH = 450
+end
+```
+
+External access uses the class name:
+
+```nex
+print(Layout.MAX_WIDTH)
+```
+
 Object creation:
 
 ```nex
