@@ -59,6 +59,12 @@ Consider the requirement:
 
 ```nex
 class Path_Result
+create
+  make(status, path: String, total_cost: Integer) do
+    this.status := status
+    this.path := path
+    this.total_cost := total_cost
+  end
 feature
   status: String
   path: String
@@ -81,27 +87,20 @@ feature
       non_negative_costs:
         a_b >= 0 and b_d >= 0 and a_c >= 0 and c_d >= 0 and a_d >= 0
     do
-      let r: Path_Result := create Path_Result
       let abd: Integer := a_b + b_d
       let acd: Integer := a_c + c_d
 
       if a_d <= abd and a_d <= acd then
-        r.status := "FOUND"
-        r.path := "A->D"
-        r.total_cost := a_d
+        result := create Path_Result.make("FOUND", "A->D", a_d)
       elseif abd <= acd then
-        r.status := "FOUND"
-        r.path := "A->B->D"
-        r.total_cost := abd
+        result := create Path_Result.make("FOUND", "A->B->D", abd)
       else
-        r.status := "FOUND"
-        r.path := "A->C->D"
-        r.total_cost := acd
+        result := create Path_Result.make("FOUND", "A->C->D", acd)
       end
-
-      result := r
     ensure
-      known_status: result.status = "FOUND" or result.status = "UNREACHABLE"
+      known_status:
+        result.status = "FOUND" or
+        result.status = "UNREACHABLE"
     end
 end
 ```

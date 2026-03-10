@@ -26,7 +26,7 @@ Together with the scalar and collection classes, they form the everyday standard
 Construction:
 
 ```nex
-let con := create Console
+let con: Console := create Console
 ```
 
 Useful operations:
@@ -41,9 +41,9 @@ Useful operations:
 Example:
 
 ```nex
-let con := create Console
+let con: Console := create Console
 con.print_line("What is your name?")
-let name := con.read_line()
+let name: String := con.read_line()
 con.print_line("Hello, " + name)
 ```
 
@@ -55,7 +55,7 @@ con.print_line("Hello, " + name)
 Construction:
 
 ```nex
-let f := create File.open("notes.txt")
+let f: File := create File.open("notes.txt")
 ```
 
 Useful operations:
@@ -71,7 +71,7 @@ Useful operations:
 Example:
 
 ```nex
-let f := create File.open("notes.txt")
+let f: File := create File.open("notes.txt")
 f.write("line 1")
 f.append("\nline 2")
 print(f.lines())
@@ -87,7 +87,7 @@ Use file routines at the boundary of the system. Core logic should usually opera
 Construction:
 
 ```nex
-let p := create Process
+let p: Process := create Process
 ```
 
 Useful operations:
@@ -99,7 +99,7 @@ Useful operations:
 Example:
 
 ```nex
-let p := create Process
+let p: Process := create Process
 print(p.getenv("HOME"))
 print(p.command_line())
 ```
@@ -114,7 +114,7 @@ Nex includes a lightweight graphics layer through `Window`, `Turtle`, and `Image
 Use `Window` for drawing lines, rectangles, circles, text, and images.
 
 ```nex
-let w := create Window.with_title("Demo", 640, 360)
+let w: Window := create Window.with_title("Demo", 640, 360)
 w.show()
 w.bgcolor("white")
 w.set_color("blue")
@@ -128,7 +128,7 @@ w.refresh()
 Use `Turtle` for turtle-graphics style drawing.
 
 ```nex
-let t := create Turtle.on_window(w)
+let t: Turtle := create Turtle.on_window(w)
 t.color("red")
 t.forward(80)
 t.right(120)
@@ -142,7 +142,7 @@ t.forward(80)
 Use `Image` to load pictures for drawing in a window.
 
 ```nex
-let img := create Image.from_file("sprite.png")
+let img: Image := create Image.from_file("sprite.png")
 w.draw_image(img, 220, 100)
 ```
 

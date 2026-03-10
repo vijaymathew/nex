@@ -50,6 +50,12 @@ When the eligibility rules change, the domain layer changes. The application lay
 
 ```nex
 class Task
+create
+  make(task_id: String, tier: String, status: String) do
+    this.task_id := task_id
+    this.tier := tier
+    this.status := status
+  end
 feature
   task_id: String
   tier: String
@@ -72,6 +78,10 @@ feature
 end
 
 class Dispatch_App_Service
+create
+  make(policy: Reroute_Policy) do
+    this.policy := policy
+  end
 feature
   policy: Reroute_Policy
 
@@ -85,7 +95,9 @@ feature
         result := "NO_REROUTE"
       end
     ensure
-      known_result: result = "REROUTE_TRIGGERED" or result = "NO_REROUTE"
+      known_result:
+        result = "REROUTE_TRIGGERED" or
+        result = "NO_REROUTE"
     end
 end
 ```

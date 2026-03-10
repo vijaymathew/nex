@@ -54,13 +54,13 @@ In Nex, we use classes and features to define these seams. The `require` and `en
 -- The Seam Definition
 deferred class Ranking_Strategy
 feature
-  rank(query: String; candidates: Array[String]): Array[String]
+  rank(query: String, candidates: Array[String]): Array[String]
     require
       query_present: query /= ""
-      has_candidates: candidates.count > 0
-    deferred
+      has_candidates: candidates.size > 0
+    do
     ensure
-      results_match_input_size: result.count = candidates.count
+      results_match_input_size: result.size = candidates.size
     end
 end
 
@@ -68,10 +68,9 @@ end
 class Legacy_Ranking
 inherit Ranking_Strategy
 feature
-  rank(query: String; candidates: Array[String]): Array[String]
+  rank(query: String, candidates: Array[String]): Array[String]
     do
-      -- Simple alphabetic sort as a placeholder
-      result := candidates.sorted
+      result := candidates
     end
 end
 
@@ -79,7 +78,7 @@ end
 class Modern_Ranking
 inherit Ranking_Strategy
 feature
-  rank(query: String; candidates: Array[String]): Array[String]
+  rank(query: String, candidates: Array[String]): Array[String]
     do
       -- Complex ranking logic...
       result := candidates -- placeholder
@@ -88,13 +87,30 @@ end
 
 -- The Consumer: Unchanged by variation
 class Search_Service
+create
+  make(strategy: Ranking_Strategy) do
+    this.strategy := strategy
+  end
 feature
   strategy: Ranking_Strategy
 
-  execute_search(q: String): Array[String]
+  fetch_from_index(q: String): Array[String]
+    require
+      query_present: q /= ""
     do
-      let initial_docs := fetch_from_index(q)
+      result := ["DOC:A", "DOC:B"]
+    ensure
+      has_candidates: result.size > 0
+    end
+
+  execute_search(q: String): Array[String]
+    require
+      query_present: q /= ""
+    do
+      let initial_docs: Array[String] := fetch_from_index(q)
       result := strategy.rank(q, initial_docs)
+    ensure
+      has_candidates: result.size > 0
     end
 end
 ```

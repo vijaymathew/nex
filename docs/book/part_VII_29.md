@@ -81,7 +81,8 @@ feature
       let t1: String := p.plan("A", "C")
       let t2: String := p.plan("C", "C")
       let t3: String := p.plan("X", "Z")
-      if t1 = "A->B->C" and t2 = "C" and t3 = "UNREACHABLE" then
+      if t1 = "A->B->C" and t2 = "C" 
+	     and t3 = "UNREACHABLE" then
         result := "PASS"
       else
         result := "FAIL"

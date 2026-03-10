@@ -50,11 +50,30 @@ In Nex, our explicit failure paths and contract checks provide the perfect frame
 
 ```nex
 -- The AI-generated proposal for a dispatch port with retry
+class Dispatch_Port
+feature
+  send(task_id: String): String
+    require
+      id_present: task_id /= ""
+    do
+      result := "SENT"
+    ensure
+      known_result:
+        result = "SENT" or
+        result = "TRANSIENT_FAILURE" or
+        result = "PERMANENT_FAILURE"
+    end
+end
+
 class Dispatch_With_Retry
+create
+  make(port: Dispatch_Port) do
+    this.port := port
+  end
 feature
   port: Dispatch_Port
 
-  send_task(task_id: String; max_attempts: Integer): String
+  send_task(task_id: String, max_attempts: Integer): String
     require
       id_present: task_id /= ""
       attempts_valid: max_attempts >= 1
@@ -63,8 +82,9 @@ feature
       let status: String := "TRANSIENT_FAILURE"
 
       from
-      until attempt > max_attempts or status = "SENT" or status = "PERMANENT_FAILURE"
-      loop
+      until attempt > max_attempts or
+            status = "SENT" or
+            status = "PERMANENT_FAILURE" do
         status := port.send(task_id)
         attempt := attempt + 1
       end

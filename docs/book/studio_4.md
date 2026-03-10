@@ -87,7 +87,7 @@ end
 
 class World_Update_Port
 feature
-  move_by_id(object_id: String; delta: Integer): String
+  move_by_id(object_id: String, delta: Integer): String
     require
       id_present: object_id /= ""
     do
@@ -106,6 +106,13 @@ After (Studio 4): callers depend on `Task_Query_Port`; concrete store is adapted
 
 ```nex
 class Delivery_Task_Store_V3
+create
+  make(k1: String, v1: String, k2: String, v2: String) do
+    this.k1 := k1
+    this.v1 := v1
+    this.k2 := k2
+    this.v2 := v2
+  end
 feature
   k1: String
   v1: String
@@ -129,6 +136,10 @@ feature
 end
 
 class Delivery_Task_Adapter
+create
+  make(store: Delivery_Task_Store_V3) do
+    this.store := store
+  end
 feature
   store: Delivery_Task_Store_V3
 
@@ -143,6 +154,10 @@ feature
 end
 
 class Delivery_Workflow
+create
+  make(tasks: Delivery_Task_Adapter) do
+    this.tasks := tasks
+  end
 feature
   tasks: Delivery_Task_Adapter
 
@@ -166,6 +181,12 @@ end
 
 ```nex
 class Doc_Index_V3
+create
+  make(dk1: String, dk2: String, dk3: String) do
+    this.dk1 := dk1
+    this.dk2 := dk2
+    this.dk3 := dk3
+  end
 feature
   dk1: String
   dk2: String
@@ -175,13 +196,18 @@ feature
     require
       id_present: doc_id /= ""
     do
-      result := doc_id = dk1 or doc_id = dk2 or doc_id = dk3
+      result := doc_id = dk1 or doc_id = dk2 
+	            or doc_id = dk3
     ensure
       bool_result: result = true or result = false
     end
 end
 
 class Doc_Query_Adapter
+create
+  make(idx: Doc_Index_V3) do
+    this.idx := idx
+  end
 feature
   idx: Doc_Index_V3
 
@@ -196,6 +222,10 @@ feature
 end
 
 class Link_Validation_Service
+create
+  make(docs: Doc_Query_Adapter) do
+    this.docs := docs
+  end
 feature
   docs: Doc_Query_Adapter
 
@@ -211,7 +241,10 @@ feature
         result := "VALID"
       end
     ensure
-      known_result: result = "VALID" or result = "MISSING_FROM" or result = "MISSING_TO"
+      known_result:
+        result = "VALID" or
+        result = "MISSING_FROM" or
+        result = "MISSING_TO"
     end
 end
 ```
@@ -220,11 +253,16 @@ end
 
 ```nex
 class World_Model_V3
+create
+  make(wk1: String, wx1: Integer) do
+    this.wk1 := wk1
+    this.wx1 := wx1
+  end
 feature
   wk1: String
   wx1: Integer
 
-  move_by_id(object_id: String; delta: Integer): String
+  move_by_id(object_id: String, delta: Integer): String
     require
       id_present: object_id /= ""
     do
@@ -240,10 +278,14 @@ feature
 end
 
 class World_Update_Adapter
+create
+  make(model: World_Model_V3) do
+    this.model := model
+  end
 feature
   model: World_Model_V3
 
-  move_by_id(object_id: String; delta: Integer): String
+  move_by_id(object_id: String, delta: Integer): String
     require
       id_present: object_id /= ""
     do
@@ -254,16 +296,22 @@ feature
 end
 
 class World_Step_Service
+create
+  make(updater: World_Update_Adapter) do
+    this.updater := updater
+  end
 feature
   updater: World_Update_Adapter
 
-  apply_player_input(object_id: String; delta: Integer): String
+  apply_player_input(object_id: String, 
+                     delta: Integer): String
     require
       id_present: object_id /= ""
     do
       result := updater.move_by_id(object_id, delta)
     ensure
-      known_result: result = "UPDATED" or result = "NOT_FOUND"
+      known_result: result = "UPDATED" 
+	                or result = "NOT_FOUND"
     end
 end
 ```
@@ -275,41 +323,36 @@ class App
 feature
   run() do
     -- Delivery setup
-    let ds: Delivery_Task_Store_V3 := create Delivery_Task_Store_V3
-    ds.k1 := "T-1"; ds.v1 := "PENDING"
-    ds.k2 := "T-2"; ds.v2 := "IN_TRANSIT"
-
-    let da: Delivery_Task_Adapter := create Delivery_Task_Adapter
-    da.store := ds
-
-    let dw: Delivery_Workflow := create Delivery_Workflow
-    dw.tasks := da
+    let ds: Delivery_Task_Store_V3
+      := create Delivery_Task_Store_V3.make(
+           "T-1", "PENDING", "T-2", "IN_TRANSIT"
+         )
+    let da: Delivery_Task_Adapter
+      := create Delivery_Task_Adapter.make(ds)
+    let dw: Delivery_Workflow := 
+	  create Delivery_Workflow.make(da)
 
     print(dw.dispatch_view("T-2"))   -- TASK_STATUS:IN_TRANSIT
     print(dw.dispatch_view("T-99"))  -- UNKNOWN_TASK
 
     -- Knowledge setup
-    let di: Doc_Index_V3 := create Doc_Index_V3
-    di.dk1 := "D-1"; di.dk2 := "D-2"; di.dk3 := "D-3"
-
-    let dqa: Doc_Query_Adapter := create Doc_Query_Adapter
-    dqa.idx := di
-
-    let lvs: Link_Validation_Service := create Link_Validation_Service
-    lvs.docs := dqa
+    let di: Doc_Index_V3
+      := create Doc_Index_V3.make("D-1", "D-2", "D-3")
+    let dqa: Doc_Query_Adapter := 
+	  create Doc_Query_Adapter.make(di)
+    let lvs: Link_Validation_Service
+      := create Link_Validation_Service.make(dqa)
 
     print(lvs.validate("D-1", "D-3"))   -- VALID
     print(lvs.validate("D-9", "D-3"))   -- MISSING_FROM
 
     -- World setup
-    let wm: World_Model_V3 := create World_Model_V3
-    wm.wk1 := "E-1"; wm.wx1 := 10
-
-    let wua: World_Update_Adapter := create World_Update_Adapter
-    wua.model := wm
-
-    let wss: World_Step_Service := create World_Step_Service
-    wss.updater := wua
+    let wm: World_Model_V3 := 
+	  create World_Model_V3.make("E-1", 10)
+    let wua: World_Update_Adapter
+      := create World_Update_Adapter.make(wm)
+    let wss: World_Step_Service := 
+	  create World_Step_Service.make(wua)
 
     print(wss.apply_player_input("E-1", 2))  -- UPDATED
     print(wss.apply_player_input("E-9", 2))  -- NOT_FOUND

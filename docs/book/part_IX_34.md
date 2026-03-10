@@ -59,7 +59,11 @@ feature
       query_present: q /= ""
     do
       -- Simple implementation
-      if q = "contracts" then result := "DOC:K-101" else result := "UNAVAILABLE" end
+      if q = "contracts" then
+        result := "DOC:K-101"
+      else
+        result := "UNAVAILABLE"
+      end
     ensure
       non_empty: result /= ""
     end
@@ -67,6 +71,10 @@ end
 
 -- AI-Generated Wrapper (Constrained by the interface)
 class Knowledge_Fallback_Wrapper
+create
+  make(core: Knowledge_Query_Service) do
+    this.core := core
+  end
 feature
   core: Knowledge_Query_Service
 

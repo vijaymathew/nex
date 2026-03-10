@@ -160,7 +160,7 @@ This is the Nex equivalent of a Java `static final` member.
 
 The form is:
 
-```nex
+```text
 NAME: Type = expression
 NAME = expression
 ```
@@ -169,13 +169,13 @@ If the type is omitted, Nex infers it from the value. `MAX_WIDTH = 450` is there
 
 Class constants are accessed from outside the class with the class name:
 
-```nex
+```text
 print(Layout.MAX_WIDTH)
 ```
 
 Inside the class, they can be used directly by name:
 
-```nex
+```text
 widened(): Integer do
   result := MAX_WIDTH + 10
 end

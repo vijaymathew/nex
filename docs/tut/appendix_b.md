@@ -43,7 +43,7 @@ Common operations:
 Example:
 
 ```nex
-let s := "  Nex  "
+let s: String := "  Nex  "
 print(s.trim().to_upper())   -- "NEX"
 print(s.split(" "))          -- array of pieces
 ```
@@ -171,7 +171,7 @@ Main methods:
 
 Construction:
 
-```nex
+```text
 create Set[Integer]
 create Set[Integer].from_array([1, 2, 3])
 {1, 2, 3}
@@ -229,7 +229,7 @@ They implement the `Cursor` protocol and are usually used indirectly through `ac
 
 Construction:
 
-```nex
+```text
 create Console
 ```
 
@@ -247,7 +247,7 @@ Main methods:
 
 Construction:
 
-```nex
+```text
 create File.open(path)
 ```
 
@@ -265,7 +265,7 @@ Main methods:
 
 Construction:
 
-```nex
+```text
 create Process
 ```
 
@@ -282,7 +282,7 @@ Main methods:
 
 Construction:
 
-```nex
+```text
 create Window
 create Window.with_title(title)
 create Window.with_title(title, width, height)
@@ -300,7 +300,7 @@ Common operations:
 
 Construction:
 
-```nex
+```text
 create Turtle.on_window(window)
 ```
 
@@ -318,7 +318,7 @@ Common operations:
 
 Construction:
 
-```nex
+```text
 create Image.from_file(path)
 ```
 

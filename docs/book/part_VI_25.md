@@ -66,12 +66,14 @@ feature
   assign(robot_id: String)
     require
       robot_present: robot_id /= ""
-      can_assign: status = "PENDING" or status = "FAILED"
+      can_assign: status = "PENDING" 
+	               or status = "FAILED"
     do
       assigned_robot := robot_id
       status := "IN_TRANSIT"
     ensure
-      assigned: assigned_robot = robot_id and status = "IN_TRANSIT"
+      assigned: assigned_robot = robot_id 
+	            and status = "IN_TRANSIT"
     end
 invariant
   id_present: task_id /= ""
@@ -84,10 +86,12 @@ end
 
 class Dispatch_Service
 feature
-  dispatch(task: Delivery_Task; robot: Robot): String
+  dispatch(task: Delivery_Task, robot: Robot): String
     require
       robot_ready: robot.ready = true
-      task_pending_or_failed: task.status = "PENDING" or task.status = "FAILED"
+      task_pending_or_failed:
+        task.status = "PENDING" or
+        task.status = "FAILED"
     do
       task.assign(robot.robot_id)
       result := "DISPATCHED"

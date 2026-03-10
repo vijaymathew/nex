@@ -67,6 +67,11 @@ This sentence is a starting point, not a specification. "Best" is undefined. "Qu
 
 ```nex
 class Route_Result
+create
+  make(status, path: String) do
+    this.status := status
+    this.path := path
+  end
 feature
   status: String
   path: String
@@ -84,20 +89,13 @@ feature
       inputs_present: start_loc /= "" 
 	                  and dest_loc /= ""
     do
-      let r: Route_Result := create Route_Result
-
       if start_loc = dest_loc then
-        r.status := "FOUND"
-        r.path := start_loc
+        result := create Route_Result.make("FOUND", start_loc)
       elseif start_loc = "A" and dest_loc = "C" then
-        r.status := "FOUND"
-        r.path := "A->B->C"
+        result := create Route_Result.make("FOUND", "A->B->C")
       else
-        r.status := "UNREACHABLE"
-        r.path := ""
+        result := create Route_Result.make("UNREACHABLE", "")
       end
-
-      result := r
     ensure
       status_is_declared:
         result.status = "FOUND" or

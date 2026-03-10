@@ -62,6 +62,12 @@ If using the web IDE, place all classes in one file and run `App.run`.
 
 ```nex
 class Evolution_Result
+create
+  make(status: String, value: String, mode: String) do
+    this.status := status
+    this.value := value
+    this.mode := mode
+  end
 feature
   status: String
   value: String
@@ -73,6 +79,11 @@ invariant
 end
 
 class Rollout_Config
+create
+  make(use_v2: Boolean, compatibility_mode: Boolean) do
+    this.use_v2 := use_v2
+    this.compatibility_mode := compatibility_mode
+  end
 feature
   use_v2: Boolean
   compatibility_mode: Boolean
@@ -102,7 +113,7 @@ end
 
 class Delivery_Policy_V2
 feature
-  decide_priority(tier: String; risk_score: Integer): String
+  decide_priority(tier: String, risk_score: Integer): String
     require
       tier_present: tier /= ""
       risk_non_negative: risk_score >= 0
@@ -123,29 +134,39 @@ feature
 end
 
 class Delivery_Evolution_Service
+create
+  make(
+    v1: Delivery_Policy_V1,
+    v2: Delivery_Policy_V2,
+    config: Rollout_Config
+  ) do
+    this.v1 := v1
+    this.v2 := v2
+    this.config := config
+  end
 feature
   v1: Delivery_Policy_V1
   v2: Delivery_Policy_V2
   config: Rollout_Config
 
-  route_mode(tier: String; risk_score: Integer): Evolution_Result
+  route_mode(tier: String, risk_score: Integer): Evolution_Result
     require
       tier_present: tier /= ""
       risk_non_negative: risk_score >= 0
     do
-      let r: Evolution_Result := create Evolution_Result
-
       if config.use_v2 then
-        r.status := "OK"
-        r.value := v2.decide_priority(tier, risk_score)
-        r.mode := "V2"
+        result := create Evolution_Result.make(
+          "OK",
+          v2.decide_priority(tier, risk_score),
+          "V2"
+        )
       else
-        r.status := "OK"
-        r.value := v1.decide_priority(tier)
-        r.mode := "V1"
+        result := create Evolution_Result.make(
+          "OK",
+          v1.decide_priority(tier),
+          "V1"
+        )
       end
-
-      result := r
     ensure
       ok_status: result.status = "OK"
     end
@@ -171,7 +192,7 @@ end
 
 class Knowledge_Query_V2
 feature
-  run(query: String; intent: String): String
+  run(query: String, intent: String): String
     require
       query_present: query /= ""
       intent_present: intent /= ""
@@ -187,6 +208,10 @@ feature
 end
 
 class Knowledge_Compatibility_Adapter
+create
+  make(v2: Knowledge_Query_V2) do
+    this.v2 := v2
+  end
 feature
   v2: Knowledge_Query_V2
 
@@ -201,6 +226,16 @@ feature
 end
 
 class Knowledge_Evolution_Service
+create
+  make(
+    v1: Knowledge_Query_V1,
+    v1_on_v2: Knowledge_Compatibility_Adapter,
+    config: Rollout_Config
+  ) do
+    this.v1 := v1
+    this.v1_on_v2 := v1_on_v2
+    this.config := config
+  end
 feature
   v1: Knowledge_Query_V1
   v1_on_v2: Knowledge_Compatibility_Adapter
@@ -210,23 +245,25 @@ feature
     require
       query_present: query /= ""
     do
-      let r: Evolution_Result := create Evolution_Result
-
       if config.use_v2 and not config.compatibility_mode then
-        r.status := "OK"
-        r.value := "DOC:K-DEEP"
-        r.mode := "V2_NATIVE"
+        result := create Evolution_Result.make(
+          "OK",
+          "DOC:K-DEEP",
+          "V2_NATIVE"
+        )
       elseif config.use_v2 then
-        r.status := "OK"
-        r.value := v1_on_v2.run_v1_shape(query)
-        r.mode := "V2_COMPAT"
+        result := create Evolution_Result.make(
+          "OK",
+          v1_on_v2.run_v1_shape(query),
+          "V2_COMPAT"
+        )
       else
-        r.status := "OK"
-        r.value := v1.run(query)
-        r.mode := "V1"
+        result := create Evolution_Result.make(
+          "OK",
+          v1.run(query),
+          "V1"
+        )
       end
-
-      result := r
     ensure
       ok_status: result.status = "OK"
     end
@@ -240,7 +277,7 @@ Continuation from Studio 5 safe world-step behavior.
 ```nex
 class World_Rules_V1
 feature
-  apply(x: Integer; delta: Integer; max_x: Integer): Integer
+  apply(x: Integer, delta: Integer, max_x: Integer): Integer
     require
       max_valid: max_x >= 0
     do
@@ -259,7 +296,7 @@ end
 
 class World_Rules_V2
 feature
-  apply(x: Integer; delta: Integer; max_x: Integer): Integer
+  apply(x: Integer, delta: Integer, max_x: Integer): Integer
     require
       max_valid: max_x >= 0
     do
@@ -285,29 +322,38 @@ feature
 end
 
 class World_Evolution_Service
+create
+  make(
+    v1: World_Rules_V1,
+    v2: World_Rules_V2,
+    config: Rollout_Config
+  ) do
+    this.v1 := v1
+    this.v2 := v2
+    this.config := config
+  end
 feature
   v1: World_Rules_V1
   v2: World_Rules_V2
   config: Rollout_Config
 
-  step(x: Integer; delta: Integer; max_x: Integer): Evolution_Result
+  step(x: Integer, delta: Integer, max_x: Integer): Evolution_Result
     require
       max_valid: max_x >= 0
     do
-      let r: Evolution_Result := create Evolution_Result
-      let out_x: Integer := 0
-
       if config.use_v2 then
-        out_x := v2.apply(x, delta, max_x)
-        r.mode := "V2"
+        result := create Evolution_Result.make(
+          "OK",
+          "X=" + v2.apply(x, delta, max_x),
+          "V2"
+        )
       else
-        out_x := v1.apply(x, delta, max_x)
-        r.mode := "V1"
+        result := create Evolution_Result.make(
+          "OK",
+          "X=" + v1.apply(x, delta, max_x),
+          "V1"
+        )
       end
-
-      r.status := "OK"
-      r.value := "X=" + out_x
-      result := r
     ensure
       ok_status: result.status = "OK"
     end
@@ -318,6 +364,10 @@ end
 
 ```nex
 class Migration_Runner
+create
+  make(initial_count: Integer) do
+    this.migrated_count := initial_count
+  end
 feature
   migrated_count: Integer
 
@@ -337,17 +387,13 @@ end
 class App
 feature
   run() do
-    let cfg: Rollout_Config := create Rollout_Config
-    cfg.use_v2 := true
-    cfg.compatibility_mode := true
+    let cfg: Rollout_Config := create Rollout_Config.make(true, true)
 
     -- Delivery evolution
     let d1: Delivery_Policy_V1 := create Delivery_Policy_V1
     let d2: Delivery_Policy_V2 := create Delivery_Policy_V2
-    let de: Delivery_Evolution_Service := create Delivery_Evolution_Service
-    de.v1 := d1
-    de.v2 := d2
-    de.config := cfg
+    let de: Delivery_Evolution_Service
+      := create Delivery_Evolution_Service.make(d1, d2, cfg)
 
     let dr: Evolution_Result := de.route_mode("PREMIUM", 70)
     print("Delivery: mode=" + dr.mode + " value=" + dr.value)
@@ -355,13 +401,10 @@ feature
     -- Knowledge evolution
     let k1: Knowledge_Query_V1 := create Knowledge_Query_V1
     let kv2: Knowledge_Query_V2 := create Knowledge_Query_V2
-    let ka: Knowledge_Compatibility_Adapter := create Knowledge_Compatibility_Adapter
-    ka.v2 := kv2
-
-    let ke: Knowledge_Evolution_Service := create Knowledge_Evolution_Service
-    ke.v1 := k1
-    ke.v1_on_v2 := ka
-    ke.config := cfg
+    let ka: Knowledge_Compatibility_Adapter
+      := create Knowledge_Compatibility_Adapter.make(kv2)
+    let ke: Knowledge_Evolution_Service
+      := create Knowledge_Evolution_Service.make(k1, ka, cfg)
 
     let kr: Evolution_Result := ke.query("contracts")
     print("Knowledge: mode=" + kr.mode + " value=" + kr.value)
@@ -369,17 +412,14 @@ feature
     -- World evolution
     let w1: World_Rules_V1 := create World_Rules_V1
     let w2: World_Rules_V2 := create World_Rules_V2
-    let we: World_Evolution_Service := create World_Evolution_Service
-    we.v1 := w1
-    we.v2 := w2
-    we.config := cfg
+    let we: World_Evolution_Service
+      := create World_Evolution_Service.make(w1, w2, cfg)
 
     let wr: Evolution_Result := we.step(8, 6, 10)
     print("World: mode=" + wr.mode + " value=" + wr.value)
 
     -- Migration + rollback gate
-    let m: Migration_Runner := create Migration_Runner
-    m.migrated_count := 0
+    let m: Migration_Runner := create Migration_Runner.make(0)
     print("Migration gate: " + m.run(true))
     print("Migration count: " + m.migrated_count)
     print("Rollback gate: " + m.run(false))

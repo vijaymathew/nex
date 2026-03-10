@@ -27,6 +27,7 @@ tmp/
 temp/
 *.orig
 *.rej
+docs/book/Beyond-Code----Building-Software-Systems-That-Last.tex
 
 # REPL history
 .nex_history

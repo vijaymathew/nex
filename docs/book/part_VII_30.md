@@ -65,6 +65,10 @@ Consider the report:
 
 ```nex
 class Delivery_Task
+create
+  make_pending() do
+    status := "PENDING"
+  end
 feature
   status: String
 
@@ -97,8 +101,8 @@ class Debug_Smoke_Test
 feature
   run(): String
     do
-      let t: Delivery_Task := create Delivery_Task
-      t.status := "PENDING"
+      let t: Delivery_Task := 
+	   create Delivery_Task.make_pending
       t.start
       t.complete
 

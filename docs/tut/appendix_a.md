@@ -30,12 +30,12 @@ Declaration:
 
 ```nex
 let name: String := "Ada"
-let count := 0
+let count: Integer := 0
 ```
 
 Assignment:
 
-```nex
+```text
 count := count + 1
 this.balance := this.balance + 10.0
 ```
@@ -45,25 +45,25 @@ this.balance := this.balance + 10.0
 
 Arithmetic:
 
-```nex
+```text
 +  -  *  /  %  ^
 ```
 
 Comparison:
 
-```nex
+```text
 =  /=  <  <=  >  >=
 ```
 
 Boolean:
 
-```nex
+```text
 and  or  not
 ```
 
 Parentheses may be used to control grouping:
 
-```nex
+```text
 (a + b) * c
 ```
 
@@ -72,7 +72,7 @@ Parentheses may be used to control grouping:
 
 `if`:
 
-```nex
+```text
 if condition then
   print("yes")
 elseif other_condition then
@@ -84,13 +84,13 @@ end
 
 `when`:
 
-```nex
-let label := when age >= 18 "adult" else "minor" end
+```text
+let label: String := when age >= 18 "adult" else "minor" end
 ```
 
 `case`:
 
-```nex
+```text
 case direction of
   "up"   then print("going up")
   "down" then print("going down")
@@ -105,7 +105,7 @@ end
 
 ```nex
 from
-  let i := 0
+  let i: Integer := 0
 until
   i = 10
 do
@@ -118,7 +118,7 @@ With loop contracts:
 
 ```nex
 from
-  let i := 0
+  let i: Integer := 0
 invariant
   in_range: i >= 0
 variant
@@ -132,7 +132,7 @@ end
 
 `repeat`:
 
-```nex
+```text
 repeat 3 do
   print("hello")
 end
@@ -165,7 +165,7 @@ end
 Anonymous function:
 
 ```nex
-let f := fn (x: Integer): Integer do
+let f: Function := fn (x: Integer): Integer do
   result := x * 2
 end
 ```
@@ -223,13 +223,13 @@ end
 
 External access uses the class name:
 
-```nex
+```text
 print(Layout.MAX_WIDTH)
 ```
 
 Object creation:
 
-```nex
+```text
 let p := create Point.make(3.0, 4.0)
 ```
 
@@ -238,7 +238,7 @@ let p := create Point.make(3.0, 4.0)
 
 Inheritance:
 
-```nex
+```text
 class Dog inherit Animal
   feature
     speak do
@@ -249,7 +249,7 @@ end
 
 Generic class:
 
-```nex
+```text
 class Stack [G]
   create
     make() do
@@ -262,7 +262,7 @@ end
 
 Generic constraint:
 
-```nex
+```text
 class Sorted_List [G -> Comparable]
   create
     make() do
@@ -302,7 +302,7 @@ end
 
 Raise:
 
-```nex
+```text
 raise "not ready"
 ```
 
@@ -333,14 +333,14 @@ end
 
 Load Nex classes:
 
-```nex
+```text
 intern math/Calculator
 intern math/Calculator as Calc
 ```
 
 Import host symbols:
 
-```nex
+```text
 import java.util.Scanner
 import Math from './math.js'
 ```

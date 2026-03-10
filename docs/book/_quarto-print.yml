@@ -76,6 +76,7 @@ format:
   pdf:
     output-file: beyond-code-print.pdf
     pdf-engine: pdflatex
+    keep-tex: true
     listings: true
     documentclass: scrbook
     classoption: [twoside, openright]
