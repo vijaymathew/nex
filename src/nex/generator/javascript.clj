@@ -8,11 +8,17 @@
 
 (def ^:dynamic *function-names* #{})
 (def ^:dynamic *this-name* "this")
+(def ^:dynamic *current-class-name* nil)
+(def ^:dynamic *class-registry* {})
 (def ^:dynamic *all-method-names* #{})  ;; own + parent method names
 (def ^:dynamic *own-fields* #{})        ;; field names defined on current class
+(def ^:dynamic *constant-names* #{})    ;; accessible class constants
 (def ^:dynamic *local-names* #{})       ;; method params + loop vars
 (def ^:dynamic *field-types* {})        ;; field-name -> type
 (def ^:dynamic *class-invariants* [])   ;; effective class invariants (inherited + local, deduped)
+
+(declare extract-members)
+(declare get-accessible-constants-js)
 
 (defn class-name-to-local
   "Convert a class name to a local variable name (e.g., 'Point' -> 'point')"
@@ -160,6 +166,33 @@
   (or (= t "Function")
       (and (map? t) (= (:base-type t) "Function"))))
 
+(defn public-member?
+  [member]
+  (not= :private (-> member :visibility :type)))
+
+(defn infer-constant-type
+  "Infer a constant type from its value expression."
+  [expr constants-by-name]
+  (case (:type expr)
+    :integer "Integer"
+    :real "Real"
+    :string "String"
+    :boolean "Boolean"
+    :char "Char"
+    :nil "Any"
+    :identifier (get constants-by-name (:name expr) "Any")
+    :binary (let [lt (infer-constant-type (:left expr) constants-by-name)
+                  rt (infer-constant-type (:right expr) constants-by-name)]
+              (case (:operator expr)
+                ("=" "/=" "<" "<=" ">" ">=" "and" "or") "Boolean"
+                "+" (if (or (= lt "String") (= rt "String")) "String" lt)
+                ("-" "*" "/" "%" "^") lt
+                "Any"))
+    :call (if (and (string? (:target expr)) (false? (:has-parens expr)))
+            (get constants-by-name (:method expr) "Any")
+            "Any")
+    "Any"))
+
 (defn resolve-identifier
   "Resolve an identifier in expression context for JavaScript.
    Resolution order: locals -> methods -> fields -> functions -> bare name"
@@ -167,6 +200,7 @@
   (cond
     (contains? *local-names* id-name) id-name
     (contains? *all-method-names* id-name) (str *this-name* "." id-name "()")
+    (contains? *constant-names* id-name) (str *current-class-name* "." id-name)
     (contains? *own-fields* id-name) (str *this-name* "." id-name)
     (contains? *function-names* id-name) (str "NexGlobals." id-name)
     :else id-name))
@@ -398,46 +432,52 @@
         (if (nil? method)
           ;; Calling an expression that returns a function
           (str target-code ".call" num-args "(" args-code ")")
+          (if (and (string? target)
+                   (false? has-parens)
+                   (get *class-registry* target)
+                   (some #(= (:name %) method)
+                         (get-accessible-constants-js (get *class-registry* target) *class-registry*)))
+            (str target "." method)
           ;; Check for this-target with has-parens distinction
-          (if this-target?
-            (if (false? has-parens)
-              ;; this.x (no parens): method -> call, field -> access
-              (if (contains? *all-method-names* method)
-                (str target-code "." method "()")
-                (str target-code "." method))
-              ;; this.x() or this.x(args) (with parens or absent)
-              (if (and (not (contains? *all-method-names* method))
-                       (function-type? (get *field-types* method)))
-                (str target-code "." method ".call" num-args "(" args-code ")")
-                (str target-code "." method "(" args-code ")")))
-            ;; External object: try builtins, then default
-            (or
-             ;; Try Integer methods first (for operators, numeric is more common)
-             (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
-               (method-fn target-code args-code))
-             ;; Try Integer64 methods
-             (when-let [method-fn (get-in builtin-method-mappings [:Integer64 method])]
-               (method-fn target-code args-code))
-             ;; Try Real methods
-             (when-let [method-fn (get-in builtin-method-mappings [:Real method])]
-               (method-fn target-code args-code))
-             ;; Try Decimal methods
-             (when-let [method-fn (get-in builtin-method-mappings [:Decimal method])]
-               (method-fn target-code args-code))
-             ;; Try String methods
-             (when-let [method-fn (get-in builtin-method-mappings [:String method])]
-               (method-fn target-code args-code))
-             ;; Try Array methods
-             (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
-               (method-fn target-code args-code))
-             ;; Try Map methods
-             (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
-               (method-fn target-code args-code))
-             ;; Try Image methods
-             (when-let [method-fn (get-in builtin-method-mappings [:Image method])]
-               (method-fn target-code args-code))
-             ;; Default: regular method call
-             (str target-code "." method "(" args-code ")")))))
+            (if this-target?
+              (if (false? has-parens)
+                ;; this.x (no parens): method -> call, field -> access
+                (if (contains? *all-method-names* method)
+                  (str target-code "." method "()")
+                  (str target-code "." method))
+                ;; this.x() or this.x(args) (with parens or absent)
+                (if (and (not (contains? *all-method-names* method))
+                         (function-type? (get *field-types* method)))
+                  (str target-code "." method ".call" num-args "(" args-code ")")
+                  (str target-code "." method "(" args-code ")")))
+              ;; External object: try builtins, then default
+              (or
+               ;; Try Integer methods first (for operators, numeric is more common)
+               (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
+                 (method-fn target-code args-code))
+               ;; Try Integer64 methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Integer64 method])]
+                 (method-fn target-code args-code))
+               ;; Try Real methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Real method])]
+                 (method-fn target-code args-code))
+               ;; Try Decimal methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Decimal method])]
+                 (method-fn target-code args-code))
+               ;; Try String methods
+               (when-let [method-fn (get-in builtin-method-mappings [:String method])]
+                 (method-fn target-code args-code))
+               ;; Try Array methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
+                 (method-fn target-code args-code))
+               ;; Try Map methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
+                 (method-fn target-code args-code))
+               ;; Try Image methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Image method])]
+                 (method-fn target-code args-code))
+               ;; Default: regular method call
+               (str target-code "." method "(" args-code ")"))))))
       ;; No target: class method, function object field, global function, or builtin
       (cond
         ;; Class method (own or inherited)
@@ -1048,6 +1088,10 @@
         init-value (default-value field-type)]
     (indent level (str "this." field-name " = " init-value ";"))))
 
+(defn generate-class-constant-js
+  [level class-name {:keys [name value]}]
+  (indent level (str "static " name " = " (generate-expression value) ";")))
+
 ;;
 ;; Constructor Generation
 ;;
@@ -1179,10 +1223,23 @@
                                     (:members section))
                                :else []))
                            class-body)
-        fields (filter #(= (:type %) :field) all-members)
+        fields (filter #(and (= (:type %) :field) (not (:constant? %))) all-members)
+        constants (let [{:keys [constants]}
+                        (reduce (fn [{:keys [types constants]} member]
+                                  (if (and (= (:type member) :field) (:constant? member))
+                                    (let [final-type (or (:field-type member)
+                                                         (infer-constant-type (:value member) types))
+                                          constant (assoc member :field-type final-type)]
+                                      {:types (assoc types (:name member) final-type)
+                                       :constants (conj constants constant)})
+                                    {:types types :constants constants}))
+                                {:types {} :constants []}
+                                all-members)]
+                    constants)
         methods (filter #(= (:type %) :method) all-members)
         ctors (mapcat :constructors constructor-sections)]
     {:fields fields
+     :constants constants
      :methods methods
      :constructors ctors}))
 
@@ -1192,6 +1249,36 @@
   (when-let [parent-def (get classes-by-name parent-name)]
     (let [{:keys [methods]} (extract-members (:body parent-def))]
       (map :name methods))))
+
+(defn get-parent-constants-js
+  "Get recursively inherited public constants from a parent class."
+  [parent-name classes-by-name]
+  (when-let [parent-def (get classes-by-name parent-name)]
+    (let [{:keys [constants]} (extract-members (:body parent-def))
+          inherited (mapcat (fn [{:keys [parent]}]
+                              (or (get-parent-constants-js parent classes-by-name) []))
+                            (:parents parent-def))]
+      (vals
+       (reduce (fn [m constant]
+                 (if (contains? m (:name constant))
+                   m
+                   (assoc m (:name constant) constant)))
+               {}
+               (concat (filter public-member? inherited)
+                       (filter public-member? constants)))))))
+
+(defn get-accessible-constants-js
+  "Get inherited public constants plus local constants, with local override by name."
+  [class-def classes-by-name]
+  (let [{:keys [constants]} (extract-members (:body class-def))
+        inherited (mapcat (fn [{:keys [parent]}]
+                            (or (get-parent-constants-js parent classes-by-name) []))
+                          (:parents class-def))]
+    (vals
+     (reduce (fn [m constant]
+               (assoc m (:name constant) constant))
+             {}
+             (concat inherited constants)))))
 
 (defn get-parent-constructors-js
   "Get constructor definitions from a direct parent class."
@@ -1281,14 +1368,19 @@
          {:keys [fields methods constructors]} (extract-members body)
          parent-names (mapv :parent parents)
          own-flds (set (map :name fields))
+         all-constants (get-accessible-constants-js class-def classes-by-name)
+         constant-names (set (map :name all-constants))
          own-method-names (set (map :name methods))
          all-methods (into own-method-names
                            (mapcat #(get-parent-method-names % classes-by-name)
                                    parent-names))
          fld-types (build-field-types-js fields parent-names classes-by-name)
          effective-invariants (collect-effective-class-invariants class-def classes-by-name)]
-     (binding [*all-method-names* all-methods
+     (binding [*current-class-name* name
+               *class-registry* classes-by-name
+               *all-method-names* all-methods
                *own-fields* own-flds
+               *constant-names* constant-names
                *field-types* fld-types
                *class-invariants* effective-invariants]
        (let [;; Generate class JSDoc if note present
@@ -1299,6 +1391,7 @@
              invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
                                 (indent 1 (str "// Class invariant: "
                                               (str/join ", " (map :label effective-invariants)))))
+             constants-code (map #(generate-class-constant-js 1 name %) all-constants)
              ;; Always generate a default no-arg constructor for field initialization
              has-parent? (some? (:extends (analyze-inheritance parents)))
              default-constructor (generate-default-constructor 1 name fields has-parent? deferred?)
@@ -1316,10 +1409,12 @@
              methods-code (map #(generate-method 1 % opts) methods-with-effective-contracts)]
          (str/join "\n"
                    (concat
-                    class-jsdoc
-                    (when generic-comment [generic-comment])
-                    [class-header]
-                    (when invariant-comment [invariant-comment ""])
+                   class-jsdoc
+                   (when generic-comment [generic-comment])
+                   [class-header]
+                   (when invariant-comment [invariant-comment ""])
+                    constants-code
+                    (when (seq all-constants) [""])
                     [default-constructor ""]
                     factory-methods
                     (when (seq factory-methods) [""])

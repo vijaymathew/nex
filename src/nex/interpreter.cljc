@@ -434,6 +434,7 @@
 
 (declare eval-node)
 (declare get-all-fields)
+(declare get-all-constants)
 (declare eval-body-with-rescue)
 (declare lookup-constructor)
 (declare get-parent-classes)
@@ -520,6 +521,60 @@
             (let [parent-class (lookup-class ctx (:parent parent-info))]
               (assoc parent-info :class-def parent-class)))
           parents)))
+
+(defn feature-members
+  "Return feature members with section visibility copied onto each member."
+  [class-def]
+  (mapcat (fn [section]
+            (when (= (:type section) :feature-section)
+              (map #(if (:visibility %)
+                      %
+                      (assoc % :visibility (:visibility section)))
+                   (:members section))))
+          (:body class-def)))
+
+(defn public-member?
+  [member]
+  (not= :private (-> member :visibility :type)))
+
+(defn get-all-constants
+  "Collect accessible constants for a class:
+   inherited public constants first, then local constants."
+  [ctx class-def]
+  (let [parent-constants (when-let [parents (get-parent-classes ctx class-def)]
+                           (mapcat (fn [{:keys [class-def]}]
+                                     (filter public-member?
+                                             (get-all-constants ctx class-def)))
+                                   parents))
+        local-constants (->> (feature-members class-def)
+                             (filter #(and (= (:type %) :field)
+                                           (:constant? %)))
+                             (map #(assoc % :declaring-class class-def)))
+        merged (reduce (fn [m constant]
+                         (assoc m (:name constant) constant))
+                       {}
+                       (concat parent-constants local-constants))]
+    (vals merged)))
+
+(defn lookup-class-constant
+  "Look up a constant on a class and its parent chain.
+   Local constants always apply; inherited constants must be public."
+  [ctx class-def constant-name]
+  (let [local-constant (some (fn [member]
+                               (when (and (= (:type member) :field)
+                                          (:constant? member)
+                                          (= (:name member) constant-name))
+                                 (assoc member :declaring-class class-def)))
+                             (feature-members class-def))]
+    (or local-constant
+        (when-let [parents (get-parent-classes ctx class-def)]
+          (some (fn [{:keys [class-def]}]
+                  (some (fn [member]
+                          (when (and (public-member? member)
+                                     (= (:name member) constant-name))
+                            member))
+                        (get-all-constants ctx class-def)))
+                parents)))))
 
 (defn lookup-method-in-class
   "Look up a method in a specific class (without searching parents)."
@@ -610,6 +665,40 @@
   (or (= target-type "Any")
       (= runtime-type target-type)
       (and runtime-type (is-parent? ctx runtime-type target-type))))
+
+(defn eval-class-constant
+  "Evaluate a class constant value with inherited constant bindings available."
+  ([ctx class-def constant-name]
+   (eval-class-constant ctx class-def constant-name (or (:constant-visiting ctx) #{})))
+  ([ctx class-def constant-name visiting]
+   (let [visit-key [(:name class-def) constant-name]]
+     (when (contains? visiting visit-key)
+       (throw (ex-info (str "Cyclic constant definition: " (:name class-def) "." constant-name)
+                       {:class-name (:name class-def)
+                        :constant constant-name})))
+     (let [constant (lookup-class-constant ctx class-def constant-name)]
+       (when-not constant
+         (throw (ex-info (str "Undefined constant: " (:name class-def) "." constant-name)
+                         {:class-name (:name class-def)
+                          :constant constant-name})))
+        (let [source-class (:declaring-class constant class-def)
+              const-env (make-env (:globals ctx))
+              next-visiting (conj visiting visit-key)
+              eval-ctx (assoc ctx
+                              :current-env const-env
+                              :current-class-name (:name source-class)
+                              :constant-visiting next-visiting)]
+         (eval-node eval-ctx (:value constant)))))))
+
+(defn bind-class-constants!
+  "Bind all constants visible from class-def into env."
+  [ctx env class-def]
+  (doseq [constant (get-all-constants ctx class-def)]
+    (env-define env
+                (:name constant)
+                (eval-class-constant ctx
+                                     (:declaring-class constant class-def)
+                                     (:name constant)))))
 
 (defn combine-assertions
   "Combine assertions from parent and child methods (for contracts)."
@@ -1384,6 +1473,7 @@
   (let [arg-values (mapv #(eval-node ctx %) args)]
     (if target
       (let [target-name (when (string? target) target)
+            class-target (when target-name (lookup-class-if-exists ctx target-name))
             ;; Check if target is a parent class name (parent-qualified call: A.method())
             parent-class (when (and target-name (:current-object ctx))
                            (let [cls (lookup-class-if-exists ctx target-name)]
@@ -1391,10 +1481,18 @@
                                         (is-parent? ctx (:class-name (:current-object ctx)) target-name))
                                cls)))
             obj (when-not parent-class
-                  (if target-name
+                  (if class-target
+                    nil
+                    (if target-name
                     (env-lookup (:current-env ctx) target-name)
-                    (eval-node ctx target)))]
+                    (eval-node ctx target))))]
         (cond
+          ;; Class-qualified constant access: A.CONST
+          (and class-target
+               (false? has-parens)
+               (lookup-class-constant ctx class-target method))
+          (eval-class-constant ctx class-target method)
+
           ;; Parent-qualified call: A.method() where A is a parent class
           parent-class
           (dispatch-parent-call ctx (:current-object ctx) target-name method arg-values)
@@ -1403,7 +1501,7 @@
           (let [class-def (lookup-class ctx (:class-name obj))
                 method-lookup (lookup-method-with-inheritance ctx class-def method)]
             (if method-lookup
-              (let [method-def (:method method-lookup)
+                (let [method-def (:method method-lookup)
                     params (:params method-def)]
                 ;; Bug fix: disallow paren-less calls to methods that require arguments
                 (when (and (false? has-parens) (seq params))
@@ -1420,6 +1518,7 @@
                       ;; Define fields first, then params — so params shadow fields
                       _ (doseq [[field-name field-val] (:fields obj)]
                           (env-define method-env (name field-name) field-val))
+                      _ (bind-class-constants! ctx method-env class-def)
                       _ (when params
                           (doseq [[param arg-val] (map vector params arg-values)]
                             (env-define method-env (:name param) arg-val)))
@@ -1587,6 +1686,11 @@
 (defmethod eval-node :member-assign
   [ctx {:keys [object-type field value]}]
   (maybe-debug-pause ctx {:type :member-assign :object-type object-type :field field :value value})
+  (when-let [current-class-name (:current-class-name ctx)]
+    (when-let [class-def (lookup-class-if-exists ctx current-class-name)]
+      (when (lookup-class-constant ctx class-def field)
+        (throw (ex-info (str "Cannot assign to constant: " field)
+                        {:field field :constant? true})))))
   (let [val (eval-node ctx value)]
     ;; Track that this field was explicitly modified via this.field :=
     (when-let [mf (:modified-fields ctx)]
@@ -1599,6 +1703,11 @@
 (defmethod eval-node :assign
   [ctx {:keys [target value]}]
   (maybe-debug-pause ctx {:type :assign :target target :value value})
+  (when-let [current-class-name (:current-class-name ctx)]
+    (when-let [class-def (lookup-class-if-exists ctx current-class-name)]
+      (when (lookup-class-constant ctx class-def target)
+        (throw (ex-info (str "Cannot assign to constant: " target)
+                        {:target target :constant? true})))))
   (let [val (eval-node ctx value)]
     ;; Assignment (without let) ONLY updates existing variables
     ;; It should fail if the variable doesn't exist
@@ -1845,17 +1954,22 @@
     (if (not= val ::not-found)
       val
       ;; Not in env - check if it's a zero-arg method on current object
-      (if-let [current-obj (:current-object ctx)]
-        (let [class-def (lookup-class ctx (:class-name current-obj))
-              method-lookup (lookup-method-with-inheritance ctx class-def name)]
-          (if method-lookup
-            ;; It's a method - invoke it (implicit this)
-            (eval-node ctx {:type :call
-                            :target (:current-target ctx)
-                            :method name
-                            :args []})
-            (throw (ex-info (str "Undefined variable: " name)
-                            {:var-name name}))))
+      (if-let [current-class-name (:current-class-name ctx)]
+        (let [class-def (lookup-class ctx current-class-name)]
+          (if-let [constant (lookup-class-constant ctx class-def name)]
+            (eval-class-constant ctx (:declaring-class constant class-def) name)
+            (if-let [current-obj (:current-object ctx)]
+              (let [method-lookup (lookup-method-with-inheritance ctx class-def name)]
+                (if method-lookup
+                  ;; It's a method - invoke it (implicit this)
+                  (eval-node ctx {:type :call
+                                  :target (:current-target ctx)
+                                  :method name
+                                  :args []})
+                  (throw (ex-info (str "Undefined variable: " name)
+                                  {:var-name name}))))
+              (throw (ex-info (str "Undefined variable: " name)
+                              {:var-name name})))))
         (throw (ex-info (str "Undefined variable: " name)
                         {:var-name name}))))))
 
@@ -1872,7 +1986,8 @@
                            (mapcat (fn [section]
                                     (when (= (:type section) :feature-section)
                                       (:members section))))
-                           (filter #(= (:type %) :field)))]
+                           (filter #(and (= (:type %) :field)
+                                         (not (:constant? %)))))]
     (concat parent-fields current-fields)))
 
 (defn lookup-constructor
@@ -1984,6 +2099,7 @@
                                     ;; Bind fields as local variables FIRST
                                     _ (doseq [[field-name field-val] initial-field-map]
                                         (env-define ctor-env (name field-name) field-val))
+                                    _ (bind-class-constants! ctx ctor-env class-def)
                                     ;; Bind parameters SECOND (so they shadow fields with same name)
                                     params (:params ctor-def)
                                     arg-values (mapv #(eval-node ctx %) args)

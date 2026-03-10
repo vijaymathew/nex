@@ -343,14 +343,29 @@
       :constructors (mapv transform-node ctors)})
 
    :fieldDecl
-   (fn [[_ name _colon type & rest]]
-     (let [note-clause (first (filter #(and (sequential? %)
+   (fn [[_ & tokens]]
+     (let [name (first tokens)
+           has-colon? (some #(= ":" %) tokens)
+           eq-idx (first (keep-indexed (fn [i v] (when (= "=" v) i)) tokens))
+           note-clause (first (filter #(and (sequential? %)
                                             (= :noteClause (first %)))
-                                     rest))]
-       {:type :field
-        :name (token-text name)
-        :field-type (transform-node type)
-        :note (when note-clause (transform-node note-clause))}))
+                                     tokens))]
+       (if has-colon?
+         (let [type-node (nth tokens 2)
+               value-node (when eq-idx (nth tokens (inc eq-idx)))]
+           {:type :field
+            :name (token-text name)
+            :field-type (transform-node type-node)
+            :constant? (boolean value-node)
+            :value (when value-node (transform-node value-node))
+            :note (when note-clause (transform-node note-clause))})
+         (let [value-node (nth tokens 2)]
+           {:type :field
+            :name (token-text name)
+            :field-type nil
+            :constant? true
+            :value (transform-node value-node)
+            :note (when note-clause (transform-node note-clause))}))))
 
    :constructorDecl
    (fn [[_ name & rest]]

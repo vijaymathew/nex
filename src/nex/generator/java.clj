@@ -14,10 +14,14 @@
 (def ^:dynamic *current-parents* #{})
 (def ^:dynamic *parent-field-map* {})   ;; field-name -> "_parent_X" prefix
 (def ^:dynamic *own-fields* #{})        ;; field names defined on current class
+(def ^:dynamic *constant-names* #{})    ;; accessible class constants in current class
 (def ^:dynamic *local-names* #{})       ;; method params + loop vars (shadow parent fields)
 (def ^:dynamic *all-method-names* #{})  ;; own + delegated parent method names
 (def ^:dynamic *field-types* {})        ;; field-name -> type, own + parent
 (def ^:dynamic *class-invariants* [])   ;; effective class invariants (inherited + local, deduped)
+
+(declare extract-members)
+(declare get-accessible-constants)
 
 (defn class-name-to-local
   "Convert a class name to a local variable name (e.g., 'Point' -> 'point')"
@@ -411,6 +415,49 @@
   (or (= t "Function")
       (and (map? t) (= (:base-type t) "Function"))))
 
+(defn public-member?
+  [member]
+  (not= :private (-> member :visibility :type)))
+
+(defn infer-constant-type
+  "Infer a constant type from its value expression."
+  [expr constants-by-name]
+  (case (:type expr)
+    :integer "Integer"
+    :real "Real"
+    :string "String"
+    :boolean "Boolean"
+    :char "Char"
+    :nil "Any"
+    :identifier (get constants-by-name (:name expr) "Any")
+    :binary (let [lt (infer-constant-type (:left expr) constants-by-name)
+                  rt (infer-constant-type (:right expr) constants-by-name)]
+              (case (:operator expr)
+                ("=" "/=" "<" "<=" ">" ">=" "and" "or") "Boolean"
+                "+" (if (or (= lt "String") (= rt "String")) "String" lt)
+                ("-" "*" "/" "%" "^") lt
+                "Any"))
+    :call (if (and (string? (:target expr)) (false? (:has-parens expr)))
+            (get constants-by-name (:method expr) "Any")
+            "Any")
+    "Any"))
+
+(defn get-parent-constants
+  "Get recursively inherited public constants from a parent class."
+  [parent-name]
+  (when-let [parent-def (get *class-registry* parent-name)]
+    (let [{:keys [constants]} (extract-members (:body parent-def))
+          inherited (mapcat (fn [{:keys [parent]}] (or (get-parent-constants parent) []))
+                            (:parents parent-def))]
+      (vals
+       (reduce (fn [m constant]
+                 (if (contains? m (:name constant))
+                   m
+                   (assoc m (:name constant) constant)))
+               {}
+               (concat (filter public-member? inherited)
+                       (filter public-member? constants)))))))
+
 (defn resolve-identifier
   "Resolve an identifier in expression context.
    Resolution order: locals -> methods -> own fields -> parent fields -> functions -> bare name"
@@ -421,6 +468,7 @@
     (if (= *this-name* "this")
       (str id-name "()")
       (str *this-name* "." id-name "()"))
+    (contains? *constant-names* id-name) id-name
     (contains? *own-fields* id-name) id-name
     (contains? *parent-field-map* id-name)
     (let [parent-prefix (get *parent-field-map* id-name)]
@@ -458,6 +506,11 @@
                            ""
                            (str *this-name* "."))]
               (str prefix "_parent_" target "." method "(" args-code ")"))
+            (if (and (string? target)
+                     (false? has-parens)
+                     (get *class-registry* target)
+                     (some #(= (:name %) method) (get-accessible-constants (get *class-registry* target))))
+              (str target "." method)
             ;; Check for this-target with has-parens distinction
             (if this-target?
               (if (false? has-parens)
@@ -500,7 +553,7 @@
                (when (= method "goto")
                  (str target-code ".goto_(" args-code ")"))
                ;; Default: regular method call
-               (str target-code "." method "(" args-code ")"))))))
+               (str target-code "." method "(" args-code ")")))))))
       ;; No target: class method, function object field, global function, or builtin
       (cond
         ;; Class method (own or inherited via delegation)
@@ -1124,18 +1177,24 @@
 
 (defn generate-field
   "Generate Java code for a field with default initialization"
-  [level {:keys [name field-type visibility note]}]
+  [level {:keys [name field-type visibility note constant? value]}]
   (let [vis (if (and visibility (= (:type visibility) :private))
              "private"
              "public")
         java-type (nex-type-to-java field-type)
-        init-value (default-value field-type)
+        init-value (if constant?
+                     (generate-expression value)
+                     (default-value field-type))
         ;; Generate Javadoc if note present
         javadoc (when note
                  (generate-javadoc level note))]
     (if javadoc
-      (str javadoc "\n" (indent level (str vis " " java-type " " name " = " init-value ";")))
-      (indent level (str vis " " java-type " " name " = " init-value ";")))))
+      (str javadoc "\n" (indent level (str vis " "
+                                          (when constant? "static final ")
+                                          java-type " " name " = " init-value ";")))
+      (indent level (str vis " "
+                         (when constant? "static final ")
+                         java-type " " name " = " init-value ";")))))
 
 ;;
 ;; Constructor Generation
@@ -1246,6 +1305,19 @@
   (when-let [parent-def (get *class-registry* parent-name)]
     (let [{:keys [methods]} (extract-members (:body parent-def))]
       methods)))
+
+(defn get-accessible-constants
+  "Get inherited public constants plus local constants, with local override by name."
+  [class-def]
+  (let [{:keys [constants]} (extract-members (:body class-def))
+        inherited (mapcat (fn [{:keys [parent]}]
+                            (or (get-parent-constants parent) []))
+                          (:parents class-def))]
+    (vals
+     (reduce (fn [m constant]
+               (assoc m (:name constant) constant))
+             {}
+             (concat inherited constants)))))
 
 (defn get-parent-constructors
   "Get constructor definitions from a direct parent class."
@@ -1440,10 +1512,23 @@
                                     (:members section))
                                :else []))
                            class-body)
-        fields (filter #(= (:type %) :field) all-members)
+        fields (filter #(and (= (:type %) :field) (not (:constant? %))) all-members)
+        constants (let [{:keys [constants]}
+                        (reduce (fn [{:keys [types constants]} member]
+                                  (if (and (= (:type member) :field) (:constant? member))
+                                    (let [final-type (or (:field-type member)
+                                                         (infer-constant-type (:value member) types))
+                                          constant (assoc member :field-type final-type)]
+                                      {:types (assoc types (:name member) final-type)
+                                       :constants (conj constants constant)})
+                                    {:types types :constants constants}))
+                                {:types {} :constants []}
+                                all-members)]
+                    constants)
         methods (filter #(= (:type %) :method) all-members)
         ctors (mapcat :constructors constructor-sections)]
     {:fields fields
+     :constants constants
      :methods methods
      :constructors ctors}))
 
@@ -1452,10 +1537,12 @@
   ([class-def] (generate-class class-def {}))
   ([class-def opts]
    (let [{:keys [name generic-params parents body note deferred?]} class-def
-         {:keys [fields methods constructors]} (extract-members body)
+         {:keys [fields constants methods constructors]} (extract-members body)
          parent-names (mapv :parent parents)
          parent-fm (build-parent-field-map parent-names)
          own-flds (set (map :name fields))
+         all-constants (get-accessible-constants class-def)
+         constant-names (set (map :name all-constants))
          own-method-names (set (map :name methods))
          all-methods (get-all-method-names parent-names own-method-names)
          fld-types (build-field-types fields parent-names)
@@ -1463,6 +1550,7 @@
     (binding [*current-parents* (set parent-names)
               *parent-field-map* parent-fm
               *own-fields* own-flds
+              *constant-names* constant-names
               *all-method-names* all-methods
               *field-types* fld-types
               *class-invariants* effective-invariants]
@@ -1477,6 +1565,7 @@
            invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
                               (indent 1 (str "// Class invariant: "
                                             (str/join ", " (map :label effective-invariants)))))
+           constants-code (map #(generate-field 1 (assoc % :constant? true)) all-constants)
            fields-code (map #(generate-field 1 %) fields)
            ;; Delegation methods for inherited methods not overridden
            delegation-methods (when (seq parents)
@@ -1499,6 +1588,8 @@
                   (when invariant-comment [invariant-comment ""])
                   composition-fields
                   (when (seq composition-fields) [""])
+                  constants-code
+                  (when (seq all-constants) [""])
                   fields-code
                   (when (seq fields) [""])
                   (when (seq delegation-methods) delegation-methods)

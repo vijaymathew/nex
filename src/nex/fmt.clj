@@ -179,8 +179,17 @@
 
 (defn format-field
   "Format a field declaration"
-  [{:keys [name field-type note]} level]
-  (str (indent level) name ": " (format-type field-type)
+  [{:keys [name field-type note constant? value]} level]
+  (str (indent level)
+       name
+       (cond
+         constant?
+         (str (when field-type (str ": " (format-type field-type)))
+              " = "
+              (format-expression value))
+
+         :else
+         (str ": " (format-type field-type)))
        (when note (str " note \"" note "\""))))
 
 (defn format-constructor

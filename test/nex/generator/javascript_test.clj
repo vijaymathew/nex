@@ -197,6 +197,25 @@ end"
       (is (str/includes? js-code "Postcondition violation: base_non_negative"))
       (is (str/includes? js-code "Postcondition violation: local_lt_ten")))))
 
+(deftest class-constants-test
+  (testing "Class constants generate static properties and inherited public copies"
+    (let [nex-code "class Frame
+  feature
+    MAX_WIDTH = 450
+end
+
+class Child inherit Frame
+  feature
+    demo(): Integer do
+      result := Frame.MAX_WIDTH + MAX_WIDTH
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "static MAX_WIDTH = 450;"))
+      (is (>= (count (re-seq #"static MAX_WIDTH = 450;" js-code)) 2))
+      (is (str/includes? js-code "Frame.MAX_WIDTH"))
+      (is (str/includes? js-code "Child.MAX_WIDTH")))))
+
 (deftest nil-literal-test
   (testing "Nil literal translation"
     (let [nex-code "class Test

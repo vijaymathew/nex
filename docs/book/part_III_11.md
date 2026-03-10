@@ -81,7 +81,8 @@ class Route_Algorithm
 feature
   compute(start_loc, dest_loc: String): Route_Result
     require
-      inputs_present: start_loc /= "" and dest_loc /= ""
+      inputs_present: start_loc /= "" 
+	                  and dest_loc /= ""
     do
       let r: Route_Result := create Route_Result
 

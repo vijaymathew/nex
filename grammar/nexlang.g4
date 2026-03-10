@@ -70,7 +70,8 @@ featureMember
     ;
 
 fieldDecl
-    : IDENTIFIER ':' type noteClause?
+    : IDENTIFIER ':' type (EQUAL expression)? noteClause?
+    | IDENTIFIER EQUAL expression noteClause?
     ;
 
 constructorDecl

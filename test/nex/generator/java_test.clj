@@ -240,6 +240,25 @@ end"
       (is (str/includes? java-code "Precondition"))
       (is (str/includes? java-code "Postcondition")))))
 
+(deftest class-constants-test
+  (testing "Class constants generate static finals and child copies inherited public constants"
+    (let [nex-code "class Frame
+  feature
+    MAX_WIDTH = 450
+end
+
+class Child inherit Frame
+  feature
+    demo(): Integer do
+      result := Frame.MAX_WIDTH + MAX_WIDTH
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "public static final int MAX_WIDTH = 450;"))
+      (is (>= (count (re-seq #"MAX_WIDTH = 450;" java-code)) 2))
+      (is (str/includes? java-code "Frame.MAX_WIDTH"))
+      (is (str/includes? java-code "MAX_WIDTH")))))
+
 (deftest convert-expression-test
   (testing "Convert expression in if-guard emits Java runtime type check and binding"
     (let [nex-code "class Vehicle
