@@ -82,6 +82,61 @@
        (str/join ", " #?(:clj (seq s) :cljs (es6-iterator-seq (.values s))))
        "}"))
 
+;; 32-bit bitwise helpers for Integer built-ins
+(defn- int32 [n]
+  #?(:clj (int n)
+     :cljs (bit-or n 0)))
+
+(defn- bit-index [n]
+  #?(:clj (bit-and (int n) 31)
+     :cljs (bit-and n 31)))
+
+(defn nex-bitwise-left-shift [n shift]
+  (int32 (bit-shift-left (int32 n) (bit-index shift))))
+
+(defn nex-bitwise-right-shift [n shift]
+  (int32 (bit-shift-right (int32 n) (bit-index shift))))
+
+(defn nex-bitwise-logical-right-shift [n shift]
+  #?(:clj (long (bit-shift-right (bit-and 0xFFFFFFFF (long (int32 n)))
+                                 (bit-index shift)))
+     :cljs (js* "(~{} >>> ~{})" (int32 n) (bit-index shift))))
+
+(defn nex-bitwise-rotate-left [n shift]
+  #?(:clj (Integer/rotateLeft (int32 n) (bit-index shift))
+     :cljs (let [x (int32 n)
+                 s (bit-index shift)]
+             (int32 (bit-or (bit-shift-left x s)
+                            (js* "(~{} >>> ~{})" x (- 32 s)))))))
+
+(defn nex-bitwise-rotate-right [n shift]
+  #?(:clj (Integer/rotateRight (int32 n) (bit-index shift))
+     :cljs (let [x (int32 n)
+                 s (bit-index shift)]
+             (int32 (bit-or (js* "(~{} >>> ~{})" x s)
+                            (bit-shift-left x (- 32 s)))))))
+
+(defn nex-bitwise-and [n other]
+  (int32 (bit-and (int32 n) (int32 other))))
+
+(defn nex-bitwise-or [n other]
+  (int32 (bit-or (int32 n) (int32 other))))
+
+(defn nex-bitwise-xor [n other]
+  (int32 (bit-xor (int32 n) (int32 other))))
+
+(defn nex-bitwise-not [n]
+  (int32 (bit-not (int32 n))))
+
+(defn nex-bitwise-is-set [n idx]
+  (not (zero? (bit-and (int32 n) (bit-shift-left 1 (bit-index idx))))))
+
+(defn nex-bitwise-set [n idx]
+  (int32 (bit-or (int32 n) (bit-shift-left 1 (bit-index idx)))))
+
+(defn nex-bitwise-unset [n idx]
+  (int32 (bit-and (int32 n) (bit-not (bit-shift-left 1 (bit-index idx))))))
+
 ;; Math helpers
 (defn nex-abs [n] #?(:clj (Math/abs (double n)) :cljs (js/Math.abs n)))
 (defn nex-round [n] #?(:clj (Math/round (double n)) :cljs (js/Math.round n)))
@@ -1018,6 +1073,18 @@
     "min"               (fn [n other & _] (min n other))
     "max"               (fn [n other & _] (max n other))
     "pick"              (fn [n & _] (rand-int n))
+    "bitwise_left_shift" (fn [n shift & _] (nex-bitwise-left-shift n shift))
+    "bitwise_right_shift" (fn [n shift & _] (nex-bitwise-right-shift n shift))
+    "bitwise_logical_right_shift" (fn [n shift & _] (nex-bitwise-logical-right-shift n shift))
+    "bitwise_rotate_left" (fn [n shift & _] (nex-bitwise-rotate-left n shift))
+    "bitwise_rotate_right" (fn [n shift & _] (nex-bitwise-rotate-right n shift))
+    "bitwise_is_set"    (fn [n idx & _] (nex-bitwise-is-set n idx))
+    "bitwise_set"       (fn [n idx & _] (nex-bitwise-set n idx))
+    "bitwise_unset"     (fn [n idx & _] (nex-bitwise-unset n idx))
+    "bitwise_and"       (fn [n other & _] (nex-bitwise-and n other))
+    "bitwise_or"        (fn [n other & _] (nex-bitwise-or n other))
+    "bitwise_xor"       (fn [n other & _] (nex-bitwise-xor n other))
+    "bitwise_not"       (fn [n & _] (nex-bitwise-not n))
     ;; Arithmetic operator methods
     "plus"              (fn [n other & _] (+ n other))
     "minus"             (fn [n other & _] (- n other))

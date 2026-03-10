@@ -37,6 +37,10 @@ All scalar classes are modeled as implementing `Comparable` and `Hashable`.
 
 ## `Integer`
 
+Bitwise operations use 32-bit integer semantics. Bit index `0` is the least-significant
+bit. For method calls on integer literals, wrap the literal in parentheses:
+`(5).bitwise_left_shift(1)`.
+
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
 | `to_string` | none | `String` | Convert to string. |
@@ -44,6 +48,18 @@ All scalar classes are modeled as implementing `Comparable` and `Hashable`.
 | `min` | `other: Integer` | `Integer` | Smaller of two values. |
 | `max` | `other: Integer` | `Integer` | Larger of two values. |
 | `pick` | none | `Integer` | Random integer in `[0, self)`. |
+| `bitwise_left_shift` | `n: Integer` | `Integer` | Left-shift by `n` bit positions. |
+| `bitwise_right_shift` | `n: Integer` | `Integer` | Arithmetic right-shift by `n` bit positions. |
+| `bitwise_logical_right_shift` | `n: Integer` | `Integer` | Logical right-shift by `n` bit positions. |
+| `bitwise_rotate_left` | `n: Integer` | `Integer` | Rotate bits left by `n` positions. |
+| `bitwise_rotate_right` | `n: Integer` | `Integer` | Rotate bits right by `n` positions. |
+| `bitwise_is_set` | `n: Integer` | `Boolean` | True if bit `n` is set. |
+| `bitwise_set` | `n: Integer` | `Integer` | Return value with bit `n` set to `1`. |
+| `bitwise_unset` | `n: Integer` | `Integer` | Return value with bit `n` cleared to `0`. |
+| `bitwise_and` | `other: Integer` | `Integer` | Bitwise AND. |
+| `bitwise_or` | `other: Integer` | `Integer` | Bitwise OR. |
+| `bitwise_xor` | `other: Integer` | `Integer` | Bitwise XOR. |
+| `bitwise_not` | none | `Integer` | Bitwise complement. |
 | `plus` | `other: Integer` | `Integer` | Addition. |
 | `minus` | `other: Integer` | `Integer` | Subtraction. |
 | `times` | `other: Integer` | `Integer` | Multiplication. |
@@ -155,6 +171,8 @@ print(s.contains("ex"))           -- true
 let n: Integer := 7
 print(n.plus(5))                  -- 12
 print(n.pick())                   -- random integer in [0, 7)
+print((5).bitwise_left_shift(1))  -- 10
+print((6).bitwise_and(3))         -- 2
 
 let r: Real := 3.6
 print(r.round())                  -- 4

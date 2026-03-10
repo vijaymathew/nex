@@ -55,8 +55,22 @@ Common operations:
 - `to_string`
 - `abs`, `min`, `max`
 - `pick`
+- `bitwise_left_shift`, `bitwise_right_shift`, `bitwise_logical_right_shift`
+- `bitwise_rotate_left`, `bitwise_rotate_right`
+- `bitwise_is_set`, `bitwise_set`, `bitwise_unset`
+- `bitwise_and`, `bitwise_or`, `bitwise_xor`, `bitwise_not`
 - `plus`, `minus`, `times`, `divided_by`
 - `compare`, `hash`
+
+Bitwise operations use 32-bit integer semantics. Bit `0` is the least-significant
+bit. When calling a bitwise method on an integer literal, wrap the literal in
+parentheses:
+
+```nex
+print((5).bitwise_left_shift(1))   -- 10
+print((6).bitwise_and(3))          -- 2
+print((5).bitwise_is_set(0))       -- true
+```
 
 ### `Integer64`
 

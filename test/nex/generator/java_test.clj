@@ -288,6 +288,24 @@ end"
       (is (str/includes? java-code "NexRuntime.setCursor"))
       (is (str/includes? java-code "class SetCursor")))))
 
+(deftest integer-bitwise-generation-test
+  (testing "Integer bitwise methods translate to Java bitwise operators/helpers"
+    (let [nex-code "class Test
+  feature
+    demo(): Integer do
+      let x: Integer := (5).bitwise_left_shift(1)
+      let y: Integer := (5).bitwise_logical_right_shift(1)
+      let z: Boolean := (5).bitwise_is_set(0)
+      result := ((5).bitwise_rotate_left(2)).bitwise_xor(x)
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "<< 1"))
+      (is (str/includes? java-code ">>> 1"))
+      (is (str/includes? java-code "Integer.rotateLeft((int)5, 2)"))
+      (is (str/includes? java-code "& 1) != 0"))
+      (is (str/includes? java-code "^")))))
+
 (deftest convert-expression-test
   (testing "Convert expression in if-guard emits Java runtime type check and binding"
     (let [nex-code "class Vehicle

@@ -245,6 +245,24 @@ end"
       (is (str/includes? js-code "__nexSetCursor"))
       (is (str/includes? js-code "_type: 'SetCursor'")))))
 
+(deftest integer-bitwise-generation-test
+  (testing "Integer bitwise methods translate to JavaScript bitwise operators/helpers"
+    (let [nex-code "class Test
+  feature
+    demo(): Integer do
+      let x: Integer := (5).bitwise_left_shift(1)
+      let y: Integer := (5).bitwise_logical_right_shift(1)
+      let z: Boolean := (5).bitwise_is_set(0)
+      result := ((5).bitwise_rotate_left(2)).bitwise_xor(x)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "<< 1"))
+      (is (str/includes? js-code ">>> 1"))
+      (is (str/includes? js-code "| 0"))
+      (is (str/includes? js-code "& 1) !== 0"))
+      (is (str/includes? js-code "^")))))
+
 (deftest nil-literal-test
   (testing "Nil literal translation"
     (let [nex-code "class Test

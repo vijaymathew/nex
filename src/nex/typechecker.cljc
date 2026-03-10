@@ -1393,6 +1393,21 @@
                      :return-type "Integer"}))
 
   (doseq [[method-name sig]
+          {"bitwise_left_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_right_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_logical_right_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_rotate_left" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_rotate_right" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_is_set" {:params [{:name "n" :type "Integer"}] :return-type "Boolean"}
+           "bitwise_set" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_unset" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_and" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
+           "bitwise_or" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
+           "bitwise_xor" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
+           "bitwise_not" {:params [] :return-type "Integer"}}]
+    (env-add-method env "Integer" method-name sig))
+
+  (doseq [[method-name sig]
           {"length"      {:params [] :return-type "Integer"}
            "index_of"    {:params [{:name "substr" :type "String"}] :return-type "Integer"}
            "substring"   {:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}] :return-type "String"}
