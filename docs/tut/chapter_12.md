@@ -134,39 +134,60 @@ nex> print(p.x)
 3.0
 ```
 
-Fields can be given initial values directly in the `feature` block:
+Classes can also define class-level constants directly in the `feature` block:
 
 ```
-nex> class Counter
-       create
-         make() do
-         end
+nex> class Layout
        feature
-         count: Integer := 0
-         increment() do
-           count := count + 1
-         end
-         value(): Integer do
-           result := count
+         HELLO: String = "hello"
+         MAX_WIDTH = 450
+         widened(): Integer do
+           result := MAX_WIDTH + 10
          end
      end
-Class(es) registered: Counter
+Class(es) registered: Layout
 
-nex> let c := create Counter.make
-nex> c.increment
-nex> c.increment
-nex> c.increment
-nex> print(c.value)
-3
+nex> let layout := create Layout
+nex> print(Layout.MAX_WIDTH)
+450
+nex> print(layout.widened)
+460
 ```
 
-`count` starts at `0` for every new `Counter` without explicit initialisation in the constructor.
+`HELLO` and `MAX_WIDTH` are not per-object fields. They belong to the class itself. Their meaning is: these features are always equal to those values.
+
+This is the Nex equivalent of a Java `static final` member.
+
+The form is:
+
+```text
+NAME: Type = expression
+NAME = expression
+```
+
+If the type is omitted, Nex infers it from the value. `MAX_WIDTH = 450` is therefore an `Integer`.
+
+Class constants are accessed from outside the class with the class name:
+
+```text
+print(Layout.MAX_WIDTH)
+```
+
+Inside the class, they can be used directly by name:
+
+```text
+widened(): Integer do
+  result := MAX_WIDTH + 10
+end
+```
+
+Because constants are not object state, they are not initialised by constructors and cannot be assigned to later.
 
 
 
 ## Detachable Fields
 
-In strict type-checking mode, Nex requires that every field holding a non-basic type — any class, array, map, or other composite — must be initialised either with a default value in the `feature` block or in the constructor. The basic types (`Integer`, `Real`, `Boolean`, `String`, `Char`) have well-defined defaults and can be left uninitialised. Everything else must be explicitly set.
+In strict type-checking mode, Nex requires that every field holding a non-basic type — any class, array, map, or other composite — must be initialised in the constructor. The basic types (`Integer`, `Real`, `Boolean`, `String`, `Char`) have well-defined defaults and can be left uninitialised. Everything else must be explicitly set.
 
 Sometimes a field genuinely might not have a value at construction time. For these cases, use a *detachable* type, written with a leading `?`:
 
@@ -407,9 +428,9 @@ nex> print(s.size)
 
 - A class has a `create` block (constructors) and a `feature` block (fields and methods)
 - Constructors are named; `create ClassName.constructor_name(args)` creates an instance
-- Fields are `name: Type` inside `feature`; methods are `name(params): ReturnType do     end`
+- Fields are `name: Type` inside `feature`; class constants use `NAME: Type = value` or `NAME = value`; methods are `name(params): ReturnType do ... end`
 - Fields are private — external code reads them with `obj.field` but cannot assign; changes go through methods
-- In strict mode, non-basic fields must be initialised in the constructor or given a default; use `?Type` for fields that may legitimately be `nil`
+- In strict mode, non-basic fields must be initialised in the constructor; use `?Type` for fields that may legitimately be `nil`
 - `this` refers to the current object; needed when a parameter name shadows a field, or to pass the object as an argument
 - Uniform access: field reads and method calls use identical `obj.name` syntax
 

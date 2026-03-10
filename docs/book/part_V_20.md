@@ -61,6 +61,12 @@ Consider the requirement:
 
 ```nex
 class Task_View
+create
+  make(id: String, priority: Integer, arrival: Integer) do
+    this.id := id
+    this.priority := priority
+    this.arrival := arrival
+  end
 feature
   id: String
   priority: Integer
@@ -71,6 +77,12 @@ invariant
 end
 
 class Sort_Example
+create
+  make(t1: Task_View, t2: Task_View, t3: Task_View) do
+    this.t1 := t1
+    this.t2 := t2
+    this.t3 := t3
+  end
 feature
   t1: Task_View
   t2: Task_View
@@ -78,7 +90,8 @@ feature
 
   sorted_ids_by_priority(): String
     do
-      -- Teaching-sized fixed comparison network for three items.
+      -- Teaching-sized fixed comparison network 
+	  -- for three items.
       let a: Task_View := t1
       let b: Task_View := t2
       let c: Task_View := t3

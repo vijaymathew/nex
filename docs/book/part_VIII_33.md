@@ -76,7 +76,11 @@ class Retrieval_Service
 feature
   retrieve(q: String): String
     do
-      if q = "graphs" then result := "CAND:G-1" else result := "CAND:GENERIC" end
+      if q = "graphs" then
+        result := "CAND:G-1"
+      else
+        result := "CAND:GENERIC"
+      end
     end
 end
 
@@ -84,12 +88,21 @@ class Ranking_Service
 feature
   rank(candidate: String): String
     do
-      if candidate = "CAND:G-1" then result := "DOC:G-1" else result := "DOC:GENERIC" end
+      if candidate = "CAND:G-1" then
+        result := "DOC:G-1"
+      else
+        result := "DOC:GENERIC"
+      end
     end
 end
 
 -- The Refactored Orchestrator: Same contract as Legacy
 class Refactored_Knowledge_Service
+create
+  make(retrieval: Retrieval_Service, ranking: Ranking_Service) do
+    this.retrieval := retrieval
+    this.ranking := ranking
+  end
 feature
   retrieval: Retrieval_Service
   ranking: Ranking_Service

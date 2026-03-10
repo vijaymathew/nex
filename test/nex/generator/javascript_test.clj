@@ -197,6 +197,72 @@ end"
       (is (str/includes? js-code "Postcondition violation: base_non_negative"))
       (is (str/includes? js-code "Postcondition violation: local_lt_ten")))))
 
+(deftest class-constants-test
+  (testing "Class constants generate static properties and inherited public copies"
+    (let [nex-code "class Frame
+  feature
+    MAX_WIDTH = 450
+end
+
+class Child inherit Frame
+  feature
+    demo(): Integer do
+      result := Frame.MAX_WIDTH + MAX_WIDTH
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "static MAX_WIDTH = 450;"))
+      (is (>= (count (re-seq #"static MAX_WIDTH = 450;" js-code)) 2))
+      (is (str/includes? js-code "Frame.MAX_WIDTH"))
+      (is (str/includes? js-code "Child.MAX_WIDTH")))))
+
+(deftest set-generation-test
+  (testing "Set literals and Set.from_array translate to JavaScript Set helpers"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let s: Set[Integer] := {1, 2, 3}
+      let t: Set[Integer] := create Set[Integer].from_array([2, 3])
+      print(s.union(t))
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "new Set([1, 2, 3])"))
+      (is (str/includes? js-code "new Set([2, 3])"))
+      (is (str/includes? js-code "__nexSetUnion(s, t)")))))
+
+(deftest set-cursor-generation-test
+  (testing "Across on sets translates via runtime set cursor helper"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      across {1, 2} as x do
+        print(x)
+      end
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "__nexSetCursor"))
+      (is (str/includes? js-code "_type: 'SetCursor'")))))
+
+(deftest integer-bitwise-generation-test
+  (testing "Integer bitwise methods translate to JavaScript bitwise operators/helpers"
+    (let [nex-code "class Test
+  feature
+    demo(): Integer do
+      let x: Integer := (5).bitwise_left_shift(1)
+      let y: Integer := (5).bitwise_logical_right_shift(1)
+      let z: Boolean := (5).bitwise_is_set(0)
+      result := ((5).bitwise_rotate_left(2)).bitwise_xor(x)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "<< 1"))
+      (is (str/includes? js-code ">>> 1"))
+      (is (str/includes? js-code "| 0"))
+      (is (str/includes? js-code "& 1) !== 0"))
+      (is (str/includes? js-code "^")))))
+
 (deftest nil-literal-test
   (testing "Nil literal translation"
     (let [nex-code "class Test
@@ -335,8 +401,7 @@ end"
       (is (str/includes? js-with-contracts "Precondition"))
       (is (str/includes? js-with-contracts "Postcondition"))
       (is (str/includes? js-with-contracts "// Class invariant:"))
-      ;; Without contracts should not include error throws
-      (is (not (str/includes? js-without-contracts "throw new Error")))
+      ;; Without contracts should not include contract-specific checks
       (is (not (str/includes? js-without-contracts "Precondition")))
       (is (not (str/includes? js-without-contracts "Postcondition")))
       (is (not (str/includes? js-without-contracts "// Class invariant:"))))))

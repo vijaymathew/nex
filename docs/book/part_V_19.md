@@ -52,6 +52,11 @@ The word "safely" is doing more work than it appears. It implies that missing ta
 
 ```nex
 class Search_Result
+create
+  make(status: String, steps: Integer) do
+    this.status := status
+    this.steps := steps
+  end
 feature
   status: String
   steps: Integer
@@ -75,29 +80,29 @@ feature
     require
       id_present: task_id /= ""
     do
-      let r: Search_Result := create Search_Result
-      r.status := "NOT_FOUND"
-      r.steps := 0
-
-      r.steps := r.steps + 1
+      let final_status: String := "NOT_FOUND"
+      let steps: Integer := 1
       if task_id = id1 then
-        r.status := st1
+        final_status := st1
       elseif task_id = id2 then
-        r.steps := r.steps + 1
-        r.status := st2
+        steps := steps + 1
+        final_status := st2
       elseif task_id = id3 then
-        r.steps := r.steps + 1
-        r.status := st3
+        steps := steps + 1
+        final_status := st3
       elseif task_id = id4 then
-        r.steps := r.steps + 1
-        r.status := st4
+        steps := steps + 1
+        final_status := st4
       else
-        r.steps := r.steps + 1
+        steps := steps + 1
       end
-
-      result := r
+      result := create Search_Result.make(
+        final_status,
+        steps
+      )
     ensure
-      bounded_steps: result.steps >= 1 and result.steps <= 4
+      bounded_steps: result.steps >= 1 
+	                 and result.steps <= 4
     end
 end
 ```

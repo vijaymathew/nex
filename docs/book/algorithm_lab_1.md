@@ -66,6 +66,12 @@ If using the web IDE, place everything in one file and run `App.run`.
 
 ```nex
 class Search_Result
+create
+  make(found: Boolean, index: Integer, steps: Integer) do
+    this.found := found
+    this.index := index
+    this.steps := steps
+  end
 feature
   found: Boolean
   index: Integer
@@ -81,53 +87,52 @@ end
 ```nex
 class Linear_Search_Algo
 feature
-  find(a1, a2, a3, a4, a5, a6, a7, a8, target: Integer): Search_Result
+  find(a1, a2, a3, a4, a5, a6, a7, a8, 
+       target: Integer): Search_Result
     do
-      let r: Search_Result := create Search_Result
-      r.found := false
-      r.index := -1
-      r.steps := 0
-
-      r.steps := r.steps + 1
+      let found: Boolean := false
+      let idx: Integer := -1
+      let steps: Integer := 1
       if a1 = target then
-        r.found := true
-        r.index := 0
+        found := true
+        idx := 0
       elseif a2 = target then
-        r.steps := r.steps + 1
-        r.found := true
-        r.index := 1
+        steps := steps + 1
+        found := true
+        idx := 1
       elseif a3 = target then
-        r.steps := r.steps + 1
-        r.found := true
-        r.index := 2
+        steps := steps + 1
+        found := true
+        idx := 2
       elseif a4 = target then
-        r.steps := r.steps + 1
-        r.found := true
-        r.index := 3
+        steps := steps + 1
+        found := true
+        idx := 3
       elseif a5 = target then
-        r.steps := r.steps + 1
-        r.found := true
-        r.index := 4
+        steps := steps + 1
+        found := true
+        idx := 4
       elseif a6 = target then
-        r.steps := r.steps + 1
-        r.found := true
-        r.index := 5
+        steps := steps + 1
+        found := true
+        idx := 5
       elseif a7 = target then
-        r.steps := r.steps + 1
-        r.found := true
-        r.index := 6
+        steps := steps + 1
+        found := true
+        idx := 6
       elseif a8 = target then
-        r.steps := r.steps + 1
-        r.found := true
-        r.index := 7
+        steps := steps + 1
+        found := true
+        idx := 7
       else
-        r.steps := r.steps + 1
+        steps := steps + 1
       end
 
-      result := r
+      result := create Search_Result.make(found, idx, steps)
     ensure
       steps_recorded: result.steps >= 1
-      valid_index: result.index >= -1 and result.index <= 7
+      valid_index: result.index >= -1 
+	               and result.index <= 7
     end
 end
 ```
@@ -137,55 +142,40 @@ end
 ```nex
 class Binary_Search_Algo
 feature
-  find(a1, a2, a3, a4, a5, a6, a7, a8, target: Integer): Search_Result
+  find(a1, a2, a3, a4, a5, a6, a7, a8, 
+       target: Integer): Search_Result
     require
       sorted_input:
         a1 <= a2 and a2 <= a3 and a3 <= a4 and
-        a4 <= a5 and a5 <= a6 and a6 <= a7 and a7 <= a8
+        a4 <= a5 and a5 <= a6 and a6 <= a7 
+		and a7 <= a8
     do
-      let r: Search_Result := create Search_Result
-      r.found := false
-      r.index := -1
       if a4 = target then
-        r.steps := 1
-        r.found := true
-        r.index := 3
+        result := create Search_Result.make(true, 3, 1)
       elseif target < a4 and a2 = target then
-        r.steps := 2
-        r.found := true
-        r.index := 1
+        result := create Search_Result.make(true, 1, 2)
       elseif target < a2 and a1 = target then
-        r.steps := 3
-        r.found := true
-        r.index := 0
-      elseif target > a2 and target < a4 and a3 = target then
-        r.steps := 3
-        r.found := true
-        r.index := 2
+        result := create Search_Result.make(true, 0, 3)
+      elseif target > a2 and target < a4 
+	         and a3 = target then
+        result := create Search_Result.make(true, 2, 3)
       elseif target > a4 and a6 = target then
-        r.steps := 2
-        r.found := true
-        r.index := 5
-      elseif target > a4 and target < a6 and a5 = target then
-        r.steps := 3
-        r.found := true
-        r.index := 4
+        result := create Search_Result.make(true, 5, 2)
+      elseif target > a4 and target < a6 
+	         and a5 = target then
+        result := create Search_Result.make(true, 4, 3)
       elseif target > a6 and a7 = target then
-        r.steps := 3
-        r.found := true
-        r.index := 6
+        result := create Search_Result.make(true, 6, 3)
       elseif target > a7 and a8 = target then
-        r.steps := 4
-        r.found := true
-        r.index := 7
+        result := create Search_Result.make(true, 7, 4)
       else
-        r.steps := 4
+        result := create Search_Result.make(false, -1, 4)
       end
-
-      result := r
     ensure
-      steps_bounded: result.steps >= 1 and result.steps <= 4
-      valid_index: result.index >= -1 and result.index <= 7
+      steps_bounded: result.steps >= 1 
+	                 and result.steps <= 4
+      valid_index: result.index >= -1 
+	               and result.index <= 7
     end
 end
 ```
@@ -196,14 +186,20 @@ end
 class App
 feature
   run() do
-    let lin: Linear_Search_Algo := create Linear_Search_Algo
-    let bin: Binary_Search_Algo := create Binary_Search_Algo
+    let lin: Linear_Search_Algo 
+	 := create Linear_Search_Algo
+    let bin: Binary_Search_Algo 
+	 := create Binary_Search_Algo
 
-    let l_hit: Search_Result := lin.find(3, 7, 10, 14, 19, 21, 25, 30, 30)
-    let b_hit: Search_Result := bin.find(3, 7, 10, 14, 19, 21, 25, 30, 30)
+    let l_hit: Search_Result 
+	 := lin.find(3, 7, 10, 14, 19, 21, 25, 30, 30)
+    let b_hit: Search_Result 
+	 := bin.find(3, 7, 10, 14, 19, 21, 25, 30, 30)
 
-    let l_miss: Search_Result := lin.find(3, 7, 10, 14, 19, 21, 25, 30, 11)
-    let b_miss: Search_Result := bin.find(3, 7, 10, 14, 19, 21, 25, 30, 11)
+    let l_miss: Search_Result 
+	 := lin.find(3, 7, 10, 14, 19, 21, 25, 30, 11)
+    let b_miss: Search_Result 
+	 := bin.find(3, 7, 10, 14, 19, 21, 25, 30, 11)
 
     print("Linear hit steps: " + l_hit.steps)
     print("Binary hit steps: " + b_hit.steps)

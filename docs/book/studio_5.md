@@ -61,6 +61,12 @@ If using the web IDE, place all classes in one file and run `App.run`.
 
 ```nex
 class Op_Result
+create
+  make(status: String, value: String, attempts: Integer) do
+    this.status := status
+    this.value := value
+    this.attempts := attempts
+  end
 feature
   status: String
   value: String
@@ -72,6 +78,10 @@ invariant
 end
 
 class Reliability_Log
+create
+  make(initial_event: String) do
+    this.last_event := initial_event
+  end
 feature
   last_event: String
 
@@ -92,11 +102,15 @@ Continuation from Studio 4 `Delivery_Workflow` idea.
 
 ```nex
 class Delivery_Port
+create
+  make(fail_until_attempt: Integer) do
+    this.fail_until_attempt := fail_until_attempt
+  end
 feature
   -- Simulate transient failures for first N attempts.
   fail_until_attempt: Integer
 
-  send_dispatch(task_id: String; attempt: Integer): String
+  send_dispatch(task_id: String, attempt: Integer): String
     require
       id_present: task_id /= ""
       attempt_valid: attempt >= 1
@@ -115,31 +129,41 @@ feature
 end
 
 class Delivery_Reliability_Service
+create
+  make(
+    port: Delivery_Port,
+    log: Reliability_Log,
+    last_dispatched_task: String
+  ) do
+    this.port := port
+    this.log := log
+    this.last_dispatched_task := last_dispatched_task
+  end
 feature
   port: Delivery_Port
   log: Reliability_Log
   last_dispatched_task: String
 
-  dispatch_with_retry(task_id: String; max_attempts: Integer): Op_Result
+  dispatch_with_retry(task_id: String, 
+                      max_attempts: Integer): Op_Result
     require
       id_present: task_id /= ""
       max_attempts_valid: max_attempts >= 1
     do
-      let r: Op_Result := create Op_Result
-
-      -- Idempotency guard: repeated same task dispatch request.
+      -- Idempotency guard: repeated same task 
+	  -- dispatch request.
       if last_dispatched_task = task_id then
-        r.status := "IDEMPOTENT_OK"
-        r.value := "ALREADY_SENT"
-        r.attempts := 0
-        result := r
+        result := create Op_Result.make(
+          "IDEMPOTENT_OK",
+          "ALREADY_SENT",
+          0
+        )
       else
         let a: Integer := 1
         let final_status: String := "TRANSIENT_FAILURE"
 
         from
-        until a > max_attempts or final_status = "SENT"
-        loop
+        until a > max_attempts or final_status = "SENT" do
           final_status := port.send_dispatch(task_id, a)
           log.record("delivery_attempt=" + a)
           a := a + 1
@@ -147,18 +171,17 @@ feature
 
         if final_status = "SENT" then
           last_dispatched_task := task_id
-          r.status := "OK"
-          r.value := "SENT"
+          result := create Op_Result.make("OK", "SENT", a - 1)
         else
-          r.status := "FAILED"
-          r.value := final_status
+          result := 
+		   create Op_Result.make("FAILED", final_status, a - 1)
         end
-
-        r.attempts := a - 1
-        result := r
       end
     ensure
-      known_status: result.status = "OK" or result.status = "FAILED" or result.status = "IDEMPOTENT_OK"
+      known_status:
+        result.status = "OK" or
+        result.status = "FAILED" or
+        result.status = "IDEMPOTENT_OK"
     end
 end
 ```
@@ -169,6 +192,10 @@ Continuation from Studio 4 query/validation services.
 
 ```nex
 class Knowledge_Port
+create
+  make(query_available: Boolean) do
+    this.query_available := query_available
+  end
 feature
   query_available: Boolean
 
@@ -187,6 +214,11 @@ feature
 end
 
 class Knowledge_Reliability_Service
+create
+  make(port: Knowledge_Port, log: Reliability_Log) do
+    this.port := port
+    this.log := log
+  end
 feature
   port: Knowledge_Port
   log: Reliability_Log
@@ -195,23 +227,18 @@ feature
     require
       query_present: query /= ""
     do
-      let r: Op_Result := create Op_Result
       let raw: String := port.fetch_top(query)
 
       if raw = "UNAVAILABLE" then
         log.record("knowledge_fallback_used")
-        r.status := "DEGRADED"
-        r.value := "DOC:CACHED-001"
-        r.attempts := 1
+        result := 
+		 create Op_Result.make("DEGRADED", "DOC:CACHED-001", 1)
       else
-        r.status := "OK"
-        r.value := raw
-        r.attempts := 1
+        result := create Op_Result.make("OK", raw, 1)
       end
-
-      result := r
     ensure
-      known_status: result.status = "OK" or result.status = "DEGRADED"
+      known_status: result.status = "OK" 
+	                or result.status = "DEGRADED"
     end
 end
 ```
@@ -222,6 +249,12 @@ Continuation from Studio 4 world update service.
 
 ```nex
 class World_Port
+create
+  make(object_id: String, x: Integer, max_x: Integer) do
+    this.object_id := object_id
+    this.x := x
+    this.max_x := max_x
+  end
 feature
   object_id: String
   x: Integer
@@ -244,20 +277,21 @@ feature
 end
 
 class World_Reliability_Service
+create
+  make(port: World_Port, log: Reliability_Log) do
+    this.port := port
+    this.log := log
+  end
 feature
   port: World_Port
   log: Reliability_Log
 
   safe_step(delta: Integer): Op_Result
     do
-      let r: Op_Result := create Op_Result
       let status: String := port.move(delta)
       log.record("world_step_delta=" + delta)
 
-      r.status := "OK"
-      r.value := status
-      r.attempts := 1
-      result := r
+      result := create Op_Result.make("OK", status, 1)
     ensure
       known_status: result.status = "OK"
     end
@@ -270,51 +304,50 @@ end
 class App
 feature
   run() do
-    let l: Reliability_Log := create Reliability_Log
-    l.last_event := "init"
+    let l: Reliability_Log := 
+	 create Reliability_Log.make("init")
 
     -- Delivery reliability run
-    let dp: Delivery_Port := create Delivery_Port
-    dp.fail_until_attempt := 2
-
-    let dr: Delivery_Reliability_Service := create Delivery_Reliability_Service
-    dr.port := dp
-    dr.log := l
-    dr.last_dispatched_task := "NONE"
+    let dp: Delivery_Port := create Delivery_Port.make(2)
+    let dr: Delivery_Reliability_Service
+      := create Delivery_Reliability_Service.make(dp, l, "NONE")
 
     let d1: Op_Result := dr.dispatch_with_retry("T-7", 3)
     print("Delivery result: " + d1.status + ", attempts=" + d1.attempts)
 
     let d2: Op_Result := dr.dispatch_with_retry("T-7", 3)
-    print("Delivery idempotent result: " + d2.status + ", value=" + d2.value)
+    print(
+      "Delivery idempotent result: " +
+      d2.status +
+      ", value=" + d2.value
+    )
 
     -- Knowledge reliability run
-    let kp: Knowledge_Port := create Knowledge_Port
-    kp.query_available := false
-
-    let kr: Knowledge_Reliability_Service := create Knowledge_Reliability_Service
-    kr.port := kp
-    kr.log := l
+    let kp: Knowledge_Port := create Knowledge_Port.make(false)
+    let kr: Knowledge_Reliability_Service
+      := create Knowledge_Reliability_Service.make(kp, l)
 
     let k1: Op_Result := kr.safe_query("contracts")
     print("Knowledge result: " + k1.status + ", value=" + k1.value)
 
     -- World reliability run
-    let wp: World_Port := create World_Port
-    wp.object_id := "E-1"
-    wp.x := 9
-    wp.max_x := 10
-
-    let wr: World_Reliability_Service := create World_Reliability_Service
-    wr.port := wp
-    wr.log := l
+    let wp: World_Port := create World_Port.make("E-1", 9, 10)
+    let wr: World_Reliability_Service
+      := create World_Reliability_Service.make(wp, l)
 
     let w1: Op_Result := wr.safe_step(5)
-    print("World result: " + w1.status + ", value=" + w1.value + ", x=" + wp.x)
+    print(
+      "World result: " + w1.status +
+      ", value=" + w1.value +
+      ", x=" + wp.x
+    )
 
     -- Simple regression assertions
-    if d1.status = "OK" and d1.attempts = 3 and d2.status = "IDEMPOTENT_OK" and
-       k1.status = "DEGRADED" and wp.x = 10 then
+    if d1.status = "OK" and
+       d1.attempts = 3 and
+       d2.status = "IDEMPOTENT_OK" and
+       k1.status = "DEGRADED" and
+       wp.x = 10 then
       print("RELIABILITY_CHECK:PASS")
     else
       print("RELIABILITY_CHECK:FAIL")

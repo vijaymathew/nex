@@ -83,7 +83,8 @@ feature
         result := "LINEAR"
       end
     ensure
-      known_strategy: result = "INDEXED" or result = "LINEAR"
+      known_strategy: result = "INDEXED" 
+	                  or result = "LINEAR"
     end
 end
 ```

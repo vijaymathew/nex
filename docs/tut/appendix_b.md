@@ -43,7 +43,7 @@ Common operations:
 Example:
 
 ```nex
-let s := "  Nex  "
+let s: String := "  Nex  "
 print(s.trim().to_upper())   -- "NEX"
 print(s.split(" "))          -- array of pieces
 ```
@@ -55,8 +55,22 @@ Common operations:
 - `to_string`
 - `abs`, `min`, `max`
 - `pick`
+- `bitwise_left_shift`, `bitwise_right_shift`, `bitwise_logical_right_shift`
+- `bitwise_rotate_left`, `bitwise_rotate_right`
+- `bitwise_is_set`, `bitwise_set`, `bitwise_unset`
+- `bitwise_and`, `bitwise_or`, `bitwise_xor`, `bitwise_not`
 - `plus`, `minus`, `times`, `divided_by`
 - `compare`, `hash`
+
+Bitwise operations use 32-bit integer semantics. Bit `0` is the least-significant
+bit. When calling a bitwise method on an integer literal, wrap the literal in
+parentheses:
+
+```nex
+print((5).bitwise_left_shift(1))   -- 10
+print((6).bitwise_and(3))          -- 2
+print((5).bitwise_is_set(0))       -- true
+```
 
 ### `Integer64`
 
@@ -153,6 +167,49 @@ Main methods:
 | `remove(key)` | Delete entry. |
 | `cursor` | Iterator over entries. |
 
+### `Set[T]`
+
+Construction:
+
+```text
+create Set[Integer]
+create Set[Integer].from_array([1, 2, 3])
+{1, 2, 3}
+```
+
+Notes:
+
+- Non-empty brace literals such as `{1, 2, 3}` create sets.
+- The empty literal `{}` creates an empty map, not an empty set.
+
+Main methods:
+
+| Method | Purpose |
+|---|---|
+| `contains(value)` | Membership test. |
+| `union(other)` | Set union. |
+| `difference(other)` | Elements in this set but not in `other`. |
+| `intersection(other)` | Common elements. |
+| `symmetric_difference(other)` | Elements that occur in exactly one set. |
+| `size` | Number of elements. |
+| `is_empty` | Check emptiness. |
+| `cursor` | Iterator for `across`. |
+
+### `Stack[T]`
+
+`Stack[T]` is not a built-in collection type. It is the standard tutorial example
+of a user-defined generic collection class built on top of `Array[T]`.
+
+Typical operations:
+
+| Method | Purpose |
+|---|---|
+| `push(value)` | Add an element to the top. |
+| `pop()` | Remove and return the top element. |
+| `peek()` | Return the top element without removing it. |
+| `is_empty()` | Check emptiness. |
+| `size()` | Number of stored elements. |
+
 
 ## Cursor Types
 
@@ -161,6 +218,7 @@ Concrete cursor classes:
 - `ArrayCursor`
 - `StringCursor`
 - `MapCursor`
+- `SetCursor`
 
 They implement the `Cursor` protocol and are usually used indirectly through `across`.
 
@@ -171,7 +229,7 @@ They implement the `Cursor` protocol and are usually used indirectly through `ac
 
 Construction:
 
-```nex
+```text
 create Console
 ```
 
@@ -189,7 +247,7 @@ Main methods:
 
 Construction:
 
-```nex
+```text
 create File.open(path)
 ```
 
@@ -207,7 +265,7 @@ Main methods:
 
 Construction:
 
-```nex
+```text
 create Process
 ```
 
@@ -224,7 +282,7 @@ Main methods:
 
 Construction:
 
-```nex
+```text
 create Window
 create Window.with_title(title)
 create Window.with_title(title, width, height)
@@ -242,7 +300,7 @@ Common operations:
 
 Construction:
 
-```nex
+```text
 create Turtle.on_window(window)
 ```
 
@@ -260,7 +318,7 @@ Common operations:
 
 Construction:
 
-```nex
+```text
 create Image.from_file(path)
 ```
 

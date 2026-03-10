@@ -8,11 +8,18 @@
 
 (def ^:dynamic *function-names* #{})
 (def ^:dynamic *this-name* "this")
+(def ^:dynamic *current-class-name* nil)
+(def ^:dynamic *class-registry* {})
 (def ^:dynamic *all-method-names* #{})  ;; own + parent method names
 (def ^:dynamic *own-fields* #{})        ;; field names defined on current class
+(def ^:dynamic *constant-names* #{})    ;; accessible class constants
 (def ^:dynamic *local-names* #{})       ;; method params + loop vars
+(def ^:dynamic *local-types* {})        ;; local/param name -> Nex type
 (def ^:dynamic *field-types* {})        ;; field-name -> type
 (def ^:dynamic *class-invariants* [])   ;; effective class invariants (inherited + local, deduped)
+
+(declare extract-members)
+(declare get-accessible-constants-js)
 
 (defn class-name-to-local
   "Convert a class name to a local variable name (e.g., 'Point' -> 'point')"
@@ -36,6 +43,7 @@
           js-base (case base-type
                     "Array" "Array"
                     "Map" "Map"
+                    "Set" "Set"
                     base-type)
           args (:type-args nex-type)]
       (if args
@@ -57,6 +65,7 @@
       "String" "string"
       "Array" "Array"
       "Map" "Map"
+      "Set" "Set"
       "Console" "Object"
       "File" "Object"
       "Process" "Object"
@@ -78,6 +87,7 @@
       (case base
         "Array" "[]"
         "Map" "new Map()"
+        "Set" "new Set()"
         "null"))
 
     ;; Handle basic types
@@ -92,6 +102,7 @@
       "String" "\"\""
       "Array" "[]"
       "Map" "new Map()"
+      "Set" "new Set()"
       "Console" "({_type: 'Console'})"
       "File" "null"
       "Process" "({_type: 'Process'})"
@@ -160,6 +171,88 @@
   (or (= t "Function")
       (and (map? t) (= (:base-type t) "Function"))))
 
+(defn public-member?
+  [member]
+  (not= :private (-> member :visibility :type)))
+
+(defn infer-constant-type
+  "Infer a constant type from its value expression."
+  [expr constants-by-name]
+  (case (:type expr)
+    :integer "Integer"
+    :real "Real"
+    :string "String"
+    :boolean "Boolean"
+    :char "Char"
+    :nil "Any"
+    :identifier (get constants-by-name (:name expr) "Any")
+    :binary (let [lt (infer-constant-type (:left expr) constants-by-name)
+                  rt (infer-constant-type (:right expr) constants-by-name)]
+              (case (:operator expr)
+                ("=" "/=" "<" "<=" ">" ">=" "and" "or") "Boolean"
+                "+" (if (or (= lt "String") (= rt "String")) "String" lt)
+                ("-" "*" "/" "%" "^") lt
+                "Any"))
+    :call (if (and (string? (:target expr)) (false? (:has-parens expr)))
+            (get constants-by-name (:method expr) "Any")
+            "Any")
+    "Any"))
+
+(defn infer-expression-type
+  "Infer a Nex type for code generation dispatch."
+  [expr]
+  (cond
+    (string? expr) (or (get *local-types* expr)
+                       (get *field-types* expr)
+                       "Any")
+    (not (map? expr)) "Any"
+    :else
+    (case (:type expr)
+      :string "String"
+      :integer "Integer"
+      :real "Real"
+      :boolean "Boolean"
+      :char "Char"
+      :array-literal "Array"
+      :map-literal "Map"
+      :set-literal "Set"
+      :create (:class-name expr)
+      :identifier (or (get *local-types* (:name expr))
+                      (get *field-types* (:name expr))
+                      "Any")
+      "Any")))
+
+(defn extract-typed-locals
+  "Collect typed local bindings from statements."
+  [stmts]
+  (reduce
+   (fn [acc stmt]
+     (if-not (map? stmt)
+       acc
+       (case (:type stmt)
+         :let (if-let [t (:var-type stmt)]
+                (assoc acc (:name stmt) t)
+                acc)
+         :if (merge acc
+                    (extract-typed-locals (:then stmt))
+                    (reduce merge {} (map #(extract-typed-locals (:then %)) (:elseif stmt)))
+                    (extract-typed-locals (:else stmt)))
+         :loop (merge acc
+                      (extract-typed-locals (:init stmt))
+                      (extract-typed-locals (:body stmt)))
+         :scoped-block (merge acc
+                              (extract-typed-locals (:body stmt))
+                              (extract-typed-locals (:rescue stmt)))
+         :with (merge acc (extract-typed-locals (:body stmt)))
+         :case (merge acc
+                      (reduce merge {} (map (fn [clause]
+                                              (extract-typed-locals [(:body clause)]))
+                                            (:clauses stmt)))
+                      (extract-typed-locals (when-let [else-stmt (:else stmt)] [else-stmt])))
+         acc)))
+   {}
+   (or stmts [])))
+
 (defn resolve-identifier
   "Resolve an identifier in expression context for JavaScript.
    Resolution order: locals -> methods -> fields -> functions -> bare name"
@@ -167,6 +260,7 @@
   (cond
     (contains? *local-names* id-name) id-name
     (contains? *all-method-names* id-name) (str *this-name* "." id-name "()")
+    (contains? *constant-names* id-name) (str *current-class-name* "." id-name)
     (contains? *own-fields* id-name) (str *this-name* "." id-name)
     (contains? *function-names* id-name) (str "NexGlobals." id-name)
     :else id-name))
@@ -221,6 +315,7 @@
     "compare"     (fn [target args] (str "__nexCompare(" target ", " args ")"))
     "hash"        (fn [target _] (str "__nexHash(" target ")"))
     "split"       (fn [target args] (str target ".split(" args ")"))
+    "cursor"      (fn [target _] (str "__nexStringCursor(" target ")"))
     ;; String operators
     "plus"        (fn [target args] (str "(" target " + " args ")"))
     "equals"      (fn [target args] (str "(" target " === " args ")"))
@@ -236,6 +331,18 @@
     "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
     "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
     "pick"      (fn [target _] (str "Math.floor(Math.random() * " target")"))
+    "bitwise_left_shift" (fn [target args] (str "(" target " << " args ")"))
+    "bitwise_right_shift" (fn [target args] (str "(" target " >> " args ")"))
+    "bitwise_logical_right_shift" (fn [target args] (str "(" target " >>> " args ")"))
+    "bitwise_rotate_left" (fn [target args] (str "(((" target " << (" args " & 31)) | (" target " >>> (32 - (" args " & 31)))) | 0)"))
+    "bitwise_rotate_right" (fn [target args] (str "(((" target " >>> (" args " & 31)) | (" target " << (32 - (" args " & 31)))) | 0)"))
+    "bitwise_is_set" (fn [target args] (str "(((" target " >>> " args ") & 1) !== 0)"))
+    "bitwise_set" (fn [target args] (str "(" target " | (1 << " args "))"))
+    "bitwise_unset" (fn [target args] (str "(" target " & ~(1 << " args "))"))
+    "bitwise_and" (fn [target args] (str "(" target " & " args ")"))
+    "bitwise_or" (fn [target args] (str "(" target " | " args ")"))
+    "bitwise_xor" (fn [target args] (str "(" target " ^ " args ")"))
+    "bitwise_not" (fn [target _] (str "(~" target ")"))
     ;; Arithmetic operators
     "plus"      (fn [target args] (str "(" target " + " args ")"))
     "minus"     (fn [target args] (str "(" target " - " args ")"))
@@ -342,7 +449,8 @@
     "remove"    (fn [target args] (str "(" target ".splice(" args ", 1), " target ")"))
     "reverse"   (fn [target _] (str "[..." target "].reverse()"))
     "sort"      (fn [target _] (str "[..." target "].sort()"))
-    "slice"     (fn [target args] (str target ".slice(" args ")"))}
+    "slice"     (fn [target args] (str target ".slice(" args ")"))
+    "cursor"    (fn [target _] (str "__nexArrayCursor(" target ")"))}
 
    :Map
    {"size"         (fn [target _] (str target ".size"))
@@ -353,7 +461,18 @@
     "contains_key" (fn [target args] (str target ".has(" args ")"))
     "keys"         (fn [target _] (str "Array.from(" target ".keys())"))
     "values"       (fn [target _] (str "Array.from(" target ".values())"))
-    "remove"       (fn [target args] (str "(" target ".delete(" args "), " target ")"))}
+    "remove"       (fn [target args] (str "(" target ".delete(" args "), " target ")"))
+    "cursor"       (fn [target _] (str "__nexMapCursor(" target ")"))}
+
+   :Set
+   {"contains"             (fn [target args] (str target ".has(" args ")"))
+    "union"                (fn [target args] (str "__nexSetUnion(" target ", " args ")"))
+    "difference"           (fn [target args] (str "__nexSetDifference(" target ", " args ")"))
+    "intersection"         (fn [target args] (str "__nexSetIntersection(" target ", " args ")"))
+    "symmetric_difference" (fn [target args] (str "__nexSetSymmetricDifference(" target ", " args ")"))
+    "size"                 (fn [target _] (str target ".size"))
+    "is_empty"             (fn [target _] (str "(" target ".size === 0)"))
+    "cursor"               (fn [target _] (str "__nexSetCursor(" target ")"))}
 
    :Image
    {"width"        (fn [target _] (str target ".width"))
@@ -398,46 +517,57 @@
         (if (nil? method)
           ;; Calling an expression that returns a function
           (str target-code ".call" num-args "(" args-code ")")
+          (if (and (string? target)
+                   (false? has-parens)
+                   (get *class-registry* target)
+                   (some #(= (:name %) method)
+                         (get-accessible-constants-js (get *class-registry* target) *class-registry*)))
+            (str target "." method)
           ;; Check for this-target with has-parens distinction
-          (if this-target?
-            (if (false? has-parens)
-              ;; this.x (no parens): method -> call, field -> access
-              (if (contains? *all-method-names* method)
-                (str target-code "." method "()")
-                (str target-code "." method))
-              ;; this.x() or this.x(args) (with parens or absent)
-              (if (and (not (contains? *all-method-names* method))
-                       (function-type? (get *field-types* method)))
-                (str target-code "." method ".call" num-args "(" args-code ")")
-                (str target-code "." method "(" args-code ")")))
-            ;; External object: try builtins, then default
-            (or
-             ;; Try Integer methods first (for operators, numeric is more common)
-             (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
-               (method-fn target-code args-code))
-             ;; Try Integer64 methods
-             (when-let [method-fn (get-in builtin-method-mappings [:Integer64 method])]
-               (method-fn target-code args-code))
-             ;; Try Real methods
-             (when-let [method-fn (get-in builtin-method-mappings [:Real method])]
-               (method-fn target-code args-code))
-             ;; Try Decimal methods
-             (when-let [method-fn (get-in builtin-method-mappings [:Decimal method])]
-               (method-fn target-code args-code))
-             ;; Try String methods
-             (when-let [method-fn (get-in builtin-method-mappings [:String method])]
-               (method-fn target-code args-code))
-             ;; Try Array methods
-             (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
-               (method-fn target-code args-code))
-             ;; Try Map methods
-             (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
-               (method-fn target-code args-code))
-             ;; Try Image methods
-             (when-let [method-fn (get-in builtin-method-mappings [:Image method])]
-               (method-fn target-code args-code))
-             ;; Default: regular method call
-             (str target-code "." method "(" args-code ")")))))
+            (if this-target?
+              (if (false? has-parens)
+                ;; this.x (no parens): method -> call, field -> access
+                (if (contains? *all-method-names* method)
+                  (str target-code "." method "()")
+                  (str target-code "." method))
+                ;; this.x() or this.x(args) (with parens or absent)
+                (if (and (not (contains? *all-method-names* method))
+                         (function-type? (get *field-types* method)))
+                  (str target-code "." method ".call" num-args "(" args-code ")")
+                  (str target-code "." method "(" args-code ")")))
+              ;; External object: try builtins, then default
+              (or
+               (when-let [method-fn (get-in builtin-method-mappings [(keyword (infer-expression-type target)) method])]
+                 (method-fn target-code args-code))
+               ;; Try Integer methods first (for operators, numeric is more common)
+               (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
+                 (method-fn target-code args-code))
+               ;; Try Integer64 methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Integer64 method])]
+                 (method-fn target-code args-code))
+               ;; Try Real methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Real method])]
+                 (method-fn target-code args-code))
+               ;; Try Decimal methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Decimal method])]
+                 (method-fn target-code args-code))
+               ;; Try String methods
+               (when-let [method-fn (get-in builtin-method-mappings [:String method])]
+                 (method-fn target-code args-code))
+               ;; Try Array methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
+                 (method-fn target-code args-code))
+               ;; Try Map methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
+                 (method-fn target-code args-code))
+               ;; Try Set methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Set method])]
+                 (method-fn target-code args-code))
+               ;; Try Image methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Image method])]
+                 (method-fn target-code args-code))
+               ;; Default: regular method call
+               (str target-code "." method "(" args-code ")"))))))
       ;; No target: class method, function object field, global function, or builtin
       (cond
         ;; Class method (own or inherited)
@@ -471,6 +601,9 @@
       "Console" "({_type: 'Console'})"
       "File" (str "({_type: 'File', path: " args-code "})")
       "Process" "({_type: 'Process'})"
+      "Set" (if (= constructor "from_array")
+              (str "new Set(" args-code ")")
+              "new Set()")
       "Window" (str "new NexWindow(" args-code ")")
       "Turtle" (str "new NexTurtle(" args-code ")")
       "Image" (if (= constructor "from_file")
@@ -506,9 +639,14 @@
   (let [entries-code (str/join ", "
                                (map (fn [{:keys [key value]}]
                                      (str "[" (generate-expression key) ", "
-                                          (generate-expression value) "]"))
+                                     (generate-expression value) "]"))
                                    entries))]
     (str "new Map([" entries-code "])")))
+
+(defn generate-set-literal
+  "Generate JavaScript code for set literal"
+  [elements]
+  (str "new Set([" (str/join ", " (map generate-expression elements)) "])"))
 
 (defn any-type?
   [t]
@@ -654,6 +792,7 @@
     :create (generate-create-expr expr)
     :subscript (generate-subscript-expr expr)
     :array-literal (generate-array-literal (:elements expr))
+    :set-literal (generate-set-literal (:elements expr))
     :map-literal (generate-map-literal (:entries expr))
     :convert (generate-convert-expr expr)
     :anonymous-function (let [class-def (:class-def expr)
@@ -974,11 +1113,19 @@
   "Generate JavaScript code for a method"
   [level {:keys [name params return-type body require ensure rescue visibility note]} opts]
   (let [param-names (set (map :name params))
+        param-types (into {} (map (juxt :name :type) params))
         convert-bindings (collect-convert-bindings-block (concat body (or rescue [])))
         convert-var-names (set (map :name convert-bindings))
+        convert-var-types (into {} (map (juxt :name :target-type) convert-bindings))
+        local-types (merge param-types
+                           convert-var-types
+                           (extract-typed-locals body)
+                           (extract-typed-locals rescue)
+                           (when return-type {"result" return-type}))
         local-names (cond-> (into param-names convert-var-names)
                       return-type (conj "result"))]
-    (binding [*local-names* (into *local-names* local-names)]
+    (binding [*local-names* (into *local-names* local-names)
+              *local-types* (merge *local-types* local-types)]
       (let [params-code (str/join ", " (map :name params))
             ;; Apply visibility naming convention
             method-name (if visibility
@@ -1048,6 +1195,10 @@
         init-value (default-value field-type)]
     (indent level (str "this." field-name " = " init-value ";"))))
 
+(defn generate-class-constant-js
+  [level class-name {:keys [name value]}]
+  (indent level (str "static " name " = " (generate-expression value) ";")))
+
 ;;
 ;; Constructor Generation
 ;;
@@ -1075,23 +1226,33 @@
   [level class-name {:keys [name params body require ensure rescue]} opts]
   (let [local-name (class-name-to-local class-name)
         param-names (set (map :name params))
+        param-types (into {} (map (juxt :name :type) params))
         convert-bindings (collect-convert-bindings-block (concat body (or rescue [])))
         convert-var-names (set (map :name convert-bindings))
+        convert-var-types (into {} (map (juxt :name :target-type) convert-bindings))
+        local-types (merge param-types
+                           convert-var-types
+                           (extract-typed-locals body)
+                           (extract-typed-locals rescue))
         local-names (into param-names convert-var-names)
         params-code (str/join ", " (map :name params))
         preconditions (binding [*this-name* local-name
-                                *local-names* (into *local-names* local-names)]
+                                *local-names* (into *local-names* local-names)
+                                *local-types* (merge *local-types* local-types)]
                         (generate-assertions (+ level 1) require "Precondition" opts))
         statements (binding [*this-name* local-name
-                             *local-names* (into *local-names* local-names)]
+                             *local-names* (into *local-names* local-names)
+                             *local-types* (merge *local-types* local-types)]
                      (if rescue
                        [(generate-rescue (+ level 1) body rescue #{})]
                        (mapv #(generate-statement (+ level 1) %) body)))
         postconditions (binding [*this-name* local-name
-                                 *local-names* (into *local-names* local-names)]
+                                 *local-names* (into *local-names* local-names)
+                                 *local-types* (merge *local-types* local-types)]
                          (generate-assertions (+ level 1) ensure "Postcondition" opts))
         class-invariant-checks (binding [*this-name* local-name
-                                         *local-names* (into *local-names* local-names)]
+                                         *local-names* (into *local-names* local-names)
+                                         *local-types* (merge *local-types* local-types)]
                                  (generate-assertions (+ level 1) *class-invariants* "Class invariant" opts))]
     (str/join "\n"
               (concat
@@ -1179,10 +1340,23 @@
                                     (:members section))
                                :else []))
                            class-body)
-        fields (filter #(= (:type %) :field) all-members)
+        fields (filter #(and (= (:type %) :field) (not (:constant? %))) all-members)
+        constants (let [{:keys [constants]}
+                        (reduce (fn [{:keys [types constants]} member]
+                                  (if (and (= (:type member) :field) (:constant? member))
+                                    (let [final-type (or (:field-type member)
+                                                         (infer-constant-type (:value member) types))
+                                          constant (assoc member :field-type final-type)]
+                                      {:types (assoc types (:name member) final-type)
+                                       :constants (conj constants constant)})
+                                    {:types types :constants constants}))
+                                {:types {} :constants []}
+                                all-members)]
+                    constants)
         methods (filter #(= (:type %) :method) all-members)
         ctors (mapcat :constructors constructor-sections)]
     {:fields fields
+     :constants constants
      :methods methods
      :constructors ctors}))
 
@@ -1192,6 +1366,36 @@
   (when-let [parent-def (get classes-by-name parent-name)]
     (let [{:keys [methods]} (extract-members (:body parent-def))]
       (map :name methods))))
+
+(defn get-parent-constants-js
+  "Get recursively inherited public constants from a parent class."
+  [parent-name classes-by-name]
+  (when-let [parent-def (get classes-by-name parent-name)]
+    (let [{:keys [constants]} (extract-members (:body parent-def))
+          inherited (mapcat (fn [{:keys [parent]}]
+                              (or (get-parent-constants-js parent classes-by-name) []))
+                            (:parents parent-def))]
+      (vals
+       (reduce (fn [m constant]
+                 (if (contains? m (:name constant))
+                   m
+                   (assoc m (:name constant) constant)))
+               {}
+               (concat (filter public-member? inherited)
+                       (filter public-member? constants)))))))
+
+(defn get-accessible-constants-js
+  "Get inherited public constants plus local constants, with local override by name."
+  [class-def classes-by-name]
+  (let [{:keys [constants]} (extract-members (:body class-def))
+        inherited (mapcat (fn [{:keys [parent]}]
+                            (or (get-parent-constants-js parent classes-by-name) []))
+                          (:parents class-def))]
+    (vals
+     (reduce (fn [m constant]
+               (assoc m (:name constant) constant))
+             {}
+             (concat inherited constants)))))
 
 (defn get-parent-constructors-js
   "Get constructor definitions from a direct parent class."
@@ -1281,14 +1485,19 @@
          {:keys [fields methods constructors]} (extract-members body)
          parent-names (mapv :parent parents)
          own-flds (set (map :name fields))
+         all-constants (get-accessible-constants-js class-def classes-by-name)
+         constant-names (set (map :name all-constants))
          own-method-names (set (map :name methods))
          all-methods (into own-method-names
                            (mapcat #(get-parent-method-names % classes-by-name)
                                    parent-names))
          fld-types (build-field-types-js fields parent-names classes-by-name)
          effective-invariants (collect-effective-class-invariants class-def classes-by-name)]
-     (binding [*all-method-names* all-methods
+     (binding [*current-class-name* name
+               *class-registry* classes-by-name
+               *all-method-names* all-methods
                *own-fields* own-flds
+               *constant-names* constant-names
                *field-types* fld-types
                *class-invariants* effective-invariants]
        (let [;; Generate class JSDoc if note present
@@ -1299,6 +1508,7 @@
              invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
                                 (indent 1 (str "// Class invariant: "
                                               (str/join ", " (map :label effective-invariants)))))
+             constants-code (map #(generate-class-constant-js 1 name %) all-constants)
              ;; Always generate a default no-arg constructor for field initialization
              has-parent? (some? (:extends (analyze-inheritance parents)))
              default-constructor (generate-default-constructor 1 name fields has-parent? deferred?)
@@ -1316,10 +1526,12 @@
              methods-code (map #(generate-method 1 % opts) methods-with-effective-contracts)]
          (str/join "\n"
                    (concat
-                    class-jsdoc
-                    (when generic-comment [generic-comment])
-                    [class-header]
-                    (when invariant-comment [invariant-comment ""])
+                   class-jsdoc
+                   (when generic-comment [generic-comment])
+                   [class-header]
+                   (when invariant-comment [invariant-comment ""])
+                    constants-code
+                    (when (seq all-constants) [""])
                     [default-constructor ""]
                     factory-methods
                     (when (seq factory-methods) [""])
@@ -1351,6 +1563,7 @@
        "  if (typeof v === 'number') return Number.isInteger(v) ? 'Integer' : 'Real';\n"
        "  if (Array.isArray(v)) return 'Array';\n"
        "  if (v instanceof Map) return 'Map';\n"
+       "  if (v instanceof Set) return 'Set';\n"
        "  if (v && v._type) return String(v._type);\n"
        "  const ctor = v && v.constructor;\n"
        "  if (ctor && ctor.name) return ctor.name;\n"
@@ -1364,7 +1577,7 @@
        "  if (runtime === 'Integer' && (typeName === 'Integer64' || typeName === 'Real' || typeName === 'Decimal')) return true;\n"
        "  if (runtime === 'Integer64' && (typeName === 'Real' || typeName === 'Decimal')) return true;\n"
        "  if (runtime === 'Real' && typeName === 'Decimal') return true;\n"
-       "  if ((runtime === 'ArrayCursor' || runtime === 'StringCursor' || runtime === 'MapCursor') && typeName === 'Cursor') return true;\n"
+       "  if ((runtime === 'ArrayCursor' || runtime === 'StringCursor' || runtime === 'MapCursor' || runtime === 'SetCursor') && typeName === 'Cursor') return true;\n"
        "  let cur = v;\n"
        "  while (cur) {\n"
        "    const ctor = cur.constructor;\n"
@@ -1403,6 +1616,30 @@
        "    h |= 0;\n"
        "  }\n"
        "  return h;\n"
+       "}\n"
+       "function __nexSetUnion(a, b) {\n"
+       "  return new Set([...a, ...b]);\n"
+       "}\n"
+       "function __nexSetDifference(a, b) {\n"
+       "  return new Set([...a].filter(v => !b.has(v)));\n"
+       "}\n"
+       "function __nexSetIntersection(a, b) {\n"
+       "  return new Set([...a].filter(v => b.has(v)));\n"
+       "}\n"
+       "function __nexSetSymmetricDifference(a, b) {\n"
+       "  return new Set([...a].filter(v => !b.has(v)).concat([...b].filter(v => !a.has(v))));\n"
+       "}\n"
+       "function __nexArrayCursor(source) {\n"
+       "  return {_type: 'ArrayCursor', source, index: 0, start() { this.index = 0; }, item() { if (this.index >= this.source.length) throw new Error('Cursor is at end'); return this.source[this.index]; }, next() { if (this.index < this.source.length) this.index += 1; }, at_end() { return this.index >= this.source.length; }};\n"
+       "}\n"
+       "function __nexStringCursor(source) {\n"
+       "  return {_type: 'StringCursor', source, index: 0, start() { this.index = 0; }, item() { if (this.index >= this.source.length) throw new Error('Cursor is at end'); return this.source[this.index]; }, next() { if (this.index < this.source.length) this.index += 1; }, at_end() { return this.index >= this.source.length; }};\n"
+       "}\n"
+       "function __nexMapCursor(source) {\n"
+       "  return {_type: 'MapCursor', source, keys: Array.from(source.keys()), index: 0, start() { this.keys = Array.from(this.source.keys()); this.index = 0; }, item() { if (this.index >= this.keys.length) throw new Error('Cursor is at end'); const key = this.keys[this.index]; return [key, this.source.get(key)]; }, next() { if (this.index < this.keys.length) this.index += 1; }, at_end() { return this.index >= this.keys.length; }};\n"
+       "}\n"
+       "function __nexSetCursor(source) {\n"
+       "  return {_type: 'SetCursor', source, values: Array.from(source.values()), index: 0, start() { this.values = Array.from(this.source.values()); this.index = 0; }, item() { if (this.index >= this.values.length) throw new Error('Cursor is at end'); return this.values[this.index]; }, next() { if (this.index < this.values.length) this.index += 1; }, at_end() { return this.index >= this.values.length; }};\n"
        "}\n"
        "const __nexHasDom = (typeof document !== 'undefined');\n"
        "function __nexParseColor(s) {\n"

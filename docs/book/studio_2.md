@@ -80,12 +80,14 @@ feature
   assign(robot_id: String)
     require
       robot_present: robot_id /= ""
-      can_assign: status = "PENDING" or status = "FAILED"
+      can_assign: status = "PENDING" 
+	              or status = "FAILED"
     do
       assigned_robot_id := robot_id
       status := "IN_TRANSIT"
     ensure
-      assigned: assigned_robot_id = robot_id and status = "IN_TRANSIT"
+      assigned: assigned_robot_id = robot_id 
+	            and status = "IN_TRANSIT"
     end
 
   complete()
@@ -106,13 +108,25 @@ feature
     ensure
       failed: status = "FAILED"
     end
+create
+  pending(task_id: String, origin: String, 
+          destination: String) do
+    this.task_id := task_id
+	this.origin := origin
+	this.destination := destination
+	this.status := "PENDING"
+  end
 invariant
   id_present: task_id /= ""
-  endpoints_present: origin /= "" and destination /= ""
+  endpoints_present: origin /= "" 
+                     and destination /= ""
   valid_status:
-    status = "PENDING" or status = "IN_TRANSIT" or status = "DELIVERED" or status = "FAILED"
+    status = "PENDING" or status = "IN_TRANSIT" 
+	         or status = "DELIVERED" 
+			 or status = "FAILED"
   transit_has_assignment:
-    status /= "IN_TRANSIT" or assigned_robot_id /= ""
+    status /= "IN_TRANSIT" 
+	or assigned_robot_id /= ""
 end
 ```
 
@@ -126,6 +140,11 @@ feature
   doc_id: String
   title: String
   body: String
+create
+  make(doc_id: String, title: String) do
+    this.doc_id := doc_id
+	this.title := title
+  end
 invariant
   id_present: doc_id /= ""
   title_present: title /= ""
@@ -142,12 +161,21 @@ feature
       from_doc_id /= "" and
       to_doc_id /= "" and
       from_doc_id /= to_doc_id and
-      (link_type = "references" or link_type = "related" or link_type = "contradicts")
+      (link_type = "references" 
+	   or link_type = "related" 
+	   or link_type = "contradicts")
   ensure
     bool_result: result = true or result = false
   end
+create
+  make(f: String, t: String, lt: String) do
+    from_doc_id := f
+	to_doc_id := t
+	link_type := lt
+  end
 invariant
-  endpoints_present: from_doc_id /= "" and to_doc_id /= ""
+  endpoints_present: from_doc_id /= "" 
+                     and to_doc_id /= ""
   no_self_link: from_doc_id /= to_doc_id
 end
 ```
@@ -178,6 +206,12 @@ feature
     ensure
       bounded_after_step: x >= 0 and x <= max_x
     end
+create
+  make(id: String, x: Integer, vx: Integer) do
+    object_id := id
+	this.x := x
+	this.vx := vx
+  end
 invariant
   id_present: object_id /= ""
 end
@@ -192,29 +226,21 @@ class App
 feature
   run() do
     -- Delivery
-    let t: Delivery_Task := create Delivery_Task
-    t.task_id := "T-001"
-    t.origin := "A"
-    t.destination := "C"
-    t.status := "PENDING"
-    t.assigned_robot_id := ""
-    t.assign("R-7")
+    let t: Delivery_Task := 
+	  create Delivery_Task.pending("T001", "A", "C")
+    t.assign("R7")
     print(t.status)              -- IN_TRANSIT
     t.complete
     print(t.status)              -- DELIVERED
 
     -- Knowledge
-    let l: Doc_Link := create Doc_Link
-    l.from_doc_id := "D-1"
-    l.to_doc_id := "D-2"
-    l.link_type := "references"
+    let l: Doc_Link := 
+	  create Doc_Link.make("D1", "D2", "references")
     print(l.is_valid)            -- true
 
     -- World
-    let w: World_Object := create World_Object
-    w.object_id := "O-1"
-    w.x := 9
-    w.vx := 4
+    let w: World_Object := 
+	  create World_Object.make("0-1", 9, 4)
     w.step(10)
     print(w.x)                   -- 10 (clamped)
   end

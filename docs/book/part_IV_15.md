@@ -44,6 +44,11 @@ The resolution — keeping a list for ordered display and introducing a separate
 
 ```nex
 class Task
+create
+  make(id: String, status: String) do
+    this.id := id
+    this.status := status
+  end
 feature
   id: String
   status: String
@@ -57,6 +62,12 @@ invariant
 end
 
 class Task_Sequence
+create
+  make(t1: Task, t2: Task, t3: Task) do
+    this.t1 := t1
+    this.t2 := t2
+    this.t3 := t3
+  end
 feature
   t1: Task
   t2: Task
@@ -86,7 +97,8 @@ feature
 
   ordered_ids(): String
     do
-      result := t1.id + " -> " + t2.id + " -> " + t3.id
+      result := t1.id + " -> " + t2.id 
+	            + " -> " + t3.id
     ensure
       non_empty: result /= ""
     end

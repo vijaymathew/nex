@@ -240,6 +240,72 @@ end"
       (is (str/includes? java-code "Precondition"))
       (is (str/includes? java-code "Postcondition")))))
 
+(deftest class-constants-test
+  (testing "Class constants generate static finals and child copies inherited public constants"
+    (let [nex-code "class Frame
+  feature
+    MAX_WIDTH = 450
+end
+
+class Child inherit Frame
+  feature
+    demo(): Integer do
+      result := Frame.MAX_WIDTH + MAX_WIDTH
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "public static final int MAX_WIDTH = 450;"))
+      (is (>= (count (re-seq #"MAX_WIDTH = 450;" java-code)) 2))
+      (is (str/includes? java-code "Frame.MAX_WIDTH"))
+      (is (str/includes? java-code "MAX_WIDTH")))))
+
+(deftest set-generation-test
+  (testing "Set literals and Set.from_array translate to Java helpers"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let s: Set[Integer] := {1, 2, 3}
+      let t: Set[Integer] := create Set[Integer].from_array([2, 3])
+      print(s.union(t))
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "NexRuntime.setOf(1, 2, 3)"))
+      (is (str/includes? java-code "NexRuntime.setFromArray(new ArrayList<>(Arrays.asList(2, 3)))"))
+      (is (str/includes? java-code "NexRuntime.setUnion(s, t)")))))
+
+(deftest set-cursor-generation-test
+  (testing "Across on sets translates via runtime set cursor helper"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      across {1, 2} as x do
+        print(x)
+      end
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "NexRuntime.setCursor"))
+      (is (str/includes? java-code "class SetCursor")))))
+
+(deftest integer-bitwise-generation-test
+  (testing "Integer bitwise methods translate to Java bitwise operators/helpers"
+    (let [nex-code "class Test
+  feature
+    demo(): Integer do
+      let x: Integer := (5).bitwise_left_shift(1)
+      let y: Integer := (5).bitwise_logical_right_shift(1)
+      let z: Boolean := (5).bitwise_is_set(0)
+      result := ((5).bitwise_rotate_left(2)).bitwise_xor(x)
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "<< 1"))
+      (is (str/includes? java-code ">>> 1"))
+      (is (str/includes? java-code "Integer.rotateLeft((int)5, 2)"))
+      (is (str/includes? java-code "& 1) != 0"))
+      (is (str/includes? java-code "^")))))
+
 (deftest convert-expression-test
   (testing "Convert expression in if-guard emits Java runtime type check and binding"
     (let [nex-code "class Vehicle

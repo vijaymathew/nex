@@ -63,6 +63,14 @@ If using the web IDE, place everything in one file and run `App.run`.
 
 ```nex
 class Path_Run_Result
+create
+  make(strategy, status, path: String, hops: Integer, steps: Integer) do
+    this.strategy := strategy
+    this.status := status
+    this.path := path
+    this.hops := hops
+    this.steps := steps
+  end
 feature
   strategy: String
   status: String
@@ -81,6 +89,19 @@ end
 
 ```nex
 class Graph_Fixture
+create
+  make_default() do
+    a_b := true
+    a_c := true
+    b_d := true
+    d_e := true
+    e_g := true
+    c_f := true
+    f_g := true
+  ensure
+    initialized:
+      a_b and a_c and b_d and d_e and e_g and c_f and f_g
+  end
 feature
   -- Teaching-sized directed edges.
   a_b: Boolean
@@ -103,6 +124,12 @@ feature
     initialized:
       a_b and a_c and b_d and d_e and e_g and c_f and f_g
   end
+
+  disable_short_branch() do
+    c_f := false
+  ensure
+    disabled: not c_f
+  end
 end
 ```
 
@@ -113,29 +140,37 @@ class DFS_Competitor
 feature
   run(g: Graph_Fixture): Path_Run_Result
     do
-      let r: Path_Run_Result := create Path_Run_Result
-      r.strategy := "DFS"
-      r.steps := 0
-
       -- Deterministic branch preference: A->B before A->C.
-      r.steps := r.steps + 1
+      let steps: Integer := 1
       if g.a_b and g.b_d and g.d_e and g.e_g then
-        r.status := "FOUND"
-        r.path := "A->B->D->E->G"
-        r.hops := 4
+        result := create Path_Run_Result.make(
+          "DFS",
+          "FOUND",
+          "A->B->D->E->G",
+          4,
+          steps
+        )
       elseif g.a_c and g.c_f and g.f_g then
-        r.status := "FOUND"
-        r.path := "A->C->F->G"
-        r.hops := 3
+        result := create Path_Run_Result.make(
+          "DFS",
+          "FOUND",
+          "A->C->F->G",
+          3,
+          steps
+        )
       else
-        r.status := "UNREACHABLE"
-        r.path := ""
-        r.hops := 0
+        result := create Path_Run_Result.make(
+          "DFS",
+          "UNREACHABLE",
+          "",
+          0,
+          steps
+        )
       end
-
-      result := r
     ensure
-      known_status: result.status = "FOUND" or result.status = "UNREACHABLE"
+      known_status:
+        result.status = "FOUND" or
+        result.status = "UNREACHABLE"
     end
 end
 ```
@@ -147,29 +182,37 @@ class BFS_Competitor
 feature
   run(g: Graph_Fixture): Path_Run_Result
     do
-      let r: Path_Run_Result := create Path_Run_Result
-      r.strategy := "BFS"
-      r.steps := 0
-
       -- Layer-aware logic returns minimum-hop route if available.
-      r.steps := r.steps + 1
+      let steps: Integer := 1
       if g.a_c and g.c_f and g.f_g then
-        r.status := "FOUND"
-        r.path := "A->C->F->G"
-        r.hops := 3
+        result := create Path_Run_Result.make(
+          "BFS",
+          "FOUND",
+          "A->C->F->G",
+          3,
+          steps
+        )
       elseif g.a_b and g.b_d and g.d_e and g.e_g then
-        r.status := "FOUND"
-        r.path := "A->B->D->E->G"
-        r.hops := 4
+        result := create Path_Run_Result.make(
+          "BFS",
+          "FOUND",
+          "A->B->D->E->G",
+          4,
+          steps
+        )
       else
-        r.status := "UNREACHABLE"
-        r.path := ""
-        r.hops := 0
+        result := create Path_Run_Result.make(
+          "BFS",
+          "UNREACHABLE",
+          "",
+          0,
+          steps
+        )
       end
-
-      result := r
     ensure
-      known_status: result.status = "FOUND" or result.status = "UNREACHABLE"
+      known_status:
+        result.status = "FOUND" or
+        result.status = "UNREACHABLE"
     end
 end
 ```
@@ -180,8 +223,7 @@ end
 class App
 feature
   run() do
-    let g: Graph_Fixture := create Graph_Fixture
-    g.setup_default
+    let g: Graph_Fixture := create Graph_Fixture.make_default
 
     let dfs: DFS_Competitor := create DFS_Competitor
     let bfs: BFS_Competitor := create BFS_Competitor
@@ -189,16 +231,32 @@ feature
     let r_dfs: Path_Run_Result := dfs.run(g)
     let r_bfs: Path_Run_Result := bfs.run(g)
 
-    print("DFS: " + r_dfs.status + " " + r_dfs.path + " hops=" + r_dfs.hops)
-    print("BFS: " + r_bfs.status + " " + r_bfs.path + " hops=" + r_bfs.hops)
+    print(
+      "DFS: " + r_dfs.status +
+      " " + r_dfs.path +
+      " hops=" + r_dfs.hops
+    )
+    print(
+      "BFS: " + r_bfs.status +
+      " " + r_bfs.path +
+      " hops=" + r_bfs.hops
+    )
 
     -- Adverse scenario: disable shorter branch.
-    g.c_f := false
+    g.disable_short_branch
     let r_dfs_2: Path_Run_Result := dfs.run(g)
     let r_bfs_2: Path_Run_Result := bfs.run(g)
 
-    print("DFS adverse: " + r_dfs_2.status + " " + r_dfs_2.path + " hops=" + r_dfs_2.hops)
-    print("BFS adverse: " + r_bfs_2.status + " " + r_bfs_2.path + " hops=" + r_bfs_2.hops)
+    print(
+      "DFS adverse: " + r_dfs_2.status +
+      " " + r_dfs_2.path +
+      " hops=" + r_dfs_2.hops
+    )
+    print(
+      "BFS adverse: " + r_bfs_2.status +
+      " " + r_bfs_2.path +
+      " hops=" + r_bfs_2.hops
+    )
   end
 end
 ```

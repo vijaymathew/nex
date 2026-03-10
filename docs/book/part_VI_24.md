@@ -66,7 +66,11 @@ feature
 
   pick_top(doc1, doc2, doc3, query: String): String
     require
-      docs_present: doc1 /= "" and doc2 /= "" and doc3 /= "" and query /= ""
+      docs_present:
+        doc1 /= "" and
+        doc2 /= "" and
+        doc3 /= "" and
+        query /= ""
     do
       let s1: Integer := score(doc1, query)
       let s2: Integer := score(doc2, query)

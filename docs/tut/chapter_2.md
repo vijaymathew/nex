@@ -70,6 +70,25 @@ nex> print(3.min(8))
 
 The `abs` method returns the absolute value. The `max` and `min` methods return the larger and smaller of two values respectively. These are the same operations as arithmetic, just written differently — the dot notation makes explicit that the operation belongs to the value on its left.
 
+Nex also provides bitwise operations on `Integer` values. These are mainly useful
+for low-level work such as flags, masks, encodings, and compact state
+representations. The interface uses method names rather than symbolic operators:
+
+```nex
+nex> print((5).bitwise_left_shift(1))
+10
+
+nex> print((6).bitwise_and(3))
+2
+
+nex> print((5).bitwise_is_set(0))
+true
+```
+
+The parentheses around integer literals matter. Without them, `5.bitwise_left_shift(1)`
+would be read as the start of a real literal rather than as a method call. Bitwise
+operations use 32-bit integer semantics; Appendix B lists the full set of methods.
+
 One method worth knowing early is `pick`:
 
 ```

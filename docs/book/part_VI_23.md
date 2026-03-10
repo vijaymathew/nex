@@ -84,13 +84,21 @@ feature
 end
 
 class Delivery_Coordinator
+create
+  make(route: Route_Component, notify: Notify_Component) do
+    this.route := route
+    this.notify := notify
+  end
 feature
   route: Route_Component
   notify: Notify_Component
 
   reroute_and_notify(task_id, start_loc, end_loc: String): String
     require
-      inputs_present: task_id /= "" and start_loc /= "" and end_loc /= ""
+      inputs_present:
+        task_id /= "" and
+        start_loc /= "" and
+        end_loc /= ""
     do
       let p: String := route.compute(start_loc, end_loc)
       if p = "UNREACHABLE" then
@@ -99,7 +107,10 @@ feature
         result := notify.send(task_id, "route=" + p)
       end
     ensure
-      known_result: result = "NO_ROUTE" or result = "SENT" or result = "FAILED"
+      known_result:
+        result = "NO_ROUTE" or
+        result = "SENT" or
+        result = "FAILED"
     end
 end
 ```

@@ -70,7 +70,8 @@ featureMember
     ;
 
 fieldDecl
-    : IDENTIFIER ':' type noteClause?
+    : IDENTIFIER ':' type (EQUAL expression)? noteClause?
+    | IDENTIFIER EQUAL expression noteClause?
     ;
 
 constructorDecl
@@ -331,6 +332,7 @@ literal
     | nilLiteral
     | STRING
     | arrayLiteral
+    | setLiteral
     | mapLiteral
     ;
 
@@ -366,11 +368,16 @@ arrayLiteral
     ;
 
 mapLiteral
-    : '{' (mapEntry (',' mapEntry)*)? '}'
+    : '{' '}'
+    | '{' mapEntry (',' mapEntry)* '}'
     ;
 
 mapEntry
     : expression ':' expression
+    ;
+
+setLiteral
+    : '{' expression (',' expression)* '}'
     ;
 
 /*

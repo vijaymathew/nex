@@ -76,7 +76,7 @@
 
 (def builtin-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Any" "Void" "Nil" "Console" "File" "Process" "Function"
+    "Array" "Map" "Set" "Any" "Void" "Nil" "Console" "File" "Process" "Function"
     "Cursor" "Window" "Turtle" "Image"})
 
 (defn builtin-type? [type-name]
@@ -344,6 +344,7 @@
                               (when (= (:type section) :feature-section)
                                 (some (fn [member]
                                         (when (and (= (:type member) :field)
+                                                   (not (:constant? member))
                                                    (= (:name member) field-name))
                                           (:field-type member)))
                                       (:members section))))
@@ -354,6 +355,45 @@
                               (lookup-field parent visited'))
                             (:parents class-def)))))))]
     (lookup-field class-name #{})))
+
+(defn feature-members
+  "Return feature members with section visibility copied onto each member."
+  [class-def]
+  (mapcat (fn [section]
+            (when (= (:type section) :feature-section)
+              (map #(if (:visibility %)
+                      %
+                      (assoc % :visibility (:visibility section)))
+                   (:members section))))
+          (:body class-def)))
+
+(defn public-member?
+  [member]
+  (not= :private (-> member :visibility :type)))
+
+(defn lookup-class-constant
+  "Look up a constant on a class and its parent chain.
+   Local constants always apply; inherited constants must be public."
+  [env class-name constant-name]
+  (letfn [(lookup-constant [cn visited inherited?]
+            (when (and cn (not (contains? visited cn)))
+              (let [class-def (env-lookup-class env cn)
+                    visited' (conj visited cn)
+                    own-constant (when class-def
+                                   (some (fn [member]
+                                           (when (and (= (:type member) :field)
+                                                      (:constant? member)
+                                                      (= (:name member) constant-name)
+                                                      (or (not inherited?)
+                                                          (public-member? member)))
+                                             member))
+                                         (feature-members class-def)))]
+                (or own-constant
+                    (when class-def
+                      (some (fn [{:keys [parent]}]
+                              (lookup-constant parent visited' true))
+                            (:parents class-def)))))))]
+    (lookup-constant class-name #{} false)))
 
 (defn lookup-class-constructors
   "Collect constructors declared on a class and inherited parent chain."
@@ -382,10 +422,12 @@
   (if-let [var-type (env-lookup-var env name)]
     var-type
     (if-let [current-class (env-lookup-var env "__current_class__")]
-      (if-let [method-sig (lookup-class-method env current-class name)]
-        (or (:return-type method-sig) "Void")
-        (throw (ex-info (str "Undefined variable: " name)
-                        {:error (type-error (str "Undefined variable: " name))})))
+      (if-let [constant (lookup-class-constant env current-class name)]
+        (:field-type constant)
+        (if-let [method-sig (lookup-class-method env current-class name)]
+          (or (:return-type method-sig) "Void")
+          (throw (ex-info (str "Undefined variable: " name)
+                          {:error (type-error (str "Undefined variable: " name))}))))
       (throw (ex-info (str "Undefined variable: " name)
                       {:error (type-error (str "Undefined variable: " name))})))))
 
@@ -579,9 +621,13 @@
   [env {:keys [target method args has-parens] :as expr}]
   (if target
     ;; Method call on object
-    (let [target-type (if (string? target)
-                       (env-lookup-var env target)
-                       (check-expression env target))
+    (let [target-name (when (string? target) target)
+          class-target (when target-name (env-lookup-class env target-name))
+          target-type (if class-target
+                        target-name
+                        (if (string? target)
+                          (env-lookup-var env target)
+                          (check-expression env target)))
           normalized-target (normalize-type target-type)
           target-detachable? (detachable-type? normalized-target)
           guarded? (and (string? target) (env-var-non-nil? env target))
@@ -591,37 +637,44 @@
                       target-type)
           ;; Build type-map for generic substitution
           type-map (build-generic-type-map env target-type)]
-      (when (and target-detachable? (not guarded?))
+      (when (and (not class-target) target-detachable? (not guarded?))
         (throw (ex-info (str "Feature access on detachable target requires nil-check: " method)
                         {:error (type-error
                                  (str "Cannot call feature '" method "' on detachable "
                                       (display-type normalized-target)
                                       ". Wrap with: if <obj> /= nil then <obj>." method "(...) end"))})))
-      (if-let [method-sig (lookup-class-method env base-type method)]
-        (do
-          ;; Check argument types
-          (when (not= (count args) (count (:params method-sig)))
-            (throw (ex-info (str "Method " method " expects " (count (:params method-sig))
-                                " arguments, got " (count args))
-                            {:error (type-error
-                                     (str "Method " method " expects " (count (:params method-sig))
-                                          " arguments, got " (count args)))})))
-          (doseq [[arg param] (map vector args (:params method-sig))]
-            (let [arg-type (check-expression env arg)
-                  ;; Resolve generic params (e.g., T -> Integer)
-                  param-type (resolve-generic-type (:type param) type-map)]
-              (when-not (types-compatible? env arg-type param-type)
-                (throw (ex-info (str "Argument type mismatch for method " method)
-                                {:error (type-error
-                                         (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
-          (resolve-generic-type (:return-type method-sig) type-map))
-        ;; If this is member access without parens, attempt field lookup.
-        (if (false? has-parens)
-          (if-let [field-type (lookup-class-field env base-type method)]
-            (resolve-generic-type field-type type-map)
-            "Any")
-          ;; Method not found - might be built-in method, return Any for now
-          "Any")))
+      (cond
+        (and class-target (false? has-parens))
+        (if-let [constant (lookup-class-constant env base-type method)]
+          (resolve-generic-type (:field-type constant) type-map)
+          "Any")
+
+        :else
+        (if-let [method-sig (lookup-class-method env base-type method)]
+          (do
+            ;; Check argument types
+            (when (not= (count args) (count (:params method-sig)))
+              (throw (ex-info (str "Method " method " expects " (count (:params method-sig))
+                                  " arguments, got " (count args))
+                              {:error (type-error
+                                       (str "Method " method " expects " (count (:params method-sig))
+                                            " arguments, got " (count args)))})))
+            (doseq [[arg param] (map vector args (:params method-sig))]
+              (let [arg-type (check-expression env arg)
+                    ;; Resolve generic params (e.g., T -> Integer)
+                    param-type (resolve-generic-type (:type param) type-map)]
+                (when-not (types-compatible? env arg-type param-type)
+                  (throw (ex-info (str "Argument type mismatch for method " method)
+                                  {:error (type-error
+                                           (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
+            (resolve-generic-type (:return-type method-sig) type-map))
+          ;; If this is member access without parens, attempt field lookup.
+          (if (false? has-parens)
+            (if-let [field-type (lookup-class-field env base-type method)]
+              (resolve-generic-type field-type type-map)
+              "Any")
+            ;; Method not found - might be built-in method, return Any for now
+            "Any"))))
     ;; Function call (built-in like print/type_of/type_is) or function object call
     (cond
       (= method "type_of")
@@ -805,6 +858,21 @@
                                      "Map entries must have consistent types")})))))
       {:base-type "Map" :type-params [key-type val-type]})))
 
+(defn check-set-literal
+  "Check the type of a set literal"
+  [env {:keys [elements] :as expr}]
+  (if (empty? elements)
+    {:base-type "Set" :type-params ["Any"]}
+    (let [first-type (check-expression env (first elements))]
+      (doseq [elem (rest elements)]
+        (let [elem-type (check-expression env elem)]
+          (when-not (types-equal? env first-type elem-type)
+            (throw (ex-info "Set elements must have same type"
+                            {:error (type-error
+                                     (str "Set elements must have same type, got "
+                                          (display-type first-type) " and " (display-type elem-type)))})))))
+      {:base-type "Set" :type-params [first-type]})))
+
 (defn check-expression
   "Check the type of an expression"
   [env expr]
@@ -828,6 +896,7 @@
       :call (check-call env expr)
       :create (check-create env expr)
       :array-literal (check-array-literal env expr)
+      :set-literal (check-set-literal env expr)
       :map-literal (check-map-literal env expr)
       :subscript (let [target-type (check-expression env (:target expr))]
                        (if (map? target-type)
@@ -869,6 +938,10 @@
 (defn check-assignment
   "Check an assignment statement"
   [env {:keys [target value] :as stmt}]
+  (when-let [current-class (env-lookup-var env "__current_class__")]
+    (when (lookup-class-constant env current-class target)
+      (throw (ex-info (str "Cannot assign to constant: " target)
+                      {:error (type-error (str "Cannot assign to constant: " target))}))))
   (let [var-type (env-lookup-var env target)
         val-type (check-expression env value)]
     (when-not var-type
@@ -882,21 +955,23 @@
 
 (defn check-let
   "Check a let statement"
-  [env {:keys [name var-type value] :as stmt}]
-  (when-not var-type
-    (throw (ex-info (str "Type annotation required for variable '" name "'")
-                    {:error (type-error
-                             (str "Type annotation required for variable '" name
-                                  "'. Use: let " name ": <Type> := ..."))})))
-  (validate-type-annotation env var-type)
-  (let [val-type (check-expression env value)]
-    (when-not (types-compatible? env val-type var-type)
+  [env {:keys [name var-type value synthetic] :as stmt}]
+  (let [val-type (check-expression env value)
+        inferred-type (or var-type (when synthetic val-type))]
+    (when-not inferred-type
+      (throw (ex-info (str "Type annotation required for variable '" name "'")
+                      {:error (type-error
+                               (str "Type annotation required for variable '" name
+                                    "'. Use: let " name ": <Type> := ..."))})))
+    (when var-type
+      (validate-type-annotation env var-type))
+    (when-not (types-compatible? env val-type inferred-type)
       (throw (ex-info (str "Type mismatch in let binding for " name)
                       {:error (type-error
                                (str "Cannot assign " (display-type val-type)
                                     " to variable '" name "' of type "
-                                    (display-type var-type)))})))
-    (env-add-var env name var-type)))
+                                    (display-type inferred-type)))})))
+    (env-add-var env name inferred-type)))
 
 (defn check-if
   "Check an if statement"
@@ -974,6 +1049,10 @@
       :retry nil
       :member-assign
       (let [field-name (:field stmt)
+            _ (when-let [current-class (env-lookup-var env "__current_class__")]
+                (when (lookup-class-constant env current-class field-name)
+                  (throw (ex-info (str "Cannot assign to constant: " field-name)
+                                  {:error (type-error (str "Cannot assign to constant: " field-name))}))))
             field-type (env-lookup-var env field-name)
             val-type (check-expression env (:value stmt))]
         (when (and field-type val-type)
@@ -1118,15 +1197,43 @@
   [env {:keys [name body] :as class-def}]
   (env-add-class env name class-def)
 
-  ;; Collect fields
-  (doseq [section body]
-    (when (= (:type section) :feature-section)
-      (doseq [member (:members section)]
-        (when (= (:type member) :field)
-          (env-add-var env (:name member) (:field-type member))))))
+  ;; Collect fields/constants and infer constant types.
+  (let [updated-body
+        (mapv (fn [section]
+                (if (= (:type section) :feature-section)
+                  (update section :members
+                          (fn [members]
+                            (mapv (fn [member]
+                                    (let [member (if (:visibility member)
+                                                   member
+                                                   (assoc member :visibility (:visibility section)))]
+                                      (if (= (:type member) :field)
+                                        (if (:constant? member)
+                                          (let [inferred-type (check-expression env (:value member))
+                                                final-type (or (:field-type member) inferred-type)]
+                                            (when (:field-type member)
+                                              (validate-type-annotation env (:field-type member))
+                                              (when-not (types-compatible? env inferred-type (:field-type member))
+                                                (throw (ex-info (str "Type mismatch in constant " (:name member))
+                                                                {:error (type-error
+                                                                         (str "Cannot assign " (display-type inferred-type)
+                                                                              " to constant '" (:name member)
+                                                                              "' of type "
+                                                                              (display-type (:field-type member))))}))))
+                                            (env-add-var env (:name member) final-type)
+                                            (assoc member :field-type final-type))
+                                          (do
+                                            (env-add-var env (:name member) (:field-type member))
+                                            member))
+                                        member)))
+                                  members)))
+                  section))
+              body)
+        updated-class-def (assoc class-def :body updated-body)]
+    (env-add-class env name updated-class-def))
 
   ;; Collect method signatures
-  (doseq [section body]
+  (doseq [section (:body (env-lookup-class env name))]
     (cond
       (= (:type section) :feature-section)
       (doseq [member (:members section)]
@@ -1154,6 +1261,10 @@
 (defn check-class
   "Check a class definition"
   [env {:keys [name body invariant parents] :as class-def}]
+  (let [class-def (or (env-lookup-class env name) class-def)
+        body (:body class-def)
+        invariant (:invariant class-def)
+        parents (:parents class-def)]
   ;; Check inheritance
   (when parents
     (check-inheritance env name parents))
@@ -1176,7 +1287,8 @@
           (= (:type member) :method)
           (check-method env name member)
           (= (:type member) :field)
-          (validate-type-annotation env (:field-type member))))
+          (when-not (:constant? member)
+            (validate-type-annotation env (:field-type member)))))
 
       (= (:type section) :constructors)
       (doseq [ctor (:constructors section)]
@@ -1186,7 +1298,8 @@
   (let [fields (->> body
                     (filter #(= :feature-section (:type %)))
                     (mapcat :members)
-                    (filter #(= :field (:type %))))
+                    (filter #(and (= :field (:type %))
+                                  (not (:constant? %)))))
         constructors (->> body
                           (filter #(= :constructors (:type %)))
                           (mapcat :constructors))
@@ -1237,7 +1350,7 @@
             (throw (ex-info (str "Constructor " name " does not initialize all attachable fields")
                             {:error (type-error
                                      (str "Constructor " name " must initialize attachable fields: "
-                                          (str/join ", " missing)))}))))))))
+                                          (str/join ", " missing)))})))))))))
 
 ;;
 ;; Program Type Checking
@@ -1278,6 +1391,21 @@
     (env-add-method env scalar "hash"
                     {:params []
                      :return-type "Integer"}))
+
+  (doseq [[method-name sig]
+          {"bitwise_left_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_right_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_logical_right_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_rotate_left" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_rotate_right" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_is_set" {:params [{:name "n" :type "Integer"}] :return-type "Boolean"}
+           "bitwise_set" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_unset" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_and" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
+           "bitwise_or" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
+           "bitwise_xor" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
+           "bitwise_not" {:params [] :return-type "Integer"}}]
+    (env-add-method env "Integer" method-name sig))
 
   (doseq [[method-name sig]
           {"length"      {:params [] :return-type "Integer"}
@@ -1396,7 +1524,8 @@
                           :return-type {:base-type "Array" :type-params ["T"]}}
            "first"       {:params [] :return-type "T"}
            "last"        {:params [] :return-type "T"}
-           "join"        {:params [{:name "sep" :type "String"}] :return-type "String"}}]
+           "join"        {:params [{:name "sep" :type "String"}] :return-type "String"}
+           "cursor"      {:params [] :return-type "Cursor"}}]
     (env-add-method env "Array" method-name sig))
 
   ;; Register Map[K, V] class and methods
@@ -1412,8 +1541,31 @@
            "contains_key" {:params [{:name "key" :type "K"}] :return-type "Boolean"}
            "keys"         {:params [] :return-type {:base-type "Array" :type-params ["K"]}}
            "values"       {:params [] :return-type {:base-type "Array" :type-params ["V"]}}
-           "remove"       {:params [{:name "key" :type "K"}] :return-type "Void"}}]
+           "remove"       {:params [{:name "key" :type "K"}] :return-type "Void"}
+           "cursor"       {:params [] :return-type "Cursor"}}]
     (env-add-method env "Map" method-name sig))
+
+  ;; Register Set[T] class and methods
+  (env-add-class env "Set" {:name "Set"
+                            :generic-params [{:name "T"}]})
+  (env-add-method env "Set" "from_array"
+                  {:params [{:name "values"
+                             :type {:base-type "Array" :type-params ["T"]}}]
+                   :return-type {:base-type "Set" :type-params ["T"]}})
+  (doseq [[method-name sig]
+          {"contains"             {:params [{:name "value" :type "T"}] :return-type "Boolean"}
+           "union"                {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
+                                   :return-type {:base-type "Set" :type-params ["T"]}}
+           "difference"           {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
+                                   :return-type {:base-type "Set" :type-params ["T"]}}
+           "intersection"         {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
+                                   :return-type {:base-type "Set" :type-params ["T"]}}
+           "symmetric_difference" {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
+                                   :return-type {:base-type "Set" :type-params ["T"]}}
+           "size"                 {:params [] :return-type "Integer"}
+           "is_empty"             {:params [] :return-type "Boolean"}
+           "cursor"               {:params [] :return-type "Cursor"}}]
+    (env-add-method env "Set" method-name sig))
 
   ;; Built-in Function methods: call0..call32
   (doseq [n (range 0 33)]

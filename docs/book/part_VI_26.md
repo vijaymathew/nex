@@ -50,6 +50,11 @@ Under this design, the route algorithm can change from BFS to Dijkstra, the grap
 
 ```nex
 class Route_Response
+create
+  make(status, path: String) do
+    this.status := status
+    this.path := path
+  end
 feature
   status: String
   path: String
@@ -66,20 +71,16 @@ feature
     require
       inputs_present: start_loc /= "" and goal_loc /= ""
     do
-      let r: Route_Response := create Route_Response
-
       if start_loc = goal_loc then
-        r.status := "FOUND"
-        r.path := start_loc
+        result := 
+		 create Route_Response.make("FOUND", start_loc)
       elseif start_loc = "A" and goal_loc = "C" then
-        r.status := "FOUND"
-        r.path := "A->B->C"
+        result := 
+		 create Route_Response.make("FOUND", "A->B->C")
       else
-        r.status := "UNREACHABLE"
-        r.path := ""
+        result := 
+		 create Route_Response.make("UNREACHABLE", "")
       end
-
-      result := r
     ensure
       declared_status:
         result.status = "FOUND" or
@@ -89,14 +90,20 @@ feature
 end
 
 class Route_Client
+create
+  make(route_api: Route_Interface) do
+    this.route_api := route_api
+  end
 feature
   route_api: Route_Interface
 
   request(start_loc, goal_loc: String): String
     require
-      inputs_present: start_loc /= "" and goal_loc /= ""
+      inputs_present: start_loc /= "" 
+	                  and goal_loc /= ""
     do
-      let resp: Route_Response := route_api.plan_route(start_loc, goal_loc)
+      let resp: Route_Response
+        := route_api.plan_route(start_loc, goal_loc)
       if resp.status = "FOUND" then
         result := "OK:" + resp.path
       elseif resp.status = "UNREACHABLE" then

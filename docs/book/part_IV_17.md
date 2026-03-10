@@ -50,6 +50,18 @@ Two things are embedded here. The first is a structural question: what is the sh
 
 ```nex
 class Topic_Node
+create
+  make(
+    key: Integer,
+    label: String,
+    left_key: Integer,
+    right_key: Integer
+  ) do
+    this.key := key
+    this.label := label
+    this.left_key := left_key
+    this.right_key := right_key
+  end
 feature
   key: Integer
   label: String
@@ -57,10 +69,17 @@ feature
   right_key: Integer
 invariant
   label_present: label /= ""
-  no_self_child: left_key /= key and right_key /= key
+  no_self_child: left_key /= key 
+                 and right_key /= key
 end
 
 class Topic_Tree
+create
+  make(root: Topic_Node, left: Topic_Node, right: Topic_Node) do
+    this.root := root
+    this.left := left
+    this.right := right
+  end
 feature
   root: Topic_Node
   left: Topic_Node
@@ -70,9 +89,11 @@ feature
     do
       if target = root.key then
         result := root.label
-      elseif target < root.key and target = left.key then
+      elseif target < root.key 
+	         and target = left.key then
         result := left.label
-      elseif target > root.key and target = right.key then
+      elseif target > root.key 
+	         and target = right.key then
         result := right.label
       else
         result := "NOT_FOUND"

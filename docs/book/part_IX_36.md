@@ -37,6 +37,12 @@ In Nex, we can even formalize our decision-making through governance objects. Th
 ```nex
 -- Formalizing Human Decision-Making
 class Rollout_Governance
+create
+  make(canary_success_rate: Integer, min_required_rate: Integer) do
+    this.canary_success_rate := canary_success_rate
+    this.min_required_rate := min_required_rate
+    this.rollback_triggered := false
+  end
 feature
   canary_success_rate: Integer
   min_required_rate: Integer
@@ -61,6 +67,12 @@ invariant
 end
 
 class Engineering_Decision_Log
+create
+  make(decision: String, rationale: String, owner: String) do
+    this.decision := decision
+    this.rationale := rationale
+    this.owner := owner
+  end
 feature
   decision: String
   rationale: String
@@ -70,7 +82,9 @@ feature
     require
       inputs_present: d /= "" and r /= "" and o /= ""
     do
-      decision := d; rationale := r; owner := o
+      decision := d
+      rationale := r
+      owner := o
       result := "RECORDED"
     ensure
       persisted: decision = d and rationale = r and owner = o

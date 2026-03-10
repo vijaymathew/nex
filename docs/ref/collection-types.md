@@ -1,5 +1,9 @@
 # Collection Types
 
+This section covers the standard collection abstractions used throughout Nex code.
+`Array`, `Map`, and `Set` are built-in collection types. `Stack[T]` is a common
+generic collection class pattern built on top of `Array[T]`.
+
 ## `Array`
 
 ### Construction
@@ -49,6 +53,89 @@
 | `remove` | `key: Any` | `Any` | Delete entry by key. |
 | `cursor` | none | `MapCursor` | Create entry iterator. |
 
+## `Set`
+
+### Construction
+
+```nex
+{}
+create Set[Integer].from_array([1, 2, 3])
+```
+
+Non-empty brace literals such as `{1, 2, 3}` denote sets. The empty literal
+`{}` denotes an empty map, so use `create Set[T]` or `create Set[T].from_array(...)`
+when you need an empty set value.
+
+### Methods
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `contains` | `value: T` | `Boolean` | Membership test. |
+| `union` | `other: Set[T]` | `Set[T]` | Set union. |
+| `difference` | `other: Set[T]` | `Set[T]` | Elements in this set but not in `other`. |
+| `intersection` | `other: Set[T]` | `Set[T]` | Common elements. |
+| `symmetric_difference` | `other: Set[T]` | `Set[T]` | Elements in exactly one of the two sets. |
+| `size` | none | `Integer` | Number of elements. |
+| `is_empty` | none | `Boolean` | True when the set has no elements. |
+| `cursor` | none | `SetCursor` | Create iterator. |
+
+## `Stack[T]`
+
+`Stack[T]` is a generic last-in, first-out collection abstraction. It is not a
+built-in primitive type; it is typically defined as a class using `Array[T]` for
+storage.
+
+### Typical Definition
+
+```nex
+class Stack [T]
+  create
+    make() do
+      items := []
+    end
+
+  feature
+    items: Array[T]
+
+    push(value: T) do
+      items.add(value)
+    end
+
+    pop(): T do
+      result := items.get(items.length - 1)
+      items.remove(items.length - 1)
+    end
+
+    peek(): T do
+      result := items.get(items.length - 1)
+    end
+
+    is_empty(): Boolean do
+      result := items.is_empty
+    end
+
+    size(): Integer do
+      result := items.length
+    end
+end
+```
+
+### Methods
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `push` | `value: T` | `Void` | Push value onto the top of the stack. |
+| `pop` | none | `T` | Remove and return the top element. |
+| `peek` | none | `T` | Return the top element without removing it. |
+| `is_empty` | none | `Boolean` | True when the stack has no elements. |
+| `size` | none | `Integer` | Number of stored elements. |
+
+### Notes
+
+- `pop` and `peek` usually require the stack to be non-empty.
+- A contract-based version should add preconditions for these operations.
+- `Stack[T]` is the canonical example of a user-defined generic collection in Nex.
+
 ## Examples
 
 ```nex
@@ -63,4 +150,13 @@ m.put("kind", "language")
 print(m.get("lang"))              -- "Nex"
 print(m.try_get("missing", "n/a")) -- "n/a"
 print(m.contains_key("kind"))     -- true
+
+let s1 := {1, 2}
+let s2 := {2, 3}
+print(s1.union(s2))               -- {1, 2, 3}
+
+let stack := create Stack[Integer].make
+stack.push(10)
+stack.push(20)
+print(stack.peek)                 -- 20
 ```

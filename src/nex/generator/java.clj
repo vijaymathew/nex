@@ -14,10 +14,15 @@
 (def ^:dynamic *current-parents* #{})
 (def ^:dynamic *parent-field-map* {})   ;; field-name -> "_parent_X" prefix
 (def ^:dynamic *own-fields* #{})        ;; field names defined on current class
+(def ^:dynamic *constant-names* #{})    ;; accessible class constants in current class
 (def ^:dynamic *local-names* #{})       ;; method params + loop vars (shadow parent fields)
+(def ^:dynamic *local-types* {})        ;; local/param name -> Nex type
 (def ^:dynamic *all-method-names* #{})  ;; own + delegated parent method names
 (def ^:dynamic *field-types* {})        ;; field-name -> type, own + parent
 (def ^:dynamic *class-invariants* [])   ;; effective class invariants (inherited + local, deduped)
+
+(declare extract-members)
+(declare get-accessible-constants)
 
 (defn class-name-to-local
   "Convert a class name to a local variable name (e.g., 'Point' -> 'point')"
@@ -43,6 +48,7 @@
       "String" "String"
       "Array" "ArrayList"
       "Map" "HashMap"
+      "Set" "LinkedHashSet"
       "Console" "Object"
       "File" "java.io.File"
       "Process" "Object"
@@ -68,6 +74,7 @@
            java-base (case base-type
                       "Array" "ArrayList"
                       "Map" "HashMap"
+                      "Set" "LinkedHashSet"
                       base-type)
            args (:type-args nex-type)]
        (if args
@@ -89,9 +96,10 @@
          "Decimal" "java.math.BigDecimal"
          "Char" "char"
          "Boolean" "boolean"
-         "String" "String"
-         "Array" "ArrayList"
-         "Map" "HashMap"
+        "String" "String"
+        "Array" "ArrayList"
+        "Map" "HashMap"
+        "Set" "LinkedHashSet"
         "Console" "Object"
         "File" "java.io.File"
         "Process" "Object"
@@ -114,6 +122,7 @@
         ;; Use Java diamond operator for type inference
         "Array" (str "new ArrayList<>()")
         "Map" (str "new HashMap<>()")
+        "Set" (str "new LinkedHashSet<>()")
         "null"))
 
     ;; Handle basic types
@@ -128,6 +137,7 @@
       "String" "\"\""
       "Array" "new ArrayList<>()"
       "Map" "new HashMap<>()"
+      "Set" "new LinkedHashSet<>()"
       "Console" "new Object() /* Console */"
       "File" "null"
       "Process" "new Object() /* Process */"
@@ -242,6 +252,7 @@
     "compare"     (fn [target args] (str "Integer.signum(" target ".compareTo(String.valueOf(" args ")))"))
     "hash"        (fn [target _] (str target ".hashCode()"))
     "split"       (fn [target args] (str "new ArrayList<>(Arrays.asList(" target ".split(" args ")))"))
+    "cursor"      (fn [target _] (str "NexRuntime.stringCursor(" target ")"))
     ;; String operators
     "plus"        (fn [target args] (str "(" target " + " args ")"))
     "equals"      (fn [target args] (str target ".equals(" args ")"))
@@ -257,6 +268,18 @@
     "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
     "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
     "pick"      (fn [target _] (str "(int)(Math.random() * (" target " - 1))"))
+    "bitwise_left_shift" (fn [target args] (str "((int)" target " << " args ")"))
+    "bitwise_right_shift" (fn [target args] (str "((int)" target " >> " args ")"))
+    "bitwise_logical_right_shift" (fn [target args] (str "((int)" target " >>> " args ")"))
+    "bitwise_rotate_left" (fn [target args] (str "Integer.rotateLeft((int)" target ", " args ")"))
+    "bitwise_rotate_right" (fn [target args] (str "Integer.rotateRight((int)" target ", " args ")"))
+    "bitwise_is_set" (fn [target args] (str "((((int)" target " >>> " args ") & 1) != 0)"))
+    "bitwise_set" (fn [target args] (str "((int)" target " | (1 << " args "))"))
+    "bitwise_unset" (fn [target args] (str "((int)" target " & ~(1 << " args "))"))
+    "bitwise_and" (fn [target args] (str "((int)" target " & (int)" args ")"))
+    "bitwise_or" (fn [target args] (str "((int)" target " | (int)" args ")"))
+    "bitwise_xor" (fn [target args] (str "((int)" target " ^ (int)" args ")"))
+    "bitwise_not" (fn [target _] (str "(~(int)" target ")"))
     ;; Arithmetic operators
     "plus"      (fn [target args] (str "(" target " + " args ")"))
     "minus"     (fn [target args] (str "(" target " - " args ")"))
@@ -363,7 +386,8 @@
     "remove"    (fn [target args] (str "(" target ".remove((int)" args "), " target ")"))
     "reverse"   (fn [target _] (str "new ArrayList<>(" target ".reversed())"))
     "sort"      (fn [target _] (str "(Collections.sort(" target "), " target ")"))
-    "slice"     (fn [target args] (str "new ArrayList<>(" target ".subList(" args "))"))}
+    "slice"     (fn [target args] (str "new ArrayList<>(" target ".subList(" args "))"))
+    "cursor"    (fn [target _] (str "NexRuntime.arrayCursor(" target ")"))}
 
    :Map
    {"get"          (fn [target args] (str target ".get(" args ")"))
@@ -374,7 +398,18 @@
     "contains_key" (fn [target args] (str target ".containsKey(" args ")"))
     "keys"         (fn [target _] (str "new ArrayList<>(" target ".keySet())"))
     "values"       (fn [target _] (str "new ArrayList<>(" target ".values())"))
-    "remove"       (fn [target args] (str "(" target ".remove(" args "), " target ")"))}
+    "remove"       (fn [target args] (str "(" target ".remove(" args "), " target ")"))
+    "cursor"       (fn [target _] (str "NexRuntime.mapCursor(" target ")"))}
+
+   :Set
+   {"contains"             (fn [target args] (str target ".contains(" args ")"))
+    "union"                (fn [target args] (str "NexRuntime.setUnion(" target ", " args ")"))
+    "difference"           (fn [target args] (str "NexRuntime.setDifference(" target ", " args ")"))
+    "intersection"         (fn [target args] (str "NexRuntime.setIntersection(" target ", " args ")"))
+    "symmetric_difference" (fn [target args] (str "NexRuntime.setSymmetricDifference(" target ", " args ")"))
+    "size"                 (fn [target _] (str target ".size()"))
+    "is_empty"             (fn [target _] (str target ".isEmpty()"))
+    "cursor"               (fn [target _] (str "NexRuntime.setCursor(" target ")"))}
 
    :Image
    {"width"        (fn [target _] (str target ".width()"))
@@ -411,6 +446,104 @@
   (or (= t "Function")
       (and (map? t) (= (:base-type t) "Function"))))
 
+(defn public-member?
+  [member]
+  (not= :private (-> member :visibility :type)))
+
+(defn infer-constant-type
+  "Infer a constant type from its value expression."
+  [expr constants-by-name]
+  (case (:type expr)
+    :integer "Integer"
+    :real "Real"
+    :string "String"
+    :boolean "Boolean"
+    :char "Char"
+    :nil "Any"
+    :identifier (get constants-by-name (:name expr) "Any")
+    :binary (let [lt (infer-constant-type (:left expr) constants-by-name)
+                  rt (infer-constant-type (:right expr) constants-by-name)]
+              (case (:operator expr)
+                ("=" "/=" "<" "<=" ">" ">=" "and" "or") "Boolean"
+                "+" (if (or (= lt "String") (= rt "String")) "String" lt)
+                ("-" "*" "/" "%" "^") lt
+                "Any"))
+    :call (if (and (string? (:target expr)) (false? (:has-parens expr)))
+            (get constants-by-name (:method expr) "Any")
+            "Any")
+    "Any"))
+
+(defn infer-expression-type
+  "Infer a Nex type for code generation dispatch."
+  [expr]
+  (cond
+    (string? expr) (or (get *local-types* expr)
+                       (get *field-types* expr)
+                       "Any")
+    (not (map? expr)) "Any"
+    :else
+    (case (:type expr)
+      :string "String"
+      :integer "Integer"
+      :real "Real"
+      :boolean "Boolean"
+      :char "Char"
+      :array-literal "Array"
+      :map-literal "Map"
+      :set-literal "Set"
+      :create (:class-name expr)
+      :identifier (or (get *local-types* (:name expr))
+                      (get *field-types* (:name expr))
+                      "Any")
+      "Any")))
+
+(defn extract-typed-locals
+  "Collect typed local bindings from statements."
+  [stmts]
+  (reduce
+   (fn [acc stmt]
+     (if-not (map? stmt)
+       acc
+       (case (:type stmt)
+         :let (if-let [t (:var-type stmt)]
+                (assoc acc (:name stmt) t)
+                acc)
+         :if (merge acc
+                    (extract-typed-locals (:then stmt))
+                    (reduce merge {} (map #(extract-typed-locals (:then %)) (:elseif stmt)))
+                    (extract-typed-locals (:else stmt)))
+         :loop (merge acc
+                      (extract-typed-locals (:init stmt))
+                      (extract-typed-locals (:body stmt)))
+         :scoped-block (merge acc
+                              (extract-typed-locals (:body stmt))
+                              (extract-typed-locals (:rescue stmt)))
+         :with (merge acc (extract-typed-locals (:body stmt)))
+         :case (merge acc
+                      (reduce merge {} (map (fn [clause]
+                                              (extract-typed-locals [(:body clause)]))
+                                            (:clauses stmt)))
+                      (extract-typed-locals (when-let [else-stmt (:else stmt)] [else-stmt])))
+         acc)))
+   {}
+   (or stmts [])))
+
+(defn get-parent-constants
+  "Get recursively inherited public constants from a parent class."
+  [parent-name]
+  (when-let [parent-def (get *class-registry* parent-name)]
+    (let [{:keys [constants]} (extract-members (:body parent-def))
+          inherited (mapcat (fn [{:keys [parent]}] (or (get-parent-constants parent) []))
+                            (:parents parent-def))]
+      (vals
+       (reduce (fn [m constant]
+                 (if (contains? m (:name constant))
+                   m
+                   (assoc m (:name constant) constant)))
+               {}
+               (concat (filter public-member? inherited)
+                       (filter public-member? constants)))))))
+
 (defn resolve-identifier
   "Resolve an identifier in expression context.
    Resolution order: locals -> methods -> own fields -> parent fields -> functions -> bare name"
@@ -421,6 +554,7 @@
     (if (= *this-name* "this")
       (str id-name "()")
       (str *this-name* "." id-name "()"))
+    (contains? *constant-names* id-name) id-name
     (contains? *own-fields* id-name) id-name
     (contains? *parent-field-map* id-name)
     (let [parent-prefix (get *parent-field-map* id-name)]
@@ -458,6 +592,11 @@
                            ""
                            (str *this-name* "."))]
               (str prefix "_parent_" target "." method "(" args-code ")"))
+            (if (and (string? target)
+                     (false? has-parens)
+                     (get *class-registry* target)
+                     (some #(= (:name %) method) (get-accessible-constants (get *class-registry* target))))
+              (str target "." method)
             ;; Check for this-target with has-parens distinction
             (if this-target?
               (if (false? has-parens)
@@ -472,6 +611,8 @@
                   (str target-code "." method "(" args-code ")")))
               ;; External object: try builtins, then default
               (or
+               (when-let [method-fn (get-in builtin-method-mappings [(keyword (infer-expression-type target)) method])]
+                 (method-fn target-code args-code))
                ;; Try Integer methods first (for operators, numeric is more common)
                (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
                  (method-fn target-code args-code))
@@ -493,6 +634,9 @@
                ;; Try Map methods
                (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
                  (method-fn target-code args-code))
+               ;; Try Set methods
+               (when-let [method-fn (get-in builtin-method-mappings [:Set method])]
+                 (method-fn target-code args-code))
                ;; Try Image methods
                (when-let [method-fn (get-in builtin-method-mappings [:Image method])]
                  (method-fn target-code args-code))
@@ -500,7 +644,7 @@
                (when (= method "goto")
                  (str target-code ".goto_(" args-code ")"))
                ;; Default: regular method call
-               (str target-code "." method "(" args-code ")"))))))
+               (str target-code "." method "(" args-code ")")))))))
       ;; No target: class method, function object field, global function, or builtin
       (cond
         ;; Class method (own or inherited via delegation)
@@ -536,6 +680,9 @@
       "Console" "new Object() /* Console */"
       "File" (str "new java.io.File(" args-code ")")
       "Process" "new Object() /* Process */"
+      "Set" (if (= constructor "from_array")
+              (str "NexRuntime.setFromArray(" args-code ")")
+              "new LinkedHashSet<>()")
       "Window" (str "new NexWindow(" args-code ")")
       "Turtle" (str "new NexTurtle(" args-code ")")
       "Image" (if (= constructor "from_file")
@@ -570,6 +717,12 @@
                                           (generate-expression value) ")"))
                                    entries))]
     (str "new HashMap<>() {{ " entries-code "; }}")))
+
+(defn generate-set-literal
+  "Generate Java code for set literal"
+  [elements]
+  (let [elements-code (str/join ", " (map generate-expression elements))]
+    (str "NexRuntime.setOf(" elements-code ")")))
 
 (defn java-convert-type
   "Return a nullable Java type suitable for convert bindings/casts."
@@ -709,6 +862,7 @@
     :create (generate-create-expr expr)
     :subscript (generate-subscript-expr expr)
     :array-literal (generate-array-literal (:elements expr))
+    :set-literal (generate-set-literal (:elements expr))
     :map-literal (generate-map-literal (:entries expr))
     :convert (generate-convert-expr expr)
     :anonymous-function (let [class-def (:class-def expr)
@@ -1065,11 +1219,19 @@
   "Generate Java code for a method"
   [level {:keys [name params return-type body require ensure rescue visibility note]} opts]
   (let [param-names (set (map :name params))
+        param-types (into {} (map (juxt :name :type) params))
         convert-bindings (collect-convert-bindings-block (concat body (or rescue [])))
         convert-var-names (set (map :name convert-bindings))
+        convert-var-types (into {} (map (juxt :name :target-type) convert-bindings))
+        local-types (merge param-types
+                           convert-var-types
+                           (extract-typed-locals body)
+                           (extract-typed-locals rescue)
+                           (when return-type {"result" return-type}))
         local-names (cond-> (into param-names convert-var-names)
                       return-type (conj "result"))]
-    (binding [*local-names* (into *local-names* local-names)]
+    (binding [*local-names* (into *local-names* local-names)
+              *local-types* (merge *local-types* local-types)]
       (let [java-return (if return-type
                           (nex-type-to-java return-type)
                           "void")
@@ -1124,18 +1286,24 @@
 
 (defn generate-field
   "Generate Java code for a field with default initialization"
-  [level {:keys [name field-type visibility note]}]
+  [level {:keys [name field-type visibility note constant? value]}]
   (let [vis (if (and visibility (= (:type visibility) :private))
              "private"
              "public")
         java-type (nex-type-to-java field-type)
-        init-value (default-value field-type)
+        init-value (if constant?
+                     (generate-expression value)
+                     (default-value field-type))
         ;; Generate Javadoc if note present
         javadoc (when note
                  (generate-javadoc level note))]
     (if javadoc
-      (str javadoc "\n" (indent level (str vis " " java-type " " name " = " init-value ";")))
-      (indent level (str vis " " java-type " " name " = " init-value ";")))))
+      (str javadoc "\n" (indent level (str vis " "
+                                          (when constant? "static final ")
+                                          java-type " " name " = " init-value ";")))
+      (indent level (str vis " "
+                         (when constant? "static final ")
+                         java-type " " name " = " init-value ";")))))
 
 ;;
 ;; Constructor Generation
@@ -1146,26 +1314,36 @@
   [level class-name {:keys [name params body require ensure rescue]} opts]
   (let [local-name (class-name-to-local class-name)
         param-names (set (map :name params))
+        param-types (into {} (map (juxt :name :type) params))
         convert-bindings (collect-convert-bindings-block (concat body (or rescue [])))
         convert-var-names (set (map :name convert-bindings))
+        convert-var-types (into {} (map (juxt :name :target-type) convert-bindings))
+        local-types (merge param-types
+                           convert-var-types
+                           (extract-typed-locals body)
+                           (extract-typed-locals rescue))
         local-names (into param-names convert-var-names)
         params-code (str/join ", "
                               (map (fn [{:keys [name type]}]
                                      (str (nex-type-to-java type) " " name))
                                    params))
         preconditions (binding [*this-name* local-name
-                                *local-names* (into *local-names* local-names)]
+                                *local-names* (into *local-names* local-names)
+                                *local-types* (merge *local-types* local-types)]
                         (generate-assertions (+ level 1) require "Precondition" opts))
         statements (binding [*this-name* local-name
-                             *local-names* (into *local-names* local-names)]
+                             *local-names* (into *local-names* local-names)
+                             *local-types* (merge *local-types* local-types)]
                      (if rescue
                        [(generate-rescue (+ level 1) body rescue #{})]
                        (mapv #(generate-statement (+ level 1) %) body)))
         postconditions (binding [*this-name* local-name
-                                 *local-names* (into *local-names* local-names)]
+                                 *local-names* (into *local-names* local-names)
+                                 *local-types* (merge *local-types* local-types)]
                          (generate-assertions (+ level 1) ensure "Postcondition" opts))
         class-invariant-checks (binding [*this-name* local-name
-                                         *local-names* (into *local-names* local-names)]
+                                         *local-names* (into *local-names* local-names)
+                                         *local-types* (merge *local-types* local-types)]
                                  (generate-assertions (+ level 1) *class-invariants* "Class invariant" opts))]
     (str/join "\n"
               (concat
@@ -1246,6 +1424,19 @@
   (when-let [parent-def (get *class-registry* parent-name)]
     (let [{:keys [methods]} (extract-members (:body parent-def))]
       methods)))
+
+(defn get-accessible-constants
+  "Get inherited public constants plus local constants, with local override by name."
+  [class-def]
+  (let [{:keys [constants]} (extract-members (:body class-def))
+        inherited (mapcat (fn [{:keys [parent]}]
+                            (or (get-parent-constants parent) []))
+                          (:parents class-def))]
+    (vals
+     (reduce (fn [m constant]
+               (assoc m (:name constant) constant))
+             {}
+             (concat inherited constants)))))
 
 (defn get-parent-constructors
   "Get constructor definitions from a direct parent class."
@@ -1440,10 +1631,23 @@
                                     (:members section))
                                :else []))
                            class-body)
-        fields (filter #(= (:type %) :field) all-members)
+        fields (filter #(and (= (:type %) :field) (not (:constant? %))) all-members)
+        constants (let [{:keys [constants]}
+                        (reduce (fn [{:keys [types constants]} member]
+                                  (if (and (= (:type member) :field) (:constant? member))
+                                    (let [final-type (or (:field-type member)
+                                                         (infer-constant-type (:value member) types))
+                                          constant (assoc member :field-type final-type)]
+                                      {:types (assoc types (:name member) final-type)
+                                       :constants (conj constants constant)})
+                                    {:types types :constants constants}))
+                                {:types {} :constants []}
+                                all-members)]
+                    constants)
         methods (filter #(= (:type %) :method) all-members)
         ctors (mapcat :constructors constructor-sections)]
     {:fields fields
+     :constants constants
      :methods methods
      :constructors ctors}))
 
@@ -1452,10 +1656,12 @@
   ([class-def] (generate-class class-def {}))
   ([class-def opts]
    (let [{:keys [name generic-params parents body note deferred?]} class-def
-         {:keys [fields methods constructors]} (extract-members body)
+         {:keys [fields constants methods constructors]} (extract-members body)
          parent-names (mapv :parent parents)
          parent-fm (build-parent-field-map parent-names)
          own-flds (set (map :name fields))
+         all-constants (get-accessible-constants class-def)
+         constant-names (set (map :name all-constants))
          own-method-names (set (map :name methods))
          all-methods (get-all-method-names parent-names own-method-names)
          fld-types (build-field-types fields parent-names)
@@ -1463,6 +1669,7 @@
     (binding [*current-parents* (set parent-names)
               *parent-field-map* parent-fm
               *own-fields* own-flds
+              *constant-names* constant-names
               *all-method-names* all-methods
               *field-types* fld-types
               *class-invariants* effective-invariants]
@@ -1477,6 +1684,7 @@
            invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
                               (indent 1 (str "// Class invariant: "
                                             (str/join ", " (map :label effective-invariants)))))
+           constants-code (map #(generate-field 1 (assoc % :constant? true)) all-constants)
            fields-code (map #(generate-field 1 %) fields)
            ;; Delegation methods for inherited methods not overridden
            delegation-methods (when (seq parents)
@@ -1499,6 +1707,8 @@
                   (when invariant-comment [invariant-comment ""])
                   composition-fields
                   (when (seq composition-fields) [""])
+                  constants-code
+                  (when (seq all-constants) [""])
                   fields-code
                   (when (seq fields) [""])
                   (when (seq delegation-methods) delegation-methods)
@@ -1956,6 +2166,7 @@ public class NexTurtle {
        "    if (value instanceof Float || value instanceof Double) return \"Real\";\n"
        "    if (value instanceof java.util.ArrayList) return \"Array\";\n"
        "    if (value instanceof java.util.HashMap) return \"Map\";\n"
+       "    if (value instanceof java.util.LinkedHashSet) return \"Set\";\n"
        "    String simple = value.getClass().getSimpleName();\n"
        "    return (simple == null || simple.isEmpty()) ? value.getClass().getName() : simple;\n"
        "  }\n\n"
@@ -1967,10 +2178,83 @@ public class NexTurtle {
        "    if (\"Integer\".equals(runtimeType) && (\"Integer64\".equals(targetType) || \"Real\".equals(targetType) || \"Decimal\".equals(targetType))) return true;\n"
        "    if (\"Integer64\".equals(runtimeType) && (\"Real\".equals(targetType) || \"Decimal\".equals(targetType))) return true;\n"
        "    if (\"Real\".equals(runtimeType) && \"Decimal\".equals(targetType)) return true;\n"
-       "    if ((\"ArrayCursor\".equals(runtimeType) || \"StringCursor\".equals(runtimeType) || \"MapCursor\".equals(runtimeType)) && \"Cursor\".equals(targetType)) return true;\n"
+       "    if ((\"ArrayCursor\".equals(runtimeType) || \"StringCursor\".equals(runtimeType) || \"MapCursor\".equals(runtimeType) || \"SetCursor\".equals(runtimeType)) && \"Cursor\".equals(targetType)) return true;\n"
        "    if (value == null) return false;\n"
        "    if (hasParentType(value, targetType, new java.util.IdentityHashMap<>())) return true;\n"
        "    return false;\n"
+       "  }\n\n"
+       "  @SafeVarargs\n"
+       "  public static <T> java.util.LinkedHashSet<T> setOf(T... values) {\n"
+       "    java.util.LinkedHashSet<T> out = new java.util.LinkedHashSet<>();\n"
+       "    for (T value : values) out.add(value);\n"
+       "    return out;\n"
+       "  }\n\n"
+       "  public static <T> java.util.LinkedHashSet<T> setFromArray(java.util.Collection<T> values) {\n"
+       "    return new java.util.LinkedHashSet<>(values);\n"
+       "  }\n\n"
+       "  public static <T> java.util.LinkedHashSet<T> setUnion(java.util.Set<T> a, java.util.Set<T> b) {\n"
+       "    java.util.LinkedHashSet<T> out = new java.util.LinkedHashSet<>(a);\n"
+       "    out.addAll(b);\n"
+       "    return out;\n"
+       "  }\n\n"
+       "  public static <T> java.util.LinkedHashSet<T> setDifference(java.util.Set<T> a, java.util.Set<T> b) {\n"
+       "    java.util.LinkedHashSet<T> out = new java.util.LinkedHashSet<>(a);\n"
+       "    out.removeAll(b);\n"
+       "    return out;\n"
+       "  }\n\n"
+       "  public static <T> java.util.LinkedHashSet<T> setIntersection(java.util.Set<T> a, java.util.Set<T> b) {\n"
+       "    java.util.LinkedHashSet<T> out = new java.util.LinkedHashSet<>(a);\n"
+       "    out.retainAll(b);\n"
+       "    return out;\n"
+       "  }\n\n"
+       "  public static <T> java.util.LinkedHashSet<T> setSymmetricDifference(java.util.Set<T> a, java.util.Set<T> b) {\n"
+       "    java.util.LinkedHashSet<T> out = new java.util.LinkedHashSet<>();\n"
+       "    for (T value : a) if (!b.contains(value)) out.add(value);\n"
+       "    for (T value : b) if (!a.contains(value)) out.add(value);\n"
+       "    return out;\n"
+       "  }\n\n"
+       "  public static class ArrayCursor<T> {\n"
+       "    private final java.util.List<T> source;\n"
+       "    private int index = 0;\n"
+       "    public ArrayCursor(java.util.List<T> source) { this.source = source; }\n"
+       "    public void start() { index = 0; }\n"
+       "    public T item() { if (index >= source.size()) throw new RuntimeException(\"Cursor is at end\"); return source.get(index); }\n"
+       "    public void next() { if (index < source.size()) index++; }\n"
+       "    public boolean at_end() { return index >= source.size(); }\n"
+       "  }\n\n"
+       "  public static class StringCursor {\n"
+       "    private final String source;\n"
+       "    private int index = 0;\n"
+       "    public StringCursor(String source) { this.source = source; }\n"
+       "    public void start() { index = 0; }\n"
+       "    public char item() { if (index >= source.length()) throw new RuntimeException(\"Cursor is at end\"); return source.charAt(index); }\n"
+       "    public void next() { if (index < source.length()) index++; }\n"
+       "    public boolean at_end() { return index >= source.length(); }\n"
+       "  }\n\n"
+       "  public static class MapCursor<K, V> {\n"
+       "    private final java.util.Map<K, V> source;\n"
+       "    private java.util.ArrayList<K> keys;\n"
+       "    private int index = 0;\n"
+       "    public MapCursor(java.util.Map<K, V> source) { this.source = source; this.keys = new java.util.ArrayList<>(source.keySet()); }\n"
+       "    public void start() { this.keys = new java.util.ArrayList<>(source.keySet()); index = 0; }\n"
+       "    public java.util.ArrayList<Object> item() { if (index >= keys.size()) throw new RuntimeException(\"Cursor is at end\"); K key = keys.get(index); return new java.util.ArrayList<>(java.util.Arrays.asList(key, source.get(key))); }\n"
+       "    public void next() { if (index < keys.size()) index++; }\n"
+       "    public boolean at_end() { return index >= keys.size(); }\n"
+       "  }\n\n"
+       "  public static class SetCursor<T> {\n"
+       "    private final java.util.Set<T> source;\n"
+       "    private java.util.ArrayList<T> values;\n"
+       "    private int index = 0;\n"
+       "    public SetCursor(java.util.Set<T> source) { this.source = source; this.values = new java.util.ArrayList<>(source); }\n"
+       "    public void start() { this.values = new java.util.ArrayList<>(source); index = 0; }\n"
+       "    public T item() { if (index >= values.size()) throw new RuntimeException(\"Cursor is at end\"); return values.get(index); }\n"
+       "    public void next() { if (index < values.size()) index++; }\n"
+       "    public boolean at_end() { return index >= values.size(); }\n"
+       "  }\n\n"
+       "  public static <T> ArrayCursor<T> arrayCursor(java.util.List<T> source) { return new ArrayCursor<>(source); }\n"
+       "  public static StringCursor stringCursor(String source) { return new StringCursor(source); }\n"
+       "  public static <K, V> MapCursor<K, V> mapCursor(java.util.Map<K, V> source) { return new MapCursor<>(source); }\n"
+       "  public static <T> SetCursor<T> setCursor(java.util.Set<T> source) { return new SetCursor<>(source); }\n"
        "  }\n"
        "}"))
 

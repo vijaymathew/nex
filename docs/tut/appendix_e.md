@@ -19,7 +19,7 @@ Another answer is no:
 
 The better choice depends on the intended interface. If the routine models a real movement of funds between distinct accounts, make it a precondition:
 
-```nex
+```text
 transfer_to(other: Account, amount: Real)
   require
     positive_amount: amount > 0.0
@@ -38,7 +38,7 @@ If the interface is meant to be tolerant and mathematical rather than operationa
 
 For
 
-```nex
+```text
 sort(items: Array[Integer]): Array[Integer]
 ```
 
@@ -50,7 +50,7 @@ useful postconditions are:
 
 In prose:
 
-```nex
+```text
 ensure
   same_length: result.length = items.length
 ```
@@ -100,21 +100,12 @@ Suppose an earlier routine was:
 
 ```nex
 function first(items: Array[String]): String
-do
-  result := items.get(0)
-end
-```
-
-Contract-first redesign:
-
-```nex
-function first(items: Array[String]): String
   require
     not_empty: items.length > 0
-  ensure
-    result_is_first_element: result = items.get(0)
   do
     result := items.get(0)
+  ensure
+    result_is_first_element: result = items.get(0)
   end
 ```
 
@@ -132,7 +123,8 @@ A `File_Cache` design can separate contract and environment like this:
 class File_Cache
   create
     make() do
-      cache := {}
+      let initial_cache: Map[String, String] := {"bootstrap": ""}
+      cache := initial_cache
     end
   feature
     cache: Map[String, String]

@@ -59,6 +59,11 @@ Consider the requirement:
 
 ```nex
 class Explore_Result
+create
+  make(status, discovered: String) do
+    this.status := status
+    this.discovered := discovered
+  end
 feature
   status: String
   discovered: String
@@ -76,31 +81,23 @@ feature
 
   bfs_from_a_depth2(): Explore_Result
     do
-      let r: Explore_Result := create Explore_Result
-
       if not a_to_b and not a_to_c then
-        r.status := "ISOLATED"
-        r.discovered := "A"
+        result := create Explore_Result.make("ISOLATED", "A")
       elseif a_to_b and b_to_d then
-        r.status := "OK"
-        r.discovered := "A,B,D"
+        result := create Explore_Result.make("OK", "A,B,D")
       elseif a_to_c and c_to_d then
-        r.status := "OK"
-        r.discovered := "A,C,D"
+        result := create Explore_Result.make("OK", "A,C,D")
       elseif a_to_b then
-        r.status := "OK"
-        r.discovered := "A,B"
+        result := create Explore_Result.make("OK", "A,B")
       elseif a_to_c then
-        r.status := "OK"
-        r.discovered := "A,C"
+        result := create Explore_Result.make("OK", "A,C")
       else
-        r.status := "ISOLATED"
-        r.discovered := "A"
+        result := create Explore_Result.make("ISOLATED", "A")
       end
-
-      result := r
     ensure
-      declared_status: result.status = "OK" or result.status = "ISOLATED"
+      declared_status:
+        result.status = "OK" or
+        result.status = "ISOLATED"
     end
 end
 ```

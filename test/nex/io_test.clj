@@ -274,11 +274,11 @@ end"
     end
 end"
           java-code (java/translate code)]
-      ;; Without type info in codegen, Console methods generate as regular method calls
-      (is (str/includes? java-code "io.print(\"hello\")"))
-      (is (str/includes? java-code "io.print_line(\"world\")"))
-      (is (str/includes? java-code "io.error(\"oops\")"))
-      (is (str/includes? java-code "io.new_line()")))))
+      ;; Console methods lower to direct Java stdio calls when target type is known.
+      (is (str/includes? java-code "System.out.print(\"hello\")"))
+      (is (str/includes? java-code "System.out.println(\"world\")"))
+      (is (str/includes? java-code "System.err.println(\"oops\")"))
+      (is (str/includes? java-code "System.out.println()")))))
 
 (deftest java-file-methods-test
   (testing "Java generation for File methods"
@@ -292,9 +292,9 @@ end"
     end
 end"
           java-code (java/translate code)]
-      ;; Without type info in codegen, File methods generate as regular method calls
-      (is (str/includes? java-code "f.write(\"content\")"))
-      (is (str/includes? java-code "f.read()"))
+      ;; File methods lower to Java IO helpers when target type is known.
+      (is (str/includes? java-code "java.nio.file.Files.writeString(f.toPath(), \"content\")"))
+      (is (str/includes? java-code "java.nio.file.Files.readString(f.toPath())"))
       (is (str/includes? java-code "f.delete()")))))
 
 ;; ============================================================================
@@ -336,11 +336,11 @@ end"
     end
 end"
           js-code (js/translate code)]
-      ;; Without type info in codegen, Console methods generate as regular method calls
-      (is (str/includes? js-code "io.print(\"hello\")"))
-      (is (str/includes? js-code "io.print_line(\"world\")"))
-      (is (str/includes? js-code "io.error(\"oops\")"))
-      (is (str/includes? js-code "io.new_line()")))))
+      ;; Console methods lower to direct JS runtime calls when target type is known.
+      (is (str/includes? js-code "process.stdout.write(String(\"hello\"))"))
+      (is (str/includes? js-code "console.log(\"world\")"))
+      (is (str/includes? js-code "console.error(\"oops\")"))
+      (is (str/includes? js-code "console.log()")))))
 
 (deftest js-file-methods-test
   (testing "JS generation for File methods"
@@ -354,10 +354,10 @@ end"
     end
 end"
           js-code (js/translate code)]
-      ;; Without type info in codegen, File methods generate as regular method calls
-      (is (str/includes? js-code "f.write(\"content\")"))
-      (is (str/includes? js-code "f.read()"))
-      (is (str/includes? js-code "f.delete()")))))
+      ;; File methods lower to Node fs helpers when target type is known.
+      (is (str/includes? js-code "require('fs').writeFileSync(f.path, \"content\", 'utf8')"))
+      (is (str/includes? js-code "require('fs').readFileSync(f.path, 'utf8')"))
+      (is (str/includes? js-code "require('fs').unlinkSync(f.path)")))))
 
 ;; ============================================================================
 ;; PROCESS INTERPRETER TESTS

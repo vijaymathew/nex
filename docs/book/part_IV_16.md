@@ -52,6 +52,11 @@ The hybrid works only if there is one authoritative write path that keeps the st
 
 ```nex
 class Doc_Record
+create
+  make(doc_id: String, title: String) do
+    this.doc_id := doc_id
+    this.title := title
+  end
 feature
   doc_id: String
   title: String
@@ -61,6 +66,22 @@ invariant
 end
 
 class Doc_Index
+create
+  make(
+    k1: String,
+    v1: Doc_Record,
+    k2: String,
+    v2: Doc_Record,
+    k3: String,
+    v3: Doc_Record
+  ) do
+    this.k1 := k1
+    this.v1 := v1
+    this.k2 := k2
+    this.v2 := v2
+    this.k3 := k3
+    this.v3 := v3
+  end
 feature
   k1: String
   v1: Doc_Record
@@ -73,7 +94,8 @@ feature
     require
       id_present: doc_id /= ""
     do
-      result := doc_id = k1 or doc_id = k2 or doc_id = k3
+      result := doc_id = k1 or doc_id = k2 
+	            or doc_id = k3
     ensure
       bool_result: result = true or result = false
     end

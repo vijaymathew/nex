@@ -64,6 +64,19 @@ Class(es) registered: Rectangle
 
 Both `Circle` and `Rectangle` inherit the `colour` field from `Shape`. Each has its own additional fields and overrides `describe`.
 
+Public class constants are inherited as well. If a parent class defines:
+
+```nex
+class Shape
+  feature
+    DEFAULT_COLOUR = "black"
+end
+```
+
+then child classes may use `DEFAULT_COLOUR` directly inside their own features, and external code may still refer to it with a class name such as `Shape.DEFAULT_COLOUR`.
+
+This is useful for shared limits, default labels, configuration values, and other facts that belong to the class definition rather than to each object.
+
 
 
 ## The `super` Call

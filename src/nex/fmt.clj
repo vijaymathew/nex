@@ -69,6 +69,7 @@
       :create (str "create " (:class-name expr) "." (:constructor expr)
                    "(" (str/join ", " (map format-expression (:args expr))) ")")
       :array-literal (str "[" (str/join ", " (map format-expression (:elements expr))) "]")
+      :set-literal (str "{" (str/join ", " (map format-expression (:elements expr))) "}")
       :map-literal (str "{" (str/join ", " (map (fn [{:keys [key value]}]
                                                    (str (format-expression key) " : "
                                                         (format-expression value)))
@@ -179,8 +180,17 @@
 
 (defn format-field
   "Format a field declaration"
-  [{:keys [name field-type note]} level]
-  (str (indent level) name ": " (format-type field-type)
+  [{:keys [name field-type note constant? value]} level]
+  (str (indent level)
+       name
+       (cond
+         constant?
+         (str (when field-type (str ": " (format-type field-type)))
+              " = "
+              (format-expression value))
+
+         :else
+         (str ": " (format-type field-type)))
        (when note (str " note \"" note "\""))))
 
 (defn format-constructor

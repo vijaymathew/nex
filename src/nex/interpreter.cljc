@@ -43,6 +43,100 @@
 (defn nex-map-remove [m key] #?(:clj (.remove m key) :cljs (.delete m key)))
 (defn nex-map-str [m] #?(:clj (json/write-str m :indent true) :cljs (->> m (js/Object.fromEntries) (js/JSON.stringify))))
 
+(defn nex-set [] #?(:clj (java.util.LinkedHashSet.) :cljs (js/Set.)))
+(defn nex-set-from [coll]
+  #?(:clj (doto (java.util.LinkedHashSet.)
+            (#(doseq [v coll] (.add % v))))
+     :cljs (js/Set. (to-array coll))))
+(defn nex-set? [v] #?(:clj (instance? java.util.LinkedHashSet v) :cljs (instance? js/Set v)))
+(defn nex-set-contains [s v] #?(:clj (.contains s v) :cljs (.has s v)))
+(defn nex-set-size [s] #?(:clj (.size s) :cljs (.-size s)))
+(defn nex-set-empty? [s] #?(:clj (.isEmpty s) :cljs (zero? (.-size s))))
+(defn nex-set-union [a b]
+  #?(:clj (let [out (java.util.LinkedHashSet. a)]
+            (.addAll out b)
+            out)
+     :cljs (nex-set-from (concat (es6-iterator-seq (.values a))
+                                 (es6-iterator-seq (.values b))))))
+(defn nex-set-difference [a b]
+  #?(:clj (let [out (java.util.LinkedHashSet. a)]
+            (.removeAll out b)
+            out)
+     :cljs (nex-set-from (remove #(.has b %) (es6-iterator-seq (.values a))))))
+(defn nex-set-intersection [a b]
+  #?(:clj (let [out (java.util.LinkedHashSet. a)]
+            (.retainAll out b)
+            out)
+     :cljs (nex-set-from (filter #(.has b %) (es6-iterator-seq (.values a))))))
+(defn nex-set-symmetric-difference [a b]
+  #?(:clj (let [out (java.util.LinkedHashSet.)]
+            (doseq [v a]
+              (when-not (.contains b v) (.add out v)))
+            (doseq [v b]
+              (when-not (.contains a v) (.add out v)))
+            out)
+     :cljs (nex-set-from (concat (remove #(.has b %) (es6-iterator-seq (.values a)))
+                                 (remove #(.has a %) (es6-iterator-seq (.values b)))))))
+(defn nex-set-str [s]
+  (str "{"
+       (str/join ", " #?(:clj (seq s) :cljs (es6-iterator-seq (.values s))))
+       "}"))
+
+;; 32-bit bitwise helpers for Integer built-ins
+(defn- int32 [n]
+  #?(:clj (int n)
+     :cljs (bit-or n 0)))
+
+(defn- bit-index [n]
+  #?(:clj (bit-and (int n) 31)
+     :cljs (bit-and n 31)))
+
+(defn nex-bitwise-left-shift [n shift]
+  (int32 (bit-shift-left (int32 n) (bit-index shift))))
+
+(defn nex-bitwise-right-shift [n shift]
+  (int32 (bit-shift-right (int32 n) (bit-index shift))))
+
+(defn nex-bitwise-logical-right-shift [n shift]
+  #?(:clj (long (bit-shift-right (bit-and 0xFFFFFFFF (long (int32 n)))
+                                 (bit-index shift)))
+     :cljs (js* "(~{} >>> ~{})" (int32 n) (bit-index shift))))
+
+(defn nex-bitwise-rotate-left [n shift]
+  #?(:clj (Integer/rotateLeft (int32 n) (bit-index shift))
+     :cljs (let [x (int32 n)
+                 s (bit-index shift)]
+             (int32 (bit-or (bit-shift-left x s)
+                            (js* "(~{} >>> ~{})" x (- 32 s)))))))
+
+(defn nex-bitwise-rotate-right [n shift]
+  #?(:clj (Integer/rotateRight (int32 n) (bit-index shift))
+     :cljs (let [x (int32 n)
+                 s (bit-index shift)]
+             (int32 (bit-or (js* "(~{} >>> ~{})" x s)
+                            (bit-shift-left x (- 32 s)))))))
+
+(defn nex-bitwise-and [n other]
+  (int32 (bit-and (int32 n) (int32 other))))
+
+(defn nex-bitwise-or [n other]
+  (int32 (bit-or (int32 n) (int32 other))))
+
+(defn nex-bitwise-xor [n other]
+  (int32 (bit-xor (int32 n) (int32 other))))
+
+(defn nex-bitwise-not [n]
+  (int32 (bit-not (int32 n))))
+
+(defn nex-bitwise-is-set [n idx]
+  (not (zero? (bit-and (int32 n) (bit-shift-left 1 (bit-index idx))))))
+
+(defn nex-bitwise-set [n idx]
+  (int32 (bit-or (int32 n) (bit-shift-left 1 (bit-index idx)))))
+
+(defn nex-bitwise-unset [n idx]
+  (int32 (bit-and (int32 n) (bit-not (bit-shift-left 1 (bit-index idx))))))
+
 ;; Math helpers
 (defn nex-abs [n] #?(:clj (Math/abs (double n)) :cljs (js/Math.abs n)))
 (defn nex-round [n] #?(:clj (Math/round (double n)) :cljs (js/Math.round n)))
@@ -88,6 +182,7 @@
 (defn nex-array-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :ArrayCursor)))
 (defn nex-string-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :StringCursor)))
 (defn nex-map-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :MapCursor)))
+(defn nex-set-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :SetCursor)))
 
 ;; Subscript helper (works on both Array and Map)
 (defn nex-coll-get [coll idx]
@@ -434,6 +529,7 @@
 
 (declare eval-node)
 (declare get-all-fields)
+(declare get-all-constants)
 (declare eval-body-with-rescue)
 (declare lookup-constructor)
 (declare get-parent-classes)
@@ -521,6 +617,60 @@
               (assoc parent-info :class-def parent-class)))
           parents)))
 
+(defn feature-members
+  "Return feature members with section visibility copied onto each member."
+  [class-def]
+  (mapcat (fn [section]
+            (when (= (:type section) :feature-section)
+              (map #(if (:visibility %)
+                      %
+                      (assoc % :visibility (:visibility section)))
+                   (:members section))))
+          (:body class-def)))
+
+(defn public-member?
+  [member]
+  (not= :private (-> member :visibility :type)))
+
+(defn get-all-constants
+  "Collect accessible constants for a class:
+   inherited public constants first, then local constants."
+  [ctx class-def]
+  (let [parent-constants (when-let [parents (get-parent-classes ctx class-def)]
+                           (mapcat (fn [{:keys [class-def]}]
+                                     (filter public-member?
+                                             (get-all-constants ctx class-def)))
+                                   parents))
+        local-constants (->> (feature-members class-def)
+                             (filter #(and (= (:type %) :field)
+                                           (:constant? %)))
+                             (map #(assoc % :declaring-class class-def)))
+        merged (reduce (fn [m constant]
+                         (assoc m (:name constant) constant))
+                       {}
+                       (concat parent-constants local-constants))]
+    (vals merged)))
+
+(defn lookup-class-constant
+  "Look up a constant on a class and its parent chain.
+   Local constants always apply; inherited constants must be public."
+  [ctx class-def constant-name]
+  (let [local-constant (some (fn [member]
+                               (when (and (= (:type member) :field)
+                                          (:constant? member)
+                                          (= (:name member) constant-name))
+                                 (assoc member :declaring-class class-def)))
+                             (feature-members class-def))]
+    (or local-constant
+        (when-let [parents (get-parent-classes ctx class-def)]
+          (some (fn [{:keys [class-def]}]
+                  (some (fn [member]
+                          (when (and (public-member? member)
+                                     (= (:name member) constant-name))
+                            member))
+                        (get-all-constants ctx class-def)))
+                parents)))))
+
 (defn lookup-method-in-class
   "Look up a method in a specific class (without searching parents)."
   [class-def method-name]
@@ -586,7 +736,7 @@
 
 (defn- cursor-subtype-runtime?
   [runtime-type target-type]
-  (and (#{"ArrayCursor" "StringCursor" "MapCursor"} runtime-type)
+  (and (#{"ArrayCursor" "StringCursor" "MapCursor" "SetCursor"} runtime-type)
        (= target-type "Cursor")))
 
 (defn- runtime-type-is?
@@ -610,6 +760,40 @@
   (or (= target-type "Any")
       (= runtime-type target-type)
       (and runtime-type (is-parent? ctx runtime-type target-type))))
+
+(defn eval-class-constant
+  "Evaluate a class constant value with inherited constant bindings available."
+  ([ctx class-def constant-name]
+   (eval-class-constant ctx class-def constant-name (or (:constant-visiting ctx) #{})))
+  ([ctx class-def constant-name visiting]
+   (let [visit-key [(:name class-def) constant-name]]
+     (when (contains? visiting visit-key)
+       (throw (ex-info (str "Cyclic constant definition: " (:name class-def) "." constant-name)
+                       {:class-name (:name class-def)
+                        :constant constant-name})))
+     (let [constant (lookup-class-constant ctx class-def constant-name)]
+       (when-not constant
+         (throw (ex-info (str "Undefined constant: " (:name class-def) "." constant-name)
+                         {:class-name (:name class-def)
+                          :constant constant-name})))
+        (let [source-class (:declaring-class constant class-def)
+              const-env (make-env (:globals ctx))
+              next-visiting (conj visiting visit-key)
+              eval-ctx (assoc ctx
+                              :current-env const-env
+                              :current-class-name (:name source-class)
+                              :constant-visiting next-visiting)]
+         (eval-node eval-ctx (:value constant)))))))
+
+(defn bind-class-constants!
+  "Bind all constants visible from class-def into env."
+  [ctx env class-def]
+  (doseq [constant (get-all-constants ctx class-def)]
+    (env-define env
+                (:name constant)
+                (eval-class-constant ctx
+                                     (:declaring-class constant class-def)
+                                     (:name constant)))))
 
 (defn combine-assertions
   "Combine assertions from parent and child methods (for contracts)."
@@ -688,6 +872,9 @@
     (nex-array? value)
     (nex-array-str value)
 
+    (nex-set? value)
+    (nex-set-str value)
+
     (coll? value)
     (pr-str value)
 
@@ -697,6 +884,21 @@
     ;; Everything else
     :else
     (pr-str value)))
+
+(defn nex-display-value
+  "Format a value for Console output.
+   Scalars keep their user-facing form; structured values use Nex syntax."
+  [value]
+  (cond
+    (or (nex-map? value)
+        (nex-array? value)
+        (nex-set? value)
+        (nil? value)
+        (nex-object? value)
+        (and (map? value) (:nex-builtin-type value)))
+    (nex-format-value value)
+    :else
+    (str value)))
 
 ;;
 ;; Built-in Functions
@@ -781,6 +983,7 @@
     (case (:base-type field-type)
       "Array" (nex-array)
       "Map" (nex-map)
+      "Set" (nex-set)
       nil)
 
     ;; Handle simple types
@@ -870,6 +1073,18 @@
     "min"               (fn [n other & _] (min n other))
     "max"               (fn [n other & _] (max n other))
     "pick"              (fn [n & _] (rand-int n))
+    "bitwise_left_shift" (fn [n shift & _] (nex-bitwise-left-shift n shift))
+    "bitwise_right_shift" (fn [n shift & _] (nex-bitwise-right-shift n shift))
+    "bitwise_logical_right_shift" (fn [n shift & _] (nex-bitwise-logical-right-shift n shift))
+    "bitwise_rotate_left" (fn [n shift & _] (nex-bitwise-rotate-left n shift))
+    "bitwise_rotate_right" (fn [n shift & _] (nex-bitwise-rotate-right n shift))
+    "bitwise_is_set"    (fn [n idx & _] (nex-bitwise-is-set n idx))
+    "bitwise_set"       (fn [n idx & _] (nex-bitwise-set n idx))
+    "bitwise_unset"     (fn [n idx & _] (nex-bitwise-unset n idx))
+    "bitwise_and"       (fn [n other & _] (nex-bitwise-and n other))
+    "bitwise_or"        (fn [n other & _] (nex-bitwise-or n other))
+    "bitwise_xor"       (fn [n other & _] (nex-bitwise-xor n other))
+    "bitwise_not"       (fn [n & _] (nex-bitwise-not n))
     ;; Arithmetic operator methods
     "plus"              (fn [n other & _] (+ n other))
     "minus"             (fn [n other & _] (- n other))
@@ -1005,15 +1220,29 @@
     "remove"       (fn [m key & _] (nex-map-remove m key))
     "cursor"       (fn [m & _]
                      {:nex-builtin-type :MapCursor
-                      :source m
-                      :keys (atom (nex-map-keys m))
-                      :index (atom 0)})}
+                     :source m
+                     :keys (atom (nex-map-keys m))
+                     :index (atom 0)})}
+
+   :Set
+   {"contains"             (fn [s value & _] (nex-set-contains s value))
+    "union"                (fn [s other & _] (nex-set-union s other))
+    "difference"           (fn [s other & _] (nex-set-difference s other))
+    "intersection"         (fn [s other & _] (nex-set-intersection s other))
+    "symmetric_difference" (fn [s other & _] (nex-set-symmetric-difference s other))
+    "size"                 (fn [s & _] (nex-set-size s))
+    "is_empty"             (fn [s & _] (nex-set-empty? s))
+    "cursor"               (fn [s & _]
+                             {:nex-builtin-type :SetCursor
+                              :source s
+                              :values (atom #?(:clj (vec s) :cljs (vec (es6-iterator-seq (.values s)))))
+                              :index (atom 0)})}
 
    :Console
-   {"print"        (fn [_ msg & _] (nex-console-print (str msg)) nil)
-    "print_line"   (fn [_ msg & _] (nex-console-println (str msg)) nil)
+   {"print"        (fn [_ msg & _] (nex-console-print (nex-display-value msg)) nil)
+    "print_line"   (fn [_ msg & _] (nex-console-println (nex-display-value msg)) nil)
     "read_line"    (fn [_ & args] (when (seq args) (nex-console-print (str (first args)))) (nex-console-read-line))
-    "error"        (fn [_ msg & _] (nex-console-error (str msg)) nil)
+    "error"        (fn [_ msg & _] (nex-console-error (nex-display-value msg)) nil)
     "new_line"     (fn [_ & _] (nex-console-newline) nil)
     "read_integer" (fn [_ & _] (nex-parse-integer (nex-console-read-line)))
     "read_real"    (fn [_ & _] (nex-parse-real (nex-console-read-line)))}
@@ -1088,6 +1317,28 @@
     "at_end"  (fn [c & _]
                 (>= @(:index c) (count @(:keys c))))}
 
+   :SetCursor
+   {"start"   (fn [c & _]
+                (reset! (:values c) #?(:clj (vec (:source c))
+                                       :cljs (vec (es6-iterator-seq (.values (:source c)))))
+                )
+                (reset! (:index c) 0)
+                nil)
+    "item"    (fn [c & _]
+                (let [vals @(:values c)
+                      idx @(:index c)]
+                  (if (< idx (count vals))
+                    (nth vals idx)
+                    (throw (ex-info "Cursor is at end" {:index idx})))))
+    "next"    (fn [c & _]
+                (let [vals @(:values c)
+                      idx @(:index c)]
+                  (when (< idx (count vals))
+                    (swap! (:index c) inc))
+                  nil))
+    "at_end"  (fn [c & _]
+                (>= @(:index c) (count @(:values c))))}
+
    :Window
    {"show"          (fn [w & _] (turtle/show-window w))
     "close"         (fn [w & _] (turtle/close-window w))
@@ -1149,6 +1400,7 @@
     (boolean? value) :Boolean
     (nex-array? value) :Array
     (nex-map? value) :Map
+    (nex-set? value) :Set
     (nex-console? value) :Console
     (nex-file? value) :File
     (nex-process? value) :Process
@@ -1158,6 +1410,7 @@
     (nex-array-cursor? value) :ArrayCursor
     (nex-string-cursor? value) :StringCursor
     (nex-map-cursor? value) :MapCursor
+    (nex-set-cursor? value) :SetCursor
     :else nil))
 
 (defn call-builtin-method
@@ -1384,6 +1637,7 @@
   (let [arg-values (mapv #(eval-node ctx %) args)]
     (if target
       (let [target-name (when (string? target) target)
+            class-target (when target-name (lookup-class-if-exists ctx target-name))
             ;; Check if target is a parent class name (parent-qualified call: A.method())
             parent-class (when (and target-name (:current-object ctx))
                            (let [cls (lookup-class-if-exists ctx target-name)]
@@ -1391,10 +1645,18 @@
                                         (is-parent? ctx (:class-name (:current-object ctx)) target-name))
                                cls)))
             obj (when-not parent-class
-                  (if target-name
+                  (if class-target
+                    nil
+                    (if target-name
                     (env-lookup (:current-env ctx) target-name)
-                    (eval-node ctx target)))]
+                    (eval-node ctx target))))]
         (cond
+          ;; Class-qualified constant access: A.CONST
+          (and class-target
+               (false? has-parens)
+               (lookup-class-constant ctx class-target method))
+          (eval-class-constant ctx class-target method)
+
           ;; Parent-qualified call: A.method() where A is a parent class
           parent-class
           (dispatch-parent-call ctx (:current-object ctx) target-name method arg-values)
@@ -1403,7 +1665,7 @@
           (let [class-def (lookup-class ctx (:class-name obj))
                 method-lookup (lookup-method-with-inheritance ctx class-def method)]
             (if method-lookup
-              (let [method-def (:method method-lookup)
+                (let [method-def (:method method-lookup)
                     params (:params method-def)]
                 ;; Bug fix: disallow paren-less calls to methods that require arguments
                 (when (and (false? has-parens) (seq params))
@@ -1420,6 +1682,7 @@
                       ;; Define fields first, then params — so params shadow fields
                       _ (doseq [[field-name field-val] (:fields obj)]
                           (env-define method-env (name field-name) field-val))
+                      _ (bind-class-constants! ctx method-env class-def)
                       _ (when params
                           (doseq [[param arg-val] (map vector params arg-values)]
                             (env-define method-env (:name param) arg-val)))
@@ -1587,6 +1850,11 @@
 (defmethod eval-node :member-assign
   [ctx {:keys [object-type field value]}]
   (maybe-debug-pause ctx {:type :member-assign :object-type object-type :field field :value value})
+  (when-let [current-class-name (:current-class-name ctx)]
+    (when-let [class-def (lookup-class-if-exists ctx current-class-name)]
+      (when (lookup-class-constant ctx class-def field)
+        (throw (ex-info (str "Cannot assign to constant: " field)
+                        {:field field :constant? true})))))
   (let [val (eval-node ctx value)]
     ;; Track that this field was explicitly modified via this.field :=
     (when-let [mf (:modified-fields ctx)]
@@ -1599,6 +1867,11 @@
 (defmethod eval-node :assign
   [ctx {:keys [target value]}]
   (maybe-debug-pause ctx {:type :assign :target target :value value})
+  (when-let [current-class-name (:current-class-name ctx)]
+    (when-let [class-def (lookup-class-if-exists ctx current-class-name)]
+      (when (lookup-class-constant ctx class-def target)
+        (throw (ex-info (str "Cannot assign to constant: " target)
+                        {:target target :constant? true})))))
   (let [val (eval-node ctx value)]
     ;; Assignment (without let) ONLY updates existing variables
     ;; It should fail if the variable doesn't exist
@@ -1823,6 +2096,10 @@
   ;; Evaluate all elements and return as a mutable array
   (nex-array-from (mapv #(eval-node ctx %) elements)))
 
+(defmethod eval-node :set-literal
+  [ctx {:keys [elements]}]
+  (nex-set-from (mapv #(eval-node ctx %) elements)))
+
 (defmethod eval-node :map-literal
   [ctx {:keys [entries]}]
   ;; Evaluate all key-value pairs and return as a mutable map
@@ -1845,17 +2122,22 @@
     (if (not= val ::not-found)
       val
       ;; Not in env - check if it's a zero-arg method on current object
-      (if-let [current-obj (:current-object ctx)]
-        (let [class-def (lookup-class ctx (:class-name current-obj))
-              method-lookup (lookup-method-with-inheritance ctx class-def name)]
-          (if method-lookup
-            ;; It's a method - invoke it (implicit this)
-            (eval-node ctx {:type :call
-                            :target (:current-target ctx)
-                            :method name
-                            :args []})
-            (throw (ex-info (str "Undefined variable: " name)
-                            {:var-name name}))))
+      (if-let [current-class-name (:current-class-name ctx)]
+        (let [class-def (lookup-class ctx current-class-name)]
+          (if-let [constant (lookup-class-constant ctx class-def name)]
+            (eval-class-constant ctx (:declaring-class constant class-def) name)
+            (if-let [current-obj (:current-object ctx)]
+              (let [method-lookup (lookup-method-with-inheritance ctx class-def name)]
+                (if method-lookup
+                  ;; It's a method - invoke it (implicit this)
+                  (eval-node ctx {:type :call
+                                  :target (:current-target ctx)
+                                  :method name
+                                  :args []})
+                  (throw (ex-info (str "Undefined variable: " name)
+                                  {:var-name name}))))
+              (throw (ex-info (str "Undefined variable: " name)
+                              {:var-name name})))))
         (throw (ex-info (str "Undefined variable: " name)
                         {:var-name name}))))))
 
@@ -1872,7 +2154,8 @@
                            (mapcat (fn [section]
                                     (when (= (:type section) :feature-section)
                                       (:members section))))
-                           (filter #(= (:type %) :field)))]
+                           (filter #(and (= (:type %) :field)
+                                         (not (:constant? %)))))]
     (concat parent-fields current-fields)))
 
 (defn lookup-constructor
@@ -1903,6 +2186,17 @@
                (throw (ex-info "File requires constructor: create File.open(path)" {:class-name "File"})))
              {:nex-builtin-type :File :path (first arg-values)})
     "Process" {:nex-builtin-type :Process}
+    "Set" (let [arg-values (mapv #(eval-node ctx %) args)]
+            (cond
+              (nil? constructor) (nex-set)
+              (= constructor "from_array") (let [source (first arg-values)]
+                                             (cond
+                                               (nex-array? source) (nex-set-from #?(:clj source :cljs (array-seq source)))
+                                               (sequential? source) (nex-set-from source)
+                                               :else (throw (ex-info "Set.from_array requires an array"
+                                                                     {:class-name "Set"}))))
+              :else (throw (ex-info (str "Constructor not found: Set." constructor)
+                                    {:class-name "Set" :constructor constructor}))))
     "Window" (let [arg-values (mapv #(eval-node ctx %) args)]
                (case constructor
                  "with_title"
@@ -1984,6 +2278,7 @@
                                     ;; Bind fields as local variables FIRST
                                     _ (doseq [[field-name field-val] initial-field-map]
                                         (env-define ctor-env (name field-name) field-val))
+                                    _ (bind-class-constants! ctx ctor-env class-def)
                                     ;; Bind parameters SECOND (so they shadow fields with same name)
                                     params (:params ctor-def)
                                     arg-values (mapv #(eval-node ctx %) args)

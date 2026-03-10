@@ -4,6 +4,8 @@ Exercise 5 in Chapter 13 asked you to define `IntegerStack`, `StringStack`, and 
 
 This is exactly the problem that generic classes solve. A generic class is parameterised by a type: you write the class once, and the type is supplied when the class is used. `Stack[Integer]`, `Stack[String]`, and `Stack[Real]` are all the same class, instantiated with different type arguments.
 
+This is also how Nex's standard collections work. `Array[T]` and `Set[T]` each take one type argument, and `Map[K, V]` takes two. Once you understand `Stack[G]`, you understand the core idea behind the standard collection library as well.
+
 
 ## A Generic Class
 
@@ -253,9 +255,9 @@ nex> print(s.size)
 
 ## The Standard Collections as Generic Classes
 
-The built-in `Array[T]` and `Map[K, V]` that you have been using throughout the book are generic classes. `Array[Integer]`, `Array[String]`, and `Array[Real]` are all instances of the same `Array` class with different type arguments. `Map[String, Integer]` and `Map[Integer, String]` are instances of `Map` with different key and value types.
+The built-in `Array[T]`, `Set[T]`, and `Map[K, V]` that you have been using throughout the book are generic classes. `Array[Integer]`, `Array[String]`, and `Array[Real]` are all instances of the same `Array` class with different type arguments. `Set[Integer]` and `Set[String]` are instances of `Set` with different element types. `Map[String, Integer]` and `Map[Integer, String]` are instances of `Map` with different key and value types.
 
-This is why the methods work uniformly across element types: `add`, `get`, `remove`, `contains`, `sort` are defined once on `Array[T]`, and work for any `T`. The `sort` method requires `T -> Comparable`, which is why sorting an `Array[Integer]` works but sorting an `Array[Map[String, Integer]]` would not.
+This is why the methods work uniformly across element types: `add`, `get`, `remove`, `contains`, `sort` are defined once on `Array[T]`, and work for any `T`. Similarly, `contains`, `union`, `intersection`, and `difference` are defined once on `Set[T]`, and work for any element type `T`. The `sort` method requires `T -> Comparable`, which is why sorting an `Array[Integer]` works but sorting an `Array[Map[String, Integer]]` would not.
 
 The generic mechanism also explains why `across` infers element types automatically: an `Array[Integer]` knows its element type is `Integer`, so the loop variable is inferred as `Integer` without annotation.
 
@@ -325,7 +327,7 @@ Error: division by zero
 - Multiple type parameters are separated by commas: `class Pair [F, S]`
 - Type constraints restrict which types can fill a parameter: `[G -> Comparable]` requires `G` to implement `Comparable`; `[K -> Hashable]` requires hashability for use as a map key
 - A generic class can inherit from another generic class using the same type parameter: `class Bounded_Stack [G] inherit Stack[G]`
-- The built-in `Array[T]` and `Map[K, V]` are generic classes; understanding this explains why element types are inferred and why sorting requires `Comparable`
+- The built-in `Array[T]`, `Set[T]`, and `Map[K, V]` are generic classes; understanding this explains why element types are inferred and why collection operations work uniformly across types
 - Generic classes provide reuse without duplication and type safety without losing flexibility
 
 

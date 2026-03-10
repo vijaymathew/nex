@@ -156,9 +156,15 @@ When adding/removing major sections, update `toc.md` for consistency with the ca
 ## 9) Recommended Editing Workflow
 
 1. Edit one or more chapter/style/config files.
-2. Run `make book` for quick overall validation.
-3. Run `make print` for print-specific checks.
-4. If page count changed and you use printed cover assets, run `make cover`.
+2. Run the Nex example smoke test:
+
+```bash
+clojure -M:test test/scripts/check_docs_examples.clj --book
+```
+
+3. Run `make book` for quick overall validation.
+4. Run `make print` for print-specific checks.
+5. If page count changed and you use printed cover assets, run `make cover`.
 
 ## 10) Troubleshooting
 
