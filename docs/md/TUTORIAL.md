@@ -229,6 +229,14 @@ end
 t.await
 ```
 
+Tasks can also be timed or cancelled:
+
+```nex
+print(t.await(100))
+print(t.cancel)
+print(t.is_cancelled)
+```
+
 Channels let tasks exchange values safely:
 
 ```nex
@@ -260,6 +268,13 @@ print(ch.try_send(3))
 print(ch.try_receive)
 ```
 
+Timed channel operations use the same feature names with an extra timeout argument:
+
+```nex
+print(ch.send(3, 50))
+print(ch.receive(50))
+```
+
 Use `select` when you want to react to whichever channel operation is ready first:
 
 ```nex
@@ -268,12 +283,14 @@ select
     print(msg)
   when control.receive as signal then
     print(signal)
+  timeout 100 then
+    print("timed out")
   else
     print("idle")
 end
 ```
 
-`select` uses channel readiness checks internally. If no clause is ready and there is no `else`, it waits until one becomes ready.
+`select` uses channel readiness checks internally. If no clause is ready and there is no `else`, it waits until one becomes ready. If a `timeout` clause is present, that body runs once the timeout expires.
 
 On the JavaScript target, the source syntax is unchanged, but generated code uses async/await under the hood. That means `spawn`, `Task.await`, `Channel.send`, and `Channel.receive` are lowered to Promise-based operations in generated JavaScript.
 

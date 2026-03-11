@@ -205,6 +205,13 @@ let t: Task := spawn do
 end
 ```
 
+Task operations:
+- `await` waits until the task finishes
+- `await(ms)` waits up to `ms` milliseconds and returns `nil` on timeout
+- `cancel` requests task cancellation and returns `true` if the task was cancelled before finishing
+- `is_done` reports whether the task has finished
+- `is_cancelled` reports whether the task was cancelled
+
 Use `Channel[T]` to communicate between tasks:
 
 ```nex
@@ -231,7 +238,9 @@ print(ch.capacity)                -- 2
 
 Channel operations:
 - `send(value)` blocks until accepted
+- `send(value, ms)` waits up to `ms` milliseconds and returns `true` on success, `false` on timeout
 - `receive` blocks until a value is available
+- `receive(ms)` waits up to `ms` milliseconds and returns `nil` on timeout
 - `try_send(value)` returns `true` if the send succeeds immediately, otherwise `false`
 - `try_receive` returns a value if one is immediately available, otherwise `nil`
 - `close` prevents future sends; buffered values may still be received
@@ -245,6 +254,8 @@ select
     print(job)
   when control.receive as signal then
     print(signal)
+  timeout 1000 then
+    print("timed out")
   else
     print("idle")
 end

@@ -101,6 +101,22 @@
                          (str ind "else\n"
                               (str/join "\n" (map #(format-statement % (inc level)) (:else stmt)))))
                        (str ind "end")])
+        :select (str/join "\n"
+                          (concat
+                           [(str ind "select")]
+                           (mapcat (fn [{:keys [expr alias body]}]
+                                     [(str (indent (inc level)) "when " (format-expression expr)
+                                           (when alias (str " as " alias))
+                                           " then")
+                                      (str/join "\n" (map #(format-statement % (+ level 2)) body))])
+                                   (:clauses stmt))
+                           (when-let [timeout (:timeout stmt)]
+                             [(str (indent (inc level)) "timeout " (format-expression (:duration timeout)) " then")
+                              (str/join "\n" (map #(format-statement % (+ level 2)) (:body timeout)))])
+                           (when (seq (:else stmt))
+                             [(str ind "else")
+                              (str/join "\n" (map #(format-statement % (inc level)) (:else stmt)))])
+                           [(str ind "end")]))
         :loop (str/join "\n"
                         [(str ind "from")
                          (str/join "\n" (map #(format-statement % (inc level)) (:init stmt)))

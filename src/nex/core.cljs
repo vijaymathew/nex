@@ -27,7 +27,7 @@
   #{"class" "deferred" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
     "when" "from" "until" "invariant" "variant" "require" "ensure"
     "let" "as" "and" "or" "not" "fn" "old" "create" "private" "note"
-    "with" "import" "intern" "function" "raise" "rescue" "retry" "spawn" "select"
+    "with" "import" "intern" "function" "raise" "rescue" "retry" "spawn" "select" "timeout"
     "repeat" "across" "case" "of"})
 
 (def nex-types

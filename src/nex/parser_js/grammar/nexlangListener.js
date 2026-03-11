@@ -302,6 +302,15 @@ export default class nexlangListener extends antlr4.tree.ParseTreeListener {
 	}
 
 
+	// Enter a parse tree produced by nexlangParser#timeoutClause.
+	enterTimeoutClause(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#timeoutClause.
+	exitTimeoutClause(ctx) {
+	}
+
+
 	// Enter a parse tree produced by nexlangParser#scopedBlock.
 	enterScopedBlock(ctx) {
 	}

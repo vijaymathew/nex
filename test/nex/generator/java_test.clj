@@ -301,6 +301,36 @@ end"
       (is (str/includes? java-code ".try_receive()"))
       (is (str/includes? java-code "break;")))))
 
+(deftest task-cancel-timeout-and-select-timeout-generation-test
+  (testing "task cancellation/timeouts and select timeout lower correctly in Java"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let t: Task[Integer] := spawn do
+        result := 1
+      end
+      print(t.await(5))
+      print(t.cancel)
+      print(t.is_cancelled)
+      let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+      print(ch.send(1, 5))
+      print(ch.receive(5))
+      select
+        when ch.receive as value then
+          print(value)
+        timeout 5 then
+          print(\"timeout\")
+      end
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "t.await(5)"))
+      (is (str/includes? java-code "t.cancel()"))
+      (is (str/includes? java-code "t.is_cancelled()"))
+      (is (str/includes? java-code "ch.send(1, 5)"))
+      (is (str/includes? java-code "ch.receive(5)"))
+      (is (str/includes? java-code "long __selectDeadline = System.currentTimeMillis() + 5;")))))
+
 (deftest class-constants-test
   (testing "Class constants generate static finals and child copies inherited public constants"
     (let [nex-code "class Frame

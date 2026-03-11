@@ -424,13 +424,15 @@
     "cursor"               (fn [target _] (str "NexRuntime.setCursor(" target ")"))}
 
    :Task
-   {"await"    (fn [target _] (str target ".await()"))
-    "is_done"  (fn [target _] (str target ".is_done()"))}
+   {"await"    (fn [target args] (str target ".await(" args ")"))
+    "cancel"   (fn [target _] (str target ".cancel()"))
+    "is_done"  (fn [target _] (str target ".is_done()"))
+    "is_cancelled" (fn [target _] (str target ".is_cancelled()"))}
 
    :Channel
    {"send"        (fn [target args] (str target ".send(" args ")"))
     "try_send"    (fn [target args] (str target ".try_send(" args ")"))
-    "receive"     (fn [target _] (str target ".receive()"))
+    "receive"     (fn [target args] (str target ".receive(" args ")"))
     "try_receive" (fn [target _] (str target ".try_receive()"))
     "close"       (fn [target _] (str target ".close()"))
     "is_closed"   (fn [target _] (str target ".is_closed()"))
@@ -530,16 +532,22 @@
                               (or (:type-args target-type) (:type-params target-type)))]
               (case normalized-target
                 "Task" (case (:method expr)
-                         "await" (or (first type-args) "Any")
+                         "await" (if (seq (:args expr))
+                                   {:base-type (or (first type-args) "Any") :detachable true}
+                                   (or (first type-args) "Any"))
+                         "cancel" "Boolean"
                          "is_done" "Boolean"
+                         "is_cancelled" "Boolean"
                          "Any")
                 "Channel" (case (:method expr)
-                            "receive" (or (first type-args) "Any")
-                            "try_receive" (or (first type-args) "Any")
+                            "receive" (if (seq (:args expr))
+                                        {:base-type (or (first type-args) "Any") :detachable true}
+                                        (or (first type-args) "Any"))
+                            "try_receive" {:base-type (or (first type-args) "Any") :detachable true}
                             "is_closed" "Boolean"
                             "capacity" "Integer"
                             "size" "Integer"
-                            "send" "Void"
+                            "send" (if (= 2 (count (:args expr))) "Boolean" "Void")
                             "try_send" "Boolean"
                             "close" "Void"
                             "Any")
@@ -1309,26 +1317,38 @@
       (indent (+ level 2) "/* Unsupported select clause */"))))
 
 (defn generate-select
-  [level {:keys [clauses else]} var-names]
+  [level {:keys [clauses else timeout]} var-names]
   (let [clause-code (map-indexed (fn [idx clause]
                                    (generate-select-clause-java level clause var-names idx))
                                  clauses)
         else-code (when else
                     [(str/join "\n" (map #(generate-statement (+ level 2) % var-names) else))
-                     (indent (+ level 2) "break;")])]
+                     (indent (+ level 2) "break;")])
+        timeout-code (when timeout
+                       [(indent level "{")
+                        (indent (+ level 1) (str "long __selectDeadline = System.currentTimeMillis() + " (generate-expression (:duration timeout)) ";"))])
+        timeout-body (when timeout
+                       [(indent (+ level 1) "if (System.currentTimeMillis() >= __selectDeadline) {")
+                        (str/join "\n" (map #(generate-statement (+ level 2) % var-names) (:body timeout)))
+                        (indent (+ level 2) "break;")
+                        (indent (+ level 1) "}")])]
     (str/join "\n"
               (concat
+               timeout-code
                [(indent level "while (true) {")]
                clause-code
                else-code
                (when-not else
-                 [(indent (+ level 1) "try {")
-                  (indent (+ level 2) "Thread.sleep(1);")
-                  (indent (+ level 1) "} catch (InterruptedException e) {")
-                  (indent (+ level 2) "Thread.currentThread().interrupt();")
-                  (indent (+ level 2) "throw new RuntimeException(e);")
-                  (indent (+ level 1) "}")])
-               [(indent level "}")]))))
+                 (concat
+                  timeout-body
+                  [(indent (+ level 1) "try {")
+                   (indent (+ level 2) "Thread.sleep(1);")
+                   (indent (+ level 1) "} catch (InterruptedException e) {")
+                   (indent (+ level 2) "Thread.currentThread().interrupt();")
+                   (indent (+ level 2) "throw new RuntimeException(e);")
+                   (indent (+ level 1) "}")]))
+               [(indent level "}")]
+               (when timeout [(indent level "}")])))))
 
 (defn generate-statement
   "Generate Java code for a statement"
@@ -2457,7 +2477,25 @@ public class NexTurtle {
        "        throw new RuntimeException(e);\n"
        "      }\n"
        "    }\n"
+       "    public T await(int timeoutMs) {\n"
+       "      try {\n"
+       "        return future.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);\n"
+       "      } catch (java.util.concurrent.TimeoutException e) {\n"
+       "        return null;\n"
+       "      } catch (java.util.concurrent.CancellationException e) {\n"
+       "        throw new RuntimeException(\"Task cancelled\");\n"
+       "      } catch (java.util.concurrent.ExecutionException e) {\n"
+       "        Throwable cause = e.getCause();\n"
+       "        if (cause instanceof RuntimeException) throw (RuntimeException) cause;\n"
+       "        throw new RuntimeException(cause != null ? cause : e);\n"
+       "      } catch (InterruptedException e) {\n"
+       "        Thread.currentThread().interrupt();\n"
+       "        throw new RuntimeException(e);\n"
+       "      }\n"
+       "    }\n"
+       "    public boolean cancel() { return future.cancel(true); }\n"
        "    public boolean is_done() { return future.isDone(); }\n"
+       "    public boolean is_cancelled() { return future.isCancelled(); }\n"
        "  }\n\n"
        "  public static <T> Task<T> spawnTask(java.util.function.Supplier<T> supplier) {\n"
        "    return new Task<>(java.util.concurrent.CompletableFuture.supplyAsync(supplier, TASK_EXECUTOR));\n"
@@ -2521,6 +2559,44 @@ public class NexTurtle {
        "        }\n"
        "      }\n"
        "    }\n\n"
+       "    public synchronized boolean send(T value, int timeoutMs) {\n"
+       "      if (closed) throw new RuntimeException(\"Cannot send on a closed channel\");\n"
+       "      long deadline = System.currentTimeMillis() + timeoutMs;\n"
+       "      if (capacity == 0 && waitingReceivers > 0) {\n"
+       "        PendingSend<T> pending = new PendingSend<>(value);\n"
+       "        pending.delivered = true;\n"
+       "        senders.addLast(pending);\n"
+       "        notifyAll();\n"
+       "        return true;\n"
+       "      }\n"
+       "      if (capacity > 0 && buffer.size() < capacity) {\n"
+       "        buffer.addLast(value);\n"
+       "        notifyAll();\n"
+       "        return true;\n"
+       "      }\n"
+       "      PendingSend<T> pending = new PendingSend<>(value);\n"
+       "      senders.addLast(pending);\n"
+       "      notifyAll();\n"
+       "      while (!pending.delivered) {\n"
+       "        if (closed) {\n"
+       "          senders.remove(pending);\n"
+       "          throw new RuntimeException(\"Cannot send on a closed channel\");\n"
+       "        }\n"
+       "        long remaining = deadline - System.currentTimeMillis();\n"
+       "        if (remaining <= 0) {\n"
+       "          senders.remove(pending);\n"
+       "          return false;\n"
+       "        }\n"
+       "        try {\n"
+       "          wait(remaining);\n"
+       "        } catch (InterruptedException e) {\n"
+       "          senders.remove(pending);\n"
+       "          Thread.currentThread().interrupt();\n"
+       "          throw new RuntimeException(e);\n"
+       "        }\n"
+       "      }\n"
+       "      return true;\n"
+       "    }\n\n"
        "    public synchronized boolean try_send(T value) {\n"
        "      if (closed) throw new RuntimeException(\"Cannot send on a closed channel\");\n"
        "      if (capacity == 0) {\n"
@@ -2553,6 +2629,37 @@ public class NexTurtle {
        "          waitingReceivers--;\n"
         "        }\n"
         "      }\n"
+       "      if (!buffer.isEmpty()) {\n"
+       "        T value = buffer.removeFirst();\n"
+       "        if (!senders.isEmpty() && buffer.size() < capacity) {\n"
+       "          PendingSend<T> pending = senders.removeFirst();\n"
+       "          buffer.addLast(pending.value);\n"
+       "          pending.delivered = true;\n"
+       "        }\n"
+       "        notifyAll();\n"
+       "        return value;\n"
+       "      }\n"
+       "      PendingSend<T> pending = senders.removeFirst();\n"
+       "      pending.delivered = true;\n"
+       "      notifyAll();\n"
+       "      return pending.value;\n"
+       "    }\n\n"
+       "    public synchronized T receive(int timeoutMs) {\n"
+       "      long deadline = System.currentTimeMillis() + timeoutMs;\n"
+       "      while (buffer.isEmpty() && senders.isEmpty()) {\n"
+       "        if (closed) throw new RuntimeException(\"Cannot receive from a closed channel\");\n"
+       "        long remaining = deadline - System.currentTimeMillis();\n"
+       "        if (remaining <= 0) return null;\n"
+       "        waitingReceivers++;\n"
+       "        try {\n"
+       "          wait(remaining);\n"
+       "        } catch (InterruptedException e) {\n"
+       "          Thread.currentThread().interrupt();\n"
+       "          throw new RuntimeException(e);\n"
+       "        } finally {\n"
+       "          waitingReceivers--;\n"
+       "        }\n"
+       "      }\n"
        "      if (!buffer.isEmpty()) {\n"
        "        T value = buffer.removeFirst();\n"
        "        if (!senders.isEmpty() && buffer.size() < capacity) {\n"

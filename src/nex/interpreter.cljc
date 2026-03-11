@@ -4,7 +4,7 @@
             #?(:clj [clojure.data.json :as json])
             #?(:clj [nex.turtle :as turtle]
                :cljs [nex.turtle-browser :as turtle]))
-  #?(:clj (:import [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit])))
+  #?(:clj (:import [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException])))
 
 ;;
 ;; Mutable Collections (platform abstraction)
@@ -549,6 +549,24 @@
 #?(:cljs
    (def ^:private channel-closed-signal ::channel-closed))
 
+(def ^:private channel-timeout-signal ::channel-timeout)
+
+(def ^:private task-timeout-signal ::task-timeout)
+
+(defn- current-time-ms []
+  #?(:clj (System/currentTimeMillis)
+     :cljs (.now js/Date)))
+
+(defn- timeout-ms
+  [v]
+  (let [n (cond
+            (integer? v) v
+            (number? v) (long v)
+            :else nil)]
+    (when (or (nil? n) (neg? n))
+      (throw (ex-info "Timeout must be a non-negative Integer" {:timeout v})))
+    n))
+
 #?(:clj
    (defn- queue-empty [] clojure.lang.PersistentQueue/EMPTY))
 
@@ -591,7 +609,12 @@
 #?(:cljs
    (defn- make-task [promise]
      (let [done? (atom false)
-           wrapped (.then (->promise promise)
+           cancelled? (atom false)
+           cancel-reject (atom nil)
+           cancel-promise (js/Promise.
+                           (fn [_resolve reject]
+                             (reset! cancel-reject reject)))
+           wrapped (.then (.race js/Promise (to-array [(->promise promise) cancel-promise]))
                           (fn [value]
                             (reset! done? true)
                             value)
@@ -600,7 +623,17 @@
                             (js/Promise.reject err)))]
        {:nex-builtin-type :Task
         :promise wrapped
-        :done? done?})))
+        :done? done?
+        :cancelled? cancelled?
+        :cancel! (fn []
+                   (if @done?
+                     false
+                     (do
+                       (reset! cancelled? true)
+                       (reset! done? true)
+                       (when-let [reject @cancel-reject]
+                         (reject (ex-info "Task cancelled" {:task :cancelled})))
+                       true)))})))
 
 #?(:clj
    (defn- make-channel
@@ -626,47 +659,105 @@
                     :receivers []})})))
 
 #?(:clj
-   (defn- task-await [task]
-     (try
-       (.get ^CompletableFuture (:future task))
-       (catch ExecutionException e
-         (throw (or (.getCause e) e)))
-       (catch InterruptedException e
-         (.interrupt (Thread/currentThread))
-         (throw e)))))
+   (defn- task-await
+     ([task]
+      (task-await task nil))
+     ([task timeout]
+      (try
+        (if (nil? timeout)
+          (.get ^CompletableFuture (:future task))
+          (.get ^CompletableFuture (:future task) (timeout-ms timeout) TimeUnit/MILLISECONDS))
+        (catch TimeoutException _ task-timeout-signal)
+        (catch CancellationException _
+          (throw (ex-info "Task cancelled" {:task task})))
+        (catch ExecutionException e
+          (throw (or (.getCause e) e)))
+        (catch InterruptedException e
+          (.interrupt (Thread/currentThread))
+          (throw e))))))
 
 #?(:cljs
-   (defn- task-await [task]
-     (:promise task)))
+   (defn- task-await
+     ([task]
+      (:promise task))
+     ([task timeout]
+      (.then (.race js/Promise
+                    (to-array [(:promise task)
+                               (js/Promise.
+                                (fn [resolve _reject]
+                                  (js/setTimeout #(resolve task-timeout-signal) (timeout-ms timeout))))]))
+             identity))))
 
 #?(:clj
-   (defn- channel-send [ch value]
-     (let [ack (promise)
-           deliver-now
-           (locking (:lock ch)
-             (let [{:keys [closed? receivers capacity buffer]} @(:state ch)]
-               (when closed?
-                 (throw (ex-info "Cannot send on a closed channel" {:channel ch})))
-               (cond
-                 (and (zero? capacity) (seq receivers))
-                 (let [[receiver rest-receivers] (queue-pop receivers)]
-                   (swap! (:state ch) assoc :receivers rest-receivers)
-                   [:receiver receiver])
-                 (< (count buffer) capacity)
-                 (do
-                   (swap! (:state ch) update :buffer queue-conj value)
-                   [:buffered])
-                 :else
-                 (do
-                   (swap! (:state ch) update :senders queue-conj {:value value :ack ack})
-                   [:wait ack]))))]
-       (case (first deliver-now)
-         :buffered nil
-         :receiver (do (deliver (second deliver-now) value) nil)
-         :wait (let [result @(second deliver-now)]
-                 (when (= result channel-closed-signal)
-                   (throw (ex-info "Cannot send on a closed channel" {:channel ch})))
-                 nil)))))
+   (defn- task-cancel [task]
+     (.cancel ^CompletableFuture (:future task) true)))
+
+#?(:cljs
+   (defn- task-cancel [task]
+     ((:cancel! task))))
+
+#?(:clj
+   (defn- task-cancelled? [task]
+     (.isCancelled ^CompletableFuture (:future task))))
+
+#?(:cljs
+   (defn- task-cancelled? [task]
+     @(:cancelled? task)))
+
+#?(:clj
+   (defn- queue-remove-first
+     [q pred]
+     (reduce (fn [acc item]
+               (let [{:keys [removed out]} acc]
+                 (if (and (not removed) (pred item))
+                   {:removed true :out out}
+                   {:removed removed :out (queue-conj out item)})))
+             {:removed false :out (queue-empty)}
+             q)))
+
+#?(:clj
+   (defn- channel-send
+     ([ch value]
+      (channel-send ch value nil))
+     ([ch value timeout]
+      (let [ack (promise)
+            timed? (some? timeout)
+            deliver-now
+            (locking (:lock ch)
+              (let [{:keys [closed? receivers capacity buffer]} @(:state ch)]
+                (when closed?
+                  (throw (ex-info "Cannot send on a closed channel" {:channel ch})))
+                (cond
+                  (and (zero? capacity) (seq receivers))
+                  (let [[receiver rest-receivers] (queue-pop receivers)]
+                    (swap! (:state ch) assoc :receivers rest-receivers)
+                    [:receiver receiver])
+                  (< (count buffer) capacity)
+                  (do
+                    (swap! (:state ch) update :buffer queue-conj value)
+                    [:buffered])
+                  :else
+                  (do
+                    (swap! (:state ch) update :senders queue-conj {:value value :ack ack})
+                    [:wait ack]))))]
+        (case (first deliver-now)
+          :buffered (if timed? true nil)
+          :receiver (do (deliver (second deliver-now) value) (if timed? true nil))
+          :wait (let [result (if timed?
+                               (deref (second deliver-now) (timeout-ms timeout) channel-timeout-signal)
+                               @(second deliver-now))]
+                  (cond
+                    (= result channel-closed-signal)
+                    (throw (ex-info "Cannot send on a closed channel" {:channel ch}))
+
+                    (= result channel-timeout-signal)
+                    (do
+                      (locking (:lock ch)
+                        (swap! (:state ch) update :senders
+                               (fn [q] (:out (queue-remove-first q #(identical? (:ack %) ack))))))
+                      false)
+
+                    :else (if timed? true nil))))))))
 
 #?(:clj
    (defn- channel-try-send [ch value]
@@ -689,46 +780,61 @@
            :else false)))))
 
 #?(:clj
-   (defn- channel-receive [ch]
-     (let [out (promise)
-           ready
-           (locking (:lock ch)
-             (let [{:keys [closed? senders buffer capacity]} @(:state ch)]
-               (cond
-                 (seq buffer)
-                 (let [[value rest-buffer] (queue-pop buffer)
-                       promote (when (and (pos? capacity) (seq senders))
-                                 (let [[sender rest-senders] (queue-pop senders)]
-                                   (swap! (:state ch) assoc
-                                          :senders rest-senders
-                                          :buffer (queue-conj rest-buffer (:value sender)))
-                                   sender))]
-                   (when-not promote
-                     (swap! (:state ch) assoc :buffer rest-buffer))
-                   [:buffer value promote])
-                 (seq senders)
-                 (let [[sender rest-senders] (queue-pop senders)]
-                   (swap! (:state ch) assoc :senders rest-senders)
-                   [:sender sender])
-                 closed?
-                   [:closed]
-                 :else
-                 (do
-                   (swap! (:state ch) update :receivers queue-conj out)
-                   [:wait out]))))]
-       (case (first ready)
-         :buffer (let [[_ value promoted] ready]
-                   (when promoted
-                     (deliver (:ack promoted) true))
-                   value)
-         :sender (let [{:keys [value ack]} (second ready)]
-                   (deliver ack true)
-                   value)
-         :closed (throw (ex-info "Cannot receive from a closed channel" {:channel ch}))
-         :wait (let [result @(second ready)]
-                 (if (= result channel-closed-signal)
-                   (throw (ex-info "Cannot receive from a closed channel" {:channel ch}))
-                   result))))))
+   (defn- channel-receive
+     ([ch]
+      (channel-receive ch nil))
+     ([ch timeout]
+      (let [out (promise)
+            timed? (some? timeout)
+            ready
+            (locking (:lock ch)
+              (let [{:keys [closed? senders buffer capacity]} @(:state ch)]
+                (cond
+                  (seq buffer)
+                  (let [[value rest-buffer] (queue-pop buffer)
+                        promote (when (and (pos? capacity) (seq senders))
+                                  (let [[sender rest-senders] (queue-pop senders)]
+                                    (swap! (:state ch) assoc
+                                           :senders rest-senders
+                                           :buffer (queue-conj rest-buffer (:value sender)))
+                                    sender))]
+                    (when-not promote
+                      (swap! (:state ch) assoc :buffer rest-buffer))
+                    [:buffer value promote])
+                  (seq senders)
+                  (let [[sender rest-senders] (queue-pop senders)]
+                    (swap! (:state ch) assoc :senders rest-senders)
+                    [:sender sender])
+                  closed?
+                  [:closed]
+                  :else
+                  (do
+                    (swap! (:state ch) update :receivers queue-conj out)
+                    [:wait out]))))]
+        (case (first ready)
+          :buffer (let [[_ value promoted] ready]
+                    (when promoted
+                      (deliver (:ack promoted) true))
+                    value)
+          :sender (let [{:keys [value ack]} (second ready)]
+                    (deliver ack true)
+                    value)
+          :closed (throw (ex-info "Cannot receive from a closed channel" {:channel ch}))
+          :wait (let [result (if timed?
+                               (deref (second ready) (timeout-ms timeout) channel-timeout-signal)
+                               @(second ready))]
+                  (cond
+                    (= result channel-closed-signal)
+                    (throw (ex-info "Cannot receive from a closed channel" {:channel ch}))
+
+                    (= result channel-timeout-signal)
+                    (do
+                      (locking (:lock ch)
+                        (swap! (:state ch) update :receivers
+                               (fn [q] (:out (queue-remove-first q #(identical? % out))))))
+                      nil)
+
+                    :else result)))))))
 
 #?(:clj
    (defn- channel-try-receive [ch]
@@ -772,33 +878,51 @@
        nil)))
 
 #?(:cljs
-   (defn- channel-send [ch value]
-     (js/Promise.
-      (fn [resolve reject]
-        (let [{:keys [closed? receivers capacity buffer]} @(:state ch)]
-          (cond
-            closed?
-            (reject (ex-info "Cannot send on a closed channel" {:channel ch}))
+   (defn- channel-send
+     ([ch value]
+      (channel-send ch value nil))
+     ([ch value timeout]
+      (js/Promise.
+       (fn [resolve reject]
+         (let [timed? (some? timeout)
+               finish (fn [v] (resolve v))
+               {:keys [closed? receivers capacity buffer]} @(:state ch)]
+           (cond
+             closed?
+             (reject (ex-info "Cannot send on a closed channel" {:channel ch}))
 
-            (and (zero? capacity) (seq receivers))
-            (let [receiver (first receivers)]
-              (swap! (:state ch) update :receivers #(vec (rest %)))
-              ((:resolve receiver) value)
-              (resolve nil))
+             (and (zero? capacity) (seq receivers))
+             (let [receiver (first receivers)]
+               (swap! (:state ch) update :receivers #(vec (rest %)))
+               ((:resolve receiver) value)
+               (finish (when timed? true)))
 
-            (< (count buffer) capacity)
-            (do
-              (swap! (:state ch) update :buffer conj value)
-              (resolve nil))
+             (< (count buffer) capacity)
+             (do
+               (swap! (:state ch) update :buffer conj value)
+               (finish (when timed? true)))
 
-            :else
-            (swap! (:state ch)
-                   update
-                   :senders
-                   conj
-                   {:value value
-                    :resolve resolve
-                    :reject reject})))))))
+             :else
+             (let [id (str (gensym "__send"))
+                   timer-id (atom nil)
+                   entry {:id id
+                          :value value
+                          :resolve (fn [_]
+                                     (when-let [timer @timer-id] (js/clearTimeout timer))
+                                     (finish (when timed? true)))
+                          :reject (fn [err]
+                                    (when-let [timer @timer-id] (js/clearTimeout timer))
+                                    (reject err))}]
+               (swap! (:state ch) update :senders conj entry)
+               (when timed?
+                 (reset! timer-id
+                         (js/setTimeout
+                          (fn []
+                            (swap! (:state ch) update :senders
+                                   (fn [senders]
+                                     (vec (remove #(= (:id %) id) senders))))
+                            (finish false))
+                          (timeout-ms timeout))))))))))))
 
 #?(:cljs
    (defn- channel-try-send [ch value]
@@ -821,41 +945,58 @@
          :else false))))
 
 #?(:cljs
-   (defn- channel-receive [ch]
-     (js/Promise.
-      (fn [resolve reject]
-        (let [{:keys [closed? senders buffer capacity]} @(:state ch)]
-          (cond
-            (seq buffer)
-            (let [buffered-value (first buffer)]
-              (swap! (:state ch) update :buffer #(vec (rest %)))
-              (when (and (pos? capacity) (seq (:senders @(:state ch))))
-                (let [{sender-value :value sender-resolve :resolve} (first (:senders @(:state ch)))]
-                  (swap! (:state ch)
-                         (fn [state]
-                           (-> state
-                               (update :senders #(vec (rest %)))
-                               (update :buffer conj sender-value))))
-                  (sender-resolve nil)))
-              (resolve buffered-value))
+   (defn- channel-receive
+     ([ch]
+      (channel-receive ch nil))
+     ([ch timeout]
+      (js/Promise.
+       (fn [resolve reject]
+         (let [timed? (some? timeout)
+               {:keys [closed? senders buffer capacity]} @(:state ch)]
+           (cond
+             (seq buffer)
+             (let [buffered-value (first buffer)]
+               (swap! (:state ch) update :buffer #(vec (rest %)))
+               (when (and (pos? capacity) (seq (:senders @(:state ch))))
+                 (let [{sender-value :value sender-resolve :resolve} (first (:senders @(:state ch)))]
+                   (swap! (:state ch)
+                          (fn [state]
+                            (-> state
+                                (update :senders #(vec (rest %)))
+                                (update :buffer conj sender-value))))
+                   (sender-resolve nil)))
+               (resolve buffered-value))
 
-            (seq senders)
-            (let [{:keys [value] :as sender} (first senders)
-                  ack-resolve (:resolve sender)]
-              (swap! (:state ch) update :senders #(vec (rest %)))
-              (ack-resolve nil)
-              (resolve value))
+             (seq senders)
+             (let [{:keys [value] :as sender} (first senders)
+                   ack-resolve (:resolve sender)]
+               (swap! (:state ch) update :senders #(vec (rest %)))
+               (ack-resolve nil)
+               (resolve value))
 
-            closed?
-            (reject (ex-info "Cannot receive from a closed channel" {:channel ch}))
+             closed?
+             (reject (ex-info "Cannot receive from a closed channel" {:channel ch}))
 
-            :else
-            (swap! (:state ch)
-                   update
-                   :receivers
-                   conj
-                   {:resolve resolve
-                    :reject reject})))))))
+             :else
+             (let [id (str (gensym "__recv"))
+                   timer-id (atom nil)
+                   entry {:id id
+                          :resolve (fn [value]
+                                     (when-let [timer @timer-id] (js/clearTimeout timer))
+                                     (resolve value))
+                          :reject (fn [err]
+                                    (when-let [timer @timer-id] (js/clearTimeout timer))
+                                    (reject err))}]
+               (swap! (:state ch) update :receivers conj entry)
+               (when timed?
+                 (reset! timer-id
+                         (js/setTimeout
+                          (fn []
+                            (swap! (:state ch) update :receivers
+                                   (fn [receivers]
+                                     (vec (remove #(= (:id %) id) receivers))))
+                            (resolve nil))
+                          (timeout-ms timeout))))))))))))
 
 #?(:cljs
    (defn- channel-try-receive [ch]
@@ -1719,14 +1860,26 @@
                               :index (atom 0)})}
 
    :Task
-   {"await"    (fn [t & _] (task-await t))
+   {"await"    (fn [t & [timeout]]
+                  (let [result (if (some? timeout)
+                                 (task-await t timeout)
+                                 (task-await t))]
+                    (if (= result task-timeout-signal) nil result)))
+    "cancel"   (fn [t & _] (task-cancel t))
     "is_done"  (fn [t & _] #?(:clj (.isDone ^CompletableFuture (:future t))
-                              :cljs @(:done? t)))}
+                              :cljs @(:done? t)))
+    "is_cancelled" (fn [t & _] (task-cancelled? t))}
 
    :Channel
-   {"send"      (fn [ch value & _] (channel-send ch value))
+   {"send"      (fn [ch value & [timeout]]
+                  (if (some? timeout)
+                    (channel-send ch value timeout)
+                    (channel-send ch value)))
     "try_send"  (fn [ch value & _] (channel-try-send ch value))
-    "receive"   (fn [ch & _] (channel-receive ch))
+    "receive"   (fn [ch & [timeout]]
+                  (if (some? timeout)
+                    (channel-receive ch timeout)
+                    (channel-receive ch)))
     "try_receive" (fn [ch & _] (channel-try-receive ch))
     "close"     (fn [ch & _] (channel-close ch))
     "is_closed" (fn [ch & _] (:closed? @(:state ch)))
@@ -2506,8 +2659,10 @@
       matched)))
 
 (defmethod eval-node :select
-  [ctx {:keys [clauses else] :as node}]
-  (let [prepared (mapv #(prepare-select-clause ctx %) clauses)]
+  [ctx {:keys [clauses else timeout] :as node}]
+  (let [prepared (mapv #(prepare-select-clause ctx %) clauses)
+        timeout-ms-val (when timeout (timeout-ms (eval-node ctx (:duration timeout))))
+        deadline (when timeout-ms-val (+ (current-time-ms) timeout-ms-val))]
     (loop []
       (if-let [[clause outcome] (some (fn [prepared-clause]
                                         (when-let [outcome (attempt-select-clause prepared-clause)]
@@ -2516,9 +2671,11 @@
         (execute-select-body ctx (:body clause) (:alias clause) (:value outcome))
         (if else
           (last (map #(eval-node ctx %) else))
-          (do
-            (sleep-select-step!)
-            (recur)))))))
+          (if (and deadline (>= (current-time-ms) deadline))
+            (last (map #(eval-node ctx %) (:body timeout)))
+            (do
+              (sleep-select-step!)
+              (recur))))))))
 
 (defmethod eval-node :loop
   [ctx {:keys [init invariant variant until body]}]
@@ -3453,20 +3610,31 @@
          (= node-type :select)
          (.then (promise-all (map #(prepare-select-clause-async ctx %) (:clauses node)))
                 (fn [prepared]
-                  (letfn [(attempt-loop []
-                            (.then (promise-all (map attempt-select-clause-async prepared))
-                                   (fn [outcomes]
-                                     (if-let [idx (first (keep-indexed (fn [i outcome]
-                                                                         (when (:selected? outcome) i))
-                                                                       outcomes))]
-                                       (let [clause (nth prepared idx)
-                                             outcome (nth outcomes idx)]
-                                         (execute-select-body-async ctx (:body clause) (:alias clause) (:value outcome)))
-                                       (if-let [else-body (:else node)]
-                                         (eval-body-async ctx else-body)
-                                         (.then (sleep-select-step-async)
-                                                (fn [_] (attempt-loop))))))))]
-                    (attempt-loop))))
+                  (let [timeout-ms-p (if-let [timeout-node (:timeout node)]
+                                       (.then (eval-node-async ctx (:duration timeout-node))
+                                              (fn [v] (timeout-ms v)))
+                                       (js/Promise.resolve nil))]
+                    (.then timeout-ms-p
+                           (fn [timeout-ms-val]
+                             (let [deadline (when timeout-ms-val (+ (.now js/Date) timeout-ms-val))]
+                               (letfn [(attempt-loop []
+                                         (.then
+                                          (promise-all (map attempt-select-clause-async prepared))
+                                          (fn [outcomes]
+                                            (if-let [idx (first (keep-indexed (fn [i outcome]
+                                                                                (when (:selected? outcome) i))
+                                                                              outcomes))]
+                                              (let [clause (nth prepared idx)
+                                                    outcome (nth outcomes idx)]
+                                                (execute-select-body-async ctx (:body clause) (:alias clause) (:value outcome)))
+                                              (if-let [else-body (:else node)]
+                                                (eval-body-async ctx else-body)
+                                                (if (and deadline (>= (.now js/Date) deadline))
+                                                  (eval-body-async ctx (get-in node [:timeout :body]))
+                                                  (.then (sleep-select-step-async)
+                                                         (fn [_]
+                                                           (attempt-loop)))))))))]
+                                 (attempt-loop)))))))
 
          (= node-type :loop)
          (.then (promise-reduce (:init node) nil
@@ -3679,7 +3847,7 @@
          :else
          (js/Promise.reject
           (ex-info (str "Cannot evaluate node type: " (:type node))
-                   {:node node})))))))
+                   {:node node}))))))))
 
 ;;
 ;; Public API

@@ -166,11 +166,15 @@ caseClause
     ;
 
 selectStatement
-    : SELECT selectClause+ (ELSE block)? END
+    : SELECT selectClause+ timeoutClause? (ELSE block)? END
     ;
 
 selectClause
     : WHEN expression (AS IDENTIFIER)? THEN block
+    ;
+
+timeoutClause
+    : TIMEOUT expression THEN block
     ;
 
 scopedBlock
@@ -440,6 +444,7 @@ ACROSS       : 'across';
 CASE         : 'case';
 OF           : 'of';
 SELECT       : 'select';
+TIMEOUT      : 'timeout';
 AND          : 'and';
 OR           : 'or';
 NOT          : 'not';

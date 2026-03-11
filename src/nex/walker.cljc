@@ -558,6 +558,7 @@
    (fn [[_ _select-kw & rest]]
      (let [tokens (vec rest)
            clauses (filterv #(and (sequential? %) (= :selectClause (first %))) tokens)
+           timeout-clause (first (filter #(and (sequential? %) (= :timeoutClause (first %))) tokens))
            has-else? (some #(= "else" %) tokens)
            else-block (when has-else?
                         (let [after-else (second (drop-while #(not= "else" %) tokens))]
@@ -565,6 +566,7 @@
                             (transform-node after-else))))]
        {:type :select
         :clauses (mapv transform-node clauses)
+        :timeout (when timeout-clause (transform-node timeout-clause))
         :else else-block}))
 
    :selectClause
@@ -576,6 +578,11 @@
        {:expr (transform-node expr)
         :alias alias
         :body (transform-node then-block)}))
+
+   :timeoutClause
+   (fn [[_ _timeout-kw duration _then-kw block]]
+     {:duration (transform-node duration)
+      :body (transform-node block)})
 
    :caseClause
    (fn [[_ & tokens]]

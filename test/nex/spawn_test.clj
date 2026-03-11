@@ -103,6 +103,26 @@ end"
 end"]
       (is (thrown-with-msg? Exception #"boom" (execute-method code))))))
 
+(deftest task-cancel-and-timeout-runtime
+  (testing "tasks support cancellation state and timed await"
+    (let [code "class Test
+  feature
+    demo() do
+      let t1: Task[Integer] := spawn do
+        sleep(20)
+        result := 1
+      end
+      print(t1.await(1))
+      let t2: Task := spawn do
+        sleep(20)
+      end
+      print(t2.cancel)
+      print(t2.is_cancelled)
+    end
+end"
+          output (execute-method-output code)]
+      (is (= ["nil" "true" "true"] output)))))
+
 (deftest channel-close-prevents-further-receive
   (testing "receiving from a closed empty channel fails"
     (let [code "class Test
@@ -160,3 +180,24 @@ end"
 end"
           output (execute-method-output code)]
       (is (= ["true" "false" "7" "\"sent\"" "9"] output)))))
+
+(deftest channel-timeout-and-select-timeout-runtime
+  (testing "channel send/receive time out and select timeout fires"
+    (let [code "class Test
+  feature
+    demo() do
+      let ch1: Channel[Integer] := create Channel[Integer]
+      print(ch1.receive(1))
+      let ch2: Channel[Integer] := create Channel[Integer].with_capacity(1)
+      ch2.send(1)
+      print(ch2.send(2, 1))
+      select
+        when ch1.receive as value then
+          print(value)
+        timeout 1 then
+          print(\"timeout\")
+      end
+    end
+end"
+          output (execute-method-output code)]
+      (is (= ["nil" "false" "\"timeout\""] output)))))

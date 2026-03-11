@@ -247,16 +247,22 @@
                               (or (:type-args target-type) (:type-params target-type)))]
               (case normalized-target
                 "Task" (case (:method expr)
-                         "await" (or (first type-args) "Any")
+                         "await" (if (seq (:args expr))
+                                   {:base-type (or (first type-args) "Any") :detachable true}
+                                   (or (first type-args) "Any"))
+                         "cancel" "Boolean"
                          "is_done" "Boolean"
+                         "is_cancelled" "Boolean"
                          "Any")
                 "Channel" (case (:method expr)
-                            "receive" (or (first type-args) "Any")
-                            "try_receive" (or (first type-args) "Any")
+                            "receive" (if (seq (:args expr))
+                                        {:base-type (or (first type-args) "Any") :detachable true}
+                                        (or (first type-args) "Any"))
+                            "try_receive" {:base-type (or (first type-args) "Any") :detachable true}
                             "is_closed" "Boolean"
                             "capacity" "Integer"
                             "size" "Integer"
-                            "send" "Void"
+                            "send" (if (= 2 (count (:args expr))) "Boolean" "Void")
                             "try_send" "Boolean"
                             "close" "Void"
                             "Any")
@@ -571,13 +577,15 @@
     "cursor"               (fn [target _] (str "__nexSetCursor(" target ")"))}
 
    :Task
-   {"await"    (fn [target _] (str "await " target ".await()"))
-    "is_done"  (fn [target _] (str target ".is_done()"))}
+   {"await"    (fn [target args] (str "await " target ".await(" args ")"))
+    "cancel"   (fn [target _] (str target ".cancel()"))
+    "is_done"  (fn [target _] (str target ".is_done()"))
+    "is_cancelled" (fn [target _] (str target ".is_cancelled()"))}
 
    :Channel
    {"send"        (fn [target args] (str "await " target ".send(" args ")"))
     "try_send"    (fn [target args] (str target ".try_send(" args ")"))
-    "receive"     (fn [target _] (str "await " target ".receive()"))
+    "receive"     (fn [target args] (str "await " target ".receive(" args ")"))
     "try_receive" (fn [target _] (str target ".try_receive()"))
     "close"       (fn [target _] (str target ".close()"))
     "is_closed"   (fn [target _] (str target ".is_closed()"))
@@ -1225,21 +1233,34 @@
       (indent (+ level 2) "/* Unsupported select clause */"))))
 
 (defn generate-select
-  [level {:keys [clauses else]} var-names]
+  [level {:keys [clauses else timeout]} var-names]
   (let [clause-code (map-indexed (fn [idx clause]
                                    (generate-select-clause-js level clause var-names idx))
                                  clauses)
         else-code (when else
                     [(str/join "\n" (map #(generate-statement (+ level 2) % var-names) else))
-                     (indent (+ level 2) "break;")])]
+                     (indent (+ level 2) "break;")])
+        timeout-code (when timeout
+                       [(indent (+ level 1) (str "const __selectDeadline = Date.now() + " (generate-expression (:duration timeout)) ";"))])
+        timeout-body (when timeout
+                       [(indent (+ level 1) "if (Date.now() >= __selectDeadline) {")
+                        (str/join "\n" (map #(generate-statement (+ level 2) % var-names) (:body timeout)))
+                        (indent (+ level 2) "break;")
+                        (indent (+ level 1) "}")]
+                       )]
     (str/join "\n"
               (concat
+               (when timeout [(indent level "{")])
+               timeout-code
                [(indent level "while (true) {")]
                clause-code
                else-code
                (when-not else
-                 [(indent (+ level 1) "await __nexSleep(0);")])
-               [(indent level "}")]))))
+                 (concat
+                  timeout-body
+                  [(indent (+ level 1) "await __nexSleep(0);")]))
+               [(indent level "}")]
+               (when timeout [(indent level "}")])))))
 
 (defn generate-statement
   "Generate JavaScript code for a statement"
@@ -1870,13 +1891,30 @@
        "class __nexTask {\n"
        "  constructor(promise) {\n"
        "    this._done = false;\n"
-       "    this._promise = Promise.resolve(promise).then(\n"
+       "    this._cancelled = false;\n"
+       "    this._cancelReject = null;\n"
+       "    this._cancelPromise = new Promise((_, reject) => { this._cancelReject = reject; });\n"
+       "    this._promise = Promise.race([Promise.resolve(promise), this._cancelPromise]).then(\n"
        "      value => { this._done = true; return value; },\n"
        "      err => { this._done = true; throw err; }\n"
        "    );\n"
        "  }\n"
-       "  async await() { return await this._promise; }\n"
+       "  async await(timeoutMs) {\n"
+       "    if (timeoutMs === undefined) return await this._promise;\n"
+       "    return await Promise.race([\n"
+       "      this._promise,\n"
+       "      new Promise(resolve => setTimeout(() => resolve(null), timeoutMs))\n"
+       "    ]);\n"
+       "  }\n"
+       "  cancel() {\n"
+       "    if (this._done) return false;\n"
+       "    this._cancelled = true;\n"
+       "    this._done = true;\n"
+       "    if (this._cancelReject) this._cancelReject(new Error('Task cancelled'));\n"
+       "    return true;\n"
+       "  }\n"
        "  is_done() { return this._done; }\n"
+       "  is_cancelled() { return this._cancelled; }\n"
        "}\n"
        "function __nexSpawn(fn) {\n"
        "  return new __nexTask(Promise.resolve().then(fn));\n"
@@ -1890,19 +1928,29 @@
        "    this._senders = [];\n"
        "    this._receivers = [];\n"
        "  }\n"
-       "  async send(value) {\n"
+       "  async send(value, timeoutMs) {\n"
        "    if (this._closed) throw new Error('Cannot send on a closed channel');\n"
        "    if (this._capacity === 0 && this._receivers.length > 0) {\n"
        "      const recv = this._receivers.shift();\n"
        "      recv.resolve(value);\n"
-       "      return null;\n"
+       "      return timeoutMs === undefined ? null : true;\n"
        "    }\n"
        "    if (this._buffer.length < this._capacity) {\n"
        "      this._buffer.push(value);\n"
-       "      return null;\n"
+       "      return timeoutMs === undefined ? null : true;\n"
        "    }\n"
        "    return await new Promise((resolve, reject) => {\n"
-       "      this._senders.push({ value, resolve, reject });\n"
+       "      const id = Symbol('send');\n"
+       "      let timer = null;\n"
+       "      const done = (result) => { if (timer !== null) clearTimeout(timer); resolve(result); };\n"
+       "      const fail = (err) => { if (timer !== null) clearTimeout(timer); reject(err); };\n"
+       "      this._senders.push({ id, value, resolve: () => done(timeoutMs === undefined ? null : true), reject: fail });\n"
+       "      if (timeoutMs !== undefined) {\n"
+       "        timer = setTimeout(() => {\n"
+       "          this._senders = this._senders.filter(sender => sender.id !== id);\n"
+       "          done(false);\n"
+       "        }, timeoutMs);\n"
+       "      }\n"
        "    });\n"
        "  }\n"
        "  try_send(value) {\n"
@@ -1918,7 +1966,7 @@
        "    }\n"
        "    return false;\n"
        "  }\n"
-       "  async receive() {\n"
+       "  async receive(timeoutMs) {\n"
        "    if (this._buffer.length > 0) {\n"
        "      const value = this._buffer.shift();\n"
        "      if (this._capacity > 0 && this._senders.length > 0) {\n"
@@ -1935,7 +1983,17 @@
        "    }\n"
        "    if (this._closed) throw new Error('Cannot receive from a closed channel');\n"
        "    return await new Promise((resolve, reject) => {\n"
-       "      this._receivers.push({ resolve, reject });\n"
+       "      const id = Symbol('receive');\n"
+       "      let timer = null;\n"
+       "      const done = (result) => { if (timer !== null) clearTimeout(timer); resolve(result); };\n"
+       "      const fail = (err) => { if (timer !== null) clearTimeout(timer); reject(err); };\n"
+       "      this._receivers.push({ id, resolve: done, reject: fail });\n"
+       "      if (timeoutMs !== undefined) {\n"
+       "        timer = setTimeout(() => {\n"
+       "          this._receivers = this._receivers.filter(receiver => receiver.id !== id);\n"
+       "          done(null);\n"
+       "        }, timeoutMs);\n"
+       "      }\n"
        "    });\n"
        "  }\n"
        "  try_receive() {\n"

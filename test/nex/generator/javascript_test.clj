@@ -306,6 +306,36 @@ end"
       (is (str/includes? js-code ".try_receive()"))
       (is (str/includes? js-code "break;")))))
 
+(deftest task-cancel-timeout-and-select-timeout-generation-test
+  (testing "task cancellation/timeouts and select timeout lower correctly in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let t: Task[Integer] := spawn do
+        result := 1
+      end
+      print(t.await(5))
+      print(t.cancel)
+      print(t.is_cancelled)
+      let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+      print(ch.send(1, 5))
+      print(ch.receive(5))
+      select
+        when ch.receive as value then
+          print(value)
+        timeout 5 then
+          print(\"timeout\")
+      end
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "await t.await(5)"))
+      (is (str/includes? js-code "t.cancel()"))
+      (is (str/includes? js-code "t.is_cancelled()"))
+      (is (str/includes? js-code "await ch.send(1, 5)"))
+      (is (str/includes? js-code "await ch.receive(5)"))
+      (is (str/includes? js-code "const __selectDeadline = Date.now() + 5;")))))
+
 (deftest integer-bitwise-generation-test
   (testing "Integer bitwise methods translate to JavaScript bitwise operators/helpers"
     (let [nex-code "class Test
