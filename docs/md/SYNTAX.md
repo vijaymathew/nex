@@ -273,6 +273,8 @@ JavaScript target note:
 - `spawn` lowers to async task code
 - `Task.await`, `Channel.send`, and `Channel.receive` lower to `await ...` in generated JavaScript
 
+For full concurrency semantics and runtime details, see [CONCURRENCY.md](CONCURRENCY.md).
+
 ## Classes
 
 A class bundles data and actions together:

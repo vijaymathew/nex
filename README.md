@@ -441,6 +441,7 @@ nex/
 | [Web IDE Guide](docs/md/WEB_IDE.md) | Browser-based IDE setup and usage |
 | [CLI Guide](docs/md/CLI.md) | Command-line options and workflows |
 | [Debugger Guide](docs/md/DEBUGGER.md) | REPL debugger commands |
+| [Concurrency Guide](docs/md/CONCURRENCY.md) | Task, channel, select, and runtime semantics |
 | [Arrays and Maps](docs/md/ARRAYS_MAPS.md) | Collection operations and examples |
 | [Emacs Support](docs/md/EMACS.md) | Emacs mode setup and key bindings |
 | [Development Notes](docs/md/DEVELOPMENT.md) | Architecture and contribution notes |

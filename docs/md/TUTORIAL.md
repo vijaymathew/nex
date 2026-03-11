@@ -303,6 +303,8 @@ end
 
 On the JavaScript target, the source syntax is unchanged, but generated code uses async/await under the hood. That means `spawn`, `Task.await`, `Channel.send`, and `Channel.receive` are lowered to Promise-based operations in generated JavaScript.
 
+For the precise concurrency semantics, target differences, and runtime design, see [CONCURRENCY.md](CONCURRENCY.md).
+
 ## 8. Classes and Objects
 
 A class groups fields and methods.
