@@ -134,6 +134,16 @@ Deploy the full `public/` directory, including:
 
 If you only deploy `public/js`, parser loading will fail in the browser.
 
+For the website checkout used in this repo, prefer the sync wrapper:
+
+```bash
+./scripts/sync-browser-ide.sh
+```
+
+It copies only the Browser IDE assets into the correct subdirectories under
+`../vijaymathew.github.io/nex` and cleans up known stray artifacts from
+incorrect trailing-slash syncs.
+
 ## Related Docs
 
 - [ClojureScript Support](CLOJURESCRIPT.md)

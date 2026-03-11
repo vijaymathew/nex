@@ -280,6 +280,18 @@ npx serve public
 
 See [docs/md/WEB_IDE.md](docs/md/WEB_IDE.md) for setup and usage.
 
+To sync the rebuilt Browser IDE into the website checkout used for deployment:
+
+```bash
+./scripts/sync-browser-ide.sh
+```
+
+Or with an explicit target:
+
+```bash
+./scripts/sync-browser-ide.sh ../vijaymathew.github.io/nex
+```
+
 ---
 
 ## Usage
