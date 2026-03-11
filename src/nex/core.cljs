@@ -269,9 +269,15 @@
 (defn- remember-typed-lets! [stmts]
   (doseq [stmt stmts]
     (when (and (map? stmt)
-               (= :let (:type stmt))
-               (:var-type stmt))
-      (swap! app-state assoc-in [:repl-var-types (:name stmt)] (:var-type stmt)))))
+               (= :let (:type stmt)))
+      (let [remembered-type (or (:var-type stmt)
+                                (tc/infer-expression-type
+                                 (:value stmt)
+                                 {:classes (vals @(get-in @app-state [:ctx :classes]))
+                                  :imports @(get-in @app-state [:ctx :imports])
+                                  :var-types (:repl-var-types @app-state)}))]
+        (when remembered-type
+          (swap! app-state assoc-in [:repl-var-types (:name stmt)] remembered-type))))))
 
 (defn- escape-html [s]
   (-> s
@@ -777,11 +783,16 @@
 (defn- looks-like-definition? [input]
   (boolean (re-find #"^\s*(class|function|import|intern)\b" input)))
 
+(defn- looks-like-statement? [input]
+  (boolean
+   (re-find #"^\s*(let|if|from|repeat|across|select|raise|retry|case|convert|do|rescue)\b"
+            input)))
+
 (defn- wrap-expression [input]
   (str "class __BrowserRepl__\n"
        "feature\n"
        "  __eval__(): Any do\n"
-       "    " input "\n"
+       "    result := " input "\n"
        "  end\n"
        "end"))
 
@@ -793,36 +804,215 @@
        "  end\n"
        "end"))
 
-(defn- eval-wrapped! [ctx wrapped-code]
-  (let [ast (p/ast wrapped-code)
+(defn- ensure-promise [v]
+  (js/Promise.resolve v))
+
+(defn- simple-await-var [source]
+  (second (re-matches #"(?s)^\s*([A-Za-z_][A-Za-z0-9_]*)\.await\s*$" source)))
+
+(defn- simple-print-await-var [source]
+  (second (re-matches #"(?s)^\s*print\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\.await\s*\)\s*$" source)))
+
+(defn- source-needs-async? [source]
+  (boolean
+   (re-find #"\b(spawn|select|await_any|await_all|sleep)\b|\.await\b|\.send\b|\.receive\b|\.try_send\b|\.try_receive\b|\bTask\b|\bChannel\b"
+            source)))
+
+(defn- eval-sync-program! [ctx ast]
+  (interp/eval-node ctx ast))
+
+(defn- eval-statement-block! [ctx source]
+  (let [wrapped-code (wrap-statement-block source)
+        ast (p/ast wrapped-code)
         _ (typecheck-ast! ast)
         method-def (-> ast :classes first :body first :members first)
         body (:body method-def)]
-    (.then (reduce (fn [acc stmt]
-                     (.then acc
-                            (fn [_]
-                              (interp/eval-node-async ctx stmt))))
-                   (js/Promise.resolve nil)
-                   body)
-           (fn [result]
-             (when (:typecheck-enabled @app-state)
-               (remember-typed-lets! body))
-             {:result result
-              :output @(:output ctx)}))))
+    (if (source-needs-async? source)
+      (.then (reduce (fn [acc stmt]
+                       (.then acc
+                              (fn [_]
+                                (.then (ensure-promise (interp/eval-node-async ctx stmt))
+                                       (fn [value]
+                                         (when (= :let (:type stmt))
+                                           (interp/env-define (:current-env ctx) (:name stmt) value))
+                                         value)))))
+                     (ensure-promise nil)
+                     body)
+             (fn [result]
+               (when (:typecheck-enabled @app-state)
+                 (remember-typed-lets! body))
+               {:result result
+                :output @(:output ctx)}))
+      (let [result (last (map (fn [stmt]
+                                (let [value (interp/eval-node ctx stmt)]
+                                  (when (= :let (:type stmt))
+                                    (interp/env-define (:current-env ctx) (:name stmt) value))
+                                  value))
+                              body))]
+        (when (:typecheck-enabled @app-state)
+          (remember-typed-lets! body))
+        (ensure-promise {:result result
+                         :output @(:output ctx)})))))
+
+(defn- eval-async-expression! [ctx source]
+  (let [task-await-fn (deref #'interp/task-await)
+        ast (p/ast source)
+        _ (typecheck-ast! ast)
+        stmt-node (or (first (:statements ast))
+                      (first (:calls ast)))]
+    (cond
+      (simple-await-var source)
+      (let [task-name (simple-await-var source)
+            task (interp/env-lookup (:current-env ctx) task-name)]
+        (.then (ensure-promise (task-await-fn task))
+               (fn [result]
+                 {:result result
+                  :output @(:output ctx)})))
+
+      (simple-print-await-var source)
+      (let [task-name (simple-print-await-var source)
+            task (interp/env-lookup (:current-env ctx) task-name)]
+        (.then (ensure-promise (task-await-fn task))
+               (fn [result]
+                 (interp/add-output ctx (interp/nex-format-value result))
+                 {:result nil
+                  :output @(:output ctx)})))
+
+      (and (= :call (:type stmt-node))
+           (nil? (:target stmt-node))
+           (#{"print" "println"} (:method stmt-node)))
+      (.then (js/Promise.all
+              (to-array (map #(ensure-promise (interp/eval-node-async ctx %))
+                             (:args stmt-node))))
+             (fn [arg-array]
+               (let [arg-values (vec (array-seq arg-array))
+                     output (str/join " " (map interp/nex-format-value arg-values))]
+                 (interp/add-output ctx output)
+                 {:result nil
+                  :output @(:output ctx)})))
+
+      :else
+      (.then (ensure-promise (interp/eval-node-async ctx stmt-node))
+             (fn [result]
+               {:result result
+                :output @(:output ctx)})))))
+
+(defn- eval-wrapped! [ctx wrapped-code]
+  (let [ast (p/ast wrapped-code)
+        _ (typecheck-ast! ast)
+        call-node {:type :call
+                   :target {:type :create
+                            :class-name "__BrowserRepl__"
+                            :generic-args []
+                            :constructor nil
+                            :args []}
+                   :method "__eval__"
+                   :args []
+                   :has-parens true}]
+    (if (source-needs-async? wrapped-code)
+      (.then (ensure-promise (interp/eval-node-async ctx ast))
+             (fn [_]
+               (.then (ensure-promise (interp/eval-node-async ctx call-node))
+                      (fn [result]
+                        (when (:typecheck-enabled @app-state)
+                          (when-let [method-def (-> ast :classes first :body first :members first)]
+                            (remember-typed-lets! (:body method-def))))
+                        {:result result
+                         :output @(:output ctx)}))))
+      (let [_ (eval-sync-program! ctx ast)
+            result (interp/eval-node ctx call-node)]
+        (when (:typecheck-enabled @app-state)
+          (when-let [method-def (-> ast :classes first :body first :members first)]
+            (remember-typed-lets! (:body method-def))))
+        (ensure-promise {:result result
+                         :output @(:output ctx)})))))
 
 (defn- run-program! [ctx source]
   (let [ast (p/ast source)
         _ (typecheck-ast! ast)]
-    (.then (interp/eval-node-async ctx ast)
-           (fn [raw-result]
-             {:result (if (= :program (:type ast)) nil raw-result)
-              :output @(:output ctx)}))))
+    (if (source-needs-async? source)
+      (.then (ensure-promise (interp/eval-node-async ctx ast))
+             (fn [raw-result]
+               {:result (if (= :program (:type ast)) nil raw-result)
+                :output @(:output ctx)}))
+      (let [raw-result (eval-sync-program! ctx ast)]
+        (ensure-promise
+         {:result (if (= :program (:type ast)) nil raw-result)
+          :output @(:output ctx)})))))
 
 (defn- show-runtime-output! [output result]
   (doseq [line output]
     (append-line! "out" (str line)))
   (when (and (some? result) (empty? output))
     (append-line! "result" (fmt-value result))))
+
+(declare run-editor!)
+
+(defn- handle-repl-command! [trimmed]
+  (case trimmed
+    ":run editor"
+    (do
+      (run-editor!)
+      true)
+
+    ":clear"
+    (do
+      (clear-repl-output!)
+      true)
+
+    ":typecheck on"
+    (do
+      (when-not (:typecheck-enabled @app-state)
+        (toggle-typecheck!))
+      true)
+
+    ":typecheck off"
+    (do
+      (when (:typecheck-enabled @app-state)
+        (toggle-typecheck!))
+      true)
+
+    false))
+
+(defn eval-repl-source!
+  "Evaluate one REPL input string against the shared browser REPL semantics.
+   Returns a Promise of {:kind kw :result v :output [...]} where :kind is
+   :definition, :statement, or :expression. Commands return {:kind :command}."
+  [ctx source]
+  (let [trimmed (str/trim source)]
+    (cond
+      (str/blank? trimmed)
+      (ensure-promise {:kind :blank :result nil :output []})
+
+      (handle-repl-command! trimmed)
+      (ensure-promise {:kind :command :result nil :output []})
+
+      :else
+      (do
+        (reset! (:output ctx) [])
+        (let [run-promise
+              (if (looks-like-definition? trimmed)
+                (run-program! ctx trimmed)
+                (if (looks-like-statement? trimmed)
+                  (eval-statement-block! ctx trimmed)
+                  (if (source-needs-async? trimmed)
+                    (eval-async-expression! ctx trimmed)
+                    (try
+                      (eval-wrapped! ctx (wrap-expression trimmed))
+                      (catch :default e1
+                        (if (typecheck-error? e1)
+                          (throw e1)
+                          (try
+                            (eval-statement-block! ctx trimmed)
+                            (catch :default _e2
+                              (throw e1)))))))))]
+          (.then run-promise
+                 (fn [{:keys [result output] :as res}]
+                   (assoc res
+                          :kind (cond
+                                  (looks-like-definition? trimmed) :definition
+                                  (looks-like-statement? trimmed) :statement
+                                  :else :expression)))))))))
 
 (defn- eval-repl-input! []
   (let [input-el (by-id "repl-input")
@@ -833,28 +1023,21 @@
       (push-repl-history! trimmed)
       (append-line! "input" (str "nex> " trimmed))
       (set! (.-value input-el) "")
-      (reset! (:output ctx) [])
       (try
-        (let [run-promise
-              (if (looks-like-definition? trimmed)
-                (run-program! ctx trimmed)
-                (try
-                  (eval-wrapped! ctx (wrap-expression trimmed))
-                  (catch :default e1
-                    (if (typecheck-error? e1)
-                      (throw e1)
-                      (try
-                        (eval-wrapped! ctx (wrap-statement-block trimmed))
-                        (catch :default _e2
-                          (throw e1)))))))]
+        (let [run-promise (eval-repl-source! ctx trimmed)]
           (.then run-promise
-                 (fn [{:keys [result output]}]
-                   (if (looks-like-definition? trimmed)
+                 (fn [{:keys [kind result output]}]
+                   (case kind
+                     :definition
                      (do
                        (doseq [line output]
                          (append-line! "out" (str line)))
                        (when (empty? output)
                          (append-line! "info" "Loaded definition.")))
+
+                     :command
+                     nil
+
                      (show-runtime-output! output result))))
           (.catch run-promise
                   (fn [e]
@@ -887,10 +1070,8 @@
                                    (seq (:interns ast))))
                 run-promise
                 (if has-defs?
-                  (.then (interp/eval-node-async ctx ast)
-                         (fn [_]
-                           {:result nil :output @(:output ctx)}))
-                  (eval-wrapped! ctx (wrap-statement-block trimmed)))]
+                  (run-program! ctx source)
+                  (eval-statement-block! ctx trimmed))]
             (.then run-promise
                    (fn [{:keys [result output]}]
                      (show-runtime-output! output result)
@@ -1209,7 +1390,7 @@
 
                              :else nil))))
 
-    (append-line! "info" "Browser IDE build: 2026-03-11a")))
+    (append-line! "info" "Browser IDE build: 2026-03-11z")))
 
 (defn init []
   (render!))

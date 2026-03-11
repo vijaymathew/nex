@@ -64,9 +64,15 @@
 
 % Match the tutorial print code-block rendering to docs/book.
 \definecolor{shadecolor}{gray}{0.96}
+\DefineVerbatimEnvironment{verbatim}{Verbatim}{
+  commandchars=\\\{\},
+  fontsize=\fontsize{6.0}{7.0}\selectfont,
+  breaklines=true,
+  breakanywhere=true
+}
 \RecustomVerbatimEnvironment{Highlighting}{Verbatim}{
   commandchars=\\\{\},
-  fontsize=\fontsize{6.8}{7.8}\selectfont,
+  fontsize=\fontsize{6.0}{7.0}\selectfont,
   breaklines=true,
   breakanywhere=true
 }
@@ -106,7 +112,7 @@
 \usepackage{flafter}
 \usepackage[section]{placeins}
 \lstset{
-  basicstyle=\ttfamily\fontsize{5.8}{6.8}\selectfont,
+  basicstyle=\ttfamily\fontsize{5.6}{6.6}\selectfont,
   breaklines=true,
   breakatwhitespace=false,
   breakautoindent=true,
@@ -132,7 +138,7 @@
 
 \AtBeginDocument{
   \lstset{
-    basicstyle=\ttfamily\fontsize{5.8}{6.8}\selectfont,
+    basicstyle=\ttfamily\fontsize{5.6}{6.6}\selectfont,
     breaklines=true,
     breakatwhitespace=false,
     breakautoindent=true,

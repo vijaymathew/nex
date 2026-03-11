@@ -1,7 +1,8 @@
 (ns nex.browser-spawn-test
   (:require [cljs.test :refer-macros [async deftest is testing]]
             [clojure.string :as str]
-            [nex.interpreter :as interp]))
+            [nex.interpreter :as interp]
+            [nex.typechecker :as tc]))
 
 (defn- make-channel
   ([] ((deref (var interp/make-channel))))
@@ -120,3 +121,94 @@
          (fn [{:keys [first-result all-results]}]
            (is (= 20 first-result))
            (is (= [10 20] all-results))))))))
+
+(deftest browser-typecheck-spawn-generic-let-smoke-test
+  (testing "CLJS typechecker accepts Task[T] spawn let declarations"
+    (let [ast {:type :program
+               :imports []
+               :interns []
+               :classes []
+               :functions []
+               :calls []
+               :statements [{:type :let
+                             :name "t"
+                             :var-type {:base-type "Task" :type-args ["Integer"]}
+                             :value {:type :spawn
+                                     :body [{:type :assign
+                                             :target "result"
+                                             :value {:type :binary
+                                                     :operator "+"
+                                                     :left {:type :integer :value 10}
+                                                     :right {:type :integer :value 2}}}]}}]}
+          result (tc/type-check ast {:var-types {}})]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest browser-interpreter-spawn-await-sequence-smoke-test
+  (async done
+    (testing "browser interpreter can bind a spawned task and await it later"
+      (let [ctx (interp/make-context)
+            let-node {:type :let
+                      :name "t"
+                      :var-type {:base-type "Task" :type-args ["Integer"]}
+                      :value {:type :spawn
+                              :body [{:type :assign
+                                      :target "result"
+                                      :value {:type :binary
+                                              :operator "+"
+                                              :left {:type :integer :value 10}
+                                              :right {:type :integer :value 2}}}]}}
+            await-node {:type :call
+                        :target "t"
+                        :method "await"
+                        :args []
+                        :has-parens false}]
+        (.then (interp/eval-node-async ctx let-node)
+               (fn [_]
+                 (.then (interp/eval-node-async ctx await-node)
+                        (fn [result]
+                          (is (= 12 result))
+                          (done))
+                        (fn [err]
+                          (is false (str "Unexpected rejection in await sequence: " err))
+                          (done))))
+               (fn [err]
+                 (is false (str "Unexpected rejection in let sequence: " err))
+                 (done)))))))
+
+(deftest browser-interpreter-print-awaited-task-smoke-test
+  (async done
+    (testing "browser interpreter can await a task inside print arguments"
+      (let [ctx (interp/make-context)
+            let-node {:type :let
+                      :name "t"
+                      :var-type {:base-type "Task" :type-args ["Integer"]}
+                      :value {:type :spawn
+                              :body [{:type :assign
+                                      :target "result"
+                                      :value {:type :binary
+                                              :operator "+"
+                                              :left {:type :integer :value 10}
+                                              :right {:type :integer :value 2}}}]}}
+            print-node {:type :call
+                        :target nil
+                        :method "print"
+                        :args [{:type :call
+                                :target "t"
+                                :method "await"
+                                :args []
+                                :has-parens false}]
+                        :has-parens true}]
+        (reset! (:output ctx) [])
+        (.then (interp/eval-node-async ctx let-node)
+               (fn [_]
+                 (.then (interp/eval-node-async ctx print-node)
+                        (fn [_]
+                          (is (= ["12"] @(:output ctx)))
+                          (done))
+                        (fn [err]
+                          (is false (str "Unexpected rejection in print/await sequence: " err))
+                          (done))))
+               (fn [err]
+                 (is false (str "Unexpected rejection in let sequence: " err))
+                 (done)))))))

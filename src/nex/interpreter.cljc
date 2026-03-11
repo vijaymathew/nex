@@ -3245,6 +3245,37 @@
                      (fn [_ stmt]
                        (eval-node-async ctx stmt)))))
 
+(defn- async-free-node?
+  [node]
+  (cond
+    (nil? node) true
+    (string? node) true
+    (not (map? node)) true
+    :else
+    (case (:type node)
+      :integer true
+      :real true
+      :boolean true
+      :char true
+      :string true
+      :nil true
+      :identifier true
+      :literal true
+      :old true
+      :unary (async-free-node? (:expr node))
+      :binary (and (async-free-node? (:left node))
+                   (async-free-node? (:right node)))
+      :subscript (and (async-free-node? (:target node))
+                      (async-free-node? (:index node)))
+      :array-literal (every? async-free-node? (:elements node))
+      :set-literal (every? async-free-node? (:elements node))
+      :map-literal (every? (fn [{:keys [key value]}]
+                             (and (async-free-node? key)
+                                  (async-free-node? value)))
+                           (:entries node))
+      :statement (async-free-node? (:node node))
+      false)))
+
 (defn- eval-body-with-rescue-async [ctx body rescue]
   #?(:clj
      (eval-body-with-rescue ctx body rescue)
@@ -3349,17 +3380,20 @@
        (nil? node) (js/Promise.resolve nil)
        (string? node) (js/Promise.resolve node)
        (not (map? node)) (js/Promise.resolve node)
+       (async-free-node? node) (js/Promise.resolve (eval-node ctx node))
        (= :spawn (:type node))
        (js/Promise.resolve
         (let [spawn-promise
-              (.then (js/Promise.resolve nil)
-                     (fn [_]
-                       (let [spawn-env (make-env (:current-env ctx))
-                             _ (env-define spawn-env "result" nil)
-                             spawn-ctx (assoc ctx :current-env spawn-env)]
-                         (.then (eval-body-async spawn-ctx (:body node))
-                                (fn [_]
-                                  (async-result-value spawn-env))))))]
+              (.then
+               (js/Promise.resolve nil)
+               (fn [_]
+                 (let [spawn-env (make-env (:current-env ctx))
+                       _ (env-define spawn-env "result" nil)
+                       spawn-ctx (assoc ctx :current-env spawn-env)]
+                   (.then
+                    (->promise (eval-body-async spawn-ctx (:body node)))
+                    (fn [_]
+                      (async-result-value spawn-env))))))]
           (make-task spawn-promise)))
        :else
        (let [node-type (:type node)]
@@ -3575,10 +3609,10 @@
                                       updated-obj (make-object (:class-name current-obj) updated-fields)
                                       _ (when-let [target-name (:current-target ctx)]
                                           (env-set! (-> ctx :current-env :parent) target-name updated-obj))]
-                                  (.then (eval-node-async ctx {:type :call
-                                                               :target (:current-target ctx)
-                                                               :method method
-                                                               :args args})
+                                  (.then (->promise (eval-node-async ctx {:type :call
+                                                                          :target (:current-target ctx)
+                                                                          :method method
+                                                                          :args args}))
                                          (fn [result]
                                            (when-let [target-name (:current-target ctx)]
                                              (let [called-obj (env-lookup (-> ctx :current-env :parent) target-name)]
@@ -3601,7 +3635,7 @@
          (js/Promise.resolve (:current-object ctx))
 
          (= node-type :member-assign)
-         (.then (eval-node-async ctx (:value node))
+         (.then (->promise (eval-node-async ctx (:value node)))
                 (fn [val]
                   (when-let [mf (:modified-fields ctx)]
                     (swap! mf conj (:field node)))
@@ -3609,15 +3643,16 @@
                   val))
 
          (= node-type :assign)
-         (.then (eval-node-async ctx (:value node))
-                (fn [val]
-                  (env-set! (:current-env ctx) (:target node) val)
-                  (when (= "result" (:target node))
-                    (env-define (:current-env ctx) "__result_assigned__" "result"))
-                  val))
+         (do
+          (.then (->promise (eval-node-async ctx (:value node)))
+                 (fn [val]
+                   (env-set! (:current-env ctx) (:target node) val)
+                   (when (= "result" (:target node))
+                     (env-define (:current-env ctx) "__result_assigned__" "result"))
+                   val)))
 
          (= node-type :let)
-         (.then (eval-node-async ctx (:value node))
+         (.then (->promise (eval-node-async ctx (:value node)))
                 (fn [val]
                   (env-define (:current-env ctx) (:name node) val)
                   (when (= "result" (:name node))
@@ -3628,7 +3663,7 @@
          (eval-body-async ctx node)
 
          (= node-type :raise)
-         (.then (eval-node-async ctx (:value node))
+         (.then (->promise (eval-node-async ctx (:value node)))
                 (fn [val]
                   (throw (ex-info (str val) {:type :nex-exception :value val}))))
 
@@ -3643,14 +3678,14 @@
              (eval-body-async new-ctx (:body node))))
 
          (= node-type :when)
-         (.then (eval-node-async ctx (:condition node))
+         (.then (->promise (eval-node-async ctx (:condition node)))
                 (fn [cond-val]
                   (if cond-val
-                    (eval-node-async ctx (:consequent node))
-                    (eval-node-async ctx (:alternative node)))))
+                    (->promise (eval-node-async ctx (:consequent node)))
+                    (->promise (eval-node-async ctx (:alternative node))))))
 
          (= node-type :convert)
-         (.then (eval-node-async ctx (:value node))
+         (.then (->promise (eval-node-async ctx (:value node)))
                 (fn [v]
                   (let [target-name (if (map? (:target-type node)) (:base-type (:target-type node)) (:target-type node))
                         runtime-name (runtime-type-name v)
@@ -3661,35 +3696,35 @@
                     ok?)))
 
          (= node-type :if)
-         (.then (eval-node-async ctx (:condition node))
+         (.then (->promise (eval-node-async ctx (:condition node)))
                 (fn [cond-val]
                   (if cond-val
-                    (eval-body-async ctx (:then node))
+                    (->promise (eval-body-async ctx (:then node)))
                     (letfn [(eval-elseif [clauses]
                               (if (empty? clauses)
                                 (if (:else node)
-                                  (eval-body-async ctx (:else node))
+                                  (->promise (eval-body-async ctx (:else node)))
                                   (js/Promise.resolve nil))
-                                (.then (eval-node-async ctx (:condition (first clauses)))
+                                (.then (->promise (eval-node-async ctx (:condition (first clauses))))
                                        (fn [matched?]
                                          (if matched?
-                                           (eval-body-async ctx (:then (first clauses)))
+                                           (->promise (eval-body-async ctx (:then (first clauses))))
                                            (eval-elseif (rest clauses)))))))]
                       (eval-elseif (:elseif node))))))
 
          (= node-type :case)
-         (.then (eval-node-async ctx (:expr node))
+         (.then (->promise (eval-node-async ctx (:expr node)))
                 (fn [val]
                   (letfn [(match-clauses [clauses]
                             (if (empty? clauses)
                               (if-let [else-node (:else node)]
-                                (eval-node-async ctx else-node)
+                                (->promise (eval-node-async ctx else-node))
                                 (js/Promise.reject (ex-info "No matching case and no else clause"
                                                             {:value val})))
                               (.then (promise-all (map #(eval-node-async ctx %) (:values (first clauses))))
                                      (fn [values]
                                        (if (some #(= val %) values)
-                                         (eval-node-async ctx (:body (first clauses)))
+                                         (->promise (eval-node-async ctx (:body (first clauses))))
                                          (match-clauses (rest clauses)))))))]
                     (match-clauses (:clauses node)))))
 
@@ -3697,7 +3732,7 @@
          (.then (promise-all (map #(prepare-select-clause-async ctx %) (:clauses node)))
                 (fn [prepared]
                   (let [timeout-ms-p (if-let [timeout-node (:timeout node)]
-                                       (.then (eval-node-async ctx (:duration timeout-node))
+                                       (.then (->promise (eval-node-async ctx (:duration timeout-node)))
                                               (fn [v] (timeout-ms v)))
                                        (js/Promise.resolve nil))]
                     (.then timeout-ms-p
@@ -3730,7 +3765,7 @@
                             (.then (->promise (when-let [invariant (:invariant node)]
                                                 (check-assertions-async ctx invariant Loop-invariant)))
                                    (fn [_]
-                                     (.then (eval-node-async ctx (:until node))
+                                     (.then (->promise (eval-node-async ctx (:until node)))
                                             (fn [until-val]
                                               (if until-val
                                                 last-result
@@ -3763,7 +3798,7 @@
                   (apply-binary-op (:operator node) left-val right-val)))
 
          (= node-type :unary)
-         (.then (eval-node-async ctx (:expr node))
+         (.then (->promise (eval-node-async ctx (:expr node)))
                 (fn [val]
                   (apply-unary-op (:operator node) val)))
 

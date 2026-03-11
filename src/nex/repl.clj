@@ -1052,8 +1052,15 @@
           ;; Persist variable types from let statements (for future type checking)
           (when @*type-checking-enabled*
             (doseq [stmt (:body method-def)]
-              (when (and (map? stmt) (= (:type stmt) :let) (:var-type stmt))
-                (swap! *repl-var-types* assoc (:name stmt) (:var-type stmt)))))
+              (when (and (map? stmt) (= (:type stmt) :let))
+                (let [remembered-type (or (:var-type stmt)
+                                          (tc/infer-expression-type
+                                           (:value stmt)
+                                           {:classes (vals @(:classes exec-ctx))
+                                            :imports @(:imports exec-ctx)
+                                            :var-types @*repl-var-types*}))]
+                  (when remembered-type
+                    (swap! *repl-var-types* assoc (:name stmt) remembered-type))))))
           ;; Infer type of the result expression when typechecking is on
           (let [type-str (when is-expression?
                            (infer-result-type exec-ctx (-> method-def :body first :args first)))]

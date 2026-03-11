@@ -31,7 +31,7 @@ This does not remove all concurrency problems, but it keeps the structure visibl
 
 `spawn do ... end` starts a new task and returns a `Task` value.
 
-```nex
+```
 let t: Task[Integer] := spawn do
   result := 40 + 2
 end
@@ -41,7 +41,7 @@ print(t.await)
 
 The body of the task runs concurrently with the caller. If the body assigns to `result`, the task has a result type such as `Task[Integer]`. If the body does not assign to `result`, the type is just `Task`.
 
-```nex
+```
 let t: Task := spawn do
   print("background work")
 end
@@ -56,7 +56,7 @@ A task is a value. You can store it in a variable, return it from a routine, pla
 
 `await` is the point where the caller synchronises with a task.
 
-```nex
+```
 let t: Task[String] := spawn do
   result := "report ready"
 end
@@ -80,7 +80,7 @@ That explicit boundary is one of the central design ideas in Nex concurrency. Sy
 
 Tasks also support status queries.
 
-```nex
+```
 let t: Task[Integer] := spawn do
   result := 10 * 10
 end
@@ -94,7 +94,7 @@ In real code, `is_done` is most useful when combined with `select`, or when you 
 
 Tasks can also be cancelled:
 
-```nex
+```
 let t: Task := spawn do
   sleep(10)
 end
@@ -112,7 +112,7 @@ Sometimes indefinite waiting is not acceptable. A program may want to give up af
 
 Tasks support a timed form of `await`:
 
-```nex
+```
 let t: Task[Integer] := spawn do
   sleep(5)
   result := 7
@@ -138,7 +138,7 @@ Launching tasks is only half of the problem. The other half is communication.
 
 Nex uses typed channels for that purpose.
 
-```nex
+```
 let ch: Channel[Integer] := create Channel[Integer]
 
 let producer: Task := spawn do
@@ -164,7 +164,7 @@ That type information matters. Concurrency already adds one level of indirection
 
 The default constructor creates an unbuffered channel:
 
-```nex
+```
 let ch: Channel[Integer] := create Channel[Integer]
 ```
 
@@ -177,7 +177,7 @@ This is a very strong coordination mechanism. The send and the receive meet at o
 
 Sometimes that is too strict. One side may need to run ahead a little. For that, Nex supports buffered channels:
 
-```nex
+```
 let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
 ch.send(10)
 ch.send(20)
@@ -199,7 +199,7 @@ This gives you a controlled queue between tasks.
 
 Blocking is sometimes right and sometimes not. When you need to probe a channel without waiting, Nex provides `try_send` and `try_receive`.
 
-```nex
+```
 let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
 print(ch.try_send(5))
 print(ch.try_send(6))
@@ -219,7 +219,7 @@ These operations are the building blocks for more flexible coordination logic, i
 
 Channels can be closed.
 
-```nex
+```
 let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
 ch.send(1)
 ch.close
@@ -242,7 +242,7 @@ A single task is useful, but real programs often launch groups of related tasks.
 
 `await_any` waits for the first task in a group to complete:
 
-```nex
+```
 let slow: Task[Integer] := spawn do
   sleep(20)
   result := 10
@@ -257,7 +257,7 @@ print(await_any([slow, fast]))
 
 `await_all` waits for every task and returns their results in input order:
 
-```nex
+```
 let a: Task[Integer] := spawn do
   result := 1
 end
@@ -278,7 +278,7 @@ These operations keep the coordination logic explicit without forcing the progra
 
 When several channels or tasks may become ready, the right tool is `select`.
 
-```nex
+```
 let ch: Channel[String] := create Channel[String].with_capacity(1)
 ch.send("done")
 
@@ -310,7 +310,7 @@ That keeps the logic of `select` consistent: it chooses among ready operations.
 
 A `select` can also wait up to a bounded interval.
 
-```nex
+```
 let ch: Channel[String] := create Channel[String]
 
 select
@@ -338,7 +338,7 @@ That distinction matters. One is a non-blocking probe. The other is a bounded wa
 
 The following example shows tasks and channels working together.
 
-```text
+```
 let input: Channel[Integer] := create Channel[Integer].with_capacity(4)
 let output: Channel[Integer] := create Channel[Integer].with_capacity(4)
 
@@ -430,4 +430,4 @@ For a fuller discussion of the semantics and implementation details, see the rep
 
 **4.** Write a small example that uses `await_all` to collect three independent computations.
 
-**5.* ** Design a tiny two-stage pipeline, such as "read values, transform them, collect results," using two channels and at least one worker task. Explain where blocking may happen and why.
+**5.\*** Design a tiny two-stage pipeline, such as "read values, transform them, collect results," using two channels and at least one worker task. Explain where blocking may happen and why.

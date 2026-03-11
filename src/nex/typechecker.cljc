@@ -1127,7 +1127,7 @@
   "Check a let statement"
   [env {:keys [name var-type value synthetic] :as stmt}]
   (let [val-type (check-expression env value)
-        inferred-type (or var-type (when synthetic val-type))]
+        inferred-type (or var-type val-type)]
     (when-not inferred-type
       (throw (ex-info (str "Type annotation required for variable '" name "'")
                       {:error (type-error

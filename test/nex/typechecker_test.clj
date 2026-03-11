@@ -433,10 +433,10 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
-;; Mandatory type annotation tests
+;; Let type inference tests
 
-(deftest test-let-without-type-annotation-fails
-  (testing "Let without type annotation should fail in typechecking mode"
+(deftest test-let-without-type-annotation-succeeds
+  (testing "Let without type annotation should infer the variable type"
     (let [code "class Test
                   feature
                     test()
@@ -447,10 +447,8 @@ end"
                   end"
           ast (p/ast code)
           result (tc/type-check ast)]
-      (is (not (:success result)))
-      (is (seq (:errors result)))
-      (is (some #(re-find #"Type annotation required" %)
-                (map tc/format-type-error (:errors result)))))))
+      (is (:success result))
+      (is (empty? (:errors result))))))
 
 (deftest test-let-with-type-annotation-succeeds
   (testing "Let with type annotation should pass in typechecking mode"
@@ -466,8 +464,8 @@ end"
           result (tc/type-check ast)]
       (is (:success result)))))
 
-(deftest test-let-without-type-create-expression-fails
-  (testing "Let without type annotation on create expression should fail"
+(deftest test-let-without-type-create-expression-succeeds
+  (testing "Let without type annotation on create expression should infer the variable type"
     (let [code "class Box
                   feature
                     value: Integer
@@ -483,9 +481,8 @@ end"
                   end"
           ast (p/ast code)
           result (tc/type-check ast)]
-      (is (not (:success result)))
-      (is (some #(re-find #"Type annotation required" %)
-                (map tc/format-type-error (:errors result)))))))
+      (is (:success result))
+      (is (empty? (:errors result))))))
 
 (deftest test-let-with-type-create-expression-succeeds
   (testing "Let with type annotation on create expression should pass"

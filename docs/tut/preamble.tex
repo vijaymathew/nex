@@ -15,3 +15,20 @@
 
 \usepackage{fancyvrb}
 \usepackage{listings}
+
+\RecustomVerbatimEnvironment{Highlighting}{Verbatim}{
+  commandchars=\\\{\},
+  fontsize=\fontsize{7.2}{8.2}\selectfont,
+  breaklines=true,
+  breakanywhere=true
+}
+
+\lstset{
+  basicstyle=\ttfamily\fontsize{7.0}{8.0}\selectfont,
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=false,
+  showstringspaces=false,
+  frame=none
+}
