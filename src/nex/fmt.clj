@@ -33,6 +33,8 @@
       (if (:detachable type-expr) (str "?" core) core))
     :else (str type-expr)))
 
+(declare format-statement)
+
 (defn format-expression
   "Format an expression"
   [expr]
@@ -51,6 +53,9 @@
       :nil "nil"
       :identifier (:name expr)
       :old (str "old " (format-expression (:expr expr)))
+      :spawn (str "spawn do\n"
+                  (str/join "\n" (map #(format-statement % 1) (:body expr)))
+                  "\nend")
       :convert (str "convert "
                     (format-expression (:value expr))
                     " to "

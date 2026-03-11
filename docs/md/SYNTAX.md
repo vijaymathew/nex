@@ -184,6 +184,52 @@ print(a.intersection(b))          -- #{3}
 print(a.difference(b))            -- #{1, 2}
 ```
 
+## Concurrency: spawn, Task, and Channel
+
+Use `spawn` to start a lightweight task:
+
+```nex
+let t: Task[Integer] := spawn do
+  result := 1 + 2
+end
+
+print(t.await)                    -- 3
+print(t.is_done)                  -- true (after completion)
+```
+
+If the spawn body does not assign `result`, the type is plain `Task`:
+
+```nex
+let t: Task := spawn do
+  print("background work")
+end
+```
+
+Use `Channel[T]` to communicate between tasks:
+
+```nex
+let ch: Channel[Integer] := create Channel[Integer]
+
+spawn do
+  ch.send(42)
+end
+
+print(ch.receive)                 -- 42
+ch.close
+print(ch.is_closed)               -- true
+```
+
+Phase 1 channels are unbuffered:
+- `send` blocks until a receiver is ready
+- `receive` blocks until a sender is ready
+- `close` prevents future sends and receives
+
+JavaScript target note:
+- generated JavaScript uses Promise-based semantics
+- Nex source syntax stays the same
+- `spawn` lowers to async task code
+- `Task.await`, `Channel.send`, and `Channel.receive` lower to `await ...` in generated JavaScript
+
 ## Classes
 
 A class bundles data and actions together:

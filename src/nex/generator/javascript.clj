@@ -17,9 +17,14 @@
 (def ^:dynamic *local-types* {})        ;; local/param name -> Nex type
 (def ^:dynamic *field-types* {})        ;; field-name -> type
 (def ^:dynamic *class-invariants* [])   ;; effective class invariants (inherited + local, deduped)
+(def ^:dynamic *spawn-result-flag* nil) ;; temp boolean flag in generated spawn bodies
 
 (declare extract-members)
 (declare get-accessible-constants-js)
+(declare generate-statement)
+(declare collect-convert-bindings-block)
+(declare generate-convert-declarations)
+(declare generate-call-expr)
 
 (defn class-name-to-local
   "Convert a class name to a local variable name (e.g., 'Point' -> 'point')"
@@ -44,8 +49,10 @@
                     "Array" "Array"
                     "Map" "Map"
                     "Set" "Set"
+                    "Task" "Task"
+                    "Channel" "Channel"
                     base-type)
-          args (:type-args nex-type)]
+          args (or (:type-args nex-type) (:type-params nex-type))]
       (if args
         (str js-base "<" (str/join ", " (map #(if (string? %)
                                                  (nex-type-to-js %)
@@ -66,6 +73,8 @@
       "Array" "Array"
       "Map" "Map"
       "Set" "Set"
+      "Task" "Task"
+      "Channel" "Channel"
       "Console" "Object"
       "File" "Object"
       "Process" "Object"
@@ -88,6 +97,8 @@
         "Array" "[]"
         "Map" "new Map()"
         "Set" "new Set()"
+        "Task" "null"
+        "Channel" "null"
         "null"))
 
     ;; Handle basic types
@@ -103,6 +114,8 @@
       "Array" "[]"
       "Map" "new Map()"
       "Set" "new Set()"
+      "Task" "null"
+      "Channel" "null"
       "Console" "({_type: 'Console'})"
       "File" "null"
       "Process" "({_type: 'Process'})"
@@ -198,6 +211,13 @@
             "Any")
     "Any"))
 
+(defn builtin-dispatch-type
+  "Normalize inferred types for builtin dispatch."
+  [t]
+  (cond
+    (map? t) (:base-type t)
+    :else t))
+
 (defn infer-expression-type
   "Infer a Nex type for code generation dispatch."
   [expr]
@@ -213,14 +233,87 @@
       :real "Real"
       :boolean "Boolean"
       :char "Char"
+      :binary (let [left-type (builtin-dispatch-type (infer-expression-type (:left expr)))
+                    right-type (builtin-dispatch-type (infer-expression-type (:right expr)))]
+                (case (:operator expr)
+                  ("=" "/=" "<" "<=" ">" ">=" "and" "or") "Boolean"
+                  "+" (if (or (= left-type "String") (= right-type "String")) "String" left-type)
+                  ("-" "*" "/" "%") left-type
+                  "Any"))
+      :call (let [target-type (when (:target expr)
+                                (infer-expression-type (:target expr)))
+                  normalized-target (builtin-dispatch-type target-type)
+                  type-args (when (map? target-type)
+                              (or (:type-args target-type) (:type-params target-type)))]
+              (case normalized-target
+                "Task" (case (:method expr)
+                         "await" (or (first type-args) "Any")
+                         "is_done" "Boolean"
+                         "Any")
+                "Channel" (case (:method expr)
+                            "receive" (or (first type-args) "Any")
+                            "is_closed" "Boolean"
+                            "capacity" "Integer"
+                            "size" "Integer"
+                            "send" "Void"
+                            "close" "Void"
+                            "Any")
+                "Set" (case (:method expr)
+                        ("contains" "is_empty") "Boolean"
+                        "size" "Integer"
+                        ("union" "difference" "intersection" "symmetric_difference") target-type
+                        "Any")
+                "Array" (case (:method expr)
+                          "get" (or (first type-args) "Any")
+                          ("length" "size" "index_of") "Integer"
+                          "is_empty" "Boolean"
+                          "Any")
+                "Map" (case (:method expr)
+                        "get" (or (second type-args) "Any")
+                        "size" "Integer"
+                        ("is_empty" "contains_key") "Boolean"
+                        "Any")
+                "String" (case (:method expr)
+                           ("length" "index_of") "Integer"
+                           "contains" "Boolean"
+                           ("substring" "to_upper" "to_lower" "trim" "replace") "String"
+                           "Any")
+                "Any"))
       :array-literal "Array"
       :map-literal "Map"
       :set-literal "Set"
+      :spawn "Task"
       :create (:class-name expr)
       :identifier (or (get *local-types* (:name expr))
                       (get *field-types* (:name expr))
                       "Any")
       "Any")))
+
+(defn infer-spawn-result-type
+  "Infer the result type assigned inside a spawn body."
+  [stmts]
+  (letfn [(collect-from-stmt [stmt]
+            (when (map? stmt)
+              (case (:type stmt)
+                :assign (when (= (:target stmt) "result")
+                          [(infer-expression-type (:value stmt))])
+                :let (when (= (:name stmt) "result")
+                       [(or (:var-type stmt) (infer-expression-type (:value stmt)))])
+                :if (concat (mapcat collect-from-stmt (:then stmt))
+                            (mapcat (fn [clause] (mapcat collect-from-stmt (:then clause))) (:elseif stmt))
+                            (mapcat collect-from-stmt (:else stmt)))
+                :loop (concat (mapcat collect-from-stmt (:init stmt))
+                              (mapcat collect-from-stmt (:body stmt)))
+                :scoped-block (concat (mapcat collect-from-stmt (:body stmt))
+                                      (mapcat collect-from-stmt (:rescue stmt)))
+                :with (mapcat collect-from-stmt (:body stmt))
+                :case (concat (mapcat (fn [clause] (collect-from-stmt (:body clause))) (:clauses stmt))
+                              (when-let [else-stmt (:else stmt)]
+                                (collect-from-stmt else-stmt)))
+                [])))]
+    (let [types (remove #(or (nil? %) (= % "Void") (= % "Any"))
+                        (mapcat collect-from-stmt stmts))]
+      (first types))))
 
 (defn extract-typed-locals
   "Collect typed local bindings from statements."
@@ -291,6 +384,7 @@
     "println" (str "console.log(" args-code ")")
     "type_of" (str "__nexTypeOf(" args-code ")")
     "type_is" (str "__nexTypeIs(" args-code ")")
+    "sleep" (str "await __nexSleep(" args-code ")")
     ;; Default: use as-is (regular method call)
     (str method "(" args-code ")")))
 
@@ -474,6 +568,18 @@
     "is_empty"             (fn [target _] (str "(" target ".size === 0)"))
     "cursor"               (fn [target _] (str "__nexSetCursor(" target ")"))}
 
+   :Task
+   {"await"    (fn [target _] (str "await " target ".await()"))
+    "is_done"  (fn [target _] (str target ".is_done()"))}
+
+   :Channel
+   {"send"      (fn [target args] (str "await " target ".send(" args ")"))
+    "receive"   (fn [target _] (str "await " target ".receive()"))
+    "close"     (fn [target _] (str target ".close()"))
+    "is_closed" (fn [target _] (str target ".is_closed()"))
+    "capacity"  (fn [target _] (str target ".capacity()"))
+    "size"      (fn [target _] (str target ".size()"))}
+
    :Image
    {"width"        (fn [target _] (str target ".width"))
     "height"       (fn [target _] (str target ".height"))}
@@ -503,6 +609,61 @@
 
 (declare generate-create-expr)
 
+(defn async-call?
+  "Whether a call should be awaited in generated JavaScript."
+  [{:keys [target method] :as call-node}]
+  (cond
+    (and (nil? method)
+         (map? target)
+         (= :create (:type target))
+         (not (#{"Console" "File" "Process" "Set" "Window" "Turtle" "Image" "Channel"} (:class-name target))))
+    true
+
+    (nil? method) false
+
+    (nil? target)
+    (and (not (#{"print" "println" "type_of" "type_is"} method))
+         (or (contains? *all-method-names* method)
+             (contains? *function-names* method)))
+
+    :else
+    (let [target-type (builtin-dispatch-type (infer-expression-type target))]
+      (cond
+        (#{"Task" "Channel"} target-type) true
+        (and (map? target) (= :this (:type target)) (contains? *all-method-names* method)) true
+        (= target-type "Any") false
+        (get *class-registry* target-type) true
+        :else false))))
+
+(defn maybe-await
+  [call-node code]
+  (if (async-call? call-node)
+    (str "await " code)
+    code))
+
+(defn generate-spawn-expr
+  "Generate JavaScript code for spawn expression."
+  [{:keys [body]}]
+  (let [convert-bindings (collect-convert-bindings-block body)
+        convert-var-names (set (map :name convert-bindings))
+        convert-var-types (into {} (map (juxt :name :target-type) convert-bindings))
+        result-type (or (infer-spawn-result-type body) "Any")
+        local-types (merge convert-var-types (extract-typed-locals body) {"result" result-type})
+        result-flag (str (gensym "__nexSpawnHasResult"))]
+    (binding [*local-names* (into *local-names* (conj convert-var-names "result"))
+              *local-types* (merge *local-types* local-types)
+              *spawn-result-flag* result-flag]
+      (let [statement-lines (map #(generate-statement 1 %) body)]
+        (str "__nexSpawn(async () => {\n"
+             (indent 1 "let result = null;") "\n"
+             (indent 1 (str "let " result-flag " = false;")) "\n"
+             (str/join "\n" (generate-convert-declarations 1 convert-bindings))
+             (when (seq convert-bindings) "\n")
+             (str/join "\n" statement-lines)
+             (when (seq statement-lines) "\n")
+             (indent 1 (str "return " result-flag " ? result : null;")) "\n"
+             "})")))))
+
 (defn generate-call-expr
   "Generate JavaScript code for method call.
    NOTE: For operator methods (plus, less_than, etc.) that exist on multiple types,
@@ -512,86 +673,76 @@
   (let [args-code (str/join ", " (map generate-expression args))
         num-args (count args)]
     (if target
-      ;; Object method call
       (let [target-code (if (string? target) target (generate-expression target))
             this-target? (and (map? target) (= :this (:type target)))
-            has-parens (:has-parens call-node)]
-        (if (nil? method)
-          ;; Constructor-call syntax is parsed as a call whose target is :create and method is nil.
+            has-parens (:has-parens call-node)
+            builtin-dispatch (keyword (builtin-dispatch-type (infer-expression-type target)))]
+        (cond
+          (nil? method)
           (if (and (map? target) (= :create (:type target)))
             (generate-create-expr (assoc target :args args))
-            ;; Calling an expression that returns a function
-            (str target-code ".call" num-args "(" args-code ")"))
-          (if (and (string? target)
-                   (false? has-parens)
-                   (get *class-registry* target)
-                   (some #(= (:name %) method)
-                         (get-accessible-constants-js (get *class-registry* target) *class-registry*)))
-            (str target "." method)
-          ;; Check for this-target with has-parens distinction
-            (if this-target?
-              (if (false? has-parens)
-                ;; this.x (no parens): method -> call, field -> access
-                (if (contains? *all-method-names* method)
-                  (str target-code "." method "()")
-                  (str target-code "." method))
-                ;; this.x() or this.x(args) (with parens or absent)
-                (if (and (not (contains? *all-method-names* method))
-                         (function-type? (get *field-types* method)))
-                  (str target-code "." method ".call" num-args "(" args-code ")")
-                  (str target-code "." method "(" args-code ")")))
-              ;; External object: try builtins, then default
-              (or
-               (when-let [method-fn (get-in builtin-method-mappings [(keyword (infer-expression-type target)) method])]
-                 (method-fn target-code args-code))
-               ;; Try Integer methods first (for operators, numeric is more common)
-               (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
-                 (method-fn target-code args-code))
-               ;; Try Integer64 methods
-               (when-let [method-fn (get-in builtin-method-mappings [:Integer64 method])]
-                 (method-fn target-code args-code))
-               ;; Try Real methods
-               (when-let [method-fn (get-in builtin-method-mappings [:Real method])]
-                 (method-fn target-code args-code))
-               ;; Try Decimal methods
-               (when-let [method-fn (get-in builtin-method-mappings [:Decimal method])]
-                 (method-fn target-code args-code))
-               ;; Try String methods
-               (when-let [method-fn (get-in builtin-method-mappings [:String method])]
-                 (method-fn target-code args-code))
-               ;; Try Array methods
-               (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
-                 (method-fn target-code args-code))
-               ;; Try Map methods
-               (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
-                 (method-fn target-code args-code))
-               ;; Try Set methods
-               (when-let [method-fn (get-in builtin-method-mappings [:Set method])]
-                 (method-fn target-code args-code))
-               ;; Try Image methods
-               (when-let [method-fn (get-in builtin-method-mappings [:Image method])]
-                 (method-fn target-code args-code))
-               ;; Default: regular method call
-               (str target-code "." method "(" args-code ")"))))))
+            (maybe-await call-node (str target-code ".call" num-args "(" args-code ")")))
+
+          (and (string? target)
+               (false? has-parens)
+               (get *class-registry* target)
+               (some #(= (:name %) method)
+                     (get-accessible-constants-js (get *class-registry* target) *class-registry*)))
+          (str target "." method)
+
+          this-target?
+          (if (false? has-parens)
+            (if (contains? *all-method-names* method)
+              (maybe-await call-node (str target-code "." method "()"))
+              (str target-code "." method))
+            (if (and (not (contains? *all-method-names* method))
+                     (function-type? (get *field-types* method)))
+              (maybe-await call-node (str target-code "." method ".call" num-args "(" args-code ")"))
+              (maybe-await call-node (str target-code "." method "(" args-code ")"))))
+
+          :else
+          (or
+           (when-let [method-fn (get-in builtin-method-mappings [builtin-dispatch method])]
+             (method-fn target-code args-code))
+           (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
+             (method-fn target-code args-code))
+           (when-let [method-fn (get-in builtin-method-mappings [:Integer64 method])]
+             (method-fn target-code args-code))
+           (when-let [method-fn (get-in builtin-method-mappings [:Real method])]
+             (method-fn target-code args-code))
+           (when-let [method-fn (get-in builtin-method-mappings [:Decimal method])]
+             (method-fn target-code args-code))
+           (when-let [method-fn (get-in builtin-method-mappings [:String method])]
+             (method-fn target-code args-code))
+           (when-let [method-fn (get-in builtin-method-mappings [:Array method])]
+             (method-fn target-code args-code))
+           (when-let [method-fn (get-in builtin-method-mappings [:Map method])]
+             (method-fn target-code args-code))
+           (when-let [method-fn (get-in builtin-method-mappings [:Set method])]
+             (method-fn target-code args-code))
+           (when-let [method-fn (get-in builtin-method-mappings [:Image method])]
+             (method-fn target-code args-code))
+           (maybe-await call-node (str target-code "." method "(" args-code ")")))))
       ;; No target: class method, function object field, global function, or builtin
       (cond
         ;; Class method (own or inherited)
         (and method (contains? *all-method-names* method))
-        (if (= *this-name* "this")
-          (str "this." method "(" args-code ")")
-          (str *this-name* "." method "(" args-code ")"))
+        (maybe-await call-node
+                     (if (= *this-name* "this")
+                       (str "this." method "(" args-code ")")
+                       (str *this-name* "." method "(" args-code ")")))
 
         ;; Function-typed field: call the function object
         (and method (function-type? (get *field-types* method)))
-        (str "this." method ".call" num-args "(" args-code ")")
+        (maybe-await call-node (str "this." method ".call" num-args "(" args-code ")"))
 
         ;; Global function
         (and method (contains? *function-names* method))
-        (str "NexGlobals." method ".call" num-args "(" args-code ")")
+        (maybe-await call-node (str "NexGlobals." method ".call" num-args "(" args-code ")"))
 
         ;; Expression that returns a function
         (nil? method)
-        (str (generate-expression target) ".call" num-args "(" args-code ")")
+        (maybe-await call-node (str (generate-expression target) ".call" num-args "(" args-code ")"))
 
         ;; Builtin
         :else
@@ -606,6 +757,11 @@
       "Console" "({_type: 'Console'})"
       "File" (str "({_type: 'File', path: " args-code "})")
       "Process" "({_type: 'Process'})"
+      "Channel" (cond
+                  (nil? constructor) "new __nexChannel()"
+                  (= constructor "with_capacity") (str "new __nexChannel(" args-code ")")
+                  :else (throw (ex-info (str "Unsupported built-in Channel constructor: " constructor)
+                                        {:constructor constructor})))
       "Set" (if (= constructor "from_array")
               (str "new Set(" args-code ")")
               "new Set()")
@@ -616,7 +772,7 @@
                 (str "new NexImage(" args-code ")"))
       (if constructor
         ;; Named constructor: static factory method call
-        (str class-name "." constructor "(" args-code ")")
+        (str "await " class-name "." constructor "(" args-code ")")
         ;; Default: new ClassName()
         (str "new " class-name "()")))))
 
@@ -800,6 +956,7 @@
     :set-literal (generate-set-literal (:elements expr))
     :map-literal (generate-map-literal (:entries expr))
     :convert (generate-convert-expr expr)
+    :spawn (generate-spawn-expr expr)
     :anonymous-function (let [class-def (:class-def expr)
                               ;; Extract the callN method definition
                               method-def (first (:members (first (:body class-def))))]
@@ -820,7 +977,9 @@
 (defn generate-assignment
   "Generate JavaScript code for assignment"
   [{:keys [target value]}]
-  (str target " = " (generate-expression value) ";"))
+  (if (and *spawn-result-flag* (= target "result"))
+    (str target " = " (generate-expression value) "; " *spawn-result-flag* " = true;")
+    (str target " = " (generate-expression value) ";")))
 
 (defn generate-let
   "Generate JavaScript code for let (local variable declaration).
@@ -829,9 +988,14 @@
   ([{:keys [name var-type value]} var-names]
    (if (contains? var-names name)
      ;; Variable already declared in outer scope - generate assignment
-     (str name " = " (generate-expression value) ";")
+     (if (and *spawn-result-flag* (= name "result"))
+       (str name " = " (generate-expression value) "; " *spawn-result-flag* " = true;")
+       (str name " = " (generate-expression value) ";"))
      ;; New variable - generate declaration
-     (str "let " name " = " (generate-expression value) ";"))))
+     (let [stmt (str "let " name " = " (generate-expression value) ";")]
+       (if (and *spawn-result-flag* (= name "result"))
+         (str stmt " " *spawn-result-flag* " = true;")
+         stmt)))))
 
 (defn generate-if
   "Generate JavaScript code for if/elseif/else"
@@ -1008,6 +1172,7 @@
    (case (:type stmt)
      :assign (indent level (generate-assignment stmt))
      :call (indent level (str (generate-call-expr stmt) ";"))
+     :spawn (indent level (str (generate-expression stmt) ";"))
      :let (indent level (generate-let stmt var-names))
      :if (generate-if level stmt var-names)
      :case (generate-case level stmt var-names)
@@ -1175,7 +1340,7 @@
         (str/join "\n"
                   (concat
                    (when jsdoc [jsdoc])
-                   [(indent level (str method-name "(" params-code ") {"))]
+                   [(indent level (str "async " method-name "(" params-code ") {"))]
                    result-init
                    convert-decls
                    old-captures
@@ -1261,7 +1426,7 @@
                                  (generate-assertions (+ level 1) *class-invariants* "Class invariant" opts))]
     (str/join "\n"
               (concat
-               [(indent level (str "static " name "(" params-code ") {"))]
+               [(indent level (str "static async " name "(" params-code ") {"))]
                [(indent (+ level 1) (str "let " local-name " = new " class-name "();"))]
                (generate-convert-declarations (+ level 1) convert-bindings)
                preconditions
@@ -1622,6 +1787,84 @@
        "  }\n"
        "  return h;\n"
        "}\n"
+       "function __nexSleep(ms) {\n"
+       "  return new Promise(resolve => setTimeout(resolve, ms));\n"
+       "}\n"
+       "class __nexTask {\n"
+       "  constructor(promise) {\n"
+       "    this._done = false;\n"
+       "    this._promise = Promise.resolve(promise).then(\n"
+       "      value => { this._done = true; return value; },\n"
+       "      err => { this._done = true; throw err; }\n"
+       "    );\n"
+       "  }\n"
+       "  async await() { return await this._promise; }\n"
+       "  is_done() { return this._done; }\n"
+       "}\n"
+       "function __nexSpawn(fn) {\n"
+       "  return new __nexTask(Promise.resolve().then(fn));\n"
+       "}\n"
+       "class __nexChannel {\n"
+       "  constructor(capacity = 0) {\n"
+       "    if (capacity < 0) throw new Error('Channel capacity must be non-negative');\n"
+       "    this._closed = false;\n"
+       "    this._capacity = capacity;\n"
+       "    this._buffer = [];\n"
+       "    this._senders = [];\n"
+       "    this._receivers = [];\n"
+       "  }\n"
+       "  async send(value) {\n"
+       "    if (this._closed) throw new Error('Cannot send on a closed channel');\n"
+       "    if (this._capacity === 0 && this._receivers.length > 0) {\n"
+       "      const recv = this._receivers.shift();\n"
+       "      recv.resolve(value);\n"
+       "      return null;\n"
+       "    }\n"
+       "    if (this._buffer.length < this._capacity) {\n"
+       "      this._buffer.push(value);\n"
+       "      return null;\n"
+       "    }\n"
+       "    return await new Promise((resolve, reject) => {\n"
+       "      this._senders.push({ value, resolve, reject });\n"
+       "    });\n"
+       "  }\n"
+       "  async receive() {\n"
+       "    if (this._buffer.length > 0) {\n"
+       "      const value = this._buffer.shift();\n"
+       "      if (this._capacity > 0 && this._senders.length > 0) {\n"
+       "        const sender = this._senders.shift();\n"
+       "        this._buffer.push(sender.value);\n"
+       "        sender.resolve(null);\n"
+       "      }\n"
+       "      return value;\n"
+       "    }\n"
+       "    if (this._senders.length > 0) {\n"
+       "      const sender = this._senders.shift();\n"
+       "      sender.resolve(null);\n"
+       "      return sender.value;\n"
+       "    }\n"
+       "    if (this._closed) throw new Error('Cannot receive from a closed channel');\n"
+       "    return await new Promise((resolve, reject) => {\n"
+       "      this._receivers.push({ resolve, reject });\n"
+       "    });\n"
+       "  }\n"
+       "  close() {\n"
+       "    if (!this._closed) {\n"
+       "      this._closed = true;\n"
+       "      const error = new Error('Channel is closed');\n"
+       "      for (const sender of this._senders) sender.reject(error);\n"
+       "      if (this._buffer.length === 0) {\n"
+       "        for (const receiver of this._receivers) receiver.reject(error);\n"
+       "        this._receivers = [];\n"
+       "      }\n"
+       "      this._senders = [];\n"
+       "    }\n"
+       "    return null;\n"
+       "  }\n"
+       "  is_closed() { return this._closed; }\n"
+       "  capacity() { return this._capacity; }\n"
+       "  size() { return this._buffer.length; }\n"
+       "}\n"
        "function __nexSetUnion(a, b) {\n"
        "  return new Set([...a, ...b]);\n"
        "}\n"
@@ -1772,8 +2015,10 @@
       (let [top-level-vars (extract-var-names-js statements)
             statement-lines (binding [*local-names* (into *local-names* top-level-vars)]
                               (map #(generate-statement 0 % #{}) statements))]
-        (str (str/join "\n" statement-lines)
-             (when (seq statement-lines) "\n")))
+        (str "(async () => {\n"
+             (indent 1 (str/join "\n" statement-lines))
+             (when (seq statement-lines) "\n")
+             "})();\n"))
       (let [last-class (last classes)
             class-name (:name last-class)
             {:keys [constructors]} (if last-class
@@ -1782,14 +2027,16 @@
             no-arg-ctor (first (filter #(empty? (:params %)) constructors))
             call (cond
                    (and class-name no-arg-ctor)
-                   (str class-name "." (:name no-arg-ctor) "()")
+                   (str "await " class-name "." (:name no-arg-ctor) "()")
                    class-name
                    (str "new " class-name "()")
                    :else
                    "/* no-op */")]
-        (str (when class-name
-               (str "const { " class-name " } = require('./" class-name "');\n"))
-             call ";\n")))))
+        (str "(async () => {\n"
+             (when class-name
+               (indent 1 (str "const { " class-name " } = require('./" class-name "');\n")))
+             (indent 1 (str call ";")) "\n"
+             "})();\n")))))
 
 ;;
 ;; Main Translation Function

@@ -28,7 +28,7 @@ end"
     x: Integer
 end"
           js-code (js/translate nex-code)]
-      (is (str/includes? js-code "static make(x, y)"))
+      (is (str/includes? js-code "static async make(x, y)"))
       (is (str/includes? js-code "this.x")))))
 
 (deftest inheritance-test
@@ -244,6 +244,45 @@ end"
           js-code (js/translate nex-code)]
       (is (str/includes? js-code "__nexSetCursor"))
       (is (str/includes? js-code "_type: 'SetCursor'")))))
+
+(deftest spawn-task-and-channel-generation-test
+  (testing "spawn, Task, and Channel lower to async Promise-based helpers"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let ch: Channel[Integer] := create Channel[Integer]
+      let t: Task[Integer] := spawn do
+        ch.send(42)
+        result := ch.receive
+      end
+      print(t.await)
+      print(t.is_done)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "class __nexTask"))
+      (is (str/includes? js-code "class __nexChannel"))
+      (is (str/includes? js-code "__nexSpawn(async () =>"))
+      (is (str/includes? js-code "let ch = new __nexChannel();"))
+      (is (str/includes? js-code "await ch.send(42)"))
+      (is (str/includes? js-code "result = await ch.receive()"))
+      (is (str/includes? js-code "console.log(await t.await())"))
+      (is (str/includes? js-code "console.log(t.is_done())")))))
+
+(deftest buffered-channel-generation-test
+  (testing "buffered Channel constructors and accessors lower correctly in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
+      print(ch.capacity)
+      print(ch.size)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "new __nexChannel(2)"))
+      (is (str/includes? js-code "console.log(ch.capacity())"))
+      (is (str/includes? js-code "console.log(ch.size())")))))
 
 (deftest integer-bitwise-generation-test
   (testing "Integer bitwise methods translate to JavaScript bitwise operators/helpers"

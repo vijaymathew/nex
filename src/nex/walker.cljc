@@ -1102,6 +1102,11 @@
       :var-name (token-text var-name)
       :target-type (transform-node type-expr)})
 
+   :spawnExpression
+   (fn [[_ _spawn-kw _do-kw block _end-kw]]
+     {:type :spawn
+      :body (transform-node block)})
+
    :oldExpression
    (fn [[_ _old-kw expr]]
      {:type :old

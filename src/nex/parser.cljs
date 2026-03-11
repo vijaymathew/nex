@@ -50,14 +50,14 @@
   (let [antlr (resolve-module antlr4 "antlr4")
         ;; Keep direct JSImport references first so Shadow includes and wires
         ;; these modules for browser runtime.
-        lexer-mod (or (.-__nexlangLexer js/window)
-                      nexlangLexer
+        lexer-mod (or nexlangLexer
+                      (.-__nexlangLexer js/window)
                       (aget (or js/$CLJS #js {}) "module$nex$parser_js$grammar$nexlangLexer")
                       (aget (or js/$CLJS #js {}) "module$nex$parser_js$grammar$nexlangLexer.js")
                       (try-shadow-require "module$nex$parser_js$grammar$nexlangLexer")
                       (try-shadow-require "module$nex$parser_js$grammar$nexlangLexer.js"))
-        parser-mod (or (.-__nexlangParser js/window)
-                       nexlangParser
+        parser-mod (or nexlangParser
+                       (.-__nexlangParser js/window)
                        (aget (or js/$CLJS #js {}) "module$nex$parser_js$grammar$nexlangParser")
                        (aget (or js/$CLJS #js {}) "module$nex$parser_js$grammar$nexlangParser.js")
                        (try-shadow-require "module$nex$parser_js$grammar$nexlangParser")

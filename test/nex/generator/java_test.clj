@@ -240,6 +240,45 @@ end"
       (is (str/includes? java-code "Precondition"))
       (is (str/includes? java-code "Postcondition")))))
 
+(deftest spawn-task-and-channel-generation-test
+  (testing "spawn, Task, and Channel lower to NexRuntime helpers"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let ch: Channel[Integer] := create Channel[Integer]
+      let t: Task[Integer] := spawn do
+        ch.send(42)
+        result := ch.receive
+      end
+      print(t.await)
+      print(t.is_done)
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "public static class Task<T>"))
+      (is (str/includes? java-code "public static class Channel<T>"))
+      (is (str/includes? java-code "NexRuntime.spawnTask(() ->"))
+      (is (str/includes? java-code "new NexRuntime.Channel<Integer>()"))
+      (is (str/includes? java-code "ch.send(42)"))
+      (is (str/includes? java-code "result = ch.receive()"))
+      (is (str/includes? java-code "t.await()"))
+      (is (str/includes? java-code "t.is_done()")))))
+
+(deftest buffered-channel-generation-test
+  (testing "buffered Channel constructors and accessors lower correctly in Java"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
+      print(ch.capacity)
+      print(ch.size)
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "new NexRuntime.Channel<Integer>(2)"))
+      (is (str/includes? java-code "ch.capacity()"))
+      (is (str/includes? java-code "ch.size()")))))
+
 (deftest class-constants-test
   (testing "Class constants generate static finals and child copies inherited public constants"
     (let [nex-code "class Frame

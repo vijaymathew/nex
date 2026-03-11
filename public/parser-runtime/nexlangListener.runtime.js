@@ -357,6 +357,15 @@ class nexlangListener extends antlr4.tree.ParseTreeListener {
 	}
 
 
+	// Enter a parse tree produced by nexlangParser#spawnExpression.
+	enterSpawnExpression(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#spawnExpression.
+	exitSpawnExpression(ctx) {
+	}
+
+
 	// Enter a parse tree produced by nexlangParser#variantClause.
 	enterVariantClause(ctx) {
 	}

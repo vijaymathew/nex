@@ -197,8 +197,7 @@ When compiling to ClojureScript, only `with "javascript"` blocks are included.
 Run ClojureScript tests:
 
 ```bash
-npx shadow-cljs compile test
-node target/test.js
+./test/scripts/run_browser_smoke_tests.sh
 ```
 
 ## Dependencies

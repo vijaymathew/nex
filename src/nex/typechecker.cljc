@@ -30,6 +30,14 @@
   [env name type]
   (swap! (:vars env) assoc name type))
 
+(defn env-set!
+  "Update a variable type in the nearest environment where it is defined."
+  [env name type]
+  (if (contains? @(:vars env) name)
+    (swap! (:vars env) assoc name type)
+    (when-let [parent (:parent env)]
+      (env-set! parent name type))))
+
 (defn env-lookup-method
   "Look up a method signature in the environment"
   [env class-name method-name]
@@ -76,7 +84,7 @@
 
 (def builtin-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Set" "Any" "Void" "Nil" "Console" "File" "Process" "Function"
+    "Array" "Map" "Set" "Task" "Channel" "Any" "Void" "Nil" "Console" "File" "Process" "Function"
     "Cursor" "Window" "Turtle" "Image"})
 
 (defn builtin-type? [type-name]
@@ -621,6 +629,39 @@
     "Boolean"))
 
 (declare check-create)
+(declare check-statement)
+
+(defn- maybe-update-spawn-result!
+  [env value-type]
+  (when (env-lookup-var env "__spawn_result_type__")
+    (let [current (env-lookup-var env "__spawn_result_type__")]
+      (cond
+        (= current "Void")
+        (env-set! env "__spawn_result_type__" value-type)
+
+        (types-compatible? env value-type current)
+        nil
+
+        (types-compatible? env current value-type)
+        (env-set! env "__spawn_result_type__" value-type)
+
+        :else
+        (throw (ex-info "Inconsistent result types in spawn body"
+                        {:error (type-error
+                                 (str "Spawn body assigns incompatible result types: "
+                                      (display-type current) " and " (display-type value-type)))}))))))
+
+(defn check-spawn
+  [env {:keys [body]}]
+  (let [spawn-env (make-type-env env)]
+    (env-add-var spawn-env "result" "Any")
+    (env-add-var spawn-env "__spawn_result_type__" "Void")
+    (doseq [stmt body]
+      (check-statement spawn-env stmt))
+    (let [result-type (env-lookup-var spawn-env "__spawn_result_type__")]
+      (if (= result-type "Void")
+        "Task"
+        {:base-type "Task" :type-params [result-type]}))))
 
 (defn check-call
   "Check the type of a method call"
@@ -760,6 +801,31 @@
     (= class-name "Console") "Console"
     ;; Handle built-in Process type
     (= class-name "Process") "Process"
+    ;; Handle built-in Channel type
+    (= class-name "Channel")
+    (do
+      (cond
+        (nil? constructor)
+        nil
+
+        (= constructor "with_capacity")
+        (do
+          (when-not (= 1 (count args))
+            (throw (ex-info "Channel.with_capacity expects 1 argument"
+                            {:error (type-error "Channel.with_capacity expects exactly 1 Integer argument")})))
+          (let [arg-type (check-expression env (first args))]
+            (when-not (types-compatible? env arg-type "Integer")
+              (throw (ex-info "Channel.with_capacity requires Integer capacity"
+                              {:error (type-error
+                                       (str "Channel.with_capacity expects Integer, got "
+                                            (display-type arg-type)))})))))
+
+        :else
+        (throw (ex-info (str "Constructor not found: Channel." constructor)
+                        {:error (type-error (str "Constructor not found: Channel." constructor))})))
+      (if (seq generic-args)
+        {:base-type "Channel" :type-args generic-args}
+        "Channel"))
     ;; Handle built-in Window type
     (= class-name "Window") "Window"
     ;; Handle built-in Turtle type
@@ -933,6 +999,7 @@
                cons-type)
       :old (check-expression env (:expr expr))
       :convert (check-convert env expr)
+      :spawn (check-spawn env expr)
       :this (or (env-lookup-var env "__current_class__") "Any")
       "Any")
     :else "Any"))
@@ -959,7 +1026,9 @@
       (throw (ex-info (str "Type mismatch in assignment to " target)
                       {:error (type-error
                                (str "Cannot assign " (display-type val-type)
-                                    " to variable of type " (display-type var-type)))})))))
+                                    " to variable of type " (display-type var-type)))})))
+    (when (= target "result")
+      (maybe-update-spawn-result! env val-type))))
 
 (defn check-let
   "Check a let statement"
@@ -979,7 +1048,9 @@
                                (str "Cannot assign " (display-type val-type)
                                     " to variable '" name "' of type "
                                     (display-type inferred-type)))})))
-    (env-add-var env name inferred-type)))
+    (env-add-var env name inferred-type)
+    (when (= name "result")
+      (maybe-update-spawn-result! env inferred-type))))
 
 (defn check-if
   "Check an if statement"
@@ -1037,6 +1108,7 @@
       :let (check-let env stmt)
       :call (check-expression env stmt)
       :convert (check-expression env stmt)
+      :spawn (check-expression env stmt)
       :if (check-if env stmt)
       :loop (check-loop env stmt)
       :scoped-block (do
@@ -1090,6 +1162,7 @@
                (references-result? (:value node)))
       :identifier (or (= (:name node) "result") (= (:name node) "Result"))
       :anonymous-function false ;; Skip anonymous functions, they have their own Result scope
+      :spawn false              ;; Spawn bodies have their own result scope
       ;; Walk all map values for other node types
       (some references-result? (vals node)))
     :else false))
@@ -1445,6 +1518,12 @@
            "read_integer" {:params [] :return-type "Integer"}
            "read_real" {:params [] :return-type "Real"}}]
     (env-add-method env "Console" method-name sig))
+  (env-add-class env "Task" {:name "Task"
+                             :generic-params [{:name "T"}]})
+  (doseq [[method-name sig]
+          {"await"   {:params [] :return-type "T"}
+           "is_done" {:params [] :return-type "Boolean"}}]
+    (env-add-method env "Task" method-name sig))
   (doseq [[method-name sig]
           {"read" {:params [] :return-type "String"}
            "write" {:params [{:name "content" :type "String"}] :return-type "Void"}
@@ -1574,6 +1653,18 @@
            "is_empty"             {:params [] :return-type "Boolean"}
            "cursor"               {:params [] :return-type "Cursor"}}]
     (env-add-method env "Set" method-name sig))
+
+  ;; Register Channel[T] class and methods
+  (env-add-class env "Channel" {:name "Channel"
+                                :generic-params [{:name "T"}]})
+  (doseq [[method-name sig]
+          {"send"      {:params [{:name "value" :type "T"}] :return-type "Void"}
+           "receive"   {:params [] :return-type "T"}
+           "close"     {:params [] :return-type "Void"}
+           "is_closed" {:params [] :return-type "Boolean"}
+           "capacity"  {:params [] :return-type "Integer"}
+           "size"      {:params [] :return-type "Integer"}}]
+    (env-add-method env "Channel" method-name sig))
 
   ;; Built-in Function methods: call0..call32
   (doseq [n (range 0 33)]

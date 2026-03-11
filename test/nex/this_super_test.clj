@@ -275,7 +275,7 @@ end"
       (is (str/includes? js-code "b.x = x;"))
       (is (str/includes? js-code "b.y = y;"))
       ;; Constructor is a static factory method
-      (is (str/includes? js-code "static make("))
+      (is (str/includes? js-code "static async make("))
       (is (str/includes? js-code "let b = new B();"))
       (is (str/includes? js-code "return b;")))))
 
@@ -295,7 +295,7 @@ end"
   (testing "create A.make(10) generates A.make(10) in JS"
     (let [expr {:type :create :class-name "A" :generic-args nil
                 :constructor "make" :args [{:type :integer :value 10}]}]
-      (is (= "A.make(10)" (js-gen/generate-create-expr expr)))))
+    (is (= "await A.make(10)" (js-gen/generate-create-expr expr)))))
   (testing "create A generates new A() in JS"
     (let [expr {:type :create :class-name "A" :generic-args nil
                 :constructor nil :args []}]

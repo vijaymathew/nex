@@ -193,6 +193,59 @@ print(m.get("name"))
 
 Array and map literals are expressions, so they can be nested.
 
+### 7.3 Sets
+
+```nex
+let ids: Set[Integer] := #{1, 2, 3}
+print(ids.contains(2))
+print(ids.union(#{4}))
+```
+
+An empty set uses `#{}`:
+
+```nex
+let empty_ids: Set[Integer] := #{}
+```
+
+### 7.4 Tasks and Channels
+
+`spawn` starts a lightweight concurrent task:
+
+```nex
+let t: Task[Integer] := spawn do
+  result := 40 + 2
+end
+
+print(t.await)
+```
+
+If a task does not produce a value, use plain `Task`:
+
+```nex
+let t: Task := spawn do
+  print("working")
+end
+
+t.await
+```
+
+Channels let tasks exchange values safely:
+
+```nex
+let ch: Channel[Integer] := create Channel[Integer]
+
+spawn do
+  ch.send(42)
+end
+
+print(ch.receive)
+ch.close
+```
+
+Current channel semantics are unbuffered: `send` and `receive` rendezvous, so each side waits for the other.
+
+On the JavaScript target, the source syntax is unchanged, but generated code uses async/await under the hood. That means `spawn`, `Task.await`, `Channel.send`, and `Channel.receive` are lowered to Promise-based operations in generated JavaScript.
+
 ## 8. Classes and Objects
 
 A class groups fields and methods.

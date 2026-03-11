@@ -69,10 +69,13 @@ When you encounter an error you do not understand, resist the impulse to change 
 
 ## Acknowledgments
 
-Nex stands on the shoulders of Bertrand Meyer's work on Eiffel and Design by Contract — one of the most consequential ideas in the history of programming language design. The intellectual debt is large and gladly acknowledged.
+Nex stands on the shoulders of Bertrand Meyer's work on Eiffel and Design by Contract — one of the most consequential ideas in the history of programming language design. The `create`/`feature` class structure, named constructors, and the `require`/`ensure`/`invariant` contract system all trace their lineage directly to Eiffel. The intellectual debt is large and gladly acknowledged.
+
+Nex also draws on two other languages whose influence runs deep. From Scheme comes the commitment to simplicity in language design and the value of exploratory programming at a REPL — the belief that a language should be small enough to hold in your head and expressive enough to let you think freely. From Go comes the model of concurrency: goroutines and channels rather than threads and locks, a design that makes concurrent programs easier to reason about and easier to get right.
+
+The combination is deliberate. Eiffel's discipline, Scheme's clarity, Go's pragmatic concurrency model — Nex is an attempt to bring these three influences into a single coherent language that is both teachable and usable.
 
 The structure of this book owes much to Kernighan and Ritchie's *The C Programming Language*, which remains the clearest demonstration that a programming book can be complete without being long, and precise without being inaccessible.
-
 
 
 *The REPL is waiting. Type something.*

@@ -196,6 +196,10 @@ retryStatement
     : RETRY
     ;
 
+spawnExpression
+    : SPAWN DO block END
+    ;
+
 variantClause
     : VARIANT expression
     ;
@@ -286,6 +290,7 @@ subscript
 
 primary
     : literal
+    | spawnExpression
     | createExpression
     | convertExpression
     | anonymousFunction
@@ -417,6 +422,7 @@ NOTE         : 'note';
 WITH         : 'with';
 CONVERT      : 'convert';
 TO           : 'to';
+SPAWN        : 'spawn';
 RAISE        : 'raise';
 RESCUE       : 'rescue';
 RETRY        : 'retry';
