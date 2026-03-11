@@ -123,6 +123,25 @@ end"
           output (execute-method-output code)]
       (is (= ["nil" "true" "true"] output)))))
 
+(deftest await-any-and-await-all-runtime
+  (testing "await_any returns the first completed task result and await_all collects all results"
+    (let [code "class Test
+  feature
+    demo() do
+      let slow: Task[Integer] := spawn do
+        sleep(10)
+        result := 10
+      end
+      let fast: Task[Integer] := spawn do
+        result := 20
+      end
+      print(await_any([slow, fast]))
+      print(await_all([slow, fast]))
+    end
+end"
+          output (execute-method-output code)]
+      (is (= ["20" "[10, 20]"] output)))))
+
 (deftest channel-close-prevents-further-receive
   (testing "receiving from a closed empty channel fails"
     (let [code "class Test
@@ -201,3 +220,22 @@ end"
 end"
           output (execute-method-output code)]
       (is (= ["nil" "false" "\"timeout\""] output)))))
+
+(deftest task-select-runtime
+  (testing "select can probe task completion as well as channel readiness"
+    (let [code "class Test
+  feature
+    demo() do
+      let t: Task[Integer] := spawn do
+        result := 42
+      end
+      select
+        when t.await as value then
+          print(value)
+        timeout 50 then
+          print(\"timeout\")
+      end
+    end
+end"
+          output (execute-method-output code)]
+      (is (= ["42"] output)))))

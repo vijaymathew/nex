@@ -118,12 +118,13 @@
     "when" "from" "until" "invariant" "variant" "require" "ensure"
     "let" "as" "and" "or" "not" "fn" "deferred" "convert" "to"
     "old" "create" "private" "note" "with" "import" "intern" "function"
-    "raise" "rescue" "retry" "repeat" "across" "case" "of")
+    "raise" "rescue" "retry" "repeat" "across" "case" "of"
+    "spawn" "select" "timeout")
   "Nex language keywords.")
 
 (defconst nex-types
   '("Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Any" "Void" "Function" "Cursor")
+    "Array" "Map" "Set" "Task" "Channel" "Any" "Void" "Function" "Cursor")
   "Nex built-in types.")
 
 (defconst nex-constants
@@ -131,7 +132,8 @@
   "Nex language constants.")
 
 (defconst nex-builtins
-  '("print" "println" "result" "exception")
+  '("print" "println" "result" "exception" "sleep"
+    "type_of" "type_is" "await_any" "await_all")
   "Nex built-in functions and special variables.")
 
 (defvar nex-font-lock-keywords
@@ -166,8 +168,8 @@
     ;; Variables after "let"
     ("\\<let\\s-+\\([a-z_][a-z0-9_]*\\)" 1 font-lock-variable-name-face)
 
-    ;; Parameterized types (e.g., Array [String], Map [K, V])
-    ("\\<\\(Array\\|Map\\)\\s-*\\[" 1 font-lock-type-face)
+    ;; Parameterized types (e.g., Array[String], Map[K, V], Task[Integer])
+    ("\\<\\(Array\\|Map\\|Set\\|Task\\|Channel\\)\\s-*\\[" 1 font-lock-type-face)
 
     ;; Generic constraints (arrow operator ->)
     ("->" . font-lock-keyword-face)
@@ -244,7 +246,7 @@
      (looking-back
       (regexp-opt '("class" "do" "then" "else" "elseif" "require" "ensure"
                     "from" "until" "inherit" "invariant" "variant"
-                    "rescue" "of")
+                    "rescue" "of" "select" "when" "timeout")
                   'words)
       (line-beginning-position))
      ;; Section keywords that contain items (feature, create)
@@ -279,8 +281,8 @@
     (beginning-of-line)
     (skip-chars-forward " \t")
     (or
-     ;; 'end', 'else', and 'rescue' close blocks
-     (looking-at (regexp-opt '("end" "else" "elseif" "rescue") 'words))
+     ;; 'end', 'else', 'elseif', 'rescue', 'when', and 'timeout' close/open siblings
+     (looking-at (regexp-opt '("end" "else" "elseif" "rescue" "when" "timeout") 'words))
      ;; 'do' aligns with require/ensure if inside contract block
      (and (looking-at "\\bdo\\b")
           (nex-in-contract-block-p)))))

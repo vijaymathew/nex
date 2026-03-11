@@ -795,6 +795,54 @@
         (check-expression env (second args))
         "Boolean")
 
+      (= method "await_all")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "await_all expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "await_all expects 1 argument, got " (count args)))})))
+        (let [tasks-type (normalize-type (check-expression env (first args)))
+              task-type (when (map? tasks-type)
+                          (let [base-type (:base-type tasks-type)
+                                type-args (or (:type-params tasks-type) (:type-args tasks-type))]
+                            (when (= base-type "Array")
+                              (first type-args))))]
+          (when-not (and task-type
+                         (= (if (map? (attachable-type task-type))
+                              (:base-type (attachable-type task-type))
+                              (attachable-type task-type))
+                            "Task"))
+            (throw (ex-info "await_all expects Array[Task[T]]"
+                            {:error (type-error
+                                     (str "await_all expects Array[Task[T]], got "
+                                          (display-type tasks-type)))})))
+          {:base-type "Array"
+           :type-params [(or (first (or (:type-params task-type) (:type-args task-type))) "Any")]}))
+
+      (= method "await_any")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "await_any expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "await_any expects 1 argument, got " (count args)))})))
+        (let [tasks-type (normalize-type (check-expression env (first args)))
+              task-type (when (map? tasks-type)
+                          (let [base-type (:base-type tasks-type)
+                                type-args (or (:type-params tasks-type) (:type-args tasks-type))]
+                            (when (= base-type "Array")
+                              (first type-args))))]
+          (when-not (and task-type
+                         (= (if (map? (attachable-type task-type))
+                              (:base-type (attachable-type task-type))
+                              (attachable-type task-type))
+                            "Task"))
+            (throw (ex-info "await_any expects Array[Task[T]]"
+                            {:error (type-error
+                                     (str "await_any expects Array[Task[T]], got "
+                                          (display-type tasks-type)))})))
+          (or (first (or (:type-params task-type) (:type-args task-type)))
+              "Any")))
+
       :else
       (if-let [var-type (env-lookup-var env method)]
       (let [base-type (if (map? var-type) (:base-type var-type) var-type)
@@ -1152,19 +1200,30 @@
 (defn- check-select-clause
   [env {:keys [expr alias body]}]
   (let [{:keys [target method args]} (or (select-clause-op expr)
-                                         (throw (ex-info "select clause must be a channel operation"
-                                                         {:error (type-error "select clause must be a channel send/receive call")})))
+                                         (throw (ex-info "select clause must be a channel or task operation"
+                                                         {:error (type-error "select clause must be a channel send/receive call or task await call")})))
         target-type (check-expression env target)
         normalized-target (normalize-type target-type)
         base-type (if (map? normalized-target) (:base-type normalized-target) normalized-target)
         type-args (when (map? normalized-target)
                     (or (:type-params normalized-target) (:type-args normalized-target)))]
-    (when-not (= base-type "Channel")
-      (throw (ex-info "select clause target must be a Channel"
-                      {:error (type-error
-                               (str "select clause target must be Channel, got "
-                                    (display-type normalized-target)))})))
-    (case method
+    (case base-type
+      "Task"
+      (do
+        (when-not (= method "await")
+          (throw (ex-info "select task clauses support only Task.await"
+                          {:error (type-error "select task clauses support only Task.await")})))
+        (when (seq args)
+          (throw (ex-info "Task.await in select takes no arguments"
+                          {:error (type-error "Task.await in select takes no arguments")})))
+        (let [body-env (make-type-env env)]
+          (when alias
+            (env-add-var body-env alias (or (first type-args) "Any")))
+          (doseq [stmt body]
+            (check-statement body-env stmt))))
+
+      "Channel"
+      (case method
       ("receive" "try_receive")
       (do
         (cond
@@ -1223,9 +1282,14 @@
             (doseq [stmt body]
               (check-statement body-env stmt)))))
 
-      (throw (ex-info "select clauses support only Channel send/receive operations"
+      (throw (ex-info "select clauses support only Channel send/receive or Task.await operations"
                       {:error (type-error
-                               "select clauses support only send, try_send, receive, and try_receive")})))))
+                               "select clauses support only send, try_send, receive, try_receive, and Task.await")})))
+
+      (throw (ex-info "select clause target must be a Channel or Task"
+                      {:error (type-error
+                               (str "select clause target must be Channel or Task, got "
+                                    (display-type normalized-target)))})))))
 
 (defn check-select
   [env {:keys [clauses else timeout]}]

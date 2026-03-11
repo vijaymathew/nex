@@ -28,14 +28,29 @@
   (should nex-keywords)
   (should (member "class" nex-keywords))
   (should (member "feature" nex-keywords))
-  (should (member "require" nex-keywords)))
+  (should (member "require" nex-keywords))
+  (should (member "spawn" nex-keywords))
+  (should (member "select" nex-keywords))
+  (should (member "timeout" nex-keywords)))
 
 (ert-deftest nex-types-defined ()
   "Test that types are defined."
   (should nex-types)
   (should (member "Integer" nex-types))
   (should (member "String" nex-types))
-  (should (member "Boolean" nex-types)))
+  (should (member "Boolean" nex-types))
+  (should (member "Set" nex-types))
+  (should (member "Task" nex-types))
+  (should (member "Channel" nex-types)))
+
+(ert-deftest nex-builtins-defined ()
+  "Test that built-in helpers are defined."
+  (should nex-builtins)
+  (should (member "await_any" nex-builtins))
+  (should (member "await_all" nex-builtins))
+  (should (member "type_of" nex-builtins))
+  (should (member "type_is" nex-builtins))
+  (should (member "sleep" nex-builtins)))
 
 (ert-deftest nex-font-lock-keywords-defined ()
   "Test that font-lock keywords are defined."

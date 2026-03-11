@@ -211,6 +211,8 @@ Task operations:
 - `cancel` requests task cancellation and returns `true` if the task was cancelled before finishing
 - `is_done` reports whether the task has finished
 - `is_cancelled` reports whether the task was cancelled
+- `await_any([t1, t2, ...])` waits for the first task to finish and returns its result
+- `await_all([t1, t2, ...])` waits for all tasks and returns an array of results
 
 Use `Channel[T]` to communicate between tasks:
 
@@ -246,12 +248,14 @@ Channel operations:
 - `close` prevents future sends; buffered values may still be received
 - `is_closed`, `size`, and `capacity` report channel state
 
-Use `select` to wait on multiple channel operations:
+Use `select` to wait on multiple channel operations or completed tasks:
 
 ```nex
 select
   when jobs.receive as job then
     print(job)
+  when worker.await as value then
+    print(value)
   when control.receive as signal then
     print(signal)
   timeout 1000 then
@@ -261,7 +265,7 @@ select
 end
 ```
 
-`select` probes its clauses using `try_send` / `try_receive`. If no clause is ready and there is no `else`, it waits until one becomes ready.
+`select` probes its clauses using `try_send` / `try_receive` for channels and `is_done` for tasks. Task clauses must use `Task.await`; they fire only when the task has already completed. If no clause is ready and there is no `else`, `select` waits until one becomes ready.
 
 JavaScript target note:
 - generated JavaScript uses Promise-based semantics

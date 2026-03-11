@@ -331,6 +331,33 @@ end"
       (is (str/includes? java-code "ch.receive(5)"))
       (is (str/includes? java-code "long __selectDeadline = System.currentTimeMillis() + 5;")))))
 
+(deftest await-any-all-and-task-select-generation-test
+  (testing "await_any/await_all and task-aware select lower correctly in Java"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let t1: Task[Integer] := spawn do
+        result := 1
+      end
+      let t2: Task[Integer] := spawn do
+        result := 2
+      end
+      print(await_any([t1, t2]))
+      print(await_all([t1, t2]))
+      select
+        when t1.await as value then
+          print(value)
+        else
+          print(\"none\")
+      end
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "NexRuntime.awaitAny("))
+      (is (str/includes? java-code "NexRuntime.awaitAll("))
+      (is (str/includes? java-code "if (t1.is_done()) {"))
+      (is (str/includes? java-code "t1.await();")))))
+
 (deftest class-constants-test
   (testing "Class constants generate static finals and child copies inherited public constants"
     (let [nex-code "class Frame

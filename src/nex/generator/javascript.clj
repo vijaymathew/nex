@@ -244,8 +244,25 @@
                                 (infer-expression-type (:target expr)))
                   normalized-target (builtin-dispatch-type target-type)
                   type-args (when (map? target-type)
-                              (or (:type-args target-type) (:type-params target-type)))]
-              (case normalized-target
+                              (or (:type-args target-type) (:type-params target-type)))
+                  first-arg-type (when-let [arg (first (:args expr))]
+                                   (infer-expression-type arg))
+                  first-arg-params (when (map? first-arg-type)
+                                     (or (:type-args first-arg-type) (:type-params first-arg-type)))
+                  nested-task-type (when (and (map? first-arg-type)
+                                              (= (:base-type first-arg-type) "Array"))
+                                     (first first-arg-params))
+                  nested-task-params (when (map? nested-task-type)
+                                       (or (:type-args nested-task-type) (:type-params nested-task-type)))]
+              (if (nil? (:target expr))
+                (case (:method expr)
+                  "await_any" (or (first nested-task-params) "Any")
+                  "await_all" {:base-type "Array" :type-params [(or (first nested-task-params) "Any")]}
+                  "type_of" "String"
+                  "type_is" "Boolean"
+                  "sleep" "Void"
+                  "Any")
+                (case normalized-target
                 "Task" (case (:method expr)
                          "await" (if (seq (:args expr))
                                    {:base-type (or (first type-args) "Any") :detachable true}
@@ -286,7 +303,7 @@
                            "contains" "Boolean"
                            ("substring" "to_upper" "to_lower" "trim" "replace") "String"
                            "Any")
-                "Any"))
+                "Any")))
       :array-literal "Array"
       :map-literal "Map"
       :set-literal "Set"
@@ -393,6 +410,8 @@
     "type_of" (str "__nexTypeOf(" args-code ")")
     "type_is" (str "__nexTypeIs(" args-code ")")
     "sleep" (str "await __nexSleep(" args-code ")")
+    "await_any" (str "await __nexAwaitAny(" args-code ")")
+    "await_all" (str "await __nexAwaitAll(" args-code ")")
     ;; Default: use as-is (regular method call)
     (str method "(" args-code ")")))
 
@@ -1189,8 +1208,8 @@
         body-var-names (cond-> var-names (:alias clause) (conj (:alias clause)))
         body-code (str/join "\n" (map #(generate-statement (+ level 3) % body-var-names) (:body clause)))
         temp-name (str "__selectValue" idx)]
-    (case method
-      "receive"
+    (cond
+      (= method "receive")
       (str/join "\n"
                 (concat
                  [(indent (+ level 2) "{")
@@ -1203,7 +1222,7 @@
                   (indent (+ level 3) "}")
                   (indent (+ level 2) "}")]))
 
-      "try_receive"
+      (= method "try_receive")
       (str/join "\n"
                 (concat
                  [(indent (+ level 2) "{")
@@ -1216,20 +1235,34 @@
                   (indent (+ level 3) "}")
                   (indent (+ level 2) "}")]))
 
-      "send"
+      (= method "send")
       (str/join "\n"
                 [(indent (+ level 2) (str "if (" target-code ".try_send(" arg-code ")) {"))
                  body-code
                  (indent (+ level 3) "break;")
                  (indent (+ level 2) "}")])
 
-      "try_send"
+      (= method "try_send")
       (str/join "\n"
                 [(indent (+ level 2) (str "if (" target-code ".try_send(" arg-code ")) {"))
                  body-code
                  (indent (+ level 3) "break;")
                  (indent (+ level 2) "}")])
 
+      (= method "await")
+      (str/join "\n"
+                (concat
+                 [(indent (+ level 2) (str "if (" target-code ".is_done()) {"))]
+                 (when (:alias clause)
+                   [(indent (+ level 3) (str "const " temp-name " = await " target-code ".await();"))
+                    (indent (+ level 3) (str "let " (:alias clause) " = " temp-name ";"))])
+                 (when-not (:alias clause)
+                   [(indent (+ level 3) (str "await " target-code ".await();"))])
+                 [body-code
+                  (indent (+ level 3) "break;")
+                  (indent (+ level 2) "}")]))
+
+      :else
       (indent (+ level 2) "/* Unsupported select clause */"))))
 
 (defn generate-select
@@ -1918,6 +1951,15 @@
        "}\n"
        "function __nexSpawn(fn) {\n"
        "  return new __nexTask(Promise.resolve().then(fn));\n"
+       "}\n"
+       "async function __nexAwaitAll(tasks) {\n"
+       "  const results = [];\n"
+       "  for (const task of tasks) results.push(await task.await());\n"
+       "  return results;\n"
+       "}\n"
+       "async function __nexAwaitAny(tasks) {\n"
+       "  if (tasks.length === 0) throw new Error('await_any requires at least one task');\n"
+       "  return await Promise.race(tasks.map(task => task.await()));\n"
        "}\n"
        "class __nexChannel {\n"
        "  constructor(capacity = 0) {\n"

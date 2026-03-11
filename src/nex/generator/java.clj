@@ -240,6 +240,8 @@
     "type_of" (str "NexRuntime.typeOf(" args-code ")")
     "type_is" (str "NexRuntime.typeIs(" args-code ")")
     "sleep" (str "NexRuntime.sleep(" args-code ")")
+    "await_any" (str "NexRuntime.awaitAny(" args-code ")")
+    "await_all" (str "NexRuntime.awaitAll(" args-code ")")
     ;; Default: use as-is (regular method call)
     (str method "(" args-code ")")))
 
@@ -529,8 +531,25 @@
                                 (infer-expression-type (:target expr)))
                   normalized-target (builtin-dispatch-type target-type)
                   type-args (when (map? target-type)
-                              (or (:type-args target-type) (:type-params target-type)))]
-              (case normalized-target
+                              (or (:type-args target-type) (:type-params target-type)))
+                  first-arg-type (when-let [arg (first (:args expr))]
+                                   (infer-expression-type arg))
+                  first-arg-params (when (map? first-arg-type)
+                                     (or (:type-args first-arg-type) (:type-params first-arg-type)))
+                  nested-task-type (when (and (map? first-arg-type)
+                                              (= (:base-type first-arg-type) "Array"))
+                                     (first first-arg-params))
+                  nested-task-params (when (map? nested-task-type)
+                                       (or (:type-args nested-task-type) (:type-params nested-task-type)))]
+              (if (nil? (:target expr))
+                (case (:method expr)
+                  "await_any" (or (first nested-task-params) "Any")
+                  "await_all" {:base-type "Array" :type-params [(or (first nested-task-params) "Any")]}
+                  "type_of" "String"
+                  "type_is" "Boolean"
+                  "sleep" "Void"
+                  "Any")
+                (case normalized-target
                 "Task" (case (:method expr)
                          "await" (if (seq (:args expr))
                                    {:base-type (or (first type-args) "Any") :detachable true}
@@ -571,7 +590,7 @@
                            "contains" "Boolean"
                            ("substring" "to_upper" "to_lower" "trim" "replace") "String"
                            "Any")
-                "Any"))
+                "Any")))
       :array-literal "Array"
       :map-literal "Map"
       :set-literal "Set"
@@ -1258,8 +1277,11 @@
   [expr]
   (let [target-type (infer-expression-type (:target expr))
         type-args (when (map? target-type)
-                    (or (:type-args target-type) (:type-params target-type)))]
-    (nex-type-to-java-boxed (or (first type-args) "Any"))))
+                    (or (:type-args target-type) (:type-params target-type)))
+        elem-type (if (= (builtin-dispatch-type target-type) "Task")
+                    (or (first type-args) "Any")
+                    (or (first type-args) "Any"))]
+    (nex-type-to-java-boxed elem-type)))
 
 (defn- generate-select-clause-java
   [level clause var-names idx]
@@ -1269,8 +1291,8 @@
         body-var-names (cond-> var-names (:alias clause) (conj (:alias clause)))
         body-code (str/join "\n" (map #(generate-statement (+ level 3) % body-var-names) (:body clause)))
         temp-name (str "__select_value_" idx)]
-    (case method
-      "receive"
+    (cond
+      (= method "receive")
       (let [temp-type (select-alias-java-type (:expr clause))
             alias-lines (when (:alias clause)
                           [(indent (+ level 3) (str temp-type " " (:alias clause) " = " temp-name ";"))])]
@@ -1285,7 +1307,7 @@
                     (indent (+ level 3) "}")
                     (indent (+ level 2) "}")])))
 
-      "try_receive"
+      (= method "try_receive")
       (let [temp-type (select-alias-java-type (:expr clause))
             alias-lines (when (:alias clause)
                           [(indent (+ level 3) (str temp-type " " (:alias clause) " = " temp-name ";"))])]
@@ -1300,20 +1322,37 @@
                     (indent (+ level 3) "}")
                     (indent (+ level 2) "}")])))
 
-      "send"
+      (= method "send")
       (str/join "\n"
                 [(indent (+ level 2) (str "if (" target-code ".try_send(" arg-code ")) {"))
                  body-code
                  (indent (+ level 3) "break;")
                  (indent (+ level 2) "}")])
 
-      "try_send"
+      (= method "try_send")
       (str/join "\n"
                 [(indent (+ level 2) (str "if (" target-code ".try_send(" arg-code ")) {"))
                  body-code
                  (indent (+ level 3) "break;")
                  (indent (+ level 2) "}")])
 
+      (= method "await")
+      (let [temp-type (select-alias-java-type (:expr clause))
+            alias-lines (when (:alias clause)
+                          [(indent (+ level 3) (str temp-type " " (:alias clause) " = " temp-name ";"))])]
+        (str/join "\n"
+                  (concat
+                   [(indent (+ level 2) (str "if (" target-code ".is_done()) {"))]
+                   (when (:alias clause)
+                     [(indent (+ level 3) (str temp-type " " temp-name " = " target-code ".await();"))])
+                   (when-not (:alias clause)
+                     [(indent (+ level 3) (str target-code ".await();"))])
+                   alias-lines
+                   [body-code
+                    (indent (+ level 3) "break;")
+                    (indent (+ level 2) "}")])))
+
+      :else
       (indent (+ level 2) "/* Unsupported select clause */"))))
 
 (defn generate-select
@@ -2499,6 +2538,29 @@ public class NexTurtle {
        "  }\n\n"
        "  public static <T> Task<T> spawnTask(java.util.function.Supplier<T> supplier) {\n"
        "    return new Task<>(java.util.concurrent.CompletableFuture.supplyAsync(supplier, TASK_EXECUTOR));\n"
+       "  }\n\n"
+       "  public static <T> java.util.ArrayList<T> awaitAll(java.util.List<Task<T>> tasks) {\n"
+       "    java.util.ArrayList<T> results = new java.util.ArrayList<>();\n"
+       "    for (Task<T> task : tasks) {\n"
+       "      results.add(task.await());\n"
+       "    }\n"
+       "    return results;\n"
+       "  }\n\n"
+       "  public static <T> T awaitAny(java.util.List<Task<T>> tasks) {\n"
+       "    if (tasks.isEmpty()) throw new RuntimeException(\"await_any requires at least one task\");\n"
+       "    while (true) {\n"
+       "      for (Task<T> task : tasks) {\n"
+       "        if (task.is_done()) {\n"
+       "          return task.await();\n"
+       "        }\n"
+       "      }\n"
+       "      try {\n"
+       "        Thread.sleep(1);\n"
+       "      } catch (InterruptedException e) {\n"
+       "        Thread.currentThread().interrupt();\n"
+       "        throw new RuntimeException(e);\n"
+       "      }\n"
+       "    }\n"
        "  }\n\n"
        "  public static class Channel<T> {\n"
        "    private static final class PendingSend<T> {\n"

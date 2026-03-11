@@ -20,6 +20,12 @@
 (defn- task-cancelled? [task]
   ((deref (var interp/task-cancelled?)) task))
 
+(defn- await-any-task [tasks]
+  ((deref (var interp/await-any-task)) tasks))
+
+(defn- await-all-tasks [tasks]
+  ((deref (var interp/await-all-tasks)) tasks))
+
 (defn- channel-send
   ([ch value] ((deref (var interp/channel-send)) ch value))
   ([ch value timeout-ms] ((deref (var interp/channel-send)) ch value timeout-ms)))
@@ -96,3 +102,21 @@
            (is (nil? awaited))
            (is (true? cancelled))
            (is (true? is-cancelled))))))))
+
+(deftest browser-await-any-all-smoke-test
+  (async done
+    (testing "browser task helpers support await_any and await_all semantics"
+      (let [slow (make-task (js/Promise. (fn [resolve _reject]
+                                           (js/setTimeout #(resolve 10) 10))))
+            fast (make-task (js/Promise.resolve 20))]
+        (settle!
+         (.then (await-any-task [slow fast])
+                (fn [first-result]
+                  (.then (await-all-tasks [slow fast])
+                         (fn [all-results]
+                           {:first-result first-result
+                            :all-results all-results}))))
+         done
+         (fn [{:keys [first-result all-results]}]
+           (is (= 20 first-result))
+           (is (= [10 20] all-results))))))))

@@ -283,7 +283,7 @@ end")
       (is (re-find #"try \{" java))
       (is (re-find #"catch \(Exception _nex_e\)" java))
       (is (re-find #"throw _nex_e;" java))
-      (is (not (re-find #"while \(true\)" java))))))
+      (is (not (re-find #"continue;" java))))))
 
 ;; ===== JavaScript Generator Tests =====
 

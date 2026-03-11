@@ -336,6 +336,33 @@ end"
       (is (str/includes? js-code "await ch.receive(5)"))
       (is (str/includes? js-code "const __selectDeadline = Date.now() + 5;")))))
 
+(deftest await-any-all-and-task-select-generation-test
+  (testing "await_any/await_all and task-aware select lower correctly in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let t1: Task[Integer] := spawn do
+        result := 1
+      end
+      let t2: Task[Integer] := spawn do
+        result := 2
+      end
+      print(await_any([t1, t2]))
+      print(await_all([t1, t2]))
+      select
+        when t1.await as value then
+          print(value)
+        else
+          print(\"none\")
+      end
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "await __nexAwaitAny("))
+      (is (str/includes? js-code "await __nexAwaitAll("))
+      (is (str/includes? js-code "if (t1.is_done()) {"))
+      (is (str/includes? js-code "await t1.await();")))))
+
 (deftest integer-bitwise-generation-test
   (testing "Integer bitwise methods translate to JavaScript bitwise operators/helpers"
     (let [nex-code "class Test

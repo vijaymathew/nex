@@ -689,6 +689,45 @@
              identity))))
 
 #?(:clj
+   (defn- task-done? [task]
+     (.isDone ^CompletableFuture (:future task))))
+
+#?(:cljs
+   (defn- task-done? [task]
+     @(:done? task)))
+
+#?(:clj
+   (defn- await-all-tasks
+     [tasks]
+     (nex-array-from (map task-await tasks))))
+
+#?(:cljs
+   (defn- await-all-tasks
+     [tasks]
+     (.then (promise-all (map task-await tasks))
+            (fn [results]
+              (nex-array-from results)))))
+
+#?(:clj
+   (defn- await-any-task
+     [tasks]
+     (when (empty? tasks)
+       (throw (ex-info "await_any requires at least one task" {})))
+     (loop []
+       (if-let [ready-task (some #(when (task-done? %) %) tasks)]
+         (task-await ready-task)
+         (do
+           (Thread/sleep 1)
+           (recur))))))
+
+#?(:cljs
+   (defn- await-any-task
+     [tasks]
+     (when (empty? tasks)
+       (throw (ex-info "await_any requires at least one task" {})))
+     (.race js/Promise (to-array (map task-await tasks)))))
+
+#?(:clj
    (defn- task-cancel [task]
      (.cancel ^CompletableFuture (:future task) true)))
 
@@ -1121,6 +1160,12 @@
 (defn- attempt-select-clause
   [{:keys [method target args] :as prepared}]
   (cond
+    (and (= (:nex-builtin-type target) :Task)
+         (= method "await"))
+    (when (task-done? target)
+      {:selected? true
+       :value (task-await target)})
+
     (#{"receive" "try_receive"} method)
     (let [value (channel-try-receive target)]
       (when (some? value)
@@ -1135,7 +1180,18 @@
 #?(:cljs
    (defn- attempt-select-clause-async
      [prepared]
-     (js/Promise.resolve (attempt-select-clause prepared))))
+     (let [{:keys [method target]} prepared]
+       (cond
+         (and (= (:nex-builtin-type target) :Task)
+              (= method "await"))
+         (if (task-done? target)
+           (.then (task-await target)
+                  (fn [value]
+                    {:selected? true :value value}))
+           (js/Promise.resolve nil))
+
+         :else
+         (js/Promise.resolve (attempt-select-clause prepared))))))
 
 (defn- sleep-select-step! []
   #?(:clj (Thread/sleep 1)
@@ -1541,6 +1597,36 @@
                        {:function "type_is" :expected 2 :actual (count args)})))
      (let [[target-type value] args]
        (runtime-type-is? ctx target-type value)))
+
+   "await_all"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "await_all expects exactly 1 argument"
+                       {:function "await_all" :expected 1 :actual (count args)})))
+     (let [tasks (first args)]
+       (when-not (nex-array? tasks)
+         (throw (ex-info "await_all requires an array of tasks"
+                         {:function "await_all" :actual-type (runtime-type-name tasks)})))
+       (doseq [task tasks]
+         (when-not (= (:nex-builtin-type task) :Task)
+           (throw (ex-info "await_all requires an array of tasks"
+                           {:function "await_all" :actual-type (runtime-type-name task)}))))
+       (await-all-tasks tasks)))
+
+   "await_any"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "await_any expects exactly 1 argument"
+                       {:function "await_any" :expected 1 :actual (count args)})))
+     (let [tasks (first args)]
+       (when-not (nex-array? tasks)
+         (throw (ex-info "await_any requires an array of tasks"
+                         {:function "await_any" :actual-type (runtime-type-name tasks)})))
+       (doseq [task tasks]
+         (when-not (= (:nex-builtin-type task) :Task)
+           (throw (ex-info "await_any requires an array of tasks"
+                           {:function "await_any" :actual-type (runtime-type-name task)}))))
+       (await-any-task tasks)))
 
    "sleep"
    (fn [_ctx & args]
