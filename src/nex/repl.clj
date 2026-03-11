@@ -27,14 +27,14 @@
   ["class" "deferred" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
    "when" "from" "until" "invariant" "variant" "require" "ensure"
    "let" "create" "convert" "to" "fn" "function" "and" "or" "old" "this" "note"
-   "with" "import" "intern" "private" "raise" "rescue" "retry" "repeat" "across" "case" "of"
+   "with" "import" "intern" "private" "raise" "rescue" "retry" "spawn" "select" "timeout" "repeat" "across" "case" "of"
    "true" "false" "nil"
    ;; strictly 'result' is not a keyword, but a pre-defined variable name.
    "result"])
 
 (def nex-types
   ["Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-   "Array" "Map" "Function" "Cursor" "Console" "File" "Process" "Window" "Turtle" "Image"])
+   "Array" "Map" "Set" "Task" "Channel" "Function" "Cursor" "Console" "File" "Process" "Window" "Turtle" "Image"])
 
 (def nex-builtins ["print" "println" "type_of" "type_is"])
 

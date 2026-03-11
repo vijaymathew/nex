@@ -123,6 +123,9 @@ Accumulator loops. Recursive descent. State machines in classes. Table-driven di
 ### Chapter 28: What to Read Next
 Where Nex ideas appear in other languages. The relationship between Nex contracts and Hoare logic. Recommended reading for algorithms, design, and software engineering. The companion book.
 
+### Chapter 29: Concurrency with Tasks and Channels
+Starting concurrent work with `spawn`. Coordinating with `Task`, `Channel[T]`, `await_any`, `await_all`, and `select`. Timeouts, cancellation, buffered channels, and the difference between JVM and JavaScript runtime behavior.
+
 ---
 
 ## Appendices

@@ -193,6 +193,118 @@ print(m.get("name"))
 
 Array and map literals are expressions, so they can be nested.
 
+### 7.3 Sets
+
+```nex
+let ids: Set[Integer] := #{1, 2, 3}
+print(ids.contains(2))
+print(ids.union(#{4}))
+```
+
+An empty set uses `#{}`:
+
+```nex
+let empty_ids: Set[Integer] := #{}
+```
+
+### 7.4 Tasks and Channels
+
+`spawn` starts a lightweight concurrent task:
+
+```nex
+let t: Task[Integer] := spawn do
+  result := 40 + 2
+end
+
+print(t.await)
+```
+
+If a task does not produce a value, use plain `Task`:
+
+```nex
+let t: Task := spawn do
+  print("working")
+end
+
+t.await
+```
+
+Tasks can also be timed or cancelled:
+
+```nex
+print(t.await(100))
+print(t.cancel)
+print(t.is_cancelled)
+```
+
+Task groups can be joined in two ways:
+
+```nex
+print(await_any([t1, t2]))
+print(await_all([t1, t2]))
+```
+
+Channels let tasks exchange values safely:
+
+```nex
+let ch: Channel[Integer] := create Channel[Integer]
+
+spawn do
+  ch.send(42)
+end
+
+print(ch.receive)
+ch.close
+```
+
+By default, channels are unbuffered: `send` and `receive` rendezvous, so each side waits for the other.
+
+For buffered communication:
+
+```nex
+let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
+ch.send(1)
+ch.send(2)
+print(ch.size)
+```
+
+Non-blocking probes are also available:
+
+```nex
+print(ch.try_send(3))
+print(ch.try_receive)
+```
+
+Timed channel operations use the same feature names with an extra timeout argument:
+
+```nex
+print(ch.send(3, 50))
+print(ch.receive(50))
+```
+
+Use `select` when you want to react to whichever channel operation is ready first, or to a task that has already finished:
+
+```nex
+select
+  when inbox.receive as msg then
+    print(msg)
+  when worker.await as value then
+    print(value)
+  when control.receive as signal then
+    print(signal)
+  timeout 100 then
+    print("timed out")
+  else
+    print("idle")
+end
+```
+
+`select` uses channel readiness checks for channels and `is_done` checks for tasks. Task clauses use `Task.await`, but only become selectable after the task has already completed. If no clause is ready and there is no `else`, `select` waits until one becomes ready. If a `timeout` clause is present, that body runs once the timeout expires.
+
+On the JavaScript target, the source syntax is unchanged, but generated code uses async/await under the hood. That means `spawn`, `Task.await`, `Channel.send`, and `Channel.receive` are lowered to Promise-based operations in generated JavaScript.
+
+For the precise concurrency semantics, target differences, and runtime design, see [CONCURRENCY.md](CONCURRENCY.md).
+
 ## 8. Classes and Objects
 
 A class groups fields and methods.

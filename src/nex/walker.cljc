@@ -551,8 +551,38 @@
                            (transform-node after-else))))]
        {:type :case
         :expr (transform-node expr)
+       :clauses (mapv transform-node clauses)
+       :else else-stmt}))
+
+   :selectStatement
+   (fn [[_ _select-kw & rest]]
+     (let [tokens (vec rest)
+           clauses (filterv #(and (sequential? %) (= :selectClause (first %))) tokens)
+           timeout-clause (first (filter #(and (sequential? %) (= :timeoutClause (first %))) tokens))
+           has-else? (some #(= "else" %) tokens)
+           else-block (when has-else?
+                        (let [after-else (second (drop-while #(not= "else" %) tokens))]
+                          (when (and (sequential? after-else) (= :block (first after-else)))
+                            (transform-node after-else))))]
+       {:type :select
         :clauses (mapv transform-node clauses)
-        :else else-stmt}))
+        :timeout (when timeout-clause (transform-node timeout-clause))
+        :else else-block}))
+
+   :selectClause
+   (fn [[_ _when-kw expr & rest]]
+     (let [tokens (vec rest)
+           alias (when (some #(= "as" %) tokens)
+                   (token-text (second (drop-while #(not= "as" %) tokens))))
+           then-block (first (filter #(and (sequential? %) (= :block (first %))) tokens))]
+       {:expr (transform-node expr)
+        :alias alias
+        :body (transform-node then-block)}))
+
+   :timeoutClause
+   (fn [[_ _timeout-kw duration _then-kw block]]
+     {:duration (transform-node duration)
+      :body (transform-node block)})
 
    :caseClause
    (fn [[_ & tokens]]
@@ -1101,6 +1131,11 @@
       :value (transform-node value-expr)
       :var-name (token-text var-name)
       :target-type (transform-node type-expr)})
+
+   :spawnExpression
+   (fn [[_ _spawn-kw _do-kw block _end-kw]]
+     {:type :spawn
+      :body (transform-node block)})
 
    :oldExpression
    (fn [[_ _old-kw expr]]

@@ -184,6 +184,97 @@ print(a.intersection(b))          -- #{3}
 print(a.difference(b))            -- #{1, 2}
 ```
 
+## Concurrency: spawn, Task, and Channel
+
+Use `spawn` to start a lightweight task:
+
+```nex
+let t: Task[Integer] := spawn do
+  result := 1 + 2
+end
+
+print(t.await)                    -- 3
+print(t.is_done)                  -- true (after completion)
+```
+
+If the spawn body does not assign `result`, the type is plain `Task`:
+
+```nex
+let t: Task := spawn do
+  print("background work")
+end
+```
+
+Task operations:
+- `await` waits until the task finishes
+- `await(ms)` waits up to `ms` milliseconds and returns `nil` on timeout
+- `cancel` requests task cancellation and returns `true` if the task was cancelled before finishing
+- `is_done` reports whether the task has finished
+- `is_cancelled` reports whether the task was cancelled
+- `await_any([t1, t2, ...])` waits for the first task to finish and returns its result
+- `await_all([t1, t2, ...])` waits for all tasks and returns an array of results
+
+Use `Channel[T]` to communicate between tasks:
+
+```nex
+let ch: Channel[Integer] := create Channel[Integer]
+
+spawn do
+  ch.send(42)
+end
+
+print(ch.receive)                 -- 42
+ch.close
+print(ch.is_closed)               -- true
+```
+
+Use `.with_capacity(n)` for buffered channels:
+
+```nex
+let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
+ch.send(10)
+ch.send(20)
+print(ch.size)                    -- 2
+print(ch.capacity)                -- 2
+```
+
+Channel operations:
+- `send(value)` blocks until accepted
+- `send(value, ms)` waits up to `ms` milliseconds and returns `true` on success, `false` on timeout
+- `receive` blocks until a value is available
+- `receive(ms)` waits up to `ms` milliseconds and returns `nil` on timeout
+- `try_send(value)` returns `true` if the send succeeds immediately, otherwise `false`
+- `try_receive` returns a value if one is immediately available, otherwise `nil`
+- `close` prevents future sends; buffered values may still be received
+- `is_closed`, `size`, and `capacity` report channel state
+
+Use `select` to wait on multiple channel operations or completed tasks:
+
+```nex
+select
+  when jobs.receive as job then
+    print(job)
+  when worker.await as value then
+    print(value)
+  when control.receive as signal then
+    print(signal)
+  timeout 1000 then
+    print("timed out")
+  else
+    print("idle")
+end
+```
+
+`select` probes its clauses using `try_send` / `try_receive` for channels and `is_done` for tasks. Task clauses must use `Task.await`; they fire only when the task has already completed. If no clause is ready and there is no `else`, `select` waits until one becomes ready.
+
+JavaScript target note:
+- generated JavaScript uses Promise-based semantics
+- Nex source syntax stays the same
+- `spawn` lowers to async task code
+- `Task.await`, `Channel.send`, and `Channel.receive` lower to `await ...` in generated JavaScript
+
+For full concurrency semantics and runtime details, see [CONCURRENCY.md](CONCURRENCY.md).
+
 ## Classes
 
 A class bundles data and actions together:

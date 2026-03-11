@@ -322,6 +322,11 @@ M-x font-lock-mode
 Or force refresh:
 ```elisp
 M-x font-lock-fontify-buffer
+
+Current mode support includes the newer concurrency surface as keywords/types:
+- keywords: `spawn`, `select`, `timeout`
+- types: `Set`, `Task`, `Channel`
+- built-ins: `await_any`, `await_all`, `sleep`, `type_of`, `type_is`
 ```
 
 ## Contributing

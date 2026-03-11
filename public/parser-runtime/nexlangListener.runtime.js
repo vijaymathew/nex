@@ -285,6 +285,33 @@ class nexlangListener extends antlr4.tree.ParseTreeListener {
 	}
 
 
+	// Enter a parse tree produced by nexlangParser#selectStatement.
+	enterSelectStatement(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#selectStatement.
+	exitSelectStatement(ctx) {
+	}
+
+
+	// Enter a parse tree produced by nexlangParser#selectClause.
+	enterSelectClause(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#selectClause.
+	exitSelectClause(ctx) {
+	}
+
+
+	// Enter a parse tree produced by nexlangParser#timeoutClause.
+	enterTimeoutClause(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#timeoutClause.
+	exitTimeoutClause(ctx) {
+	}
+
+
 	// Enter a parse tree produced by nexlangParser#scopedBlock.
 	enterScopedBlock(ctx) {
 	}
@@ -354,6 +381,15 @@ class nexlangListener extends antlr4.tree.ParseTreeListener {
 
 	// Exit a parse tree produced by nexlangParser#retryStatement.
 	exitRetryStatement(ctx) {
+	}
+
+
+	// Enter a parse tree produced by nexlangParser#spawnExpression.
+	enterSpawnExpression(ctx) {
+	}
+
+	// Exit a parse tree produced by nexlangParser#spawnExpression.
+	exitSpawnExpression(ctx) {
 	}
 
 

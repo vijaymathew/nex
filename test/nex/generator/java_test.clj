@@ -240,6 +240,124 @@ end"
       (is (str/includes? java-code "Precondition"))
       (is (str/includes? java-code "Postcondition")))))
 
+(deftest spawn-task-and-channel-generation-test
+  (testing "spawn, Task, and Channel lower to NexRuntime helpers"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let ch: Channel[Integer] := create Channel[Integer]
+      let t: Task[Integer] := spawn do
+        ch.send(42)
+        result := ch.receive
+      end
+      print(t.await)
+      print(t.is_done)
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "public static class Task<T>"))
+      (is (str/includes? java-code "public static class Channel<T>"))
+      (is (str/includes? java-code "NexRuntime.spawnTask(() ->"))
+      (is (str/includes? java-code "new NexRuntime.Channel<Integer>()"))
+      (is (str/includes? java-code "ch.send(42)"))
+      (is (str/includes? java-code "result = ch.receive()"))
+      (is (str/includes? java-code "t.await()"))
+      (is (str/includes? java-code "t.is_done()")))))
+
+(deftest buffered-channel-generation-test
+  (testing "buffered Channel constructors and accessors lower correctly in Java"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
+      print(ch.capacity)
+      print(ch.size)
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "new NexRuntime.Channel<Integer>(2)"))
+      (is (str/includes? java-code "ch.capacity()"))
+      (is (str/includes? java-code "ch.size()")))))
+
+(deftest select-generation-test
+  (testing "select lowers to try_send/try_receive polling in Java"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+      select
+        when ch.send(1) then
+          print(\"sent\")
+        when ch.receive as value then
+          print(value)
+        else
+          print(\"none\")
+      end
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "while (true) {"))
+      (is (str/includes? java-code ".try_send(1)"))
+      (is (str/includes? java-code ".try_receive()"))
+      (is (str/includes? java-code "break;")))))
+
+(deftest task-cancel-timeout-and-select-timeout-generation-test
+  (testing "task cancellation/timeouts and select timeout lower correctly in Java"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let t: Task[Integer] := spawn do
+        result := 1
+      end
+      print(t.await(5))
+      print(t.cancel)
+      print(t.is_cancelled)
+      let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+      print(ch.send(1, 5))
+      print(ch.receive(5))
+      select
+        when ch.receive as value then
+          print(value)
+        timeout 5 then
+          print(\"timeout\")
+      end
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "t.await(5)"))
+      (is (str/includes? java-code "t.cancel()"))
+      (is (str/includes? java-code "t.is_cancelled()"))
+      (is (str/includes? java-code "ch.send(1, 5)"))
+      (is (str/includes? java-code "ch.receive(5)"))
+      (is (str/includes? java-code "long __selectDeadline = System.currentTimeMillis() + 5;")))))
+
+(deftest await-any-all-and-task-select-generation-test
+  (testing "await_any/await_all and task-aware select lower correctly in Java"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let t1: Task[Integer] := spawn do
+        result := 1
+      end
+      let t2: Task[Integer] := spawn do
+        result := 2
+      end
+      print(await_any([t1, t2]))
+      print(await_all([t1, t2]))
+      select
+        when t1.await as value then
+          print(value)
+        else
+          print(\"none\")
+      end
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "NexRuntime.awaitAny("))
+      (is (str/includes? java-code "NexRuntime.awaitAll("))
+      (is (str/includes? java-code "if (t1.is_done()) {"))
+      (is (str/includes? java-code "t1.await();")))))
+
 (deftest class-constants-test
   (testing "Class constants generate static finals and child copies inherited public constants"
     (let [nex-code "class Frame

@@ -28,7 +28,7 @@ end"
     x: Integer
 end"
           js-code (js/translate nex-code)]
-      (is (str/includes? js-code "static make(x, y)"))
+      (is (str/includes? js-code "static async make(x, y)"))
       (is (str/includes? js-code "this.x")))))
 
 (deftest inheritance-test
@@ -244,6 +244,124 @@ end"
           js-code (js/translate nex-code)]
       (is (str/includes? js-code "__nexSetCursor"))
       (is (str/includes? js-code "_type: 'SetCursor'")))))
+
+(deftest spawn-task-and-channel-generation-test
+  (testing "spawn, Task, and Channel lower to async Promise-based helpers"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let ch: Channel[Integer] := create Channel[Integer]
+      let t: Task[Integer] := spawn do
+        ch.send(42)
+        result := ch.receive
+      end
+      print(t.await)
+      print(t.is_done)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "class __nexTask"))
+      (is (str/includes? js-code "class __nexChannel"))
+      (is (str/includes? js-code "__nexSpawn(async () =>"))
+      (is (str/includes? js-code "let ch = new __nexChannel();"))
+      (is (str/includes? js-code "await ch.send(42)"))
+      (is (str/includes? js-code "result = await ch.receive()"))
+      (is (str/includes? js-code "console.log(await t.await())"))
+      (is (str/includes? js-code "console.log(t.is_done())")))))
+
+(deftest buffered-channel-generation-test
+  (testing "buffered Channel constructors and accessors lower correctly in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
+      print(ch.capacity)
+      print(ch.size)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "new __nexChannel(2)"))
+      (is (str/includes? js-code "console.log(ch.capacity())"))
+      (is (str/includes? js-code "console.log(ch.size())")))))
+
+(deftest select-generation-test
+  (testing "select lowers to try_send/try_receive polling in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+      select
+        when ch.send(1) then
+          print(\"sent\")
+        when ch.receive as value then
+          print(value)
+        else
+          print(\"none\")
+      end
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "while (true) {"))
+      (is (str/includes? js-code ".try_send(1)"))
+      (is (str/includes? js-code ".try_receive()"))
+      (is (str/includes? js-code "break;")))))
+
+(deftest task-cancel-timeout-and-select-timeout-generation-test
+  (testing "task cancellation/timeouts and select timeout lower correctly in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let t: Task[Integer] := spawn do
+        result := 1
+      end
+      print(t.await(5))
+      print(t.cancel)
+      print(t.is_cancelled)
+      let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+      print(ch.send(1, 5))
+      print(ch.receive(5))
+      select
+        when ch.receive as value then
+          print(value)
+        timeout 5 then
+          print(\"timeout\")
+      end
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "await t.await(5)"))
+      (is (str/includes? js-code "t.cancel()"))
+      (is (str/includes? js-code "t.is_cancelled()"))
+      (is (str/includes? js-code "await ch.send(1, 5)"))
+      (is (str/includes? js-code "await ch.receive(5)"))
+      (is (str/includes? js-code "const __selectDeadline = Date.now() + 5;")))))
+
+(deftest await-any-all-and-task-select-generation-test
+  (testing "await_any/await_all and task-aware select lower correctly in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let t1: Task[Integer] := spawn do
+        result := 1
+      end
+      let t2: Task[Integer] := spawn do
+        result := 2
+      end
+      print(await_any([t1, t2]))
+      print(await_all([t1, t2]))
+      select
+        when t1.await as value then
+          print(value)
+        else
+          print(\"none\")
+      end
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "await __nexAwaitAny("))
+      (is (str/includes? js-code "await __nexAwaitAll("))
+      (is (str/includes? js-code "if (t1.is_done()) {"))
+      (is (str/includes? js-code "await t1.await();")))))
 
 (deftest integer-bitwise-generation-test
   (testing "Integer bitwise methods translate to JavaScript bitwise operators/helpers"

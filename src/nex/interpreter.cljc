@@ -3,7 +3,8 @@
             #?(:clj [nex.parser :as parser])
             #?(:clj [clojure.data.json :as json])
             #?(:clj [nex.turtle :as turtle]
-               :cljs [nex.turtle-browser :as turtle])))
+               :cljs [nex.turtle-browser :as turtle]))
+  #?(:clj (:import [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException])))
 
 ;;
 ;; Mutable Collections (platform abstraction)
@@ -177,6 +178,8 @@
 (defn nex-window? [v] (and (map? v) (= (:nex-builtin-type v) :Window)))
 (defn nex-turtle? [v] (and (map? v) (= (:nex-builtin-type v) :Turtle)))
 (defn nex-image? [v] (and (map? v) (= (:nex-builtin-type v) :Image)))
+(defn nex-task? [v] (and (map? v) (= (:nex-builtin-type v) :Task)))
+(defn nex-channel? [v] (and (map? v) (= (:nex-builtin-type v) :Channel)))
 
 ;; Cursor type detection
 (defn nex-array-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :ArrayCursor)))
@@ -517,17 +520,567 @@
   ([class-name field-values closure-env]
    (->NexObject class-name field-values closure-env)))
 
+#?(:clj
+   (defonce ^:private concurrent-executor
+     (Executors/newCachedThreadPool)))
+
+#?(:clj
+   (defn shutdown-runtime!
+     "Release shared JVM runtime resources so short-lived tools and test runners can exit cleanly."
+     []
+     (.shutdown ^java.util.concurrent.ExecutorService concurrent-executor)
+     (when-not (.awaitTermination ^java.util.concurrent.ExecutorService concurrent-executor 100 TimeUnit/MILLISECONDS)
+       (.shutdownNow ^java.util.concurrent.ExecutorService concurrent-executor))))
+
+#?(:cljs
+   (defn shutdown-runtime!
+     []
+     nil))
+
 (defn nex-object?
   "Check if a value is a Nex object instance."
   [v]
   (or (instance? NexObject v)
       (and (map? v) (contains? v :class-name) (contains? v :fields))))
 
+#?(:clj
+   (def ^:private channel-closed-signal ::channel-closed))
+
+#?(:cljs
+   (def ^:private channel-closed-signal ::channel-closed))
+
+(def ^:private channel-timeout-signal ::channel-timeout)
+
+(def ^:private task-timeout-signal ::task-timeout)
+
+(defn- current-time-ms []
+  #?(:clj (System/currentTimeMillis)
+     :cljs (.now js/Date)))
+
+(defn- timeout-ms
+  [v]
+  (let [n (cond
+            (integer? v) v
+            (number? v) (long v)
+            :else nil)]
+    (when (or (nil? n) (neg? n))
+      (throw (ex-info "Timeout must be a non-negative Integer" {:timeout v})))
+    n))
+
+#?(:clj
+   (defn- queue-empty [] clojure.lang.PersistentQueue/EMPTY))
+
+#?(:clj
+   (defn- queue-conj [q x]
+     (conj (or q (queue-empty)) x)))
+
+#?(:clj
+   (defn- queue-pop [q]
+     [(peek q) (pop q)]))
+
+#?(:clj
+   (defn- make-task [future]
+     {:nex-builtin-type :Task
+      :future future}))
+
+#?(:cljs
+   (defn- promise? [v]
+     (instance? js/Promise v)))
+
+#?(:cljs
+   (defn- ->promise [v]
+     (if (promise? v) v (js/Promise.resolve v))))
+
+#?(:cljs
+   (defn- promise-all [values]
+     (.then (js/Promise.all (to-array (map ->promise values)))
+            (fn [arr] (vec (array-seq arr))))))
+
+#?(:cljs
+   (defn- promise-reduce
+     [items init f]
+     (reduce (fn [acc item]
+               (.then (->promise acc)
+                      (fn [state]
+                        (->promise (f state item)))))
+             (->promise init)
+             items)))
+
+#?(:cljs
+   (defn- make-task [promise]
+     (let [done? (atom false)
+           cancelled? (atom false)
+           cancel-reject (atom nil)
+           cancel-promise (js/Promise.
+                           (fn [_resolve reject]
+                             (reset! cancel-reject reject)))
+           wrapped (.then (.race js/Promise (to-array [(->promise promise) cancel-promise]))
+                          (fn [value]
+                            (reset! done? true)
+                            value)
+                          (fn [err]
+                            (reset! done? true)
+                            (js/Promise.reject err)))]
+       {:nex-builtin-type :Task
+        :promise wrapped
+        :done? done?
+        :cancelled? cancelled?
+        :cancel! (fn []
+                   (if @done?
+                     false
+                     (do
+                       (reset! cancelled? true)
+                       (reset! done? true)
+                       (when-let [reject @cancel-reject]
+                         (reject (ex-info "Task cancelled" {:task :cancelled})))
+                       true)))})))
+
+#?(:clj
+   (defn- make-channel
+     ([] (make-channel 0))
+     ([capacity]
+     {:nex-builtin-type :Channel
+      :lock (Object.)
+      :state (atom {:closed? false
+                    :capacity capacity
+                    :buffer (queue-empty)
+                    :senders (queue-empty)
+                    :receivers (queue-empty)})})))
+
+#?(:cljs
+   (defn- make-channel
+     ([] (make-channel 0))
+     ([capacity]
+     {:nex-builtin-type :Channel
+      :state (atom {:closed? false
+                    :capacity capacity
+                    :buffer []
+                    :senders []
+                    :receivers []})})))
+
+#?(:clj
+   (defn- task-await
+     ([task]
+      (task-await task nil))
+     ([task timeout]
+      (try
+        (if (nil? timeout)
+          (.get ^CompletableFuture (:future task))
+          (.get ^CompletableFuture (:future task) (timeout-ms timeout) TimeUnit/MILLISECONDS))
+        (catch TimeoutException _ task-timeout-signal)
+        (catch CancellationException _
+          (throw (ex-info "Task cancelled" {:task task})))
+        (catch ExecutionException e
+          (throw (or (.getCause e) e)))
+        (catch InterruptedException e
+          (.interrupt (Thread/currentThread))
+          (throw e))))))
+
+#?(:cljs
+   (defn- task-await
+     ([task]
+      (:promise task))
+     ([task timeout]
+      (.then (.race js/Promise
+                    (to-array [(:promise task)
+                               (js/Promise.
+                                (fn [resolve _reject]
+                                  (js/setTimeout #(resolve task-timeout-signal) (timeout-ms timeout))))]))
+             identity))))
+
+#?(:clj
+   (defn- task-done? [task]
+     (.isDone ^CompletableFuture (:future task))))
+
+#?(:cljs
+   (defn- task-done? [task]
+     @(:done? task)))
+
+#?(:clj
+   (defn- await-all-tasks
+     [tasks]
+     (nex-array-from (map task-await tasks))))
+
+#?(:cljs
+   (defn- await-all-tasks
+     [tasks]
+     (.then (promise-all (map task-await tasks))
+            (fn [results]
+              (nex-array-from results)))))
+
+#?(:clj
+   (defn- await-any-task
+     [tasks]
+     (when (empty? tasks)
+       (throw (ex-info "await_any requires at least one task" {})))
+     (loop []
+       (if-let [ready-task (some #(when (task-done? %) %) tasks)]
+         (task-await ready-task)
+         (do
+           (Thread/sleep 1)
+           (recur))))))
+
+#?(:cljs
+   (defn- await-any-task
+     [tasks]
+     (when (empty? tasks)
+       (throw (ex-info "await_any requires at least one task" {})))
+     (.race js/Promise (to-array (map task-await tasks)))))
+
+#?(:clj
+   (defn- task-cancel [task]
+     (.cancel ^CompletableFuture (:future task) true)))
+
+#?(:cljs
+   (defn- task-cancel [task]
+     ((:cancel! task))))
+
+#?(:clj
+   (defn- task-cancelled? [task]
+     (.isCancelled ^CompletableFuture (:future task))))
+
+#?(:cljs
+   (defn- task-cancelled? [task]
+     @(:cancelled? task)))
+
+#?(:clj
+   (defn- queue-remove-first
+     [q pred]
+     (reduce (fn [acc item]
+               (let [{:keys [removed out]} acc]
+                 (if (and (not removed) (pred item))
+                   {:removed true :out out}
+                   {:removed removed :out (queue-conj out item)})))
+             {:removed false :out (queue-empty)}
+             q)))
+
+#?(:clj
+   (defn- channel-send
+     ([ch value]
+      (channel-send ch value nil))
+     ([ch value timeout]
+      (let [ack (promise)
+            timed? (some? timeout)
+            deliver-now
+            (locking (:lock ch)
+              (let [{:keys [closed? receivers capacity buffer]} @(:state ch)]
+                (when closed?
+                  (throw (ex-info "Cannot send on a closed channel" {:channel ch})))
+                (cond
+                  (and (zero? capacity) (seq receivers))
+                  (let [[receiver rest-receivers] (queue-pop receivers)]
+                    (swap! (:state ch) assoc :receivers rest-receivers)
+                    [:receiver receiver])
+                  (< (count buffer) capacity)
+                  (do
+                    (swap! (:state ch) update :buffer queue-conj value)
+                    [:buffered])
+                  :else
+                  (do
+                    (swap! (:state ch) update :senders queue-conj {:value value :ack ack})
+                    [:wait ack]))))]
+        (case (first deliver-now)
+          :buffered (if timed? true nil)
+          :receiver (do (deliver (second deliver-now) value) (if timed? true nil))
+          :wait (let [result (if timed?
+                               (deref (second deliver-now) (timeout-ms timeout) channel-timeout-signal)
+                               @(second deliver-now))]
+                  (cond
+                    (= result channel-closed-signal)
+                    (throw (ex-info "Cannot send on a closed channel" {:channel ch}))
+
+                    (= result channel-timeout-signal)
+                    (do
+                      (locking (:lock ch)
+                        (swap! (:state ch) update :senders
+                               (fn [q] (:out (queue-remove-first q #(identical? (:ack %) ack))))))
+                      false)
+
+                    :else (if timed? true nil))))))))
+
+#?(:clj
+   (defn- channel-try-send [ch value]
+     (locking (:lock ch)
+       (let [{:keys [closed? receivers capacity buffer]} @(:state ch)]
+         (when closed?
+           (throw (ex-info "Cannot send on a closed channel" {:channel ch})))
+         (cond
+           (and (zero? capacity) (seq receivers))
+           (let [[receiver rest-receivers] (queue-pop receivers)]
+             (swap! (:state ch) assoc :receivers rest-receivers)
+             (deliver receiver value)
+             true)
+
+           (< (count buffer) capacity)
+           (do
+             (swap! (:state ch) update :buffer queue-conj value)
+             true)
+
+           :else false)))))
+
+#?(:clj
+   (defn- channel-receive
+     ([ch]
+      (channel-receive ch nil))
+     ([ch timeout]
+      (let [out (promise)
+            timed? (some? timeout)
+            ready
+            (locking (:lock ch)
+              (let [{:keys [closed? senders buffer capacity]} @(:state ch)]
+                (cond
+                  (seq buffer)
+                  (let [[value rest-buffer] (queue-pop buffer)
+                        promote (when (and (pos? capacity) (seq senders))
+                                  (let [[sender rest-senders] (queue-pop senders)]
+                                    (swap! (:state ch) assoc
+                                           :senders rest-senders
+                                           :buffer (queue-conj rest-buffer (:value sender)))
+                                    sender))]
+                    (when-not promote
+                      (swap! (:state ch) assoc :buffer rest-buffer))
+                    [:buffer value promote])
+                  (seq senders)
+                  (let [[sender rest-senders] (queue-pop senders)]
+                    (swap! (:state ch) assoc :senders rest-senders)
+                    [:sender sender])
+                  closed?
+                  [:closed]
+                  :else
+                  (do
+                    (swap! (:state ch) update :receivers queue-conj out)
+                    [:wait out]))))]
+        (case (first ready)
+          :buffer (let [[_ value promoted] ready]
+                    (when promoted
+                      (deliver (:ack promoted) true))
+                    value)
+          :sender (let [{:keys [value ack]} (second ready)]
+                    (deliver ack true)
+                    value)
+          :closed (throw (ex-info "Cannot receive from a closed channel" {:channel ch}))
+          :wait (let [result (if timed?
+                               (deref (second ready) (timeout-ms timeout) channel-timeout-signal)
+                               @(second ready))]
+                  (cond
+                    (= result channel-closed-signal)
+                    (throw (ex-info "Cannot receive from a closed channel" {:channel ch}))
+
+                    (= result channel-timeout-signal)
+                    (do
+                      (locking (:lock ch)
+                        (swap! (:state ch) update :receivers
+                               (fn [q] (:out (queue-remove-first q #(identical? % out))))))
+                      nil)
+
+                    :else result)))))))
+
+#?(:clj
+   (defn- channel-try-receive [ch]
+     (locking (:lock ch)
+       (let [{:keys [senders buffer capacity]} @(:state ch)]
+         (cond
+           (seq buffer)
+           (let [[value rest-buffer] (queue-pop buffer)
+                 promoted (when (and (pos? capacity) (seq senders))
+                            (let [[sender rest-senders] (queue-pop senders)]
+                              (swap! (:state ch) assoc
+                                     :senders rest-senders
+                                     :buffer (queue-conj rest-buffer (:value sender)))
+                              sender))]
+             (when-not promoted
+               (swap! (:state ch) assoc :buffer rest-buffer))
+             (when promoted
+               (deliver (:ack promoted) true))
+             value)
+
+           (seq senders)
+           (let [[sender rest-senders] (queue-pop senders)]
+             (swap! (:state ch) assoc :senders rest-senders)
+             (deliver (:ack sender) true)
+             (:value sender))
+
+           :else nil)))))
+
+#?(:clj
+   (defn- channel-close [ch]
+     (locking (:lock ch)
+       (let [{:keys [closed? senders receivers buffer]} @(:state ch)]
+         (when-not closed?
+           (swap! (:state ch) assoc :closed? true :senders (queue-empty)
+                  :receivers (if (seq buffer) receivers (queue-empty)))
+           (doseq [{:keys [ack]} senders]
+             (deliver ack channel-closed-signal))
+           (when-not (seq buffer)
+             (doseq [receiver receivers]
+               (deliver receiver channel-closed-signal)))))
+       nil)))
+
+#?(:cljs
+   (defn- channel-send
+     ([ch value]
+      (channel-send ch value nil))
+     ([ch value timeout]
+      (js/Promise.
+       (fn [resolve reject]
+         (let [timed? (some? timeout)
+               finish (fn [v] (resolve v))
+               {:keys [closed? receivers capacity buffer]} @(:state ch)]
+           (cond
+             closed?
+             (reject (ex-info "Cannot send on a closed channel" {:channel ch}))
+
+             (and (zero? capacity) (seq receivers))
+             (let [receiver (first receivers)]
+               (swap! (:state ch) update :receivers #(vec (rest %)))
+               ((:resolve receiver) value)
+               (finish (when timed? true)))
+
+             (< (count buffer) capacity)
+             (do
+               (swap! (:state ch) update :buffer conj value)
+               (finish (when timed? true)))
+
+             :else
+             (let [id (str (gensym "__send"))
+                   timer-id (atom nil)
+                   entry {:id id
+                          :value value
+                          :resolve (fn [_]
+                                     (when-let [timer @timer-id] (js/clearTimeout timer))
+                                     (finish (when timed? true)))
+                          :reject (fn [err]
+                                    (when-let [timer @timer-id] (js/clearTimeout timer))
+                                    (reject err))}]
+               (swap! (:state ch) update :senders conj entry)
+               (when timed?
+                 (reset! timer-id
+                         (js/setTimeout
+                          (fn []
+                            (swap! (:state ch) update :senders
+                                   (fn [senders]
+                                     (vec (remove #(= (:id %) id) senders))))
+                            (finish false))
+                          (timeout-ms timeout))))))))))))
+
+#?(:cljs
+   (defn- channel-try-send [ch value]
+     (let [{:keys [closed? receivers capacity buffer]} @(:state ch)]
+       (cond
+         closed?
+         (throw (ex-info "Cannot send on a closed channel" {:channel ch}))
+
+         (and (zero? capacity) (seq receivers))
+         (let [receiver (first receivers)]
+           (swap! (:state ch) update :receivers #(vec (rest %)))
+           ((:resolve receiver) value)
+           true)
+
+         (< (count buffer) capacity)
+         (do
+           (swap! (:state ch) update :buffer conj value)
+           true)
+
+         :else false))))
+
+#?(:cljs
+   (defn- channel-receive
+     ([ch]
+      (channel-receive ch nil))
+     ([ch timeout]
+      (js/Promise.
+       (fn [resolve reject]
+         (let [timed? (some? timeout)
+               {:keys [closed? senders buffer capacity]} @(:state ch)]
+           (cond
+             (seq buffer)
+             (let [buffered-value (first buffer)]
+               (swap! (:state ch) update :buffer #(vec (rest %)))
+               (when (and (pos? capacity) (seq (:senders @(:state ch))))
+                 (let [{sender-value :value sender-resolve :resolve} (first (:senders @(:state ch)))]
+                   (swap! (:state ch)
+                          (fn [state]
+                            (-> state
+                                (update :senders #(vec (rest %)))
+                                (update :buffer conj sender-value))))
+                   (sender-resolve nil)))
+               (resolve buffered-value))
+
+             (seq senders)
+             (let [{:keys [value] :as sender} (first senders)
+                   ack-resolve (:resolve sender)]
+               (swap! (:state ch) update :senders #(vec (rest %)))
+               (ack-resolve nil)
+               (resolve value))
+
+             closed?
+             (reject (ex-info "Cannot receive from a closed channel" {:channel ch}))
+
+             :else
+             (let [id (str (gensym "__recv"))
+                   timer-id (atom nil)
+                   entry {:id id
+                          :resolve (fn [value]
+                                     (when-let [timer @timer-id] (js/clearTimeout timer))
+                                     (resolve value))
+                          :reject (fn [err]
+                                    (when-let [timer @timer-id] (js/clearTimeout timer))
+                                    (reject err))}]
+               (swap! (:state ch) update :receivers conj entry)
+               (when timed?
+                 (reset! timer-id
+                         (js/setTimeout
+                          (fn []
+                            (swap! (:state ch) update :receivers
+                                   (fn [receivers]
+                                     (vec (remove #(= (:id %) id) receivers))))
+                            (resolve nil))
+                          (timeout-ms timeout))))))))))))
+
+#?(:cljs
+   (defn- channel-try-receive [ch]
+     (let [{:keys [senders buffer capacity]} @(:state ch)]
+       (cond
+         (seq buffer)
+         (let [buffered-value (first buffer)]
+           (swap! (:state ch) update :buffer #(vec (rest %)))
+           (when (and (pos? capacity) (seq (:senders @(:state ch))))
+             (let [{sender-value :value sender-resolve :resolve} (first (:senders @(:state ch)))]
+               (swap! (:state ch)
+                      (fn [state]
+                        (-> state
+                            (update :senders #(vec (rest %)))
+                            (update :buffer conj sender-value))))
+               (sender-resolve nil)))
+           buffered-value)
+
+         (seq senders)
+         (let [{:keys [value] :as sender} (first senders)
+               ack-resolve (:resolve sender)]
+           (swap! (:state ch) update :senders #(vec (rest %)))
+           (ack-resolve nil)
+           value)
+
+         :else nil))))
+
+#?(:cljs
+   (defn- channel-close [ch]
+     (let [{:keys [closed? senders receivers buffer]} @(:state ch)]
+       (when-not closed?
+         (swap! (:state ch) assoc :closed? true :senders [] :receivers (if (seq buffer) receivers []))
+         (doseq [{:keys [reject]} senders]
+           (reject (ex-info "Cannot send on a closed channel" {:channel ch})))
+         (when-not (seq buffer)
+           (doseq [{:keys [reject]} receivers]
+             (reject (ex-info "Cannot receive from a closed channel" {:channel ch})))))
+       nil)))
+
 ;;
 ;; Forward declarations
 ;;
 
 (declare eval-node)
+(declare eval-node-async)
 (declare get-all-fields)
 (declare get-all-constants)
 (declare eval-body-with-rescue)
@@ -536,6 +1089,119 @@
 (declare combine-assertions)
 (declare combine-preconditions)
 (declare get-type-name)
+(declare eval-body-async)
+
+(defn- select-op-call
+  [expr]
+  (when (and (map? expr) (= :call (:type expr)))
+    expr))
+
+(defn- eval-select-target
+  [ctx target]
+  (let [target-name (when (string? target) target)
+        class-target (when target-name (lookup-class-if-exists ctx target-name))]
+    (if class-target
+      nil
+      (if target-name
+        (env-lookup (:current-env ctx) target-name)
+        (eval-node ctx target)))))
+
+#?(:cljs
+   (defn- eval-select-target-async
+     [ctx target]
+     (let [target-name (when (string? target) target)
+           class-target (when target-name (lookup-class-if-exists ctx target-name))]
+       (if class-target
+         (js/Promise.resolve nil)
+         (if target-name
+           (js/Promise.resolve (env-lookup (:current-env ctx) target-name))
+           (eval-node-async ctx target))))))
+
+(defn- prepare-select-clause
+  [ctx {:keys [expr alias body] :as clause}]
+  (let [{:keys [target method args] :as call} (select-op-call expr)]
+    {:method method
+     :alias alias
+     :body body
+     :target (eval-select-target ctx target)
+     :args (mapv #(eval-node ctx %) args)}))
+
+#?(:cljs
+   (defn- prepare-select-clause-async
+     [ctx {:keys [expr alias body] :as clause}]
+     (let [{:keys [target method args]} (select-op-call expr)]
+       (.then (eval-select-target-async ctx target)
+              (fn [target-val]
+                (.then (promise-all (map #(eval-node-async ctx %) args))
+                       (fn [arg-vals]
+                         {:method method
+                          :alias alias
+                          :body body
+                          :target target-val
+                          :args arg-vals})))))))
+
+(defn- execute-select-body
+  [ctx body alias value]
+  (let [body-ctx (if alias
+                   (assoc ctx :current-env (doto (make-env (:current-env ctx))
+                                            (env-define alias value)))
+                   ctx)]
+    (last (map #(eval-node body-ctx %) body))))
+
+#?(:cljs
+   (defn- execute-select-body-async
+     [ctx body alias value]
+     (let [body-ctx (if alias
+                      (assoc ctx :current-env (doto (make-env (:current-env ctx))
+                                               (env-define alias value)))
+                      ctx)]
+       (eval-body-async body-ctx body))))
+
+(defn- attempt-select-clause
+  [{:keys [method target args] :as prepared}]
+  (cond
+    (and (= (:nex-builtin-type target) :Task)
+         (= method "await"))
+    (when (task-done? target)
+      {:selected? true
+       :value (task-await target)})
+
+    (#{"receive" "try_receive"} method)
+    (let [value (channel-try-receive target)]
+      (when (some? value)
+        {:selected? true :value value}))
+
+    (#{"send" "try_send"} method)
+    (when (channel-try-send target (first args))
+      {:selected? true})
+
+    :else nil))
+
+#?(:cljs
+   (defn- attempt-select-clause-async
+     [prepared]
+     (let [{:keys [method target]} prepared]
+       (cond
+         (and (= (:nex-builtin-type target) :Task)
+              (= method "await"))
+         (if (task-done? target)
+           (.then (task-await target)
+                  (fn [value]
+                    {:selected? true :value value}))
+           (js/Promise.resolve nil))
+
+         :else
+         (js/Promise.resolve (attempt-select-clause prepared))))))
+
+(defn- sleep-select-step! []
+  #?(:clj (Thread/sleep 1)
+     :cljs nil))
+
+#?(:cljs
+   (defn- sleep-select-step-async []
+     (js/Promise.
+      (fn [resolve _reject]
+        (js/setTimeout resolve 0)))))
 
 ;;
 ;; Debugger Hooks
@@ -930,7 +1596,46 @@
        (throw (ex-info "type_is expects exactly 2 arguments"
                        {:function "type_is" :expected 2 :actual (count args)})))
      (let [[target-type value] args]
-       (runtime-type-is? ctx target-type value)))})
+       (runtime-type-is? ctx target-type value)))
+
+   "await_all"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "await_all expects exactly 1 argument"
+                       {:function "await_all" :expected 1 :actual (count args)})))
+     (let [tasks (first args)]
+       (when-not (nex-array? tasks)
+         (throw (ex-info "await_all requires an array of tasks"
+                         {:function "await_all" :actual-type (runtime-type-name tasks)})))
+       (doseq [task tasks]
+         (when-not (= (:nex-builtin-type task) :Task)
+           (throw (ex-info "await_all requires an array of tasks"
+                           {:function "await_all" :actual-type (runtime-type-name task)}))))
+       (await-all-tasks tasks)))
+
+   "await_any"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "await_any expects exactly 1 argument"
+                       {:function "await_any" :expected 1 :actual (count args)})))
+     (let [tasks (first args)]
+       (when-not (nex-array? tasks)
+         (throw (ex-info "await_any requires an array of tasks"
+                         {:function "await_any" :actual-type (runtime-type-name tasks)})))
+       (doseq [task tasks]
+         (when-not (= (:nex-builtin-type task) :Task)
+           (throw (ex-info "await_any requires an array of tasks"
+                           {:function "await_any" :actual-type (runtime-type-name task)}))))
+       (await-any-task tasks)))
+
+   "sleep"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "sleep expects exactly 1 argument"
+                       {:function "sleep" :expected 1 :actual (count args)})))
+     #?(:clj (Thread/sleep (long (first args)))
+        :cljs nil)
+     nil)})
 
 ;;
 ;; Operator Implementations
@@ -999,6 +1704,8 @@
       "Console" {:nex-builtin-type :Console}
       "File" nil
       "Process" {:nex-builtin-type :Process}
+      "Task" nil
+      "Channel" nil
       "Window" nil
       "Turtle" nil
       "Image" nil
@@ -1238,6 +1945,35 @@
                               :values (atom #?(:clj (vec s) :cljs (vec (es6-iterator-seq (.values s)))))
                               :index (atom 0)})}
 
+   :Task
+   {"await"    (fn [t & [timeout]]
+                  (let [result (if (some? timeout)
+                                 (task-await t timeout)
+                                 (task-await t))]
+                    (if (= result task-timeout-signal) nil result)))
+    "cancel"   (fn [t & _] (task-cancel t))
+    "is_done"  (fn [t & _] #?(:clj (.isDone ^CompletableFuture (:future t))
+                              :cljs @(:done? t)))
+    "is_cancelled" (fn [t & _] (task-cancelled? t))}
+
+   :Channel
+   {"send"      (fn [ch value & [timeout]]
+                  (if (some? timeout)
+                    (channel-send ch value timeout)
+                    (channel-send ch value)))
+    "try_send"  (fn [ch value & _] (channel-try-send ch value))
+    "receive"   (fn [ch & [timeout]]
+                  (if (some? timeout)
+                    (channel-receive ch timeout)
+                    (channel-receive ch)))
+    "try_receive" (fn [ch & _] (channel-try-receive ch))
+    "close"     (fn [ch & _] (channel-close ch))
+    "is_closed" (fn [ch & _] (:closed? @(:state ch)))
+    "capacity"  (fn [ch & _] (:capacity @(:state ch)))
+    "size"      (fn [ch & _]
+                  #?(:clj (count (:buffer @(:state ch)))
+                     :cljs (count (:buffer @(:state ch)))))}
+
    :Console
    {"print"        (fn [_ msg & _] (nex-console-print (nex-display-value msg)) nil)
     "print_line"   (fn [_ msg & _] (nex-console-println (nex-display-value msg)) nil)
@@ -1404,6 +2140,8 @@
     (nex-console? value) :Console
     (nex-file? value) :File
     (nex-process? value) :Process
+    (nex-task? value) :Task
+    (nex-channel? value) :Channel
     (nex-window? value) :Window
     (nex-turtle? value) :Turtle
     (nex-image? value) :Image
@@ -2006,6 +2744,25 @@
                         {:value val})))
       matched)))
 
+(defmethod eval-node :select
+  [ctx {:keys [clauses else timeout] :as node}]
+  (let [prepared (mapv #(prepare-select-clause ctx %) clauses)
+        timeout-ms-val (when timeout (timeout-ms (eval-node ctx (:duration timeout))))
+        deadline (when timeout-ms-val (+ (current-time-ms) timeout-ms-val))]
+    (loop []
+      (if-let [[clause outcome] (some (fn [prepared-clause]
+                                        (when-let [outcome (attempt-select-clause prepared-clause)]
+                                          [prepared-clause outcome]))
+                                      prepared)]
+        (execute-select-body ctx (:body clause) (:alias clause) (:value outcome))
+        (if else
+          (last (map #(eval-node ctx %) else))
+          (if (and deadline (>= (current-time-ms) deadline))
+            (last (map #(eval-node ctx %) (:body timeout)))
+            (do
+              (sleep-select-step!)
+              (recur))))))))
+
 (defmethod eval-node :loop
   [ctx {:keys [init invariant variant until body]}]
   (maybe-debug-pause ctx {:type :loop :init init :invariant invariant :variant variant :until until :body body})
@@ -2187,6 +2944,23 @@
                (throw (ex-info "File requires constructor: create File.open(path)" {:class-name "File"})))
              {:nex-builtin-type :File :path (first arg-values)})
     "Process" {:nex-builtin-type :Process}
+    "Channel" #?(:clj (let [arg-values (mapv #(eval-node ctx %) args)]
+                        (cond
+                          (nil? constructor) (make-channel)
+                          (= constructor "with_capacity")
+                          (let [capacity (first arg-values)]
+                            (when-not (integer? capacity)
+                              (throw (ex-info "Channel.with_capacity requires an Integer capacity"
+                                              {:class-name "Channel" :constructor constructor})))
+                            (when (neg? capacity)
+                              (throw (ex-info "Channel capacity must be non-negative"
+                                              {:class-name "Channel" :constructor constructor})))
+                            (make-channel capacity))
+                          :else
+                          (throw (ex-info (str "Constructor not found: Channel." constructor)
+                                          {:class-name "Channel" :constructor constructor}))))
+                 :cljs (throw (ex-info "Channels are not supported in ClojureScript interpreter"
+                                       {:class-name "Channel"})))
     "Set" (let [arg-values (mapv #(eval-node ctx %) args)]
             (cond
               (nil? constructor) (nex-set)
@@ -2345,6 +3119,29 @@
          :cljs (throw (ex-info (str "Undefined class: " class-name)
                                {:class-name class-name})))))))
 
+(defmethod eval-node :spawn
+  [ctx {:keys [body]}]
+  #?(:clj
+     (make-task
+       (CompletableFuture/supplyAsync
+        (reify java.util.function.Supplier
+          (get [_]
+            (let [spawn-env (make-env (:current-env ctx))
+                  _ (env-define spawn-env "result" nil)
+                  spawn-ctx (assoc ctx :current-env spawn-env)]
+              (doseq [stmt body]
+                (eval-node spawn-ctx stmt))
+              (let [result-flag (try
+                                  (env-lookup spawn-env "__result_assigned__")
+                                  (catch Exception _ ::not-found))]
+                (if (= result-flag "result")
+                  (env-lookup spawn-env "result")
+                  nil)))))
+        concurrent-executor))
+     :cljs
+     (throw (ex-info "spawn is not supported in ClojureScript interpreter"
+                     {:type :unsupported}))))
+
 (defmethod eval-node :literal
   [_ctx node]
   ;; Handle literal values that might be passed directly
@@ -2386,6 +3183,757 @@
     (env-lookup (:current-env ctx) node)
     (throw (ex-info (str "Cannot evaluate node type: " (or (:type node) (type node)))
                     {:node node}))))
+
+(defn- async-result-value [env]
+  (let [result-flag (try
+                      (env-lookup env "__result_assigned__")
+                      (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+    (if (= result-flag "result")
+      (env-lookup env "result")
+      (let [res (try
+                  (env-lookup env "result")
+                  (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+        (if (not= res ::not-found) res nil)))))
+
+(defn- check-assertions-async [ctx assertions contract-type]
+  #?(:clj
+     (do
+       (check-assertions ctx assertions contract-type)
+       nil)
+     :cljs
+     (promise-reduce assertions nil
+                     (fn [_ {:keys [label condition]}]
+                       (.then (->promise (eval-node-async ctx condition))
+                              (fn [result]
+                                (when-not result
+                                  (report-contract-violation contract-type label condition))
+                                nil))))))
+
+(defn- check-class-invariant-async [ctx class-def]
+  (letfn [(collect-invariants [class-def seen]
+            (let [class-name (:name class-def)
+                  already-seen? (and class-name (contains? seen class-name))
+                  seen' (if class-name (conj seen class-name) seen)]
+              (if already-seen?
+                [[] seen]
+                (let [[parent-invariants seen'']
+                      (if-let [parents (get-parent-classes ctx class-def)]
+                        (reduce (fn [[acc seen-so-far] {parent-class-def :class-def}]
+                                  (let [[inv seen-next] (collect-invariants parent-class-def seen-so-far)]
+                                    [(into acc inv) seen-next]))
+                                [[] seen']
+                                parents)
+                        [[] seen'])
+                      local-invariants (or (:invariant class-def) [])]
+                  [(vec (concat parent-invariants local-invariants)) seen'']))))]
+    (let [[assertions _] (collect-invariants class-def #{})]
+      #?(:clj
+         (do
+           (when (seq assertions)
+             (check-assertions ctx assertions Class-invariant))
+           nil)
+         :cljs
+         (if (seq assertions)
+           (check-assertions-async ctx assertions Class-invariant)
+           (js/Promise.resolve nil))))))
+
+(defn- eval-body-async [ctx body]
+  #?(:clj
+     (last (map #(eval-node ctx %) body))
+     :cljs
+     (promise-reduce body nil
+                     (fn [_ stmt]
+                       (eval-node-async ctx stmt)))))
+
+(defn- eval-body-with-rescue-async [ctx body rescue]
+  #?(:clj
+     (eval-body-with-rescue ctx body rescue)
+     :cljs
+     (letfn [(run-body []
+               (.catch
+                (->promise (eval-body-async ctx body))
+                (fn [e]
+                  (if (and (instance? ExceptionInfo e)
+                           (= :nex-retry (:type (ex-data e))))
+                    (js/Promise.reject e)
+                    (let [exc-value (if (and (instance? ExceptionInfo e)
+                                             (= :nex-exception (:type (ex-data e))))
+                                      (:value (ex-data e))
+                                      (.-message e))
+                          rescue-env (make-env (:current-env ctx))
+                          _ (env-define rescue-env "exception" exc-value)
+                          rescue-ctx (assoc ctx :current-env rescue-env)]
+                      (.catch
+                       (.then (->promise (eval-body-async rescue-ctx rescue))
+                              (fn [_]
+                                (js/Promise.reject e)))
+                       (fn [re]
+                         (if (and (instance? ExceptionInfo re)
+                                  (= :nex-retry (:type (ex-data re))))
+                           (run-body)
+                           (js/Promise.reject re)))))))))]
+       (run-body))))
+
+(defn- dispatch-parent-call-async
+  [ctx current-obj parent-class-name method arg-values]
+  #?(:clj
+     (dispatch-parent-call ctx current-obj parent-class-name method arg-values)
+     :cljs
+     (let [parent-class-def (lookup-class ctx parent-class-name)
+           method-lookup (lookup-method-with-inheritance ctx parent-class-def method)
+           ctor-def (when-not method-lookup
+                      (lookup-constructor parent-class-def method))]
+       (if-let [callable (or (:method method-lookup) ctor-def)]
+         (let [class-def (lookup-class ctx (:class-name current-obj))
+               all-fields (get-all-fields ctx class-def)
+               parent-fields (get-all-fields ctx parent-class-def)
+               parent-field-names (set (map :name parent-fields))
+               method-env (make-env (:current-env ctx))
+               _ (doseq [[field-name field-val] (:fields current-obj)]
+                   (env-define method-env (name field-name) field-val))
+               params (:params callable)
+               _ (doseq [[param arg-val] (map vector params arg-values)]
+                   (env-define method-env (:name param) arg-val))
+               return-type (:return-type callable)
+               default-result (when return-type (get-default-field-value return-type))
+               _ (env-define method-env "result" default-result)
+               _ (env-define method-env "this" current-obj)
+               new-ctx (-> ctx
+                           (assoc :current-env method-env)
+                           (assoc :current-object current-obj)
+                           (assoc :current-target (:current-target ctx))
+                           (assoc :current-class-name (:class-name current-obj))
+                           (assoc :current-method-name method)
+                           (update :debug-stack (fnil conj [])
+                                   {:class (:class-name current-obj)
+                                    :method method
+                                    :env method-env
+                                    :arg-names (set (map :name (or params [])))
+                                    :field-names (set (map :name all-fields))
+                                    :source (:debug-source ctx)})
+                           (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))]
+           (.then (->promise (if-let [rescue (:rescue callable)]
+                               (eval-body-with-rescue-async new-ctx (:body callable) rescue)
+                               (eval-body-async new-ctx (:body callable))))
+                  (fn [_]
+                    (let [updated-fields (reduce (fn [m field]
+                                                  (let [field-name (:name field)
+                                                        field-key (keyword field-name)
+                                                        val (try
+                                                              (env-lookup method-env field-name)
+                                                              (catch :default _ ::not-found))]
+                                                    (if (not= val ::not-found)
+                                                      (assoc m field-key val)
+                                                      m)))
+                                                (:fields current-obj)
+                                                all-fields)
+                          updated-obj (make-object (:class-name current-obj) updated-fields)
+                          result (async-result-value method-env)]
+                      (when-let [tgt (:current-target ctx)]
+                        (try
+                          (env-set! (:current-env ctx) tgt updated-obj)
+                          (catch :default _)))
+                      (doseq [[field-name field-val] (:fields updated-obj)]
+                        (when (contains? parent-field-names (name field-name))
+                          (try
+                            (env-set! (:current-env ctx) (name field-name) field-val)
+                            (catch :default _))))
+                      result))))
+         (js/Promise.reject
+          (ex-info (str "Method not found in parent " parent-class-name ": " method)
+                   {:parent parent-class-name :method method}))))))
+
+(defn eval-node-async [ctx node]
+  #?(:cljs
+     (cond
+       (nil? node) (js/Promise.resolve nil)
+       (string? node) (js/Promise.resolve node)
+       (not (map? node)) (js/Promise.resolve node)
+       (= :spawn (:type node))
+       (js/Promise.resolve
+        (let [spawn-promise
+              (.then (js/Promise.resolve nil)
+                     (fn [_]
+                       (let [spawn-env (make-env (:current-env ctx))
+                             _ (env-define spawn-env "result" nil)
+                             spawn-ctx (assoc ctx :current-env spawn-env)]
+                         (.then (eval-body-async spawn-ctx (:body node))
+                                (fn [_]
+                                  (async-result-value spawn-env))))))]
+          (make-task spawn-promise)))
+       :else
+       (let [node-type (:type node)]
+         (cond
+         (= node-type :program)
+         (let [{:keys [imports interns classes functions statements calls]} node]
+           (doseq [import-node imports]
+             (when (map? import-node)
+               (swap! (:imports ctx) conj import-node)))
+           (doseq [intern-node interns]
+             (when (map? intern-node)
+               (process-intern ctx intern-node)))
+           (doseq [class-node classes]
+             (when (map? class-node)
+               (register-class ctx class-node)))
+           (.then (promise-reduce functions nil
+                                  (fn [_ fn-node]
+                                    (when (map? fn-node)
+                                      (eval-node-async ctx fn-node))))
+                  (fn [_]
+                    (.then (promise-reduce (if (seq statements) statements calls) nil
+                                           (fn [_ stmt-node]
+                                             (when (map? stmt-node)
+                                               (eval-node-async ctx stmt-node))))
+                           (fn [_] ctx)))))
+
+         (= node-type :class)
+         (js/Promise.resolve (do (register-class ctx node) nil))
+
+         (= node-type :function)
+         (let [{:keys [name class-def class-name]} node]
+           (register-class ctx class-def)
+           (let [obj (make-object class-name {})]
+             (env-define (:current-env ctx) name obj)
+             (js/Promise.resolve obj)))
+
+         (= node-type :anonymous-function)
+         (let [{:keys [class-def class-name]} node]
+           (register-class ctx class-def)
+           (js/Promise.resolve (make-object class-name {} (:current-env ctx))))
+
+         (= node-type :call)
+         (let [{:keys [target method args has-parens]} node]
+           (if (and (map? target) (= :create (:type target)) (nil? method))
+             (eval-node-async ctx (assoc target :args args))
+             (.then (promise-all (map #(eval-node-async ctx %) args))
+                    (fn [arg-values]
+                      (if target
+                        (let [target-name (when (string? target) target)
+                              class-target (when target-name (lookup-class-if-exists ctx target-name))
+                              parent-class (when (and target-name (:current-object ctx))
+                                             (let [cls (lookup-class-if-exists ctx target-name)]
+                                               (when (and cls
+                                                          (is-parent? ctx (:class-name (:current-object ctx)) target-name))
+                                                 cls)))]
+                          (.then (if (or parent-class class-target target-name)
+                                   (js/Promise.resolve nil)
+                                   (eval-node-async ctx target))
+                                 (fn [target-value]
+                                   (let [obj (when-not parent-class
+                                               (if class-target
+                                                 nil
+                                                 (if target-name
+                                                   (env-lookup (:current-env ctx) target-name)
+                                                   target-value)))]
+                                     (cond
+                                       (and class-target
+                                            (false? has-parens)
+                                            (lookup-class-constant ctx class-target method))
+                                       (js/Promise.resolve (eval-class-constant ctx class-target method))
+
+                                       parent-class
+                                       (dispatch-parent-call-async ctx (:current-object ctx) target-name method arg-values)
+
+                                       (nex-object? obj)
+                                       (let [class-def (lookup-class ctx (:class-name obj))
+                                             method-lookup (lookup-method-with-inheritance ctx class-def method)]
+                                         (if method-lookup
+                                           (let [method-def (:method method-lookup)
+                                                 params (:params method-def)]
+                                             (when (and (false? has-parens) (seq params))
+                                               (throw (ex-info (str method " requires arguments")
+                                                               {:method method :params (mapv :name params)})))
+                                             (let [all-fields (get-all-fields ctx class-def)
+                                                   effective-require (:effective-require method-lookup)
+                                                   effective-ensure (:effective-ensure method-lookup)
+                                                   has-postconditions? (seq effective-ensure)
+                                                   old-values (when has-postconditions? (:fields obj))
+                                                   method-env (make-env (or (:closure-env obj) (:current-env ctx)))
+                                                   param-names (set (map :name params))
+                                                   _ (doseq [[field-name field-val] (:fields obj)]
+                                                       (env-define method-env (name field-name) field-val))
+                                                   _ (bind-class-constants! ctx method-env class-def)
+                                                   _ (doseq [[param arg-val] (map vector params arg-values)]
+                                                       (env-define method-env (:name param) arg-val))
+                                                   modified-fields (atom #{})
+                                                   return-type (:return-type method-def)
+                                                   default-result (if return-type
+                                                                    (get-default-field-value return-type)
+                                                                    nil)
+                                                   _ (env-define method-env "result" default-result)
+                                                   _ (env-define method-env "this" obj)
+                                                   new-ctx (-> ctx
+                                                               (assoc :current-env method-env)
+                                                               (assoc :current-object obj)
+                                                               (assoc :current-target target-name)
+                                                               (assoc :current-class-name (:class-name obj))
+                                                               (assoc :current-method-name method)
+                                                               (assoc :old-values old-values)
+                                                               (assoc :modified-fields modified-fields)
+                                                               (update :debug-stack (fnil conj [])
+                                                                       {:class (:class-name obj)
+                                                                        :method method
+                                                                        :env method-env
+                                                                        :arg-names (set (map :name (or params [])))
+                                                                        :field-names (set (map name (keys (:fields obj))))
+                                                                        :source (:debug-source ctx)})
+                                                               (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))]
+                                               (.then (->promise (if effective-require
+                                                                   (check-assertions-async new-ctx effective-require Precondition)
+                                                                   nil))
+                                                      (fn [_]
+                                                        (.then (->promise (if-let [rescue (:rescue method-def)]
+                                                                            (eval-body-with-rescue-async new-ctx (:body method-def) rescue)
+                                                                            (eval-body-async new-ctx (:body method-def))))
+                                                               (fn [_]
+                                                                 (let [updated-fields (reduce (fn [m field]
+                                                                                               (let [field-name (:name field)
+                                                                                                     field-key (keyword field-name)]
+                                                                                                 (if (and (contains? param-names field-name)
+                                                                                                          (not (contains? @modified-fields field-name)))
+                                                                                                   m
+                                                                                                   (let [val (try
+                                                                                                               (env-lookup method-env field-name)
+                                                                                                               (catch :default _ ::not-found))]
+                                                                                                     (if (not= val ::not-found)
+                                                                                                       (assoc m field-key val)
+                                                                                                       m)))))
+                                                                                             (:fields obj)
+                                                                                             all-fields)
+                                                                       updated-obj (make-object (:class-name obj) updated-fields)
+                                                                       result (async-result-value method-env)]
+                                                                   (.then (->promise (if effective-ensure
+                                                                                       (check-assertions-async new-ctx effective-ensure Postcondition)
+                                                                                       nil))
+                                                                          (fn [_]
+                                                                            (.then (check-class-invariant-async new-ctx class-def)
+                                                                                   (fn [_]
+                                                                                     (when target-name
+                                                                                       (env-set! (:current-env ctx) target-name updated-obj))
+                                                                                     result))))
+                                                                   ))))))
+                                           (let [all-fields (get-all-fields ctx class-def)
+                                                 field (first (filter #(= (:name %) method) all-fields))]
+                                             (if field
+                                               (let [field-val (get (:fields obj) (keyword method))]
+                                                 (if (and has-parens (nex-object? field-val))
+                                                   (let [call-method (str "call" (count arg-values))
+                                                         literal-args (mapv (fn [v] {:type :literal :value v}) arg-values)]
+                                                     (eval-node-async ctx {:type :call
+                                                                           :target {:type :literal :value field-val}
+                                                                           :method call-method
+                                                                           :args literal-args}))
+                                                   (if (empty? arg-values)
+                                                     (js/Promise.resolve field-val)
+                                                     (js/Promise.reject (ex-info (str "Method not found: " method)
+                                                                                 {:object obj :method method})))))
+                                               (js/Promise.reject (ex-info (str "Method not found: " method)
+                                                                           {:object obj :method method})))))))
+
+                                       (get-type-name obj)
+                                       (->promise (call-builtin-method (or target-name target) obj method arg-values))
+
+                                       :else
+                                       (js/Promise.reject
+                                        (ex-info (str "Method not found on type: " method)
+                                                 {:target target :value obj :method method})))))))
+                        (let [fn-obj (try
+                                       (env-lookup (:current-env ctx) method)
+                                       (catch :default _ ::not-found))]
+                          (cond
+                            (not= fn-obj ::not-found)
+                            (if (nex-object? fn-obj)
+                              (if (not= has-parens false)
+                                (eval-node-async ctx {:type :call
+                                                      :target method
+                                                      :method (str "call" (count args))
+                                                      :args args})
+                                (js/Promise.resolve fn-obj))
+                              (if (false? has-parens)
+                                (js/Promise.resolve fn-obj)
+                                (js/Promise.reject (ex-info (str "Undefined function: " method)
+                                                            {:function method}))))
+
+                            (:current-object ctx)
+                            (let [current-obj (:current-object ctx)
+                                  class-def (lookup-class ctx (:class-name current-obj))
+                                  method-lookup (lookup-method-with-inheritance ctx class-def method)]
+                              (if method-lookup
+                                (let [all-fields (get-all-fields ctx class-def)
+                                      current-env (:current-env ctx)
+                                      updated-fields (reduce (fn [m field]
+                                                               (let [field-name (:name field)
+                                                                     field-key (keyword field-name)
+                                                                     val (try
+                                                                           (env-lookup current-env field-name)
+                                                                           (catch :default _ ::not-found))]
+                                                                 (if (not= val ::not-found)
+                                                                   (assoc m field-key val)
+                                                                   m)))
+                                                             (:fields current-obj)
+                                                             all-fields)
+                                      updated-obj (make-object (:class-name current-obj) updated-fields)
+                                      _ (when-let [target-name (:current-target ctx)]
+                                          (env-set! (-> ctx :current-env :parent) target-name updated-obj))]
+                                  (.then (eval-node-async ctx {:type :call
+                                                               :target (:current-target ctx)
+                                                               :method method
+                                                               :args args})
+                                         (fn [result]
+                                           (when-let [target-name (:current-target ctx)]
+                                             (let [called-obj (env-lookup (-> ctx :current-env :parent) target-name)]
+                                               (when called-obj
+                                                 (doseq [[field-name field-val] (:fields called-obj)]
+                                                   (env-set! current-env (name field-name) field-val)))))
+                                           result)))
+                                (if-let [builtin (get builtins method)]
+                                  (->promise (apply builtin ctx arg-values))
+                                  (js/Promise.reject (ex-info (str "Undefined method: " method)
+                                                              {:function method :object current-obj})))))
+
+                            :else
+                            (if-let [builtin (get builtins method)]
+                              (->promise (apply builtin ctx arg-values))
+                              (js/Promise.reject (ex-info (str "Undefined function: " method)
+                                                          {:function method}))))))))))
+
+         (= node-type :this)
+         (js/Promise.resolve (:current-object ctx))
+
+         (= node-type :member-assign)
+         (.then (eval-node-async ctx (:value node))
+                (fn [val]
+                  (when-let [mf (:modified-fields ctx)]
+                    (swap! mf conj (:field node)))
+                  (env-set! (:current-env ctx) (:field node) val)
+                  val))
+
+         (= node-type :assign)
+         (.then (eval-node-async ctx (:value node))
+                (fn [val]
+                  (env-set! (:current-env ctx) (:target node) val)
+                  (when (= "result" (:target node))
+                    (env-define (:current-env ctx) "__result_assigned__" "result"))
+                  val))
+
+         (= node-type :let)
+         (.then (eval-node-async ctx (:value node))
+                (fn [val]
+                  (env-define (:current-env ctx) (:name node) val)
+                  (when (= "result" (:name node))
+                    (env-define (:current-env ctx) "__result_assigned__" "result"))
+                  val))
+
+         (= node-type :block)
+         (eval-body-async ctx node)
+
+         (= node-type :raise)
+         (.then (eval-node-async ctx (:value node))
+                (fn [val]
+                  (throw (ex-info (str val) {:type :nex-exception :value val}))))
+
+         (= node-type :retry)
+         (js/Promise.reject (ex-info "retry" {:type :nex-retry}))
+
+         (= node-type :scoped-block)
+         (let [new-env (make-env (:current-env ctx))
+               new-ctx (assoc ctx :current-env new-env)]
+           (if-let [rescue (:rescue node)]
+             (eval-body-with-rescue-async new-ctx (:body node) rescue)
+             (eval-body-async new-ctx (:body node))))
+
+         (= node-type :when)
+         (.then (eval-node-async ctx (:condition node))
+                (fn [cond-val]
+                  (if cond-val
+                    (eval-node-async ctx (:consequent node))
+                    (eval-node-async ctx (:alternative node)))))
+
+         (= node-type :convert)
+         (.then (eval-node-async ctx (:value node))
+                (fn [v]
+                  (let [target-name (if (map? (:target-type node)) (:base-type (:target-type node)) (:target-type node))
+                        runtime-name (runtime-type-name v)
+                        ok? (and (some? v)
+                                 (string? target-name)
+                                 (convert-compatible-runtime? ctx runtime-name target-name))]
+                    (env-define (:current-env ctx) (:var-name node) (if ok? v nil))
+                    ok?)))
+
+         (= node-type :if)
+         (.then (eval-node-async ctx (:condition node))
+                (fn [cond-val]
+                  (if cond-val
+                    (eval-body-async ctx (:then node))
+                    (letfn [(eval-elseif [clauses]
+                              (if (empty? clauses)
+                                (if (:else node)
+                                  (eval-body-async ctx (:else node))
+                                  (js/Promise.resolve nil))
+                                (.then (eval-node-async ctx (:condition (first clauses)))
+                                       (fn [matched?]
+                                         (if matched?
+                                           (eval-body-async ctx (:then (first clauses)))
+                                           (eval-elseif (rest clauses)))))))]
+                      (eval-elseif (:elseif node))))))
+
+         (= node-type :case)
+         (.then (eval-node-async ctx (:expr node))
+                (fn [val]
+                  (letfn [(match-clauses [clauses]
+                            (if (empty? clauses)
+                              (if-let [else-node (:else node)]
+                                (eval-node-async ctx else-node)
+                                (js/Promise.reject (ex-info "No matching case and no else clause"
+                                                            {:value val})))
+                              (.then (promise-all (map #(eval-node-async ctx %) (:values (first clauses))))
+                                     (fn [values]
+                                       (if (some #(= val %) values)
+                                         (eval-node-async ctx (:body (first clauses)))
+                                         (match-clauses (rest clauses)))))))]
+                    (match-clauses (:clauses node)))))
+
+         (= node-type :select)
+         (.then (promise-all (map #(prepare-select-clause-async ctx %) (:clauses node)))
+                (fn [prepared]
+                  (let [timeout-ms-p (if-let [timeout-node (:timeout node)]
+                                       (.then (eval-node-async ctx (:duration timeout-node))
+                                              (fn [v] (timeout-ms v)))
+                                       (js/Promise.resolve nil))]
+                    (.then timeout-ms-p
+                           (fn [timeout-ms-val]
+                             (let [deadline (when timeout-ms-val (+ (.now js/Date) timeout-ms-val))]
+                               (letfn [(attempt-loop []
+                                         (.then
+                                          (promise-all (map attempt-select-clause-async prepared))
+                                          (fn [outcomes]
+                                            (if-let [idx (first (keep-indexed (fn [i outcome]
+                                                                                (when (:selected? outcome) i))
+                                                                              outcomes))]
+                                              (let [clause (nth prepared idx)
+                                                    outcome (nth outcomes idx)]
+                                                (execute-select-body-async ctx (:body clause) (:alias clause) (:value outcome)))
+                                              (if-let [else-body (:else node)]
+                                                (eval-body-async ctx else-body)
+                                                (if (and deadline (>= (.now js/Date) deadline))
+                                                  (eval-body-async ctx (get-in node [:timeout :body]))
+                                                  (.then (sleep-select-step-async)
+                                                         (fn [_]
+                                                           (attempt-loop)))))))))]
+                                 (attempt-loop)))))))
+
+         (= node-type :loop)
+         (.then (promise-reduce (:init node) nil
+                                (fn [_ stmt] (eval-node-async ctx stmt)))
+                (fn [_]
+                  (letfn [(step [last-result prev-variant iteration]
+                            (.then (->promise (when-let [invariant (:invariant node)]
+                                                (check-assertions-async ctx invariant Loop-invariant)))
+                                   (fn [_]
+                                     (.then (eval-node-async ctx (:until node))
+                                            (fn [until-val]
+                                              (if until-val
+                                                last-result
+                                                (.then (->promise (when-let [variant (:variant node)]
+                                                                    (eval-node-async ctx variant)))
+                                                       (fn [curr-variant]
+                                                         (when (and (:variant node) prev-variant)
+                                                           (when-not (< curr-variant prev-variant)
+                                                             (throw (ex-info "Loop variant must decrease"
+                                                                             {:iteration iteration
+                                                                              :previous-variant prev-variant
+                                                                              :current-variant curr-variant}))))
+                                                         (let [body-env (make-env (:current-env ctx))
+                                                               body-ctx (assoc ctx :current-env body-env)]
+                                                           (.then (eval-body-async body-ctx (:body node))
+                                                                  (fn [result]
+                                                                    (.then (->promise (when-let [invariant (:invariant node)]
+                                                                                        (check-assertions-async ctx invariant Loop-invariant)))
+                                                                           (fn [_]
+                                                                             (step result curr-variant (inc iteration)))))))))))))))]
+                    (step nil nil 0))))
+
+         (= node-type :statement)
+         (eval-node-async ctx (:node node))
+
+         (= node-type :binary)
+         (.then (promise-all [(eval-node-async ctx (:left node))
+                              (eval-node-async ctx (:right node))])
+                (fn [[left-val right-val]]
+                  (apply-binary-op (:operator node) left-val right-val)))
+
+         (= node-type :unary)
+         (.then (eval-node-async ctx (:expr node))
+                (fn [val]
+                  (apply-unary-op (:operator node) val)))
+
+         (= node-type :integer) (js/Promise.resolve (:value node))
+         (= node-type :real) (js/Promise.resolve (:value node))
+         (= node-type :boolean) (js/Promise.resolve (:value node))
+         (= node-type :char) (js/Promise.resolve (:value node))
+         (= node-type :string) (js/Promise.resolve (:value node))
+         (= node-type :nil) (js/Promise.resolve nil)
+
+         (= node-type :array-literal)
+         (.then (promise-all (map #(eval-node-async ctx %) (:elements node)))
+                nex-array-from)
+
+         (= node-type :set-literal)
+         (.then (promise-all (map #(eval-node-async ctx %) (:elements node)))
+                nex-set-from)
+
+         (= node-type :map-literal)
+         (.then (promise-all (map (fn [{:keys [key value]}]
+                                    (promise-all [(eval-node-async ctx key)
+                                                  (eval-node-async ctx value)]))
+                                  (:entries node)))
+                nex-map-from)
+
+         (= node-type :subscript)
+         (.then (promise-all [(eval-node-async ctx (:target node))
+                              (eval-node-async ctx (:index node))])
+                (fn [[coll idx]]
+                  (nex-coll-get coll idx)))
+
+         (= node-type :identifier)
+         (js/Promise.resolve (eval-node ctx node))
+
+         (= node-type :create)
+         (let [{:keys [class-name generic-args constructor args]} node]
+           (.then (promise-all (map #(eval-node-async ctx %) args))
+                  (fn [arg-values]
+                    (case class-name
+                      "Console" {:nex-builtin-type :Console}
+                      "File" (do
+                               (when-not (= constructor "open")
+                                 (throw (ex-info "File requires constructor: create File.open(path)" {:class-name "File"})))
+                               {:nex-builtin-type :File :path (first arg-values)})
+                      "Process" {:nex-builtin-type :Process}
+                      "Channel" (cond
+                                  (nil? constructor) (make-channel)
+                                  (= constructor "with_capacity")
+                                  (let [capacity (first arg-values)]
+                                    (when-not (integer? capacity)
+                                      (throw (ex-info "Channel.with_capacity requires an Integer capacity"
+                                                      {:class-name "Channel" :constructor constructor})))
+                                    (when (neg? capacity)
+                                      (throw (ex-info "Channel capacity must be non-negative"
+                                                      {:class-name "Channel" :constructor constructor})))
+                                    (make-channel capacity))
+                                  :else
+                                  (throw (ex-info (str "Constructor not found: Channel." constructor)
+                                                  {:class-name "Channel" :constructor constructor})))
+                      "Set" (cond
+                              (nil? constructor) (nex-set)
+                              (= constructor "from_array") (let [source (first arg-values)]
+                                                             (cond
+                                                               (nex-array? source) (nex-set-from (array-seq source))
+                                                               (sequential? source) (nex-set-from source)
+                                                               :else (throw (ex-info "Set.from_array requires an array"
+                                                                                     {:class-name "Set"}))))
+                              :else (throw (ex-info (str "Constructor not found: Set." constructor)
+                                                    {:class-name "Set" :constructor constructor})))
+                      (let [effective-class-name
+                            (if (seq generic-args)
+                              (let [spec-name (specialized-class-name class-name generic-args)]
+                                (if (lookup-specialized-class ctx spec-name)
+                                  spec-name
+                                  (let [template (get @(:classes ctx) class-name)]
+                                    (when-not template
+                                      (throw (ex-info (str "Undefined template class: " class-name)
+                                                      {:class-name class-name})))
+                                    (let [specialized (specialize-class template generic-args)]
+                                      (register-specialized-class ctx specialized)
+                                      spec-name))))
+                              class-name)
+                            class-def (lookup-class-if-exists ctx effective-class-name)]
+                        (when-not class-def
+                          (throw (ex-info (str "Undefined class: " class-name)
+                                          {:class-name class-name})))
+                        (when (:deferred? class-def)
+                          (throw (ex-info (str "Cannot instantiate deferred class: " class-name)
+                                          {:class-name class-name :deferred? true})))
+                        (let [all-fields (get-all-fields ctx class-def)
+                              initial-field-map (reduce (fn [m field]
+                                                          (assoc m (keyword (:name field))
+                                                                 (get-default-field-value (:field-type field))))
+                                                        {}
+                                                        all-fields)
+                              finalize-object
+                              (fn [field-map]
+                                (let [obj (make-object effective-class-name field-map)
+                                      inv-env (make-env (:current-env ctx))
+                                      _ (doseq [[field-name field-val] field-map]
+                                          (env-define inv-env (name field-name) field-val))
+                                      inv-ctx (assoc ctx :current-env inv-env)]
+                                  (.then (check-class-invariant-async inv-ctx class-def)
+                                         (fn [_] obj))))]
+                          (if constructor
+                            (let [ctor-def (lookup-constructor-with-inheritance ctx class-def constructor)]
+                              (when-not ctor-def
+                                (throw (ex-info (str "Constructor not found: " class-name "." constructor)
+                                                {:class-name class-name :constructor constructor})))
+                              (let [ctor-env (make-env (:current-env ctx))
+                                    _ (doseq [[field-name field-val] initial-field-map]
+                                        (env-define ctor-env (name field-name) field-val))
+                                    _ (bind-class-constants! ctx ctor-env class-def)
+                                    params (:params ctor-def)
+                                    _ (doseq [[param arg-val] (map vector params arg-values)]
+                                        (env-define ctor-env (:name param) arg-val))
+                                    temp-obj (make-object effective-class-name initial-field-map)
+                                    new-ctx (-> ctx
+                                                (assoc :current-env ctor-env)
+                                                (assoc :current-object temp-obj)
+                                                (assoc :current-class-name effective-class-name)
+                                                (assoc :current-method-name constructor)
+                                                (update :debug-stack (fnil conj [])
+                                                        {:class effective-class-name
+                                                         :method (or constructor "make")
+                                                         :env ctor-env
+                                                         :arg-names (set (map :name (or params [])))
+                                                         :field-names (set (map name (keys initial-field-map)))
+                                                         :source (:debug-source ctx)})
+                                                (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))]
+                                (.then (->promise (when-let [require-assertions (:require ctor-def)]
+                                                    (check-assertions-async new-ctx require-assertions Precondition)))
+                                       (fn [_]
+                                         (.then (->promise (if-let [rescue (:rescue ctor-def)]
+                                                             (eval-body-with-rescue-async new-ctx (:body ctor-def) rescue)
+                                                             (eval-body-async new-ctx (:body ctor-def))))
+                                                (fn [_]
+                                                  (let [updated-fields (reduce (fn [m field]
+                                                                                 (let [field-name (:name field)
+                                                                                       field-key (keyword field-name)
+                                                                                       val (try
+                                                                                             (env-lookup ctor-env field-name)
+                                                                                             (catch :default _ ::not-found))]
+                                                                                   (if (not= val ::not-found)
+                                                                                     (assoc m field-key val)
+                                                                                     m)))
+                                                                               initial-field-map
+                                                                               all-fields)]
+                                                    (.then (->promise (when-let [ensure-assertions (:ensure ctor-def)]
+                                                                        (check-assertions-async new-ctx ensure-assertions Postcondition)))
+                                                           (fn [_]
+                                                             (finalize-object updated-fields)))))))))
+                            (finalize-object initial-field-map)))))))))
+
+         (= node-type :literal)
+         (js/Promise.resolve (if (map? node) (:value node) node))
+
+         (= node-type :old)
+         (js/Promise.resolve (eval-node ctx node))
+
+         (= node-type :with)
+         (js/Promise.resolve nil)
+
+         (= node-type :default)
+         (js/Promise.resolve (eval-node ctx node))
+
+         :else
+         (js/Promise.reject
+          (ex-info (str "Cannot evaluate node type: " (:type node))
+                   {:node node}))))))))
 
 ;;
 ;; Public API

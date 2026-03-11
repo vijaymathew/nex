@@ -67,7 +67,7 @@ print(y)"
               main-js (get js-files "main.js")]
           (is (str/includes? main-java "int y ="))
           (is (str/includes? main-java "NexGlobals.double.call1(5)"))
-          (is (str/includes? main-js "let y = NexGlobals.double.call1(5);"))
+      (is (str/includes? main-js "let y = await NexGlobals.double.call1(5);"))
           (is (str/includes? main-js "console.log(y)")))
         (finally
           (.delete tmp))))))

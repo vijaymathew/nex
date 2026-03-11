@@ -2,6 +2,7 @@
 
 (require '[clojure.java.io :as io])
 (require '[clojure.string :as str])
+(require '[nex.interpreter :as interpreter])
 (require '[nex.repl :as repl])
 
 (defn md-file? [^java.io.File f]
@@ -179,6 +180,9 @@
     (when (seq failed)
       (System/exit 1))))
 
-(let [opts (parse-args *command-line-args*)
-      results (mapv #(run-file! % opts) (:files opts))]
-  (print-summary (:root opts) results))
+(let [opts (parse-args *command-line-args*)]
+  (try
+    (let [results (mapv #(run-file! % opts) (:files opts))]
+      (print-summary (:root opts) results))
+    (finally
+      (interpreter/shutdown-runtime!))))

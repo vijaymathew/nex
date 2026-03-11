@@ -10,6 +10,7 @@
 \usepackage{microtype}
 \microtypesetup{protrusion=true,expansion=true}
 \usepackage{setspace}
+\usepackage{fvextra}
 \setstretch{1.2}
 
 \clubpenalty=10000
@@ -61,10 +62,19 @@
 }
 \renewcommand*{\chapterpagestyle}{chapterstartstyle}
 
+% Match the tutorial print code-block rendering to docs/book.
 \definecolor{shadecolor}{gray}{0.96}
+\RecustomVerbatimEnvironment{Highlighting}{Verbatim}{
+  commandchars=\\\{\},
+  fontsize=\fontsize{6.8}{7.8}\selectfont,
+  breaklines=true,
+  breakanywhere=true
+}
+\renewenvironment{Shaded}{\vspace{0.35\baselineskip}}{\vspace{0.2\baselineskip}}
 
 \usepackage{listings}
 \usepackage{caption}
+\usepackage{xcolor}
 \captionsetup{
   font=small,
   labelfont=bf,
@@ -96,45 +106,53 @@
 \usepackage{flafter}
 \usepackage[section]{placeins}
 \lstset{
-  basicstyle=\ttfamily\scriptsize,
+  basicstyle=\ttfamily\fontsize{5.8}{6.8}\selectfont,
   breaklines=true,
   breakatwhitespace=false,
   breakautoindent=true,
   breakindent=0pt,
-  columns=flexible,
+  columns=fullflexible,
   linewidth=\linewidth,
-  keepspaces=true,
+  keepspaces=false,
   showstringspaces=false,
-  frame=single,
-  framerule=0.15pt,
-  framesep=4pt,
+  frame=none,
+  framerule=0pt,
+  framesep=0pt,
   xleftmargin=0pt,
   xrightmargin=0pt,
   framexleftmargin=0pt,
   framexrightmargin=0pt,
+  aboveskip=0.45\baselineskip,
+  belowskip=0.35\baselineskip,
+  upquote=true,
   postbreak=\mbox{\textcolor{gray}{$\hookrightarrow$}\space},
+  prebreak=\mbox{\textcolor{gray}{$\hookleftarrow$}\space},
   captionpos=t
 }
 
 \AtBeginDocument{
   \lstset{
-    basicstyle=\ttfamily\scriptsize,
+    basicstyle=\ttfamily\fontsize{5.8}{6.8}\selectfont,
     breaklines=true,
     breakatwhitespace=false,
     breakautoindent=true,
     breakindent=0pt,
-    columns=flexible,
+    columns=fullflexible,
     linewidth=\linewidth,
-    keepspaces=true,
+    keepspaces=false,
     showstringspaces=false,
-    frame=single,
-    framerule=0.15pt,
-    framesep=4pt,
+    frame=none,
+    framerule=0pt,
+    framesep=0pt,
     xleftmargin=0pt,
     xrightmargin=0pt,
     framexleftmargin=0pt,
     framexrightmargin=0pt,
+    aboveskip=0.45\baselineskip,
+    belowskip=0.35\baselineskip,
+    upquote=true,
     postbreak=\mbox{\textcolor{gray}{$\hookrightarrow$}\space},
+    prebreak=\mbox{\textcolor{gray}{$\hookleftarrow$}\space},
     captionpos=t
   }
 }

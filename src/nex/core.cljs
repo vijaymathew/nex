@@ -27,12 +27,12 @@
   #{"class" "deferred" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
     "when" "from" "until" "invariant" "variant" "require" "ensure"
     "let" "as" "and" "or" "not" "fn" "old" "create" "private" "note"
-    "with" "import" "intern" "function" "raise" "rescue" "retry"
+    "with" "import" "intern" "function" "raise" "rescue" "retry" "spawn" "select" "timeout"
     "repeat" "across" "case" "of"})
 
 (def nex-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Any" "Void" "Function" "Cursor" "Window" "Turtle" "Image"})
+    "Array" "Map" "Set" "Task" "Channel" "Any" "Void" "Function" "Cursor" "Window" "Turtle" "Image"})
 
 (def nex-constants
   #{"true" "false" "nil"})
@@ -780,7 +780,7 @@
 (defn- wrap-expression [input]
   (str "class __BrowserRepl__\n"
        "feature\n"
-       "  __eval__() do\n"
+       "  __eval__(): Any do\n"
        "    " input "\n"
        "  end\n"
        "end"))
@@ -788,7 +788,7 @@
 (defn- wrap-statement-block [input]
   (str "class __BrowserRepl__\n"
        "feature\n"
-       "  __eval__() do\n"
+       "  __eval__(): Any do\n"
        input "\n"
        "  end\n"
        "end"))
@@ -797,20 +797,26 @@
   (let [ast (p/ast wrapped-code)
         _ (typecheck-ast! ast)
         method-def (-> ast :classes first :body first :members first)
-        body (:body method-def)
-        result (last (mapv #(interp/eval-node ctx %) body))]
-    (when (:typecheck-enabled @app-state)
-      (remember-typed-lets! body))
-    {:result result
-     :output @(:output ctx)}))
+        body (:body method-def)]
+    (.then (reduce (fn [acc stmt]
+                     (.then acc
+                            (fn [_]
+                              (interp/eval-node-async ctx stmt))))
+                   (js/Promise.resolve nil)
+                   body)
+           (fn [result]
+             (when (:typecheck-enabled @app-state)
+               (remember-typed-lets! body))
+             {:result result
+              :output @(:output ctx)}))))
 
 (defn- run-program! [ctx source]
   (let [ast (p/ast source)
-        _ (typecheck-ast! ast)
-        raw-result (interp/eval-node ctx ast)
-        result (if (= :program (:type ast)) nil raw-result)]
-    {:result result
-     :output @(:output ctx)}))
+        _ (typecheck-ast! ast)]
+    (.then (interp/eval-node-async ctx ast)
+           (fn [raw-result]
+             {:result (if (= :program (:type ast)) nil raw-result)
+              :output @(:output ctx)}))))
 
 (defn- show-runtime-output! [output result]
   (doseq [line output]
@@ -829,15 +835,9 @@
       (set! (.-value input-el) "")
       (reset! (:output ctx) [])
       (try
-        (if (looks-like-definition? trimmed)
-          (let [{:keys [result output]} (run-program! ctx trimmed)]
-            ;; Definitions should not dump interpreter internals (e.g. Context).
-            ;; Show runtime output if any, otherwise a concise confirmation.
-            (doseq [line output]
-              (append-line! "out" (str line)))
-            (when (empty? output)
-              (append-line! "info" "Loaded definition.")))
-          (let [{:keys [result output]}
+        (let [run-promise
+              (if (looks-like-definition? trimmed)
+                (run-program! ctx trimmed)
                 (try
                   (eval-wrapped! ctx (wrap-expression trimmed))
                   (catch :default e1
@@ -846,8 +846,22 @@
                       (try
                         (eval-wrapped! ctx (wrap-statement-block trimmed))
                         (catch :default _e2
-                          (throw e1))))))]
-            (show-runtime-output! output result)))
+                          (throw e1)))))))]
+          (.then run-promise
+                 (fn [{:keys [result output]}]
+                   (if (looks-like-definition? trimmed)
+                     (do
+                       (doseq [line output]
+                         (append-line! "out" (str line)))
+                       (when (empty? output)
+                         (append-line! "info" "Loaded definition.")))
+                     (show-runtime-output! output result))))
+          (.catch run-promise
+                  (fn [e]
+                    (let [msg (str "Error: " (or (.-message e) (str e)))]
+                      (append-line! "err" msg)
+                      (when (str/includes? msg "Parser module missing")
+                        (append-line! "err" (parser-debug-info)))))))
         (catch :default e
           (let [msg (str "Error: " (or (.-message e) (str e)))]
             (append-line! "err" msg)
@@ -871,15 +885,20 @@
                                    (seq (:functions ast))
                                    (seq (:imports ast))
                                    (seq (:interns ast))))
-                {:keys [result output]}
+                run-promise
                 (if has-defs?
-                  (do
-                    (interp/eval-node ctx ast)
-                    {:result nil :output @(:output ctx)})
+                  (.then (interp/eval-node-async ctx ast)
+                         (fn [_]
+                           {:result nil :output @(:output ctx)}))
                   (eval-wrapped! ctx (wrap-statement-block trimmed)))]
-            (show-runtime-output! output result)
-            (when (and (empty? output) (nil? result))
-              (append-line! "info" "Program loaded and executed.")))
+            (.then run-promise
+                   (fn [{:keys [result output]}]
+                     (show-runtime-output! output result)
+                     (when (and (empty? output) (nil? result))
+                       (append-line! "info" "Program loaded and executed."))))
+            (.catch run-promise
+                    (fn [e]
+                      (append-line! "err" (str "Error: " (or (.-message e) (str e)))))))
           (catch :default e
             (append-line! "err" (str "Error: " (or (.-message e) (str e))))))))))
 
@@ -1190,7 +1209,7 @@
 
                              :else nil))))
 
-    (append-line! "info" "Browser IDE build: 2026-03-10a")))
+    (append-line! "info" "Browser IDE build: 2026-03-11a")))
 
 (defn init []
   (render!))

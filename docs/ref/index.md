@@ -8,6 +8,7 @@ This reference documents the interpreter-level built-ins currently defined in `s
 - [Collection Types](collection-types.md)
 - [Cursor Types](cursor-types.md)
 - [System Classes](system-classes.md)
+- [Concurrency Guide](../md/CONCURRENCY.md)
 - [Graphics Classes](graphics-classes.md)
 
 ## Conventions

@@ -20,6 +20,7 @@
 (def ^:dynamic *all-method-names* #{})  ;; own + delegated parent method names
 (def ^:dynamic *field-types* {})        ;; field-name -> type, own + parent
 (def ^:dynamic *class-invariants* [])   ;; effective class invariants (inherited + local, deduped)
+(def ^:dynamic *spawn-result-flag* nil) ;; temp boolean var name used inside generated spawn bodies
 
 (declare extract-members)
 (declare get-accessible-constants)
@@ -49,6 +50,8 @@
       "Array" "ArrayList"
       "Map" "HashMap"
       "Set" "LinkedHashSet"
+      "Task" "NexRuntime.Task"
+      "Channel" "NexRuntime.Channel"
       "Console" "Object"
       "File" "java.io.File"
       "Process" "Object"
@@ -75,8 +78,10 @@
                       "Array" "ArrayList"
                       "Map" "HashMap"
                       "Set" "LinkedHashSet"
+                      "Task" "NexRuntime.Task"
+                      "Channel" "NexRuntime.Channel"
                       base-type)
-           args (:type-args nex-type)]
+           args (or (:type-args nex-type) (:type-params nex-type))]
        (if args
          ;; Type arguments in generics must use boxed types
          (str java-base "<" (str/join ", " (map #(if (string? %)
@@ -100,6 +105,8 @@
         "Array" "ArrayList"
         "Map" "HashMap"
         "Set" "LinkedHashSet"
+        "Task" "NexRuntime.Task"
+        "Channel" "NexRuntime.Channel"
         "Console" "Object"
         "File" "java.io.File"
         "Process" "Object"
@@ -123,6 +130,8 @@
         "Array" (str "new ArrayList<>()")
         "Map" (str "new HashMap<>()")
         "Set" (str "new LinkedHashSet<>()")
+        "Task" "null"
+        "Channel" "null"
         "null"))
 
     ;; Handle basic types
@@ -138,6 +147,8 @@
       "Array" "new ArrayList<>()"
       "Map" "new HashMap<>()"
       "Set" "new LinkedHashSet<>()"
+      "Task" "null"
+      "Channel" "null"
       "Console" "new Object() /* Console */"
       "File" "null"
       "Process" "new Object() /* Process */"
@@ -228,6 +239,9 @@
     "println" (str "System.out.println(" args-code ")")
     "type_of" (str "NexRuntime.typeOf(" args-code ")")
     "type_is" (str "NexRuntime.typeIs(" args-code ")")
+    "sleep" (str "NexRuntime.sleep(" args-code ")")
+    "await_any" (str "NexRuntime.awaitAny(" args-code ")")
+    "await_all" (str "NexRuntime.awaitAll(" args-code ")")
     ;; Default: use as-is (regular method call)
     (str method "(" args-code ")")))
 
@@ -411,6 +425,22 @@
     "is_empty"             (fn [target _] (str target ".isEmpty()"))
     "cursor"               (fn [target _] (str "NexRuntime.setCursor(" target ")"))}
 
+   :Task
+   {"await"    (fn [target args] (str target ".await(" args ")"))
+    "cancel"   (fn [target _] (str target ".cancel()"))
+    "is_done"  (fn [target _] (str target ".is_done()"))
+    "is_cancelled" (fn [target _] (str target ".is_cancelled()"))}
+
+   :Channel
+   {"send"        (fn [target args] (str target ".send(" args ")"))
+    "try_send"    (fn [target args] (str target ".try_send(" args ")"))
+    "receive"     (fn [target args] (str target ".receive(" args ")"))
+    "try_receive" (fn [target _] (str target ".try_receive()"))
+    "close"       (fn [target _] (str target ".close()"))
+    "is_closed"   (fn [target _] (str target ".is_closed()"))
+    "capacity"    (fn [target _] (str target ".capacity()"))
+    "size"        (fn [target _] (str target ".size()"))}
+
    :Image
    {"width"        (fn [target _] (str target ".width()"))
     "height"       (fn [target _] (str target ".height()"))}
@@ -473,6 +503,8 @@
             "Any")
     "Any"))
 
+(declare builtin-dispatch-type)
+
 (defn infer-expression-type
   "Infer a Nex type for code generation dispatch."
   [expr]
@@ -488,14 +520,119 @@
       :real "Real"
       :boolean "Boolean"
       :char "Char"
+      :binary (let [left-type (builtin-dispatch-type (infer-expression-type (:left expr)))
+                    right-type (builtin-dispatch-type (infer-expression-type (:right expr)))]
+                (case (:operator expr)
+                  ("=" "/=" "<" "<=" ">" ">=" "and" "or") "Boolean"
+                  "+" (if (or (= left-type "String") (= right-type "String")) "String" left-type)
+                  ("-" "*" "/" "%") left-type
+                  "Any"))
+      :call (let [target-type (when (:target expr)
+                                (infer-expression-type (:target expr)))
+                  normalized-target (builtin-dispatch-type target-type)
+                  type-args (when (map? target-type)
+                              (or (:type-args target-type) (:type-params target-type)))
+                  first-arg-type (when-let [arg (first (:args expr))]
+                                   (infer-expression-type arg))
+                  first-arg-params (when (map? first-arg-type)
+                                     (or (:type-args first-arg-type) (:type-params first-arg-type)))
+                  nested-task-type (when (and (map? first-arg-type)
+                                              (= (:base-type first-arg-type) "Array"))
+                                     (first first-arg-params))
+                  nested-task-params (when (map? nested-task-type)
+                                       (or (:type-args nested-task-type) (:type-params nested-task-type)))]
+              (if (nil? (:target expr))
+                (case (:method expr)
+                  "await_any" (or (first nested-task-params) "Any")
+                  "await_all" {:base-type "Array" :type-params [(or (first nested-task-params) "Any")]}
+                  "type_of" "String"
+                  "type_is" "Boolean"
+                  "sleep" "Void"
+                  "Any")
+                (case normalized-target
+                "Task" (case (:method expr)
+                         "await" (if (seq (:args expr))
+                                   {:base-type (or (first type-args) "Any") :detachable true}
+                                   (or (first type-args) "Any"))
+                         "cancel" "Boolean"
+                         "is_done" "Boolean"
+                         "is_cancelled" "Boolean"
+                         "Any")
+                "Channel" (case (:method expr)
+                            "receive" (if (seq (:args expr))
+                                        {:base-type (or (first type-args) "Any") :detachable true}
+                                        (or (first type-args) "Any"))
+                            "try_receive" {:base-type (or (first type-args) "Any") :detachable true}
+                            "is_closed" "Boolean"
+                            "capacity" "Integer"
+                            "size" "Integer"
+                            "send" (if (= 2 (count (:args expr))) "Boolean" "Void")
+                            "try_send" "Boolean"
+                            "close" "Void"
+                            "Any")
+                "Set" (case (:method expr)
+                        ("contains" "is_empty") "Boolean"
+                        "size" "Integer"
+                        ("union" "difference" "intersection" "symmetric_difference") target-type
+                        "Any")
+                "Array" (case (:method expr)
+                          "get" (or (first type-args) "Any")
+                          ("length" "size" "index_of") "Integer"
+                          "is_empty" "Boolean"
+                          "Any")
+                "Map" (case (:method expr)
+                        "get" (or (second type-args) "Any")
+                        ("size") "Integer"
+                        ("is_empty" "contains_key") "Boolean"
+                        "Any")
+                "String" (case (:method expr)
+                           ("length" "index_of") "Integer"
+                           "contains" "Boolean"
+                           ("substring" "to_upper" "to_lower" "trim" "replace") "String"
+                           "Any")
+                "Any")))
       :array-literal "Array"
       :map-literal "Map"
       :set-literal "Set"
+      :spawn "Task"
       :create (:class-name expr)
       :identifier (or (get *local-types* (:name expr))
                       (get *field-types* (:name expr))
                       "Any")
       "Any")))
+
+(defn infer-spawn-result-type
+  "Infer the result type assigned inside a spawn body."
+  [stmts]
+  (letfn [(collect-from-stmt [stmt]
+            (when (map? stmt)
+              (case (:type stmt)
+                :assign (when (= (:target stmt) "result")
+                          [(infer-expression-type (:value stmt))])
+                :let (when (= (:name stmt) "result")
+                       [(or (:var-type stmt) (infer-expression-type (:value stmt)))])
+                :if (concat (mapcat collect-from-stmt (:then stmt))
+                            (mapcat (fn [clause] (mapcat collect-from-stmt (:then clause))) (:elseif stmt))
+                            (mapcat collect-from-stmt (:else stmt)))
+                :loop (concat (mapcat collect-from-stmt (:init stmt))
+                              (mapcat collect-from-stmt (:body stmt)))
+                :scoped-block (concat (mapcat collect-from-stmt (:body stmt))
+                                      (mapcat collect-from-stmt (:rescue stmt)))
+                :with (mapcat collect-from-stmt (:body stmt))
+                :case (concat (mapcat (fn [clause] (collect-from-stmt (:body clause))) (:clauses stmt))
+                              (when-let [else-stmt (:else stmt)]
+                                (collect-from-stmt else-stmt)))
+                [])))]
+    (let [types (remove #(or (nil? %) (= % "Void") (= % "Any"))
+                        (mapcat collect-from-stmt stmts))]
+      (first types))))
+
+(defn builtin-dispatch-type
+  "Normalize inferred types for builtin dispatch."
+  [t]
+  (cond
+    (map? t) (:base-type t)
+    :else t))
 
 (defn extract-typed-locals
   "Collect typed local bindings from statements."
@@ -565,6 +702,35 @@
     :else id-name))
 
 (declare generate-create-expr)
+(declare generate-statement)
+(declare collect-convert-bindings-block)
+(declare generate-convert-declarations)
+
+(defn generate-spawn-expr
+  "Generate Java code for spawn expression."
+  [{:keys [body]}]
+  (let [convert-bindings (collect-convert-bindings-block body)
+        convert-var-names (set (map :name convert-bindings))
+        convert-var-types (into {} (map (juxt :name :target-type) convert-bindings))
+        result-type (or (infer-spawn-result-type body) "Any")
+        java-result-type (if (= result-type "Any")
+                           "Object"
+                           (nex-type-to-java-boxed result-type))
+        local-types (merge convert-var-types (extract-typed-locals body) {"result" result-type})
+        result-flag (str (gensym "__nexSpawnHasResult"))]
+    (binding [*local-names* (into *local-names* (conj convert-var-names "result"))
+              *local-types* (merge *local-types* local-types)
+              *spawn-result-flag* result-flag]
+      (let [statement-lines (map #(generate-statement 1 %) body)]
+        (str "NexRuntime.spawnTask(() -> {\n"
+             (indent 1 (str java-result-type " result = null;")) "\n"
+             (indent 1 (str "boolean " result-flag " = false;")) "\n"
+             (str/join "\n" (generate-convert-declarations 1 convert-bindings))
+             (when (seq convert-bindings) "\n")
+             (str/join "\n" statement-lines)
+             (when (seq statement-lines) "\n")
+             (indent 1 (str "return " result-flag " ? result : null;")) "\n"
+             "})")))))
 
 (defn generate-call-expr
   "Generate Java code for method call.
@@ -610,8 +776,9 @@
                   (str target-code "." method ".call" num-args "(" args-code ")")
                   (str target-code "." method "(" args-code ")")))
               ;; External object: try builtins, then default
-              (or
-               (when-let [method-fn (get-in builtin-method-mappings [(keyword (infer-expression-type target)) method])]
+              (let [dispatch-type (builtin-dispatch-type (infer-expression-type target))]
+                (or
+               (when-let [method-fn (get-in builtin-method-mappings [(keyword dispatch-type) method])]
                  (method-fn target-code args-code))
                ;; Try Integer methods first (for operators, numeric is more common)
                (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
@@ -644,7 +811,7 @@
                (when (= method "goto")
                  (str target-code ".goto_(" args-code ")"))
                ;; Default: regular method call
-               (str target-code "." method "(" args-code ")")))))))
+               (str target-code "." method "(" args-code ")"))))))))
       ;; No target: class method, function object field, global function, or builtin
       (cond
         ;; Class method (own or inherited via delegation)
@@ -680,6 +847,14 @@
       "Console" "new Object() /* Console */"
       "File" (str "new java.io.File(" args-code ")")
       "Process" "new Object() /* Process */"
+      "Channel" (cond
+                  (nil? constructor)
+                  (str "new NexRuntime.Channel" (or type-params "<>") "()")
+                  (= constructor "with_capacity")
+                  (str "new NexRuntime.Channel" (or type-params "<>") "(" args-code ")")
+                  :else
+                  (throw (ex-info (str "Unsupported built-in Channel constructor: " constructor)
+                                  {:constructor constructor})))
       "Set" (if (= constructor "from_array")
               (str "NexRuntime.setFromArray(" args-code ")")
               "new LinkedHashSet<>()")
@@ -865,6 +1040,7 @@
     :set-literal (generate-set-literal (:elements expr))
     :map-literal (generate-map-literal (:entries expr))
     :convert (generate-convert-expr expr)
+    :spawn (generate-spawn-expr expr)
     :anonymous-function (let [class-def (:class-def expr)
                               ;; Extract the callN method definition
                               method-def (first (:members (first (:body class-def))))
@@ -899,7 +1075,10 @@
 (defn generate-assignment
   "Generate Java code for assignment"
   [{:keys [target value]}]
-  (str (resolve-field-name target) " = " (generate-expression value) ";"))
+  (if (and *spawn-result-flag* (= target "result"))
+    (str (resolve-field-name target) " = " (generate-expression value)
+         "; " *spawn-result-flag* " = true;")
+    (str (resolve-field-name target) " = " (generate-expression value) ";")))
 
 (defn generate-let
   "Generate Java code for let (local variable declaration).
@@ -908,13 +1087,21 @@
   ([{:keys [name var-type value]} var-names]
    (if (contains? var-names name)
      ;; Variable already declared in outer scope - generate assignment
-     (str name " = " (generate-expression value) ";")
+     (if (and *spawn-result-flag* (= name "result"))
+       (str name " = " (generate-expression value) "; " *spawn-result-flag* " = true;")
+       (str name " = " (generate-expression value) ";"))
      ;; New variable - generate declaration
      (if var-type
        ;; With type: "int x = 10;"
-       (str (nex-type-to-java var-type) " " name " = " (generate-expression value) ";")
+       (let [stmt (str (nex-type-to-java var-type) " " name " = " (generate-expression value) ";")]
+         (if (and *spawn-result-flag* (= name "result"))
+           (str stmt " " *spawn-result-flag* " = true;")
+           stmt))
        ;; Without type: use 'var' for type inference (Java 10+)
-       (str "var " name " = " (generate-expression value) ";")))))
+       (let [stmt (str "var " name " = " (generate-expression value) ";")]
+         (if (and *spawn-result-flag* (= name "result"))
+           (str stmt " " *spawn-result-flag* " = true;")
+           stmt))))))
 
 (defn generate-if
   "Generate Java code for if/elseif/else"
@@ -1082,6 +1269,126 @@
                (or default-part no-else-default)
                [(indent level "}")]))))
 
+(defn- select-clause-call
+  [clause]
+  (:expr clause))
+
+(defn- select-alias-java-type
+  [expr]
+  (let [target-type (infer-expression-type (:target expr))
+        type-args (when (map? target-type)
+                    (or (:type-args target-type) (:type-params target-type)))
+        elem-type (if (= (builtin-dispatch-type target-type) "Task")
+                    (or (first type-args) "Any")
+                    (or (first type-args) "Any"))]
+    (nex-type-to-java-boxed elem-type)))
+
+(defn- generate-select-clause-java
+  [level clause var-names idx]
+  (let [{:keys [target method args]} (select-clause-call clause)
+        target-code (if (string? target) target (generate-expression target))
+        arg-code (when (seq args) (generate-expression (first args)))
+        body-var-names (cond-> var-names (:alias clause) (conj (:alias clause)))
+        body-code (str/join "\n" (map #(generate-statement (+ level 3) % body-var-names) (:body clause)))
+        temp-name (str "__select_value_" idx)]
+    (cond
+      (= method "receive")
+      (let [temp-type (select-alias-java-type (:expr clause))
+            alias-lines (when (:alias clause)
+                          [(indent (+ level 3) (str temp-type " " (:alias clause) " = " temp-name ";"))])]
+        (str/join "\n"
+                  (concat
+                   [(indent (+ level 2) "{")
+                    (indent (+ level 3) (str temp-type " " temp-name " = " target-code ".try_receive();"))
+                    (indent (+ level 3) (str "if (" temp-name " != null) {"))]
+                   alias-lines
+                   [body-code
+                    (indent (+ level 4) "break;")
+                    (indent (+ level 3) "}")
+                    (indent (+ level 2) "}")])))
+
+      (= method "try_receive")
+      (let [temp-type (select-alias-java-type (:expr clause))
+            alias-lines (when (:alias clause)
+                          [(indent (+ level 3) (str temp-type " " (:alias clause) " = " temp-name ";"))])]
+        (str/join "\n"
+                  (concat
+                   [(indent (+ level 2) "{")
+                    (indent (+ level 3) (str temp-type " " temp-name " = " target-code ".try_receive();"))
+                    (indent (+ level 3) (str "if (" temp-name " != null) {"))]
+                   alias-lines
+                   [body-code
+                    (indent (+ level 4) "break;")
+                    (indent (+ level 3) "}")
+                    (indent (+ level 2) "}")])))
+
+      (= method "send")
+      (str/join "\n"
+                [(indent (+ level 2) (str "if (" target-code ".try_send(" arg-code ")) {"))
+                 body-code
+                 (indent (+ level 3) "break;")
+                 (indent (+ level 2) "}")])
+
+      (= method "try_send")
+      (str/join "\n"
+                [(indent (+ level 2) (str "if (" target-code ".try_send(" arg-code ")) {"))
+                 body-code
+                 (indent (+ level 3) "break;")
+                 (indent (+ level 2) "}")])
+
+      (= method "await")
+      (let [temp-type (select-alias-java-type (:expr clause))
+            alias-lines (when (:alias clause)
+                          [(indent (+ level 3) (str temp-type " " (:alias clause) " = " temp-name ";"))])]
+        (str/join "\n"
+                  (concat
+                   [(indent (+ level 2) (str "if (" target-code ".is_done()) {"))]
+                   (when (:alias clause)
+                     [(indent (+ level 3) (str temp-type " " temp-name " = " target-code ".await();"))])
+                   (when-not (:alias clause)
+                     [(indent (+ level 3) (str target-code ".await();"))])
+                   alias-lines
+                   [body-code
+                    (indent (+ level 3) "break;")
+                    (indent (+ level 2) "}")])))
+
+      :else
+      (indent (+ level 2) "/* Unsupported select clause */"))))
+
+(defn generate-select
+  [level {:keys [clauses else timeout]} var-names]
+  (let [clause-code (map-indexed (fn [idx clause]
+                                   (generate-select-clause-java level clause var-names idx))
+                                 clauses)
+        else-code (when else
+                    [(str/join "\n" (map #(generate-statement (+ level 2) % var-names) else))
+                     (indent (+ level 2) "break;")])
+        timeout-code (when timeout
+                       [(indent level "{")
+                        (indent (+ level 1) (str "long __selectDeadline = System.currentTimeMillis() + " (generate-expression (:duration timeout)) ";"))])
+        timeout-body (when timeout
+                       [(indent (+ level 1) "if (System.currentTimeMillis() >= __selectDeadline) {")
+                        (str/join "\n" (map #(generate-statement (+ level 2) % var-names) (:body timeout)))
+                        (indent (+ level 2) "break;")
+                        (indent (+ level 1) "}")])]
+    (str/join "\n"
+              (concat
+               timeout-code
+               [(indent level "while (true) {")]
+               clause-code
+               else-code
+               (when-not else
+                 (concat
+                  timeout-body
+                  [(indent (+ level 1) "try {")
+                   (indent (+ level 2) "Thread.sleep(1);")
+                   (indent (+ level 1) "} catch (InterruptedException e) {")
+                   (indent (+ level 2) "Thread.currentThread().interrupt();")
+                   (indent (+ level 2) "throw new RuntimeException(e);")
+                   (indent (+ level 1) "}")]))
+               [(indent level "}")]
+               (when timeout [(indent level "}")])))))
+
 (defn generate-statement
   "Generate Java code for a statement"
   ([level stmt] (generate-statement level stmt #{}))
@@ -1102,9 +1409,11 @@
                  (indent level (str prefix "_parent_" target " = "
                                     target "." method "(" args-code ");")))
                (indent level (str (generate-call-expr stmt) ";"))))
+     :spawn (indent level (str (generate-expression stmt) ";"))
      :let (indent level (generate-let stmt var-names))
      :if (generate-if level stmt var-names)
      :case (generate-case level stmt var-names)
+     :select (generate-select level stmt var-names)
      :scoped-block (generate-scoped-block level stmt var-names)
      :loop (generate-loop level stmt)
      :with (when (= (:target stmt) "java")
@@ -2136,6 +2445,7 @@ public class NexTurtle {
   "Generate runtime helpers for built-in global functions."
   []
   (str "public class NexRuntime {\n"
+       "  private static final java.util.concurrent.ExecutorService TASK_EXECUTOR = java.util.concurrent.Executors.newCachedThreadPool();\n\n"
        "  private static boolean hasParentType(Object value, String targetType, java.util.IdentityHashMap<Object, Boolean> seen) {\n"
        "    if (value == null) return false;\n"
        "    if (seen.containsKey(value)) return false;\n"
@@ -2182,6 +2492,280 @@ public class NexTurtle {
        "    if (value == null) return false;\n"
        "    if (hasParentType(value, targetType, new java.util.IdentityHashMap<>())) return true;\n"
        "    return false;\n"
+       "  }\n\n"
+       "  public static void sleep(int ms) {\n"
+       "    try {\n"
+       "      Thread.sleep(ms);\n"
+       "    } catch (InterruptedException e) {\n"
+       "      Thread.currentThread().interrupt();\n"
+       "      throw new RuntimeException(e);\n"
+       "    }\n"
+       "  }\n\n"
+       "  public static class Task<T> {\n"
+       "    private final java.util.concurrent.CompletableFuture<T> future;\n"
+       "    public Task(java.util.concurrent.CompletableFuture<T> future) { this.future = future; }\n"
+       "    public T await() {\n"
+       "      try {\n"
+       "        return future.get();\n"
+       "      } catch (java.util.concurrent.ExecutionException e) {\n"
+       "        Throwable cause = e.getCause();\n"
+       "        if (cause instanceof RuntimeException) throw (RuntimeException) cause;\n"
+       "        throw new RuntimeException(cause != null ? cause : e);\n"
+       "      } catch (InterruptedException e) {\n"
+       "        Thread.currentThread().interrupt();\n"
+       "        throw new RuntimeException(e);\n"
+       "      }\n"
+       "    }\n"
+       "    public T await(int timeoutMs) {\n"
+       "      try {\n"
+       "        return future.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);\n"
+       "      } catch (java.util.concurrent.TimeoutException e) {\n"
+       "        return null;\n"
+       "      } catch (java.util.concurrent.CancellationException e) {\n"
+       "        throw new RuntimeException(\"Task cancelled\");\n"
+       "      } catch (java.util.concurrent.ExecutionException e) {\n"
+       "        Throwable cause = e.getCause();\n"
+       "        if (cause instanceof RuntimeException) throw (RuntimeException) cause;\n"
+       "        throw new RuntimeException(cause != null ? cause : e);\n"
+       "      } catch (InterruptedException e) {\n"
+       "        Thread.currentThread().interrupt();\n"
+       "        throw new RuntimeException(e);\n"
+       "      }\n"
+       "    }\n"
+       "    public boolean cancel() { return future.cancel(true); }\n"
+       "    public boolean is_done() { return future.isDone(); }\n"
+       "    public boolean is_cancelled() { return future.isCancelled(); }\n"
+       "  }\n\n"
+       "  public static <T> Task<T> spawnTask(java.util.function.Supplier<T> supplier) {\n"
+       "    return new Task<>(java.util.concurrent.CompletableFuture.supplyAsync(supplier, TASK_EXECUTOR));\n"
+       "  }\n\n"
+       "  public static <T> java.util.ArrayList<T> awaitAll(java.util.List<Task<T>> tasks) {\n"
+       "    java.util.ArrayList<T> results = new java.util.ArrayList<>();\n"
+       "    for (Task<T> task : tasks) {\n"
+       "      results.add(task.await());\n"
+       "    }\n"
+       "    return results;\n"
+       "  }\n\n"
+       "  public static <T> T awaitAny(java.util.List<Task<T>> tasks) {\n"
+       "    if (tasks.isEmpty()) throw new RuntimeException(\"await_any requires at least one task\");\n"
+       "    while (true) {\n"
+       "      for (Task<T> task : tasks) {\n"
+       "        if (task.is_done()) {\n"
+       "          return task.await();\n"
+       "        }\n"
+       "      }\n"
+       "      try {\n"
+       "        Thread.sleep(1);\n"
+       "      } catch (InterruptedException e) {\n"
+       "        Thread.currentThread().interrupt();\n"
+       "        throw new RuntimeException(e);\n"
+       "      }\n"
+       "    }\n"
+       "  }\n\n"
+       "  public static class Channel<T> {\n"
+       "    private static final class PendingSend<T> {\n"
+       "      private final T value;\n"
+       "      private boolean delivered;\n"
+       "      private PendingSend(T value) { this.value = value; this.delivered = false; }\n"
+       "    }\n\n"
+       "    private final int capacity;\n"
+       "    private final java.util.ArrayDeque<T> buffer = new java.util.ArrayDeque<>();\n"
+       "    private final java.util.ArrayDeque<PendingSend<T>> senders = new java.util.ArrayDeque<>();\n"
+       "    private int waitingReceivers = 0;\n"
+       "    private boolean closed = false;\n\n"
+       "    public Channel() { this(0); }\n"
+       "    public Channel(int capacity) {\n"
+       "      if (capacity < 0) throw new RuntimeException(\"Channel capacity must be non-negative\");\n"
+       "      this.capacity = capacity;\n"
+       "    }\n\n"
+       "    public synchronized void send(T value) {\n"
+       "      if (closed) throw new RuntimeException(\"Cannot send on a closed channel\");\n"
+       "      if (capacity == 0) {\n"
+        "        PendingSend<T> pending = new PendingSend<>(value);\n"
+        "        senders.addLast(pending);\n"
+       "        notifyAll();\n"
+       "        while (!pending.delivered) {\n"
+       "          if (closed) {\n"
+       "            senders.remove(pending);\n"
+       "            throw new RuntimeException(\"Cannot send on a closed channel\");\n"
+       "          }\n"
+       "          try {\n"
+       "            wait();\n"
+       "          } catch (InterruptedException e) {\n"
+       "            senders.remove(pending);\n"
+       "            Thread.currentThread().interrupt();\n"
+       "            throw new RuntimeException(e);\n"
+       "          }\n"
+       "        }\n"
+       "        return;\n"
+       "      }\n"
+       "      if (buffer.size() < capacity) {\n"
+       "        buffer.addLast(value);\n"
+       "        notifyAll();\n"
+       "        return;\n"
+       "      }\n"
+       "      PendingSend<T> pending = new PendingSend<>(value);\n"
+       "      senders.addLast(pending);\n"
+       "      notifyAll();\n"
+       "      while (!pending.delivered) {\n"
+       "        if (closed) {\n"
+       "          senders.remove(pending);\n"
+       "          throw new RuntimeException(\"Cannot send on a closed channel\");\n"
+       "        }\n"
+       "        try {\n"
+       "          wait();\n"
+       "        } catch (InterruptedException e) {\n"
+       "          senders.remove(pending);\n"
+       "          Thread.currentThread().interrupt();\n"
+       "          throw new RuntimeException(e);\n"
+       "        }\n"
+       "      }\n"
+       "    }\n\n"
+       "    public synchronized boolean send(T value, int timeoutMs) {\n"
+       "      if (closed) throw new RuntimeException(\"Cannot send on a closed channel\");\n"
+       "      long deadline = System.currentTimeMillis() + timeoutMs;\n"
+       "      if (capacity == 0 && waitingReceivers > 0) {\n"
+       "        PendingSend<T> pending = new PendingSend<>(value);\n"
+       "        pending.delivered = true;\n"
+       "        senders.addLast(pending);\n"
+       "        notifyAll();\n"
+       "        return true;\n"
+       "      }\n"
+       "      if (capacity > 0 && buffer.size() < capacity) {\n"
+       "        buffer.addLast(value);\n"
+       "        notifyAll();\n"
+       "        return true;\n"
+       "      }\n"
+       "      PendingSend<T> pending = new PendingSend<>(value);\n"
+       "      senders.addLast(pending);\n"
+       "      notifyAll();\n"
+       "      while (!pending.delivered) {\n"
+       "        if (closed) {\n"
+       "          senders.remove(pending);\n"
+       "          throw new RuntimeException(\"Cannot send on a closed channel\");\n"
+       "        }\n"
+       "        long remaining = deadline - System.currentTimeMillis();\n"
+       "        if (remaining <= 0) {\n"
+       "          senders.remove(pending);\n"
+       "          return false;\n"
+       "        }\n"
+       "        try {\n"
+       "          wait(remaining);\n"
+       "        } catch (InterruptedException e) {\n"
+       "          senders.remove(pending);\n"
+       "          Thread.currentThread().interrupt();\n"
+       "          throw new RuntimeException(e);\n"
+       "        }\n"
+       "      }\n"
+       "      return true;\n"
+       "    }\n\n"
+       "    public synchronized boolean try_send(T value) {\n"
+       "      if (closed) throw new RuntimeException(\"Cannot send on a closed channel\");\n"
+       "      if (capacity == 0) {\n"
+       "        if (waitingReceivers > 0) {\n"
+       "          PendingSend<T> pending = new PendingSend<>(value);\n"
+       "          pending.delivered = true;\n"
+       "          senders.addLast(pending);\n"
+       "          notifyAll();\n"
+       "          return true;\n"
+       "        }\n"
+       "        return false;\n"
+       "      }\n"
+       "      if (buffer.size() < capacity) {\n"
+       "        buffer.addLast(value);\n"
+       "        notifyAll();\n"
+       "        return true;\n"
+       "      }\n"
+       "      return false;\n"
+       "    }\n\n"
+       "    public synchronized T receive() {\n"
+       "      while (buffer.isEmpty() && senders.isEmpty()) {\n"
+       "        if (closed) throw new RuntimeException(\"Cannot receive from a closed channel\");\n"
+       "        waitingReceivers++;\n"
+        "        try {\n"
+        "          wait();\n"
+        "        } catch (InterruptedException e) {\n"
+          "          Thread.currentThread().interrupt();\n"
+          "          throw new RuntimeException(e);\n"
+       "        } finally {\n"
+       "          waitingReceivers--;\n"
+        "        }\n"
+        "      }\n"
+       "      if (!buffer.isEmpty()) {\n"
+       "        T value = buffer.removeFirst();\n"
+       "        if (!senders.isEmpty() && buffer.size() < capacity) {\n"
+       "          PendingSend<T> pending = senders.removeFirst();\n"
+       "          buffer.addLast(pending.value);\n"
+       "          pending.delivered = true;\n"
+       "        }\n"
+       "        notifyAll();\n"
+       "        return value;\n"
+       "      }\n"
+       "      PendingSend<T> pending = senders.removeFirst();\n"
+       "      pending.delivered = true;\n"
+       "      notifyAll();\n"
+       "      return pending.value;\n"
+       "    }\n\n"
+       "    public synchronized T receive(int timeoutMs) {\n"
+       "      long deadline = System.currentTimeMillis() + timeoutMs;\n"
+       "      while (buffer.isEmpty() && senders.isEmpty()) {\n"
+       "        if (closed) throw new RuntimeException(\"Cannot receive from a closed channel\");\n"
+       "        long remaining = deadline - System.currentTimeMillis();\n"
+       "        if (remaining <= 0) return null;\n"
+       "        waitingReceivers++;\n"
+       "        try {\n"
+       "          wait(remaining);\n"
+       "        } catch (InterruptedException e) {\n"
+       "          Thread.currentThread().interrupt();\n"
+       "          throw new RuntimeException(e);\n"
+       "        } finally {\n"
+       "          waitingReceivers--;\n"
+       "        }\n"
+       "      }\n"
+       "      if (!buffer.isEmpty()) {\n"
+       "        T value = buffer.removeFirst();\n"
+       "        if (!senders.isEmpty() && buffer.size() < capacity) {\n"
+       "          PendingSend<T> pending = senders.removeFirst();\n"
+       "          buffer.addLast(pending.value);\n"
+       "          pending.delivered = true;\n"
+       "        }\n"
+       "        notifyAll();\n"
+       "        return value;\n"
+       "      }\n"
+       "      PendingSend<T> pending = senders.removeFirst();\n"
+       "      pending.delivered = true;\n"
+       "      notifyAll();\n"
+       "      return pending.value;\n"
+       "    }\n\n"
+       "    public synchronized T try_receive() {\n"
+       "      if (!buffer.isEmpty()) {\n"
+       "        T value = buffer.removeFirst();\n"
+       "        if (!senders.isEmpty() && buffer.size() < capacity) {\n"
+       "          PendingSend<T> pending = senders.removeFirst();\n"
+       "          buffer.addLast(pending.value);\n"
+       "          pending.delivered = true;\n"
+       "        }\n"
+       "        notifyAll();\n"
+       "        return value;\n"
+       "      }\n"
+       "      if (!senders.isEmpty()) {\n"
+       "        PendingSend<T> pending = senders.removeFirst();\n"
+       "        pending.delivered = true;\n"
+       "        notifyAll();\n"
+       "        return pending.value;\n"
+       "      }\n"
+       "      return null;\n"
+       "    }\n\n"
+       "    public synchronized void close() {\n"
+       "      if (!closed) {\n"
+       "        closed = true;\n"
+       "        senders.clear();\n"
+       "        notifyAll();\n"
+       "      }\n"
+       "    }\n\n"
+       "    public synchronized boolean is_closed() { return closed; }\n"
+       "    public synchronized int capacity() { return capacity; }\n"
+       "    public synchronized int size() { return buffer.size(); }\n"
        "  }\n\n"
        "  @SafeVarargs\n"
        "  public static <T> java.util.LinkedHashSet<T> setOf(T... values) {\n"
@@ -2255,7 +2839,6 @@ public class NexTurtle {
        "  public static StringCursor stringCursor(String source) { return new StringCursor(source); }\n"
        "  public static <K, V> MapCursor<K, V> mapCursor(java.util.Map<K, V> source) { return new MapCursor<>(source); }\n"
        "  public static <T> SetCursor<T> setCursor(java.util.Set<T> source) { return new SetCursor<>(source); }\n"
-       "  }\n"
        "}"))
 
 (defn generate-function-globals

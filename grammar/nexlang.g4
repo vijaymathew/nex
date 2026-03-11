@@ -153,6 +153,7 @@ statement
     | raiseStatement
     | retryStatement
     | caseStatement
+    | selectStatement
     | expression
     ;
 
@@ -162,6 +163,18 @@ caseStatement
 
 caseClause
     : literal (',' literal)* THEN statement
+    ;
+
+selectStatement
+    : SELECT selectClause+ timeoutClause? (ELSE block)? END
+    ;
+
+selectClause
+    : WHEN expression (AS IDENTIFIER)? THEN block
+    ;
+
+timeoutClause
+    : TIMEOUT expression THEN block
     ;
 
 scopedBlock
@@ -194,6 +207,10 @@ raiseStatement
 
 retryStatement
     : RETRY
+    ;
+
+spawnExpression
+    : SPAWN DO block END
     ;
 
 variantClause
@@ -286,6 +303,7 @@ subscript
 
 primary
     : literal
+    | spawnExpression
     | createExpression
     | convertExpression
     | anonymousFunction
@@ -417,6 +435,7 @@ NOTE         : 'note';
 WITH         : 'with';
 CONVERT      : 'convert';
 TO           : 'to';
+SPAWN        : 'spawn';
 RAISE        : 'raise';
 RESCUE       : 'rescue';
 RETRY        : 'retry';
@@ -424,6 +443,8 @@ REPEAT       : 'repeat';
 ACROSS       : 'across';
 CASE         : 'case';
 OF           : 'of';
+SELECT       : 'select';
+TIMEOUT      : 'timeout';
 AND          : 'and';
 OR           : 'or';
 NOT          : 'not';

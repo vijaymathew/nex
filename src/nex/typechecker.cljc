@@ -30,6 +30,14 @@
   [env name type]
   (swap! (:vars env) assoc name type))
 
+(defn env-set!
+  "Update a variable type in the nearest environment where it is defined."
+  [env name type]
+  (if (contains? @(:vars env) name)
+    (swap! (:vars env) assoc name type)
+    (when-let [parent (:parent env)]
+      (env-set! parent name type))))
+
 (defn env-lookup-method
   "Look up a method signature in the environment"
   [env class-name method-name]
@@ -76,7 +84,7 @@
 
 (def builtin-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Set" "Any" "Void" "Nil" "Console" "File" "Process" "Function"
+    "Array" "Map" "Set" "Task" "Channel" "Any" "Void" "Nil" "Console" "File" "Process" "Function"
     "Cursor" "Window" "Turtle" "Image"})
 
 (defn builtin-type? [type-name]
@@ -621,6 +629,83 @@
     "Boolean"))
 
 (declare check-create)
+(declare check-statement)
+
+(defn- maybe-update-spawn-result!
+  [env value-type]
+  (when (env-lookup-var env "__spawn_result_type__")
+    (let [current (env-lookup-var env "__spawn_result_type__")]
+      (cond
+        (= current "Void")
+        (env-set! env "__spawn_result_type__" value-type)
+
+        (types-compatible? env value-type current)
+        nil
+
+        (types-compatible? env current value-type)
+        (env-set! env "__spawn_result_type__" value-type)
+
+        :else
+        (throw (ex-info "Inconsistent result types in spawn body"
+                        {:error (type-error
+                                 (str "Spawn body assigns incompatible result types: "
+                                      (display-type current) " and " (display-type value-type)))}))))))
+
+(defn check-spawn
+  [env {:keys [body]}]
+  (let [spawn-env (make-type-env env)]
+    (env-add-var spawn-env "result" "Any")
+    (env-add-var spawn-env "__spawn_result_type__" "Void")
+    (doseq [stmt body]
+      (check-statement spawn-env stmt))
+    (let [result-type (env-lookup-var spawn-env "__spawn_result_type__")]
+      (if (= result-type "Void")
+        "Task"
+        {:base-type "Task" :type-params [result-type]}))))
+
+(defn- builtin-method-signature
+  [base-type method argc type-map]
+  (case base-type
+    "Task"
+    (case method
+      "await" (case argc
+                0 {:params [] :return-type (resolve-generic-type "T" type-map)}
+                1 {:params [{:name "timeout_ms" :type "Integer"}]
+                   :return-type (detachable-version (resolve-generic-type "T" type-map))}
+                nil)
+      "cancel" (when (= argc 0)
+                 {:params [] :return-type "Boolean"})
+      "is_done" (when (= argc 0)
+                  {:params [] :return-type "Boolean"})
+      "is_cancelled" (when (= argc 0)
+                       {:params [] :return-type "Boolean"})
+      nil)
+
+    "Channel"
+    (let [elem-type (or (resolve-generic-type "T" type-map) "Any")]
+      (case method
+        "send" (case argc
+                 1 {:params [{:name "value" :type elem-type}] :return-type "Void"}
+                 2 {:params [{:name "value" :type elem-type}
+                             {:name "timeout_ms" :type "Integer"}]
+                    :return-type "Boolean"}
+                 nil)
+        "try_send" (when (= argc 1)
+                     {:params [{:name "value" :type elem-type}] :return-type "Boolean"})
+        "receive" (case argc
+                    0 {:params [] :return-type elem-type}
+                    1 {:params [{:name "timeout_ms" :type "Integer"}]
+                       :return-type (detachable-version elem-type)}
+                    nil)
+        "try_receive" (when (= argc 0)
+                        {:params [] :return-type (detachable-version elem-type)})
+        "close" (when (= argc 0) {:params [] :return-type "Void"})
+        "is_closed" (when (= argc 0) {:params [] :return-type "Boolean"})
+        "capacity" (when (= argc 0) {:params [] :return-type "Integer"})
+        "size" (when (= argc 0) {:params [] :return-type "Integer"})
+        nil))
+
+    nil))
 
 (defn check-call
   "Check the type of a method call"
@@ -658,7 +743,8 @@
           "Any")
 
         :else
-        (if-let [method-sig (lookup-class-method env base-type method)]
+        (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
+                                (lookup-class-method env base-type method))]
           (do
             ;; Check argument types
             (when (not= (count args) (count (:params method-sig)))
@@ -708,6 +794,54 @@
                                           (display-type target-type-type)))}))))
         (check-expression env (second args))
         "Boolean")
+
+      (= method "await_all")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "await_all expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "await_all expects 1 argument, got " (count args)))})))
+        (let [tasks-type (normalize-type (check-expression env (first args)))
+              task-type (when (map? tasks-type)
+                          (let [base-type (:base-type tasks-type)
+                                type-args (or (:type-params tasks-type) (:type-args tasks-type))]
+                            (when (= base-type "Array")
+                              (first type-args))))]
+          (when-not (and task-type
+                         (= (if (map? (attachable-type task-type))
+                              (:base-type (attachable-type task-type))
+                              (attachable-type task-type))
+                            "Task"))
+            (throw (ex-info "await_all expects Array[Task[T]]"
+                            {:error (type-error
+                                     (str "await_all expects Array[Task[T]], got "
+                                          (display-type tasks-type)))})))
+          {:base-type "Array"
+           :type-params [(or (first (or (:type-params task-type) (:type-args task-type))) "Any")]}))
+
+      (= method "await_any")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "await_any expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "await_any expects 1 argument, got " (count args)))})))
+        (let [tasks-type (normalize-type (check-expression env (first args)))
+              task-type (when (map? tasks-type)
+                          (let [base-type (:base-type tasks-type)
+                                type-args (or (:type-params tasks-type) (:type-args tasks-type))]
+                            (when (= base-type "Array")
+                              (first type-args))))]
+          (when-not (and task-type
+                         (= (if (map? (attachable-type task-type))
+                              (:base-type (attachable-type task-type))
+                              (attachable-type task-type))
+                            "Task"))
+            (throw (ex-info "await_any expects Array[Task[T]]"
+                            {:error (type-error
+                                     (str "await_any expects Array[Task[T]], got "
+                                          (display-type tasks-type)))})))
+          (or (first (or (:type-params task-type) (:type-args task-type)))
+              "Any")))
 
       :else
       (if-let [var-type (env-lookup-var env method)]
@@ -760,6 +894,31 @@
     (= class-name "Console") "Console"
     ;; Handle built-in Process type
     (= class-name "Process") "Process"
+    ;; Handle built-in Channel type
+    (= class-name "Channel")
+    (do
+      (cond
+        (nil? constructor)
+        nil
+
+        (= constructor "with_capacity")
+        (do
+          (when-not (= 1 (count args))
+            (throw (ex-info "Channel.with_capacity expects 1 argument"
+                            {:error (type-error "Channel.with_capacity expects exactly 1 Integer argument")})))
+          (let [arg-type (check-expression env (first args))]
+            (when-not (types-compatible? env arg-type "Integer")
+              (throw (ex-info "Channel.with_capacity requires Integer capacity"
+                              {:error (type-error
+                                       (str "Channel.with_capacity expects Integer, got "
+                                            (display-type arg-type)))})))))
+
+        :else
+        (throw (ex-info (str "Constructor not found: Channel." constructor)
+                        {:error (type-error (str "Constructor not found: Channel." constructor))})))
+      (if (seq generic-args)
+        {:base-type "Channel" :type-args generic-args}
+        "Channel"))
     ;; Handle built-in Window type
     (= class-name "Window") "Window"
     ;; Handle built-in Turtle type
@@ -933,6 +1092,7 @@
                cons-type)
       :old (check-expression env (:expr expr))
       :convert (check-convert env expr)
+      :spawn (check-spawn env expr)
       :this (or (env-lookup-var env "__current_class__") "Any")
       "Any")
     :else "Any"))
@@ -959,7 +1119,9 @@
       (throw (ex-info (str "Type mismatch in assignment to " target)
                       {:error (type-error
                                (str "Cannot assign " (display-type val-type)
-                                    " to variable of type " (display-type var-type)))})))))
+                                    " to variable of type " (display-type var-type)))})))
+    (when (= target "result")
+      (maybe-update-spawn-result! env val-type))))
 
 (defn check-let
   "Check a let statement"
@@ -979,7 +1141,9 @@
                                (str "Cannot assign " (display-type val-type)
                                     " to variable '" name "' of type "
                                     (display-type inferred-type)))})))
-    (env-add-var env name inferred-type)))
+    (env-add-var env name inferred-type)
+    (when (= name "result")
+      (maybe-update-spawn-result! env inferred-type))))
 
 (defn check-if
   "Check an if statement"
@@ -1028,6 +1192,124 @@
                                    (str "Loop condition must be Boolean, got " cond-type))})))))
     (doseq [stmt body] (check-statement loop-env stmt))))
 
+(defn- select-clause-op
+  [expr]
+  (when (and (map? expr) (= :call (:type expr)))
+    expr))
+
+(defn- check-select-clause
+  [env {:keys [expr alias body]}]
+  (let [{:keys [target method args]} (or (select-clause-op expr)
+                                         (throw (ex-info "select clause must be a channel or task operation"
+                                                         {:error (type-error "select clause must be a channel send/receive call or task await call")})))
+        target-type (check-expression env target)
+        normalized-target (normalize-type target-type)
+        base-type (if (map? normalized-target) (:base-type normalized-target) normalized-target)
+        type-args (when (map? normalized-target)
+                    (or (:type-params normalized-target) (:type-args normalized-target)))]
+    (case base-type
+      "Task"
+      (do
+        (when-not (= method "await")
+          (throw (ex-info "select task clauses support only Task.await"
+                          {:error (type-error "select task clauses support only Task.await")})))
+        (when (seq args)
+          (throw (ex-info "Task.await in select takes no arguments"
+                          {:error (type-error "Task.await in select takes no arguments")})))
+        (let [body-env (make-type-env env)]
+          (when alias
+            (env-add-var body-env alias (or (first type-args) "Any")))
+          (doseq [stmt body]
+            (check-statement body-env stmt))))
+
+      "Channel"
+      (case method
+      ("receive" "try_receive")
+      (do
+        (cond
+          (= method "try_receive")
+          (when (seq args)
+            (throw (ex-info "Channel.try_receive takes no arguments"
+                            {:error (type-error "Channel.try_receive takes no arguments")})))
+
+          (= method "receive")
+          (when (> (count args) 1)
+            (throw (ex-info "Channel.receive expects 0 or 1 arguments"
+                            {:error (type-error "Channel.receive expects 0 or 1 arguments")}))))
+        (when (= 1 (count args))
+          (let [timeout-type (check-expression env (first args))]
+            (when-not (= (attachable-type timeout-type) "Integer")
+              (throw (ex-info "Channel.receive timeout must be Integer"
+                              {:error (type-error
+                                       (str "Channel.receive timeout must be Integer, got "
+                                            (display-type timeout-type)))})))))
+        (let [body-env (make-type-env env)]
+          (when alias
+            (env-add-var body-env alias (or (first type-args) "Any")))
+          (doseq [stmt body]
+            (check-statement body-env stmt))))
+
+      ("send" "try_send")
+      (do
+        (cond
+          (= method "try_send")
+          (when-not (= 1 (count args))
+            (throw (ex-info "Channel.try_send expects 1 argument"
+                            {:error (type-error "Channel.try_send expects 1 argument")})))
+
+          (= method "send")
+          (when-not (<= 1 (count args) 2)
+            (throw (ex-info "Channel.send expects 1 or 2 arguments"
+                            {:error (type-error "Channel.send expects 1 or 2 arguments")}))))
+        (when alias
+          (throw (ex-info "send clauses cannot bind a value"
+                          {:error (type-error "send clauses cannot use 'as <name>'")})))
+        (let [arg-type (check-expression env (first args))
+              elem-type (or (first type-args) "Any")]
+          (when-not (types-compatible? env arg-type elem-type)
+            (throw (ex-info (str "Channel." method " argument type mismatch")
+                            {:error (type-error
+                                     (str "Expected " (display-type elem-type)
+                                          ", got " (display-type arg-type)))})))
+          (when (= 2 (count args))
+            (let [timeout-type (check-expression env (second args))]
+              (when-not (= (attachable-type timeout-type) "Integer")
+                (throw (ex-info "Channel.send timeout must be Integer"
+                                {:error (type-error
+                                         (str "Channel.send timeout must be Integer, got "
+                                              (display-type timeout-type)))})))))
+          (let [body-env (make-type-env env)]
+            (doseq [stmt body]
+              (check-statement body-env stmt)))))
+
+      (throw (ex-info "select clauses support only Channel send/receive or Task.await operations"
+                      {:error (type-error
+                               "select clauses support only send, try_send, receive, try_receive, and Task.await")})))
+
+      (throw (ex-info "select clause target must be a Channel or Task"
+                      {:error (type-error
+                               (str "select clause target must be Channel or Task, got "
+                                    (display-type normalized-target)))})))))
+
+(defn check-select
+  [env {:keys [clauses else timeout]}]
+  (doseq [clause clauses]
+    (check-select-clause env clause))
+  (when timeout
+    (let [duration-type (check-expression env (:duration timeout))]
+      (when-not (= (attachable-type duration-type) "Integer")
+        (throw (ex-info "select timeout must be Integer"
+                        {:error (type-error
+                                 (str "select timeout must be Integer, got "
+                                      (display-type duration-type)))})))
+      (let [timeout-env (make-type-env env)]
+        (doseq [stmt (:body timeout)]
+          (check-statement timeout-env stmt)))))
+  (when else
+    (let [else-env (make-type-env env)]
+      (doseq [stmt else]
+        (check-statement else-env stmt)))))
+
 (defn check-statement
   "Check a statement"
   [env stmt]
@@ -1037,8 +1319,10 @@
       :let (check-let env stmt)
       :call (check-expression env stmt)
       :convert (check-expression env stmt)
+      :spawn (check-expression env stmt)
       :if (check-if env stmt)
       :loop (check-loop env stmt)
+      :select (check-select env stmt)
       :scoped-block (do
                       (let [block-env (make-type-env env)]
                         (doseq [s (:body stmt)] (check-statement block-env s)))
@@ -1090,6 +1374,7 @@
                (references-result? (:value node)))
       :identifier (or (= (:name node) "result") (= (:name node) "Result"))
       :anonymous-function false ;; Skip anonymous functions, they have their own Result scope
+      :spawn false              ;; Spawn bodies have their own result scope
       ;; Walk all map values for other node types
       (some references-result? (vals node)))
     :else false))
@@ -1445,6 +1730,14 @@
            "read_integer" {:params [] :return-type "Integer"}
            "read_real" {:params [] :return-type "Real"}}]
     (env-add-method env "Console" method-name sig))
+  (env-add-class env "Task" {:name "Task"
+                             :generic-params [{:name "T"}]})
+  (doseq [[method-name sig]
+          {"await"   {:params [] :return-type "T"}
+           "cancel"  {:params [] :return-type "Boolean"}
+           "is_done" {:params [] :return-type "Boolean"}
+           "is_cancelled" {:params [] :return-type "Boolean"}}]
+    (env-add-method env "Task" method-name sig))
   (doseq [[method-name sig]
           {"read" {:params [] :return-type "String"}
            "write" {:params [{:name "content" :type "String"}] :return-type "Void"}
@@ -1574,6 +1867,20 @@
            "is_empty"             {:params [] :return-type "Boolean"}
            "cursor"               {:params [] :return-type "Cursor"}}]
     (env-add-method env "Set" method-name sig))
+
+  ;; Register Channel[T] class and methods
+  (env-add-class env "Channel" {:name "Channel"
+                                :generic-params [{:name "T"}]})
+  (doseq [[method-name sig]
+          {"send"        {:params [{:name "value" :type "T"}] :return-type "Void"}
+           "try_send"    {:params [{:name "value" :type "T"}] :return-type "Boolean"}
+           "receive"     {:params [] :return-type "T"}
+           "try_receive" {:params [] :return-type {:base-type "T" :detachable true}}
+           "close"       {:params [] :return-type "Void"}
+           "is_closed"   {:params [] :return-type "Boolean"}
+           "capacity"    {:params [] :return-type "Integer"}
+           "size"        {:params [] :return-type "Integer"}}]
+    (env-add-method env "Channel" method-name sig))
 
   ;; Built-in Function methods: call0..call32
   (doseq [n (range 0 33)]
