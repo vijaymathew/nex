@@ -279,6 +279,28 @@ end"
       (is (str/includes? java-code "ch.capacity()"))
       (is (str/includes? java-code "ch.size()")))))
 
+(deftest select-generation-test
+  (testing "select lowers to try_send/try_receive polling in Java"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+      select
+        when ch.send(1) then
+          print(\"sent\")
+        when ch.receive as value then
+          print(value)
+        else
+          print(\"none\")
+      end
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "while (true) {"))
+      (is (str/includes? java-code ".try_send(1)"))
+      (is (str/includes? java-code ".try_receive()"))
+      (is (str/includes? java-code "break;")))))
+
 (deftest class-constants-test
   (testing "Class constants generate static finals and child copies inherited public constants"
     (let [nex-code "class Frame

@@ -2,6 +2,7 @@
 
 (require '[clojure.test :as test])
 (require '[clojure.java.io :as io])
+(require '[nex.interpreter :as interpreter])
 
 (defn test-file?
   [^java.io.File f]
@@ -34,6 +35,7 @@
 
 ;; Run all tests
 (let [results (apply test/run-tests all-test-namespaces)]
+  (interpreter/shutdown-runtime!)
   (println)
   (println "╔════════════════════════════════════════════════════════════╗")
   (println "║                    TEST SUMMARY                            ║")

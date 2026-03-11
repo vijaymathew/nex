@@ -242,7 +242,38 @@ print(ch.receive)
 ch.close
 ```
 
-Current channel semantics are unbuffered: `send` and `receive` rendezvous, so each side waits for the other.
+By default, channels are unbuffered: `send` and `receive` rendezvous, so each side waits for the other.
+
+For buffered communication:
+
+```nex
+let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
+ch.send(1)
+ch.send(2)
+print(ch.size)
+```
+
+Non-blocking probes are also available:
+
+```nex
+print(ch.try_send(3))
+print(ch.try_receive)
+```
+
+Use `select` when you want to react to whichever channel operation is ready first:
+
+```nex
+select
+  when inbox.receive as msg then
+    print(msg)
+  when control.receive as signal then
+    print(signal)
+  else
+    print("idle")
+end
+```
+
+`select` uses channel readiness checks internally. If no clause is ready and there is no `else`, it waits until one becomes ready.
 
 On the JavaScript target, the source syntax is unchanged, but generated code uses async/await under the hood. That means `spawn`, `Task.await`, `Channel.send`, and `Channel.receive` are lowered to Promise-based operations in generated JavaScript.
 

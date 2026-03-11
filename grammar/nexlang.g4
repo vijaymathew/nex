@@ -153,6 +153,7 @@ statement
     | raiseStatement
     | retryStatement
     | caseStatement
+    | selectStatement
     | expression
     ;
 
@@ -162,6 +163,14 @@ caseStatement
 
 caseClause
     : literal (',' literal)* THEN statement
+    ;
+
+selectStatement
+    : SELECT selectClause+ (ELSE block)? END
+    ;
+
+selectClause
+    : WHEN expression (AS IDENTIFIER)? THEN block
     ;
 
 scopedBlock
@@ -430,6 +439,7 @@ REPEAT       : 'repeat';
 ACROSS       : 'across';
 CASE         : 'case';
 OF           : 'of';
+SELECT       : 'select';
 AND          : 'and';
 OR           : 'or';
 NOT          : 'not';

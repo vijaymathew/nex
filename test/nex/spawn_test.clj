@@ -134,3 +134,29 @@ end"]
 end"
           output (execute-method-output code)]
       (is (= ["2" "2" "10" "20" "true" "0"] output)))))
+
+(deftest channel-try-methods-and-select-runtime
+  (testing "try_send/try_receive and select work with buffered channels"
+    (let [code "class Test
+  feature
+    demo() do
+      let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+      print(ch.try_send(7))
+      print(ch.try_send(8))
+      print(ch.try_receive)
+      select
+        when ch.send(9) then
+          print(\"sent\")
+        else
+          print(\"blocked\")
+      end
+      select
+        when ch.receive as value then
+          print(value)
+        else
+          print(\"none\")
+      end
+    end
+end"
+          output (execute-method-output code)]
+      (is (= ["true" "false" "7" "\"sent\"" "9"] output)))))

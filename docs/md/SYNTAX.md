@@ -219,10 +219,38 @@ ch.close
 print(ch.is_closed)               -- true
 ```
 
-Phase 1 channels are unbuffered:
-- `send` blocks until a receiver is ready
-- `receive` blocks until a sender is ready
-- `close` prevents future sends and receives
+Use `.with_capacity(n)` for buffered channels:
+
+```nex
+let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
+ch.send(10)
+ch.send(20)
+print(ch.size)                    -- 2
+print(ch.capacity)                -- 2
+```
+
+Channel operations:
+- `send(value)` blocks until accepted
+- `receive` blocks until a value is available
+- `try_send(value)` returns `true` if the send succeeds immediately, otherwise `false`
+- `try_receive` returns a value if one is immediately available, otherwise `nil`
+- `close` prevents future sends; buffered values may still be received
+- `is_closed`, `size`, and `capacity` report channel state
+
+Use `select` to wait on multiple channel operations:
+
+```nex
+select
+  when jobs.receive as job then
+    print(job)
+  when control.receive as signal then
+    print(signal)
+  else
+    print("idle")
+end
+```
+
+`select` probes its clauses using `try_send` / `try_receive`. If no clause is ready and there is no `else`, it waits until one becomes ready.
 
 JavaScript target note:
 - generated JavaScript uses Promise-based semantics

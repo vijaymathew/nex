@@ -1099,6 +1099,70 @@
                                    (str "Loop condition must be Boolean, got " cond-type))})))))
     (doseq [stmt body] (check-statement loop-env stmt))))
 
+(defn- select-clause-op
+  [expr]
+  (when (and (map? expr) (= :call (:type expr)))
+    expr))
+
+(defn- check-select-clause
+  [env {:keys [expr alias body]}]
+  (let [{:keys [target method args]} (or (select-clause-op expr)
+                                         (throw (ex-info "select clause must be a channel operation"
+                                                         {:error (type-error "select clause must be a channel send/receive call")})))
+        target-type (check-expression env target)
+        normalized-target (normalize-type target-type)
+        base-type (if (map? normalized-target) (:base-type normalized-target) normalized-target)
+        type-args (when (map? normalized-target)
+                    (or (:type-params normalized-target) (:type-args normalized-target)))]
+    (when-not (= base-type "Channel")
+      (throw (ex-info "select clause target must be a Channel"
+                      {:error (type-error
+                               (str "select clause target must be Channel, got "
+                                    (display-type normalized-target)))})))
+    (case method
+      ("receive" "try_receive")
+      (do
+        (when (seq args)
+          (throw (ex-info (str "Channel." method " takes no arguments")
+                          {:error (type-error (str "Channel." method " takes no arguments"))})))
+        (let [body-env (make-type-env env)]
+          (when alias
+            (env-add-var body-env alias (or (first type-args) "Any")))
+          (doseq [stmt body]
+            (check-statement body-env stmt))))
+
+      ("send" "try_send")
+      (do
+        (when-not (= 1 (count args))
+          (throw (ex-info (str "Channel." method " expects 1 argument")
+                          {:error (type-error (str "Channel." method " expects 1 argument"))})))
+        (when alias
+          (throw (ex-info "send clauses cannot bind a value"
+                          {:error (type-error "send clauses cannot use 'as <name>'")})))
+        (let [arg-type (check-expression env (first args))
+              elem-type (or (first type-args) "Any")]
+          (when-not (types-compatible? env arg-type elem-type)
+            (throw (ex-info (str "Channel." method " argument type mismatch")
+                            {:error (type-error
+                                     (str "Expected " (display-type elem-type)
+                                          ", got " (display-type arg-type)))})))
+          (let [body-env (make-type-env env)]
+            (doseq [stmt body]
+              (check-statement body-env stmt)))))
+
+      (throw (ex-info "select clauses support only Channel send/receive operations"
+                      {:error (type-error
+                               "select clauses support only send, try_send, receive, and try_receive")})))))
+
+(defn check-select
+  [env {:keys [clauses else]}]
+  (doseq [clause clauses]
+    (check-select-clause env clause))
+  (when else
+    (let [else-env (make-type-env env)]
+      (doseq [stmt else]
+        (check-statement else-env stmt)))))
+
 (defn check-statement
   "Check a statement"
   [env stmt]
@@ -1111,6 +1175,7 @@
       :spawn (check-expression env stmt)
       :if (check-if env stmt)
       :loop (check-loop env stmt)
+      :select (check-select env stmt)
       :scoped-block (do
                       (let [block-env (make-type-env env)]
                         (doseq [s (:body stmt)] (check-statement block-env s)))
@@ -1658,12 +1723,14 @@
   (env-add-class env "Channel" {:name "Channel"
                                 :generic-params [{:name "T"}]})
   (doseq [[method-name sig]
-          {"send"      {:params [{:name "value" :type "T"}] :return-type "Void"}
-           "receive"   {:params [] :return-type "T"}
-           "close"     {:params [] :return-type "Void"}
-           "is_closed" {:params [] :return-type "Boolean"}
-           "capacity"  {:params [] :return-type "Integer"}
-           "size"      {:params [] :return-type "Integer"}}]
+          {"send"        {:params [{:name "value" :type "T"}] :return-type "Void"}
+           "try_send"    {:params [{:name "value" :type "T"}] :return-type "Boolean"}
+           "receive"     {:params [] :return-type "T"}
+           "try_receive" {:params [] :return-type {:base-type "T" :detachable true}}
+           "close"       {:params [] :return-type "Void"}
+           "is_closed"   {:params [] :return-type "Boolean"}
+           "capacity"    {:params [] :return-type "Integer"}
+           "size"        {:params [] :return-type "Integer"}}]
     (env-add-method env "Channel" method-name sig))
 
   ;; Built-in Function methods: call0..call32

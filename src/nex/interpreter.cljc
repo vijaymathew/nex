@@ -4,7 +4,7 @@
             #?(:clj [clojure.data.json :as json])
             #?(:clj [nex.turtle :as turtle]
                :cljs [nex.turtle-browser :as turtle]))
-  #?(:clj (:import [java.util.concurrent CompletableFuture ExecutionException Executors])))
+  #?(:clj (:import [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit])))
 
 ;;
 ;; Mutable Collections (platform abstraction)
@@ -524,6 +524,19 @@
    (defonce ^:private concurrent-executor
      (Executors/newCachedThreadPool)))
 
+#?(:clj
+   (defn shutdown-runtime!
+     "Release shared JVM runtime resources so short-lived tools and test runners can exit cleanly."
+     []
+     (.shutdown ^java.util.concurrent.ExecutorService concurrent-executor)
+     (when-not (.awaitTermination ^java.util.concurrent.ExecutorService concurrent-executor 100 TimeUnit/MILLISECONDS)
+       (.shutdownNow ^java.util.concurrent.ExecutorService concurrent-executor))))
+
+#?(:cljs
+   (defn shutdown-runtime!
+     []
+     nil))
+
 (defn nex-object?
   "Check if a value is a Nex object instance."
   [v]
@@ -656,6 +669,26 @@
                  nil)))))
 
 #?(:clj
+   (defn- channel-try-send [ch value]
+     (locking (:lock ch)
+       (let [{:keys [closed? receivers capacity buffer]} @(:state ch)]
+         (when closed?
+           (throw (ex-info "Cannot send on a closed channel" {:channel ch})))
+         (cond
+           (and (zero? capacity) (seq receivers))
+           (let [[receiver rest-receivers] (queue-pop receivers)]
+             (swap! (:state ch) assoc :receivers rest-receivers)
+             (deliver receiver value)
+             true)
+
+           (< (count buffer) capacity)
+           (do
+             (swap! (:state ch) update :buffer queue-conj value)
+             true)
+
+           :else false)))))
+
+#?(:clj
    (defn- channel-receive [ch]
      (let [out (promise)
            ready
@@ -696,6 +729,33 @@
                  (if (= result channel-closed-signal)
                    (throw (ex-info "Cannot receive from a closed channel" {:channel ch}))
                    result))))))
+
+#?(:clj
+   (defn- channel-try-receive [ch]
+     (locking (:lock ch)
+       (let [{:keys [senders buffer capacity]} @(:state ch)]
+         (cond
+           (seq buffer)
+           (let [[value rest-buffer] (queue-pop buffer)
+                 promoted (when (and (pos? capacity) (seq senders))
+                            (let [[sender rest-senders] (queue-pop senders)]
+                              (swap! (:state ch) assoc
+                                     :senders rest-senders
+                                     :buffer (queue-conj rest-buffer (:value sender)))
+                              sender))]
+             (when-not promoted
+               (swap! (:state ch) assoc :buffer rest-buffer))
+             (when promoted
+               (deliver (:ack promoted) true))
+             value)
+
+           (seq senders)
+           (let [[sender rest-senders] (queue-pop senders)]
+             (swap! (:state ch) assoc :senders rest-senders)
+             (deliver (:ack sender) true)
+             (:value sender))
+
+           :else nil)))))
 
 #?(:clj
    (defn- channel-close [ch]
@@ -741,6 +801,26 @@
                     :reject reject})))))))
 
 #?(:cljs
+   (defn- channel-try-send [ch value]
+     (let [{:keys [closed? receivers capacity buffer]} @(:state ch)]
+       (cond
+         closed?
+         (throw (ex-info "Cannot send on a closed channel" {:channel ch}))
+
+         (and (zero? capacity) (seq receivers))
+         (let [receiver (first receivers)]
+           (swap! (:state ch) update :receivers #(vec (rest %)))
+           ((:resolve receiver) value)
+           true)
+
+         (< (count buffer) capacity)
+         (do
+           (swap! (:state ch) update :buffer conj value)
+           true)
+
+         :else false))))
+
+#?(:cljs
    (defn- channel-receive [ch]
      (js/Promise.
       (fn [resolve reject]
@@ -778,6 +858,32 @@
                     :reject reject})))))))
 
 #?(:cljs
+   (defn- channel-try-receive [ch]
+     (let [{:keys [senders buffer capacity]} @(:state ch)]
+       (cond
+         (seq buffer)
+         (let [buffered-value (first buffer)]
+           (swap! (:state ch) update :buffer #(vec (rest %)))
+           (when (and (pos? capacity) (seq (:senders @(:state ch))))
+             (let [{sender-value :value sender-resolve :resolve} (first (:senders @(:state ch)))]
+               (swap! (:state ch)
+                      (fn [state]
+                        (-> state
+                            (update :senders #(vec (rest %)))
+                            (update :buffer conj sender-value))))
+               (sender-resolve nil)))
+           buffered-value)
+
+         (seq senders)
+         (let [{:keys [value] :as sender} (first senders)
+               ack-resolve (:resolve sender)]
+           (swap! (:state ch) update :senders #(vec (rest %)))
+           (ack-resolve nil)
+           value)
+
+         :else nil))))
+
+#?(:cljs
    (defn- channel-close [ch]
      (let [{:keys [closed? senders receivers buffer]} @(:state ch)]
        (when-not closed?
@@ -803,6 +909,102 @@
 (declare combine-assertions)
 (declare combine-preconditions)
 (declare get-type-name)
+(declare eval-body-async)
+
+(defn- select-op-call
+  [expr]
+  (when (and (map? expr) (= :call (:type expr)))
+    expr))
+
+(defn- eval-select-target
+  [ctx target]
+  (let [target-name (when (string? target) target)
+        class-target (when target-name (lookup-class-if-exists ctx target-name))]
+    (if class-target
+      nil
+      (if target-name
+        (env-lookup (:current-env ctx) target-name)
+        (eval-node ctx target)))))
+
+#?(:cljs
+   (defn- eval-select-target-async
+     [ctx target]
+     (let [target-name (when (string? target) target)
+           class-target (when target-name (lookup-class-if-exists ctx target-name))]
+       (if class-target
+         (js/Promise.resolve nil)
+         (if target-name
+           (js/Promise.resolve (env-lookup (:current-env ctx) target-name))
+           (eval-node-async ctx target))))))
+
+(defn- prepare-select-clause
+  [ctx {:keys [expr alias body] :as clause}]
+  (let [{:keys [target method args] :as call} (select-op-call expr)]
+    {:method method
+     :alias alias
+     :body body
+     :target (eval-select-target ctx target)
+     :args (mapv #(eval-node ctx %) args)}))
+
+#?(:cljs
+   (defn- prepare-select-clause-async
+     [ctx {:keys [expr alias body] :as clause}]
+     (let [{:keys [target method args]} (select-op-call expr)]
+       (.then (eval-select-target-async ctx target)
+              (fn [target-val]
+                (.then (promise-all (map #(eval-node-async ctx %) args))
+                       (fn [arg-vals]
+                         {:method method
+                          :alias alias
+                          :body body
+                          :target target-val
+                          :args arg-vals})))))))
+
+(defn- execute-select-body
+  [ctx body alias value]
+  (let [body-ctx (if alias
+                   (assoc ctx :current-env (doto (make-env (:current-env ctx))
+                                            (env-define alias value)))
+                   ctx)]
+    (last (map #(eval-node body-ctx %) body))))
+
+#?(:cljs
+   (defn- execute-select-body-async
+     [ctx body alias value]
+     (let [body-ctx (if alias
+                      (assoc ctx :current-env (doto (make-env (:current-env ctx))
+                                               (env-define alias value)))
+                      ctx)]
+       (eval-body-async body-ctx body))))
+
+(defn- attempt-select-clause
+  [{:keys [method target args] :as prepared}]
+  (cond
+    (#{"receive" "try_receive"} method)
+    (let [value (channel-try-receive target)]
+      (when (some? value)
+        {:selected? true :value value}))
+
+    (#{"send" "try_send"} method)
+    (when (channel-try-send target (first args))
+      {:selected? true})
+
+    :else nil))
+
+#?(:cljs
+   (defn- attempt-select-clause-async
+     [prepared]
+     (js/Promise.resolve (attempt-select-clause prepared))))
+
+(defn- sleep-select-step! []
+  #?(:clj (Thread/sleep 1)
+     :cljs nil))
+
+#?(:cljs
+   (defn- sleep-select-step-async []
+     (js/Promise.
+      (fn [resolve _reject]
+        (js/setTimeout resolve 0)))))
 
 ;;
 ;; Debugger Hooks
@@ -1523,7 +1725,9 @@
 
    :Channel
    {"send"      (fn [ch value & _] (channel-send ch value))
+    "try_send"  (fn [ch value & _] (channel-try-send ch value))
     "receive"   (fn [ch & _] (channel-receive ch))
+    "try_receive" (fn [ch & _] (channel-try-receive ch))
     "close"     (fn [ch & _] (channel-close ch))
     "is_closed" (fn [ch & _] (:closed? @(:state ch)))
     "capacity"  (fn [ch & _] (:capacity @(:state ch)))
@@ -2300,6 +2504,21 @@
         (throw (ex-info "No matching case and no else clause"
                         {:value val})))
       matched)))
+
+(defmethod eval-node :select
+  [ctx {:keys [clauses else] :as node}]
+  (let [prepared (mapv #(prepare-select-clause ctx %) clauses)]
+    (loop []
+      (if-let [[clause outcome] (some (fn [prepared-clause]
+                                        (when-let [outcome (attempt-select-clause prepared-clause)]
+                                          [prepared-clause outcome]))
+                                      prepared)]
+        (execute-select-body ctx (:body clause) (:alias clause) (:value outcome))
+        (if else
+          (last (map #(eval-node ctx %) else))
+          (do
+            (sleep-select-step!)
+            (recur)))))))
 
 (defmethod eval-node :loop
   [ctx {:keys [init invariant variant until body]}]
@@ -3230,6 +3449,24 @@
                                          (eval-node-async ctx (:body (first clauses)))
                                          (match-clauses (rest clauses)))))))]
                     (match-clauses (:clauses node)))))
+
+         (= node-type :select)
+         (.then (promise-all (map #(prepare-select-clause-async ctx %) (:clauses node)))
+                (fn [prepared]
+                  (letfn [(attempt-loop []
+                            (.then (promise-all (map attempt-select-clause-async prepared))
+                                   (fn [outcomes]
+                                     (if-let [idx (first (keep-indexed (fn [i outcome]
+                                                                         (when (:selected? outcome) i))
+                                                                       outcomes))]
+                                       (let [clause (nth prepared idx)
+                                             outcome (nth outcomes idx)]
+                                         (execute-select-body-async ctx (:body clause) (:alias clause) (:value outcome)))
+                                       (if-let [else-body (:else node)]
+                                         (eval-body-async ctx else-body)
+                                         (.then (sleep-select-step-async)
+                                                (fn [_] (attempt-loop))))))))]
+                    (attempt-loop))))
 
          (= node-type :loop)
          (.then (promise-reduce (:init node) nil

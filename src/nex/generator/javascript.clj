@@ -252,10 +252,12 @@
                          "Any")
                 "Channel" (case (:method expr)
                             "receive" (or (first type-args) "Any")
+                            "try_receive" (or (first type-args) "Any")
                             "is_closed" "Boolean"
                             "capacity" "Integer"
                             "size" "Integer"
                             "send" "Void"
+                            "try_send" "Boolean"
                             "close" "Void"
                             "Any")
                 "Set" (case (:method expr)
@@ -573,12 +575,14 @@
     "is_done"  (fn [target _] (str target ".is_done()"))}
 
    :Channel
-   {"send"      (fn [target args] (str "await " target ".send(" args ")"))
-    "receive"   (fn [target _] (str "await " target ".receive()"))
-    "close"     (fn [target _] (str target ".close()"))
-    "is_closed" (fn [target _] (str target ".is_closed()"))
-    "capacity"  (fn [target _] (str target ".capacity()"))
-    "size"      (fn [target _] (str target ".size()"))}
+   {"send"        (fn [target args] (str "await " target ".send(" args ")"))
+    "try_send"    (fn [target args] (str target ".try_send(" args ")"))
+    "receive"     (fn [target _] (str "await " target ".receive()"))
+    "try_receive" (fn [target _] (str target ".try_receive()"))
+    "close"       (fn [target _] (str target ".close()"))
+    "is_closed"   (fn [target _] (str target ".is_closed()"))
+    "capacity"    (fn [target _] (str target ".capacity()"))
+    "size"        (fn [target _] (str target ".size()"))}
 
    :Image
    {"width"        (fn [target _] (str target ".width"))
@@ -1165,6 +1169,78 @@
                (or default-part no-else-default)
                [(indent level "}")]))))
 
+(defn- select-clause-call
+  [clause]
+  (:expr clause))
+
+(defn- generate-select-clause-js
+  [level clause var-names idx]
+  (let [{:keys [target method args]} (select-clause-call clause)
+        target-code (if (string? target) target (generate-expression target))
+        arg-code (when (seq args) (generate-expression (first args)))
+        body-var-names (cond-> var-names (:alias clause) (conj (:alias clause)))
+        body-code (str/join "\n" (map #(generate-statement (+ level 3) % body-var-names) (:body clause)))
+        temp-name (str "__selectValue" idx)]
+    (case method
+      "receive"
+      (str/join "\n"
+                (concat
+                 [(indent (+ level 2) "{")
+                  (indent (+ level 3) (str "const " temp-name " = " target-code ".try_receive();"))
+                  (indent (+ level 3) (str "if (" temp-name " !== null && " temp-name " !== undefined) {"))]
+                 (when (:alias clause)
+                   [(indent (+ level 4) (str "let " (:alias clause) " = " temp-name ";"))])
+                 [body-code
+                  (indent (+ level 4) "break;")
+                  (indent (+ level 3) "}")
+                  (indent (+ level 2) "}")]))
+
+      "try_receive"
+      (str/join "\n"
+                (concat
+                 [(indent (+ level 2) "{")
+                  (indent (+ level 3) (str "const " temp-name " = " target-code ".try_receive();"))
+                  (indent (+ level 3) (str "if (" temp-name " !== null && " temp-name " !== undefined) {"))]
+                 (when (:alias clause)
+                   [(indent (+ level 4) (str "let " (:alias clause) " = " temp-name ";"))])
+                 [body-code
+                  (indent (+ level 4) "break;")
+                  (indent (+ level 3) "}")
+                  (indent (+ level 2) "}")]))
+
+      "send"
+      (str/join "\n"
+                [(indent (+ level 2) (str "if (" target-code ".try_send(" arg-code ")) {"))
+                 body-code
+                 (indent (+ level 3) "break;")
+                 (indent (+ level 2) "}")])
+
+      "try_send"
+      (str/join "\n"
+                [(indent (+ level 2) (str "if (" target-code ".try_send(" arg-code ")) {"))
+                 body-code
+                 (indent (+ level 3) "break;")
+                 (indent (+ level 2) "}")])
+
+      (indent (+ level 2) "/* Unsupported select clause */"))))
+
+(defn generate-select
+  [level {:keys [clauses else]} var-names]
+  (let [clause-code (map-indexed (fn [idx clause]
+                                   (generate-select-clause-js level clause var-names idx))
+                                 clauses)
+        else-code (when else
+                    [(str/join "\n" (map #(generate-statement (+ level 2) % var-names) else))
+                     (indent (+ level 2) "break;")])]
+    (str/join "\n"
+              (concat
+               [(indent level "while (true) {")]
+               clause-code
+               else-code
+               (when-not else
+                 [(indent (+ level 1) "await __nexSleep(0);")])
+               [(indent level "}")]))))
+
 (defn generate-statement
   "Generate JavaScript code for a statement"
   ([level stmt] (generate-statement level stmt #{}))
@@ -1176,6 +1252,7 @@
      :let (indent level (generate-let stmt var-names))
      :if (generate-if level stmt var-names)
      :case (generate-case level stmt var-names)
+     :select (generate-select level stmt var-names)
      :scoped-block (generate-scoped-block level stmt var-names)
      :loop (generate-loop level stmt)
      :with (when (= (:target stmt) "javascript")
@@ -1828,6 +1905,19 @@
        "      this._senders.push({ value, resolve, reject });\n"
        "    });\n"
        "  }\n"
+       "  try_send(value) {\n"
+       "    if (this._closed) throw new Error('Cannot send on a closed channel');\n"
+       "    if (this._capacity === 0 && this._receivers.length > 0) {\n"
+       "      const recv = this._receivers.shift();\n"
+       "      recv.resolve(value);\n"
+       "      return true;\n"
+       "    }\n"
+       "    if (this._buffer.length < this._capacity) {\n"
+       "      this._buffer.push(value);\n"
+       "      return true;\n"
+       "    }\n"
+       "    return false;\n"
+       "  }\n"
        "  async receive() {\n"
        "    if (this._buffer.length > 0) {\n"
        "      const value = this._buffer.shift();\n"
@@ -1847,6 +1937,23 @@
        "    return await new Promise((resolve, reject) => {\n"
        "      this._receivers.push({ resolve, reject });\n"
        "    });\n"
+       "  }\n"
+       "  try_receive() {\n"
+       "    if (this._buffer.length > 0) {\n"
+       "      const value = this._buffer.shift();\n"
+       "      if (this._capacity > 0 && this._senders.length > 0) {\n"
+       "        const sender = this._senders.shift();\n"
+       "        this._buffer.push(sender.value);\n"
+       "        sender.resolve(null);\n"
+       "      }\n"
+       "      return value;\n"
+       "    }\n"
+       "    if (this._senders.length > 0) {\n"
+       "      const sender = this._senders.shift();\n"
+       "      sender.resolve(null);\n"
+       "      return sender.value;\n"
+       "    }\n"
+       "    return null;\n"
        "  }\n"
        "  close() {\n"
        "    if (!this._closed) {\n"

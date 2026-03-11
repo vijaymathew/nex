@@ -428,12 +428,14 @@
     "is_done"  (fn [target _] (str target ".is_done()"))}
 
    :Channel
-   {"send"      (fn [target args] (str target ".send(" args ")"))
-    "receive"   (fn [target _] (str target ".receive()"))
-    "close"     (fn [target _] (str target ".close()"))
-    "is_closed" (fn [target _] (str target ".is_closed()"))
-    "capacity"  (fn [target _] (str target ".capacity()"))
-    "size"      (fn [target _] (str target ".size()"))}
+   {"send"        (fn [target args] (str target ".send(" args ")"))
+    "try_send"    (fn [target args] (str target ".try_send(" args ")"))
+    "receive"     (fn [target _] (str target ".receive()"))
+    "try_receive" (fn [target _] (str target ".try_receive()"))
+    "close"       (fn [target _] (str target ".close()"))
+    "is_closed"   (fn [target _] (str target ".is_closed()"))
+    "capacity"    (fn [target _] (str target ".capacity()"))
+    "size"        (fn [target _] (str target ".size()"))}
 
    :Image
    {"width"        (fn [target _] (str target ".width()"))
@@ -533,10 +535,12 @@
                          "Any")
                 "Channel" (case (:method expr)
                             "receive" (or (first type-args) "Any")
+                            "try_receive" (or (first type-args) "Any")
                             "is_closed" "Boolean"
                             "capacity" "Integer"
                             "size" "Integer"
                             "send" "Void"
+                            "try_send" "Boolean"
                             "close" "Void"
                             "Any")
                 "Set" (case (:method expr)
@@ -1238,6 +1242,94 @@
                (or default-part no-else-default)
                [(indent level "}")]))))
 
+(defn- select-clause-call
+  [clause]
+  (:expr clause))
+
+(defn- select-alias-java-type
+  [expr]
+  (let [target-type (infer-expression-type (:target expr))
+        type-args (when (map? target-type)
+                    (or (:type-args target-type) (:type-params target-type)))]
+    (nex-type-to-java-boxed (or (first type-args) "Any"))))
+
+(defn- generate-select-clause-java
+  [level clause var-names idx]
+  (let [{:keys [target method args]} (select-clause-call clause)
+        target-code (if (string? target) target (generate-expression target))
+        arg-code (when (seq args) (generate-expression (first args)))
+        body-var-names (cond-> var-names (:alias clause) (conj (:alias clause)))
+        body-code (str/join "\n" (map #(generate-statement (+ level 3) % body-var-names) (:body clause)))
+        temp-name (str "__select_value_" idx)]
+    (case method
+      "receive"
+      (let [temp-type (select-alias-java-type (:expr clause))
+            alias-lines (when (:alias clause)
+                          [(indent (+ level 3) (str temp-type " " (:alias clause) " = " temp-name ";"))])]
+        (str/join "\n"
+                  (concat
+                   [(indent (+ level 2) "{")
+                    (indent (+ level 3) (str temp-type " " temp-name " = " target-code ".try_receive();"))
+                    (indent (+ level 3) (str "if (" temp-name " != null) {"))]
+                   alias-lines
+                   [body-code
+                    (indent (+ level 4) "break;")
+                    (indent (+ level 3) "}")
+                    (indent (+ level 2) "}")])))
+
+      "try_receive"
+      (let [temp-type (select-alias-java-type (:expr clause))
+            alias-lines (when (:alias clause)
+                          [(indent (+ level 3) (str temp-type " " (:alias clause) " = " temp-name ";"))])]
+        (str/join "\n"
+                  (concat
+                   [(indent (+ level 2) "{")
+                    (indent (+ level 3) (str temp-type " " temp-name " = " target-code ".try_receive();"))
+                    (indent (+ level 3) (str "if (" temp-name " != null) {"))]
+                   alias-lines
+                   [body-code
+                    (indent (+ level 4) "break;")
+                    (indent (+ level 3) "}")
+                    (indent (+ level 2) "}")])))
+
+      "send"
+      (str/join "\n"
+                [(indent (+ level 2) (str "if (" target-code ".try_send(" arg-code ")) {"))
+                 body-code
+                 (indent (+ level 3) "break;")
+                 (indent (+ level 2) "}")])
+
+      "try_send"
+      (str/join "\n"
+                [(indent (+ level 2) (str "if (" target-code ".try_send(" arg-code ")) {"))
+                 body-code
+                 (indent (+ level 3) "break;")
+                 (indent (+ level 2) "}")])
+
+      (indent (+ level 2) "/* Unsupported select clause */"))))
+
+(defn generate-select
+  [level {:keys [clauses else]} var-names]
+  (let [clause-code (map-indexed (fn [idx clause]
+                                   (generate-select-clause-java level clause var-names idx))
+                                 clauses)
+        else-code (when else
+                    [(str/join "\n" (map #(generate-statement (+ level 2) % var-names) else))
+                     (indent (+ level 2) "break;")])]
+    (str/join "\n"
+              (concat
+               [(indent level "while (true) {")]
+               clause-code
+               else-code
+               (when-not else
+                 [(indent (+ level 1) "try {")
+                  (indent (+ level 2) "Thread.sleep(1);")
+                  (indent (+ level 1) "} catch (InterruptedException e) {")
+                  (indent (+ level 2) "Thread.currentThread().interrupt();")
+                  (indent (+ level 2) "throw new RuntimeException(e);")
+                  (indent (+ level 1) "}")])
+               [(indent level "}")]))))
+
 (defn generate-statement
   "Generate Java code for a statement"
   ([level stmt] (generate-statement level stmt #{}))
@@ -1262,6 +1354,7 @@
      :let (indent level (generate-let stmt var-names))
      :if (generate-if level stmt var-names)
      :case (generate-case level stmt var-names)
+     :select (generate-select level stmt var-names)
      :scoped-block (generate-scoped-block level stmt var-names)
      :loop (generate-loop level stmt)
      :with (when (= (:target stmt) "java")
@@ -2378,6 +2471,7 @@ public class NexTurtle {
        "    private final int capacity;\n"
        "    private final java.util.ArrayDeque<T> buffer = new java.util.ArrayDeque<>();\n"
        "    private final java.util.ArrayDeque<PendingSend<T>> senders = new java.util.ArrayDeque<>();\n"
+       "    private int waitingReceivers = 0;\n"
        "    private boolean closed = false;\n\n"
        "    public Channel() { this(0); }\n"
        "    public Channel(int capacity) {\n"
@@ -2427,16 +2521,38 @@ public class NexTurtle {
        "        }\n"
        "      }\n"
        "    }\n\n"
+       "    public synchronized boolean try_send(T value) {\n"
+       "      if (closed) throw new RuntimeException(\"Cannot send on a closed channel\");\n"
+       "      if (capacity == 0) {\n"
+       "        if (waitingReceivers > 0) {\n"
+       "          PendingSend<T> pending = new PendingSend<>(value);\n"
+       "          pending.delivered = true;\n"
+       "          senders.addLast(pending);\n"
+       "          notifyAll();\n"
+       "          return true;\n"
+       "        }\n"
+       "        return false;\n"
+       "      }\n"
+       "      if (buffer.size() < capacity) {\n"
+       "        buffer.addLast(value);\n"
+       "        notifyAll();\n"
+       "        return true;\n"
+       "      }\n"
+       "      return false;\n"
+       "    }\n\n"
        "    public synchronized T receive() {\n"
        "      while (buffer.isEmpty() && senders.isEmpty()) {\n"
        "        if (closed) throw new RuntimeException(\"Cannot receive from a closed channel\");\n"
-       "        try {\n"
-       "          wait();\n"
-       "        } catch (InterruptedException e) {\n"
-       "          Thread.currentThread().interrupt();\n"
-       "          throw new RuntimeException(e);\n"
-       "        }\n"
-       "      }\n"
+       "        waitingReceivers++;\n"
+        "        try {\n"
+        "          wait();\n"
+        "        } catch (InterruptedException e) {\n"
+          "          Thread.currentThread().interrupt();\n"
+          "          throw new RuntimeException(e);\n"
+       "        } finally {\n"
+       "          waitingReceivers--;\n"
+        "        }\n"
+        "      }\n"
        "      if (!buffer.isEmpty()) {\n"
        "        T value = buffer.removeFirst();\n"
        "        if (!senders.isEmpty() && buffer.size() < capacity) {\n"
@@ -2451,6 +2567,25 @@ public class NexTurtle {
        "      pending.delivered = true;\n"
        "      notifyAll();\n"
        "      return pending.value;\n"
+       "    }\n\n"
+       "    public synchronized T try_receive() {\n"
+       "      if (!buffer.isEmpty()) {\n"
+       "        T value = buffer.removeFirst();\n"
+       "        if (!senders.isEmpty() && buffer.size() < capacity) {\n"
+       "          PendingSend<T> pending = senders.removeFirst();\n"
+       "          buffer.addLast(pending.value);\n"
+       "          pending.delivered = true;\n"
+       "        }\n"
+       "        notifyAll();\n"
+       "        return value;\n"
+       "      }\n"
+       "      if (!senders.isEmpty()) {\n"
+       "        PendingSend<T> pending = senders.removeFirst();\n"
+       "        pending.delivered = true;\n"
+       "        notifyAll();\n"
+       "        return pending.value;\n"
+       "      }\n"
+       "      return null;\n"
        "    }\n\n"
        "    public synchronized void close() {\n"
        "      if (!closed) {\n"

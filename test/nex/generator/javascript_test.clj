@@ -284,6 +284,28 @@ end"
       (is (str/includes? js-code "console.log(ch.capacity())"))
       (is (str/includes? js-code "console.log(ch.size())")))))
 
+(deftest select-generation-test
+  (testing "select lowers to try_send/try_receive polling in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+      select
+        when ch.send(1) then
+          print(\"sent\")
+        when ch.receive as value then
+          print(value)
+        else
+          print(\"none\")
+      end
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "while (true) {"))
+      (is (str/includes? js-code ".try_send(1)"))
+      (is (str/includes? js-code ".try_receive()"))
+      (is (str/includes? js-code "break;")))))
+
 (deftest integer-bitwise-generation-test
   (testing "Integer bitwise methods translate to JavaScript bitwise operators/helpers"
     (let [nex-code "class Test
