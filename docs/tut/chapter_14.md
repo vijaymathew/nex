@@ -219,9 +219,105 @@ A class with at least one abstract method cannot be instantiated directly. Only 
 
 When a subclass overrides a method, the override should honour the same contract as the superclass method: it should accept at least the same inputs and guarantee at least as much. This is the *Liskov Substitution Principle*: wherever a superclass instance is expected, a subclass instance should be usable without breaking anything.
 
+In Nex, this idea is not only informal. Contract inheritance follows explicit rules.
+
+### Precondition Inheritance
+
+For an overridden feature, the effective precondition is:
+
+`<base-feature-require> or <local-feature-require>`
+
+Either side may be absent. The practical meaning is that a child class may *weaken* the precondition. It may accept everything the parent accepted, and possibly more.
+
+For example:
+
+```text
+class Account
+feature
+  withdraw(amount: Real)
+    require
+      enough: amount <= balance
+    do
+      balance := balance - amount
+    end
+end
+
+class Overdraft_Account
+inherit Account
+feature
+  withdraw(amount: Real)
+    require
+      within_limit: amount <= balance + overdraft_limit
+    do
+      balance := balance - amount
+    end
+end
+```
+
+The effective precondition of `Overdraft_Account.withdraw` is:
+
+`(amount <= balance) or (amount <= balance + overdraft_limit)`
+
+So any call valid for `Account` remains valid for `Overdraft_Account`.
+
+### Postcondition Inheritance
+
+For an overridden feature, the effective postcondition is:
+
+`<base-feature-ensure> and <local-feature-ensure>`
+
+Either side may be absent. The practical meaning is that a child class may *strengthen* the postcondition, but it may not drop promises that the parent already made.
+
+If a parent routine promises that `area >= 0.0`, then every child implementation must still guarantee `area >= 0.0`. A child may add a stronger fact, but not a weaker one.
+
+### Invariant Inheritance
+
+For a child class, the effective class invariant is:
+
+`<base-invariants> and <local-class-invariants>`
+
+`base-invariants` includes the invariants of all immediate parent classes, and those parent invariants already include their own inherited invariants recursively.
+
+For example:
+
+```text
+class Account
+invariant
+  non_negative_balance: balance >= 0.0
+end
+
+class Savings_Account
+inherit Account
+invariant
+  non_negative_rate: interest_rate >= 0.0
+end
+```
+
+The effective invariant of `Savings_Account` is:
+
+`(balance >= 0.0) and (interest_rate >= 0.0)`
+
+This means subclass objects must satisfy everything required of parent objects, plus their own additional consistency rules.
+
+### Multiple Inheritance
+
+With multiple inheritance, Nex combines:
+
+- inherited preconditions with `or`
+- inherited postconditions with `and`
+- inherited class invariants with `and`
+
+Inherited invariant contributions are collected recursively and deduped by ancestor class, so the same ancestor contract is not applied twice through different parent paths.
+
+The rule to remember is simple:
+
+- children may accept more
+- children must promise at least as much
+- child objects must satisfy all inherited validity rules
+
 If `Shape.area` promises to return a non-negative real number, then every subclass `area` must also return a non-negative real. A subclass that returns a negative area or raises an exception where the superclass would not has violated the contract that clients of `Shape` rely on.
 
-When overriding a method: read the superclass method's contract first. The override must at minimum satisfy that contract.
+When overriding a method: read the superclass method's contract first. In Nex, the language combines inherited contracts in exactly the way behavioral subtyping requires.
 
 
 
