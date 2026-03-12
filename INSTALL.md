@@ -16,6 +16,19 @@ This guide explains how to install the Nex language implementation on your syste
 
 ## Quick Install
 
+### Downloadable Bootstrap Script
+
+Users can install Nex without cloning the repository by downloading the
+bootstrap installer:
+
+```bash
+curl -fsSL -o bootstrap-install.sh https://raw.githubusercontent.com/vijaymathew/nex/main/bootstrap-install.sh
+bash bootstrap-install.sh jvm --install-deps
+```
+
+The bootstrap script downloads a source archive from GitHub and then runs the
+project's `install.sh`.
+
 ### JVM Installation (Default)
 
 The installer will automatically detect missing dependencies and offer to install them:
@@ -37,6 +50,12 @@ or explicitly:
 ```
 
 This will automatically install Java and Clojure if they're not present.
+
+To install into a custom prefix without exporting `INSTALL_PREFIX` first:
+
+```bash
+./install.sh jvm --prefix "$HOME/.local"
+```
 
 ### Node.js Installation
 
@@ -93,6 +112,12 @@ To install to a different location:
 
 ```bash
 INSTALL_PREFIX=$HOME/.local ./install.sh
+```
+
+Or equivalently:
+
+```bash
+./install.sh --prefix "$HOME/.local"
 ```
 
 Then add `$HOME/.local/bin` to your PATH:

@@ -238,6 +238,20 @@ cd nex
 nex help
 ```
 
+If you want a single downloadable installer instead of cloning the repo:
+
+```bash
+curl -fsSL -o bootstrap-install.sh https://raw.githubusercontent.com/vijaymathew/nex/main/bootstrap-install.sh
+bash bootstrap-install.sh jvm --install-deps
+```
+
+To install without `sudo`, target a user-local prefix:
+
+```bash
+bash bootstrap-install.sh jvm --prefix "$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+```
+
 Supported platforms: Ubuntu, Debian, Fedora, CentOS, RHEL, Arch, Manjaro, macOS.
 
 For manual installation and platform-specific instructions, see [INSTALL.md](INSTALL.md).

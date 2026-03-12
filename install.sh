@@ -2,24 +2,45 @@
 set -e
 
 # Nex Language Installation Script
-# Usage: ./install.sh [jvm|nodejs] [--install-deps]
+# Usage: ./install.sh [jvm|nodejs] [--install-deps] [--prefix DIR]
 
 VERSION="0.1.0"
-TARGET="${1:-jvm}"
+TARGET="jvm"
 INSTALL_DEPS=false
 INSTALL_PREFIX="${INSTALL_PREFIX:-/usr/local}"
 BIN_DIR="$INSTALL_PREFIX/bin"
 LIB_DIR="$INSTALL_PREFIX/lib/nex"
 
 # Parse arguments
-for arg in "$@"; do
-    if [[ "$arg" == "--install-deps" ]]; then
-        INSTALL_DEPS=true
-    elif [[ "$arg" != "jvm" && "$arg" != "nodejs" ]]; then
-        if [[ "$arg" != "$1" ]]; then  # Not the target argument
-            echo "Warning: Unknown argument '$arg'"
-        fi
-    fi
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        jvm|nodejs)
+            TARGET="$1"
+            shift
+            ;;
+        --install-deps)
+            INSTALL_DEPS=true
+            shift
+            ;;
+        --prefix)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --prefix requires a directory argument."
+                exit 1
+            fi
+            INSTALL_PREFIX="$2"
+            BIN_DIR="$INSTALL_PREFIX/bin"
+            LIB_DIR="$INSTALL_PREFIX/lib/nex"
+            shift 2
+            ;;
+        --help|-h)
+            echo "Usage: ./install.sh [jvm|nodejs] [--install-deps] [--prefix DIR]"
+            exit 0
+            ;;
+        *)
+            echo "Warning: Unknown argument '$1'"
+            shift
+            ;;
+    esac
 done
 
 echo "╔════════════════════════════════════════════════════════════╗"
@@ -30,7 +51,7 @@ echo ""
 # Validate target
 if [[ "$TARGET" != "jvm" && "$TARGET" != "nodejs" ]]; then
     echo "Error: Invalid target '$TARGET'. Must be 'jvm' or 'nodejs'."
-    echo "Usage: ./install.sh [jvm|nodejs] [--install-deps]"
+    echo "Usage: ./install.sh [jvm|nodejs] [--install-deps] [--prefix DIR]"
     exit 1
 fi
 
