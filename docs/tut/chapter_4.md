@@ -170,7 +170,7 @@ nex> let age := 20
 nex> let category := when age >= 18 "adult" else "minor" end
 => adult
 
-nex> print(category)
+nex> category
 adult
 ```
 
@@ -300,7 +300,7 @@ nex> if income <= 10000.0 then
        tax := income * 0.30
     end
 
-nex> print("Tax: " + tax.to_string)
+nex> "Tax: " + tax.to_string
 Tax: 7000.0
 ```
 

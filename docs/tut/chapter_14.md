@@ -110,11 +110,11 @@ When a subclass defines a feature with the same name as a superclass feature, th
 
 ```
 nex> let c := create Circle.make("red", 5.0)
-nex> print(c.describe)
+nex> c.describe
 A red circle with radius 5.0
 
 nex> let r := create Rectangle.make("blue", 4.0, 3.0)
-nex> print(r.describe)
+nex> r.describe
 A blue rectangle (4.0 x 3.0)
 ```
 
@@ -205,7 +205,7 @@ nex> class Circle inherit Shape
 Class(es) registered: Circle
 
 nex> let c := create Circle.make("red", 5.0)
-nex> print(c.describe)
+nex> c.describe
 A red circle with area 78.53975
 ```
 

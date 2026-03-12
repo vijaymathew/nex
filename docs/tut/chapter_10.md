@@ -13,10 +13,10 @@ Map literals are written with curly braces, each entry as `key: value`, entries 
 nex> let capitals := {"France": "Paris", "Japan": "Tokyo", "Brazil": "Brasília"}
 => {France: Paris, Japan: Tokyo, Brazil: Brasília}
 
-nex> print(capitals.get("France"))
+nex> capitals.get("France")
 Paris
 
-nex> print(capitals.get("Japan"))
+nex> capitals.get("Japan")
 Tokyo
 ```
 
@@ -44,11 +44,11 @@ nex> let scores: Map[String, Integer] := {}
 nex> scores.put("Alice", 92)
 nex> scores.put("Bob", 78)
 nex> scores.put("Carol", 85)
-nex> print(scores)
+nex> scores
 {Alice: 92, Bob: 78, Carol: 85}
 
 nex> scores.put("Alice", 95)
-nex> print(scores)
+nex> scores
 {Alice: 95, Bob: 78, Carol: 85}
 ```
 
@@ -61,17 +61,17 @@ If the key `"Alice"` already exists, `put` replaces its value. If it does not ex
 The `get` method retrieves the value associated with a key:
 
 ```
-nex> print(scores.get("Bob"))
+nex> scores.get("Bob")
 78
 ```
 
 If the key does not exist, `get` raises an exception. This is the map equivalent of an out-of-bounds array access — the precondition for `get` is that the key must be present. When you are not certain a key exists, check first with `contains_key`:
 
 ```
-nex> print(scores.contains_key("Bob"))
+nex> scores.contains_key("Bob")
 true
 
-nex> print(scores.contains_key("David"))
+nex> scores.contains_key("David")
 false
 
 nex> if scores.contains_key("David") then
@@ -85,10 +85,10 @@ David not found
 The `try_get` method provides a more concise alternative — it returns a default value when the key is absent, avoiding the exception entirely:
 
 ```
-nex> print(scores.try_get("David", 0))
+nex> scores.try_get("David", 0)
 0
 
-nex> print(scores.try_get("Alice", 0))
+nex> scores.try_get("Alice", 0)
 95
 ```
 
@@ -102,10 +102,10 @@ The `remove` method deletes an entry by key and returns the value that was assoc
 
 ```
 nex> let removed := scores.remove("Bob")
-nex> print(removed)
+nex> removed
 78
 
-nex> print(scores)
+nex> scores
 {Alice: 95, Carol: 85}
 ```
 
@@ -118,10 +118,10 @@ Like `get`, `remove` raises an exception if the key does not exist. Check with `
 Several methods provide information about a map's contents without modifying it:
 
 ```
-nex> print(scores.size)
+nex> scores.size
 2
 
-nex> print(scores.is_empty)
+nex> scores.is_empty
 false
 ```
 
@@ -130,10 +130,10 @@ Note the naming difference from arrays: maps use `size` where arrays use `length
 `keys` and `values` return the map's keys and values as arrays:
 
 ```
-nex> print(scores.keys)
+nex> scores.keys
 [Alice, Carol]
 
-nex> print(scores.values)
+nex> scores.values
 [95, 85]
 ```
 
@@ -194,7 +194,7 @@ nex> across words as w do
        word_lengths.put(w, w.length)
     end
 
-nex> print(word_lengths)
+nex> word_lengths
 {apple: 5, fig: 3, banana: 6, kiwi: 4}
 ```
 
@@ -217,7 +217,7 @@ nex> function invert(m: Map[String, String]): Map[String, String]
 
 nex> let capitals := {"France": "Paris", "Japan": "Tokyo", "Brazil": "Brasília"}
 nex> let by_capital := invert(capitals)
-nex> print(by_capital.get("Tokyo"))
+nex> by_capital.get("Tokyo")
 Japan
 ```
 
@@ -258,13 +258,13 @@ nex> let text := "to be or not to be that is the question to be"
 => to be or not to be that is the question to be
 
 nex> let freq := word_frequencies(text)
-nex> print(freq.get("to"))
+nex> freq.get("to")
 3
 
-nex> print(freq.get("be"))
+nex> freq.get("be")
 3
 
-nex> print(freq.get("question"))
+nex> freq.get("question")
 1
 ```
 
@@ -283,7 +283,7 @@ nex> function most_frequent(freq: Map[String, Integer]): String
        end
      end
 
-nex> print(most_frequent(freq))
+nex> most_frequent(freq)
 to
 ```
 

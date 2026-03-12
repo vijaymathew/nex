@@ -54,13 +54,13 @@ nex> let int_stack := create Stack[Integer].make
 nex> int_stack.push(10)
 nex> int_stack.push(20)
 nex> int_stack.push(30)
-nex> print(int_stack.pop)
+nex> int_stack.pop
 30
 
 nex> let str_stack := create Stack[String].make
 nex> str_stack.push("hello")
 nex> str_stack.push("world")
-nex> print(str_stack.peek)
+nex> str_stack.peek
 world
 ```
 
@@ -99,14 +99,14 @@ Class(es) registered: Pair
 
 ```
 nex> let p1 := create Pair[String, Integer].make("age", 30)
-nex> print(p1.get_first)
+nex> p1.get_first
 age
 
-nex> print(p1.get_second)
+nex> p1.get_second
 30
 
 nex> let p2 := create Pair[Real, Boolean].make(3.14, true)
-nex> print(p2.describe)
+nex> p2.describe
 (3.14, true)
 ```
 
@@ -153,10 +153,10 @@ nex> nums.insert(5)
 nex> nums.insert(2)
 nex> nums.insert(8)
 nex> nums.insert(1)
-nex> print(nums.min)
+nex> nums.min
 1
 
-nex> print(nums.max)
+nex> nums.max
 8
 ```
 
@@ -205,10 +205,10 @@ Class(es) registered: Dictionary
 nex> let dict := create Dictionary[String, Integer].make
 nex> dict.put("apples", 5)
 nex> dict.put("oranges", 3)
-nex> print(dict.get("apples"))
+nex> dict.get("apples")
 5
 
-nex> print(dict.try_get("bananas", 0))
+nex> dict.try_get("bananas", 0)
 0
 ```
 
@@ -247,7 +247,7 @@ nex> s.push(1)
 nex> s.push(2)
 nex> s.push(3)
 nex> s.push(4)     -- ignored: stack is full
-nex> print(s.size)
+nex> s.size
 3
 ```
 
@@ -309,10 +309,10 @@ nex> function safe_divide(a, b: Real): Result[Real]
        end
      end
 
-nex> print(safe_divide(10.0, 2.0).describe)
+nex> safe_divide(10.0, 2.0).describe
 Success: 5.0
 
-nex> print(safe_divide(10.0, 0.0).describe)
+nex> safe_divide(10.0, 0.0).describe
 Error: division by zero
 ```
 
