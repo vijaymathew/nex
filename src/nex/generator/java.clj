@@ -505,6 +505,19 @@
 
 (declare builtin-dispatch-type)
 
+(defn integral-dispatch-type?
+  [t]
+  (contains? #{"Integer" "Integer64"} t))
+
+(defn division-dispatch-type
+  [left-type right-type]
+  (if (and (integral-dispatch-type? left-type)
+           (integral-dispatch-type? right-type))
+    (if (or (= left-type "Integer64") (= right-type "Integer64"))
+      "Integer64"
+      "Integer")
+    "Real"))
+
 (defn infer-expression-type
   "Infer a Nex type for code generation dispatch."
   [expr]
@@ -525,7 +538,8 @@
                 (case (:operator expr)
                   ("=" "/=" "<" "<=" ">" ">=" "and" "or") "Boolean"
                   "+" (if (or (= left-type "String") (= right-type "String")) "String" left-type)
-                  ("-" "*" "/" "%") left-type
+                  "/" (division-dispatch-type left-type right-type)
+                  ("-" "*" "%") left-type
                   "Any"))
       :call (let [target-type (when (:target expr)
                                 (infer-expression-type (:target expr)))

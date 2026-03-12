@@ -218,6 +218,19 @@
     (map? t) (:base-type t)
     :else t))
 
+(defn integral-dispatch-type?
+  [t]
+  (contains? #{"Integer" "Integer64"} t))
+
+(defn division-dispatch-type
+  [left-type right-type]
+  (if (and (integral-dispatch-type? left-type)
+           (integral-dispatch-type? right-type))
+    (if (or (= left-type "Integer64") (= right-type "Integer64"))
+      "Integer64"
+      "Integer")
+    "Real"))
+
 (defn infer-expression-type
   "Infer a Nex type for code generation dispatch."
   [expr]
@@ -238,7 +251,8 @@
                 (case (:operator expr)
                   ("=" "/=" "<" "<=" ">" ">=" "and" "or") "Boolean"
                   "+" (if (or (= left-type "String") (= right-type "String")) "String" left-type)
-                  ("-" "*" "/" "%") left-type
+                  "/" (division-dispatch-type left-type right-type)
+                  ("-" "*" "%") left-type
                   "Any"))
       :call (let [target-type (when (:target expr)
                                 (infer-expression-type (:target expr)))
@@ -387,9 +401,16 @@
   "Generate JavaScript code for binary expression"
   [{:keys [operator left right]}]
   (let [left-code (generate-expression left)
-        right-code (generate-expression right)
-        op (generate-binary-op operator)]
-    (str "(" left-code " " op " " right-code ")")))
+        right-code (generate-expression right)]
+    (if (= operator "/")
+      (let [left-type (builtin-dispatch-type (infer-expression-type left))
+            right-type (builtin-dispatch-type (infer-expression-type right))]
+        (if (and (integral-dispatch-type? left-type)
+                 (integral-dispatch-type? right-type))
+          (str "__nexIntDiv(" left-code ", " right-code ")")
+          (str "(" left-code " / " right-code ")")))
+      (let [op (generate-binary-op operator)]
+        (str "(" left-code " " op " " right-code ")")))))
 
 (defn generate-unary-expr
   "Generate JavaScript code for unary expression"
@@ -1869,6 +1890,10 @@
        "  const ctor = v && v.constructor;\n"
        "  if (ctor && ctor.name) return ctor.name;\n"
        "  return 'Any';\n"
+       "}\n"
+       "function __nexIntDiv(a, b) {\n"
+       "  if (b === 0) throw new Error('Division by zero');\n"
+       "  return Math.trunc(a / b);\n"
        "}\n"
        "function __nexTypeIs(typeName, v) {\n"
        "  if (typeof typeName !== 'string') return false;\n"

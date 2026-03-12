@@ -381,6 +381,20 @@ end"
       (is (str/includes? js-code "& 1) !== 0"))
       (is (str/includes? js-code "^")))))
 
+(deftest integer-division-generation-test
+  (testing "Integral division uses the JavaScript integer-division helper"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let i: Integer := 10 / 3
+      let r: Real := 10 / 3.0
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "function __nexIntDiv(a, b)"))
+      (is (str/includes? js-code "let i = __nexIntDiv(10, 3);"))
+      (is (str/includes? js-code "let r = (10 / 3.0);")))))
+
 (deftest nil-literal-test
   (testing "Nil literal translation"
     (let [nex-code "class Test
@@ -474,7 +488,7 @@ end"
       (is (str/includes? js-code "(1 + 2)"))
       (is (str/includes? js-code "(3 - 4)"))
       (is (str/includes? js-code "(5 * 6)"))
-      (is (str/includes? js-code "(7 / 8)"))
+      (is (str/includes? js-code "__nexIntDiv(7, 8)"))
       (is (str/includes? js-code "(9 > 10)"))
       (is (str/includes? js-code "(11 < 12)"))
       (is (str/includes? js-code "&&"))

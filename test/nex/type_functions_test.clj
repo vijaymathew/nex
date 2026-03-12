@@ -82,7 +82,7 @@ end"
       (is (seq (:errors result))))))
 
 (deftest division-runtime-format-and-type
-  (testing "Non-integral division is reported as a Real in JVM runtime output"
+  (testing "Integral division yields an Integer at runtime when both operands are integral"
     (let [code "class Test
   feature
     demo() do
@@ -91,5 +91,5 @@ end"
     end
 end"
           output (execute-method-output code)]
-      (is (str/starts-with? (first output) "3.333333333333333"))
-      (is (= "\"Real\"" (second output))))))
+      (is (= "3" (first output)))
+      (is (= "\"Integer\"" (second output))))))

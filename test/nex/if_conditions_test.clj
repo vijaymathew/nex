@@ -168,7 +168,7 @@ end"
     end
 end"
           output (execute-method code)]
-      (is (= ["\"Pass\"" "8.5"] output)))))
+      (is (= ["\"Pass\"" "8"] output)))))
 
 ;; ========== elseif tests ==========
 

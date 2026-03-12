@@ -281,6 +281,20 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-division-result-types
+  (testing "Division is integral for integral operands and Real otherwise"
+    (let [code "class Test
+                  feature
+                    demo() do
+                      let i: Integer := 10 / 3
+                      let r: Real := 10 / 3.0
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-boolean-operators
   (testing "Boolean operators should require Boolean operands"
     (let [code "class Test

@@ -306,6 +306,27 @@
         (= t "Real")
         (= t "Decimal"))))
 
+(defn integral-type?
+  "Check if a type is an integral numeric type."
+  [type]
+  (let [t (normalize-type type)]
+    (or (= t "Integer")
+        (= t "Integer64"))))
+
+(defn division-result-type
+  "Infer the result type of division.
+   Integral / integral stays integral; any non-integral operand yields Real."
+  [left-type right-type]
+  (cond
+    (and (integral-type? left-type) (integral-type? right-type))
+    (if (or (= (normalize-type left-type) "Integer64")
+            (= (normalize-type right-type) "Integer64"))
+      "Integer64"
+      "Integer")
+
+    :else
+    "Real"))
+
 (defn is-comparable-type?
   "Check if a type supports comparison operators"
   [type]
@@ -468,7 +489,15 @@
                                  (str "Operator " operator " requires numeric or String operands, got "
                                       (display-type left-type) " and " (display-type right-type)))})))
 
-      ("-" "*" "/" "%" "^")
+      ("/")
+      (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
+        (division-result-type left-type right-type)
+        (throw (ex-info (str "Operator " operator " requires numeric operands")
+                        {:error (type-error
+                                 (str "Operator " operator " requires numeric operands, got "
+                                      (display-type left-type) " and " (display-type right-type)))})))
+
+      ("-" "*" "%" "^")
       (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
         left-type
         (throw (ex-info (str "Operator " operator " requires numeric operands")
