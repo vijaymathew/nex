@@ -296,6 +296,15 @@ setup_directories() {
 install_files() {
     echo "Installing Nex files..."
 
+    # Remove previously installed managed content first so deleted/renamed source
+    # files do not linger and shadow newer namespaces (for example .clj vs .cljc).
+    sudo rm -rf "$LIB_DIR/src" "$LIB_DIR/grammar"
+    sudo rm -f "$LIB_DIR/deps.edn" "$LIB_DIR/package.json" "$LIB_DIR/package-lock.json" \
+      "$LIB_DIR/nex.js" "$LIB_DIR/nex-wrapper.js"
+    if [[ "$TARGET" == "nodejs" ]]; then
+        sudo rm -rf "$LIB_DIR/node_modules"
+    fi
+
     # Copy source files
     sudo cp -r src "$LIB_DIR/"
     sudo cp -r grammar "$LIB_DIR/"
@@ -307,6 +316,9 @@ install_files() {
         sudo cp target/nex.js "$LIB_DIR/"
         sudo cp nex-wrapper.js "$LIB_DIR/"
         sudo cp package.json "$LIB_DIR/"
+        if [[ -f "package-lock.json" ]]; then
+            sudo cp package-lock.json "$LIB_DIR/"
+        fi
 
         # Copy node_modules if they exist
         if [[ -d "node_modules" ]]; then

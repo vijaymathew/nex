@@ -61,10 +61,10 @@ Integers also have methods. Methods are operations invoked with dot notation:
 nex> (-7).abs
 7
 
-nex> 3.max(8)
+nex> (3).max(8)
 8
 
-nex> 3.min(8)
+nex> (3).min(8)
 3
 ```
 
@@ -92,11 +92,11 @@ operations use 32-bit integer semantics; Appendix B lists the full set of method
 One method worth knowing early is `pick`:
 
 ```
-nex> 6.pick
+nex> (6).pick
 4
 ```
 
-`pick` returns a random integer in the range from zero up to but not including the value it is called on. `6.pick` returns a random integer from 0 to 5. The result will differ each time you call it. This is useful for simulations and exercises, and we will use it in several places later in the book.
+`pick` returns a random integer in the range from zero up to but not including the value it is called on. `(6).pick` returns a random integer from 0 to 5. The result will differ each time you call it. This is useful for simulations and exercises, and we will use it in several places later in the book.
 
 
 
@@ -106,7 +106,7 @@ A `Real` value is a number with a fractional part. Write real literals with a de
 
 ```
 nex> let pi := 3.14159
-=> 3.14159
+3.14159
 
 nex> pi * 2.0
 6.28318
@@ -152,7 +152,7 @@ A `Boolean` value is either `true` or `false`. Booleans arise from comparisons:
 
 ```
 nex> let x := 10
-=> 10
+10
 
 nex> x > 5
 true
@@ -184,22 +184,6 @@ true
 
 The `and` operator returns `true` only when both sides are `true`. The `or` operator returns `true` when at least one side is `true`. The `not` operator inverts a boolean value.
 
-These operators can also be written as method calls:
-
-```
-nex> true.and(false)
-false
-
-nex> true.or(false)
-true
-
-nex> true.not
-false
-```
-
-Both forms are valid. The operator form — `and`, `or`, `not` used directly between or before values — is more natural in most contexts.
-
-
 
 ## Strings
 
@@ -207,7 +191,7 @@ A `String` is a sequence of characters. String literals are enclosed in double q
 
 ```
 nex> let greeting := "Hello, Nex"
-=> Hello, Nex
+Hello, Nex
 
 nex> greeting.length
 10
@@ -254,7 +238,7 @@ Whitespace removal:
 
 ```
 nex> let padded := "  hello  "
-=> "  hello  "
+"  hello  "
 
 nex> padded.trim
 hello
@@ -264,7 +248,7 @@ Splitting a string into parts:
 
 ```
 nex> let csv := "one,two,three"
-=> one,two,three
+ one,two,three
 
 nex> csv.split(",")
 [one, two, three]
@@ -273,45 +257,22 @@ nex> csv.split(",")
 `split` returns an array — we will work with arrays in Chapter 9.
 
 
-
-## Operators and Methods: Two Faces of the Same Thing
-
-You have now seen two ways to express the same operations. Addition can be written as `7 + 5` or as `7.plus(5)`. Comparison can be written as `x > 5` or as `x.greater_than(5)`. Both forms produce identical results.
-
-```
-nex> 7 + 5
-12
-
-nex> 7.plus(5)
-12
-
-nex> 10 > 3
-true
-
-nex> 10.greater_than(3)
-true
-```
-
-The operator form is shorter and more familiar. The method form is more explicit about what is happening: `7.plus(5)` makes visible that `plus` is an operation that belongs to the value `7`, and that `5` is its argument. In most situations you will use operators. When you need to pass an operation as a value, or when working with generic code, the method form becomes necessary. For now, use whichever is clearer.
-
-
-
 ## Type Annotations
 
 When you write `let x := 10`, Nex infers that `x` is an `Integer` from the value on the right-hand side. Type inference is convenient, but writing the type explicitly is better practice:
 
 ```
 nex> let x: Integer := 10
-=> 10
+10
 
 nex> let name: String := "Ada"
-=> Ada
+Ada
 
 nex> let height: Real := 1.52
-=> 1.52
+1.52
 
 nex> let enrolled: Boolean := true
-=> true
+true
 ```
 
 The annotation — the `: Type` after the variable name — makes your intention explicit. It means the variable is expected to hold a value of that type, and if you later accidentally assign the wrong type, Nex can tell you immediately. Type annotations also serve as documentation: a reader of your code knows what kind of value a variable holds without having to trace where it came from.
@@ -332,10 +293,10 @@ Converting a number to a string:
 
 ```
 nex> let age: Integer := 25
-=> 25
+25
 
 nex> let message: String := "Age: " + age
-=> Age: 25
+Age: 25
 
 nex> message
 Age: 25
@@ -350,10 +311,10 @@ Converting a string to a number:
 
 ```
 nex> let s: String := "42"
-=> 42
+42
 
 nex> let n: Integer := s.to_integer
-=> 42
+42
 
 nex> n + 8
 50
@@ -363,7 +324,7 @@ Real conversion works the same way:
 
 ```
 nex> let r: Real := "3.14".to_real
-=> 3.14
+3.14
 ```
 
 The conversion methods only work when the string actually represents a value of the target type. Calling `.to_integer` on a string that does not contain a valid integer raises an exception:
@@ -385,7 +346,7 @@ Occasionally, however, a variable genuinely might not have a value — perhaps i
 
 ```
 nex> let maybe_name: ?String := nil
-=> nil
+ nil
 
 nex> maybe_name
 nil

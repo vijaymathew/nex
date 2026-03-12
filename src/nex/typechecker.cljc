@@ -1112,6 +1112,7 @@
       :string (check-literal env expr)
       :char (check-literal env expr)
       :boolean (check-literal env expr)
+      :nil (check-literal env expr)
       :identifier (check-identifier env expr)
       :binary (check-binary-op env expr)
       :unary (check-unary-op env expr)
