@@ -415,7 +415,6 @@ This small program touches everything introduced in this chapter: a typed variab
 
 - Every value in Nex has a type: `Integer`, `Real`, `Boolean`, or `String` cover most cases
 - Integer division with `/` discards the fractional part; use `Real` values for fractional results
-- Operations can be written as operators (`7 + 5`) or as methods (`7.plus(5)`); both are equivalent
 - Type annotations on variables make intentions explicit and catch mistakes early
 - Nex supports automatic string conversion during string concatenation with `+`; other conversions still use `.to_string`, `.to_integer`, `.to_real`, and related methods
 - Calling `.to_integer` or `.to_real` on a non-numeric string raises an exception
