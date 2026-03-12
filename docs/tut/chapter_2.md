@@ -257,6 +257,29 @@ nex> csv.split(",")
 `split` returns an array — we will work with arrays in Chapter 9.
 
 
+
+## Operators and Methods: Two Faces of the Same Thing
+
+You have now seen two ways to express the same operations. Addition can be written as `7 + 5` or as `(7).plus(5)`. Comparison can be written as `x > 5` or as `(x).greater_than(5)`. Both forms produce identical results.
+
+```
+nex> 7 + 5
+12
+
+nex> (7).plus(5)
+12
+
+nex> 10 > 3
+true
+
+nex> (10).greater_than(3)
+true
+```
+
+The operator form is shorter and more familiar. The method form is more explicit about what is happening: `7.plus(5)` makes visible that `plus` is an operation that belongs to the value `7`, and that `5` is its argument. In most situations you will use operators. When you need to pass an operation as a value, or when working with generic code, the method form becomes necessary. For now, use whichever is clearer.
+
+
+
 ## Type Annotations
 
 When you write `let x := 10`, Nex infers that `x` is an `Integer` from the value on the right-hand side. Type inference is convenient, but writing the type explicitly is better practice:
@@ -346,7 +369,7 @@ Occasionally, however, a variable genuinely might not have a value — perhaps i
 
 ```
 nex> let maybe_name: ?String := nil
- nil
+nil
 
 nex> maybe_name
 nil
@@ -415,6 +438,7 @@ This small program touches everything introduced in this chapter: a typed variab
 
 - Every value in Nex has a type: `Integer`, `Real`, `Boolean`, or `String` cover most cases
 - Integer division with `/` discards the fractional part; use `Real` values for fractional results
+- Operations can be written as operators (`7 + 5`) or as methods (`7.plus(5)`); both are equivalent
 - Type annotations on variables make intentions explicit and catch mistakes early
 - Nex supports automatic string conversion during string concatenation with `+`; other conversions still use `.to_string`, `.to_integer`, `.to_real`, and related methods
 - Calling `.to_integer` or `.to_real` on a non-numeric string raises an exception
