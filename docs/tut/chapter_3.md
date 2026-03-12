@@ -22,7 +22,7 @@ In practice, the boundary between expressions and statements in Nex is clean. If
 The arithmetic operators in Nex are:
 
 | Operator | Meaning | Example | Result |
-|||||
+|---|---|---|---|
 | `+` | Addition | `10 + 3` | `13` |
 | `-` | Subtraction | `10 - 3` | `7` |
 | `*` | Multiplication | `10 * 3` | `30` |
@@ -92,7 +92,7 @@ The third example shows that `^` is also left-associative in Nex: `2 ^ 3 ^ 2` is
 Comparison operators produce `Boolean` values:
 
 | Operator | Meaning | Example | Result |
-|||||
+|---|---|---|---|
 | `=` | Equal | `5 = 5` | `true` |
 | `/=` | Not equal | `5 /= 3` | `true` |
 | `<` | Less than | `3 < 5` | `true` |
