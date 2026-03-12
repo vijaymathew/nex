@@ -223,6 +223,7 @@
         super (normalize-type super)]
     (cond
       (or (nil? sub) (nil? super)) false
+      (= super "Any") true
       (= sub super) true
       (not (and (string? sub) (string? super))) false
       :else
@@ -709,6 +710,16 @@
 (defn- builtin-method-signature
   [base-type method argc type-map]
   (case base-type
+    "Any"
+    (case method
+      "to_string" (when (= argc 0)
+                    {:params [] :return-type "String"})
+      "equals" (when (= argc 1)
+                 {:params [{:name "other" :type "Any"}] :return-type "Boolean"})
+      "clone" (when (= argc 0)
+                {:params [] :return-type "Any"})
+      nil)
+
     "Task"
     (case method
       "await" (case argc
@@ -787,6 +798,7 @@
 
         :else
         (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
+                                (builtin-method-signature "Any" method (count args) type-map)
                                 (lookup-class-method env base-type method))]
           (do
             ;; Check argument types
@@ -1696,6 +1708,17 @@
   "Register method signatures for built-in types."
   [env]
   ;; Built-in deferred protocol classes
+  (env-add-class env "Any" {:name "Any"
+                            :deferred? false
+                            :generic-params nil
+                            :parents nil
+                            :body []})
+  (doseq [[method-name sig]
+          {"to_string" {:params [] :return-type "String"}
+           "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "clone" {:params [] :return-type "Any"}}]
+    (env-add-method env "Any" method-name sig))
+
   (env-add-class env "Comparable" {:name "Comparable"
                                    :deferred? true
                                    :generic-params nil
@@ -1719,7 +1742,7 @@
     (env-add-class env scalar {:name scalar
                                :deferred? false
                                :generic-params nil
-                               :parents [{:parent "Comparable"} {:parent "Hashable"}]
+                               :parents [{:parent "Any"} {:parent "Comparable"} {:parent "Hashable"}]
                                :body []})
     (env-add-method env scalar "compare"
                     {:params [{:name "a" :type "Any"}]
@@ -1869,6 +1892,9 @@
            "first"       {:params [] :return-type "T"}
            "last"        {:params [] :return-type "T"}
            "join"        {:params [{:name "sep" :type "String"}] :return-type "String"}
+           "to_string"   {:params [] :return-type "String"}
+           "equals"      {:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}] :return-type "Boolean"}
+           "clone"       {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
            "cursor"      {:params [] :return-type "Cursor"}}]
     (env-add-method env "Array" method-name sig))
 
@@ -1886,6 +1912,9 @@
            "keys"         {:params [] :return-type {:base-type "Array" :type-params ["K"]}}
            "values"       {:params [] :return-type {:base-type "Array" :type-params ["V"]}}
            "remove"       {:params [{:name "key" :type "K"}] :return-type "Void"}
+           "to_string"    {:params [] :return-type "String"}
+           "equals"       {:params [{:name "other" :type {:base-type "Map" :type-params ["K" "V"]}}] :return-type "Boolean"}
+           "clone"        {:params [] :return-type {:base-type "Map" :type-params ["K" "V"]}}
            "cursor"       {:params [] :return-type "Cursor"}}]
     (env-add-method env "Map" method-name sig))
 
@@ -1908,6 +1937,9 @@
                                    :return-type {:base-type "Set" :type-params ["T"]}}
            "size"                 {:params [] :return-type "Integer"}
            "is_empty"             {:params [] :return-type "Boolean"}
+           "to_string"            {:params [] :return-type "String"}
+           "equals"               {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}] :return-type "Boolean"}
+           "clone"                {:params [] :return-type {:base-type "Set" :type-params ["T"]}}
            "cursor"               {:params [] :return-type "Cursor"}}]
     (env-add-method env "Set" method-name sig))
 

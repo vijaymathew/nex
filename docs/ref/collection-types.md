@@ -4,6 +4,10 @@ This section covers the standard collection abstractions used throughout Nex cod
 `Array`, `Map`, and `Set` are built-in collection types. `Stack[T]` is a common
 generic collection class pattern built on top of `Array[T]`.
 
+All built-in collection types inherit `Any`. Their `to_string`, `equals`, and
+`clone` methods operate recursively: `to_string` renders nested structure,
+`equals` performs deep structural equality, and `clone` performs a deep copy.
+
 ## `Array`
 
 ### Construction
@@ -28,6 +32,9 @@ generic collection class pattern built on top of `Array[T]`.
 | `reverse` | none | `Array[Any]` | Return reversed array. |
 | `sort` | none | `Array[Any]` | Sort array in-place/runtime order. |
 | `slice` | `start: Integer, end: Integer` | `Array[Any]` | Subrange from `start` to `end`. |
+| `to_string` | none | `String` | Render the array and its nested values as text. |
+| `equals` | `other: Any` | `Boolean` | Deep structural equality. |
+| `clone` | none | `Array[T]` | Deep-copy the array and its nested values while preserving element type. |
 | `cursor` | none | `ArrayCursor` | Create iterator. |
 
 ## `Map`
@@ -51,6 +58,9 @@ generic collection class pattern built on top of `Array[T]`.
 | `keys` | none | `Array[Any]` | Array of keys. |
 | `values` | none | `Array[Any]` | Array of values. |
 | `remove` | `key: Any` | `Any` | Delete entry by key. |
+| `to_string` | none | `String` | Render the map and its nested values as text. |
+| `equals` | `other: Any` | `Boolean` | Deep structural equality. |
+| `clone` | none | `Map[K, V]` | Deep-copy the map and its nested keys and values while preserving key/value types. |
 | `cursor` | none | `MapCursor` | Create entry iterator. |
 
 ## `Set`
@@ -75,6 +85,9 @@ Set literals use `#{...}`. The empty map literal remains `{}`.
 | `symmetric_difference` | `other: Set[T]` | `Set[T]` | Elements in exactly one of the two sets. |
 | `size` | none | `Integer` | Number of elements. |
 | `is_empty` | none | `Boolean` | True when the set has no elements. |
+| `to_string` | none | `String` | Render the set and its nested values as text. |
+| `equals` | `other: Any` | `Boolean` | Deep structural equality. |
+| `clone` | none | `Set[T]` | Deep-copy the set and its nested values while preserving element type. |
 | `cursor` | none | `SetCursor` | Create iterator. |
 
 ## `Stack[T]`

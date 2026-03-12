@@ -189,3 +189,16 @@ end"
                      (reset! repl/*repl-var-types* {})))]
       (is (str/includes? output "hello world"))
       (is (not (str/includes? output "Type error:"))))))
+
+(deftest repl-typecheck-allows-string-concatenation-with-non-string
+  (testing "REPL typechecking accepts String + non-String"
+    (let [ctx (repl/init-repl-context)
+          output (try
+                   (reset! repl/*type-checking-enabled* true)
+                   (with-out-str
+                     (repl/eval-code ctx "\"n=\" + 10"))
+                   (finally
+                     (reset! repl/*type-checking-enabled* false)
+                     (reset! repl/*repl-var-types* {})))]
+      (is (str/includes? output "n=10"))
+      (is (not (str/includes? output "Type error:"))))))

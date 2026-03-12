@@ -234,13 +234,19 @@
         right-code (generate-expression right)
         left-type (builtin-dispatch-type (infer-expression-type left))
         right-type (builtin-dispatch-type (infer-expression-type right))]
-    (if (= operator "^")
+    (cond
+      (and (= operator "+")
+           (or (= left-type "String") (= right-type "String")))
+      (str "NexRuntime.concatValues(" left-code ", " right-code ")")
+
+      (= operator "^")
       (if (and (integral-dispatch-type? left-type)
                (integral-dispatch-type? right-type))
         (if (or (= left-type "Integer64") (= right-type "Integer64"))
           (str "NexRuntime.intPow64(" left-code ", " right-code ")")
           (str "NexRuntime.intPow(" left-code ", " right-code ")"))
         (str "(Math.pow(" left-code ", " right-code "))"))
+      :else
       (let [op (generate-binary-op operator)]
         (str "(" left-code " " op " " right-code ")")))))
 
@@ -270,7 +276,12 @@
 
 (def builtin-method-mappings
   "Map Nex built-in type methods to Java equivalents"
-  {:String
+  {:Any
+   {"to_string"  (fn [target _] (str "NexRuntime.toStringValue(" target ")"))
+    "equals"     (fn [target args] (str "NexRuntime.anyEquals(" target ", " args ")"))
+    "clone"      (fn [target _] (str "NexRuntime.cloneValue(" target ")"))}
+
+   :String
    {"length"      (fn [target _] (str target ".length()"))
     "index_of"    (fn [target args] (str target ".indexOf(" args ")"))
     "substring"   (fn [target args] (str target ".substring(" args ")"))
@@ -291,7 +302,7 @@
     "split"       (fn [target args] (str "new ArrayList<>(Arrays.asList(" target ".split(" args ")))"))
     "cursor"      (fn [target _] (str "NexRuntime.stringCursor(" target ")"))
     ;; String operators
-    "plus"        (fn [target args] (str "(" target " + " args ")"))
+    "plus"        (fn [target args] (str "NexRuntime.concatValues(" target ", " args ")"))
     "equals"      (fn [target args] (str target ".equals(" args ")"))
     "not_equals"  (fn [target args] (str "!" target ".equals(" args ")"))
     "less_than"   (fn [target args] (str "(" target ".compareTo(" args ") < 0)"))
@@ -424,6 +435,9 @@
     "reverse"   (fn [target _] (str "new ArrayList<>(" target ".reversed())"))
     "sort"      (fn [target _] (str "(Collections.sort(" target "), " target ")"))
     "slice"     (fn [target args] (str "new ArrayList<>(" target ".subList(" args "))"))
+    "to_string" (fn [target _] (str "NexRuntime.toStringValue(" target ")"))
+    "equals"    (fn [target args] (str "NexRuntime.deepEquals(" target ", " args ")"))
+    "clone"     (fn [target _] (str "(ArrayList) NexRuntime.deepClone(" target ")"))
     "cursor"    (fn [target _] (str "NexRuntime.arrayCursor(" target ")"))}
 
    :Map
@@ -436,6 +450,9 @@
     "keys"         (fn [target _] (str "new ArrayList<>(" target ".keySet())"))
     "values"       (fn [target _] (str "new ArrayList<>(" target ".values())"))
     "remove"       (fn [target args] (str "(" target ".remove(" args "), " target ")"))
+    "to_string"    (fn [target _] (str "NexRuntime.toStringValue(" target ")"))
+    "equals"       (fn [target args] (str "NexRuntime.deepEquals(" target ", " args ")"))
+    "clone"        (fn [target _] (str "(HashMap) NexRuntime.deepClone(" target ")"))
     "cursor"       (fn [target _] (str "NexRuntime.mapCursor(" target ")"))}
 
    :Set
@@ -446,6 +463,9 @@
     "symmetric_difference" (fn [target args] (str "NexRuntime.setSymmetricDifference(" target ", " args ")"))
     "size"                 (fn [target _] (str target ".size()"))
     "is_empty"             (fn [target _] (str target ".isEmpty()"))
+    "to_string"            (fn [target _] (str "NexRuntime.toStringValue(" target ")"))
+    "equals"               (fn [target args] (str "NexRuntime.deepEquals(" target ", " args ")"))
+    "clone"                (fn [target _] (str "(LinkedHashSet) NexRuntime.deepClone(" target ")"))
     "cursor"               (fn [target _] (str "NexRuntime.setCursor(" target ")"))}
 
    :Task
@@ -816,7 +836,9 @@
                 (if (and (not (contains? *all-method-names* method))
                          (function-type? (get *field-types* method)))
                   (str target-code "." method ".call" num-args "(" args-code ")")
-                  (str target-code "." method "(" args-code ")")))
+                  (if-let [method-fn (get-in builtin-method-mappings [:Any method])]
+                    (method-fn target-code args-code)
+                    (str target-code "." method "(" args-code ")"))))
               ;; External object: try builtins, then default
               (let [dispatch-type (builtin-dispatch-type (infer-expression-type target))]
                 (or
@@ -848,6 +870,9 @@
                  (method-fn target-code args-code))
                ;; Try Image methods
                (when-let [method-fn (get-in builtin-method-mappings [:Image method])]
+                 (method-fn target-code args-code))
+               ;; Root Any methods for arbitrary objects
+               (when-let [method-fn (get-in builtin-method-mappings [:Any method])]
                  (method-fn target-code args-code))
                ;; Handle Java reserved words used as method names
                (when (= method "goto")
@@ -1724,7 +1749,9 @@
 (defn analyze-inheritance
   "Return the list of parent names for composition-based inheritance"
   [parents]
-  (mapv :parent parents))
+  (->> parents
+       (remove #(= "Any" (:parent %)))
+       (mapv :parent)))
 
 (defn collect-effective-class-invariants
   "Collect effective class invariants as:
@@ -2017,7 +2044,8 @@
   ([class-def opts]
    (let [{:keys [name generic-params parents body note deferred?]} class-def
          {:keys [fields constants methods constructors]} (extract-members body)
-         parent-names (mapv :parent parents)
+         runtime-parents (vec (remove #(= "Any" (:parent %)) parents))
+         parent-names (mapv :parent runtime-parents)
          parent-fm (build-parent-field-map parent-names)
          own-flds (set (map :name fields))
          all-constants (get-accessible-constants class-def)
@@ -2037,21 +2065,21 @@
            ;; Generate class Javadoc if note present
            class-javadoc (when note
                           [(generate-javadoc 0 note)])
-           class-header (generate-class-header name generic-params parents deferred?)
+           class-header (generate-class-header name generic-params runtime-parents deferred?)
            ;; Composition fields for parent classes
-           composition-fields (when (seq parents)
-                                (generate-composition-fields 1 parents))
+           composition-fields (when (seq runtime-parents)
+                                (generate-composition-fields 1 runtime-parents))
            invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
                               (indent 1 (str "// Class invariant: "
                                             (str/join ", " (map :label effective-invariants)))))
            constants-code (map #(generate-field 1 (assoc % :constant? true)) all-constants)
            fields-code (map #(generate-field 1 %) fields)
            ;; Delegation methods for inherited methods not overridden
-           delegation-methods (when (seq parents)
-                                (generate-delegation-methods 1 parents own-method-names opts))
+           delegation-methods (when (seq runtime-parents)
+                                (generate-delegation-methods 1 runtime-parents own-method-names opts))
            constructors-code (map #(generate-constructor 1 name % opts) constructors)
-           inherited-constructor-shims (when (seq parents)
-                                         (generate-inherited-constructor-shims 1 name parents (set (map :name constructors)) opts))
+           inherited-constructor-shims (when (seq runtime-parents)
+                                         (generate-inherited-constructor-shims 1 name runtime-parents (set (map :name constructors)) opts))
            methods-with-effective-contracts
            (map (fn [m]
                   (let [effective (lookup-method-effective-contracts class-def (:name m))]
@@ -2543,6 +2571,126 @@ public class NexTurtle {
        "    if (value == null) return false;\n"
        "    if (hasParentType(value, targetType, new java.util.IdentityHashMap<>())) return true;\n"
        "    return false;\n"
+       "  }\n\n"
+       "  public static String toStringValue(Object value) {\n"
+       "    if (value == null) return \"nil\";\n"
+       "    if (value instanceof String || value instanceof Number || value instanceof Boolean || value instanceof Character) return String.valueOf(value);\n"
+       "    if (value instanceof java.math.BigDecimal) return ((java.math.BigDecimal) value).toPlainString();\n"
+       "    if (value instanceof java.util.List) {\n"
+       "      java.util.List<?> list = (java.util.List<?>) value;\n"
+       "      java.util.ArrayList<String> parts = new java.util.ArrayList<>();\n"
+       "      for (Object item : list) parts.add(toStringValue(item));\n"
+       "      return \"[\" + String.join(\", \", parts) + \"]\";\n"
+       "    }\n"
+       "    if (value instanceof java.util.Map) {\n"
+       "      java.util.Map<?, ?> map = (java.util.Map<?, ?>) value;\n"
+       "      java.util.ArrayList<String> parts = new java.util.ArrayList<>();\n"
+       "      for (java.util.Map.Entry<?, ?> e : map.entrySet()) parts.add(toStringValue(e.getKey()) + \": \" + toStringValue(e.getValue()));\n"
+       "      return \"{\" + String.join(\", \", parts) + \"}\";\n"
+       "    }\n"
+       "    if (value instanceof java.util.Set) {\n"
+       "      java.util.Set<?> set = (java.util.Set<?>) value;\n"
+       "      java.util.ArrayList<String> parts = new java.util.ArrayList<>();\n"
+       "      for (Object item : set) parts.add(toStringValue(item));\n"
+       "      return \"#{\" + String.join(\", \", parts) + \"}\";\n"
+       "    }\n"
+       "    return \"#<\" + typeOf(value) + \" object>\";\n"
+       "  }\n\n"
+       "  public static String toConcatString(Object value) {\n"
+       "    if (value instanceof String) return (String) value;\n"
+       "    if (value != null) {\n"
+       "      try {\n"
+       "        java.lang.reflect.Method m = value.getClass().getMethod(\"to_string\");\n"
+       "        if (m.getParameterCount() == 0) {\n"
+       "          Object out = m.invoke(value);\n"
+       "          return out instanceof String ? (String) out : toStringValue(out);\n"
+       "        }\n"
+       "      } catch (NoSuchMethodException e) {\n"
+       "      } catch (Exception e) {\n"
+       "        throw new RuntimeException(\"to_string failed for type: \" + typeOf(value), e);\n"
+       "      }\n"
+       "    }\n"
+       "    return toStringValue(value);\n"
+       "  }\n\n"
+       "  public static String concatValues(Object left, Object right) {\n"
+       "    return toConcatString(left) + toConcatString(right);\n"
+       "  }\n\n"
+       "  public static boolean anyEquals(Object a, Object b) {\n"
+       "    return a == b;\n"
+       "  }\n\n"
+       "  public static Object cloneValue(Object value) {\n"
+       "    if (value == null || value instanceof String || value instanceof Number || value instanceof Boolean || value instanceof Character || value instanceof java.math.BigDecimal) return value;\n"
+       "    if (value instanceof java.util.ArrayList) return new java.util.ArrayList<>((java.util.ArrayList<?>) value);\n"
+       "    if (value instanceof java.util.HashMap) return new java.util.HashMap<>((java.util.HashMap<?, ?>) value);\n"
+       "    if (value instanceof java.util.LinkedHashSet) return new java.util.LinkedHashSet<>((java.util.LinkedHashSet<?>) value);\n"
+       "    try {\n"
+       "      Class<?> cls = value.getClass();\n"
+       "      Object copy = cls.getDeclaredConstructor().newInstance();\n"
+       "      for (java.lang.reflect.Field field : cls.getDeclaredFields()) {\n"
+       "        if (!java.lang.reflect.Modifier.isStatic(field.getModifiers())) {\n"
+       "          field.setAccessible(true);\n"
+       "          field.set(copy, field.get(value));\n"
+       "        }\n"
+       "      }\n"
+       "      return copy;\n"
+       "    } catch (Exception e) {\n"
+       "      throw new RuntimeException(\"Clone failed for type: \" + typeOf(value), e);\n"
+       "    }\n"
+       "  }\n\n"
+       "  public static boolean deepEquals(Object a, Object b) {\n"
+       "    if (a == b) return true;\n"
+       "    if (a == null || b == null) return false;\n"
+       "    if (a instanceof java.util.List && b instanceof java.util.List) {\n"
+       "      java.util.List<?> la = (java.util.List<?>) a;\n"
+       "      java.util.List<?> lb = (java.util.List<?>) b;\n"
+       "      if (la.size() != lb.size()) return false;\n"
+       "      for (int i = 0; i < la.size(); i++) if (!deepEquals(la.get(i), lb.get(i))) return false;\n"
+       "      return true;\n"
+       "    }\n"
+       "    if (a instanceof java.util.Map && b instanceof java.util.Map) {\n"
+       "      java.util.Map<?, ?> ma = (java.util.Map<?, ?>) a;\n"
+       "      java.util.Map<?, ?> mb = (java.util.Map<?, ?>) b;\n"
+       "      if (ma.size() != mb.size()) return false;\n"
+       "      outer: for (java.util.Map.Entry<?, ?> ea : ma.entrySet()) {\n"
+       "        for (java.util.Map.Entry<?, ?> eb : mb.entrySet()) {\n"
+       "          if (deepEquals(ea.getKey(), eb.getKey()) && deepEquals(ea.getValue(), eb.getValue())) continue outer;\n"
+       "        }\n"
+       "        return false;\n"
+       "      }\n"
+       "      return true;\n"
+       "    }\n"
+       "    if (a instanceof java.util.Set && b instanceof java.util.Set) {\n"
+       "      java.util.Set<?> sa = (java.util.Set<?>) a;\n"
+       "      java.util.Set<?> sb = (java.util.Set<?>) b;\n"
+       "      if (sa.size() != sb.size()) return false;\n"
+       "      outer: for (Object va : sa) {\n"
+       "        for (Object vb : sb) {\n"
+       "          if (deepEquals(va, vb)) continue outer;\n"
+       "        }\n"
+       "        return false;\n"
+       "      }\n"
+       "      return true;\n"
+       "    }\n"
+       "    return java.util.Objects.equals(a, b);\n"
+       "  }\n\n"
+       "  public static Object deepClone(Object value) {\n"
+       "    if (value == null || value instanceof String || value instanceof Number || value instanceof Boolean || value instanceof Character || value instanceof java.math.BigDecimal) return value;\n"
+       "    if (value instanceof java.util.List) {\n"
+       "      java.util.ArrayList<Object> out = new java.util.ArrayList<>();\n"
+       "      for (Object item : (java.util.List<?>) value) out.add(deepClone(item));\n"
+       "      return out;\n"
+       "    }\n"
+       "    if (value instanceof java.util.Map) {\n"
+       "      java.util.HashMap<Object, Object> out = new java.util.HashMap<>();\n"
+       "      for (java.util.Map.Entry<?, ?> e : ((java.util.Map<?, ?>) value).entrySet()) out.put(deepClone(e.getKey()), deepClone(e.getValue()));\n"
+       "      return out;\n"
+       "    }\n"
+       "    if (value instanceof java.util.Set) {\n"
+       "      java.util.LinkedHashSet<Object> out = new java.util.LinkedHashSet<>();\n"
+       "      for (Object item : (java.util.Set<?>) value) out.add(deepClone(item));\n"
+       "      return out;\n"
+       "    }\n"
+       "    return cloneValue(value);\n"
        "  }\n\n"
        "  public static void sleep(int ms) {\n"
        "    try {\n"

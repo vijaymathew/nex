@@ -33,6 +33,26 @@
       (is (not (:success result)))
       (is (seq (:errors result))))))
 
+(deftest test-any-root-methods
+  (testing "Any exposes to_string, equals, and clone on explicit Any subclasses"
+    (let [code "class Box inherit Any
+                  feature
+                    x: Integer
+                  create
+                    make(v: Integer) do
+                      x := v
+                    end
+                    demo(other: Box) do
+                      let s: String := this.to_string()
+                      let eq: Boolean := this.equals(other)
+                      let copy: Any := this.clone()
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-return-type-mismatch
   (testing "Return type mismatch should fail"
     (let [code "class Test

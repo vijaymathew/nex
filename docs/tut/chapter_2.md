@@ -322,7 +322,11 @@ In the REPL, annotations are optional. In functions and class definitions — wh
 
 ## Type Conversion
 
-Nex does not convert between types automatically. If you have an integer and need a string, you must convert it explicitly. Each scalar type provides conversion methods for this purpose.
+Nex does not convert between types automatically in general. Each scalar type
+provides conversion methods for cases where you need to change representation.
+The main exception you have already seen is string concatenation with `+`: if
+either operand is a string, the other operand is converted with `to_string`
+internally.
 
 Converting a number to a string:
 
@@ -330,14 +334,17 @@ Converting a number to a string:
 nex> let age: Integer := 25
 => 25
 
-nex> let message: String := "Age: " + age.to_string
+nex> let message: String := "Age: " + age
 => Age: 25
 
 nex> print(message)
 Age: 25
 ```
 
-Without `.to_string`, the `+` operation would fail because `String.plus` expects a `String` argument, not an `Integer`. The conversion makes the types agree.
+Because the left operand is a string, Nex performs string concatenation and
+converts `age` by calling its `to_string` method internally. Writing
+`age.to_string` explicitly is still valid when you want to make the conversion
+obvious.
 
 Converting a string to a number:
 
@@ -449,7 +456,7 @@ This small program touches everything introduced in this chapter: a typed variab
 - Integer division with `/` discards the fractional part; use `Real` values for fractional results
 - Operations can be written as operators (`7 + 5`) or as methods (`7.plus(5)`); both are equivalent
 - Type annotations on variables make intentions explicit and catch mistakes early
-- Nex does not convert types automatically; use `.to_string`, `.to_integer`, `.to_real` explicitly
+- Nex supports automatic string conversion during string concatenation with `+`; other conversions still use `.to_string`, `.to_integer`, `.to_real`, and related methods
 - Calling `.to_integer` or `.to_real` on a non-numeric string raises an exception
 - Detachable types (`?String`, `?Integer`) can hold `nil`; always check before using them
 - `create Console` gives access to keyboard input via `read_line`

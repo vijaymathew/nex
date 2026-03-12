@@ -6,6 +6,13 @@
                :cljs [nex.turtle-browser :as turtle]))
   #?(:clj (:import [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException])))
 
+(declare nex-format-value)
+(declare eval-node)
+(declare eval-node-async)
+(declare lookup-method-with-inheritance)
+(declare lookup-class)
+(declare call-builtin-method)
+
 ;;
 ;; Mutable Collections (platform abstraction)
 ;;
@@ -26,7 +33,8 @@
 (defn nex-array-reverse [arr] #?(:clj (java.util.ArrayList. (.reversed arr)) :cljs (js/Array.from (.reverse (.slice arr)))))
 (defn nex-array-sort [arr] #?(:clj (.sort arr nil) :cljs (.sort arr)))
 (defn nex-array-slice [arr start end] #?(:clj (.subList arr start end) :cljs (.slice arr start end)))
-(defn nex-array-str [arr] (str "[" (str/join ", " arr) "]"))
+(defn nex-array-str [arr]
+  (str "[" (str/join ", " (map nex-format-value #?(:clj arr :cljs (array-seq arr)))) "]"))
 
 ;; Map helpers
 (defn nex-map [] #?(:clj (java.util.HashMap.) :cljs (js/Map.)))
@@ -42,7 +50,10 @@
 (defn nex-map-keys [m] #?(:clj (vec (.keySet m)) :cljs (vec (es6-iterator-seq (.keys m)))))
 (defn nex-map-values [m] #?(:clj (vec (.values m)) :cljs (vec (es6-iterator-seq (.values m)))))
 (defn nex-map-remove [m key] #?(:clj (.remove m key) :cljs (.delete m key)))
-(defn nex-map-str [m] #?(:clj (json/write-str m :indent true) :cljs (->> m (js/Object.fromEntries) (js/JSON.stringify))))
+(defn nex-map-str [m]
+  (let [entries #?(:clj (for [[k v] m] (str (nex-format-value k) ": " (nex-format-value v)))
+                   :cljs (for [[k v] (es6-iterator-seq (.entries m))] (str (nex-format-value k) ": " (nex-format-value v))))]
+    (str "{" (str/join ", " entries) "}")))
 
 (defn nex-set [] #?(:clj (java.util.LinkedHashSet.) :cljs (js/Set.)))
 (defn nex-set-from [coll]
@@ -80,7 +91,7 @@
                                  (remove #(.has a %) (es6-iterator-seq (.values b)))))))
 (defn nex-set-str [s]
   (str "#{"
-       (str/join ", " #?(:clj (seq s) :cljs (es6-iterator-seq (.values s))))
+       (str/join ", " (map nex-format-value #?(:clj (seq s) :cljs (es6-iterator-seq (.values s)))))
        "}"))
 
 ;; 32-bit bitwise helpers for Integer built-ins
@@ -343,6 +354,18 @@
                       :note nil :require nil :body [] :ensure nil}]}]
    :invariant nil})
 
+(defn- build-any-base-class
+  "Create the built-in Any root class definition."
+  []
+  {:type :class
+   :name "Any"
+   :deferred? false
+   :generic-params nil
+   :note nil
+   :parents nil
+   :body []
+   :invariant nil})
+
 (defn- build-hashable-base-class
   "Create the built-in deferred Hashable class."
   []
@@ -368,7 +391,7 @@
    :deferred? false
    :generic-params nil
    :note nil
-   :parents [{:parent "Comparable"} {:parent "Hashable"}]
+   :parents [{:parent "Any"} {:parent "Comparable"} {:parent "Hashable"}]
    :body []
    :invariant nil})
 
@@ -384,6 +407,7 @@
                (atom [])           ; imports registry
                (atom {}))]         ; specialized classes cache
       ;; Register built-in base classes
+      (register-class ctx (build-any-base-class))
       (register-class ctx (build-function-base-class))
       (register-class ctx (build-cursor-base-class))
       (register-class ctx (build-comparable-base-class))
@@ -1586,6 +1610,71 @@
     :else
     (pr-str value)))
 
+(defn- nex-clone-value [value]
+  (cond
+    (instance? nex.interpreter.NexObject value)
+    (make-object (:class-name value)
+                 (into {} (map (fn [[k v]] [k (nex-clone-value v)]) (:fields value)))
+                 (:closure-env value))
+
+    (nex-array? value)
+    (nex-array-from (map nex-clone-value #?(:clj value :cljs (array-seq value))))
+
+    (nex-map? value)
+    #?(:clj (java.util.HashMap. (into {} (map (fn [[k v]] [(nex-clone-value k) (nex-clone-value v)]) value)))
+       :cljs (js/Map. (to-array (map (fn [[k v]] (to-array [(nex-clone-value k) (nex-clone-value v)]))
+                                     (es6-iterator-seq (.entries value))))))
+
+    (nex-set? value)
+    #?(:clj (doto (java.util.LinkedHashSet.)
+              (#(doseq [v value] (.add % (nex-clone-value v)))))
+       :cljs (js/Set. (to-array (map nex-clone-value (es6-iterator-seq (.values value))))))
+
+    (and (map? value) (:nex-builtin-type value))
+    (into {} value)
+
+    :else
+    value))
+
+(declare nex-deep-equals?)
+
+(defn- nex-map-entry-match?
+  [m2 k1 v1]
+  (some (fn [[k2 v2]]
+          (and (nex-deep-equals? k1 k2)
+               (nex-deep-equals? v1 v2)))
+        #?(:clj m2 :cljs (es6-iterator-seq (.entries m2)))))
+
+(defn- nex-deep-equals? [a b]
+  (cond
+    (and (instance? nex.interpreter.NexObject a)
+         (instance? nex.interpreter.NexObject b))
+    (and (= (:class-name a) (:class-name b))
+         (= (set (keys (:fields a))) (set (keys (:fields b))))
+         (every? (fn [k] (nex-deep-equals? (get (:fields a) k) (get (:fields b) k)))
+                 (keys (:fields a))))
+
+    (and (nex-array? a) (nex-array? b))
+    (and (= (nex-array-size a) (nex-array-size b))
+         (every? true? (map nex-deep-equals?
+                            #?(:clj a :cljs (array-seq a))
+                            #?(:clj b :cljs (array-seq b)))))
+
+    (and (nex-map? a) (nex-map? b))
+    (and (= (nex-map-size a) (nex-map-size b))
+         (every? (fn [[k v]] (nex-map-entry-match? b k v))
+                 #?(:clj a :cljs (es6-iterator-seq (.entries a)))))
+
+    (and (nex-set? a) (nex-set? b))
+    (and (= (nex-set-size a) (nex-set-size b))
+         (every? (fn [v1]
+                   (some #(nex-deep-equals? v1 %)
+                         #?(:clj b :cljs (es6-iterator-seq (.values b)))))
+                 #?(:clj a :cljs (es6-iterator-seq (.values a)))))
+
+    :else
+    (= a b)))
+
 (defn nex-display-value
   "Format a value for Console output.
    Scalars keep their user-facing form; structured values use Nex syntax."
@@ -1680,11 +1769,10 @@
   "Apply a binary operator to two values."
   [op left right]
   (case op
-    "+" (if (or (string? left) (string? right))
-          ;; String concatenation
-          (str left right)
-          ;; Numeric addition
-          (+ left right))
+    "+" (if (and (not (string? left)) (not (string? right)))
+          (+ left right)
+          (throw (ex-info "String concatenation requires evaluation context"
+                          {:operator op :left left :right right})))
     "-" (- left right)
     "*" (* left right)
     "/" (if (zero? right)
@@ -1709,6 +1797,56 @@
     "or" (or left right)
     (throw (ex-info (str "Unknown binary operator: " op)
                     {:operator op}))))
+
+(defn- concat-string-value
+  "Convert a runtime value to the string form used by String concatenation.
+   If a Nex object implements to_string, invoke it; otherwise use the built-in
+   Any/to_string formatting path."
+  [ctx value]
+  (cond
+    (string? value) value
+
+    (nex-object? value)
+    (let [class-def (lookup-class ctx (:class-name value))
+          method-lookup (lookup-method-with-inheritance ctx class-def "to_string")]
+      (if method-lookup
+        (let [result (eval-node ctx {:type :call
+                                     :target {:type :literal :value value}
+                                     :method "to_string"
+                                     :args []})]
+          (if (string? result)
+            result
+            (nex-format-value result)))
+        (call-builtin-method nil value "to_string" [])))
+
+    :else
+    (call-builtin-method nil value "to_string" [])))
+
+(defn- concat-string-value-async
+  "Async variant of concat-string-value for the browser interpreter."
+  [ctx value]
+  #?(:clj
+     (concat-string-value ctx value)
+     :cljs
+     (cond
+       (string? value) (js/Promise.resolve value)
+
+       (nex-object? value)
+       (let [class-def (lookup-class ctx (:class-name value))
+             method-lookup (lookup-method-with-inheritance ctx class-def "to_string")]
+         (if method-lookup
+           (.then (->promise (eval-node-async ctx {:type :call
+                                                   :target {:type :literal :value value}
+                                                   :method "to_string"
+                                                   :args []}))
+                  (fn [result]
+                    (if (string? result)
+                      result
+                      (nex-format-value result))))
+           (js/Promise.resolve (call-builtin-method nil value "to_string" []))))
+
+       :else
+       (js/Promise.resolve (call-builtin-method nil value "to_string" [])))))
 
 (defn apply-unary-op
   "Apply a unary operator to a value."
@@ -1776,7 +1914,14 @@
                       (= sx sy) 0
                       (neg? (compare sx sy)) -1
                       :else 1))))))]
-  {:String
+  {:Any
+   {"to_string"   (fn [v & _] (nex-format-value v))
+    "equals"      (fn [v other & _]
+                    #?(:clj (identical? v other)
+                       :cljs (js/Object.is v other)))
+    "clone"       (fn [v & _] (nex-clone-value v))}
+
+   :String
    {"length"      (fn [s & _] (count s))
     "index_of"    (fn [s ch & _]
                     (let [idx (str/index-of s (str ch))]
@@ -1798,7 +1943,10 @@
     "char_at"     (fn [s idx & _] (get s idx))
     "split"       (fn [s delim & _] (vec (str/split s (re-pattern delim))))
     ;; String operator methods
-    "plus"        (fn [s other & _] (str s other))
+    "plus"        (fn [s other & [ctx]]
+                    (str s (if ctx
+                             (concat-string-value ctx other)
+                             (nex-format-value other))))
     "equals"      (fn [s other & _] (= s other))
     "not_equals"  (fn [s other & _] (not= s other))
     "less_than"   (fn [s other & _] (neg? (compare s other)))
@@ -1940,6 +2088,9 @@
     "reverse"     (fn [arr _] (nex-array-reverse arr))
     "sort"        (fn [arr & _] (nex-array-sort arr))
     "slice"       (fn [arr start end & _] (nex-array-slice arr start end))
+    "to_string"   (fn [arr & _] (nex-array-str arr))
+    "equals"      (fn [arr other & _] (nex-deep-equals? arr other))
+    "clone"       (fn [arr & _] (nex-clone-value arr))
     "cursor"      (fn [arr & _]
                     {:nex-builtin-type :ArrayCursor
                      :source arr
@@ -1963,6 +2114,9 @@
     "keys"         (fn [m & _] (nex-map-keys m))
     "values"       (fn [m & _] (nex-map-values m))
     "remove"       (fn [m key & _] (nex-map-remove m key))
+    "to_string"    (fn [m & _] (nex-map-str m))
+    "equals"       (fn [m other & _] (nex-deep-equals? m other))
+    "clone"        (fn [m & _] (nex-clone-value m))
     "cursor"       (fn [m & _]
                      {:nex-builtin-type :MapCursor
                      :source m
@@ -1977,6 +2131,9 @@
     "symmetric_difference" (fn [s other & _] (nex-set-symmetric-difference s other))
     "size"                 (fn [s & _] (nex-set-size s))
     "is_empty"             (fn [s & _] (nex-set-empty? s))
+    "to_string"            (fn [s & _] (nex-set-str s))
+    "equals"               (fn [s other & _] (nex-deep-equals? s other))
+    "clone"                (fn [s & _] (nex-clone-value s))
     "cursor"               (fn [s & _]
                              {:nex-builtin-type :SetCursor
                               :source s
@@ -2194,9 +2351,10 @@
   "Call a built-in method on a primitive value"
   [target value method-name args]
   (if-let [method-fn
-           (when-let [type-name (get-type-name value)]
-             (when-let [methods (get builtin-type-methods type-name)]
-               (get methods method-name)))]
+           (or (when-let [type-name (get-type-name value)]
+                 (when-let [methods (get builtin-type-methods type-name)]
+                   (get methods method-name)))
+               (get-in builtin-type-methods [:Any method-name]))]
     (apply method-fn value args)
     (throw (ex-info (str "Method not found on type: " method-name)
                     {:target target :value value :method method-name}))))
@@ -2551,8 +2709,10 @@
                         field-val
                         (throw (ex-info (str "Method not found: " method)
                                         {:object obj :method method})))))
-                  (throw (ex-info (str "Method not found: " method)
-                                  {:object obj :method method}))))))
+                  (if (get-in builtin-type-methods [:Any method])
+                    (call-builtin-method (or target-name target) obj method arg-values)
+                    (throw (ex-info (str "Method not found: " method)
+                                    {:object obj :method method})))))))
 
           (get-type-name obj)
           (call-builtin-method (or target-name target) obj method arg-values)
@@ -2857,7 +3017,11 @@
   [ctx {:keys [operator left right]}]
   (let [left-val (eval-node ctx left)
         right-val (eval-node ctx right)]
-    (apply-binary-op operator left-val right-val)))
+    (if (and (= operator "+")
+             (or (string? left-val) (string? right-val)))
+      (str (concat-string-value ctx left-val)
+           (concat-string-value ctx right-val))
+      (apply-binary-op operator left-val right-val))))
 
 (defmethod eval-node :unary
   [ctx {:keys [operator expr]}]
@@ -3589,19 +3753,21 @@
                                                  field (first (filter #(= (:name %) method) all-fields))]
                                              (if field
                                                (let [field-val (get (:fields obj) (keyword method))]
-                                                 (if (and has-parens (nex-object? field-val))
+                                               (if (and has-parens (nex-object? field-val))
                                                    (let [call-method (str "call" (count arg-values))
                                                          literal-args (mapv (fn [v] {:type :literal :value v}) arg-values)]
                                                      (eval-node-async ctx {:type :call
                                                                            :target {:type :literal :value field-val}
                                                                            :method call-method
                                                                            :args literal-args}))
-                                                   (if (empty? arg-values)
-                                                     (js/Promise.resolve field-val)
-                                                     (js/Promise.reject (ex-info (str "Method not found: " method)
-                                                                                 {:object obj :method method})))))
-                                               (js/Promise.reject (ex-info (str "Method not found: " method)
-                                                                           {:object obj :method method})))))))
+                                                  (if (empty? arg-values)
+                                                    (js/Promise.resolve field-val)
+                                                    (js/Promise.reject (ex-info (str "Method not found: " method)
+                                                                                {:object obj :method method})))))
+                                               (if (get-in builtin-type-methods [:Any method])
+                                                 (->promise (call-builtin-method (or target-name target) obj method arg-values))
+                                                 (js/Promise.reject (ex-info (str "Method not found: " method)
+                                                                             {:object obj :method method})))))))))
 
                                        (get-type-name obj)
                                        (->promise (call-builtin-method (or target-name target) obj method arg-values))
@@ -3834,7 +4000,13 @@
          (.then (promise-all [(eval-node-async ctx (:left node))
                               (eval-node-async ctx (:right node))])
                 (fn [[left-val right-val]]
-                  (apply-binary-op (:operator node) left-val right-val)))
+                  (if (and (= (:operator node) "+")
+                           (or (string? left-val) (string? right-val)))
+                    (.then (promise-all [(concat-string-value-async ctx left-val)
+                                         (concat-string-value-async ctx right-val)])
+                           (fn [[left-str right-str]]
+                             (str left-str right-str)))
+                    (apply-binary-op (:operator node) left-val right-val))))
 
          (= node-type :unary)
          (.then (->promise (eval-node-async ctx (:expr node)))
@@ -4007,7 +4179,7 @@
          :else
          (js/Promise.reject
           (ex-info (str "Cannot evaluate node type: " (:type node))
-                   {:node node}))))))))
+                   {:node node})))))))
 
 ;;
 ;; Public API

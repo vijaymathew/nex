@@ -406,10 +406,17 @@
   "Generate JavaScript code for binary expression"
   [{:keys [operator left right]}]
   (let [left-code (generate-expression left)
-        right-code (generate-expression right)]
-    (if (contains? #{"/" "^"} operator)
-      (let [left-type (builtin-dispatch-type (infer-expression-type left))
-            right-type (builtin-dispatch-type (infer-expression-type right))]
+        right-code (generate-expression right)
+        left-type (builtin-dispatch-type (infer-expression-type left))
+        right-type (builtin-dispatch-type (infer-expression-type right))]
+    (cond
+      (and (= operator "+")
+           (or (= left-type "String") (= right-type "String")))
+      (str "__nexConcat(" left-code ", " right-code ")")
+
+      (contains? #{"/" "^"} operator)
+      (let [left-type left-type
+            right-type right-type]
         (case operator
           "/" (if (and (integral-dispatch-type? left-type)
                        (integral-dispatch-type? right-type))
@@ -419,6 +426,8 @@
                        (integral-dispatch-type? right-type))
                 (str "__nexIntPow(" left-code ", " right-code ")")
                 (str "(" left-code " ** " right-code ")"))))
+
+      :else
       (let [op (generate-binary-op operator)]
         (str "(" left-code " " op " " right-code ")")))))
 
@@ -448,7 +457,12 @@
 
 (def builtin-method-mappings
   "Map Nex built-in type methods to JavaScript equivalents"
-  {:String
+  {:Any
+   {"to_string"  (fn [target _] (str "__nexToString(" target ")"))
+    "equals"     (fn [target args] (str "(" target " === " args ")"))
+    "clone"      (fn [target _] (str "__nexCloneValue(" target ")"))}
+
+   :String
    {"length"      (fn [target _] (str target ".length"))
     "index_of"    (fn [target args] (str target ".indexOf(" args ")"))
     "substring"   (fn [target args] (str target ".substring(" args ")"))
@@ -469,7 +483,7 @@
     "split"       (fn [target args] (str target ".split(" args ")"))
     "cursor"      (fn [target _] (str "__nexStringCursor(" target ")"))
     ;; String operators
-    "plus"        (fn [target args] (str "(" target " + " args ")"))
+    "plus"        (fn [target args] (str "__nexConcat(" target ", " args ")"))
     "equals"      (fn [target args] (str "(" target " === " args ")"))
     "not_equals"  (fn [target args] (str "(" target " !== " args ")"))
     "less_than"   (fn [target args] (str "(" target ".localeCompare(" args ") < 0)"))
@@ -602,6 +616,9 @@
     "reverse"   (fn [target _] (str "[..." target "].reverse()"))
     "sort"      (fn [target _] (str "[..." target "].sort()"))
     "slice"     (fn [target args] (str target ".slice(" args ")"))
+    "to_string" (fn [target _] (str "__nexToString(" target ")"))
+    "equals"    (fn [target args] (str "__nexDeepEquals(" target ", " args ")"))
+    "clone"     (fn [target _] (str "__nexDeepClone(" target ")"))
     "cursor"    (fn [target _] (str "__nexArrayCursor(" target ")"))}
 
    :Map
@@ -614,6 +631,9 @@
     "keys"         (fn [target _] (str "Array.from(" target ".keys())"))
     "values"       (fn [target _] (str "Array.from(" target ".values())"))
     "remove"       (fn [target args] (str "(" target ".delete(" args "), " target ")"))
+    "to_string"    (fn [target _] (str "__nexToString(" target ")"))
+    "equals"       (fn [target args] (str "__nexDeepEquals(" target ", " args ")"))
+    "clone"        (fn [target _] (str "__nexDeepClone(" target ")"))
     "cursor"       (fn [target _] (str "__nexMapCursor(" target ")"))}
 
    :Set
@@ -624,6 +644,9 @@
     "symmetric_difference" (fn [target args] (str "__nexSetSymmetricDifference(" target ", " args ")"))
     "size"                 (fn [target _] (str target ".size"))
     "is_empty"             (fn [target _] (str "(" target ".size === 0)"))
+    "to_string"            (fn [target _] (str "__nexToString(" target ")"))
+    "equals"               (fn [target args] (str "__nexDeepEquals(" target ", " args ")"))
+    "clone"                (fn [target _] (str "__nexDeepClone(" target ")"))
     "cursor"               (fn [target _] (str "__nexSetCursor(" target ")"))}
 
    :Task
@@ -763,7 +786,9 @@
             (if (and (not (contains? *all-method-names* method))
                      (function-type? (get *field-types* method)))
               (maybe-await call-node (str target-code "." method ".call" num-args "(" args-code ")"))
-              (maybe-await call-node (str target-code "." method "(" args-code ")"))))
+              (if-let [method-fn (get-in builtin-method-mappings [:Any method])]
+                (method-fn target-code args-code)
+                (maybe-await call-node (str target-code "." method "(" args-code ")")))))
 
           :else
           (or
@@ -786,6 +811,8 @@
            (when-let [method-fn (get-in builtin-method-mappings [:Set method])]
              (method-fn target-code args-code))
            (when-let [method-fn (get-in builtin-method-mappings [:Image method])]
+             (method-fn target-code args-code))
+           (when-let [method-fn (get-in builtin-method-mappings [:Any method])]
              (method-fn target-code args-code))
            (maybe-await call-node (str target-code "." method "(" args-code ")")))))
       ;; No target: class method, function object field, global function, or builtin
@@ -1616,9 +1643,10 @@
 (defn analyze-inheritance
   "Analyze inheritance structure - JS only supports single inheritance"
   [parents]
-  (if (empty? parents)
-    {:extends nil}
-    {:extends (:parent (first parents))}))
+  (let [parents (vec (remove #(= "Any" (:parent %)) parents))]
+    (if (empty? parents)
+      {:extends nil}
+      {:extends (:parent (first parents))})))
 
 (defn collect-effective-class-invariants
   "Collect effective class invariants as:
@@ -1826,7 +1854,8 @@
   ([class-def opts classes-by-name]
    (let [{:keys [name generic-params parents body note deferred?]} class-def
          {:keys [fields methods constructors]} (extract-members body)
-         parent-names (mapv :parent parents)
+         runtime-parents (vec (remove #(= "Any" (:parent %)) parents))
+         parent-names (mapv :parent runtime-parents)
          own-flds (set (map :name fields))
          all-constants (get-accessible-constants-js class-def classes-by-name)
          constant-names (set (map :name all-constants))
@@ -1847,18 +1876,18 @@
              class-jsdoc (when note
                           [(generate-jsdoc 0 note)])
              generic-comment (generate-generic-comment generic-params)
-             class-header (generate-class-header name generic-params parents)
+             class-header (generate-class-header name generic-params runtime-parents)
              invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
                                 (indent 1 (str "// Class invariant: "
                                               (str/join ", " (map :label effective-invariants)))))
              constants-code (map #(generate-class-constant-js 1 name %) all-constants)
              ;; Always generate a default no-arg constructor for field initialization
-             has-parent? (some? (:extends (analyze-inheritance parents)))
+             has-parent? (some? (:extends (analyze-inheritance runtime-parents)))
              default-constructor (generate-default-constructor 1 name fields has-parent? deferred?)
              ;; All Nex constructors become static factory methods
              factory-methods (map #(generate-factory-constructor 1 name % opts) constructors)
-             inherited-constructor-shims (when (seq parents)
-                                           (generate-inherited-constructor-shims-js 1 name parents (set (map :name constructors)) classes-by-name))
+             inherited-constructor-shims (when (seq runtime-parents)
+                                           (generate-inherited-constructor-shims-js 1 name runtime-parents (set (map :name constructors)) classes-by-name))
              methods-with-effective-contracts
              (map (fn [m]
                     (let [effective (lookup-method-effective-contracts class-def (:name m) classes-by-name)]
@@ -1911,6 +1940,66 @@
        "  const ctor = v && v.constructor;\n"
        "  if (ctor && ctor.name) return ctor.name;\n"
        "  return 'Any';\n"
+       "}\n"
+       "function __nexToString(v) {\n"
+       "  if (v === null || v === undefined) return 'nil';\n"
+       "  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return String(v);\n"
+       "  if (__nexTypeOf(v) === 'Char') return String(v);\n"
+       "  if (Array.isArray(v)) return '[' + v.map(__nexToString).join(', ') + ']';\n"
+       "  if (v instanceof Map) return '{' + Array.from(v.entries()).map(([k, val]) => __nexToString(k) + ': ' + __nexToString(val)).join(', ') + '}';\n"
+       "  if (v instanceof Set) return '#{' + Array.from(v.values()).map(__nexToString).join(', ') + '}';\n"
+       "  return `#<${__nexTypeOf(v)} object>`;\n"
+       "}\n"
+       "function __nexToConcatString(v) {\n"
+       "  if (typeof v === 'string') return v;\n"
+       "  if (v !== null && v !== undefined && typeof v.to_string === 'function') {\n"
+       "    const out = v.to_string();\n"
+       "    return typeof out === 'string' ? out : __nexToString(out);\n"
+       "  }\n"
+       "  return __nexToString(v);\n"
+       "}\n"
+       "function __nexConcat(a, b) {\n"
+       "  return __nexToConcatString(a) + __nexToConcatString(b);\n"
+       "}\n"
+       "function __nexDeepEquals(a, b) {\n"
+       "  if (a === b) return true;\n"
+       "  if (a == null || b == null) return false;\n"
+       "  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => __nexDeepEquals(v, b[i]));\n"
+       "  if (a instanceof Map && b instanceof Map) {\n"
+       "    if (a.size !== b.size) return false;\n"
+       "    outer: for (const [ka, va] of a.entries()) {\n"
+       "      for (const [kb, vb] of b.entries()) {\n"
+       "        if (__nexDeepEquals(ka, kb) && __nexDeepEquals(va, vb)) continue outer;\n"
+       "      }\n"
+       "      return false;\n"
+       "    }\n"
+       "    return true;\n"
+       "  }\n"
+       "  if (a instanceof Set && b instanceof Set) {\n"
+       "    if (a.size !== b.size) return false;\n"
+       "    outer: for (const va of a.values()) {\n"
+       "      for (const vb of b.values()) {\n"
+       "        if (__nexDeepEquals(va, vb)) continue outer;\n"
+       "      }\n"
+       "      return false;\n"
+       "    }\n"
+       "    return true;\n"
+       "  }\n"
+       "  return a === b;\n"
+       "}\n"
+       "function __nexCloneValue(v) {\n"
+       "  if (v === null || v === undefined || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;\n"
+       "  if (Array.isArray(v)) return v.slice();\n"
+       "  if (v instanceof Map) return new Map(v);\n"
+       "  if (v instanceof Set) return new Set(v);\n"
+       "  return Object.assign(Object.create(Object.getPrototypeOf(v)), v);\n"
+       "}\n"
+       "function __nexDeepClone(v) {\n"
+       "  if (v === null || v === undefined || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;\n"
+       "  if (Array.isArray(v)) return v.map(__nexDeepClone);\n"
+       "  if (v instanceof Map) return new Map(Array.from(v.entries()).map(([k, val]) => [__nexDeepClone(k), __nexDeepClone(val)]));\n"
+       "  if (v instanceof Set) return new Set(Array.from(v.values()).map(__nexDeepClone));\n"
+       "  return __nexCloneValue(v);\n"
        "}\n"
        "function __nexIntDiv(a, b) {\n"
        "  if (b === 0) throw new Error('Division by zero');\n"

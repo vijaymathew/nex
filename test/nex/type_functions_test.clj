@@ -125,3 +125,93 @@ end"
 end"
           output (execute-method-output code)]
       (is (= ["10" "8" "255" "1000" "-16"] output)))))
+
+(deftest string-concatenation-coerces-with-to-string
+  (testing "String + value coerces the value using Nex to_string semantics"
+    (let [code "class Box
+  feature
+    value: Integer
+
+    to_string(): String do
+      result := \"Box(\" + value.to_string() + \")\"
+    end
+
+  create
+    make(v: Integer) do
+      value := v
+    end
+end
+
+class Test
+  feature
+    demo() do
+      let b: Box := create Box.make(7)
+      print(\"value=\" + 10)
+      print(\"box=\" + b)
+    end
+end"
+          output (execute-method-output code)]
+      (is (= ["\"value=10\"" "\"box=Box(7)\""] output)))))
+
+(deftest any-root-runtime-methods
+  (testing "Explicit Any subclasses inherit to_string, equals, and clone at runtime"
+    (let [code "class Box inherit Any
+  feature
+    x: Integer
+  create
+    make(v: Integer) do
+      x := v
+    end
+end
+
+class Test
+  feature
+    demo() do
+      let a: Box := create Box.make(10)
+      let b: Any := a.clone()
+      print(a.to_string())
+      print(type_of(b))
+      print(a.equals(a))
+      print(a.equals(b))
+    end
+end"
+          output (execute-method-output code)]
+      (is (= "\"#<Box object>\"" (nth output 0)))
+      (is (= "\"Box\"" (nth output 1)))
+      (is (= "true" (nth output 2)))
+      (is (= "false" (nth output 3))))))
+
+(deftest collection-deep-methods-runtime
+  (testing "Array, Map, and Set implement deep to_string, equals, and clone"
+    (let [code "class Test
+  feature
+    demo() do
+      let a1 := [[1, 2], [3, 4]]
+      let a2 := a1.clone()
+      a2.get(0).put(0, 99)
+      print(a1.to_string())
+      print(a1.equals([[1, 2], [3, 4]]))
+      print(a2.equals([[99, 2], [3, 4]]))
+
+      let m1 := {\"nums\": [1, 2]}
+      let m2 := m1.clone()
+      m2.get(\"nums\").add(3)
+      print(m1.to_string())
+      print(m1.equals({\"nums\": [1, 2]}))
+      print(m2.equals({\"nums\": [1, 2, 3]}))
+
+      let s1: Set[Any] := #{[1, 2], [3, 4]}
+      let s2: Set[Any] := s1.clone()
+      print(s1.equals(#{[3, 4], [1, 2]}))
+      print(s2.to_string())
+    end
+end"
+          output (execute-method-output code)]
+      (is (= "\"[[1, 2], [3, 4]]\"" (nth output 0)))
+      (is (= "true" (nth output 1)))
+      (is (= "true" (nth output 2)))
+      (is (str/includes? (nth output 3) "\"nums\": [1, 2]"))
+      (is (= "true" (nth output 4)))
+      (is (= "true" (nth output 5)))
+      (is (= "true" (nth output 6)))
+      (is (= "\"#{[1, 2], [3, 4]}\"" (nth output 7))))))

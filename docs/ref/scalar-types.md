@@ -2,7 +2,8 @@
 
 Built-in scalar classes: `String`, `Integer`, `Integer64`, `Real`, `Decimal`, `Boolean`, `Char`.
 
-All scalar classes are modeled as implementing `Comparable` and `Hashable`.
+All scalar classes are modeled as inheriting `Any` and implementing
+`Comparable` and `Hashable`.
 
 ## `String`
 
