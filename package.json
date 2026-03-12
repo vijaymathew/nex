@@ -4,7 +4,8 @@
   "description": "Nex Programming Language - ClojureScript Runtime",
   "main": "nex-wrapper.js",
   "dependencies": {
-    "antlr4": "^4.13.1"
+    "antlr4": "^4.13.1",
+    "process": "^0.11.10"
   },
   "devDependencies": {},
   "scripts": {
