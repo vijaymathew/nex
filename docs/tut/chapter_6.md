@@ -77,7 +77,6 @@ nex> double(5)
 10
 
 nex> let x := double(8)
-=> 16
 
 nex> double(x)
 32
@@ -304,7 +303,6 @@ With these three functions defined, working with temperatures becomes readable:
 
 ```
 nex> let boiling := 100.0
-=> 100.0
 
 nex> celsius_to_fahrenheit(boiling)
 212.0
@@ -313,10 +311,8 @@ nex> describe_temperature(boiling)
 warm
 
 nex> let body_temp_f := 98.6
-=> 98.6
 
 nex> let body_temp_c := fahrenheit_to_celsius(body_temp_f)
-=> 37.0
 
 nex> describe_temperature(body_temp_c)
 warm

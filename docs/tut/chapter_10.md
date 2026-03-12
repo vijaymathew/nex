@@ -11,7 +11,6 @@ Map literals are written with curly braces, each entry as `key: value`, entries 
 
 ```
 nex> let capitals := {"France": "Paris", "Japan": "Tokyo", "Brazil": "Brasília"}
-=> {France: Paris, Japan: Tokyo, Brazil: Brasília}
 
 nex> capitals.get("France")
 Paris
@@ -26,7 +25,6 @@ An empty map requires a type annotation:
 
 ```
 nex> let prices: Map[String, Real] := {}
-=> {}
 ```
 
 Note that `{}` is the empty map literal, just as `[]` is the empty array literal.
@@ -39,7 +37,6 @@ The `put` method adds a new entry or replaces an existing one:
 
 ```
 nex> let scores: Map[String, Integer] := {}
-=> {}
 
 nex> scores.put("Alice", 92)
 nex> scores.put("Bob", 78)
@@ -156,7 +153,6 @@ Carol: 85
 
 ```
 nex> let capitals := {"France": "Paris", "Japan": "Tokyo", "Brazil": "Brasília"}
-=> {France: Paris, Japan: Tokyo, Brazil: Brasília}
 
 nex> across capitals as entry do
        print(entry.get(0) + " -> " + entry.get(1))
@@ -185,10 +181,8 @@ Like arrays, maps are often built programmatically. The pattern is an empty map 
 
 ```
 nex> let word_lengths: Map[String, Integer] := {}
-=> {}
 
 nex> let words := ["apple", "fig", "banana", "kiwi"]
-=> [apple, fig, banana, kiwi]
 
 nex> across words as w do
        word_lengths.put(w, w.length)
@@ -255,7 +249,6 @@ nex> function word_frequencies(text: String): Map[String, Integer]
 
 ```
 nex> let text := "to be or not to be that is the question to be"
-=> to be or not to be that is the question to be
 
 nex> let freq := word_frequencies(text)
 nex> freq.get("to")

@@ -202,3 +202,31 @@ end"
                      (reset! repl/*repl-var-types* {})))]
       (is (str/includes? output "n=10"))
       (is (not (str/includes? output "Type error:"))))))
+
+(deftest repl-typecheck-rejects-nil-for-attachable-bindings
+  (testing "REPL typechecking rejects nil assigned to attachable references"
+    (let [ctx (repl/init-repl-context)
+          output (try
+                   (reset! repl/*type-checking-enabled* true)
+                   (with-out-str
+                     (repl/eval-code ctx "class A feature x: Integer end")
+                     (repl/eval-code ctx "let s: String := nil")
+                     (repl/eval-code ctx "let a: A := nil"))
+                   (finally
+                     (reset! repl/*type-checking-enabled* false)
+                     (reset! repl/*repl-var-types* {})))]
+      (is (str/includes? output "Cannot assign Nil to variable 's' of type String"))
+      (is (str/includes? output "Cannot assign Nil to variable 'a' of type A")))))
+
+(deftest repl-typecheck-rejects-attachable-field-without-constructor
+  (testing "REPL typechecking rejects class definitions with uninitialized attachable fields"
+    (let [ctx (repl/init-repl-context)
+          output (try
+                   (reset! repl/*type-checking-enabled* true)
+                   (with-out-str
+                     (repl/eval-code ctx "class A feature x: Integer end")
+                     (repl/eval-code ctx "class B feature a: A end"))
+                   (finally
+                     (reset! repl/*type-checking-enabled* false)
+                     (reset! repl/*repl-var-types* {})))]
+      (is (str/includes? output "Attachable fields must be initialized by constructors in class B: a")))))

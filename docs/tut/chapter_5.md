@@ -127,10 +127,8 @@ Stopping early when a condition is met:
 
 ```
 nex> let target := 7
-=> 7
 
 nex> let found := false
-=> false
 
 nex> from
        let i := 1
