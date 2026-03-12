@@ -43,7 +43,7 @@ The book is divided into eight parts.
 
 Read it with a REPL open.
 
-Every code example in this book can be typed at the Nex REPL and will produce the output shown. No example requires installation beyond accessing the browser-based IDE at [schemer.in/nex]. The exercises at the end of each chapter are meant to be done, not read. The ones marked with an asterisk extend the chapter's ideas into territory that is not fully covered — they are invitations to explore rather than tests of recall.
+Every code example in this book can be typed at the Nex REPL and will produce the output shown. No example requires installation beyond accessing the browser-based IDE at [schemer.in/nex](schemer.in/nex). The exercises at the end of each chapter are meant to be done, not read. The ones marked with an asterisk extend the chapter's ideas into territory that is not fully covered — they are invitations to explore rather than tests of recall.
 
 If you are new to programming, move through Parts I and II slowly. Implement every example yourself rather than reading past it. The understanding that comes from having run a piece of code is qualitatively different from the understanding that comes from having read it.
 
