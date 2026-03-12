@@ -31,7 +31,7 @@ The simplest thing a Nex program can do is print something. Try this:
 
 ```
 nex> print("Hello, Nex")
-Hello, Nex
+"Hello, Nex"
 ```
 
 The `print` function takes a value and writes it to the output. The text `"Hello, Nex"` is a *string* — a sequence of characters enclosed in double quotes. The REPL prints the result on the next line and then shows the prompt again, waiting for more input.
@@ -40,10 +40,10 @@ Try a few variations:
 
 ```
 nex> print("Hello, world")
-Hello, world
+"Hello, world"
 
 nex> print("What is your name?")
-What is your name?
+"What is your name?"
 ```
 
 Numbers do not need quotes:
@@ -56,7 +56,7 @@ nex> print(3.14)
 3.14
 ```
 
-The difference between `print(42)` and `print("42")` matters. The first prints the number forty-two. The second prints a string that happens to contain the characters four and two. They look the same in the output, but they are different things, and that difference will matter later.
+The difference between `print(42)` and `print("42")` matters. The first prints the number forty-two. The second prints a string that happens to contain the characters four and two. They may look the same in the output, but they are different things, and that difference will matter later.
 
 
 
@@ -69,14 +69,14 @@ In Nex, comments start with `--`:
 ```
 nex> -- This line does nothing
 nex> print("But this one does")
-But this one does
+"But this one does"
 ```
 
 Everything from `--` to the end of the line is a comment. You can put a comment at the end of a line that also contains code:
 
 ```
 nex> print("Hello") -- greet the user
-Hello
+"Hello"
 ```
 
 Comments become important as programs get longer. A comment that explains *why* a piece of code does what it does is more useful than one that merely describes what it does — the code already says what it does.
@@ -88,47 +88,47 @@ Comments become important as programs get longer. A comment that explains *why* 
 The REPL can evaluate arithmetic expressions directly. Try these:
 
 ```
-nex> print(10 + 3)
+nex> 10 + 3
 13
 
-nex> print(10 - 3)
+nex> 10 - 3
 7
 
-nex> print(10 * 3)
+nex> 10 * 3
 30
 
-nex> print(10 / 3)
+nex> 10 / 3
 3
 ```
 
 The last result may surprise you. In Nex, dividing one integer by another produces an integer — the fractional part is discarded. This is called *integer division*. If you want the fractional part, use real numbers:
 
 ```
-nex> print(10.0 / 3.0)
+nex> 10.0 / 3.0
 3.3333333333333335
 ```
 
 The `%` operator gives the remainder after division:
 
 ```
-nex> print(10 % 3)
+nex> 10 % 3
 1
 ```
 
 And `^` raises a number to a power:
 
 ```
-nex> print(2 ^ 8)
+nex> 2 ^ 8
 256
 ```
 
 Parentheses control the order of evaluation:
 
 ```
-nex> print(2 + 3 * 4)
+nex> 2 + 3 * 4
 14
 
-nex> print((2 + 3) * 4)
+nex> (2 + 3) * 4
 20
 ```
 
@@ -144,7 +144,7 @@ A variable is a name for a value. You introduce a variable in Nex with `let`:
 nex> let x := 10
 => 10
 
-nex> print(x)
+nex> x
 10
 ```
 
@@ -156,10 +156,10 @@ Variables can be used in expressions:
 nex> let y := x + 5
 => 15
 
-nex> print(y)
+nex> y
 15
 
-nex> print(x + y)
+nex> x + y
 25
 ```
 
@@ -169,7 +169,7 @@ Once a variable is introduced with `let`, you can update it using plain `:=` wit
 nex> x := 20
 => 20
 
-nex> print(x)
+nex> x
 20
 ```
 
@@ -225,14 +225,14 @@ Strings can be joined together with `+`:
 nex> let greeting := "Hello, " + name
 => Hello, Ada
 
-nex> print(greeting)
+nex> greeting
 Hello, Ada
 ```
 
 Numbers can be converted to strings for inclusion in messages:
 
 ```
-nex> print("Age: " + age)
+nex> "Age: " + age
 Age: 12
 ```
 
@@ -317,7 +317,7 @@ nex> let celsius := 100.0
 nex> let fahrenheit := celsius * 9.0 / 5.0 + 32.0
 => 212.0
 
-nex> print(celsius + " degrees Celsius is " + fahrenheit + " degrees Fahrenheit")
+nex> celsius + " degrees Celsius is " + fahrenheit + " degrees Fahrenheit"
 100.0 degrees Celsius is 212.0 degrees Fahrenheit
 ```
 
