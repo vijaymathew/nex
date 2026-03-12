@@ -92,7 +92,7 @@ The third example shows that `^` is also left-associative in Nex: `2 ^ 3 ^ 2` is
 Comparison operators produce `Boolean` values:
 
 | Operator | Meaning | Example | Result |
-|||||
+|---|---|---|---|
 | `=` | Equal | `5 = 5` | `true` |
 | `/=` | Not equal | `5 /= 3` | `true` |
 | `<` | Less than | `3 < 5` | `true` |
