@@ -203,6 +203,20 @@ end"
       (is (str/includes? output "n=10"))
       (is (not (str/includes? output "Type error:"))))))
 
+(deftest repl-string-order-comparison-works
+  (testing "REPL evaluates string ordering lexicographically"
+    (let [ctx (repl/init-repl-context)
+          output (try
+                   (reset! repl/*type-checking-enabled* true)
+                   (with-out-str
+                     (repl/eval-code ctx "\"hello\" > \"ok\""))
+                   (finally
+                     (reset! repl/*type-checking-enabled* false)
+                     (reset! repl/*repl-var-types* {})))]
+      (is (str/includes? output "false"))
+      (is (not (str/includes? output "cannot be cast")))
+      (is (not (str/includes? output "Type error:"))))))
+
 (deftest repl-typecheck-rejects-nil-for-attachable-bindings
   (testing "REPL typechecking rejects nil assigned to attachable references"
     (let [ctx (repl/init-repl-context)

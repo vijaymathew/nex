@@ -1765,6 +1765,24 @@
 ;; Operator Implementations
 ;;
 
+(defn- nex-ordering-compare [x y]
+  (cond
+    (= x y) 0
+    :else
+    (try
+      (let [c (compare x y)]
+        (cond
+          (neg? c) -1
+          (pos? c) 1
+          :else 0))
+      (catch #?(:clj Exception :cljs :default) _
+        (let [sx (str x)
+              sy (str y)]
+          (cond
+            (= sx sy) 0
+            (neg? (compare sx sy)) -1
+            :else 1))))))
+
 (defn apply-binary-op
   "Apply a binary operator to two values."
   [op left right]
@@ -1789,10 +1807,10 @@
           (mod left right))
     "=" (= left right)
     "/=" (not= left right)
-    "<" (< left right)
-    "<=" (<= left right)
-    ">" (> left right)
-    ">=" (>= left right)
+    "<" (neg? (nex-ordering-compare left right))
+    "<=" (not (pos? (nex-ordering-compare left right)))
+    ">" (pos? (nex-ordering-compare left right))
+    ">=" (not (neg? (nex-ordering-compare left right)))
     "and" (and left right)
     "or" (or left right)
     (throw (ex-info (str "Unknown binary operator: " op)
@@ -1898,22 +1916,7 @@
 (def builtin-type-methods
   "Methods available on built-in types"
   (letfn [(nex-compare [x y]
-            (cond
-              (= x y) 0
-              :else
-              (try
-                (let [c (compare x y)]
-                  (cond
-                    (neg? c) -1
-                    (pos? c) 1
-                    :else 0))
-                (catch #?(:clj Exception :cljs :default) _
-                  (let [sx (str x)
-                        sy (str y)]
-                    (cond
-                      (= sx sy) 0
-                      (neg? (compare sx sy)) -1
-                      :else 1))))))]
+            (nex-ordering-compare x y))]
   {:Any
    {"to_string"   (fn [v & _] (nex-format-value v))
     "equals"      (fn [v other & _]
