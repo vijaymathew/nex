@@ -147,14 +147,14 @@ nex> function max_of(items: Array[Integer]): Integer
 Without the precondition, the call `items.get(0)` is suspicious. With the precondition, the suspicion is removed. The routine states exactly why that access is safe.
 
 ```
-nex> print(max_of([4, 8, 2, 9, 1]))
+nex> max_of([4, 8, 2, 9, 1])
 9
 ```
 
 If the caller violates the contract:
 
 ```
-nex> print(max_of([]))
+nex> max_of([])
 Error: Precondition violation: not_empty
 ```
 
@@ -314,10 +314,10 @@ nex> let checking := create Account.make("Checking", 150.0)
 nex> let savings  := create Account.make("Savings", 80.0)
 
 nex> checking.transfer_to(savings, 50.0)
-nex> print(checking.balance)
+nex> checking.balance
 100.0
 
-nex> print(savings.balance)
+nex> savings.balance
 130.0
 ```
 

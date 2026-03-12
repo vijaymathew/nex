@@ -22,7 +22,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: maven
 
       - name: Set up Clojure CLI
         uses: DeLaGuardo/setup-clojure@13.2
@@ -34,6 +33,9 @@ jobs:
         with:
           node-version: "20"
           cache: npm
+
+      - name: Clear npm cache
+        run: npm cache clean --force
 
       - name: Install JavaScript dependencies
         run: npm ci

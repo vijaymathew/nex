@@ -13,7 +13,7 @@ Array literals are written with square brackets, elements separated by commas:
 nex> let scores := [85, 92, 78, 95, 60]
 => [85, 92, 78, 95, 60]
 
-nex> print(scores.length)
+nex> scores.length
 5
 ```
 
@@ -25,7 +25,7 @@ An empty array requires an explicit type annotation, because there are no elemen
 nex> let empty: Array[Integer] := []
 => []
 
-nex> print(empty.length)
+nex> empty.length
 0
 ```
 
@@ -39,20 +39,20 @@ Elements are accessed by their index, which counts from zero:
 nex> let scores := [85, 92, 78, 95, 60]
 => [85, 92, 78, 95, 60]
 
-nex> print(scores.get(0))
+nex> scores.get(0)
 85
 
-nex> print(scores.get(1))
+nex> scores.get(1)
 92
 
-nex> print(scores.get(4))
+nex> scores.get(4)
 60
 ```
 
 The first element is at index 0, the last at index `length - 1`. Accessing an index outside this range raises an exception:
 
 ```
-nex> print(scores.get(5))
+nex> scores.get(5)
 Error: index out of bounds
 ```
 
@@ -61,10 +61,10 @@ This is the array equivalent of calling `.to_integer` on a non-numeric string â€
 The last element is accessed with `scores[scores.length - 1]`, 
 
 ```
-nex> print(scores.get(scores.length - 1))
+nex> scores.get(scores.length - 1)
 60
 
-nex> print(scores.get(0))
+nex> scores.get(0)
 85
 ```
 
@@ -76,7 +76,7 @@ Individual elements can be updated by assigning to an indexed position:
 
 ```
 nex> scores.put(2, 80)
-nex> print(scores)
+nex> scores
 [85, 92, 80, 95, 60]
 ```
 
@@ -135,14 +135,14 @@ nex> let names: Array[String] := ["Alice", "Bob"]
 => [Alice, Bob]
 
 nex> names.add("Carol")
-nex> print(names)
+nex> names
 [Alice, Bob, Carol]
 
 nex> names.add("David")
-nex> print(names)
+nex> names
 [Alice, Bob, Carol, David]
 
-nex> print(names.length)
+nex> names.length
 4
 ```
 
@@ -152,11 +152,11 @@ Elements can be removed by index with `remove`:
 
 ```
 nex> names.remove(names.length - 1)
-nex> print(names)
+nex> names
 [Alice, Bob, Carol]
 
 nex> names.remove(1)
-nex> print(names)
+nex> names
 [Alice, Carol]
 ```
 
@@ -166,7 +166,7 @@ Elements can be inserted at a specific position with `add_at`:
 
 ```
 nex> names.add_at(1, "Bob")
-nex> print(names)
+nex> names
 [Alice, Bob, Carol]
 ```
 
@@ -182,20 +182,20 @@ nex> print(names)
 nex> let primes := [2, 3, 5, 7, 11]
 => [2, 3, 5, 7, 11]
 
-nex> print(primes.contains(5))
+nex> primes.contains(5)
 true
 
-nex> print(primes.contains(4))
+nex> primes.contains(4)
 false
 ```
 
 **Finding the index of an element:**
 
 ```
-nex> print(primes.index_of(7))
+nex> primes.index_of(7)
 3
 
-nex> print(primes.index_of(9))
+nex> primes.index_of(9)
 -1
 ```
 
@@ -207,7 +207,7 @@ nex> print(primes.index_of(9))
 nex> let scores := [85, 92, 78, 95, 60]
 => [85, 92, 78, 95, 60]
 
-nex> print(scores.slice(1, 4))
+nex> scores.slice(1, 4)
 [92, 78, 95]
 ```
 
@@ -216,14 +216,14 @@ nex> print(scores.slice(1, 4))
 **Reversing:**
 
 ```
-nex> print(scores.reverse)
+nex> scores.reverse
 [60, 95, 78, 92, 85]
 ```
 
 **Sorting:**
 
 ```
-nex> print(scores.sort)
+nex> scores.sort
 [60, 78, 85, 92, 95]
 ```
 
@@ -248,7 +248,7 @@ nex> from
        i := i + 1
     end
 
-nex> print(squares)
+nex> squares
 [1, 4, 9, 16, 25, 36, 49, 64, 81, 100]
 ```
 
@@ -269,10 +269,10 @@ nex> function sum(arr: Array[Integer]): Integer
        end
      end
 
-nex> print(sum([10, 20, 30, 40]))
+nex> sum([10, 20, 30, 40])
 100
 
-nex> print(sum([]))
+nex> sum([])
 0
 ```
 
@@ -287,7 +287,7 @@ nex> function maximum(arr: Array[Integer]): Integer
        end
      end
 
-nex> print(maximum([3, 7, 1, 9, 4]))
+nex> maximum([3, 7, 1, 9, 4])
 9
 ```
 
@@ -306,7 +306,7 @@ nex> function filter_above(arr: Array[Integer], threshold: Integer): Array[Integ
        end
      end
 
-nex> print(filter_above([85, 92, 78, 95, 60], 80))
+nex> filter_above([85, 92, 78, 95, 60], 80)
 [85, 92, 95]
 ```
 
@@ -365,13 +365,13 @@ nex> function std_dev(arr: Array[Real]): Real
 nex> let data := [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]
 => [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]
 
-nex> print(mean(data))
+nex> mean(data)
 5.0
 
-nex> print(variance(data))
+nex> variance(data)
 4.0
 
-nex> print(std_dev(data))
+nex> std_dev(data)
 2.0
 ```
 

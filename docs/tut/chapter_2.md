@@ -23,33 +23,33 @@ These four types cover the vast majority of what you will need in the early chap
 An integer is a whole number. Integer arithmetic in Nex works as you would expect for addition, subtraction, and multiplication:
 
 ```
-nex> print(10 + 3)
+nex> 10 + 3
 13
 
-nex> print(10 - 3)
+nex> 10 - 3
 7
 
-nex> print(10 * 3)
+nex> 10 * 3
 30
 ```
 
 Division between two integers deserves attention. When you divide one integer by another using `/`, the result is always an integer — the fractional part is discarded:
 
 ```
-nex> print(10 / 3)
+nex> 10 / 3
 3
 
-nex> print(7 / 2)
+nex> 7 / 2
 3
 ```
 
 This is called *integer division*. It is not a mistake; it is the defined behaviour for the `/` operator on integers. The `%` operator gives the remainder:
 
 ```
-nex> print(10 % 3)
+nex> 10 % 3
 1
 
-nex> print(7 % 2)
+nex> 7 % 2
 1
 ```
 
@@ -58,13 +58,13 @@ Together, `/` and `%` give you full information: `10 / 3` is `3` remainder `1`. 
 Integers also have methods. Methods are operations invoked with dot notation:
 
 ```
-nex> print((-7).abs)
+nex> (-7).abs
 7
 
-nex> print(3.max(8))
+nex> 3.max(8)
 8
 
-nex> print(3.min(8))
+nex> 3.min(8)
 3
 ```
 
@@ -75,13 +75,13 @@ for low-level work such as flags, masks, encodings, and compact state
 representations. The interface uses method names rather than symbolic operators:
 
 ```nex
-nex> print((5).bitwise_left_shift(1))
+nex> (5).bitwise_left_shift(1)
 10
 
-nex> print((6).bitwise_and(3))
+nex> (6).bitwise_and(3)
 2
 
-nex> print((5).bitwise_is_set(0))
+nex> (5).bitwise_is_set(0)
 true
 ```
 
@@ -92,7 +92,7 @@ operations use 32-bit integer semantics; Appendix B lists the full set of method
 One method worth knowing early is `pick`:
 
 ```
-nex> print(6.pick)
+nex> 6.pick
 4
 ```
 
@@ -108,17 +108,17 @@ A `Real` value is a number with a fractional part. Write real literals with a de
 nex> let pi := 3.14159
 => 3.14159
 
-nex> print(pi * 2.0)
+nex> pi * 2.0
 6.28318
 ```
 
 Arithmetic on real numbers works as expected and always produces real results:
 
 ```
-nex> print(10.0 / 3.0)
+nex> 10.0 / 3.0
 3.3333333333333335
 
-nex> print(7.0 / 2.0)
+nex> 7.0 / 2.0
 3.5
 ```
 
@@ -127,20 +127,20 @@ Note the trailing digits in the first result. Real numbers in Nex, as in most pr
 The `round` method converts a real number to the nearest integer:
 
 ```
-nex> print(3.6.round)
+nex> 3.6.round
 4
 
-nex> print(3.2.round)
+nex> 3.2.round
 3
 ```
 
 Real numbers also have `abs`, `min`, and `max`:
 
 ```
-nex> print((-3.5).abs)
+nex> (-3.5).abs
 3.5
 
-nex> print(1.2.max(4.7))
+nex> 1.2.max(4.7)
 4.7
 ```
 
@@ -154,13 +154,13 @@ A `Boolean` value is either `true` or `false`. Booleans arise from comparisons:
 nex> let x := 10
 => 10
 
-nex> print(x > 5)
+nex> x > 5
 true
 
-nex> print(x = 5)
+nex> x = 5
 false
 
-nex> print(x /= 5)
+nex> x /= 5
 true
 ```
 
@@ -169,16 +169,16 @@ In Nex, `=` tests equality and `/=` tests inequality. (The `:=` you have been us
 Booleans can be combined with `and`, `or`, and `not`:
 
 ```
-nex> print(true and false)
+nex> true and false
 false
 
-nex> print(true or false)
+nex> true or false
 true
 
-nex> print(not true)
+nex> not true
 false
 
-nex> print(x > 5 and x < 20)
+nex> x > 5 and x < 20
 true
 ```
 
@@ -187,13 +187,13 @@ The `and` operator returns `true` only when both sides are `true`. The `or` oper
 These operators can also be written as method calls:
 
 ```
-nex> print(true.and(false))
+nex> true.and(false)
 false
 
-nex> print(true.or(false))
+nex> true.or(false)
 true
 
-nex> print(true.not)
+nex> true.not
 false
 ```
 
@@ -209,7 +209,7 @@ A `String` is a sequence of characters. String literals are enclosed in double q
 nex> let greeting := "Hello, Nex"
 => Hello, Nex
 
-nex> print(greeting.length)
+nex> greeting.length
 10
 ```
 
@@ -218,13 +218,13 @@ The `length` method returns the number of characters in the string.
 Strings can be searched and inspected:
 
 ```
-nex> print(greeting.contains("Nex"))
+nex> greeting.contains("Nex")
 true
 
-nex> print(greeting.starts_with("Hello"))
+nex> greeting.starts_with("Hello")
 true
 
-nex> print(greeting.index_of("N"))
+nex> greeting.index_of("N")
 7
 ```
 
@@ -233,20 +233,20 @@ nex> print(greeting.index_of("N"))
 Substrings are extracted with `substring`, which takes a start index (inclusive) and an end index (exclusive):
 
 ```
-nex> print(greeting.substring(0, 5))
+nex> greeting.substring(0, 5)
 Hello
 
-nex> print(greeting.substring(7, 10))
+nex> greeting.substring(7, 10)
 Nex
 ```
 
 Case conversion:
 
 ```
-nex> print(greeting.to_upper)
+nex> greeting.to_upper
 HELLO, NEX
 
-nex> print(greeting.to_lower)
+nex> greeting.to_lower
 hello, nex
 ```
 
@@ -256,7 +256,7 @@ Whitespace removal:
 nex> let padded := "  hello  "
 => "  hello  "
 
-nex> print(padded.trim)
+nex> padded.trim
 hello
 ```
 
@@ -266,7 +266,7 @@ Splitting a string into parts:
 nex> let csv := "one,two,three"
 => one,two,three
 
-nex> print(csv.split(","))
+nex> csv.split(",")
 [one, two, three]
 ```
 
@@ -279,16 +279,16 @@ nex> print(csv.split(","))
 You have now seen two ways to express the same operations. Addition can be written as `7 + 5` or as `7.plus(5)`. Comparison can be written as `x > 5` or as `x.greater_than(5)`. Both forms produce identical results.
 
 ```
-nex> print(7 + 5)
+nex> 7 + 5
 12
 
-nex> print(7.plus(5))
+nex> 7.plus(5)
 12
 
-nex> print(10 > 3)
+nex> 10 > 3
 true
 
-nex> print(10.greater_than(3))
+nex> 10.greater_than(3)
 true
 ```
 
@@ -337,7 +337,7 @@ nex> let age: Integer := 25
 nex> let message: String := "Age: " + age
 => Age: 25
 
-nex> print(message)
+nex> message
 Age: 25
 ```
 
@@ -355,7 +355,7 @@ nex> let s: String := "42"
 nex> let n: Integer := s.to_integer
 => 42
 
-nex> print(n + 8)
+nex> n + 8
 50
 ```
 
@@ -387,7 +387,7 @@ Occasionally, however, a variable genuinely might not have a value — perhaps i
 nex> let maybe_name: ?String := nil
 => nil
 
-nex> print(maybe_name)
+nex> maybe_name
 nil
 ```
 

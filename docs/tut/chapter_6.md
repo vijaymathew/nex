@@ -73,13 +73,13 @@ nex> function double(n: Integer): Integer
        result := n * 2
      end
 
-nex> print(double(5))
+nex> double(5)
 10
 
 nex> let x := double(8)
 => 16
 
-nex> print(double(x))
+nex> double(x)
 32
 ```
 
@@ -105,10 +105,10 @@ nex> function max(a, b: Integer): Integer
        end
      end
 
-nex> print(max(3, 7))
+nex> max(3, 7)
 7
 
-nex> print(max(10, 4))
+nex> max(10, 4)
 10
 ```
 
@@ -129,13 +129,13 @@ nex> function describe(n: Integer): String
        end
      end
 
-nex> print(describe(-3))
+nex> describe(-3)
 negative
 
-nex> print(describe(0))
+nex> describe(0)
 zero
 
-nex> print(describe(42))
+nex> describe(42)
 positive
 ```
 
@@ -153,7 +153,7 @@ nex> function rectangle_area(width, height: Real): Real
        result := width * height
      end
 
-nex> print(rectangle_area(4.0, 5.0))
+nex> rectangle_area(4.0, 5.0)
 20.0
 ```
 
@@ -169,13 +169,13 @@ nex> function clamp(value, low, high: Integer): Integer
        end
      end
 
-nex> print(clamp(15, 0, 10))
+nex> clamp(15, 0, 10)
 10
 
-nex> print(clamp(-3, 0, 10))
+nex> clamp(-3, 0, 10)
 0
 
-nex> print(clamp(7, 0, 10))
+nex> clamp(7, 0, 10)
 7
 ```
 
@@ -198,7 +198,7 @@ nex> function sum_of_squares(a, b: Integer): Integer
        result := square(a) + square(b)
      end
 
-nex> print(sum_of_squares(3, 4))
+nex> sum_of_squares(3, 4)
 25
 ```
 
@@ -215,7 +215,7 @@ nex> let double := fn (n: Integer): Integer do
        result := n * 2
      end
 
-nex> print(double(5))
+nex> double(5)
 10
 ```
 
@@ -229,7 +229,7 @@ nex> function apply_twice(f: Function, n: Integer): Integer
        result := f(f(n))
      end
 
-nex> print(apply_twice(fn (n: Integer): Integer do result := n + 3 end, 10))
+nex> apply_twice(fn (n: Integer): Integer do result := n + 3 end, 10)
 16
 ```
 
@@ -306,10 +306,10 @@ With these three functions defined, working with temperatures becomes readable:
 nex> let boiling := 100.0
 => 100.0
 
-nex> print(celsius_to_fahrenheit(boiling))
+nex> celsius_to_fahrenheit(boiling)
 212.0
 
-nex> print(describe_temperature(boiling))
+nex> describe_temperature(boiling)
 warm
 
 nex> let body_temp_f := 98.6
@@ -318,7 +318,7 @@ nex> let body_temp_f := 98.6
 nex> let body_temp_c := fahrenheit_to_celsius(body_temp_f)
 => 37.0
 
-nex> print(describe_temperature(body_temp_c))
+nex> describe_temperature(body_temp_c)
 warm
 ```
 

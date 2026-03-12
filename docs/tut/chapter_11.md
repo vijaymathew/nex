@@ -14,13 +14,13 @@ nex> let books: Array[Map[String, Any]] := [
      {"title": "Foundation", "author": "Isaac Asimov", "year": 1951}
   ]
 
-nex> print(books.length)
+nex> books.length
 3
 
-nex> print(books.get(0).get("title"))
+nex> books.get(0).get("title")
 Dune
 
-nex> print(books.get(1).get("author"))
+nex> books.get(1).get("author")
 William Gibson
 ```
 
@@ -64,13 +64,13 @@ nex> let timetable: Map[String, Array[String]] := {
      "Wednesday": ["Maths", "Biology", "PE"]
   }
 
-nex> print(timetable.get("Monday"))
+nex> timetable.get("Monday")
 [Maths, Physics, History]
 
-nex> print(timetable.get("Monday").length)
+nex> timetable.get("Monday").length
 3
 
-nex> print(timetable.get("Tuesday").get(0))
+nex> timetable.get("Tuesday").get(0)
 English
 ```
 
@@ -130,10 +130,10 @@ nex> let entries := [
   ]
 
 nex> let gradebook := build_gradebook(entries)
-nex> print(gradebook.get("Alice"))
+nex> gradebook.get("Alice")
 [85, 91, 88]
 
-nex> print(gradebook.get("Bob"))
+nex> gradebook.get("Bob")
 [72, 68]
 ```
 
@@ -260,7 +260,7 @@ nex> if found /= nil then
 notes.txt
 
 nex> let missing := find_node(filesystem, "missing.txt")
-nex> print(missing)
+nex> missing
 nil
 ```
 
@@ -310,17 +310,17 @@ nex> function total_amount(node: Map[String, Any]): Integer
      end
    end
 
-nex> print(total_amount(expenses))
+nex> total_amount(expenses)
 2950
 
-nex> print(total_amount(expenses.get("children").get(0)))
+nex> total_amount(expenses.get("children").get(0))
 2400
 ```
 
 The total for the root node is the sum of every amount in the tree: 0 (root) + 1200 (Housing) + 900 (Rent) + 300 (Utilities) + 150 (Food) + 400 (Groceries) + 200 (Dining out) = 3150. Work through it by hand before trusting the function — the recursive structure makes it easy to miscount.
 
 ```
-nex> print(total_amount(expenses))
+nex> total_amount(expenses)
 3150
 ```
 

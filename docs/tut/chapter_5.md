@@ -48,7 +48,7 @@ nex> from
        total := total + i
        i := i + 1
     end
-nex> print(total)
+nex> total
 10
 ```
 
@@ -115,7 +115,7 @@ nex> from
        product := product * i
        i := i + 1
     end
-nex> print(product)
+nex> product
 120
 ```
 
@@ -143,7 +143,7 @@ nex> from
        i := i + 1
     end
 
-nex> print(found)
+nex> found
 true
 ```
 

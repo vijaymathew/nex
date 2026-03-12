@@ -39,13 +39,13 @@ nex> function square(x: Integer): Integer
 simple tests might be:
 
 ```
-nex> print(square(0))
+nex> square(0)
 0
 
-nex> print(square(5))
+nex> square(5)
 25
 
-nex> print(square(-3))
+nex> square(-3)
 9
 ```
 

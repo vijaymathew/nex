@@ -113,7 +113,7 @@ Conceptually:
 
 ```
 nex> let prices := {"apple": 3, "orange": 4, "pear": 5}
-nex> print(prices.get("orange"))
+nex> prices.get("orange")
 4
 ```
 

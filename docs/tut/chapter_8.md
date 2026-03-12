@@ -17,7 +17,7 @@ nex> function sum_to(n: Integer): Integer
        end
      end
 
-nex> print(sum_to(5))
+nex> sum_to(5)
 15
 ```
 
@@ -71,7 +71,7 @@ nex> function factorial(n: Integer): Integer
        end
      end
 
-nex> print(factorial(5))
+nex> factorial(5)
 120
 ```
 
@@ -143,7 +143,7 @@ nex> function count_char(s: String, ch: Char): Integer
        end
      end
 
-nex> print(count_char("mississippi", #s))
+nex> count_char("mississippi", #s)
 4
 ```
 
@@ -176,10 +176,10 @@ nex> function is_odd(n: Integer): Boolean
        end
      end
 
-nex> print(is_even(4))
+nex> is_even(4)
 true
 
-nex> print(is_odd(7))
+nex> is_odd(7)
 true
 ```
 
@@ -207,7 +207,7 @@ nex> function fibonacci(n: Integer): Integer
        end
      end
 
-nex> print(fibonacci(10))
+nex> fibonacci(10)
 55
 ```
 
@@ -246,7 +246,7 @@ The loop is shorter and more direct. Reach for a loop when the iteration pattern
 
 ```
 nex> -- this will fail for large n due to stack overflow
-nex> print(sum_to(100000))
+nex> sum_to(100000)
 
 nex> -- this handles any n safely
 nex> from
@@ -258,7 +258,7 @@ nex> from
        total := total + i
        i := i + 1
     end
-nex> print(total)
+nex> total
 5000050000
 ```
 

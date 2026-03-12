@@ -168,19 +168,19 @@ nex> todo.add_task("write chapter draft")
 nex> todo.add_task("check examples")
 nex> todo.add_task("revise wording")
 
-nex> print(todo.size)
+nex> todo.size
 3
 
-nex> print(todo.completed_count)
+nex> todo.completed_count
 0
 
 nex> todo.task_at(0).mark_done
 nex> todo.task_at(1).mark_done
 
-nex> print(todo.completed_count)
+nex> todo.completed_count
 2
 
-nex> print(todo.all_done)
+nex> todo.all_done
 false
 ```
 

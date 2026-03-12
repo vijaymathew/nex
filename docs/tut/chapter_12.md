@@ -38,13 +38,13 @@ Objects are created with `create`, naming both the class and the constructor:
 
 ```
 nex> let p := create Point.make(3.0, 4.0)
-nex> print(p.x)
+nex> p.x
 3.0
 
-nex> print(p.y)
+nex> p.y
 4.0
 
-nex> print(p.distance_from_origin)
+nex> p.distance_from_origin
 5.0
 ```
 
@@ -79,11 +79,11 @@ nex> class Point
 Class(es) registered: Point
 
 nex> let p1 := create Point.origin
-nex> print(p1.x)
+nex> p1.x
 0.0
 
 nex> let p2 := create Point.make(3.0, 4.0)
-nex> print(p2.distance_from_origin)
+nex> p2.distance_from_origin
 5.0
 ```
 
@@ -99,10 +99,10 @@ Fields are the data a class carries. Each instance gets its own independent copy
 nex> let p1 := create Point.make(1.0, 2.0)
 nex> let p2 := create Point.make(4.0, 6.0)
 
-nex> print(p1.x)
+nex> p1.x
 1.0
 
-nex> print(p2.x)
+nex> p2.x
 4.0
 ```
 
@@ -130,7 +130,7 @@ Class(es) registered: Point
 
 nex> let p := create Point.make(1.0, 2.0)
 nex> p.move(2.0, 2.0)
-nex> print(p.x)
+nex> p.x
 3.0
 ```
 
@@ -148,9 +148,9 @@ nex> class Layout
 Class(es) registered: Layout
 
 nex> let layout := create Layout
-nex> print(Layout.MAX_WIDTH)
+nex> Layout.MAX_WIDTH
 450
-nex> print(layout.widened)
+nex> layout.widened
 460
 ```
 
@@ -215,11 +215,11 @@ nex> class Person
 Class(es) registered: Person
 
 nex> let p := create Person.make("Ada")
-nex> print(p.describe)
+nex> p.describe
 Ada (no email)
 
 nex> p.set_email("ada@example.com")
-nex> print(p.describe)
+nex> p.describe
 Ada <ada@example.com>
 ```
 
@@ -277,7 +277,7 @@ Class(es) registered: BankAccount
 nex> let account := create BankAccount.make("Alice", 1000.0)
 nex> account.deposit(500.0)
 nex> account.withdraw(200.0)
-nex> print(account.describe)
+nex> account.describe
 Alice: 1300.0
 ```
 
@@ -324,7 +324,7 @@ Class(es) registered: Point
 
 nex> let p1 := create Point.make(0.0, 0.0)
 nex> let p2 := create Point.make(3.0, 4.0)
-nex> print(p1.distance_to(p2))
+nex> p1.distance_to(p2)
 5.0
 ```
 
@@ -337,10 +337,10 @@ In `distance_to`, `this.x` and `this.y` refer to the fields of the object the me
 Field reads and method calls use identical syntax:
 
 ```
-nex> print(p.x)                      -- reads a field
+nex> p.x                      -- reads a field
 3.0
 
-nex> print(p.distance_from_origin)   -- calls a method
+nex> p.distance_from_origin   -- calls a method
 5.0
 ```
 
@@ -366,10 +366,10 @@ nex> class Circle
 Class(es) registered: Circle
 
 nex> let c := create Circle.make(5.0)
-nex> print(c.radius)
+nex> c.radius
 5.0
 
-nex> print(c.diameter)
+nex> c.diameter
 10.0
 ```
 
@@ -410,13 +410,13 @@ nex> let s := create Stack.make
 nex> s.push(10)
 nex> s.push(20)
 nex> s.push(30)
-nex> print(s.peek)
+nex> s.peek
 30
 
-nex> print(s.pop)
+nex> s.pop
 30
 
-nex> print(s.size)
+nex> s.size
 1
 ```
 

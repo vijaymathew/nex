@@ -53,13 +53,13 @@ Pure functions have a property that makes them especially valuable: they are eas
 This property makes pure functions easy to test. Testing `celsius_to_fahrenheit` means choosing inputs and verifying outputs:
 
 ```
-nex> print(celsius_to_fahrenheit(0.0))
+nex> celsius_to_fahrenheit(0.0)
 32.0
 
-nex> print(celsius_to_fahrenheit(100.0))
+nex> celsius_to_fahrenheit(100.0)
 212.0
 
-nex> print(celsius_to_fahrenheit(-40.0))
+nex> celsius_to_fahrenheit(-40.0)
 -40.0
 ```
 
@@ -120,13 +120,13 @@ nex> function report_temperature(c: Real)
 The second version separates the decision — which label applies to this temperature? — from the action — print the label. The decision is pure and can be tested exhaustively:
 
 ```
-nex> print(temperature_label(-5.0))
+nex> temperature_label(-5.0)
 Freezing
 
-nex> print(temperature_label(10.0))
+nex> temperature_label(10.0)
 Cold
 
-nex> print(temperature_label(20.0))
+nex> temperature_label(20.0)
 Mild or warm
 ```
 
@@ -162,7 +162,7 @@ The second version can be tested with any price and any rate. The first can only
 **Output as return value, not side effect.** A function that communicates its result by assigning to an external variable, or by printing, makes that result difficult to capture and verify programmatically. A function that returns its result explicitly is testable directly:
 
 ```
-nex> print(compute_tax(100.0, 0.20))
+nex> compute_tax(100.0, 0.20)
 20.0
 ```
 
@@ -171,16 +171,16 @@ One line. No setup. The result is right there.
 **Well-chosen examples.** When testing a function, choose inputs that cover distinct cases: the typical case, the boundary cases, and at least one case where the result is known precisely. For `compute_tax`, a typical case is a normal price and rate. A boundary case is a price of zero (the tax should also be zero). A known case might be price 100 and rate 0.10, where the result is exactly 10.0.
 
 ```
-nex> print(compute_tax(100.0, 0.20))
+nex> compute_tax(100.0, 0.20)
 20.0
 
-nex> print(compute_tax(0.0, 0.20))
+nex> compute_tax(0.0, 0.20)
 0.0
 
-nex> print(compute_tax(100.0, 0.0))
+nex> compute_tax(100.0, 0.0)
 0.0
 
-nex> print(compute_tax(99.99, 0.10))
+nex> compute_tax(99.99, 0.10)
 9.999
 ```
 
@@ -222,7 +222,7 @@ nex> function temperature_report(c: Real): String
 Now the top-level program is one line:
 
 ```
-nex> print(temperature_report(22.0))
+nex> temperature_report(22.0)
 Mild: 22.0 deg C / 71.6 deg F
 ```
 

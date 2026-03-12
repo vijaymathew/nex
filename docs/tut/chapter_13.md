@@ -160,10 +160,10 @@ Class(es) registered: Card
 
 nex> let ace   := create Card.make(14, "Spades")
 nex> let seven := create Card.make(7, "Hearts")
-nex> print(ace.name)
+nex> ace.name
 Ace of Spades
 
-nex> print(ace.beats(seven))
+nex> ace.beats(seven)
 true
 ```
 
