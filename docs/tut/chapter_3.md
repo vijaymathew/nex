@@ -228,17 +228,20 @@ Hello, Nex!
 
 The `+` operator on strings is concatenation — it produces a new string that is the two operands joined end to end. It is left-associative, so `"a" + "b" + "c"` is `("a" + "b") + "c"`, which is `"abc"`.
 
-As established in Chapter 2, string concatenation is typed: both operands must be strings. If one of them is a number, convert it first:
+If either operand of `+` is a string, Nex performs string concatenation. Any
+non-string operand is converted by calling its `to_string` method internally:
 
 ```
 nex> let count: Integer := 3
 => 3
 
-nex> print("Found " + count.to_string + " results")
+nex> print("Found " + count + " results")
 Found 3 results
 ```
 
-This pattern — arithmetic value, converted to string, incorporated into a message — appears constantly in real programs. The `.to_string` call is brief enough that it quickly becomes automatic.
+This pattern — arithmetic value incorporated into a message — appears constantly
+in real programs. You can still write `.to_string` explicitly when that makes
+the intent clearer, especially in longer chained expressions.
 
 
 
@@ -329,7 +332,7 @@ A common source of confusion for beginners is treating a statement as though it 
 - When the precedence is unclear, use parentheses. They make intentions unambiguous.
 - Comparison operators (`=`, `/=`, `<`, `<=`, `>`, `>=`) produce `Boolean` values. Arithmetic is evaluated before comparisons.
 - Boolean operators `and`, `or`, and `not` combine `Boolean` values. `and` binds more tightly than `or`; use parentheses when both appear in the same expression.
-- String concatenation uses `+` and requires both operands to be strings. Convert numbers with `.to_string` before concatenating.
+- String concatenation uses `+`. If either operand is a string, the other is converted with `to_string` automatically.
 - Method calls are expressions and can be chained. The value produced by one call becomes the receiver of the next.
 
 

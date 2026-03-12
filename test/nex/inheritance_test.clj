@@ -73,3 +73,17 @@ end"
       (is (= "Child" (:name child-class)))
       (is (= 1 (count (:parents child-class))))
       (is (= "Base" (:parent (first (:parents child-class))))))))
+
+(deftest any-as-explicit-base-class-test
+  (testing "Any can appear as an explicit base class"
+    (let [code "class Thing inherit Any
+feature
+  show(): String do
+    result := to_string()
+  end
+end"
+          ast (p/ast code)
+          thing-class (first (:classes ast))]
+      (is (= "Thing" (:name thing-class)))
+      (is (= 1 (count (:parents thing-class))))
+      (is (= "Any" (:parent (first (:parents thing-class))))))))

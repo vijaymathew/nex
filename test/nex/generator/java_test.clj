@@ -620,6 +620,17 @@ end"
       (is (str/includes? java-code "(11 < 12)"))
       (is (str/includes? java-code "NexRuntime.intPow(2, 3)")))))
 
+(deftest string-concat-generation-test
+  (testing "Java generator routes String concatenation through runtime coercion"
+    (let [nex-code "class Test
+  feature
+    test() do
+      let a: String := \"n=\" + 10
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "NexRuntime.concatValues(\"n=\", 10)")))))
+
 (deftest typed-power-generation-test
   (testing "Integral exponentiation uses the Java integer-power helper and real exponentiation uses Math.pow"
     (let [nex-code "class Test
@@ -844,6 +855,47 @@ end"
           java-code (java/translate nex-code)]
       (is (str/includes? java-code "NexRuntime.parseInt(\"0xFF\")"))
       (is (str/includes? java-code "NexRuntime.parseLong(\"0b1010\")")))))
+
+(deftest any-root-methods-java-generation-test
+  (testing "Any root methods lower to runtime helpers and do not generate a fake Any parent"
+    (let [nex-code "class Box inherit Any
+  feature
+    demo(other: Box) do
+      print(this.to_string())
+      print(this.equals(other))
+      let c: Any := this.clone()
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "NexRuntime.toStringValue(this)"))
+      (is (str/includes? java-code "NexRuntime.anyEquals(this, other)"))
+      (is (str/includes? java-code "NexRuntime.cloneValue(this)"))
+      (is (not (str/includes? java-code "_parent_Any"))))))
+
+(deftest collection-deep-methods-java-generation-test
+  (testing "Java generator routes collection to_string/equals/clone through deep runtime helpers"
+    (let [nex-code "class Test
+  feature
+    demo(a: Array[Any], m: Map[Any, Any], s: Set[Any]) do
+      print(a.to_string())
+      print(a.equals(a))
+      let a2: Array[Any] := a.clone()
+      print(m.to_string())
+      print(m.equals(m))
+      let m2: Map[Any, Any] := m.clone()
+      print(s.to_string())
+      print(s.equals(s))
+      let s2: Set[Any] := s.clone()
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "NexRuntime.toStringValue(a)"))
+      (is (str/includes? java-code "NexRuntime.deepEquals(a, a)"))
+      (is (str/includes? java-code "(ArrayList) NexRuntime.deepClone(a)"))
+      (is (str/includes? java-code "NexRuntime.toStringValue(m)"))
+      (is (str/includes? java-code "(HashMap) NexRuntime.deepClone(m)"))
+      (is (str/includes? java-code "NexRuntime.toStringValue(s)"))
+      (is (str/includes? java-code "(LinkedHashSet) NexRuntime.deepClone(s)")))))
 
 (deftest image-create-and-methods-java-generation-test
   (testing "Image create/from_file and width/height methods are supported in Java generator"

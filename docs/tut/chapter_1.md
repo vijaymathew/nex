@@ -233,14 +233,10 @@ In the REPL, type annotations are optional by default — Nex infers the type fr
 
 If you enable strict checking with `:typecheck on`, type annotations on REPL `let` bindings should be treated as mandatory. In that mode, being explicit about the intended type keeps later checks predictable and avoids ambiguous interactive state.
 
-You cannot mix types arbitrarily. Adding an integer to a string, for example, is not a valid operation. When you attempt it, Nex tells you:
-
-```
-nex> print(age + name)
-Error: type mismatch
-```
-
-The error is not a punishment. It is information: the operation you attempted is not defined for these types, and the system is telling you precisely where the problem is.
+You cannot mix types arbitrarily. Arithmetic operators still require numeric
+operands, for example. But string concatenation is special: if either side of
+`+` is a string, Nex concatenates the values and converts the non-string side by
+calling its `to_string` method internally.
 
 
 
@@ -256,14 +252,17 @@ nex> greeting
 "Hello, Ada"
 ```
 
-Numbers can be converted to strings for inclusion in messages:
+If either side of `+` is a string, Nex performs string concatenation. A
+non-string operand is converted internally using `to_string`:
 
 ```
 nex> "Age: " + age
 "Age: 12"
 ```
 
-This is one of the most common operations in any program: constructing a message from a mix of fixed text and variable values.
+This is one of the most common operations in any program: constructing a message
+from a mix of fixed text and variable values. You can still write `.to_string`
+explicitly when you want to make that conversion visible in the code.
 
 
 

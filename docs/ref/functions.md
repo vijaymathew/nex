@@ -30,7 +30,9 @@ Returns the runtime type name.
 type_is(type_name: String, value): Boolean
 ```
 
-Checks runtime type compatibility (including built-in inheritance relationships like scalar types implementing `Comparable`/`Hashable`, and cursor types matching `Cursor`).
+Checks runtime type compatibility (including `Any` as the universal root type,
+built-in inheritance relationships like scalar types implementing
+`Comparable`/`Hashable`, and cursor types matching `Cursor`).
 
 ## `sleep`
 

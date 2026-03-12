@@ -495,6 +495,17 @@ end"
       (is (str/includes? js-code "||"))
       (is (str/includes? js-code "__nexIntPow(2, 3)")))))
 
+(deftest string-concat-generation-test
+  (testing "JavaScript generator routes String concatenation through runtime coercion"
+    (let [nex-code "class Test
+  feature
+    test() do
+      let a: String := \"n=\" + 10
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "__nexConcat(\"n=\", 10)")))))
+
 (deftest typed-power-generation-test
   (testing "Integral exponentiation uses the JS integer-power helper and real exponentiation uses **"
     (let [nex-code "class Test
@@ -520,6 +531,47 @@ end"
           js-code (js/translate nex-code)]
       (is (str/includes? js-code "__nexParseInt(\"0xFF\")"))
       (is (str/includes? js-code "__nexParseLong(\"0b1010\")")))))
+
+(deftest any-root-methods-js-generation-test
+  (testing "Any root methods lower to runtime helpers and do not emit extends Any"
+    (let [nex-code "class Box inherit Any
+  feature
+    demo(other: Box) do
+      print(this.to_string())
+      print(this.equals(other))
+      let c: Any := this.clone()
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "__nexToString(this)"))
+      (is (str/includes? js-code "(this === other)"))
+      (is (str/includes? js-code "__nexCloneValue(this)"))
+      (is (not (str/includes? js-code "extends Any"))))))
+
+(deftest collection-deep-methods-js-generation-test
+  (testing "JavaScript generator routes collection to_string/equals/clone through deep helpers"
+    (let [nex-code "class Test
+  feature
+    demo(a: Array[Any], m: Map[Any, Any], s: Set[Any]) do
+      print(a.to_string())
+      print(a.equals(a))
+      let a2: Array[Any] := a.clone()
+      print(m.to_string())
+      print(m.equals(m))
+      let m2: Map[Any, Any] := m.clone()
+      print(s.to_string())
+      print(s.equals(s))
+      let s2: Set[Any] := s.clone()
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "__nexToString(a)"))
+      (is (str/includes? js-code "__nexDeepEquals(a, a)"))
+      (is (str/includes? js-code "__nexDeepClone(a)"))
+      (is (str/includes? js-code "__nexToString(m)"))
+      (is (str/includes? js-code "__nexDeepClone(m)"))
+      (is (str/includes? js-code "__nexToString(s)"))
+      (is (str/includes? js-code "__nexDeepClone(s)")))))
 
 (deftest equality-operators-test
   (testing "Equality operator translation to ==="

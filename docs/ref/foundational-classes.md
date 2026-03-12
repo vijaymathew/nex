@@ -1,5 +1,16 @@
 # Foundational Classes
 
+## `Any`
+
+Universal root class for all Nex values. User-defined classes may explicitly
+write `inherit Any`.
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `to_string` | none | `String` | Return a user-facing string representation. |
+| `equals` | `other: Any` | `Boolean` | Default equality. Arbitrary objects use identity-style equality unless they override it. |
+| `clone` | none | `Any` | Clone the value. Built-in collections override this with deep-copy behavior. |
+
 ## `Function`
 
 Built-in base class with deferred call-style methods.
