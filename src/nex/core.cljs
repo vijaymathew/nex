@@ -258,10 +258,34 @@
                 "Type check failed.")]
       (throw (ex-info msg {:type :typecheck :errors errors})))))
 
+(defn- current-repl-classes []
+  (remove #(or (= "__BrowserRepl__" (:name %))
+               (str/starts-with? (:name %) "AnonymousFunction_"))
+          (vals @(get-in @app-state [:ctx :classes]))))
+
+(defn- augment-ast-for-typecheck [ast]
+  (let [prev-classes (seq (current-repl-classes))
+        prev-imports (seq @(get-in @app-state [:ctx :imports]))]
+    (cond
+      (and prev-classes prev-imports)
+      (assoc ast
+             :classes (concat prev-classes (:classes ast))
+             :imports (concat prev-imports (:imports ast)))
+
+      prev-classes
+      (assoc ast :classes (concat prev-classes (:classes ast)))
+
+      prev-imports
+      (assoc ast :imports (concat prev-imports (:imports ast)))
+
+      :else
+      ast)))
+
 (defn- typecheck-ast! [ast]
   (when (:typecheck-enabled @app-state)
     (throw-type-errors!
-     (tc/type-check ast {:var-types (:repl-var-types @app-state)}))))
+     (tc/type-check (augment-ast-for-typecheck ast)
+                    {:var-types (:repl-var-types @app-state)}))))
 
 (defn- typecheck-error? [e]
   (= :typecheck (:type (ex-data e))))
@@ -279,6 +303,11 @@
         (when remembered-type
           (swap! app-state assoc-in [:repl-var-types (:name stmt)] remembered-type))))))
 
+(defn- remember-function-defs! [functions]
+  (doseq [fn-def functions]
+    (when (map? fn-def)
+      (swap! app-state assoc-in [:repl-var-types (:name fn-def)] (:class-name fn-def)))))
+
 (defn- escape-html [s]
   (-> s
       (str/replace "&" "&amp;")
@@ -289,7 +318,12 @@
   (let [esc (escape-html tok)]
     (cond
       (str/starts-with? tok "\"") (str "<span class='tok-str'>" esc "</span>")
-      (re-matches #"^[0-9]+(\.[0-9]+)?$" tok) (str "<span class='tok-num'>" esc "</span>")
+      (or (re-matches #"^[0-9](?:_?[0-9])*$" tok)
+          (re-matches #"^0b[01](?:_?[01])*$" tok)
+          (re-matches #"^0o[0-7](?:_?[0-7])*$" tok)
+          (re-matches #"^0x[0-9A-Fa-f](?:_?[0-9A-Fa-f])*$" tok)
+          (re-matches #"^[0-9]+(\.[0-9]+)?$" tok))
+      (str "<span class='tok-num'>" esc "</span>")
       (#{"->" ":="} tok) (str "<span class='tok-op'>" esc "</span>")
       (re-matches #"^[A-Za-z_][A-Za-z0-9_]*$" tok)
       (cond
@@ -308,7 +342,7 @@
                 code-part (if (some? comment-idx) (subs line 0 comment-idx) line)
                 comment-part (when (some? comment-idx) (subs line comment-idx))
                 ;; Use a non-capturing top-level group so re-seq returns strings, not match vectors.
-                parts (re-seq #"(?:\"(?:[^\"\\]|\\.)*\"|->|:=|[A-Za-z_][A-Za-z0-9_]*|[0-9]+(?:\.[0-9]+)?|\s+|.)" code-part)
+                parts (re-seq #"(?:\"(?:[^\"\\]|\\.)*\"|->|:=|0b[01](?:_?[01])*|0o[0-7](?:_?[0-7])*|0x[0-9A-Fa-f](?:_?[0-9A-Fa-f])*|[0-9](?:_?[0-9])*(?:\.[0-9]+)?|[A-Za-z_][A-Za-z0-9_]*|\s+|.)" code-part)
                 code-html (->> parts
                                (map token-html)
                                (str/join ""))
@@ -933,9 +967,13 @@
     (if (source-needs-async? source)
       (.then (ensure-promise (interp/eval-node-async ctx ast))
              (fn [raw-result]
+               (when (:typecheck-enabled @app-state)
+                 (remember-function-defs! (:functions ast)))
                {:result (if (= :program (:type ast)) nil raw-result)
                 :output @(:output ctx)}))
       (let [raw-result (eval-sync-program! ctx ast)]
+        (when (:typecheck-enabled @app-state)
+          (remember-function-defs! (:functions ast)))
         (ensure-promise
          {:result (if (= :program (:type ast)) nil raw-result)
           :output @(:output ctx)})))))

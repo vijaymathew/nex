@@ -493,7 +493,33 @@ end"
       (is (str/includes? js-code "(11 < 12)"))
       (is (str/includes? js-code "&&"))
       (is (str/includes? js-code "||"))
-      (is (str/includes? js-code "(2 ** 3)")))))
+      (is (str/includes? js-code "__nexIntPow(2, 3)")))))
+
+(deftest typed-power-generation-test
+  (testing "Integral exponentiation uses the JS integer-power helper and real exponentiation uses **"
+    (let [nex-code "class Test
+  feature
+    test() do
+      let i: Integer := 2 ^ 8
+      let r: Real := 2.0 ^ 8
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "__nexIntPow(2, 8)"))
+      (is (str/includes? js-code "(2.0 ** 8)")))))
+
+(deftest string-prefixed-integer-conversion-js-generation-test
+  (testing "Generated JavaScript uses Nex integer parsers for prefixed strings"
+    (let [nex-code "class Test
+  feature
+    parse_values() do
+      let i: Integer := \"0xFF\".to_integer()
+      let i64: Integer64 := \"0b1010\".to_integer64()
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "__nexParseInt(\"0xFF\")"))
+      (is (str/includes? js-code "__nexParseLong(\"0b1010\")")))))
 
 (deftest equality-operators-test
   (testing "Equality operator translation to ==="
@@ -834,6 +860,57 @@ end")
           (is (.exists (io/file out-dir "Greeter.js")))
           (is (.exists (io/file out-dir "main.js")))
           (is (str/includes? (get files "main.js") "Greeter.make()")))
+        (finally
+          (doseq [f (reverse (file-seq tmp-dir))]
+            (.delete f)))))))
+
+(deftest closure-returned-from-function-js-runtime-test
+  (testing "Generated JavaScript preserves closure capture across repeated calls"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-js-closure-run-test")
+          js-file (io/file tmp-dir "bundle.js")
+          nex-code "function cf(): Function
+do
+  let x := 30
+  result := fn(i: Integer): Integer do
+    result := i + x
+  end
+end
+
+let f1 := cf()
+print(f1(10))
+print(\" \")
+print(f1(20))"]
+      (try
+        (.mkdirs tmp-dir)
+        (let [out-dir (io/file tmp-dir "out")
+              files (js/translate-file (.getPath (doto (io/file tmp-dir "app.nex") (spit nex-code)))
+                                       (.getPath out-dir)
+                                       {})
+              main-js (-> (get files "main.js")
+                          (str/replace #"(?m)^\s*const \{ [^}]+ \} = require\([^)]+\);\n?" ""))
+              bundle (str/join "\n"
+                               (concat
+                                [(get files "Function.js")
+                                 (get files "NexWindow.js")]
+                                (->> files
+                                     keys
+                                     (remove #(#{"Function.js" "NexWindow.js" "NexGlobals.js" "main.js"} %))
+                                     sort
+                                     (map files))
+                                [(get files "NexGlobals.js")
+                                 main-js]))
+              _ (spit js-file bundle)
+              proc (.exec (Runtime/getRuntime)
+                          (into-array String ["node" (.getPath js-file)]))]
+          (.waitFor proc)
+          (let [output (slurp (.getInputStream proc))
+                stderr (slurp (.getErrorStream proc))
+                bundle-js bundle]
+            (is (= 0 (.exitValue proc)) stderr)
+            (is (str/includes? main-js "f1.call1(10)"))
+            (is (str/includes? main-js "f1.call1(20)"))
+            (is (str/includes? bundle-js "result = (i + x);"))
+            (is (= "40\n \n50" (str/trim output)))))
         (finally
           (doseq [f (reverse (file-seq tmp-dir))]
             (.delete f)))))))

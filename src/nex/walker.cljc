@@ -1,5 +1,6 @@
 (ns nex.walker
-  (:require [clojure.walk :as walk]))
+  (:require [clojure.string :as str]
+            [clojure.walk :as walk]))
 
 ;;
 ;; Utilities
@@ -84,6 +85,16 @@
   (if (and (string? v) (> (count v) 1))
     (or (get special-char-codes v) 0)
     v))
+
+(defn- parse-integer-literal [token]
+  (let [clean (str/replace token "_" "")
+        [radix digits] (cond
+                         (str/starts-with? clean "0b") [2 (subs clean 2)]
+                         (str/starts-with? clean "0o") [8 (subs clean 2)]
+                         (str/starts-with? clean "0x") [16 (subs clean 2)]
+                         :else [10 clean])]
+    #?(:clj (Long/parseLong digits radix)
+       :cljs (js/parseInt digits radix))))
 
 ;;
 ;; Node handlers map (data-driven transformations)
@@ -1011,8 +1022,7 @@
    :integerLiteral
    (fn [[_ value]]
      {:type :integer
-      :value #?(:clj (Long/parseLong value)
-                :cljs (js/parseInt value))})
+      :value (parse-integer-literal value)})
 
    :realLiteral
    (fn [[_ value]]

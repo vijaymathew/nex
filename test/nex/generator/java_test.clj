@@ -618,7 +618,20 @@ end"
       (is (str/includes? java-code "(7 / 8)"))
       (is (str/includes? java-code "(9 > 10)"))
       (is (str/includes? java-code "(11 < 12)"))
-      (is (str/includes? java-code "(Math.pow(2, 3))")))))
+      (is (str/includes? java-code "NexRuntime.intPow(2, 3)")))))
+
+(deftest typed-power-generation-test
+  (testing "Integral exponentiation uses the Java integer-power helper and real exponentiation uses Math.pow"
+    (let [nex-code "class Test
+  feature
+    test() do
+      let i: Integer := 2 ^ 8
+      let r: Real := 2.0 ^ 8
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "NexRuntime.intPow(2, 8)"))
+      (is (str/includes? java-code "(Math.pow(2.0, 8))")))))
 
 (deftest skip-contracts-option-test
   (testing "Skip contracts option for production builds"
@@ -769,6 +782,39 @@ end")
           (doseq [f (reverse (file-seq tmp-dir))]
             (.delete f)))))))
 
+(deftest closure-returned-from-function-java-runtime-test
+  (testing "Generated Java preserves closure capture across repeated calls"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-java-closure-run-test")
+          nex-file (io/file tmp-dir "app.nex")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "function cf(): Function
+do
+  let x := 30
+  result := fn(i: Integer): Integer do
+    result := i + x
+  end
+end
+
+let f1 := cf()
+print(f1(10))
+print(\" \")
+print(f1(20))")
+        (let [out-dir (io/file tmp-dir "out")
+              result (java/translate-file (.getPath nex-file) (.getPath out-dir) {})
+              proc (.exec (Runtime/getRuntime)
+                          (into-array String ["java" "-jar" (:jar result)]))]
+          (.waitFor proc)
+          (let [output (slurp (.getInputStream proc))
+                main-java (get (:files result) "Main.java")]
+            (is (= 0 (.exitValue proc)))
+            (is (str/includes? main-java "f1.call1(10)"))
+            (is (str/includes? main-java "f1.call1(20)"))
+            (is (= "40 50" (str/trim output)))))
+        (finally
+          (doseq [f (reverse (file-seq tmp-dir))]
+            (.delete f)))))))
+
 (deftest string-conversion-methods-java-generation-test
   (testing "String conversion methods map to Java numeric parsing APIs"
     (let [nex-code "class Test
@@ -781,10 +827,23 @@ end")
     end
 end"
           java-code (java/translate nex-code)]
-      (is (str/includes? java-code "Integer.parseInt(\"123\".trim())"))
-      (is (str/includes? java-code "Long.parseLong(\"123\".trim())"))
+      (is (str/includes? java-code "NexRuntime.parseInt(\"123\")"))
+      (is (str/includes? java-code "NexRuntime.parseLong(\"123\")"))
       (is (str/includes? java-code "Double.parseDouble(\"3.14\".trim())"))
           (is (str/includes? java-code "new java.math.BigDecimal(\"42.5\".trim())")))))
+
+(deftest string-prefixed-integer-conversion-java-generation-test
+  (testing "Generated Java uses NexRuntime integer parsers for prefixed strings"
+    (let [nex-code "class Test
+  feature
+    parse_values() do
+      let i: Integer := \"0xFF\".to_integer()
+      let i64: Integer64 := \"0b1010\".to_integer64()
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "NexRuntime.parseInt(\"0xFF\")"))
+      (is (str/includes? java-code "NexRuntime.parseLong(\"0b1010\")")))))
 
 (deftest image-create-and-methods-java-generation-test
   (testing "Image create/from_file and width/height methods are supported in Java generator"

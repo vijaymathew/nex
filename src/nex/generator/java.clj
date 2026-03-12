@@ -206,18 +206,41 @@
     "%" "%"
     operator))
 
+(defn object-arg-cast
+  "Convert an Object bridge argument to the declared Java parameter type."
+  [param-type arg-name]
+  (let [t (if (map? param-type) (:base-type param-type) param-type)]
+    (case t
+      "Integer" (str "((Number)" arg-name ").intValue()")
+      "Integer64" (str "((Number)" arg-name ").longValue()")
+      "Real" (str "((Number)" arg-name ").doubleValue()")
+      "Decimal" (str "(java.math.BigDecimal)" arg-name)
+      "Boolean" (str "((Boolean)" arg-name ").booleanValue()")
+      "Char" (str "((Character)" arg-name ").charValue()")
+      (str "(" (nex-type-to-java-boxed param-type) ")" arg-name))))
+
 (declare generate-expression)
 (declare is-parent-constructor?)
 (declare generate-method)
 (declare resolve-field-name)
+(declare builtin-dispatch-type)
+(declare infer-expression-type)
+(declare integral-dispatch-type?)
 
 (defn generate-binary-expr
   "Generate Java code for binary expression"
   [{:keys [operator left right]}]
   (let [left-code (generate-expression left)
-        right-code (generate-expression right)]
+        right-code (generate-expression right)
+        left-type (builtin-dispatch-type (infer-expression-type left))
+        right-type (builtin-dispatch-type (infer-expression-type right))]
     (if (= operator "^")
-      (str "(Math.pow(" left-code ", " right-code "))")
+      (if (and (integral-dispatch-type? left-type)
+               (integral-dispatch-type? right-type))
+        (if (or (= left-type "Integer64") (= right-type "Integer64"))
+          (str "NexRuntime.intPow64(" left-code ", " right-code ")")
+          (str "NexRuntime.intPow(" left-code ", " right-code ")"))
+        (str "(Math.pow(" left-code ", " right-code "))"))
       (let [op (generate-binary-op operator)]
         (str "(" left-code " " op " " right-code ")")))))
 
@@ -253,8 +276,8 @@
     "substring"   (fn [target args] (str target ".substring(" args ")"))
     "to_upper"    (fn [target _] (str target ".toUpperCase()"))
     "to_lower"    (fn [target _] (str target ".toLowerCase()"))
-    "to_integer"  (fn [target _] (str "Integer.parseInt(" target ".trim())"))
-    "to_integer64" (fn [target _] (str "Long.parseLong(" target ".trim())"))
+    "to_integer"  (fn [target _] (str "NexRuntime.parseInt(" target ")"))
+    "to_integer64" (fn [target _] (str "NexRuntime.parseLong(" target ")"))
     "to_real"     (fn [target _] (str "Double.parseDouble(" target ".trim())"))
     "to_decimal"  (fn [target _] (str "new java.math.BigDecimal(" target ".trim())"))
     "contains"    (fn [target args] (str target ".contains(" args ")"))
@@ -453,7 +476,7 @@
                                   (str "new java.util.Scanner(System.in).nextLine() /* prompt: " args " */")))
     "error"        (fn [_ args] (str "System.err.println(" args ")"))
     "new_line"     (fn [_ _] "System.out.println()")
-    "read_integer" (fn [_ _] "Integer.parseInt(new java.util.Scanner(System.in).nextLine().trim())")
+    "read_integer" (fn [_ _] "NexRuntime.parseInt(new java.util.Scanner(System.in).nextLine())")
     "read_real"    (fn [_ _] "Double.parseDouble(new java.util.Scanner(System.in).nextLine().trim())")}
 
    :File
@@ -518,6 +541,10 @@
       "Integer")
     "Real"))
 
+(defn power-dispatch-type
+  [left-type right-type]
+  (division-dispatch-type left-type right-type))
+
 (defn infer-expression-type
   "Infer a Nex type for code generation dispatch."
   [expr]
@@ -539,6 +566,7 @@
                   ("=" "/=" "<" "<=" ">" ">=" "and" "or") "Boolean"
                   "+" (if (or (= left-type "String") (= right-type "String")) "String" left-type)
                   "/" (division-dispatch-type left-type right-type)
+                  "^" (power-dispatch-type left-type right-type)
                   ("-" "*" "%") left-type
                   "Any"))
       :call (let [target-type (when (:target expr)
@@ -839,6 +867,14 @@
         (let [field-ref (resolve-field-name method)]
           (str field-ref ".call" num-args "(" args-code ")"))
 
+        ;; Function-typed local/parameter/top-level binding
+        (and method (function-type? (get *local-types* method)))
+        (str method ".call" num-args "(" args-code ")")
+
+        ;; Local/parameter/top-level binding shadows global functions and is callable
+        (and method (contains? *local-names* method))
+        (str method ".call" num-args "(" args-code ")")
+
         ;; Global function
         (and method (contains? *function-names* method))
         (str "NexGlobals." method ".call" num-args "(" args-code ")")
@@ -1061,19 +1097,20 @@
                               num-args (count (:params method-def))
                               method-name (:name method-def)
                               params (:params method-def)
-                              return-type (:return-type method-def)]
+                              return-type (:return-type method-def)
+                              impl-name (str method-name "$impl")]
                           (str "(new Function() {\n"
                                (indent 1 (str "@Override public Object call" num-args "("
                                               (str/join ", " (map #(str "Object arg" %) (range 1 (inc num-args))))
                                               ") {\n"))
-                               (indent 2 (str "return this." method-name "("
+                               (indent 2 (str "return this." impl-name "("
                                               (str/join ", " (map (fn [i p]
-                                                                    (str "(" (nex-type-to-java-boxed (:type p)) ")arg" i))
+                                                                    (object-arg-cast (:type p) (str "arg" i)))
                                                                   (range 1 (inc num-args))
                                                                   params))
                                               ");\n"))
                                (indent 1 "}\n")
-                               (generate-method 1 method-def {})
+                               (generate-method 1 (assoc method-def :name impl-name) {})
                                "\n" (indent 0 "})")))
     :when (str "(" (generate-expression (:condition expr)) " ? " (generate-expression (:consequent expr)) " : " (generate-expression (:alternative expr)) ")")
     :old (str "old_" (generate-expression (:expr expr)))
@@ -2515,6 +2552,52 @@ public class NexTurtle {
        "      throw new RuntimeException(e);\n"
        "    }\n"
        "  }\n\n"
+       "  public static long parseLong(String raw) {\n"
+       "    String s = raw.trim().replace(\"_\", \"\");\n"
+       "    boolean negative = s.startsWith(\"-\");\n"
+       "    String unsigned = negative ? s.substring(1) : s;\n"
+       "    int radix = 10;\n"
+       "    String digits = unsigned;\n"
+       "    if (unsigned.startsWith(\"0b\")) {\n"
+       "      radix = 2;\n"
+       "      digits = unsigned.substring(2);\n"
+       "    } else if (unsigned.startsWith(\"0o\")) {\n"
+       "      radix = 8;\n"
+       "      digits = unsigned.substring(2);\n"
+       "    } else if (unsigned.startsWith(\"0x\")) {\n"
+       "      radix = 16;\n"
+       "      digits = unsigned.substring(2);\n"
+       "    }\n"
+       "    long parsed = Long.parseLong(digits, radix);\n"
+       "    return negative ? -parsed : parsed;\n"
+       "  }\n\n"
+       "  public static int parseInt(String raw) {\n"
+       "    return (int) parseLong(raw);\n"
+       "  }\n\n"
+       "  public static int intPow(int base, int exponent) {\n"
+       "    if (exponent < 0) throw new RuntimeException(\"Integral exponentiation requires a non-negative exponent\");\n"
+       "    int acc = 1;\n"
+       "    int b = base;\n"
+       "    int e = exponent;\n"
+       "    while (e > 0) {\n"
+       "      if ((e & 1) == 1) acc *= b;\n"
+       "      b *= b;\n"
+       "      e /= 2;\n"
+       "    }\n"
+       "    return acc;\n"
+       "  }\n\n"
+       "  public static long intPow64(long base, long exponent) {\n"
+       "    if (exponent < 0L) throw new RuntimeException(\"Integral exponentiation requires a non-negative exponent\");\n"
+       "    long acc = 1L;\n"
+       "    long b = base;\n"
+       "    long e = exponent;\n"
+       "    while (e > 0L) {\n"
+       "      if ((e & 1L) == 1L) acc *= b;\n"
+       "      b *= b;\n"
+       "      e /= 2L;\n"
+       "    }\n"
+       "    return acc;\n"
+       "  }\n\n"
        "  public static class Task<T> {\n"
        "    private final java.util.concurrent.CompletableFuture<T> future;\n"
        "    public Task(java.util.concurrent.CompletableFuture<T> future) { this.future = future; }\n"
@@ -2880,8 +2963,10 @@ public class NexTurtle {
         classes (:classes ast)]
     (if (seq statements)
       (let [top-level-vars (extract-var-names statements)
-            statement-lines (binding [*local-names* (into *local-names* top-level-vars)]
-                              (map #(generate-statement 2 % #{}) statements))]
+            top-level-types (extract-typed-locals statements)
+            statement-lines (binding [*local-names* (into *local-names* top-level-vars)
+                                      *local-types* (merge *local-types* top-level-types)]
+                              (mapv #(generate-statement 2 % #{}) statements))]
         (str "public class Main {\n"
              "    public static void main(String[] args) {\n"
              (if (seq statement-lines)

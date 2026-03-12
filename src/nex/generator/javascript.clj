@@ -231,6 +231,10 @@
       "Integer")
     "Real"))
 
+(defn power-dispatch-type
+  [left-type right-type]
+  (division-dispatch-type left-type right-type))
+
 (defn infer-expression-type
   "Infer a Nex type for code generation dispatch."
   [expr]
@@ -252,6 +256,7 @@
                   ("=" "/=" "<" "<=" ">" ">=" "and" "or") "Boolean"
                   "+" (if (or (= left-type "String") (= right-type "String")) "String" left-type)
                   "/" (division-dispatch-type left-type right-type)
+                  "^" (power-dispatch-type left-type right-type)
                   ("-" "*" "%") left-type
                   "Any"))
       :call (let [target-type (when (:target expr)
@@ -402,13 +407,18 @@
   [{:keys [operator left right]}]
   (let [left-code (generate-expression left)
         right-code (generate-expression right)]
-    (if (= operator "/")
+    (if (contains? #{"/" "^"} operator)
       (let [left-type (builtin-dispatch-type (infer-expression-type left))
             right-type (builtin-dispatch-type (infer-expression-type right))]
-        (if (and (integral-dispatch-type? left-type)
-                 (integral-dispatch-type? right-type))
-          (str "__nexIntDiv(" left-code ", " right-code ")")
-          (str "(" left-code " / " right-code ")")))
+        (case operator
+          "/" (if (and (integral-dispatch-type? left-type)
+                       (integral-dispatch-type? right-type))
+                (str "__nexIntDiv(" left-code ", " right-code ")")
+                (str "(" left-code " / " right-code ")"))
+          "^" (if (and (integral-dispatch-type? left-type)
+                       (integral-dispatch-type? right-type))
+                (str "__nexIntPow(" left-code ", " right-code ")")
+                (str "(" left-code " ** " right-code ")"))))
       (let [op (generate-binary-op operator)]
         (str "(" left-code " " op " " right-code ")")))))
 
@@ -444,8 +454,8 @@
     "substring"   (fn [target args] (str target ".substring(" args ")"))
     "to_upper"    (fn [target _] (str target ".toUpperCase()"))
     "to_lower"    (fn [target _] (str target ".toLowerCase()"))
-    "to_integer"  (fn [target _] (str "parseInt(" target ".trim(), 10)"))
-    "to_integer64" (fn [target _] (str "parseInt(" target ".trim(), 10)"))
+    "to_integer"  (fn [target _] (str "__nexParseInt(" target ")"))
+    "to_integer64" (fn [target _] (str "__nexParseLong(" target ")"))
     "to_real"     (fn [target _] (str "parseFloat(" target ".trim())"))
     "to_decimal"  (fn [target _] (str "parseFloat(" target ".trim())"))
     "contains"    (fn [target args] (str target ".includes(" args ")"))
@@ -642,7 +652,7 @@
     "read_line"    (fn [_ _] "require('readline-sync').question('')")
     "error"        (fn [_ args] (str "console.error(" args ")"))
     "new_line"     (fn [_ _] "console.log()")
-    "read_integer" (fn [_ _] "parseInt(require('readline-sync').question(''), 10)")
+    "read_integer" (fn [_ _] "__nexParseInt(require('readline-sync').question(''))")
     "read_real"    (fn [_ _] "parseFloat(require('readline-sync').question(''))")}
 
    :File
@@ -676,6 +686,9 @@
     (nil? target)
     (and (not (#{"print" "println" "type_of" "type_is"} method))
          (or (contains? *all-method-names* method)
+             (function-type? (get *field-types* method))
+             (function-type? (get *local-types* method))
+             (contains? *local-names* method)
              (contains? *function-names* method)))
 
     :else
@@ -787,6 +800,14 @@
         ;; Function-typed field: call the function object
         (and method (function-type? (get *field-types* method)))
         (maybe-await call-node (str "this." method ".call" num-args "(" args-code ")"))
+
+        ;; Function-typed local/parameter/top-level binding
+        (and method (function-type? (get *local-types* method)))
+        (maybe-await call-node (str method ".call" num-args "(" args-code ")"))
+
+        ;; Local/parameter/top-level binding shadows global functions and is callable
+        (and method (contains? *local-names* method))
+        (maybe-await call-node (str method ".call" num-args "(" args-code ")"))
 
         ;; Global function
         (and method (contains? *function-names* method))
@@ -1895,6 +1916,40 @@
        "  if (b === 0) throw new Error('Division by zero');\n"
        "  return Math.trunc(a / b);\n"
        "}\n"
+       "function __nexParseLong(raw) {\n"
+       "  const trimmed = String(raw).trim();\n"
+       "  const negative = trimmed.startsWith('-');\n"
+       "  const unsigned = (negative ? trimmed.slice(1) : trimmed).replace(/_/g, '');\n"
+       "  let radix = 10;\n"
+       "  let digits = unsigned;\n"
+       "  if (unsigned.startsWith('0b')) {\n"
+       "    radix = 2;\n"
+       "    digits = unsigned.slice(2);\n"
+       "  } else if (unsigned.startsWith('0o')) {\n"
+       "    radix = 8;\n"
+       "    digits = unsigned.slice(2);\n"
+       "  } else if (unsigned.startsWith('0x')) {\n"
+       "    radix = 16;\n"
+       "    digits = unsigned.slice(2);\n"
+       "  }\n"
+       "  const parsed = parseInt(digits, radix);\n"
+       "  return negative ? -parsed : parsed;\n"
+       "}\n"
+       "function __nexParseInt(raw) {\n"
+       "  return __nexParseLong(raw);\n"
+       "}\n"
+       "function __nexIntPow(a, b) {\n"
+       "  if (b < 0) throw new Error('Integral exponentiation requires a non-negative exponent');\n"
+       "  let acc = 1;\n"
+       "  let base = a;\n"
+       "  let exp = b;\n"
+       "  while (exp > 0) {\n"
+       "    if ((exp & 1) === 1) acc *= base;\n"
+       "    base *= base;\n"
+       "    exp = Math.trunc(exp / 2);\n"
+       "  }\n"
+       "  return acc;\n"
+       "}\n"
        "function __nexTypeIs(typeName, v) {\n"
        "  if (typeof typeName !== 'string') return false;\n"
        "  const runtime = __nexTypeOf(v);\n"
@@ -2245,9 +2300,19 @@
         classes (:classes ast)]
     (if (seq statements)
       (let [top-level-vars (extract-var-names-js statements)
-            statement-lines (binding [*local-names* (into *local-names* top-level-vars)]
-                              (map #(generate-statement 0 % #{}) statements))]
+            top-level-types (extract-typed-locals statements)
+            require-lines (concat
+                           (when (seq *function-names*)
+                             [(indent 1 "const { NexGlobals } = require('./NexGlobals');")])
+                           (map (fn [cls]
+                                  (indent 1 (str "const { " (:name cls) " } = require('./" (:name cls) "');")))
+                                classes))
+            statement-lines (binding [*local-names* (into *local-names* top-level-vars)
+                                      *local-types* (merge *local-types* top-level-types)]
+                              (mapv #(generate-statement 0 % #{}) statements))]
         (str "(async () => {\n"
+             (when (seq require-lines)
+               (str (str/join "\n" require-lines) "\n"))
              (indent 1 (str/join "\n" statement-lines))
              (when (seq statement-lines) "\n")
              "})();\n"))
@@ -2309,10 +2374,10 @@
                            (when (seq js-imports) [""])
                            [function-base]
                            ["" graphics-runtime]
-                           (when function-globals [""])
-                           (when function-globals [function-globals])
                            (when (seq js-classes) [""])
-                           js-classes)]
+                           js-classes
+                           (when function-globals [""])
+                           (when function-globals [function-globals]))]
          (str/join "\n" (remove empty? parts)))))))
 
 (defn translate

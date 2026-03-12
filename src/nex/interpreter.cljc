@@ -142,13 +142,43 @@
 (defn nex-abs [n] #?(:clj (Math/abs (double n)) :cljs (js/Math.abs n)))
 (defn nex-round [n] #?(:clj (Math/round (double n)) :cljs (js/Math.round n)))
 
+(defn nex-int-pow
+  "Raise an integral base to an integral exponent, preserving an integral result.
+   Negative exponents are rejected because they cannot be represented as integers."
+  [base exponent]
+  (when (neg? exponent)
+    (throw (ex-info "Integral exponentiation requires a non-negative exponent"
+                    {:base base :exponent exponent})))
+  (loop [acc 1
+         b base
+         e exponent]
+    (if (zero? e)
+      acc
+      (recur (if (odd? e) (* acc b) acc)
+             (* b b)
+             (quot e 2)))))
+
 ;; Console helpers
 (defn nex-console-print [msg] #?(:clj (print msg) :cljs (.write js/process.stdout (str msg))))
 (defn nex-console-println [msg] #?(:clj (println msg) :cljs (js/console.log msg)))
 (defn nex-console-error [msg] #?(:clj (binding [*out* *err*] (println msg)) :cljs (js/console.error msg)))
 (defn nex-console-newline [] #?(:clj (println) :cljs (js/console.log "")))
 (defn nex-console-read-line [] #?(:clj (read-line) :cljs (throw (ex-info "read-line not supported in ClojureScript" {}))))
-(defn nex-parse-integer [s] #?(:clj (Integer/parseInt (.trim s)) :cljs (js/parseInt s 10)))
+(defn nex-parse-integer64-string [s]
+  (let [trimmed (str/trim s)
+        negative? (str/starts-with? trimmed "-")
+        unsigned (if negative? (subs trimmed 1) trimmed)
+        normalized (str/replace unsigned "_" "")
+        [radix digits] (cond
+                         (str/starts-with? normalized "0b") [2 (subs normalized 2)]
+                         (str/starts-with? normalized "0o") [8 (subs normalized 2)]
+                         (str/starts-with? normalized "0x") [16 (subs normalized 2)]
+                         :else [10 normalized])
+        parsed #?(:clj (Long/parseLong digits radix)
+                  :cljs (js/parseInt digits radix))]
+    (if negative? (- parsed) parsed)))
+(defn nex-parse-integer [s] #?(:clj (int (nex-parse-integer64-string s))
+                               :cljs (nex-parse-integer64-string s)))
 (defn nex-parse-real [s] #?(:clj (Double/parseDouble (.trim s)) :cljs (js/parseFloat s)))
 
 ;; File helpers
@@ -1663,7 +1693,9 @@
             #?(:clj (quot left right)
                :cljs (js/Math.trunc (/ left right)))
             (/ left right)))
-    "^" (Math/pow left right)
+    "^" (if (and (integer? left) (integer? right))
+          (nex-int-pow left right)
+          (Math/pow left right))
     "%" (if (zero? right)
           (throw (ex-info "Division by zero" {:left left :right right}))
           (mod left right))
@@ -1752,10 +1784,8 @@
     "substring"   (fn [s start end & _] (subs s start end))
     "to_upper"    (fn [s & _] (str/upper-case s))
     "to_lower"    (fn [s & _] (str/lower-case s))
-    "to_integer"  (fn [s & _] #?(:clj (Integer/parseInt (str/trim s))
-                                 :cljs (js/parseInt (str/trim s) 10)))
-    "to_integer64" (fn [s & _] #?(:clj (Long/parseLong (str/trim s))
-                                  :cljs (js/parseInt (str/trim s) 10)))
+    "to_integer"  (fn [s & _] (nex-parse-integer s))
+    "to_integer64" (fn [s & _] (nex-parse-integer64-string s))
     "to_real"     (fn [s & _] #?(:clj (Double/parseDouble (str/trim s))
                                  :cljs (js/parseFloat (str/trim s))))
     "to_decimal"  (fn [s & _] #?(:clj (bigdec (str/trim s))
@@ -2356,7 +2386,7 @@
                                         m)))
                                   (:fields current-obj)
                                   all-fields)
-            updated-obj (make-object (:class-name current-obj) updated-fields)
+            updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
             result (let [res (try
                                (env-lookup method-env "result")
                                (catch #?(:clj Exception :cljs :default) _ ::not-found))]
@@ -2479,7 +2509,7 @@
                                                       m)))))
                                             (:fields obj)
                                             all-fields)
-                      updated-obj (make-object (:class-name obj) updated-fields)
+                      updated-obj (make-object (:class-name obj) updated-fields (:closure-env obj))
                       result-flag (try
                                     (env-lookup method-env "__result_assigned__")
                                     (catch #?(:clj Exception :cljs :default) _ ::not-found))
@@ -2569,7 +2599,7 @@
                                               m)))
                                         (:fields current-obj)
                                         all-fields)
-                  updated-obj (make-object (:class-name current-obj) updated-fields)
+                  updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
                   _ (when-let [target-name (:current-target ctx)]
                       (env-set! (-> ctx :current-env :parent) target-name updated-obj))
                   result (eval-node ctx {:type :call
@@ -3367,7 +3397,7 @@
                                                       m)))
                                                 (:fields current-obj)
                                                 all-fields)
-                          updated-obj (make-object (:class-name current-obj) updated-fields)
+                          updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
                           result (async-result-value method-env)]
                       (when-let [tgt (:current-target ctx)]
                         (try
@@ -3543,7 +3573,7 @@
                                                                                                        m)))))
                                                                                              (:fields obj)
                                                                                              all-fields)
-                                                                       updated-obj (make-object (:class-name obj) updated-fields)
+                                                                       updated-obj (make-object (:class-name obj) updated-fields (:closure-env obj))
                                                                        result (async-result-value method-env)]
                                                                    (.then (->promise (if effective-ensure
                                                                                        (check-assertions-async new-ctx effective-ensure Postcondition)
@@ -3615,7 +3645,7 @@
                                                                    m)))
                                                              (:fields current-obj)
                                                              all-fields)
-                                      updated-obj (make-object (:class-name current-obj) updated-fields)
+                                      updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
                                       _ (when-let [target-name (:current-target ctx)]
                                           (env-set! (-> ctx :current-env :parent) target-name updated-obj))]
                                   (.then (->promise (eval-node-async ctx {:type :call

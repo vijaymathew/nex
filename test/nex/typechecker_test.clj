@@ -295,6 +295,20 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-power-result-types
+  (testing "Exponentiation is integral for integral operands and Real otherwise"
+    (let [code "class Test
+                  feature
+                    demo() do
+                      let i: Integer := 2 ^ 8
+                      let r: Real := 2.0 ^ 8
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-boolean-operators
   (testing "Boolean operators should require Boolean operands"
     (let [code "class Test

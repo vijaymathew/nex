@@ -35,6 +35,16 @@ let remainder: Integer := 10 % 3 -- 1
 let power: Integer := 2 ^ 8     -- 256
 ```
 
+Integer literals can also be written with explicit bases:
+
+```nex
+let flags: Integer := 0b1111_0000
+let perms: Integer := 0o755
+let color: Integer := 0xFF_AA_33
+```
+
+Use lowercase prefixes `0b`, `0o`, and `0x`. `_` may be used as a digit separator.
+
 ## Comparing Things
 
 ```nex

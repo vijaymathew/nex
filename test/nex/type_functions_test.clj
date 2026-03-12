@@ -93,3 +93,35 @@ end"
           output (execute-method-output code)]
       (is (= "3" (first output)))
       (is (= "\"Integer\"" (second output))))))
+
+(deftest power-runtime-format-and-type
+  (testing "Integral exponentiation stays Integer and mixed exponentiation stays Real"
+    (let [code "class Test
+  feature
+    demo() do
+      print(2 ^ 8)
+      print(type_of(2 ^ 8))
+      print(2.0 ^ 8)
+      print(type_of(2.0 ^ 8))
+    end
+end"
+          output (execute-method-output code)]
+      (is (= "256" (nth output 0)))
+      (is (= "\"Integer\"" (nth output 1)))
+      (is (= "256.0" (nth output 2)))
+      (is (= "\"Real\"" (nth output 3))))))
+
+(deftest string-integer-conversions-accept-base-prefixes
+  (testing "String to_integer and to_integer64 accept binary, octal, hex, and separators"
+    (let [code "class Test
+  feature
+    demo() do
+      print(\"0b1010\".to_integer())
+      print(\"0o10\".to_integer())
+      print(\"0xFF\".to_integer())
+      print(\"1_000\".to_integer64())
+      print(\"-0x10\".to_integer())
+    end
+end"
+          output (execute-method-output code)]
+      (is (= ["10" "8" "255" "1000" "-16"] output)))))

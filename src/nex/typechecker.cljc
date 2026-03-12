@@ -327,6 +327,12 @@
     :else
     "Real"))
 
+(defn power-result-type
+  "Infer the result type of exponentiation.
+   Integral ^ integral stays integral; any non-integral operand yields Real."
+  [left-type right-type]
+  (division-result-type left-type right-type))
+
 (defn is-comparable-type?
   "Check if a type supports comparison operators"
   [type]
@@ -497,9 +503,17 @@
                                  (str "Operator " operator " requires numeric operands, got "
                                       (display-type left-type) " and " (display-type right-type)))})))
 
-      ("-" "*" "%" "^")
+      ("-" "*" "%")
       (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
         left-type
+        (throw (ex-info (str "Operator " operator " requires numeric operands")
+                        {:error (type-error
+                                 (str "Operator " operator " requires numeric operands, got "
+                                      (display-type left-type) " and " (display-type right-type)))})))
+
+      ("^")
+      (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
+        (power-result-type left-type right-type)
         (throw (ex-info (str "Operator " operator " requires numeric operands")
                         {:error (type-error
                                  (str "Operator " operator " requires numeric operands, got "

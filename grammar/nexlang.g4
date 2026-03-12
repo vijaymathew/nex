@@ -510,11 +510,26 @@ REAL
  *  Sign handled in parser as unary minus.
  */
 INTEGER
-    : DIGITS
+    : '0' 'b' BIN_DIGITS
+    | '0' 'o' OCT_DIGITS
+    | '0' 'x' HEX_DIGITS
+    | DIGITS
     ;
 
 fragment DIGITS
-    : [0-9]+
+    : [0-9] ('_'? [0-9])*
+    ;
+
+fragment BIN_DIGITS
+    : [0-1] ('_'? [0-1])*
+    ;
+
+fragment OCT_DIGITS
+    : [0-7] ('_'? [0-7])*
+    ;
+
+fragment HEX_DIGITS
+    : [0-9a-fA-F] ('_'? [0-9a-fA-F])*
     ;
 
 fragment EXPONENT

@@ -37,6 +37,30 @@ end")
                                         :args [{:type :integer :value 41}]})]
       (is (= 42 result)))))
 
+(deftest anonymous-function-retains-captured-locals-across-calls
+  (testing "Anonymous functions keep their closure environment after repeated invocation"
+    (let [code "function cf(): Function
+do
+  let x := 30
+  result := fn(i: Integer): Integer do
+    result := i + x
+  end
+end
+
+let f1 := cf()"
+          ctx (interp/make-context)
+          ast (p/ast code)
+          _ (interp/eval-node ctx ast)
+          call-node (fn [n]
+                      {:type :call
+                       :target nil
+                       :method "f1"
+                       :args [{:type :integer :value n}]})
+          result1 (interp/eval-node ctx (call-node 10))
+          result2 (interp/eval-node ctx (call-node 20))]
+      (is (= 40 result1))
+      (is (= 50 result2)))))
+
 (deftest typechecker-checks-top-level-statements-in-order
   (testing "Typechecker handles typed top-level let that references top-level function"
     (let [ast (p/ast "function double(n: Integer): Integer

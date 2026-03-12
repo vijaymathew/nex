@@ -56,6 +56,21 @@ nex> print(3.14)
 3.14
 ```
 
+Integers can also be written in binary, octal, or hexadecimal:
+
+```
+nex> 0b1010
+10
+
+nex> 0o10
+8
+
+nex> 0xFF
+255
+```
+
+Use lowercase prefixes `0b`, `0o`, and `0x`. You may insert `_` between digits to make long literals easier to read: `0b1111_0000`, `1_000_000`, `0xFF_AA_33`.
+
 The difference between `print(42)` and `print("42")` matters. The first prints the number forty-two. The second prints a string that happens to contain the characters four and two. They may look the same in the output, but they are different things, and that difference will matter later.
 
 
@@ -142,19 +157,19 @@ A variable is a name for a value. You introduce a variable in Nex with `let`:
 
 ```
 nex> let x := 10
-=> 10
+10
 
 nex> x
 10
 ```
 
-The `:=` symbol means *becomes*. After `let x := 10`, the name `x` refers to the value `10`. The REPL confirms the assignment by printing `=> 10`.
+The `:=` symbol means *becomes*. After `let x := 10`, the name `x` refers to the value `10`. The REPL confirms the assignment by printing `10`.
 
 Variables can be used in expressions:
 
 ```
 nex> let y := x + 5
-=> 15
+15
 
 nex> y
 15
@@ -167,7 +182,7 @@ Once a variable is introduced with `let`, you can update it using plain `:=` wit
 
 ```
 nex> x := 20
-=> 20
+20
 
 nex> x
 20
@@ -181,10 +196,14 @@ Variable names in Nex are case-sensitive. `x`, `X`, and `total_cost` are three d
 
 ## Types
 
-Every value in Nex has a type — a classification that determines what operations are valid on it. The basic types are:
+Every value in Nex has a type — a classification that determines what operations are valid on it. The basic scalar types are:
 
 - `Integer` — whole numbers: `0`, `42`, `-7`
+- `Integer` also supports explicit base prefixes: `0b1010`, `0o755`, `0xFF`
+- `Integer64` — large whole numbers that may exceed the `Integer` range
 - `Real` — numbers with a fractional part: `3.14`, `-0.5`, `1.0`
+- `Decimal` — decimal numbers for precise base-10 arithmetic
+- `Char` — a single character: `#a`, `#65`
 - `Boolean` — the values `true` and `false`
 - `String` — sequences of characters: `"hello"`, `"42"`, `""`
 
@@ -192,19 +211,27 @@ You can declare the type of a variable explicitly:
 
 ```
 nex> let name: String := "Ada"
-=> Ada
+"Ada"
 
 nex> let age: Integer := 12
-=> 12
+12
 
 nex> let height: Real := 1.52
-=> 1.52
+1.52
 
 nex> let enrolled: Boolean := true
-=> true
+true
+
+nex> let initial: Char := #65
+#A
+
+nex> #10024
+-- will print sparkles if your console supports unicode
 ```
 
-In the REPL, type annotations are optional — Nex infers the type from the value on the right-hand side. But writing them out is a good habit. It makes your intentions explicit, catches mistakes early, and will become essential when we start writing functions and classes.
+In the REPL, type annotations are optional by default — Nex infers the type from the value on the right-hand side. But writing them out is a good habit. It makes your intentions explicit, catches mistakes early, and will become essential when we start writing functions and classes.
+
+If you enable strict checking with `:typecheck on`, type annotations on REPL `let` bindings should be treated as mandatory. In that mode, being explicit about the intended type keeps later checks predictable and avoids ambiguous interactive state.
 
 You cannot mix types arbitrarily. Adding an integer to a string, for example, is not a valid operation. When you attempt it, Nex tells you:
 
@@ -223,17 +250,17 @@ Strings can be joined together with `+`:
 
 ```
 nex> let greeting := "Hello, " + name
-=> Hello, Ada
+"Hello, Ada"
 
 nex> greeting
-Hello, Ada
+"Hello, Ada"
 ```
 
 Numbers can be converted to strings for inclusion in messages:
 
 ```
 nex> "Age: " + age
-Age: 12
+"Age: 12"
 ```
 
 This is one of the most common operations in any program: constructing a message from a mix of fixed text and variable values.
@@ -312,13 +339,13 @@ Everything in this chapter so far has been fragments — individual expressions 
 
 ```
 nex> let celsius := 100.0
-=> 100.0
+100.0
 
 nex> let fahrenheit := celsius * 9.0 / 5.0 + 32.0
-=> 212.0
+212.0
 
 nex> celsius + " degrees Celsius is " + fahrenheit + " degrees Fahrenheit"
-100.0 degrees Celsius is 212.0 degrees Fahrenheit
+"100.0 degrees Celsius is 212.0 degrees Fahrenheit"
 ```
 
 Try it with a different starting value. Change `100.0` to `0.0` and recompute `fahrenheit`. Change it to `37.0` — normal body temperature in Celsius — and see what Fahrenheit temperature you get.
@@ -335,7 +362,8 @@ This chapter introduced the fundamental tools for working in Nex:
 - Comments begin with `--` and are ignored by the interpreter
 - Arithmetic follows conventional precedence; parentheses override it
 - `let name := value` introduces a variable; `name := value` updates one
-- The basic types are `Integer`, `Real`, `Boolean`, and `String`
+- The basic scalar types are `Integer`, `Integer64`, `Real`, `Decimal`, `Char`, `Boolean`, and `String`
+- In the REPL, type annotations are optional by default, but with `:typecheck on` you should write them explicitly on `let` bindings
 - Strings are joined with `+`
 - REPL commands — `:vars`, `:clear`, `:quit` — manage the session
 - Error messages are information; read them before changing anything
