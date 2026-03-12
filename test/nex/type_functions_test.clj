@@ -1,5 +1,6 @@
 (ns nex.type-functions-test
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [nex.parser :as p]
             [nex.interpreter :as interp]
             [nex.typechecker :as tc]))
@@ -79,3 +80,16 @@ end"
           result (tc/type-check (p/ast code))]
       (is (not (:success result)))
       (is (seq (:errors result))))))
+
+(deftest division-runtime-format-and-type
+  (testing "Non-integral division is reported as a Real in JVM runtime output"
+    (let [code "class Test
+  feature
+    demo() do
+      print(10 / 3)
+      print(type_of(10 / 3))
+    end
+end"
+          output (execute-method-output code)]
+      (is (str/starts-with? (first output) "3.333333333333333"))
+      (is (= "\"Real\"" (second output))))))

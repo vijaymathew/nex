@@ -168,7 +168,7 @@ end"
     end
 end"
           output (execute-method code)]
-      (is (= ["\"Pass\"" "17/2"] output)))))
+      (is (= ["\"Pass\"" "8.5"] output)))))
 
 ;; ========== elseif tests ==========
 
@@ -441,4 +441,3 @@ end"
           js-code (js-gen/translate-ast ast)]
       (is (str/includes? js-code "?"))
       (is (str/includes? js-code ":")))))
-

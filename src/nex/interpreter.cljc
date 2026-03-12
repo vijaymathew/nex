@@ -1519,6 +1519,11 @@
     (string? value)
     (str \" value \")
 
+    ;; Clojure integer division can produce exact ratios; format them as reals
+    ;; so JVM REPL output matches the browser/runtime surface.
+    #?(:clj (ratio? value) :cljs false)
+    (str (double value))
+
     ;; Numbers
     (number? value)
     (str value)
@@ -2131,6 +2136,7 @@
     ;; Real literals are parsed as doubles on the JVM.
     #?(:clj (or (double? value) (float? value))
        :cljs (and (number? value) (not (integer? value)))) :Real
+    #?(:clj (ratio? value) :cljs false) :Real
     (integer? value) :Integer
     (nex-char? value) :Char
     (boolean? value) :Boolean
