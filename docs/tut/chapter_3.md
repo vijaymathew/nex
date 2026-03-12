@@ -22,7 +22,7 @@ In practice, the boundary between expressions and statements in Nex is clean. If
 The arithmetic operators in Nex are:
 
 | Operator | Meaning | Example | Result |
-|||||
+|---|---|---|---|
 | `+` | Addition | `10 + 3` | `13` |
 | `-` | Subtraction | `10 - 3` | `7` |
 | `*` | Multiplication | `10 * 3` | `30` |
