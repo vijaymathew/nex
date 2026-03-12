@@ -11,7 +11,6 @@ Array literals are written with square brackets, elements separated by commas:
 
 ```
 nex> let scores := [85, 92, 78, 95, 60]
-=> [85, 92, 78, 95, 60]
 
 nex> scores.length
 5
@@ -23,7 +22,6 @@ An empty array requires an explicit type annotation, because there are no elemen
 
 ```
 nex> let empty: Array[Integer] := []
-=> []
 
 nex> empty.length
 0
@@ -37,7 +35,6 @@ Elements are accessed by their index, which counts from zero:
 
 ```
 nex> let scores := [85, 92, 78, 95, 60]
-=> [85, 92, 78, 95, 60]
 
 nex> scores.get(0)
 85
@@ -90,7 +87,6 @@ The most natural way to process every element of an array is `across`:
 
 ```
 nex> let scores := [85, 92, 78, 95, 60]
-=> [85, 92, 78, 95, 60]
 
 nex> across scores as s do
        print(s)
@@ -132,7 +128,6 @@ Arrays can be extended with `add`:
 
 ```
 nex> let names: Array[String] := ["Alice", "Bob"]
-=> [Alice, Bob]
 
 nex> names.add("Carol")
 nex> names
@@ -180,7 +175,6 @@ nex> names
 
 ```
 nex> let primes := [2, 3, 5, 7, 11]
-=> [2, 3, 5, 7, 11]
 
 nex> primes.contains(5)
 true
@@ -205,7 +199,6 @@ nex> primes.index_of(9)
 
 ```
 nex> let scores := [85, 92, 78, 95, 60]
-=> [85, 92, 78, 95, 60]
 
 nex> scores.slice(1, 4)
 [92, 78, 95]
@@ -237,7 +230,6 @@ Often an array is built up element by element rather than written as a literal. 
 
 ```
 nex> let squares: Array[Integer] := []
-=> []
 
 nex> from
        let i := 1
@@ -363,7 +355,6 @@ nex> function std_dev(arr: Array[Real]): Real
 
 ```
 nex> let data := [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]
-=> [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]
 
 nex> mean(data)
 5.0

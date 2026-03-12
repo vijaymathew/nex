@@ -295,6 +295,7 @@ setup_directories() {
 # Install files
 install_files() {
     echo "Installing Nex files..."
+    echo "  Cleaning previously installed managed files to avoid stale namespace conflicts..."
 
     # Remove previously installed managed content first so deleted/renamed source
     # files do not linger and shadow newer namespaces (for example .clj vs .cljc).

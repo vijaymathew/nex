@@ -189,7 +189,6 @@ These operators are most useful for combining comparison expressions:
 
 ```
 nex> let age := 17
-=> 17
 
 nex> age >= 13 and age <= 17
 true
@@ -217,10 +216,8 @@ Strings are joined with `+`:
 
 ```
 nex> let first := "Hello"
-=> Hello
 
 nex> let second := "Nex"
-=> Nex
 
 nex> first + ", " + second + "!"
 Hello, Nex!
@@ -233,7 +230,6 @@ non-string operand is converted by calling its `to_string` method internally:
 
 ```
 nex> let count: Integer := 3
-=> 3
 
 nex> "Found " + count + " results"
 Found 3 results
@@ -251,7 +247,6 @@ Method calls are expressions. The call `n.abs` produces a value — the absolute
 
 ```
 nex> let n := -5
-=> -5
 
 nex> n.abs * 2
 10
@@ -279,13 +274,10 @@ Real programs rarely deal with simple two-operand expressions. More often, expre
 
 ```
 nex> let weight: Real := 70.0
-=> 70.0
 
 nex> let height: Real := 1.75
-=> 1.75
 
 nex> let bmi: Real := weight / (height * height)
-=> 22.857142857142858
 
 nex> "BMI: " + bmi.round.to_string
 BMI: 23

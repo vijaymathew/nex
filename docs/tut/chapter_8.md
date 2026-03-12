@@ -113,13 +113,10 @@ This is also a natural moment to introduce the `Char` type. A `Char` is a single
 
 ```
 nex> let c: Char := #s
-=> s
 
 nex> let newline: Char := #newline
-=> newline
 
 nex> let tab: Char := #tab
-=> tab
 ```
 
 `Char` is distinct from `String` — `#s` is a single character value, not the one-character string `"s"`. Special characters are written by name: `#newline`, `#space`, `#tab`. The `to_string` method converts a `Char` to a `String` when needed for comparison or concatenation.

@@ -9,7 +9,6 @@ The simplest form of a conditional executes a block of code only when a conditio
 
 ```
 nex> let temperature := 35
-=> 35
 
 nex> if temperature > 30 then
        print("hot")
@@ -23,7 +22,6 @@ The `else` branch provides an alternative when the condition is false:
 
 ```
 nex> let score := 45
-=> 45
 
 nex> if score >= 50 then
        print("pass")
@@ -39,7 +37,6 @@ For more than two cases, use `elseif`:
 
 ```
 nex> let score := 72
-=> 72
 
 nex> if score >= 90 then
        print("A")
@@ -69,13 +66,10 @@ A condition is a `Boolean` expression, and the quality of the condition determin
 
 ```
 nex> let age := 22
-=> 22
 
 nex> let has_licence := true
-=> true
 
 nex> let can_drive := age >= 17 and has_licence
-=> true
 
 nex> if can_drive then
        print("You may drive")
@@ -125,10 +119,8 @@ Conditions can be nested — an `if` can appear inside another `if`:
 
 ```
 nex> let age := 20
-=> 20
 
 nex> let has_ticket := true
-=> true
 
 nex> if age >= 18 then
        if has_ticket then
@@ -165,10 +157,8 @@ The `if` statement executes blocks of code. Sometimes what you want is not to ex
 
 ```
 nex> let age := 20
-=> 20
 
 nex> let category := when age >= 18 "adult" else "minor" end
-=> adult
 
 nex> category
 adult
@@ -207,7 +197,6 @@ When a condition tests the same variable against several specific values, a chai
 
 ```
 nex> let day := "Monday"
-=> Monday
 
 nex> if day = "Saturday" or day = "Sunday" then
        print("weekend")
@@ -236,7 +225,6 @@ edge of week
 
 ```
 nex> let code: Integer := 2
-=> 2
 
 nex> case code of
        0, 1 then print("low")
@@ -287,10 +275,8 @@ Tax calculations are a classic example of tiered conditional logic. Suppose a si
 
 ```
 nex> let income: Real := 35000.0
-=> 35000.0
 
 nex> let tax: Real := 0.0
-=> 0.0
 
 nex> if income <= 10000.0 then
        tax := income * 0.10
