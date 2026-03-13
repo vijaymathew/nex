@@ -1,6 +1,7 @@
 (ns nex.browser-spawn-test
   (:require [cljs.test :refer-macros [async deftest is testing]]
             [clojure.string :as str]
+            [nex.core :as core]
             [nex.interpreter :as interp]
             [nex.typechecker :as tc]))
 
@@ -211,4 +212,36 @@
                           (done))))
                (fn [err]
                  (is false (str "Unexpected rejection in let sequence: " err))
+                 (done)))))))
+
+(deftest browser-repl-spawn-let-with-capture-smoke-test
+  (async done
+    (testing "browser REPL returns promptly for typed let bindings of spawned tasks"
+      (reset! core/app-state
+              (assoc @core/app-state
+                     :ctx (interp/make-context)
+                     :typecheck-enabled false
+                     :repl-var-types {}))
+      (let [ctx (:ctx @core/app-state)
+            timeout-id (js/setTimeout
+                        (fn []
+                          (is false "browser REPL spawn let timed out")
+                          (done))
+                        1000)]
+        (.then (core/eval-repl-source! ctx "let x: Integer := 100")
+               (fn [_]
+                 (.then (core/eval-repl-source! ctx "let t: Task[Integer] := spawn do result := x + 2 end")
+                        (fn [{:keys [kind result output]}]
+                          (js/clearTimeout timeout-id)
+                          (is (= :statement kind))
+                          (is (empty? output))
+                          (is (= :Task (:nex-builtin-type result)))
+                          (done))
+                        (fn [err]
+                          (js/clearTimeout timeout-id)
+                          (is false (str "Unexpected rejection in typed spawn let: " err))
+                          (done))))
+               (fn [err]
+                 (js/clearTimeout timeout-id)
+                 (is false (str "Unexpected rejection in captured binding let: " err))
                  (done)))))))

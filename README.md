@@ -273,6 +273,10 @@ bash bootstrap-install.sh jvm --prefix "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
+The installer also copies the shipped Nex libraries from `lib/` into `~/.nex/deps`,
+so `intern` can resolve standard library namespaces such as `io/Path`, `time/Date_Time`,
+and `net/Http_Client` from an installed Nex command.
+
 Supported platforms: Ubuntu, Debian, Fedora, CentOS, RHEL, Arch, Manjaro, macOS.
 
 For manual installation and platform-specific instructions, see [INSTALL.md](INSTALL.md).

@@ -861,32 +861,21 @@
         _ (typecheck-ast! ast)
         method-def (-> ast :classes first :body first :members first)
         body (:body method-def)]
-    (if (source-needs-async? source)
-      (.then (reduce (fn [acc stmt]
-                       (.then acc
-                              (fn [_]
-                                (.then (ensure-promise (interp/eval-node-async ctx stmt))
-                                       (fn [value]
-                                         (when (= :let (:type stmt))
-                                           (interp/env-define (:current-env ctx) (:name stmt) value))
-                                         value)))))
-                     (ensure-promise nil)
-                     body)
-             (fn [result]
-               (when (:typecheck-enabled @app-state)
-                 (remember-typed-lets! body))
-               {:result result
-                :output @(:output ctx)}))
-      (let [result (last (map (fn [stmt]
-                                (let [value (interp/eval-node ctx stmt)]
-                                  (when (= :let (:type stmt))
-                                    (interp/env-define (:current-env ctx) (:name stmt) value))
-                                  value))
-                              body))]
-        (when (:typecheck-enabled @app-state)
-          (remember-typed-lets! body))
-        (ensure-promise {:result result
-                         :output @(:output ctx)})))))
+    (.then (reduce (fn [acc stmt]
+                     (.then acc
+                            (fn [_]
+                              (.then (interp/eval-node-async ctx stmt)
+                                     (fn [value]
+                                       (when (= :let (:type stmt))
+                                         (interp/env-define (:current-env ctx) (:name stmt) value))
+                                       value)))))
+                   (ensure-promise nil)
+                   body)
+           (fn [result]
+             (when (:typecheck-enabled @app-state)
+               (remember-typed-lets! body))
+             {:result result
+              :output @(:output ctx)}))))
 
 (defn- eval-async-expression! [ctx source]
   (let [task-await-fn (deref #'interp/task-await)
@@ -898,7 +887,7 @@
       (simple-await-var source)
       (let [task-name (simple-await-var source)
             task (interp/env-lookup (:current-env ctx) task-name)]
-        (.then (ensure-promise (task-await-fn task))
+        (.then (task-await-fn task)
                (fn [result]
                  {:result result
                   :output @(:output ctx)})))
@@ -906,7 +895,7 @@
       (simple-print-await-var source)
       (let [task-name (simple-print-await-var source)
             task (interp/env-lookup (:current-env ctx) task-name)]
-        (.then (ensure-promise (task-await-fn task))
+        (.then (task-await-fn task)
                (fn [result]
                  (interp/add-output ctx (interp/nex-format-value result))
                  {:result nil
@@ -916,7 +905,7 @@
            (nil? (:target stmt-node))
            (#{"print" "println"} (:method stmt-node)))
       (.then (js/Promise.all
-              (to-array (map #(ensure-promise (interp/eval-node-async ctx %))
+              (to-array (map #(interp/eval-node-async ctx %)
                              (:args stmt-node))))
              (fn [arg-array]
                (let [arg-values (vec (array-seq arg-array))
@@ -926,7 +915,7 @@
                   :output @(:output ctx)})))
 
       :else
-      (.then (ensure-promise (interp/eval-node-async ctx stmt-node))
+      (.then (interp/eval-node-async ctx stmt-node)
              (fn [result]
                {:result result
                 :output @(:output ctx)})))))
@@ -936,47 +925,32 @@
         _ (typecheck-ast! ast)
         call-node {:type :call
                    :target {:type :create
-                            :class-name "__BrowserRepl__"
-                            :generic-args []
-                            :constructor nil
-                            :args []}
+                   :class-name "__BrowserRepl__"
+                   :generic-args []
+                   :constructor nil
+                   :args []}
                    :method "__eval__"
                    :args []
                    :has-parens true}]
-    (if (source-needs-async? wrapped-code)
-      (.then (ensure-promise (interp/eval-node-async ctx ast))
-             (fn [_]
-               (.then (ensure-promise (interp/eval-node-async ctx call-node))
-                      (fn [result]
-                        (when (:typecheck-enabled @app-state)
-                          (when-let [method-def (-> ast :classes first :body first :members first)]
-                            (remember-typed-lets! (:body method-def))))
-                        {:result result
-                         :output @(:output ctx)}))))
-      (let [_ (eval-sync-program! ctx ast)
-            result (interp/eval-node ctx call-node)]
-        (when (:typecheck-enabled @app-state)
-          (when-let [method-def (-> ast :classes first :body first :members first)]
-            (remember-typed-lets! (:body method-def))))
-        (ensure-promise {:result result
-                         :output @(:output ctx)})))))
+    (.then (interp/eval-node-async ctx ast)
+           (fn [_]
+             (.then (interp/eval-node-async ctx call-node)
+                    (fn [result]
+                      (when (:typecheck-enabled @app-state)
+                        (when-let [method-def (-> ast :classes first :body first :members first)]
+                          (remember-typed-lets! (:body method-def))))
+                      {:result result
+                       :output @(:output ctx)}))))))
 
 (defn- run-program! [ctx source]
   (let [ast (p/ast source)
         _ (typecheck-ast! ast)]
-    (if (source-needs-async? source)
-      (.then (ensure-promise (interp/eval-node-async ctx ast))
-             (fn [raw-result]
-               (when (:typecheck-enabled @app-state)
-                 (remember-function-defs! (:functions ast)))
-               {:result (if (= :program (:type ast)) nil raw-result)
-                :output @(:output ctx)}))
-      (let [raw-result (eval-sync-program! ctx ast)]
-        (when (:typecheck-enabled @app-state)
-          (remember-function-defs! (:functions ast)))
-        (ensure-promise
-         {:result (if (= :program (:type ast)) nil raw-result)
-          :output @(:output ctx)})))))
+    (.then (interp/eval-node-async ctx ast)
+           (fn [raw-result]
+             (when (:typecheck-enabled @app-state)
+               (remember-function-defs! (:functions ast)))
+             {:result (if (= :program (:type ast)) nil raw-result)
+              :output @(:output ctx)}))))
 
 (defn- show-runtime-output! [output result]
   (doseq [line output]

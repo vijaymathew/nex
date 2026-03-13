@@ -12,6 +12,12 @@ book:
     - collection-types.md
     - cursor-types.md
     - system-classes.md
+    - libraries.md
+    - data.md
+    - io.md
+    - text.md
+    - time.md
+    - networking.md
     - graphics-classes.md
 
 format:
