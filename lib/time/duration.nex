@@ -1,0 +1,51 @@
+class Duration
+  note "Time span stored as total milliseconds."
+
+create
+  milliseconds(ms: Integer64) do
+    this.millis := ms
+  end
+
+  seconds(n: Integer) do
+    this.millis := n * 1000
+  end
+
+  minutes(n: Integer) do
+    this.millis := n * 60 * 1000
+  end
+
+  hours(n: Integer) do
+    this.millis := n * 60 * 60 * 1000
+  end
+
+  days(n: Integer) do
+    this.millis := n * 24 * 60 * 60 * 1000
+  end
+
+  weeks(n: Integer) do
+    this.millis := n * 7 * 24 * 60 * 60 * 1000
+  end
+
+feature
+  millis: Integer64
+
+  total_milliseconds(): Integer64 do
+    result := millis
+  end
+
+  total_seconds(): Real do
+    result := millis / 1000.0
+  end
+
+  plus(other: Duration): Duration do
+    result := create Duration.milliseconds(millis + other.millis)
+  end
+
+  minus(other: Duration): Duration do
+    result := create Duration.milliseconds(millis - other.millis)
+  end
+
+  to_string(): String do
+    result := "Duration(" + millis + " ms)"
+  end
+end

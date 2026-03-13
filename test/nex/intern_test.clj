@@ -283,3 +283,18 @@ end")
                    (repl/eval-code ctx "print(json.to_string())"))]
       (is (not (.contains output "Cannot find intern file for data/Json")))
       (is (.contains output "#<Json object>")))))
+
+(deftest repl-intern-loads-checked-in-time-libraries
+  (testing "REPL can load the checked-in time libraries and create representative objects"
+    (let [ctx (repl/init-repl-context)
+          output (with-out-str
+                   (repl/eval-code ctx "intern time/Duration")
+                   (repl/eval-code ctx "intern time/Date_Time")
+                   (repl/eval-code ctx "let d: Duration := create Duration.seconds(5)")
+                   (repl/eval-code ctx "let t: Date_Time := create Date_Time.make(2026, 3, 13, 10, 30, 0)")
+                   (repl/eval-code ctx "print(d.to_string())")
+                   (repl/eval-code ctx "print(t.to_string())"))]
+      (is (not (.contains output "Cannot find intern file for time/Duration")))
+      (is (not (.contains output "Cannot find intern file for time/Date_Time")))
+      (is (.contains output "\"Duration(5000 ms)\""))
+      (is (.contains output "\"2026-03-13T10:30:00Z\"")))))

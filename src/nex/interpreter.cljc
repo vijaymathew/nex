@@ -4,6 +4,7 @@
             [nex.types.runtime :as rt]
             [nex.types.json :as json-types]
             [nex.types.http :as http]
+            [nex.types.datetime :as dt]
             [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo]
             [nex.types.bootstrap :as bootstrap]
@@ -1490,6 +1491,150 @@
      #?(:clj (json-types/nex-json-stringify (first args))
         :cljs (throw (ex-info "json_stringify is not supported in the ClojureScript interpreter"
                               {:function "json_stringify"}))))
+
+   "datetime_now"
+   (fn [_ctx & args]
+     (when (not= (count args) 0)
+       (throw (ex-info "datetime_now expects exactly 0 arguments" {:function "datetime_now"})))
+     #?(:clj (dt/datetime-now)
+        :cljs (throw (ex-info "datetime_now is not supported in the ClojureScript interpreter"
+                              {:function "datetime_now"}))))
+
+   "datetime_from_epoch_millis"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_from_epoch_millis expects exactly 1 argument" {:function "datetime_from_epoch_millis"})))
+     #?(:clj (dt/datetime-from-epoch-millis (first args))
+        :cljs (throw (ex-info "datetime_from_epoch_millis is not supported in the ClojureScript interpreter"
+                              {:function "datetime_from_epoch_millis"}))))
+
+   "datetime_parse_iso"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_parse_iso expects exactly 1 argument" {:function "datetime_parse_iso"})))
+     #?(:clj (dt/datetime-parse-iso (first args))
+        :cljs (throw (ex-info "datetime_parse_iso is not supported in the ClojureScript interpreter"
+                              {:function "datetime_parse_iso"}))))
+
+   "datetime_make"
+   (fn [_ctx & args]
+     (when (not= (count args) 6)
+       (throw (ex-info "datetime_make expects exactly 6 arguments" {:function "datetime_make"})))
+     #?(:clj (apply dt/datetime-make args)
+        :cljs (throw (ex-info "datetime_make is not supported in the ClojureScript interpreter"
+                              {:function "datetime_make"}))))
+
+   "datetime_year"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_year expects exactly 1 argument" {:function "datetime_year"})))
+     #?(:clj (dt/datetime-year (first args))
+        :cljs (throw (ex-info "datetime_year is not supported in the ClojureScript interpreter"
+                              {:function "datetime_year"}))))
+
+   "datetime_month"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_month expects exactly 1 argument" {:function "datetime_month"})))
+     #?(:clj (dt/datetime-month (first args))
+        :cljs (throw (ex-info "datetime_month is not supported in the ClojureScript interpreter"
+                              {:function "datetime_month"}))))
+
+   "datetime_day"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_day expects exactly 1 argument" {:function "datetime_day"})))
+     #?(:clj (dt/datetime-day (first args))
+        :cljs (throw (ex-info "datetime_day is not supported in the ClojureScript interpreter"
+                              {:function "datetime_day"}))))
+
+   "datetime_weekday"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_weekday expects exactly 1 argument" {:function "datetime_weekday"})))
+     #?(:clj (dt/datetime-weekday (first args))
+        :cljs (throw (ex-info "datetime_weekday is not supported in the ClojureScript interpreter"
+                              {:function "datetime_weekday"}))))
+
+   "datetime_day_of_year"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_day_of_year expects exactly 1 argument" {:function "datetime_day_of_year"})))
+     #?(:clj (dt/datetime-day-of-year (first args))
+        :cljs (throw (ex-info "datetime_day_of_year is not supported in the ClojureScript interpreter"
+                              {:function "datetime_day_of_year"}))))
+
+   "datetime_hour"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_hour expects exactly 1 argument" {:function "datetime_hour"})))
+     #?(:clj (dt/datetime-hour (first args))
+        :cljs (throw (ex-info "datetime_hour is not supported in the ClojureScript interpreter"
+                              {:function "datetime_hour"}))))
+
+   "datetime_minute"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_minute expects exactly 1 argument" {:function "datetime_minute"})))
+     #?(:clj (dt/datetime-minute (first args))
+        :cljs (throw (ex-info "datetime_minute is not supported in the ClojureScript interpreter"
+                              {:function "datetime_minute"}))))
+
+   "datetime_second"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_second expects exactly 1 argument" {:function "datetime_second"})))
+     #?(:clj (dt/datetime-second (first args))
+        :cljs (throw (ex-info "datetime_second is not supported in the ClojureScript interpreter"
+                              {:function "datetime_second"}))))
+
+   "datetime_epoch_millis"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_epoch_millis expects exactly 1 argument" {:function "datetime_epoch_millis"})))
+     #?(:clj (dt/datetime-epoch-millis (first args))
+        :cljs (throw (ex-info "datetime_epoch_millis is not supported in the ClojureScript interpreter"
+                              {:function "datetime_epoch_millis"}))))
+
+   "datetime_add_millis"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "datetime_add_millis expects exactly 2 arguments" {:function "datetime_add_millis"})))
+     #?(:clj (apply dt/datetime-add-millis args)
+        :cljs (throw (ex-info "datetime_add_millis is not supported in the ClojureScript interpreter"
+                              {:function "datetime_add_millis"}))))
+
+   "datetime_diff_millis"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "datetime_diff_millis expects exactly 2 arguments" {:function "datetime_diff_millis"})))
+     #?(:clj (apply dt/datetime-diff-millis args)
+        :cljs (throw (ex-info "datetime_diff_millis is not supported in the ClojureScript interpreter"
+                              {:function "datetime_diff_millis"}))))
+
+   "datetime_truncate_to_day"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_truncate_to_day expects exactly 1 argument" {:function "datetime_truncate_to_day"})))
+     #?(:clj (dt/datetime-truncate-to-day (first args))
+        :cljs (throw (ex-info "datetime_truncate_to_day is not supported in the ClojureScript interpreter"
+                              {:function "datetime_truncate_to_day"}))))
+
+   "datetime_truncate_to_hour"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_truncate_to_hour expects exactly 1 argument" {:function "datetime_truncate_to_hour"})))
+     #?(:clj (dt/datetime-truncate-to-hour (first args))
+        :cljs (throw (ex-info "datetime_truncate_to_hour is not supported in the ClojureScript interpreter"
+                              {:function "datetime_truncate_to_hour"}))))
+
+   "datetime_format_iso"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_format_iso expects exactly 1 argument" {:function "datetime_format_iso"})))
+     #?(:clj (dt/datetime-format-iso (first args))
+        :cljs (throw (ex-info "datetime_format_iso is not supported in the ClojureScript interpreter"
+                              {:function "datetime_format_iso"}))))
 
    "path_exists"
    (fn [_ctx & args]

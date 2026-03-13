@@ -1044,6 +1044,24 @@ end"
       (is (str/includes? js-code "result = __nexJsonParse(text);"))
       (is (str/includes? js-code "result = __nexJsonStringify(value);")))))
 
+(deftest time-library-generation-test
+  (testing "time libraries lower to ordinary classes plus runtime datetime builtins"
+    (let [duration-code (js/translate (slurp "lib/time/duration.nex") {:skip-type-check true})
+          datetime-code (js/translate (slurp "lib/time/date_time.nex") {:skip-type-check true})]
+      (is (str/includes? duration-code "class Duration"))
+      (is (str/includes? duration-code "static async minutes"))
+      (is (str/includes? datetime-code "class Date_Time"))
+      (is (str/includes? datetime-code "__nexDateTimeNow("))
+      (is (str/includes? datetime-code "__nexDateTimeParseIso("))
+      (is (str/includes? datetime-code "__nexDateTimeMake("))
+      (is (str/includes? datetime-code "__nexDateTimeWeekday("))
+      (is (str/includes? datetime-code "__nexDateTimeDayOfYear("))
+      (is (str/includes? datetime-code "__nexDateTimeTruncateToDay("))
+      (is (str/includes? datetime-code "__nexDateTimeTruncateToHour("))
+      (is (str/includes? datetime-code "__nexDateTimeFormatIso("))
+      (is (str/includes? datetime-code "__nexDateTimeAddMillis("))
+      (is (str/includes? datetime-code "__nexDateTimeDiffMillis(")))))
+
 (deftest io-library-generation-test
   (testing "io libraries lower to ordinary classes plus runtime IO builtins"
     (let [path-code (js/translate (slurp "lib/io/path.nex"))

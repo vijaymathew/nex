@@ -278,6 +278,24 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
+                  "datetime_now" "Integer64"
+                  "datetime_from_epoch_millis" "Integer64"
+                  "datetime_parse_iso" "Integer64"
+                  "datetime_make" "Integer64"
+                  "datetime_year" "Integer"
+                  "datetime_month" "Integer"
+                  "datetime_day" "Integer"
+                  "datetime_weekday" "Integer"
+                  "datetime_day_of_year" "Integer"
+                  "datetime_hour" "Integer"
+                  "datetime_minute" "Integer"
+                  "datetime_second" "Integer"
+                  "datetime_epoch_millis" "Integer64"
+                  "datetime_add_millis" "Integer64"
+                  "datetime_diff_millis" "Integer64"
+                  "datetime_truncate_to_day" "Integer64"
+                  "datetime_truncate_to_hour" "Integer64"
+                  "datetime_format_iso" "String"
                   "path_exists" "Boolean"
                   "path_is_file" "Boolean"
                   "path_is_directory" "Boolean"
@@ -496,6 +514,24 @@
     "type_of" (str "__nexTypeOf(" args-code ")")
     "type_is" (str "__nexTypeIs(" args-code ")")
     "sleep" (str "await __nexSleep(" args-code ")")
+    "datetime_now" (str "__nexDateTimeNow(" args-code ")")
+    "datetime_from_epoch_millis" (str "__nexDateTimeFromEpochMillis(" args-code ")")
+    "datetime_parse_iso" (str "__nexDateTimeParseIso(" args-code ")")
+    "datetime_make" (str "__nexDateTimeMake(" args-code ")")
+    "datetime_year" (str "__nexDateTimeYear(" args-code ")")
+    "datetime_month" (str "__nexDateTimeMonth(" args-code ")")
+    "datetime_day" (str "__nexDateTimeDay(" args-code ")")
+    "datetime_weekday" (str "__nexDateTimeWeekday(" args-code ")")
+    "datetime_day_of_year" (str "__nexDateTimeDayOfYear(" args-code ")")
+    "datetime_hour" (str "__nexDateTimeHour(" args-code ")")
+    "datetime_minute" (str "__nexDateTimeMinute(" args-code ")")
+    "datetime_second" (str "__nexDateTimeSecond(" args-code ")")
+    "datetime_epoch_millis" (str "__nexDateTimeEpochMillis(" args-code ")")
+    "datetime_add_millis" (str "__nexDateTimeAddMillis(" args-code ")")
+    "datetime_diff_millis" (str "__nexDateTimeDiffMillis(" args-code ")")
+    "datetime_truncate_to_day" (str "__nexDateTimeTruncateToDay(" args-code ")")
+    "datetime_truncate_to_hour" (str "__nexDateTimeTruncateToHour(" args-code ")")
+    "datetime_format_iso" (str "__nexDateTimeFormatIso(" args-code ")")
     "path_exists" (str "__nexPathExists(" args-code ")")
     "path_is_file" (str "__nexPathIsFile(" args-code ")")
     "path_is_directory" (str "__nexPathIsDirectory(" args-code ")")
@@ -2198,6 +2234,24 @@
        "function __nexSleep(ms) {\n"
        "  return new Promise(resolve => setTimeout(resolve, ms));\n"
        "}\n"
+       "function __nexDateTimeNow() { return Date.now(); }\n"
+       "function __nexDateTimeFromEpochMillis(ms) { return Number(ms); }\n"
+       "function __nexDateTimeParseIso(text) { return Date.parse(String(text)); }\n"
+       "function __nexDateTimeMake(year, month, day, hour, minute, second) { return Date.UTC(year, month - 1, day, hour, minute, second); }\n"
+       "function __nexDateTimeYear(epochMs) { return new Date(epochMs).getUTCFullYear(); }\n"
+       "function __nexDateTimeMonth(epochMs) { return new Date(epochMs).getUTCMonth() + 1; }\n"
+       "function __nexDateTimeDay(epochMs) { return new Date(epochMs).getUTCDate(); }\n"
+       "function __nexDateTimeWeekday(epochMs) { const d = new Date(epochMs).getUTCDay(); return d === 0 ? 7 : d; }\n"
+       "function __nexDateTimeDayOfYear(epochMs) { const d = new Date(epochMs); const start = Date.UTC(d.getUTCFullYear(), 0, 1); return Math.floor((epochMs - start) / 86400000) + 1; }\n"
+       "function __nexDateTimeHour(epochMs) { return new Date(epochMs).getUTCHours(); }\n"
+       "function __nexDateTimeMinute(epochMs) { return new Date(epochMs).getUTCMinutes(); }\n"
+       "function __nexDateTimeSecond(epochMs) { return new Date(epochMs).getUTCSeconds(); }\n"
+       "function __nexDateTimeEpochMillis(epochMs) { return Number(epochMs); }\n"
+       "function __nexDateTimeAddMillis(epochMs, deltaMs) { return Number(epochMs) + Number(deltaMs); }\n"
+       "function __nexDateTimeDiffMillis(leftMs, rightMs) { return Number(leftMs) - Number(rightMs); }\n"
+       "function __nexDateTimeTruncateToDay(epochMs) { const d = new Date(epochMs); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0); }\n"
+       "function __nexDateTimeTruncateToHour(epochMs) { const d = new Date(epochMs); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), 0, 0, 0); }\n"
+       "function __nexDateTimeFormatIso(epochMs) { return new Date(epochMs).toISOString(); }\n"
        "function __nexPathFs() {\n"
        "  return require('fs');\n"
        "}\n"

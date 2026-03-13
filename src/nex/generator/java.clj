@@ -266,6 +266,24 @@
     "type_of" (str "NexRuntime.typeOf(" args-code ")")
     "type_is" (str "NexRuntime.typeIs(" args-code ")")
     "sleep" (str "NexRuntime.sleep(" args-code ")")
+    "datetime_now" (str "NexRuntime.datetimeNow(" args-code ")")
+    "datetime_from_epoch_millis" (str "NexRuntime.datetimeFromEpochMillis(" args-code ")")
+    "datetime_parse_iso" (str "NexRuntime.datetimeParseIso(" args-code ")")
+    "datetime_make" (str "NexRuntime.datetimeMake(" args-code ")")
+    "datetime_year" (str "NexRuntime.datetimeYear(" args-code ")")
+    "datetime_month" (str "NexRuntime.datetimeMonth(" args-code ")")
+    "datetime_day" (str "NexRuntime.datetimeDay(" args-code ")")
+    "datetime_weekday" (str "NexRuntime.datetimeWeekday(" args-code ")")
+    "datetime_day_of_year" (str "NexRuntime.datetimeDayOfYear(" args-code ")")
+    "datetime_hour" (str "NexRuntime.datetimeHour(" args-code ")")
+    "datetime_minute" (str "NexRuntime.datetimeMinute(" args-code ")")
+    "datetime_second" (str "NexRuntime.datetimeSecond(" args-code ")")
+    "datetime_epoch_millis" (str "NexRuntime.datetimeEpochMillis(" args-code ")")
+    "datetime_add_millis" (str "NexRuntime.datetimeAddMillis(" args-code ")")
+    "datetime_diff_millis" (str "NexRuntime.datetimeDiffMillis(" args-code ")")
+    "datetime_truncate_to_day" (str "NexRuntime.datetimeTruncateToDay(" args-code ")")
+    "datetime_truncate_to_hour" (str "NexRuntime.datetimeTruncateToHour(" args-code ")")
+    "datetime_format_iso" (str "NexRuntime.datetimeFormatIso(" args-code ")")
     "path_exists" (str "NexRuntime.pathExists(" args-code ")")
     "path_is_file" (str "NexRuntime.pathIsFile(" args-code ")")
     "path_is_directory" (str "NexRuntime.pathIsDirectory(" args-code ")")
@@ -646,6 +664,24 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
+                  "datetime_now" "Integer64"
+                  "datetime_from_epoch_millis" "Integer64"
+                  "datetime_parse_iso" "Integer64"
+                  "datetime_make" "Integer64"
+                  "datetime_year" "Integer"
+                  "datetime_month" "Integer"
+                  "datetime_day" "Integer"
+                  "datetime_weekday" "Integer"
+                  "datetime_day_of_year" "Integer"
+                  "datetime_hour" "Integer"
+                  "datetime_minute" "Integer"
+                  "datetime_second" "Integer"
+                  "datetime_epoch_millis" "Integer64"
+                  "datetime_add_millis" "Integer64"
+                  "datetime_diff_millis" "Integer64"
+                  "datetime_truncate_to_day" "Integer64"
+                  "datetime_truncate_to_hour" "Integer64"
+                  "datetime_format_iso" "String"
                   "path_exists" "Boolean"
                   "path_is_file" "Boolean"
                   "path_is_directory" "Boolean"
@@ -2780,6 +2816,41 @@ public class NexTurtle {
        "      throw new RuntimeException(e);\n"
        "    }\n"
        "  }\n\n"
+       "  public static long datetimeNow() { return java.time.Instant.now().toEpochMilli(); }\n"
+       "  public static long datetimeFromEpochMillis(long ms) { return ms; }\n"
+       "  public static long datetimeParseIso(String text) {\n"
+       "    try {\n"
+       "      return java.time.Instant.parse(text).toEpochMilli();\n"
+       "    } catch (Exception ex) {\n"
+       "      java.time.LocalDateTime ldt = java.time.LocalDateTime.parse(text);\n"
+       "      return ldt.atZone(java.time.ZoneOffset.UTC).toInstant().toEpochMilli();\n"
+       "    }\n"
+       "  }\n"
+       "  public static long datetimeMake(int year, int month, int day, int hour, int minute, int second) {\n"
+       "    return java.time.LocalDateTime.of(year, month, day, hour, minute, second)\n"
+       "      .atZone(java.time.ZoneOffset.UTC).toInstant().toEpochMilli();\n"
+       "  }\n"
+       "  private static java.time.ZonedDateTime datetimeUtc(long epochMs) {\n"
+       "    return java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(epochMs), java.time.ZoneOffset.UTC);\n"
+       "  }\n"
+       "  public static int datetimeYear(long epochMs) { return datetimeUtc(epochMs).getYear(); }\n"
+       "  public static int datetimeMonth(long epochMs) { return datetimeUtc(epochMs).getMonthValue(); }\n"
+       "  public static int datetimeDay(long epochMs) { return datetimeUtc(epochMs).getDayOfMonth(); }\n"
+       "  public static int datetimeWeekday(long epochMs) { return datetimeUtc(epochMs).getDayOfWeek().getValue(); }\n"
+       "  public static int datetimeDayOfYear(long epochMs) { return datetimeUtc(epochMs).getDayOfYear(); }\n"
+       "  public static int datetimeHour(long epochMs) { return datetimeUtc(epochMs).getHour(); }\n"
+       "  public static int datetimeMinute(long epochMs) { return datetimeUtc(epochMs).getMinute(); }\n"
+       "  public static int datetimeSecond(long epochMs) { return datetimeUtc(epochMs).getSecond(); }\n"
+       "  public static long datetimeEpochMillis(long epochMs) { return epochMs; }\n"
+       "  public static long datetimeAddMillis(long epochMs, long deltaMs) { return epochMs + deltaMs; }\n"
+       "  public static long datetimeDiffMillis(long leftMs, long rightMs) { return leftMs - rightMs; }\n"
+       "  public static long datetimeTruncateToDay(long epochMs) {\n"
+       "    return datetimeUtc(epochMs).withHour(0).withMinute(0).withSecond(0).withNano(0).toInstant().toEpochMilli();\n"
+       "  }\n"
+       "  public static long datetimeTruncateToHour(long epochMs) {\n"
+       "    return datetimeUtc(epochMs).withMinute(0).withSecond(0).withNano(0).toInstant().toEpochMilli();\n"
+       "  }\n"
+       "  public static String datetimeFormatIso(long epochMs) { return java.time.format.DateTimeFormatter.ISO_INSTANT.format(java.time.Instant.ofEpochMilli(epochMs)); }\n"
        "  public static boolean pathExists(String path) { return new java.io.File(path).exists(); }\n"
        "  public static boolean pathIsFile(String path) { return new java.io.File(path).isFile(); }\n"
        "  public static boolean pathIsDirectory(String path) { return new java.io.File(path).isDirectory(); }\n"

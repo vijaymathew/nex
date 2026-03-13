@@ -299,6 +299,24 @@ end"
       (is (str/includes? java-code "result = NexRuntime.jsonParse(text);"))
       (is (str/includes? java-code "result = NexRuntime.jsonStringify(value);")))))
 
+(deftest time-library-generation-test
+  (testing "time libraries lower to ordinary classes plus runtime datetime builtins"
+    (let [duration-code (java/translate (slurp "lib/time/duration.nex") {:skip-type-check true})
+          datetime-code (java/translate (slurp "lib/time/date_time.nex") {:skip-type-check true})]
+      (is (str/includes? duration-code "public class Duration"))
+      (is (str/includes? duration-code "public static Duration minutes"))
+      (is (str/includes? datetime-code "public class Date_Time"))
+      (is (str/includes? datetime-code "NexRuntime.datetimeNow("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeParseIso("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeMake("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeWeekday("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeDayOfYear("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeTruncateToDay("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeTruncateToHour("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeFormatIso("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeAddMillis("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeDiffMillis(")))))
+
 (deftest io-library-generation-test
   (testing "io libraries lower to ordinary classes plus runtime IO builtins"
     (let [path-code (java/translate (slurp "lib/io/path.nex"))

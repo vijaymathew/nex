@@ -167,6 +167,30 @@ print(p.command_line())
 ```
 
 
+## Time And Scheduling
+
+Use `time/Date_Time` and `time/Duration` for UTC timestamps, scheduling offsets, and log formatting.
+
+```nex
+intern time/Duration
+intern time/Date_Time
+
+let started_at: Date_Time := create Date_Time.now()
+let next_run: Date_Time := started_at.add(create Duration.minutes(15))
+let weekly_cutoff: Date_Time := started_at.add(create Duration.weeks(1))
+
+print("started at " + started_at.format_iso())
+print("month=" + started_at.month_name())
+print("weekday=" + started_at.weekday())
+print("weekday-name=" + started_at.weekday_name())
+print("day-of-year=" + started_at.day_of_year())
+print("next run at " + next_run.truncate_to_hour().format_iso())
+print("weekly cutoff " + weekly_cutoff.truncate_to_day().format_iso())
+```
+
+This is a better fit for logging and scheduling code than manually building timestamp strings.
+
+
 ## Graphics and Simple Visual Programs
 
 Nex includes a lightweight graphics layer through `Window`, `Turtle`, and `Image`.

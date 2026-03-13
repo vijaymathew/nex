@@ -71,6 +71,11 @@ Tests are organized following standard Clojure conventions:
   - `io/Binary_File`: open_read, open_write, read, read_all, write, close
   - JVM interpreter coverage for shipped `lib/io` library classes
 
+- **time_lib_test.clj** (`nex.time-lib-test`)
+  - `time/Duration`: construction and arithmetic
+  - `time/Date_Time`: UTC field access, ISO formatting/parsing, arithmetic and comparison
+  - JVM interpreter coverage for shipped `lib/time` library classes
+
 ### Code Generation
 
 - **generator/java_test.clj** (`nex.generator.java-test`)

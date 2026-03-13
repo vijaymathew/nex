@@ -936,6 +936,199 @@
                                           (display-type path-type)))}))))
         "Boolean")
 
+      (= method "datetime_now")
+      (do
+        (when (not= (count args) 0)
+          (throw (ex-info "datetime_now expects exactly 0 arguments"
+                          {:error (type-error
+                                   (str "datetime_now expects 0 arguments, got " (count args)))})))
+        "Integer64")
+
+      (= method "datetime_from_epoch_millis")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_from_epoch_millis expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_from_epoch_millis expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_from_epoch_millis argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_from_epoch_millis argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer64")
+
+      (= method "datetime_parse_iso")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_parse_iso expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_parse_iso expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "String")
+            (throw (ex-info "datetime_parse_iso argument must be String"
+                            {:error (type-error
+                                     (str "datetime_parse_iso argument must be String, got "
+                                          (display-type arg-type)))}))))
+        "Integer64")
+
+      (= method "datetime_make")
+      (do
+        (when (not= (count args) 6)
+          (throw (ex-info "datetime_make expects exactly 6 arguments"
+                          {:error (type-error
+                                   (str "datetime_make expects 6 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "Integer")
+              (throw (ex-info "datetime_make arguments must be Integer"
+                              {:error (type-error
+                                       (str "datetime_make arguments must be Integer, got "
+                                            (display-type arg-type)))})))))
+        "Integer64")
+
+      (= method "datetime_year")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_year expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_year expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_year argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_year argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer")
+
+      (= method "datetime_month")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_month expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_month expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_month argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_month argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer")
+
+      (= method "datetime_day")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_day expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_day expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_day argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_day argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer")
+
+      (= method "datetime_hour")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_hour expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_hour expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_hour argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_hour argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer")
+
+      (= method "datetime_minute")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_minute expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_minute expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_minute argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_minute argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer")
+
+      (= method "datetime_second")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_second expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_second expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_second argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_second argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer")
+
+      (= method "datetime_epoch_millis")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_epoch_millis expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_epoch_millis expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_epoch_millis argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_epoch_millis argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer64")
+
+      (= method "datetime_add_millis")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "datetime_add_millis expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "datetime_add_millis expects 2 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "Integer64")
+              (throw (ex-info "datetime_add_millis arguments must be Integer64"
+                              {:error (type-error
+                                       (str "datetime_add_millis arguments must be Integer64, got "
+                                            (display-type arg-type)))})))))
+        "Integer64")
+
+      (= method "datetime_diff_millis")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "datetime_diff_millis expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "datetime_diff_millis expects 2 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "Integer64")
+              (throw (ex-info "datetime_diff_millis arguments must be Integer64"
+                              {:error (type-error
+                                       (str "datetime_diff_millis arguments must be Integer64, got "
+                                            (display-type arg-type)))})))))
+        "Integer64")
+
+      (= method "datetime_format_iso")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_format_iso expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_format_iso expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_format_iso argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_format_iso argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "String")
+
       (= method "path_is_file")
       (do
         (when (not= (count args) 1)
