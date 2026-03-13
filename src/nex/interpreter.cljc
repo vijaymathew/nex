@@ -150,7 +150,8 @@
   (int32 (bit-and (int32 n) (bit-not (bit-shift-left 1 (bit-index idx))))))
 
 ;; Math helpers
-(defn nex-abs [n] #?(:clj (Math/abs (double n)) :cljs (js/Math.abs n)))
+(defn nex-abs [n]
+  (if (neg? n) (- n) n))
 (defn nex-round [n] #?(:clj (Math/round (double n)) :cljs (js/Math.round n)))
 
 (defn nex-int-pow
