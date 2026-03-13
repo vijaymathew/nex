@@ -2374,20 +2374,65 @@
       :else :literal)))
 
 #?(:clj
+   (defn- intern-search-roots
+     "Return directories to search for project-local interned classes.
+      Prefer the currently loaded source file's directory when available, then
+      fall back to the user's original working directory."
+     [ctx]
+     (let [source-dir (when-let [source (:debug-source ctx)]
+                        (let [f (clojure.java.io/file source)]
+                          (when (.isAbsolute f)
+                            (.getParentFile f))))
+           user-dir (when-let [udir (System/getProperty "nex.user.dir")]
+                      (clojure.java.io/file udir))
+           pwd (clojure.java.io/file ".")]
+       (->> [source-dir user-dir pwd]
+            (remove nil?)
+            distinct)))
+
+   :cljs
+   (defn- intern-search-roots
+     [ctx]
+     (let [path-module (js/require "path")
+           source-dir (when-let [source (:debug-source ctx)]
+                        (when (.isAbsolute path-module source)
+                          (.dirname path-module source)))
+           user-dir (or (.-nex_user_dir js/process.env)
+                        (.-NEX_USER_DIR js/process.env)
+                        (.-PWD js/process.env))
+           pwd (.resolve path-module ".")]
+       (->> [source-dir user-dir pwd]
+            (remove nil?)
+            distinct))))
+
+#?(:clj
    (defn find-intern-file
      "Search for an intern file in the specified locations.
       Returns the absolute path if found, otherwise throws an exception."
-     [path class-name]
+     [ctx path class-name]
      (let [filename (str class-name ".nex")
-           ;; Search locations in order
-           locations [(str "./" filename)                                          ; 1. Current directory
-                      (str "./libs/" path "/src/" filename)                        ; 2. ./libs/path/src/
-                      (str (System/getProperty "user.home") "/.nex/deps/"
-                           path "/src/" filename)]                                 ; 3. ~/.nex/deps/path/src/
+           local-roots (intern-search-roots ctx)
+           local-direct (map #(str (clojure.java.io/file % filename)) local-roots)
+           local-lib (when (seq path)
+                       (mapcat (fn [root]
+                                 [(str (clojure.java.io/file root "libs" path filename))
+                                  (str (clojure.java.io/file root "libs" path "src" filename))])
+                               local-roots))
+           home-deps (if (seq path)
+                       [(str (System/getProperty "user.home") "/.nex/deps/"
+                             path "/" filename)
+                        (str (System/getProperty "user.home") "/.nex/deps/"
+                             path "/src/" filename)]
+                       [(str (System/getProperty "user.home") "/.nex/deps/" filename)
+                        (str (System/getProperty "user.home") "/.nex/deps/src/" filename)])
+           locations (vec (concat local-direct local-lib home-deps))
            found (first (filter #(-> % clojure.java.io/file .exists) locations))]
        (if found
          found
-         (throw (ex-info (str "Cannot find intern file for " path "/" class-name)
+         (throw (ex-info (str "Cannot find intern file for "
+                              (if (seq path)
+                                (str path "/" class-name)
+                                class-name))
                         {:path path
                          :class-name class-name
                          :searched-locations locations})))))
@@ -2395,19 +2440,31 @@
    (defn find-intern-file
      "Search for an intern file in the specified locations.
       Returns the absolute path if found, otherwise throws an exception."
-     [path class-name]
+     [ctx path class-name]
      (let [fs (js/require "fs")
            path-module (js/require "path")
            filename (str class-name ".nex")
            home (or (.-HOME js/process.env) (.-USERPROFILE js/process.env) ".")
-           ;; Search locations in order
-           locations [(str "./" filename)
-                      (str "./libs/" path "/src/" filename)
-                      (str home "/.nex/deps/" path "/src/" filename)]
+           local-roots (intern-search-roots ctx)
+           local-direct (map #(.join path-module % filename) local-roots)
+           local-lib (when (seq path)
+                       (mapcat (fn [root]
+                                 [(.join path-module root "libs" path filename)
+                                  (.join path-module root "libs" path "src" filename)])
+                               local-roots))
+           home-deps (if (seq path)
+                       [(str home "/.nex/deps/" path "/" filename)
+                        (str home "/.nex/deps/" path "/src/" filename)]
+                       [(str home "/.nex/deps/" filename)
+                        (str home "/.nex/deps/src/" filename)])
+           locations (vec (concat local-direct local-lib home-deps))
            found (first (filter #(.existsSync fs %) locations))]
        (if found
          found
-         (throw (ex-info (str "Cannot find intern file for " path "/" class-name)
+         (throw (ex-info (str "Cannot find intern file for "
+                              (if (seq path)
+                                (str path "/" class-name)
+                                class-name))
                         {:path path
                          :class-name class-name
                          :searched-locations locations}))))))
@@ -2416,7 +2473,7 @@
    (defn process-intern
      "Load and interpret an external file, then register the class with the given alias."
      [ctx {:keys [path class-name alias]}]
-     (let [file-path (find-intern-file path class-name)
+     (let [file-path (find-intern-file ctx path class-name)
            ;; Load and parse the external file
            file-content (slurp file-path)
            file-ast (parser/ast file-content)

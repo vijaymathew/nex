@@ -1082,13 +1082,16 @@
         (= (:type ast) :program)
         (let [classes (:classes ast)
               functions (:functions ast)
+              interns (:interns ast)
+              imports (:imports ast)
               statements (:statements ast)
               calls (:calls ast)
               real-class-names (filter #(not= % "__ReplTemp__")
                                       (map :name (filter map? classes)))
               function-names (map :name (filter map? functions))]
-          ;; If there are classes or functions, evaluate the program to register them
-          (when (or (seq real-class-names) (seq function-names))
+          ;; If there are imports/interns/classes/functions, evaluate the program
+          ;; as a whole so registration side effects happen.
+          (when (or (seq imports) (seq interns) (seq real-class-names) (seq function-names))
             (interp/eval-node exec-ctx ast)
             (when @*type-checking-enabled*
               (doseq [fn-def (filter map? functions)]
