@@ -13,6 +13,15 @@
 (declare lookup-class)
 (declare call-builtin-method)
 
+(defn- lowercase-filename
+  [class-name]
+  (-> class-name str/lower-case))
+
+(defn- intern-filenames
+  [class-name]
+  (distinct [(str class-name ".nex")
+             (str (lowercase-filename class-name) ".nex")]))
+
 ;;
 ;; Mutable Collections (platform abstraction)
 ;;
@@ -2410,21 +2419,24 @@
      "Search for an intern file in the specified locations.
       Returns the absolute path if found, otherwise throws an exception."
      [ctx path class-name]
-     (let [filename (str class-name ".nex")
+     (let [filenames (intern-filenames class-name)
            local-roots (intern-search-roots ctx)
-           local-direct (map #(str (clojure.java.io/file % filename)) local-roots)
+           local-direct (mapcat (fn [root]
+                                  (map #(str (clojure.java.io/file root %)) filenames))
+                                local-roots)
            local-lib (when (seq path)
                        (mapcat (fn [root]
-                                 [(str (clojure.java.io/file root "libs" path filename))
-                                  (str (clojure.java.io/file root "libs" path "src" filename))])
+                                 (concat
+                                  (map #(str (clojure.java.io/file root "lib" path %)) filenames)
+                                  (map #(str (clojure.java.io/file root "lib" path "src" %)) filenames)))
                                local-roots))
            home-deps (if (seq path)
-                       [(str (System/getProperty "user.home") "/.nex/deps/"
-                             path "/" filename)
-                        (str (System/getProperty "user.home") "/.nex/deps/"
-                             path "/src/" filename)]
-                       [(str (System/getProperty "user.home") "/.nex/deps/" filename)
-                        (str (System/getProperty "user.home") "/.nex/deps/src/" filename)])
+                       (concat
+                        (map #(str (System/getProperty "user.home") "/.nex/deps/" path "/" %) filenames)
+                        (map #(str (System/getProperty "user.home") "/.nex/deps/" path "/src/" %) filenames))
+                       (concat
+                        (map #(str (System/getProperty "user.home") "/.nex/deps/" %) filenames)
+                        (map #(str (System/getProperty "user.home") "/.nex/deps/src/" %) filenames)))
            locations (vec (concat local-direct local-lib home-deps))
            found (first (filter #(-> % clojure.java.io/file .exists) locations))]
        (if found
@@ -2443,20 +2455,25 @@
      [ctx path class-name]
      (let [fs (js/require "fs")
            path-module (js/require "path")
-           filename (str class-name ".nex")
+           filenames (intern-filenames class-name)
            home (or (.-HOME js/process.env) (.-USERPROFILE js/process.env) ".")
            local-roots (intern-search-roots ctx)
-           local-direct (map #(.join path-module % filename) local-roots)
+           local-direct (mapcat (fn [root]
+                                  (map #(.join path-module root %) filenames))
+                                local-roots)
            local-lib (when (seq path)
                        (mapcat (fn [root]
-                                 [(.join path-module root "libs" path filename)
-                                  (.join path-module root "libs" path "src" filename)])
+                                 (concat
+                                  (map #(.join path-module root "lib" path %) filenames)
+                                  (map #(.join path-module root "lib" path "src" %) filenames)))
                                local-roots))
            home-deps (if (seq path)
-                       [(str home "/.nex/deps/" path "/" filename)
-                        (str home "/.nex/deps/" path "/src/" filename)]
-                       [(str home "/.nex/deps/" filename)
-                        (str home "/.nex/deps/src/" filename)])
+                       (concat
+                        (map #(str home "/.nex/deps/" path "/" %) filenames)
+                        (map #(str home "/.nex/deps/" path "/src/" %) filenames))
+                       (concat
+                        (map #(str home "/.nex/deps/" %) filenames)
+                        (map #(str home "/.nex/deps/src/" %) filenames)))
            locations (vec (concat local-direct local-lib home-deps))
            found (first (filter #(.existsSync fs %) locations))]
        (if found

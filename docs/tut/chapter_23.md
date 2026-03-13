@@ -38,6 +38,49 @@ intern math/Calculator as Calc
 That allows the imported class to be referred to locally as `Calc`.
 
 
+## How `intern` Resolves Files
+
+`intern` searches in this order:
+
+1. the directory of the currently loaded script, if the code came from a file
+2. the REPL or process working directory
+3. `~/.nex/deps`
+
+For a path-qualified intern such as:
+
+```text
+intern net/Tcp_Socket
+```
+
+Nex tries these local layouts under each search root:
+
+```text
+Tcp_Socket.nex
+tcp_socket.nex
+lib/net/Tcp_Socket.nex
+lib/net/tcp_socket.nex
+lib/net/src/Tcp_Socket.nex
+lib/net/src/tcp_socket.nex
+```
+
+Then it tries the same path forms under:
+
+```text
+~/.nex/deps
+```
+
+So all of these are valid examples:
+
+```text
+./lib/net/tcp_socket.nex
+/some/project/lib/net/Tcp_Socket.nex
+~/.nex/deps/net/tcp_socket.nex
+~/.nex/deps/net/src/Tcp_Socket.nex
+```
+
+Exact-case filenames are checked first. If they are not found, Nex falls back to a lowercase filename such as `tcp_socket.nex`.
+
+
 ## A Simple Two-File Example
 
 Suppose `math/Counter.nex` contains:

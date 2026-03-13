@@ -152,3 +152,60 @@ end")
           (.delete (io/file fake-home ".nex" "deps"))
           (.delete (io/file fake-home ".nex"))
           (.delete fake-home))))))
+
+(deftest repl-intern-loads-lowercase-filename-fallback
+  (testing "REPL resolves Tcp_Socket from lowercase tcp_socket.nex"
+    (let [fake-home (io/file (System/getProperty "java.io.tmpdir") (str "nex-home-lowercase-" (System/nanoTime)))
+          deps-dir (io/file fake-home ".nex" "deps" "utils")
+          socket-file (io/file deps-dir "tcp_socket.nex")
+          ctx (repl/init-repl-context)
+          original-home (System/getProperty "user.home")]
+      (.mkdirs fake-home)
+      (.mkdirs deps-dir)
+      (spit socket-file "class Tcp_Socket
+  feature
+    show() do
+      print(\"ok\")
+    end
+end")
+      (try
+        (System/setProperty "user.home" (.getAbsolutePath fake-home))
+        (let [output (with-out-str
+                       (repl/eval-code ctx "intern utils/Tcp_Socket")
+                       (repl/eval-code ctx "let s := create Tcp_Socket")
+                       (repl/eval-code ctx "s.show()"))]
+          (is (not (.contains output "Cannot find intern file for utils/Tcp_Socket")))
+          (is (.contains output "#<Tcp_Socket object>"))
+          (is (.contains output "\"ok\"")))
+        (finally
+          (System/setProperty "user.home" original-home)
+          (.delete socket-file)
+          (.delete deps-dir)
+          (.delete (io/file fake-home ".nex" "deps"))
+          (.delete (io/file fake-home ".nex"))
+          (.delete fake-home))))))
+
+(deftest repl-intern-loads-from-local-lib-directory
+  (testing "REPL resolves path-qualified intern names from ./lib"
+    (let [net-dir (io/file "lib" "net")
+          socket-file (io/file net-dir "tcp_socket.nex")
+          ctx (repl/init-repl-context)]
+      (.mkdirs net-dir)
+      (spit socket-file "class Tcp_Socket
+  feature
+    show() do
+      print(\"ok\")
+    end
+end")
+      (try
+        (let [output (with-out-str
+                       (repl/eval-code ctx "intern net/Tcp_Socket")
+                       (repl/eval-code ctx "let s := create Tcp_Socket")
+                       (repl/eval-code ctx "s.show()"))]
+          (is (not (.contains output "Cannot find intern file for net/Tcp_Socket")))
+          (is (.contains output "#<Tcp_Socket object>"))
+          (is (.contains output "\"ok\"")))
+        (finally
+          (.delete socket-file)
+          (.delete net-dir)
+          (.delete (io/file "lib")))))))
