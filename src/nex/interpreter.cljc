@@ -1,7 +1,12 @@
 (ns nex.interpreter
   (:require [clojure.string :as str]
             #?(:clj [nex.parser :as parser])
-            #?(:clj [clojure.data.json :as json])
+            [nex.types.runtime :as rt]
+            [nex.types.json :as json-types]
+            [nex.types.http :as http]
+            [nex.types.value :as value]
+            [nex.types.typeinfo :as typeinfo]
+            [nex.types.bootstrap :as bootstrap]
             #?(:clj [nex.turtle :as turtle]
                :cljs [nex.turtle-browser :as turtle]))
   #?(:clj (:import [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException])))
@@ -12,7 +17,8 @@
 (declare lookup-method-with-inheritance)
 (declare lookup-class)
 (declare call-builtin-method)
-(declare nex-set?)
+(declare make-object)
+(declare invoke-http-server-handler)
 
 (defn- lowercase-filename
   [class-name]
@@ -24,399 +30,139 @@
              (str (lowercase-filename class-name) ".nex")]))
 
 ;;
-;; Mutable Collections (platform abstraction)
+;; Runtime type helpers imported from nex.types.*
 ;;
 
-;; Array helpers
-(defn nex-array [] #?(:clj (java.util.ArrayList.) :cljs #js []))
-(defn nex-array-from [coll] #?(:clj (java.util.ArrayList. (vec coll)) :cljs (js/Array.from (to-array coll))))
-(defn nex-array? [v] #?(:clj (instance? java.util.ArrayList v) :cljs (array? v)))
-(defn nex-array-get [arr idx] #?(:clj (.get arr idx) :cljs (aget arr idx)))
-(defn nex-array-add [arr val] #?(:clj (.add arr val) :cljs (.push arr val)))
-(defn nex-array-add-at [arr idx val] #?(:clj (.add arr idx val) :cljs (.splice arr idx 0 val)))
-(defn nex-array-set [arr idx val] #?(:clj (.set arr idx val) :cljs (aset arr idx val)))
-(defn nex-array-size [arr] #?(:clj (.size arr) :cljs (.-length arr)))
-(defn nex-array-empty? [arr] #?(:clj (.isEmpty arr) :cljs (zero? (.-length arr))))
-(defn nex-array-contains [arr elem] #?(:clj (.contains arr elem) :cljs (.includes arr elem)))
-(defn nex-array-index-of [arr elem] #?(:clj (.indexOf arr elem) :cljs (.indexOf arr elem)))
-(defn nex-array-remove [arr idx] #?(:clj (.remove arr (int idx)) :cljs (.splice arr idx 1)))
-(defn nex-array-reverse [arr] #?(:clj (java.util.ArrayList. (.reversed arr)) :cljs (js/Array.from (.reverse (.slice arr)))))
-(defn nex-array-sort [arr] #?(:clj (.sort arr nil) :cljs (.sort arr)))
-(defn nex-array-slice [arr start end] #?(:clj (.subList arr start end) :cljs (.slice arr start end)))
-(defn nex-array-str [arr]
-  (str "[" (str/join ", " (map nex-format-value #?(:clj arr :cljs (array-seq arr)))) "]"))
+(def nex-array rt/nex-array)
+(def nex-array-from rt/nex-array-from)
+(def nex-array? rt/nex-array?)
+(def nex-array-get rt/nex-array-get)
+(def nex-array-add rt/nex-array-add)
+(def nex-array-add-at rt/nex-array-add-at)
+(def nex-array-set rt/nex-array-set)
+(def nex-array-size rt/nex-array-size)
+(def nex-array-empty? rt/nex-array-empty?)
+(def nex-array-contains rt/nex-array-contains)
+(def nex-array-index-of rt/nex-array-index-of)
+(def nex-array-remove rt/nex-array-remove)
+(def nex-array-reverse rt/nex-array-reverse)
+(def nex-array-sort rt/nex-array-sort)
+(def nex-array-slice rt/nex-array-slice)
+(defn nex-array-str [arr] (rt/nex-array-str nex-format-value arr))
 
-;; Map helpers
-(defn nex-map [] #?(:clj (java.util.HashMap.) :cljs (js/Map.)))
-(defn nex-map-from [pairs]
-  #?(:clj (java.util.HashMap. (into {} pairs))
-     :cljs (js/Map. (to-array (map to-array pairs)))))
-(defn nex-map? [v] #?(:clj (instance? java.util.HashMap v) :cljs (instance? js/Map v)))
-(defn nex-map-get [m key] #?(:clj (.get m key) :cljs (.get m key)))
-(defn nex-map-put [m key val] #?(:clj (.put m key val) :cljs (.set m key val)))
-(defn nex-map-size [m] #?(:clj (.size m) :cljs (.-size m)))
-(defn nex-map-empty? [m] #?(:clj (.isEmpty m) :cljs (zero? (.-size m))))
-(defn nex-map-contains-key [m key] #?(:clj (.containsKey m key) :cljs (.has m key)))
-(defn nex-map-keys [m] #?(:clj (vec (.keySet m)) :cljs (vec (es6-iterator-seq (.keys m)))))
-(defn nex-map-values [m] #?(:clj (vec (.values m)) :cljs (vec (es6-iterator-seq (.values m)))))
-(defn nex-map-remove [m key] #?(:clj (.remove m key) :cljs (.delete m key)))
-(defn nex-map-str [m]
-  (let [entries #?(:clj (for [[k v] m] (str (nex-format-value k) ": " (nex-format-value v)))
-                   :cljs (for [[k v] (es6-iterator-seq (.entries m))] (str (nex-format-value k) ": " (nex-format-value v))))]
-    (str "{" (str/join ", " entries) "}")))
+(def nex-map rt/nex-map)
+(def nex-map-from rt/nex-map-from)
+(def nex-map? rt/nex-map?)
+(def nex-map-get rt/nex-map-get)
+(def nex-map-put rt/nex-map-put)
+(def nex-map-size rt/nex-map-size)
+(def nex-map-empty? rt/nex-map-empty?)
+(def nex-map-contains-key rt/nex-map-contains-key)
+(def nex-map-keys rt/nex-map-keys)
+(def nex-map-values rt/nex-map-values)
+(def nex-map-remove rt/nex-map-remove)
+(defn nex-map-str [m] (rt/nex-map-str nex-format-value m))
 
-#?(:clj
-   (defn- json-value->nex
-     [value]
-     (cond
-       (nil? value) nil
-       (or (string? value) (boolean? value) (char? value)) value
-       (integer? value)
-       (let [n (long value)]
-         (if (<= Integer/MIN_VALUE n Integer/MAX_VALUE)
-           (int n)
-           n))
-       (number? value) (double value)
-       (vector? value) (nex-array-from (mapv json-value->nex value))
-       (sequential? value) (nex-array-from (mapv json-value->nex value))
-       (map? value)
-       (let [m (nex-map)]
-         (doseq [[k v] value]
-           (nex-map-put m (str k) (json-value->nex v)))
-         m)
-       :else value)))
+(def nex-set rt/nex-set)
+(def nex-set-from rt/nex-set-from)
+(def nex-set? rt/nex-set?)
+(def nex-set-contains rt/nex-set-contains)
+(def nex-set-size rt/nex-set-size)
+(def nex-set-empty? rt/nex-set-empty?)
+(def nex-set-union rt/nex-set-union)
+(def nex-set-difference rt/nex-set-difference)
+(def nex-set-intersection rt/nex-set-intersection)
+(def nex-set-symmetric-difference rt/nex-set-symmetric-difference)
+(defn nex-set-str [s] (rt/nex-set-str nex-format-value s))
 
-#?(:clj
-   (defn- nex-value->json
-     [value]
-     (cond
-       (nil? value) nil
-       (or (string? value) (boolean? value) (number? value)) value
-       (char? value) (str value)
-       (nex-array? value) (mapv nex-value->json value)
-       (nex-map? value)
-       (into {}
-             (map (fn [[k v]] [(str k) (nex-value->json v)]))
-             value)
-       (nex-set? value) (mapv nex-value->json value)
-       :else (throw (ex-info (str "Value is not JSON-serializable: " (pr-str (type value)))
-                             {:value value})))))
+(def nex-bitwise-left-shift rt/nex-bitwise-left-shift)
+(def nex-bitwise-right-shift rt/nex-bitwise-right-shift)
+(def nex-bitwise-logical-right-shift rt/nex-bitwise-logical-right-shift)
+(def nex-bitwise-rotate-left rt/nex-bitwise-rotate-left)
+(def nex-bitwise-rotate-right rt/nex-bitwise-rotate-right)
+(def nex-bitwise-and rt/nex-bitwise-and)
+(def nex-bitwise-or rt/nex-bitwise-or)
+(def nex-bitwise-xor rt/nex-bitwise-xor)
+(def nex-bitwise-not rt/nex-bitwise-not)
+(def nex-bitwise-is-set rt/nex-bitwise-is-set)
+(def nex-bitwise-set rt/nex-bitwise-set)
+(def nex-bitwise-unset rt/nex-bitwise-unset)
+(def nex-abs rt/nex-abs)
+(def nex-round rt/nex-round)
+(def nex-int-pow rt/nex-int-pow)
 
-#?(:clj
-   (defn- nex-json-parse
-     [text]
-     (json-value->nex (json/read-str (str text)))))
+(def nex-console-print rt/nex-console-print)
+(def nex-console-println rt/nex-console-println)
+(def nex-console-error rt/nex-console-error)
+(def nex-console-newline rt/nex-console-newline)
+(def nex-console-read-line rt/nex-console-read-line)
+(def nex-parse-integer64-string rt/nex-parse-integer64-string)
+(def nex-parse-integer rt/nex-parse-integer)
+(def nex-parse-real rt/nex-parse-real)
 
-#?(:clj
-   (defn- nex-json-stringify
-     [value]
-     (json/write-str (nex-value->json value))))
-
-(defn nex-set [] #?(:clj (java.util.LinkedHashSet.) :cljs (js/Set.)))
-(defn nex-set-from [coll]
-  #?(:clj (doto (java.util.LinkedHashSet.)
-            (#(doseq [v coll] (.add % v))))
-     :cljs (js/Set. (to-array coll))))
-(defn nex-set? [v] #?(:clj (instance? java.util.LinkedHashSet v) :cljs (instance? js/Set v)))
-(defn nex-set-contains [s v] #?(:clj (.contains s v) :cljs (.has s v)))
-(defn nex-set-size [s] #?(:clj (.size s) :cljs (.-size s)))
-(defn nex-set-empty? [s] #?(:clj (.isEmpty s) :cljs (zero? (.-size s))))
-(defn nex-set-union [a b]
-  #?(:clj (let [out (java.util.LinkedHashSet. a)]
-            (.addAll out b)
-            out)
-     :cljs (nex-set-from (concat (es6-iterator-seq (.values a))
-                                 (es6-iterator-seq (.values b))))))
-(defn nex-set-difference [a b]
-  #?(:clj (let [out (java.util.LinkedHashSet. a)]
-            (.removeAll out b)
-            out)
-     :cljs (nex-set-from (remove #(.has b %) (es6-iterator-seq (.values a))))))
-(defn nex-set-intersection [a b]
-  #?(:clj (let [out (java.util.LinkedHashSet. a)]
-            (.retainAll out b)
-            out)
-     :cljs (nex-set-from (filter #(.has b %) (es6-iterator-seq (.values a))))))
-(defn nex-set-symmetric-difference [a b]
-  #?(:clj (let [out (java.util.LinkedHashSet.)]
-            (doseq [v a]
-              (when-not (.contains b v) (.add out v)))
-            (doseq [v b]
-              (when-not (.contains a v) (.add out v)))
-            out)
-     :cljs (nex-set-from (concat (remove #(.has b %) (es6-iterator-seq (.values a)))
-                                 (remove #(.has a %) (es6-iterator-seq (.values b)))))))
-(defn nex-set-str [s]
-  (str "#{"
-       (str/join ", " (map nex-format-value #?(:clj (seq s) :cljs (es6-iterator-seq (.values s)))))
-       "}"))
-
-;; 32-bit bitwise helpers for Integer built-ins
-(defn- int32 [n]
-  #?(:clj (int n)
-     :cljs (bit-or n 0)))
-
-(defn- bit-index [n]
-  #?(:clj (bit-and (int n) 31)
-     :cljs (bit-and n 31)))
-
-(defn nex-bitwise-left-shift [n shift]
-  (int32 (bit-shift-left (int32 n) (bit-index shift))))
-
-(defn nex-bitwise-right-shift [n shift]
-  (int32 (bit-shift-right (int32 n) (bit-index shift))))
-
-(defn nex-bitwise-logical-right-shift [n shift]
-  #?(:clj (long (bit-shift-right (bit-and 0xFFFFFFFF (long (int32 n)))
-                                 (bit-index shift)))
-     :cljs (js* "(~{} >>> ~{})" (int32 n) (bit-index shift))))
-
-(defn nex-bitwise-rotate-left [n shift]
-  #?(:clj (Integer/rotateLeft (int32 n) (bit-index shift))
-     :cljs (let [x (int32 n)
-                 s (bit-index shift)]
-             (int32 (bit-or (bit-shift-left x s)
-                            (js* "(~{} >>> ~{})" x (- 32 s)))))))
-
-(defn nex-bitwise-rotate-right [n shift]
-  #?(:clj (Integer/rotateRight (int32 n) (bit-index shift))
-     :cljs (let [x (int32 n)
-                 s (bit-index shift)]
-             (int32 (bit-or (js* "(~{} >>> ~{})" x s)
-                            (bit-shift-left x (- 32 s)))))))
-
-(defn nex-bitwise-and [n other]
-  (int32 (bit-and (int32 n) (int32 other))))
-
-(defn nex-bitwise-or [n other]
-  (int32 (bit-or (int32 n) (int32 other))))
-
-(defn nex-bitwise-xor [n other]
-  (int32 (bit-xor (int32 n) (int32 other))))
-
-(defn nex-bitwise-not [n]
-  (int32 (bit-not (int32 n))))
-
-(defn nex-bitwise-is-set [n idx]
-  (not (zero? (bit-and (int32 n) (bit-shift-left 1 (bit-index idx))))))
-
-(defn nex-bitwise-set [n idx]
-  (int32 (bit-or (int32 n) (bit-shift-left 1 (bit-index idx)))))
-
-(defn nex-bitwise-unset [n idx]
-  (int32 (bit-and (int32 n) (bit-not (bit-shift-left 1 (bit-index idx))))))
-
-;; Math helpers
-(defn nex-abs [n]
-  (if (neg? n) (- n) n))
-(defn nex-round [n] #?(:clj (Math/round (double n)) :cljs (js/Math.round n)))
-
-(defn nex-int-pow
-  "Raise an integral base to an integral exponent, preserving an integral result.
-   Negative exponents are rejected because they cannot be represented as integers."
-  [base exponent]
-  (when (neg? exponent)
-    (throw (ex-info "Integral exponentiation requires a non-negative exponent"
-                    {:base base :exponent exponent})))
-  (loop [acc 1
-         b base
-         e exponent]
-    (if (zero? e)
-      acc
-      (recur (if (odd? e) (* acc b) acc)
-             (* b b)
-             (quot e 2)))))
-
-;; Console helpers
-(defn nex-console-print [msg] #?(:clj (print msg) :cljs (.write js/process.stdout (str msg))))
-(defn nex-console-println [msg] #?(:clj (println msg) :cljs (js/console.log msg)))
-(defn nex-console-error [msg] #?(:clj (binding [*out* *err*] (println msg)) :cljs (js/console.error msg)))
-(defn nex-console-newline [] #?(:clj (println) :cljs (js/console.log "")))
-(defn nex-console-read-line [] #?(:clj (read-line) :cljs (throw (ex-info "read-line not supported in ClojureScript" {}))))
-(defn nex-parse-integer64-string [s]
-  (let [trimmed (str/trim s)
-        negative? (str/starts-with? trimmed "-")
-        unsigned (if negative? (subs trimmed 1) trimmed)
-        normalized (str/replace unsigned "_" "")
-        [radix digits] (cond
-                         (str/starts-with? normalized "0b") [2 (subs normalized 2)]
-                         (str/starts-with? normalized "0o") [8 (subs normalized 2)]
-                         (str/starts-with? normalized "0x") [16 (subs normalized 2)]
-                         :else [10 normalized])
-        parsed #?(:clj (Long/parseLong digits radix)
-                  :cljs (js/parseInt digits radix))]
-    (if negative? (- parsed) parsed)))
-(defn nex-parse-integer [s] #?(:clj (int (nex-parse-integer64-string s))
-                               :cljs (nex-parse-integer64-string s)))
-(defn nex-parse-real [s] #?(:clj (Double/parseDouble (.trim s)) :cljs (js/parseFloat s)))
-
-;; File helpers
-(defn nex-file-read [path] #?(:clj (slurp path) :cljs (.toString (.readFileSync (js/require "fs") path "utf8"))))
-(defn nex-file-write [path content] #?(:clj (spit path content) :cljs (.writeFileSync (js/require "fs") path content "utf8")))
-(defn nex-file-append [path content] #?(:clj (spit path content :append true) :cljs (.appendFileSync (js/require "fs") path content "utf8")))
-(defn nex-file-exists? [path] #?(:clj (.exists (java.io.File. path)) :cljs (.existsSync (js/require "fs") path)))
-(defn nex-file-delete [path] #?(:clj (.delete (java.io.File. path)) :cljs (.unlinkSync (js/require "fs") path)))
-(defn nex-file-lines [path] #?(:clj (nex-array-from (str/split-lines (slurp path)))
-                                :cljs (nex-array-from (.split (.toString (.readFileSync (js/require "fs") path "utf8")) "\n"))))
-
-;; Process helpers
-(defn nex-process-getenv [name]
-  #?(:clj (System/getenv name)
-     :cljs (aget (.-env js/process) name)))
-(defn nex-process-setenv [name value]
-  #?(:clj (throw (ex-info "setenv is not supported on the JVM" {:name name}))
-     :cljs (aset (.-env js/process) name value)))
-(defn nex-process-command-line []
-  #?(:clj (nex-array-from (into [] (.getInputArguments (java.lang.management.ManagementFactory/getRuntimeMXBean))))
-     :cljs (nex-array-from (vec (.-argv js/process)))))
-
-(declare make-object)
+(def nex-file-read rt/nex-file-read)
+(def nex-file-write rt/nex-file-write)
+(def nex-file-append rt/nex-file-append)
+(def nex-file-exists? rt/nex-file-exists?)
+(def nex-file-delete rt/nex-file-delete)
+(def nex-file-lines rt/nex-file-lines)
+(def nex-process-getenv rt/nex-process-getenv)
+(def nex-process-setenv rt/nex-process-setenv)
+(def nex-process-command-line rt/nex-process-command-line)
 
 #?(:clj
    (defn- http-response-headers->nex-map
      [headers]
-     (let [m (nex-map)]
-       (doseq [[k values] (.map ^java.net.http.HttpHeaders headers)]
-         (nex-map-put m k (if (seq values) (str (first values)) "")))
-       m)))
+     (http/http-response-headers->nex-map headers)))
 
 #?(:clj
    (defn- make-http-response-object
      [status body headers]
-     (make-object "Http_Response"
-                  {"status_code" status
-                   "body_text" body
-                   "header_map" headers})))
+     (http/make-http-response-object make-object status body headers)))
 
 #?(:clj
    (defn- make-http-server-request-object
      [method-name path-value body-text header-map route-params query-map]
-     (make-object "Http_Request"
-                  {"method_name" method-name
-                   "path_value" path-value
-                   "body_text" body-text
-                   "header_map" header-map
-                   "route_params" route-params
-                   "query_map" query-map})))
+     (http/make-http-server-request-object make-object method-name path-value body-text header-map route-params query-map)))
 
 #?(:clj
    (defn- make-http-server-default-response-object
      []
-     (make-object "Http_Server_Response"
-                  {"status_code" 404
-                   "body_text" "Not Found"
-                   "header_map" (nex-map)})))
+     (http/make-http-server-default-response-object make-object)))
 
 #?(:clj
    (defn- http-exchange-headers->nex-map
      [headers]
-     (let [m (nex-map)]
-       (doseq [entry (.entrySet headers)]
-         (let [k (.getKey entry)
-               values (.getValue entry)]
-           (nex-map-put m (str k)
-                        (if (seq values)
-                          (str (first values))
-                          ""))))
-       m)))
+     (http/http-exchange-headers->nex-map headers)))
 
 #?(:clj
    (defn- java-http-request
      [method url body timeout-ms]
-     (let [builder (java.net.http.HttpRequest/newBuilder
-                    (java.net.URI/create url))
-           _ (when (some? timeout-ms)
-               (.timeout builder (java.time.Duration/ofMillis (long timeout-ms))))
-           publisher (if (= method "POST")
-                       (java.net.http.HttpRequest$BodyPublishers/ofString (or body ""))
-                       (java.net.http.HttpRequest$BodyPublishers/noBody))
-           _ (if (= method "POST")
-               (.POST builder publisher)
-               (.GET builder))
-           request (.build builder)
-           client (.build (java.net.http.HttpClient/newBuilder))
-           response (.send client request (java.net.http.HttpResponse$BodyHandlers/ofString))]
-       (make-http-response-object (.statusCode response)
-                                  (.body response)
-                                  (http-response-headers->nex-map (.headers response))))))
+     (http/java-http-request make-object method url body timeout-ms)))
 
 #?(:clj
    (defn- make-http-server-handle
      [port]
-     {:nex-builtin-type :HttpServerHandle
-      :port (atom port)
-      :server (atom nil)
-      :routes {"GET" (atom [])
-               "POST" (atom [])
-               "PUT" (atom [])
-               "DELETE" (atom [])}}))
+     (http/make-http-server-handle port)))
+
+#?(:clj (def url-decode http/url-decode))
+#?(:clj (def path-segments http/path-segments))
+#?(:clj (def parse-query-map http/parse-query-map))
+#?(:clj (def route-match http/route-match))
+#?(:clj (def find-route http/find-route))
+#?(:clj (def http-server-response-status http/http-server-response-status))
+#?(:clj (def http-server-response-body http/http-server-response-body))
+#?(:clj (def http-server-response-headers http/http-server-response-headers))
 
 #?(:clj
-   (defn- url-decode
-     [s]
-     (java.net.URLDecoder/decode (str (or s "")) "UTF-8")))
-
-#?(:clj
-   (defn- path-segments
-     [path]
-     (let [trimmed (or path "")]
-       (if (or (= trimmed "") (= trimmed "/"))
-         []
-         (->> (clojure.string/split trimmed #"/")
-              (remove clojure.string/blank?)
-              vec)))))
-
-#?(:clj
-   (defn- parse-query-map
-     [query]
-     (let [m (nex-map)]
-       (when (seq query)
-         (doseq [part (clojure.string/split (str query) #"&")]
-           (when (seq part)
-             (let [[k v] (clojure.string/split part #"=" 2)]
-               (nex-map-put m (url-decode k) (url-decode (or v "")))))))
-       m)))
-
-#?(:clj
-   (defn- route-match
-     [pattern path]
-     (let [pattern-segments (path-segments pattern)
-           path-segments* (path-segments path)
-           params (nex-map)]
-       (loop [ps pattern-segments
-              xs path-segments*]
-         (cond
-           (and (empty? ps) (empty? xs))
-           params
-
-           (empty? ps)
-           nil
-
-           (= (first ps) "*")
-           (do
-             (nex-map-put params "*" (clojure.string/join "/" xs))
-             params)
-
-           (empty? xs)
-           nil
-
-           (clojure.string/starts-with? (first ps) ":")
-           (do
-             (nex-map-put params (subs (first ps) 1) (url-decode (first xs)))
-             (recur (rest ps) (rest xs)))
-
-           (= (first ps) (first xs))
-           (recur (rest ps) (rest xs))
-
-           :else nil)))))
-
-#?(:clj
-   (defn- find-route
-     [handle method path]
-     (some (fn [{:keys [path-pattern handler]}]
-             (when-let [params (route-match path-pattern path)]
-               {:handler handler :params params}))
-           @(get (:routes handle) method))))
+   (defn- start-http-server!
+     [ctx handle]
+     (http/start-http-server!
+      make-object
+      (fn [inner-ctx handler request-obj]
+        (invoke-http-server-handler inner-ctx handler request-obj))
+      ctx
+      handle)))
 
 #?(:clj
    (defn- invoke-http-server-handler
@@ -426,97 +172,22 @@
                      :method "call1"
                      :args [{:type :literal :value request-obj}]})))
 
-#?(:clj
-   (defn- http-server-response-status
-     [response]
-     (let [fields (:fields response)]
-       (or (get fields :status_code)
-           200))))
 
-#?(:clj
-   (defn- http-server-response-body
-     [response]
-     (let [fields (:fields response)]
-       (str (or (get fields :body_text) "")))))
-
-#?(:clj
-   (defn- http-server-response-headers
-     [response]
-     (let [fields (:fields response)
-           headers (or (get fields :header_map) (nex-map))]
-       headers)))
-
-#?(:clj
-   (defn- start-http-server!
-     [ctx handle]
-     (let [server (com.sun.net.httpserver.HttpServer/create (java.net.InetSocketAddress. "127.0.0.1" (int @(:port handle))) 0)
-           dispatch
-           (proxy [com.sun.net.httpserver.HttpHandler] []
-             (handle [exchange]
-               (try
-                 (let [method (.getRequestMethod exchange)
-                       uri (.getRequestURI exchange)
-                       path (.getPath uri)
-                       query (.getRawQuery uri)
-                       body (slurp (.getRequestBody exchange))
-                       route (find-route handle method path)
-                       request-obj (make-http-server-request-object method path body
-                                                                    (http-exchange-headers->nex-map (.getRequestHeaders exchange))
-                                                                    (or (:params route) (nex-map))
-                                                                    (parse-query-map query))
-                       response-obj (if route
-                                      (invoke-http-server-handler ctx (:handler route) request-obj)
-                                      (make-http-server-default-response-object))
-                       status (int (http-server-response-status response-obj))
-                       response-body (http-server-response-body response-obj)
-                       response-bytes (.getBytes response-body java.nio.charset.StandardCharsets/UTF_8)
-                       response-headers (http-server-response-headers response-obj)]
-                   (doseq [[k v] response-headers]
-                     (.add (.getResponseHeaders exchange) (str k) (str v)))
-                   (.sendResponseHeaders exchange status (long (alength response-bytes)))
-                   (with-open [os (.getResponseBody exchange)]
-                     (.write os response-bytes))
-                   nil)
-                 (catch Exception ex
-                   (let [message (.getMessage ex)
-                         bytes (.getBytes (str "Server error: " (or message "unknown")) java.nio.charset.StandardCharsets/UTF_8)]
-                     (.sendResponseHeaders exchange 500 (long (alength bytes)))
-                     (with-open [os (.getResponseBody exchange)]
-                       (.write os bytes)))
-                   nil))))]
-       (.createContext server "/" dispatch)
-       (.start server)
-       (reset! (:server handle) server)
-       (reset! (:port handle) (.getPort (.getAddress server)))
-       @(:port handle))))
-
-;; Built-in IO type detection
-(defn nex-console? [v] (and (map? v) (= (:nex-builtin-type v) :Console)))
-(defn nex-file? [v] (and (map? v) (= (:nex-builtin-type v) :File)))
-(defn nex-process? [v] (and (map? v) (= (:nex-builtin-type v) :Process)))
-(defn nex-window? [v] (and (map? v) (= (:nex-builtin-type v) :Window)))
-(defn nex-turtle? [v] (and (map? v) (= (:nex-builtin-type v) :Turtle)))
-(defn nex-image? [v] (and (map? v) (= (:nex-builtin-type v) :Image)))
-(defn nex-task? [v] (and (map? v) (= (:nex-builtin-type v) :Task)))
-(defn nex-channel? [v] (and (map? v) (= (:nex-builtin-type v) :Channel)))
-
-;; Cursor type detection
-(defn nex-array-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :ArrayCursor)))
-(defn nex-string-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :StringCursor)))
-(defn nex-map-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :MapCursor)))
-(defn nex-set-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :SetCursor)))
-
-;; Subscript helper (works on both Array and Map)
-(defn nex-coll-get [coll idx]
-  (cond
-    (nex-array? coll) (nex-array-get coll idx)
-    (nex-map? coll) (nex-map-get coll idx)
-    :else #?(:clj (.get coll idx) :cljs (aget coll idx))))
-
-;; Char detection helper
-(defn nex-char? [v]
-  #?(:clj (char? v)
-     :cljs (and (string? v) (== (.-length v) 1))))
+;; Built-in IO / cursor / primitive predicates imported from nex.types.runtime
+(def nex-console? rt/nex-console?)
+(def nex-file? rt/nex-file?)
+(def nex-process? rt/nex-process?)
+(def nex-window? rt/nex-window?)
+(def nex-turtle? rt/nex-turtle?)
+(def nex-image? rt/nex-image?)
+(def nex-task? rt/nex-task?)
+(def nex-channel? rt/nex-channel?)
+(def nex-array-cursor? rt/nex-array-cursor?)
+(def nex-string-cursor? rt/nex-string-cursor?)
+(def nex-map-cursor? rt/nex-map-cursor?)
+(def nex-set-cursor? rt/nex-set-cursor?)
+(def nex-coll-get rt/nex-coll-get)
+(def nex-char? rt/nex-char?)
 
 ;;
 ;; Runtime Environment
@@ -566,112 +237,12 @@
 
 (declare register-class)
 
-(defn- build-function-base-class
-  "Create the built-in Function base class definition."
-  []
-  (let [make-method (fn [n]
-                      {:type :method
-                       :name (str "call" n)
-                       :params (if (zero? 0)
-                                 []
-                                 (mapv (fn [i]
-                                         {:name (str "arg" i) :type "Any"})
-                                       (range 1 (inc n))))
-                       :return-type "Any"
-                       :note nil
-                       :require nil
-                       :body []
-                       :ensure nil})
-        methods (vec (cons (make-method 0) (mapv make-method (range 1 33))))]
-    {:type :class
-     :name "Function"
-     :generic-params nil
-     :note nil
-     :parents nil
-     :body [{:type :feature-section
-             :visibility {:type :public}
-             :members methods}]
-     :invariant nil}))
-
-(defn- build-cursor-base-class
-  "Create the built-in Cursor base class definition.
-   Cursor defines the iteration interface: start, item, next, at_end.
-   Array, String, and Map are conceptual subclasses."
-  []
-  {:type :class
-   :name "Cursor"
-   :generic-params nil
-   :note nil
-   :parents nil
-   :body [{:type :feature-section
-           :visibility {:type :public}
-           :members [{:type :method :name "start" :params nil :return-type nil
-                      :note nil :require nil :body [] :ensure nil}
-                     {:type :method :name "item" :params nil :return-type "Any"
-                      :note nil :require nil :body [] :ensure nil}
-                     {:type :method :name "next" :params nil :return-type nil
-                      :note nil :require nil :body [] :ensure nil}
-                     {:type :method :name "at_end" :params nil :return-type "Boolean"
-                      :note nil :require nil :body [] :ensure nil}]}]
-   :invariant nil})
-
-(defn- build-comparable-base-class
-  "Create the built-in deferred Comparable class."
-  []
-  {:type :class
-   :name "Comparable"
-   :deferred? true
-   :generic-params nil
-   :note nil
-   :parents nil
-   :body [{:type :feature-section
-           :visibility {:type :public}
-           :members [{:type :method :name "compare"
-                      :params [{:name "a" :type "Any"}]
-                      :return-type "Integer"
-                      :note nil :require nil :body [] :ensure nil}]}]
-   :invariant nil})
-
-(defn- build-any-base-class
-  "Create the built-in Any root class definition."
-  []
-  {:type :class
-   :name "Any"
-   :deferred? false
-   :generic-params nil
-   :note nil
-   :parents nil
-   :body []
-   :invariant nil})
-
-(defn- build-hashable-base-class
-  "Create the built-in deferred Hashable class."
-  []
-  {:type :class
-   :name "Hashable"
-   :deferred? true
-   :generic-params nil
-   :note nil
-   :parents nil
-   :body [{:type :feature-section
-           :visibility {:type :public}
-           :members [{:type :method :name "hash"
-                      :params nil
-                      :return-type "Integer"
-                      :note nil :require nil :body [] :ensure nil}]}]
-   :invariant nil})
-
-(defn- build-builtin-scalar-class
-  "Create a built-in scalar class definition that implements Comparable and Hashable."
-  [name]
-  {:type :class
-   :name name
-   :deferred? false
-   :generic-params nil
-   :note nil
-   :parents [{:parent "Any"} {:parent "Comparable"} {:parent "Hashable"}]
-   :body []
-   :invariant nil})
+(def build-function-base-class bootstrap/build-function-base-class)
+(def build-cursor-base-class bootstrap/build-cursor-base-class)
+(def build-comparable-base-class bootstrap/build-comparable-base-class)
+(def build-any-base-class bootstrap/build-any-base-class)
+(def build-hashable-base-class bootstrap/build-hashable-base-class)
+(def build-builtin-scalar-class bootstrap/build-builtin-scalar-class)
 
 (defn make-context
   "Create a new runtime context."
@@ -1715,51 +1286,17 @@
       (or (some #(= (:parent %) parent-name) parents)
           (some #(is-parent? ctx (:parent %) parent-name) parents)))))
 
-(defn- runtime-type-name
-  "Return runtime type/class name as string for convert checks."
-  [value]
-  (cond
-    (nil? value) "Nil"
-    (nex-object? value) (:class-name value)
-    :else (some-> (get-type-name value) name)))
+(defn- runtime-type-name [value]
+  (typeinfo/runtime-type-name nex-object? get-type-name value))
 
-(defn- numeric-subtype-runtime?
-  "Runtime numeric widening chain used by type_is:
-   Integer <: Integer64 <: Real <: Decimal."
-  [runtime-type target-type]
-  (or (and (= runtime-type "Integer")
-           (#{"Integer64" "Real" "Decimal"} target-type))
-      (and (= runtime-type "Integer64")
-           (#{"Real" "Decimal"} target-type))
-      (and (= runtime-type "Real")
-           (= target-type "Decimal"))))
+(def numeric-subtype-runtime? typeinfo/numeric-subtype-runtime?)
+(def cursor-subtype-runtime? typeinfo/cursor-subtype-runtime?)
 
-(defn- cursor-subtype-runtime?
-  [runtime-type target-type]
-  (and (#{"ArrayCursor" "StringCursor" "MapCursor" "SetCursor"} runtime-type)
-       (= target-type "Cursor")))
+(defn- runtime-type-is? [ctx target-type value]
+  (typeinfo/runtime-type-is? runtime-type-name is-parent? ctx target-type value))
 
-(defn- runtime-type-is?
-  "Whether value's runtime type is target-type or subtype of target-type."
-  [ctx target-type value]
-  (let [runtime-type (runtime-type-name value)]
-    (cond
-      (not (string? target-type)) false
-      (nil? runtime-type) false
-      (= target-type "Any") true
-      (= runtime-type target-type) true
-      (numeric-subtype-runtime? runtime-type target-type) true
-      (cursor-subtype-runtime? runtime-type target-type) true
-      (and runtime-type (is-parent? ctx runtime-type target-type)) true
-      :else false)))
-
-(defn- convert-compatible-runtime?
-  "Java-style runtime conversion relation:
-   value must be an instance of target type (or target supertype)."
-  [ctx runtime-type target-type]
-  (or (= target-type "Any")
-      (= runtime-type target-type)
-      (and runtime-type (is-parent? ctx runtime-type target-type))))
+(defn- convert-compatible-runtime? [ctx runtime-type target-type]
+  (typeinfo/convert-compatible-runtime? is-parent? ctx runtime-type target-type))
 
 (defn eval-class-constant
   "Evaluate a class constant value with inherited constant bindings available."
@@ -1837,138 +1374,20 @@
       :else
       nil)))
 
-(defn nex-format-value
-  "Format a value as-per Nex syntax rules."
-  [value]
-  (cond
-    ;; Nex objects
-    (instance? nex.interpreter.NexObject value)
-    (str "#<" (:class-name value) " object>")
-
-    ;; Built-in types with :nex-builtin-type
-    (and (map? value) (:nex-builtin-type value))
-    (str "#<" (name (:nex-builtin-type value)) ">")
-
-    ;; Strings - show without quotes for direct display
-    (string? value)
-    (str \" value \")
-
-    ;; Clojure integer division can produce exact ratios; format them as reals
-    ;; so JVM REPL output matches the browser/runtime surface.
-    #?(:clj (ratio? value) :cljs false)
-    (str (double value))
-
-    ;; Numbers
-    (number? value)
-    (str value)
-
-    ;; Booleans
-    (boolean? value)
-    (str value)
-
-    ;; Nil
-    (nil? value)
-    "nil"
-
-    ;; Collections
-    (nex-map? value)
-    (nex-map-str value)
-
-    (nex-array? value)
-    (nex-array-str value)
-
-    (nex-set? value)
-    (nex-set-str value)
-
-    (coll? value)
-    (pr-str value)
-
-    (char? value)
-    (str "#" value)
-
-    ;; Everything else
-    :else
-    (pr-str value)))
+(defn nex-format-value [value]
+  (value/nex-format-value nex-object? nex-map-str nex-array-str nex-set-str value))
 
 (defn- nex-clone-value [value]
-  (cond
-    (instance? nex.interpreter.NexObject value)
-    (make-object (:class-name value)
-                 (into {} (map (fn [[k v]] [k (nex-clone-value v)]) (:fields value)))
-                 (:closure-env value))
+  (value/nex-clone-value nex-object? make-object value))
 
-    (nex-array? value)
-    (nex-array-from (map nex-clone-value #?(:clj value :cljs (array-seq value))))
-
-    (nex-map? value)
-    #?(:clj (java.util.HashMap. (into {} (map (fn [[k v]] [(nex-clone-value k) (nex-clone-value v)]) value)))
-       :cljs (js/Map. (to-array (map (fn [[k v]] (to-array [(nex-clone-value k) (nex-clone-value v)]))
-                                     (es6-iterator-seq (.entries value))))))
-
-    (nex-set? value)
-    #?(:clj (doto (java.util.LinkedHashSet.)
-              (#(doseq [v value] (.add % (nex-clone-value v)))))
-       :cljs (js/Set. (to-array (map nex-clone-value (es6-iterator-seq (.values value))))))
-
-    (and (map? value) (:nex-builtin-type value))
-    (into {} value)
-
-    :else
-    value))
-
-(declare nex-deep-equals?)
-
-(defn- nex-map-entry-match?
-  [m2 k1 v1]
-  (some (fn [[k2 v2]]
-          (and (nex-deep-equals? k1 k2)
-               (nex-deep-equals? v1 v2)))
-        #?(:clj m2 :cljs (es6-iterator-seq (.entries m2)))))
+(defn- nex-map-entry-match? [m2 k1 v1]
+  (value/nex-map-entry-match? nex-object? k1 v1 m2))
 
 (defn- nex-deep-equals? [a b]
-  (cond
-    (and (instance? nex.interpreter.NexObject a)
-         (instance? nex.interpreter.NexObject b))
-    (and (= (:class-name a) (:class-name b))
-         (= (set (keys (:fields a))) (set (keys (:fields b))))
-         (every? (fn [k] (nex-deep-equals? (get (:fields a) k) (get (:fields b) k)))
-                 (keys (:fields a))))
+  (value/nex-deep-equals? nex-object? a b))
 
-    (and (nex-array? a) (nex-array? b))
-    (and (= (nex-array-size a) (nex-array-size b))
-         (every? true? (map nex-deep-equals?
-                            #?(:clj a :cljs (array-seq a))
-                            #?(:clj b :cljs (array-seq b)))))
-
-    (and (nex-map? a) (nex-map? b))
-    (and (= (nex-map-size a) (nex-map-size b))
-         (every? (fn [[k v]] (nex-map-entry-match? b k v))
-                 #?(:clj a :cljs (es6-iterator-seq (.entries a)))))
-
-    (and (nex-set? a) (nex-set? b))
-    (and (= (nex-set-size a) (nex-set-size b))
-         (every? (fn [v1]
-                   (some #(nex-deep-equals? v1 %)
-                         #?(:clj b :cljs (es6-iterator-seq (.values b)))))
-                 #?(:clj a :cljs (es6-iterator-seq (.values a)))))
-
-    :else
-    (= a b)))
-
-(defn nex-display-value
-  "Format a value for Console output.
-   Scalars keep their user-facing form; structured values use Nex syntax."
-  [value]
-  (cond
-    (or (nex-map? value)
-        (nex-array? value)
-        (nex-set? value)
-        (nil? value)
-        (nex-object? value)
-        (and (map? value) (:nex-builtin-type value)))
-    (nex-format-value value)
-    :else
-    (str value)))
+(defn nex-display-value [value]
+  (value/nex-display-value nex-object? nex-format-value value))
 
 ;;
 ;; Built-in Functions
@@ -2066,7 +1485,7 @@
      (when (not= (count args) 1)
        (throw (ex-info "json_parse expects exactly 1 argument"
                        {:function "json_parse" :expected 1 :actual (count args)})))
-     #?(:clj (nex-json-parse (first args))
+     #?(:clj (json-types/nex-json-parse (first args))
         :cljs (throw (ex-info "json_parse is not supported in the ClojureScript interpreter"
                               {:function "json_parse"}))))
 
@@ -2075,7 +1494,7 @@
      (when (not= (count args) 1)
        (throw (ex-info "json_stringify expects exactly 1 argument"
                        {:function "json_stringify" :expected 1 :actual (count args)})))
-     #?(:clj (nex-json-stringify (first args))
+     #?(:clj (json-types/nex-json-stringify (first args))
         :cljs (throw (ex-info "json_stringify is not supported in the ClojureScript interpreter"
                               {:function "json_stringify"}))))
 
@@ -2732,36 +2151,7 @@
     "ypos"       (fn [t & _] (turtle/turtle-y t))
     "show"       (fn [t & _] (turtle/turtle-show t))}}))
 
-(defn get-type-name
-  "Get the type name for a value"
-  [value]
-  (cond
-    (string? value) :String
-    #?(:clj (instance? java.math.BigDecimal value)
-       :cljs false) :Decimal
-    ;; Real literals are parsed as doubles on the JVM.
-    #?(:clj (or (double? value) (float? value))
-       :cljs (and (number? value) (not (integer? value)))) :Real
-    #?(:clj (ratio? value) :cljs false) :Real
-    (integer? value) :Integer
-    (nex-char? value) :Char
-    (boolean? value) :Boolean
-    (nex-array? value) :Array
-    (nex-map? value) :Map
-    (nex-set? value) :Set
-    (nex-console? value) :Console
-    (nex-file? value) :File
-    (nex-process? value) :Process
-    (nex-task? value) :Task
-    (nex-channel? value) :Channel
-    (nex-window? value) :Window
-    (nex-turtle? value) :Turtle
-    (nex-image? value) :Image
-    (nex-array-cursor? value) :ArrayCursor
-    (nex-string-cursor? value) :StringCursor
-    (nex-map-cursor? value) :MapCursor
-    (nex-set-cursor? value) :SetCursor
-    :else nil))
+(def get-type-name typeinfo/get-type-name)
 
 (defn call-builtin-method
   "Call a built-in method on a primitive value"
