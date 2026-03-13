@@ -53,7 +53,6 @@
       "Task" "NexRuntime.Task"
       "Channel" "NexRuntime.Channel"
       "Console" "Object"
-      "File" "java.io.File"
       "Process" "Object"
       "Function" "Function"
       "Window" "NexWindow"
@@ -108,7 +107,6 @@
         "Task" "NexRuntime.Task"
         "Channel" "NexRuntime.Channel"
         "Console" "Object"
-        "File" "java.io.File"
         "Process" "Object"
         "Function" "Function"
         "Window" "NexWindow"
@@ -150,7 +148,6 @@
       "Task" "null"
       "Channel" "null"
       "Console" "new Object() /* Console */"
-      "File" "null"
       "Process" "new Object() /* Process */"
       "Window" "null"
       "Turtle" "null"
@@ -269,6 +266,42 @@
     "type_of" (str "NexRuntime.typeOf(" args-code ")")
     "type_is" (str "NexRuntime.typeIs(" args-code ")")
     "sleep" (str "NexRuntime.sleep(" args-code ")")
+    "path_exists" (str "NexRuntime.pathExists(" args-code ")")
+    "path_is_file" (str "NexRuntime.pathIsFile(" args-code ")")
+    "path_is_directory" (str "NexRuntime.pathIsDirectory(" args-code ")")
+    "path_name" (str "NexRuntime.pathName(" args-code ")")
+    "path_extension" (str "NexRuntime.pathExtension(" args-code ")")
+    "path_name_without_extension" (str "NexRuntime.pathNameWithoutExtension(" args-code ")")
+    "path_absolute" (str "NexRuntime.pathAbsolute(" args-code ")")
+    "path_normalize" (str "NexRuntime.pathNormalize(" args-code ")")
+    "path_size" (str "NexRuntime.pathSize(" args-code ")")
+    "path_modified_time" (str "NexRuntime.pathModifiedTime(" args-code ")")
+    "path_parent" (str "NexRuntime.pathParent(" args-code ")")
+    "path_child" (str "NexRuntime.pathChild(" args-code ")")
+    "path_create_file" (str "NexRuntime.pathCreateFile(" args-code ")")
+    "path_create_directory" (str "NexRuntime.pathCreateDirectory(" args-code ")")
+    "path_create_directories" (str "NexRuntime.pathCreateDirectories(" args-code ")")
+    "path_delete" (str "NexRuntime.pathDelete(" args-code ")")
+    "path_delete_tree" (str "NexRuntime.pathDeleteTree(" args-code ")")
+    "path_copy" (str "NexRuntime.pathCopy(" args-code ")")
+    "path_move" (str "NexRuntime.pathMove(" args-code ")")
+    "path_read_text" (str "NexRuntime.pathReadText(" args-code ")")
+    "path_write_text" (str "NexRuntime.pathWriteText(" args-code ")")
+    "path_append_text" (str "NexRuntime.pathAppendText(" args-code ")")
+    "path_list" (str "NexRuntime.pathList(" args-code ")")
+    "text_file_open_read" (str "NexRuntime.textFileOpenRead(" args-code ")")
+    "text_file_open_write" (str "NexRuntime.textFileOpenWrite(" args-code ")")
+    "text_file_open_append" (str "NexRuntime.textFileOpenAppend(" args-code ")")
+    "text_file_read_line" (str "NexRuntime.textFileReadLine(" args-code ")")
+    "text_file_write" (str "NexRuntime.textFileWrite(" args-code ")")
+    "text_file_close" (str "NexRuntime.textFileClose(" args-code ")")
+    "binary_file_open_read" (str "NexRuntime.binaryFileOpenRead(" args-code ")")
+    "binary_file_open_write" (str "NexRuntime.binaryFileOpenWrite(" args-code ")")
+    "binary_file_open_append" (str "NexRuntime.binaryFileOpenAppend(" args-code ")")
+    "binary_file_read_all" (str "NexRuntime.binaryFileReadAll(" args-code ")")
+    "binary_file_read" (str "NexRuntime.binaryFileRead(" args-code ")")
+    "binary_file_write" (str "NexRuntime.binaryFileWrite(" args-code ")")
+    "binary_file_close" (str "NexRuntime.binaryFileClose(" args-code ")")
     "json_parse" (str "NexRuntime.jsonParse(" args-code ")")
     "json_stringify" (str "NexRuntime.jsonStringify(" args-code ")")
     "http_get" (str "NexRuntime.httpGet(" args-code ")")
@@ -511,15 +544,6 @@
     "read_integer" (fn [_ _] "NexRuntime.parseInt(new java.util.Scanner(System.in).nextLine())")
     "read_real"    (fn [_ _] "Double.parseDouble(new java.util.Scanner(System.in).nextLine().trim())")}
 
-   :File
-   {"read"   (fn [t _] (str "java.nio.file.Files.readString(" t ".toPath())"))
-    "write"  (fn [t a] (str "java.nio.file.Files.writeString(" t ".toPath(), " a ")"))
-    "append" (fn [t a] (str "java.nio.file.Files.writeString(" t ".toPath(), " a ", java.nio.file.StandardOpenOption.APPEND)"))
-    "exists" (fn [t _] (str t ".exists()"))
-    "delete" (fn [t _] (str t ".delete()"))
-    "lines"  (fn [t _] (str "new ArrayList<>(java.nio.file.Files.readAllLines(" t ".toPath()))"))
-    "close"  (fn [t _] (str "/* " t ".close() */"))}
-
    :Process
    {"getenv"       (fn [_ a] (str "System.getenv(" a ")"))
     "setenv"       (fn [_ a] (str "/* setenv not supported in Java: " a " */"))
@@ -622,6 +646,42 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
+                  "path_exists" "Boolean"
+                  "path_is_file" "Boolean"
+                  "path_is_directory" "Boolean"
+                  "path_name" "String"
+                  "path_extension" "String"
+                  "path_name_without_extension" "String"
+                  "path_absolute" "String"
+                  "path_normalize" "String"
+                  "path_size" "Integer64"
+                  "path_modified_time" "Integer64"
+                  "path_parent" {:base-type "String" :detachable true}
+                  "path_child" "String"
+                  "path_create_file" "Void"
+                  "path_create_directory" "Void"
+                  "path_create_directories" "Void"
+                  "path_delete" "Void"
+                  "path_delete_tree" "Void"
+                  "path_copy" "Void"
+                  "path_move" "Void"
+                  "path_read_text" "String"
+                  "path_write_text" "Void"
+                  "path_append_text" "Void"
+                  "path_list" {:base-type "Array" :type-params ["String"]}
+                  "text_file_open_read" "Any"
+                  "text_file_open_write" "Any"
+                  "text_file_open_append" "Any"
+                  "text_file_read_line" {:base-type "String" :detachable true}
+                  "text_file_write" "Void"
+                  "text_file_close" "Void"
+                  "binary_file_open_read" "Any"
+                  "binary_file_open_write" "Any"
+                  "binary_file_open_append" "Any"
+                  "binary_file_read_all" {:base-type "Array" :type-params ["Integer"]}
+                  "binary_file_read" {:base-type "Array" :type-params ["Integer"]}
+                  "binary_file_write" "Void"
+                  "binary_file_close" "Void"
                   "json_parse" "Any"
                   "json_stringify" "String"
                   "http_get" "Http_Response"
@@ -944,7 +1004,6 @@
                       (str "<" (str/join ", " (map nex-type-to-java-boxed generic-args)) ">"))]
     (case class-name
       "Console" "new Object() /* Console */"
-      "File" (str "new java.io.File(" args-code ")")
       "Process" "new Object() /* Process */"
       "Map" "new HashMap<>()"
       "Channel" (cond
@@ -2719,6 +2778,236 @@ public class NexTurtle {
        "    } catch (InterruptedException e) {\n"
        "      Thread.currentThread().interrupt();\n"
        "      throw new RuntimeException(e);\n"
+       "    }\n"
+       "  }\n\n"
+       "  public static boolean pathExists(String path) { return new java.io.File(path).exists(); }\n"
+       "  public static boolean pathIsFile(String path) { return new java.io.File(path).isFile(); }\n"
+       "  public static boolean pathIsDirectory(String path) { return new java.io.File(path).isDirectory(); }\n"
+       "  public static String pathName(String path) { return new java.io.File(path).getName(); }\n"
+       "  public static String pathExtension(String path) {\n"
+       "    String name = pathName(path);\n"
+       "    int dot = name.lastIndexOf('.');\n"
+       "    return (dot <= 0 || dot == name.length() - 1) ? \"\" : name.substring(dot + 1);\n"
+       "  }\n"
+       "  public static String pathNameWithoutExtension(String path) {\n"
+       "    String name = pathName(path);\n"
+       "    int dot = name.lastIndexOf('.');\n"
+       "    return (dot <= 0) ? name : name.substring(0, dot);\n"
+       "  }\n"
+       "  public static String pathAbsolute(String path) { return new java.io.File(path).getAbsolutePath(); }\n"
+       "  public static String pathNormalize(String path) { return new java.io.File(path).toPath().normalize().toString(); }\n"
+       "  public static long pathSize(String path) { return new java.io.File(path).length(); }\n"
+       "  public static long pathModifiedTime(String path) { return new java.io.File(path).lastModified(); }\n"
+       "  public static String pathParent(String path) { return new java.io.File(path).getParent(); }\n"
+       "  public static String pathChild(String path, String childName) { return new java.io.File(path, childName).getPath(); }\n"
+       "  public static void pathCreateFile(String path) {\n"
+       "    try {\n"
+       "      new java.io.File(path).createNewFile();\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void pathCreateDirectory(String path) {\n"
+       "    if (!new java.io.File(path).mkdir() && !new java.io.File(path).isDirectory()) throw new RuntimeException(\"Could not create directory: \" + path);\n"
+       "  }\n"
+       "  public static void pathCreateDirectories(String path) {\n"
+       "    if (!new java.io.File(path).mkdirs() && !new java.io.File(path).isDirectory()) throw new RuntimeException(\"Could not create directories: \" + path);\n"
+       "  }\n"
+       "  public static void pathDelete(String path) {\n"
+       "    java.io.File f = new java.io.File(path);\n"
+       "    if (!f.exists()) return;\n"
+       "    if (f.isDirectory()) throw new RuntimeException(\"path_delete does not remove directories\");\n"
+       "    if (!f.delete()) throw new RuntimeException(\"Could not delete path: \" + path);\n"
+       "  }\n"
+       "  private static void deleteTree(java.io.File f) {\n"
+       "    if (!f.exists()) return;\n"
+       "    java.io.File[] children = f.listFiles();\n"
+       "    if (children != null) for (java.io.File child : children) deleteTree(child);\n"
+       "    if (!f.delete()) throw new RuntimeException(\"Could not delete path: \" + f.getPath());\n"
+       "  }\n"
+       "  public static void pathDeleteTree(String path) {\n"
+       "    deleteTree(new java.io.File(path));\n"
+       "  }\n"
+       "  private static void copyTree(java.io.File source, java.io.File target) {\n"
+       "    try {\n"
+       "      if (source.isDirectory()) {\n"
+       "        target.mkdirs();\n"
+       "        java.io.File[] children = source.listFiles();\n"
+       "        if (children != null) for (java.io.File child : children) copyTree(child, new java.io.File(target, child.getName()));\n"
+       "      } else {\n"
+       "        java.io.File parent = target.getParentFile();\n"
+       "        if (parent != null) parent.mkdirs();\n"
+       "        java.nio.file.Files.copy(source.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);\n"
+       "      }\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void pathCopy(String sourcePath, String targetPath) {\n"
+       "    copyTree(new java.io.File(sourcePath), new java.io.File(targetPath));\n"
+       "  }\n"
+       "  public static void pathMove(String sourcePath, String targetPath) {\n"
+       "    java.io.File source = new java.io.File(sourcePath);\n"
+       "    java.io.File target = new java.io.File(targetPath);\n"
+       "    java.io.File parent = target.getParentFile();\n"
+       "    if (parent != null) parent.mkdirs();\n"
+       "    if (!source.renameTo(target)) {\n"
+       "      copyTree(source, target);\n"
+       "      deleteTree(source);\n"
+       "    }\n"
+       "  }\n"
+       "  public static String pathReadText(String path) {\n"
+       "    try {\n"
+       "      return java.nio.file.Files.readString(java.nio.file.Paths.get(path), java.nio.charset.StandardCharsets.UTF_8);\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void pathWriteText(String path, String text) {\n"
+       "    try {\n"
+       "      java.nio.file.Files.writeString(java.nio.file.Paths.get(path), String.valueOf(text), java.nio.charset.StandardCharsets.UTF_8);\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void pathAppendText(String path, String text) {\n"
+       "    try {\n"
+       "      java.nio.file.Files.writeString(java.nio.file.Paths.get(path), String.valueOf(text), java.nio.charset.StandardCharsets.UTF_8,\n"
+       "        java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static ArrayList<String> pathList(String path) {\n"
+       "    java.io.File[] files = new java.io.File(path).listFiles();\n"
+       "    ArrayList<String> out = new ArrayList<>();\n"
+       "    if (files != null) for (java.io.File f : files) out.add(f.getPath());\n"
+       "    return out;\n"
+       "  }\n\n"
+       "  public static class TextFileHandle {\n"
+       "    public final java.io.BufferedReader reader;\n"
+       "    public final java.io.BufferedWriter writer;\n"
+       "    public TextFileHandle(java.io.BufferedReader reader, java.io.BufferedWriter writer) {\n"
+       "      this.reader = reader;\n"
+       "      this.writer = writer;\n"
+       "    }\n"
+       "  }\n"
+       "  public static Object textFileOpenRead(String path) {\n"
+       "    try {\n"
+       "      return new TextFileHandle(new java.io.BufferedReader(new java.io.InputStreamReader(new java.io.FileInputStream(path), java.nio.charset.StandardCharsets.UTF_8)), null);\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static Object textFileOpenWrite(String path) {\n"
+       "    try {\n"
+       "      return new TextFileHandle(null, new java.io.BufferedWriter(new java.io.OutputStreamWriter(new java.io.FileOutputStream(path, false), java.nio.charset.StandardCharsets.UTF_8)));\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static Object textFileOpenAppend(String path) {\n"
+       "    try {\n"
+       "      return new TextFileHandle(null, new java.io.BufferedWriter(new java.io.OutputStreamWriter(new java.io.FileOutputStream(path, true), java.nio.charset.StandardCharsets.UTF_8)));\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static String textFileReadLine(Object handleObj) {\n"
+       "    try {\n"
+       "      return ((TextFileHandle) handleObj).reader.readLine();\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void textFileWrite(Object handleObj, String text) {\n"
+       "    try {\n"
+       "      TextFileHandle handle = (TextFileHandle) handleObj;\n"
+       "      handle.writer.write(String.valueOf(text));\n"
+       "      handle.writer.flush();\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void textFileClose(Object handleObj) {\n"
+       "    try {\n"
+       "      TextFileHandle handle = (TextFileHandle) handleObj;\n"
+       "      if (handle.reader != null) handle.reader.close();\n"
+       "      if (handle.writer != null) handle.writer.close();\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n\n"
+       "  public static class BinaryFileHandle {\n"
+       "    public final byte[] data;\n"
+       "    public int index;\n"
+       "    public final java.io.FileOutputStream out;\n"
+       "    public BinaryFileHandle(byte[] data, int index, java.io.FileOutputStream out) {\n"
+       "      this.data = data;\n"
+       "      this.index = index;\n"
+       "      this.out = out;\n"
+       "    }\n"
+       "  }\n"
+       "  private static ArrayList<Integer> bytesToIntArray(byte[] bytes) {\n"
+       "    ArrayList<Integer> out = new ArrayList<>();\n"
+       "    for (byte b : bytes) out.add(b & 0xFF);\n"
+       "    return out;\n"
+       "  }\n"
+       "  private static byte[] intArrayToBytes(ArrayList<Integer> values) {\n"
+       "    byte[] out = new byte[values.size()];\n"
+       "    for (int i = 0; i < values.size(); i++) {\n"
+       "      int v = values.get(i);\n"
+       "      if (v < 0 || v > 255) throw new RuntimeException(\"Binary byte values must be in range 0..255\");\n"
+       "      out[i] = (byte) v;\n"
+       "    }\n"
+       "    return out;\n"
+       "  }\n"
+       "  public static Object binaryFileOpenRead(String path) {\n"
+       "    try {\n"
+       "      return new BinaryFileHandle(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)), 0, null);\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static Object binaryFileOpenWrite(String path) {\n"
+       "    try {\n"
+       "      return new BinaryFileHandle(null, 0, new java.io.FileOutputStream(path, false));\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static Object binaryFileOpenAppend(String path) {\n"
+       "    try {\n"
+       "      return new BinaryFileHandle(null, 0, new java.io.FileOutputStream(path, true));\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static ArrayList<Integer> binaryFileReadAll(Object handleObj) {\n"
+       "    return bytesToIntArray(((BinaryFileHandle) handleObj).data);\n"
+       "  }\n"
+       "  public static ArrayList<Integer> binaryFileRead(Object handleObj, int count) {\n"
+       "    BinaryFileHandle handle = (BinaryFileHandle) handleObj;\n"
+       "    int end = Math.min(handle.index + count, handle.data.length);\n"
+       "    byte[] out = java.util.Arrays.copyOfRange(handle.data, handle.index, end);\n"
+       "    handle.index = end;\n"
+       "    return bytesToIntArray(out);\n"
+       "  }\n"
+       "  public static void binaryFileWrite(Object handleObj, ArrayList<Integer> values) {\n"
+       "    try {\n"
+       "      BinaryFileHandle handle = (BinaryFileHandle) handleObj;\n"
+       "      handle.out.write(intArrayToBytes(values));\n"
+       "      handle.out.flush();\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void binaryFileClose(Object handleObj) {\n"
+       "    try {\n"
+       "      BinaryFileHandle handle = (BinaryFileHandle) handleObj;\n"
+       "      if (handle.out != null) handle.out.close();\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
        "    }\n"
        "  }\n\n"
        "  private static Http_Response httpRequest(String method, String url, String bodyText, Integer timeoutMs) {\n"

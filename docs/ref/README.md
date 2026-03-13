@@ -11,6 +11,7 @@ This reference documents the interpreter-level built-ins currently defined in `s
 - [Cursor Types](cursor-types.md)
 - [System Classes](system-classes.md)
 - [Data Libraries](data.md)
+- [IO Libraries](io.md)
 - [Library Index](libraries.md)
 - [Networking Libraries](networking.md)
 - [Graphics Classes](graphics-classes.md)
@@ -20,4 +21,4 @@ This reference documents the interpreter-level built-ins currently defined in `s
 - Method names are listed exactly as implemented.
 - Signatures are shown in Nex-style pseudocode.
 - `nil` means no useful return value.
-- Some behavior differs by runtime (`:clj` vs `:cljs`), especially for `File` and `Process`.
+- Some behavior differs by runtime (`:clj` vs `:cljs`), especially for `Process` and platform-specific libraries under `lib/`.

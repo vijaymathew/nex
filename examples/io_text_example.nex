@@ -1,0 +1,26 @@
+intern io/Path
+intern io/Text_File
+
+let root: Path := create Path.make("tmp_io")
+root.create_directories()
+
+let original: Path := root.child("notes.txt")
+original.write_text("first line")
+original.append_text("\nsecond line")
+
+print(original.read_text())
+
+let reader: Text_File := create Text_File.open_read(original)
+print(reader.read_line())
+print(reader.read_line())
+reader.close()
+
+let copy_path: Path := root.child("notes_copy.txt")
+original.copy_to(copy_path)
+print(copy_path.read_text())
+
+let moved_path: Path := root.child("notes_moved.txt")
+copy_path.move_to(moved_path)
+print(moved_path.exists())
+
+root.delete_tree()

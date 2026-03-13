@@ -7,6 +7,7 @@ Unlike built-in runtime classes, these libraries may be platform-specific and mu
 ## Categories
 
 - [Data Libraries](data.md) - `data/Json` for JSON parsing and serialization
+- [IO Libraries](io.md) - `io/Path`, `io/Directory`, `io/Text_File`, and `io/Binary_File` for filesystem and file I/O
 - [Networking Libraries](networking.md) - portable `Http_Client`, JVM/Node `Http_Server`, and JVM-only TCP wrappers under `lib/net`
 
 ## Conventions

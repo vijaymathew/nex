@@ -1,0 +1,45 @@
+intern io/Path
+
+class Binary_File
+  note "Sequential binary file IO wrapper built on top of runtime binary-file primitives."
+
+create
+  open_read(path_value: Path) do
+    this.path := path_value
+    this.handle := binary_file_open_read(path_value.path)
+  end
+
+  open_write(path_value: Path) do
+    this.path := path_value
+    this.handle := binary_file_open_write(path_value.path)
+  end
+
+  open_append(path_value: Path) do
+    this.path := path_value
+    this.handle := binary_file_open_append(path_value.path)
+  end
+
+feature
+  path: Path
+  handle: Any
+
+  read_all(): Array[Integer] do
+    result := binary_file_read_all(handle)
+  end
+
+  read(count: Integer): Array[Integer] do
+    result := binary_file_read(handle, count)
+  end
+
+  write(bytes: Array[Integer]) do
+    binary_file_write(handle, bytes)
+  end
+
+  close() do
+    binary_file_close(handle)
+  end
+
+  to_string(): String do
+    result := "Binary_File(" + path.to_string() + ")"
+  end
+end

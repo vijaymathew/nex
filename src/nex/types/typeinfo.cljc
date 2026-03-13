@@ -17,7 +17,6 @@
     (rt/nex-map? value) :Map
     (rt/nex-set? value) :Set
     (rt/nex-console? value) :Console
-    (rt/nex-file? value) :File
     (rt/nex-process? value) :Process
     (rt/nex-task? value) :Task
     (rt/nex-channel? value) :Channel

@@ -1,0 +1,108 @@
+intern io/Path
+
+class Directory
+  note "Typed directory wrapper built on top of io/Path."
+
+create
+  make(path_value: String) do
+    this.path := create Path.make(path_value)
+  end
+
+  from_path(path_value: Path) do
+    this.path := path_value
+  end
+
+feature
+  path: Path
+
+  exists(): Boolean do
+    result := path.exists() and path.is_directory()
+  end
+
+  create_directory() do
+    path.create_directory()
+  end
+
+  create_tree() do
+    path.create_directories()
+  end
+
+  delete() do
+    path.delete()
+  end
+
+  delete_tree() do
+    path.delete_tree()
+  end
+
+  name(): String do
+    result := path.name()
+  end
+
+  parent(): ?Directory do
+    let parent_path: ?Path := path.parent()
+    if convert parent_path to attached_parent:Path then
+      result := create Directory.from_path(attached_parent)
+    end
+  end
+
+  child_dir(name: String): Directory do
+    result := create Directory.from_path(path.child(name))
+  end
+
+  child_path(name: String): Path do
+    result := path.child(name)
+  end
+
+  list(): Array[Path] do
+    result := path.list()
+  end
+
+  directories(): Array[Directory] do
+    let results: Array[Directory] := []
+    let items: Array[Path] := path.list()
+    let c: Cursor := items.cursor()
+    from
+      c.start()
+    until
+      c.at_end()
+    do
+      let item: Path := c.item()
+      if item.is_directory() then
+        results.add(create Directory.from_path(item))
+      end
+      c.next()
+    end
+    result := results
+  end
+
+  files(): Array[Path] do
+    let results: Array[Path] := []
+    let items: Array[Path] := path.list()
+    let c: Cursor := items.cursor()
+    from
+      c.start()
+    until
+      c.at_end()
+    do
+      let item: Path := c.item()
+      if item.is_file() then
+        results.add(item)
+      end
+      c.next()
+    end
+    result := results
+  end
+
+  absolute(): Directory do
+    result := create Directory.from_path(path.absolute())
+  end
+
+  normalize(): Directory do
+    result := create Directory.from_path(path.normalize())
+  end
+
+  to_string(): String do
+    result := "Directory(" + path.to_string() + ")"
+  end
+end

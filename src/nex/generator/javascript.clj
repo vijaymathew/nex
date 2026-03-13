@@ -76,7 +76,6 @@
       "Task" "Task"
       "Channel" "Channel"
       "Console" "Object"
-      "File" "Object"
       "Process" "Object"
       "Window" "NexWindow"
       "Turtle" "NexTurtle"
@@ -117,7 +116,6 @@
       "Task" "null"
       "Channel" "null"
       "Console" "({_type: 'Console'})"
-      "File" "null"
       "Process" "({_type: 'Process'})"
       "Window" "null"
       "Turtle" "null"
@@ -280,6 +278,42 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
+                  "path_exists" "Boolean"
+                  "path_is_file" "Boolean"
+                  "path_is_directory" "Boolean"
+                  "path_name" "String"
+                  "path_extension" "String"
+                  "path_name_without_extension" "String"
+                  "path_absolute" "String"
+                  "path_normalize" "String"
+                  "path_size" "Integer64"
+                  "path_modified_time" "Integer64"
+                  "path_parent" {:base-type "String" :detachable true}
+                  "path_child" "String"
+                  "path_create_file" "Void"
+                  "path_create_directory" "Void"
+                  "path_create_directories" "Void"
+                  "path_delete" "Void"
+                  "path_delete_tree" "Void"
+                  "path_copy" "Void"
+                  "path_move" "Void"
+                  "path_read_text" "String"
+                  "path_write_text" "Void"
+                  "path_append_text" "Void"
+                  "path_list" {:base-type "Array" :type-params ["String"]}
+                  "text_file_open_read" "Any"
+                  "text_file_open_write" "Any"
+                  "text_file_open_append" "Any"
+                  "text_file_read_line" {:base-type "String" :detachable true}
+                  "text_file_write" "Void"
+                  "text_file_close" "Void"
+                  "binary_file_open_read" "Any"
+                  "binary_file_open_write" "Any"
+                  "binary_file_open_append" "Any"
+                  "binary_file_read_all" {:base-type "Array" :type-params ["Integer"]}
+                  "binary_file_read" {:base-type "Array" :type-params ["Integer"]}
+                  "binary_file_write" "Void"
+                  "binary_file_close" "Void"
                   "json_parse" "Any"
                   "json_stringify" "String"
                   "http_get" "Http_Response"
@@ -462,6 +496,42 @@
     "type_of" (str "__nexTypeOf(" args-code ")")
     "type_is" (str "__nexTypeIs(" args-code ")")
     "sleep" (str "await __nexSleep(" args-code ")")
+    "path_exists" (str "__nexPathExists(" args-code ")")
+    "path_is_file" (str "__nexPathIsFile(" args-code ")")
+    "path_is_directory" (str "__nexPathIsDirectory(" args-code ")")
+    "path_name" (str "__nexPathName(" args-code ")")
+    "path_extension" (str "__nexPathExtension(" args-code ")")
+    "path_name_without_extension" (str "__nexPathNameWithoutExtension(" args-code ")")
+    "path_absolute" (str "__nexPathAbsolute(" args-code ")")
+    "path_normalize" (str "__nexPathNormalize(" args-code ")")
+    "path_size" (str "__nexPathSize(" args-code ")")
+    "path_modified_time" (str "__nexPathModifiedTime(" args-code ")")
+    "path_parent" (str "__nexPathParent(" args-code ")")
+    "path_child" (str "__nexPathChild(" args-code ")")
+    "path_create_file" (str "__nexPathCreateFile(" args-code ")")
+    "path_create_directory" (str "__nexPathCreateDirectory(" args-code ")")
+    "path_create_directories" (str "__nexPathCreateDirectories(" args-code ")")
+    "path_delete" (str "__nexPathDelete(" args-code ")")
+    "path_delete_tree" (str "__nexPathDeleteTree(" args-code ")")
+    "path_copy" (str "__nexPathCopy(" args-code ")")
+    "path_move" (str "__nexPathMove(" args-code ")")
+    "path_read_text" (str "__nexPathReadText(" args-code ")")
+    "path_write_text" (str "__nexPathWriteText(" args-code ")")
+    "path_append_text" (str "__nexPathAppendText(" args-code ")")
+    "path_list" (str "__nexPathList(" args-code ")")
+    "text_file_open_read" (str "__nexTextFileOpenRead(" args-code ")")
+    "text_file_open_write" (str "__nexTextFileOpenWrite(" args-code ")")
+    "text_file_open_append" (str "__nexTextFileOpenAppend(" args-code ")")
+    "text_file_read_line" (str "__nexTextFileReadLine(" args-code ")")
+    "text_file_write" (str "__nexTextFileWrite(" args-code ")")
+    "text_file_close" (str "__nexTextFileClose(" args-code ")")
+    "binary_file_open_read" (str "__nexBinaryFileOpenRead(" args-code ")")
+    "binary_file_open_write" (str "__nexBinaryFileOpenWrite(" args-code ")")
+    "binary_file_open_append" (str "__nexBinaryFileOpenAppend(" args-code ")")
+    "binary_file_read_all" (str "__nexBinaryFileReadAll(" args-code ")")
+    "binary_file_read" (str "__nexBinaryFileRead(" args-code ")")
+    "binary_file_write" (str "__nexBinaryFileWrite(" args-code ")")
+    "binary_file_close" (str "__nexBinaryFileClose(" args-code ")")
     "json_parse" (str "__nexJsonParse(" args-code ")")
     "json_stringify" (str "__nexJsonStringify(" args-code ")")
     "http_get" (str "await __nexHttpGet(" args-code ")")
@@ -702,15 +772,6 @@
     "read_integer" (fn [_ _] "__nexParseInt(require('readline-sync').question(''))")
     "read_real"    (fn [_ _] "parseFloat(require('readline-sync').question(''))")}
 
-   :File
-   {"read"   (fn [t _] (str "require('fs').readFileSync(" t ".path, 'utf8')"))
-    "write"  (fn [t a] (str "require('fs').writeFileSync(" t ".path, " a ", 'utf8')"))
-    "append" (fn [t a] (str "require('fs').appendFileSync(" t ".path, " a ", 'utf8')"))
-    "exists" (fn [t _] (str "require('fs').existsSync(" t ".path)"))
-    "delete" (fn [t _] (str "require('fs').unlinkSync(" t ".path)"))
-    "lines"  (fn [t _] (str "require('fs').readFileSync(" t ".path, 'utf8').split('\\n')"))
-    "close"  (fn [t _] (str "/* " t ".close() */"))}
-
    :Process
    {"getenv"       (fn [_ a] (str "process.env[" a "]"))
    "setenv"       (fn [_ a] (str "process.env[" a "]"))
@@ -725,7 +786,7 @@
     (and (nil? method)
          (map? target)
          (= :create (:type target))
-         (not (#{"Console" "File" "Process" "Set" "Window" "Turtle" "Image" "Channel"} (:class-name target))))
+        (not (#{"Console" "Process" "Set" "Window" "Turtle" "Image" "Channel"} (:class-name target))))
     true
 
     (nil? method) false
@@ -879,7 +940,6 @@
   (let [args-code (str/join ", " (map generate-expression args))]
     (case class-name
       "Console" "({_type: 'Console'})"
-      "File" (str "({_type: 'File', path: " args-code "})")
       "Process" "({_type: 'Process'})"
       "Map" "new Map()"
       "Channel" (cond
@@ -2137,6 +2197,185 @@
        "}\n"
        "function __nexSleep(ms) {\n"
        "  return new Promise(resolve => setTimeout(resolve, ms));\n"
+       "}\n"
+       "function __nexPathFs() {\n"
+       "  return require('fs');\n"
+       "}\n"
+       "function __nexPathMod() {\n"
+       "  return require('path');\n"
+       "}\n"
+       "function __nexPathExists(path) {\n"
+       "  return __nexPathFs().existsSync(path);\n"
+       "}\n"
+       "function __nexPathIsFile(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  return fs.existsSync(path) && fs.statSync(path).isFile();\n"
+       "}\n"
+       "function __nexPathIsDirectory(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  return fs.existsSync(path) && fs.statSync(path).isDirectory();\n"
+       "}\n"
+       "function __nexPathName(path) {\n"
+       "  return __nexPathMod().basename(path);\n"
+       "}\n"
+       "function __nexPathExtension(path) {\n"
+       "  const name = __nexPathName(path);\n"
+       "  const dot = name.lastIndexOf('.');\n"
+       "  return (dot <= 0 || dot === name.length - 1) ? \"\" : name.substring(dot + 1);\n"
+       "}\n"
+       "function __nexPathNameWithoutExtension(path) {\n"
+       "  const name = __nexPathName(path);\n"
+       "  const dot = name.lastIndexOf('.');\n"
+       "  return dot <= 0 ? name : name.substring(0, dot);\n"
+       "}\n"
+       "function __nexPathAbsolute(path) {\n"
+       "  return __nexPathMod().resolve(path);\n"
+       "}\n"
+       "function __nexPathNormalize(path) {\n"
+       "  return __nexPathMod().normalize(path);\n"
+       "}\n"
+       "function __nexPathSize(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  return fs.existsSync(path) ? fs.statSync(path).size : 0;\n"
+       "}\n"
+       "function __nexPathModifiedTime(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  return fs.existsSync(path) ? fs.statSync(path).mtimeMs : 0;\n"
+       "}\n"
+       "function __nexPathParent(path) {\n"
+       "  const parent = __nexPathMod().dirname(path);\n"
+       "  return parent === path ? null : parent;\n"
+       "}\n"
+       "function __nexPathChild(path, childName) {\n"
+       "  return __nexPathMod().join(path, childName);\n"
+       "}\n"
+       "function __nexPathCreateFile(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  if (!fs.existsSync(path)) fs.writeFileSync(path, '', 'utf8');\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathCreateDirectory(path) {\n"
+       "  __nexPathFs().mkdirSync(path, {recursive: false});\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathCreateDirectories(path) {\n"
+       "  __nexPathFs().mkdirSync(path, {recursive: true});\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathDelete(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  if (!fs.existsSync(path)) return null;\n"
+       "  if (fs.statSync(path).isDirectory()) throw new Error('path_delete does not remove directories');\n"
+       "  fs.unlinkSync(path);\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathDeleteTree(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  if (fs.existsSync(path)) fs.rmSync(path, {recursive: true, force: true});\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathCopy(src, dst) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  const pathMod = __nexPathMod();\n"
+       "  const copy = (source, target) => {\n"
+       "    const stat = fs.statSync(source);\n"
+       "    if (stat.isDirectory()) {\n"
+       "      fs.mkdirSync(target, {recursive: true});\n"
+       "      for (const name of fs.readdirSync(source)) copy(pathMod.join(source, name), pathMod.join(target, name));\n"
+       "    } else {\n"
+       "      fs.mkdirSync(pathMod.dirname(target), {recursive: true});\n"
+       "      fs.copyFileSync(source, target);\n"
+       "    }\n"
+       "  };\n"
+       "  copy(src, dst);\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathMove(src, dst) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  const pathMod = __nexPathMod();\n"
+       "  fs.mkdirSync(pathMod.dirname(dst), {recursive: true});\n"
+       "  try {\n"
+       "    fs.renameSync(src, dst);\n"
+       "  } catch (err) {\n"
+       "    __nexPathCopy(src, dst);\n"
+       "    __nexPathDeleteTree(src);\n"
+       "  }\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathReadText(path) {\n"
+       "  return __nexPathFs().readFileSync(path, 'utf8').toString();\n"
+       "}\n"
+       "function __nexPathWriteText(path, text) {\n"
+       "  __nexPathFs().writeFileSync(path, String(text), 'utf8');\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathAppendText(path, text) {\n"
+       "  __nexPathFs().appendFileSync(path, String(text), 'utf8');\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathList(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  const pathMod = __nexPathMod();\n"
+       "  return fs.readdirSync(path).map(name => pathMod.join(path, name));\n"
+       "}\n"
+       "function __nexTextFileOpenRead(path) {\n"
+       "  const content = __nexPathFs().readFileSync(path, 'utf8').toString();\n"
+       "  return {_type: 'TextFileHandle', mode: 'read', lines: content.split(/\\r?\\n/), index: 0, path};\n"
+       "}\n"
+       "function __nexTextFileOpenWrite(path) {\n"
+       "  __nexPathFs().writeFileSync(path, '', 'utf8');\n"
+       "  return {_type: 'TextFileHandle', mode: 'write', path};\n"
+       "}\n"
+       "function __nexTextFileOpenAppend(path) {\n"
+       "  return {_type: 'TextFileHandle', mode: 'append', path};\n"
+       "}\n"
+       "function __nexTextFileReadLine(handle) {\n"
+       "  if (handle.index >= handle.lines.length) return null;\n"
+       "  const line = handle.lines[handle.index];\n"
+       "  handle.index += 1;\n"
+       "  return line;\n"
+       "}\n"
+       "function __nexTextFileWrite(handle, text) {\n"
+       "  __nexPathFs().appendFileSync(handle.path, String(text), 'utf8');\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexTextFileClose(handle) {\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexBytesToIntArray(buf) {\n"
+       "  return Array.from(buf.values());\n"
+       "}\n"
+       "function __nexIntArrayToBuffer(values) {\n"
+       "  return Buffer.from(values.map(v => {\n"
+       "    if (v < 0 || v > 255) throw new Error('Binary byte values must be in range 0..255');\n"
+       "    return v;\n"
+       "  }));\n"
+       "}\n"
+       "function __nexBinaryFileOpenRead(path) {\n"
+       "  return {_type: 'BinaryFileHandle', mode: 'read', data: __nexPathFs().readFileSync(path), index: 0, path};\n"
+       "}\n"
+       "function __nexBinaryFileOpenWrite(path) {\n"
+       "  __nexPathFs().writeFileSync(path, Buffer.alloc(0));\n"
+       "  return {_type: 'BinaryFileHandle', mode: 'write', path};\n"
+       "}\n"
+       "function __nexBinaryFileOpenAppend(path) {\n"
+       "  return {_type: 'BinaryFileHandle', mode: 'append', path};\n"
+       "}\n"
+       "function __nexBinaryFileReadAll(handle) {\n"
+       "  return __nexBytesToIntArray(handle.data);\n"
+       "}\n"
+       "function __nexBinaryFileRead(handle, count) {\n"
+       "  const end = Math.min(handle.index + count, handle.data.length);\n"
+       "  const out = handle.data.subarray(handle.index, end);\n"
+       "  handle.index = end;\n"
+       "  return __nexBytesToIntArray(out);\n"
+       "}\n"
+       "function __nexBinaryFileWrite(handle, values) {\n"
+       "  __nexPathFs().appendFileSync(handle.path, __nexIntArrayToBuffer(values));\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexBinaryFileClose(handle) {\n"
+       "  return null;\n"
        "}\n"
        "async function __nexHttpRequest(method, url, body_text = null, timeout_ms = null) {\n"
        "  let controller = null;\n"

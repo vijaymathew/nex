@@ -258,6 +258,22 @@ end")
       (is (.contains output "false"))
       (is (.contains output "\"Http_Server(port=0, running=false)\"")))))
 
+(deftest repl-intern-loads-checked-in-io-libraries
+  (testing "REPL can load the checked-in io libraries and create representative objects"
+    (let [ctx (repl/init-repl-context)
+          output (with-out-str
+                   (repl/eval-code ctx "intern io/Path")
+                   (repl/eval-code ctx "intern io/Directory")
+                   (repl/eval-code ctx "intern io/Text_File")
+                   (repl/eval-code ctx "intern io/Binary_File")
+                   (repl/eval-code ctx "let d: Directory := create Directory.make(\".\")")
+                   (repl/eval-code ctx "print(d.to_string())"))]
+      (is (not (.contains output "Cannot find intern file for io/Path")))
+      (is (not (.contains output "Cannot find intern file for io/Directory")))
+      (is (not (.contains output "Cannot find intern file for io/Text_File")))
+      (is (not (.contains output "Cannot find intern file for io/Binary_File")))
+      (is (.contains output "\"Directory(.") ))))
+
 (deftest repl-intern-loads-checked-in-json-library
   (testing "REPL can load the checked-in Json library and create a Json object"
     (let [ctx (repl/init-repl-context)

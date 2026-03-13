@@ -299,6 +299,37 @@ end"
       (is (str/includes? java-code "result = NexRuntime.jsonParse(text);"))
       (is (str/includes? java-code "result = NexRuntime.jsonStringify(value);")))))
 
+(deftest io-library-generation-test
+  (testing "io libraries lower to ordinary classes plus runtime IO builtins"
+    (let [path-code (java/translate (slurp "lib/io/path.nex"))
+          directory-code (java/translate (slurp "lib/io/directory.nex") {:skip-type-check true})
+          text-code (java/translate (slurp "lib/io/text_file.nex") {:skip-type-check true})
+          binary-code (java/translate (slurp "lib/io/binary_file.nex") {:skip-type-check true})]
+      (is (str/includes? path-code "public class Path"))
+      (is (str/includes? path-code "NexRuntime.pathExists("))
+      (is (str/includes? path-code "NexRuntime.pathChild("))
+      (is (str/includes? path-code "NexRuntime.pathExtension("))
+      (is (str/includes? path-code "NexRuntime.pathNameWithoutExtension("))
+      (is (str/includes? path-code "NexRuntime.pathAbsolute("))
+      (is (str/includes? path-code "NexRuntime.pathNormalize("))
+      (is (str/includes? path-code "NexRuntime.pathSize("))
+      (is (str/includes? path-code "NexRuntime.pathModifiedTime("))
+      (is (str/includes? path-code "NexRuntime.pathList("))
+      (is (str/includes? path-code "NexRuntime.pathCopy("))
+      (is (str/includes? path-code "NexRuntime.pathMove("))
+      (is (str/includes? path-code "NexRuntime.pathDeleteTree("))
+      (is (str/includes? directory-code "public class Directory"))
+      (is (str/includes? directory-code "public void create_directory()"))
+      (is (str/includes? directory-code "public ArrayList<Directory> directories()"))
+      (is (str/includes? text-code "public class Text_File"))
+      (is (str/includes? text-code "NexRuntime.textFileOpenRead("))
+      (is (str/includes? text-code "NexRuntime.textFileReadLine("))
+      (is (str/includes? text-code "NexRuntime.textFileWrite("))
+      (is (str/includes? binary-code "public class Binary_File"))
+      (is (str/includes? binary-code "NexRuntime.binaryFileOpenWrite("))
+      (is (str/includes? binary-code "NexRuntime.binaryFileRead("))
+      (is (str/includes? binary-code "NexRuntime.binaryFileWrite(")))))
+
 (deftest buffered-channel-generation-test
   (testing "buffered Channel constructors and accessors lower correctly in Java"
     (let [nex-code "class Test

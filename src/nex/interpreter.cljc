@@ -100,12 +100,6 @@
 (def nex-parse-integer rt/nex-parse-integer)
 (def nex-parse-real rt/nex-parse-real)
 
-(def nex-file-read rt/nex-file-read)
-(def nex-file-write rt/nex-file-write)
-(def nex-file-append rt/nex-file-append)
-(def nex-file-exists? rt/nex-file-exists?)
-(def nex-file-delete rt/nex-file-delete)
-(def nex-file-lines rt/nex-file-lines)
 (def nex-process-getenv rt/nex-process-getenv)
 (def nex-process-setenv rt/nex-process-setenv)
 (def nex-process-command-line rt/nex-process-command-line)
@@ -175,7 +169,6 @@
 
 ;; Built-in IO / cursor / primitive predicates imported from nex.types.runtime
 (def nex-console? rt/nex-console?)
-(def nex-file? rt/nex-file?)
 (def nex-process? rt/nex-process?)
 (def nex-window? rt/nex-window?)
 (def nex-turtle? rt/nex-turtle?)
@@ -1498,6 +1491,222 @@
         :cljs (throw (ex-info "json_stringify is not supported in the ClojureScript interpreter"
                               {:function "json_stringify"}))))
 
+   "path_exists"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_exists expects exactly 1 argument" {:function "path_exists"})))
+     (rt/path-exists? (str (first args))))
+
+   "path_is_file"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_is_file expects exactly 1 argument" {:function "path_is_file"})))
+     (rt/path-is-file? (str (first args))))
+
+   "path_is_directory"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_is_directory expects exactly 1 argument" {:function "path_is_directory"})))
+     (rt/path-is-directory? (str (first args))))
+
+   "path_name"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_name expects exactly 1 argument" {:function "path_name"})))
+     (rt/path-name (str (first args))))
+
+   "path_extension"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_extension expects exactly 1 argument" {:function "path_extension"})))
+     (rt/path-extension (str (first args))))
+
+   "path_name_without_extension"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_name_without_extension expects exactly 1 argument" {:function "path_name_without_extension"})))
+     (rt/path-name-without-extension (str (first args))))
+
+   "path_absolute"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_absolute expects exactly 1 argument" {:function "path_absolute"})))
+     (str (rt/path-absolute (str (first args)))))
+
+   "path_normalize"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_normalize expects exactly 1 argument" {:function "path_normalize"})))
+     (str (rt/path-normalize (str (first args)))))
+
+   "path_size"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_size expects exactly 1 argument" {:function "path_size"})))
+     (rt/path-size (str (first args))))
+
+   "path_modified_time"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_modified_time expects exactly 1 argument" {:function "path_modified_time"})))
+     (rt/path-modified-time (str (first args))))
+
+   "path_parent"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_parent expects exactly 1 argument" {:function "path_parent"})))
+     (rt/path-parent (str (first args))))
+
+   "path_child"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_child expects exactly 2 arguments" {:function "path_child"})))
+     (rt/path-child (str (first args)) (str (second args))))
+
+   "path_create_file"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_create_file expects exactly 1 argument" {:function "path_create_file"})))
+     (rt/path-create-file (str (first args))))
+
+   "path_create_directory"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_create_directory expects exactly 1 argument" {:function "path_create_directory"})))
+     (rt/path-create-directory (str (first args))))
+
+   "path_create_directories"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_create_directories expects exactly 1 argument" {:function "path_create_directories"})))
+     (rt/path-create-directories (str (first args))))
+
+   "path_delete"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_delete expects exactly 1 argument" {:function "path_delete"})))
+     (rt/path-delete (str (first args))))
+
+   "path_delete_tree"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_delete_tree expects exactly 1 argument" {:function "path_delete_tree"})))
+     (rt/path-delete-tree (str (first args))))
+
+   "path_copy"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_copy expects exactly 2 arguments" {:function "path_copy"})))
+     (rt/path-copy (str (first args)) (str (second args))))
+
+   "path_move"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_move expects exactly 2 arguments" {:function "path_move"})))
+     (rt/path-move (str (first args)) (str (second args))))
+
+   "path_read_text"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_read_text expects exactly 1 argument" {:function "path_read_text"})))
+     (rt/path-read-text (str (first args))))
+
+   "path_write_text"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_write_text expects exactly 2 arguments" {:function "path_write_text"})))
+     (rt/path-write-text (str (first args)) (str (second args))))
+
+   "path_append_text"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_append_text expects exactly 2 arguments" {:function "path_append_text"})))
+     (rt/path-append-text (str (first args)) (str (second args))))
+
+   "path_list"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_list expects exactly 1 argument" {:function "path_list"})))
+     (rt/path-list (str (first args))))
+
+   "text_file_open_read"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_open_read expects exactly 1 argument" {:function "text_file_open_read"})))
+     (rt/text-file-open-read (str (first args))))
+
+   "text_file_open_write"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_open_write expects exactly 1 argument" {:function "text_file_open_write"})))
+     (rt/text-file-open-write (str (first args))))
+
+   "text_file_open_append"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_open_append expects exactly 1 argument" {:function "text_file_open_append"})))
+     (rt/text-file-open-append (str (first args))))
+
+   "text_file_read_line"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_read_line expects exactly 1 argument" {:function "text_file_read_line"})))
+     (rt/text-file-read-line (first args)))
+
+   "text_file_write"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "text_file_write expects exactly 2 arguments" {:function "text_file_write"})))
+     (rt/text-file-write (first args) (str (second args))))
+
+   "text_file_close"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_close expects exactly 1 argument" {:function "text_file_close"})))
+     (rt/text-file-close (first args)))
+
+   "binary_file_open_read"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_open_read expects exactly 1 argument" {:function "binary_file_open_read"})))
+     (rt/binary-file-open-read (str (first args))))
+
+   "binary_file_open_write"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_open_write expects exactly 1 argument" {:function "binary_file_open_write"})))
+     (rt/binary-file-open-write (str (first args))))
+
+   "binary_file_open_append"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_open_append expects exactly 1 argument" {:function "binary_file_open_append"})))
+     (rt/binary-file-open-append (str (first args))))
+
+   "binary_file_read_all"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_read_all expects exactly 1 argument" {:function "binary_file_read_all"})))
+     (rt/binary-file-read-all (first args)))
+
+   "binary_file_read"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "binary_file_read expects exactly 2 arguments" {:function "binary_file_read"})))
+     (rt/binary-file-read (first args) (second args)))
+
+   "binary_file_write"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "binary_file_write expects exactly 2 arguments" {:function "binary_file_write"})))
+     (rt/binary-file-write (first args) (second args)))
+
+   "binary_file_close"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_close expects exactly 1 argument" {:function "binary_file_close"})))
+     (rt/binary-file-close (first args)))
+
    "http_server_create"
    (fn [_ctx & args]
      (when (not= (count args) 1)
@@ -1730,7 +1939,6 @@
       "Boolean" false
       "String" ""
       "Console" {:nex-builtin-type :Console}
-      "File" nil
       "Process" {:nex-builtin-type :Process}
       "Task" nil
       "Channel" nil
@@ -2012,15 +2220,6 @@
     "new_line"     (fn [_ & _] (nex-console-newline) nil)
     "read_integer" (fn [_ & _] (nex-parse-integer (nex-console-read-line)))
     "read_real"    (fn [_ & _] (nex-parse-real (nex-console-read-line)))}
-
-   :File
-   {"read"   (fn [f & _] (nex-file-read (:path f)))
-    "write"  (fn [f content & _] (nex-file-write (:path f) (str content)) nil)
-    "append" (fn [f content & _] (nex-file-append (:path f) (str content)) nil)
-    "exists" (fn [f & _] (nex-file-exists? (:path f)))
-    "delete" (fn [f & _] (nex-file-delete (:path f)) nil)
-    "lines"  (fn [f & _] (nex-file-lines (:path f)))
-    "close"  (fn [_ & _] nil)}
 
    :Process
    {"getenv"       (fn [_ name & _] (or (nex-process-getenv (str name)) ""))
@@ -3013,10 +3212,6 @@
   ;; Handle built-in IO types
   (case class-name
     "Console" {:nex-builtin-type :Console}
-    "File" (let [arg-values (mapv #(eval-node ctx %) args)]
-             (when-not (= constructor "open")
-               (throw (ex-info "File requires constructor: create File.open(path)" {:class-name "File"})))
-             {:nex-builtin-type :File :path (first arg-values)})
     "Process" {:nex-builtin-type :Process}
     "Map" (nex-map)
     "Channel" #?(:clj (let [arg-values (mapv #(eval-node ctx %) args)]
@@ -3920,12 +4115,8 @@
          (let [{:keys [class-name generic-args constructor args]} node]
            (.then (promise-all (map #(eval-node-async ctx %) args))
                   (fn [arg-values]
-                    (case class-name
+                   (case class-name
                       "Console" {:nex-builtin-type :Console}
-                      "File" (do
-                               (when-not (= constructor "open")
-                                 (throw (ex-info "File requires constructor: create File.open(path)" {:class-name "File"})))
-                               {:nex-builtin-type :File :path (first arg-values)})
                       "Process" {:nex-builtin-type :Process}
                       "Map" (nex-map)
                       "Channel" (cond
