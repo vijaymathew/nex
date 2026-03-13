@@ -173,6 +173,8 @@
          :docs-mode :tutorial
          :tutorial-visible false}))
 
+(defonce eval-queue-tail (atom (js/Promise.resolve nil)))
+
 (defn- by-id [id]
   (.getElementById js/document id))
 
@@ -841,6 +843,24 @@
 (defn- ensure-promise [v]
   (js/Promise.resolve v))
 
+(defn- next-browser-tick []
+  (js/Promise. (fn [resolve _reject]
+                 (js/setTimeout #(resolve nil) 0))))
+
+(defn- enqueue-eval! [f]
+  (let [result-promise (atom nil)]
+    (swap! eval-queue-tail
+           (fn [tail]
+             (let [run (.then tail
+                              (fn [_] (f))
+                              (fn [_] (f)))
+                   next-tail (.then run
+                                    (fn [_] nil)
+                                    (fn [_] nil))]
+               (reset! result-promise run)
+               next-tail)))
+    @result-promise))
+
 (defn- simple-await-var [source]
   (second (re-matches #"(?s)^\s*([A-Za-z_][A-Za-z0-9_]*)\.await\s*$" source)))
 
@@ -1036,7 +1056,7 @@
       (append-line! "input" (str "nex> " trimmed))
       (set! (.-value input-el) "")
       (try
-        (let [run-promise (eval-repl-source! ctx trimmed)]
+        (let [run-promise (enqueue-eval! #(eval-repl-source! ctx trimmed))]
           (.then run-promise
                  (fn [{:keys [kind result output]}]
                    (case kind
@@ -1072,28 +1092,32 @@
       (append-line! "info" "Editor is empty.")
       (do
         (append-line! "input" "nex> :run editor")
-        (reset! (:output ctx) [])
-        (try
-          (let [ast (p/ast source)
-                has-defs? (and (= :program (:type ast))
-                               (or (seq (:classes ast))
-                                   (seq (:functions ast))
-                                   (seq (:imports ast))
-                                   (seq (:interns ast))))
-                run-promise
-                (if has-defs?
-                  (run-program! ctx source)
-                  (eval-statement-block! ctx trimmed))]
-            (.then run-promise
-                   (fn [{:keys [result output]}]
-                     (show-runtime-output! output result)
-                     (when (and (empty? output) (nil? result))
-                       (append-line! "info" "Program loaded and executed."))))
-            (.catch run-promise
-                    (fn [e]
-                      (append-line! "err" (str "Error: " (or (.-message e) (str e)))))))
-          (catch :default e
-            (append-line! "err" (str "Error: " (or (.-message e) (str e))))))))))
+        (let [run-promise
+              (enqueue-eval!
+               (fn []
+                 (reset! (:output ctx) [])
+                 (.then (next-browser-tick)
+                        (fn [_]
+                          (try
+                            (let [ast (p/ast source)
+                                  has-defs? (and (= :program (:type ast))
+                                                 (or (seq (:classes ast))
+                                                     (seq (:functions ast))
+                                                     (seq (:imports ast))
+                                                     (seq (:interns ast))))]
+                              (if has-defs?
+                                (run-program! ctx source)
+                                (eval-statement-block! ctx trimmed)))
+                            (catch :default e
+                              (js/Promise.reject e)))))))]
+          (.then run-promise
+                 (fn [{:keys [result output]}]
+                   (show-runtime-output! output result)
+                   (when (and (empty? output) (nil? result))
+                     (append-line! "info" "Program loaded and executed."))))
+          (.catch run-promise
+                  (fn [e]
+                    (append-line! "err" (str "Error: " (or (.-message e) (str e)))))))))))
 
 (defn- update-docs! []
   (let [{:keys [docs-pages web-ide-pages docs-page docs-mode]} @app-state
@@ -1402,7 +1426,7 @@
 
                              :else nil))))
 
-    (append-line! "info" "Browser IDE build: 2026-03-11z")))
+    (append-line! "info" "Browser IDE build: 2026-03-13b")))
 
 (defn init []
   (render!))

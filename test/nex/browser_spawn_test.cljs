@@ -105,6 +105,30 @@
            (is (true? cancelled))
            (is (true? is-cancelled))))))))
 
+(deftest browser-sleep-builtin-smoke-test
+  (async done
+    (testing "browser sleep is Promise-based and resolves through eval-node-async"
+      (let [ctx (interp/make-context)
+            sleep-node {:type :call
+                        :target nil
+                        :method "sleep"
+                        :args [{:type :integer :value 5}]
+                        :has-parens true}
+            timeout-id (js/setTimeout
+                        (fn []
+                          (is false "browser sleep did not resolve")
+                          (done))
+                        1000)]
+        (.then (interp/eval-node-async ctx sleep-node)
+               (fn [result]
+                 (js/clearTimeout timeout-id)
+                 (is (nil? result))
+                 (done))
+               (fn [err]
+                 (js/clearTimeout timeout-id)
+                 (is false (str "Unexpected rejection in sleep: " err))
+                 (done)))))))
+
 (deftest browser-await-any-all-smoke-test
   (async done
     (testing "browser task helpers support await_any and await_all semantics"

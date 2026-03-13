@@ -50,6 +50,12 @@
     (.now js/performance)
     (.now js/Date)))
 
+(defn- delay-promise [ms]
+  (if (pos? (long ms))
+    (js/Promise. (fn [resolve _reject]
+                   (js/setTimeout #(resolve nil) (long ms))))
+    nil))
+
 (defn- draw-turtle-cursor
   [ctx x y heading color shape]
   (.save ctx)
@@ -236,10 +242,8 @@
   nil)
 
 (defn window-sleep [_win ms]
-  ;; Blocking sleep to preserve interpreter semantics.
-  (let [end (+ (now-ms) (double ms))]
-    (while (< (now-ms) end) nil))
-  nil)
+  ;; Browser runtime must not busy-wait on the UI thread.
+  (delay-promise ms))
 
 (defn create-image [path]
   (ensure-dom!)
@@ -345,9 +349,7 @@
       (swap! (:state turtle) update :fill-points conj [new-x new-y]))
     (repaint-window win)
     (let [delay (speed-delay (:speed ts))]
-      (when (pos? delay)
-        (window-sleep win delay))))
-  nil)
+      (window-sleep win delay))))
 
 (defn turtle-backward [turtle dist]
   (turtle-forward turtle (- dist)))
@@ -406,9 +408,7 @@
       (swap! (:state turtle) update :fill-points conj [nx ny]))
     (repaint-window win)
     (let [delay (speed-delay (:speed ts))]
-      (when (pos? delay)
-        (window-sleep win delay))))
-  nil)
+      (window-sleep win delay))))
 
 (defn turtle-circle [turtle radius]
   (let [ts @(:state turtle)
@@ -424,9 +424,7 @@
       (.stroke ctx))
     (repaint-window win)
     (let [delay (speed-delay (:speed ts))]
-      (when (pos? delay)
-        (window-sleep win delay))))
-  nil)
+      (window-sleep win delay))))
 
 (defn turtle-begin-fill [turtle]
   (let [ts @(:state turtle)]

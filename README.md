@@ -31,9 +31,17 @@ This has consequences that go beyond style.
 
 ---
 
-## Online IDE
+## Web IDE Status
 
-Try Nex in the browser: https://schemer.in/nex.html
+The browser-based Web IDE has been retired as a supported workflow.
+
+Supported workflows:
+- CLI REPL
+- JVM interpreter
+- generated Java
+- generated JavaScript
+
+The retired page at `https://schemer.in/nex/` now points users back to the supported local workflows and documentation.
 
 ---
 
@@ -312,6 +320,9 @@ nex> :quit      -- exit
 
 ### Browser IDE
 
+The browser IDE is retired and is no longer a supported execution environment.
+The local browser build scripts remain in the repository temporarily during the transition, but they should not be treated as a supported user workflow.
+
 ```bash
 npx shadow-cljs compile browser
 npx serve public
@@ -319,7 +330,7 @@ npx serve public
 
 See [docs/md/WEB_IDE.md](docs/md/WEB_IDE.md) for setup and usage.
 
-To sync the rebuilt Browser IDE into the website checkout used for deployment:
+To sync the retired notice page and any transitional browser assets into the website checkout:
 
 ```bash
 ./scripts/sync-browser-ide.sh
@@ -488,8 +499,8 @@ nex/
 | Document | Description |
 |---|---|
 | [Syntax on a Postcard](docs/md/SYNTAX.md) | Core language syntax and quick reference |
-| [Tutorial](docs/md/TUTORIAL.md) | Step-by-step introduction used by the Web IDE |
-| [Web IDE Guide](docs/md/WEB_IDE.md) | Browser-based IDE setup and usage |
+| [Tutorial](docs/md/TUTORIAL.md) | Step-by-step introduction to the language |
+| [Web IDE Guide](docs/md/WEB_IDE.md) | Retirement notice and migration guidance |
 | [CLI Guide](docs/md/CLI.md) | Command-line options and workflows |
 | [Debugger Guide](docs/md/DEBUGGER.md) | REPL debugger commands |
 | [Concurrency Guide](docs/md/CONCURRENCY.md) | Task, channel, select, and runtime semantics |
@@ -530,7 +541,7 @@ Support for VS Code, Vim, and other editors is planned. Contributions welcome.
 |---|---|
 | Done | Java code generator |
 | Done | JavaScript (ES6+) code generator |
-| Done | Browser Web IDE |
+| Retired | Browser Web IDE |
 | Planned | TypeScript code generator |
 | Planned | Python code generator |
 | Planned | LSP server for IDE integration |

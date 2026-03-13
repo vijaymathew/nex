@@ -79,6 +79,8 @@ Generates `target/nex.js` with exports:
 
 ### Browser Application
 
+This build path still exists for development and internal testing, but the browser-based Web IDE has been retired as a supported user workflow.
+
 ```bash
 npx shadow-cljs compile browser
 ```
@@ -138,6 +140,8 @@ nexCljs.evalNode.call(null, ctx, ast);
 ```
 
 ## Browser Usage Example
+
+This remains a low-level ClojureScript embedding example, not a supported IDE workflow.
 
 ```html
 <!DOCTYPE html>

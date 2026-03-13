@@ -13,7 +13,7 @@ Start the Nex REPL by running:
 nex
 ```
 
-Or, if you are using the browser-based IDE, click the REPL tab. Either way, you will see a prompt:
+In the CLI REPL, you will see a prompt:
 
 ```
 nex>

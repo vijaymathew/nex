@@ -10,7 +10,7 @@ These are library classes, not core built-in classes. Load them with `intern`.
 - `io/Directory`: JVM interpreter, generated JVM, generated JavaScript/Node
 - `io/Text_File`: JVM interpreter, generated JVM, generated JavaScript/Node
 - `io/Binary_File`: JVM interpreter, generated JVM, generated JavaScript/Node
-- Browser/Web REPL: not supported
+- Retired browser interpreter path: not supported
 
 ## Load
 
