@@ -922,10 +922,12 @@
       (format-type t))))
 
 (defn looks-like-class?
-  "Check if input looks like a class or function definition"
+  "Check if input looks like a top-level declaration"
   [input]
   (or (re-find #"^\s*class\s+" input)
-      (re-find #"^\s*function\s+" input)))
+      (re-find #"^\s*function\s+" input)
+      (re-find #"^\s*import\s+" input)
+      (re-find #"^\s*intern\s+" input)))
 
 (defn looks-like-statement?
   "Check if input needs to be wrapped in a method"

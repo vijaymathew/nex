@@ -187,7 +187,7 @@ end")
 
 (deftest repl-intern-loads-from-local-lib-directory
   (testing "REPL resolves path-qualified intern names from ./lib"
-    (let [net-dir (io/file "lib" "net")
+    (let [net-dir (io/file "lib" "test_net")
           socket-file (io/file net-dir "tcp_socket.nex")
           ctx (repl/init-repl-context)]
       (.mkdirs net-dir)
@@ -199,13 +199,38 @@ end")
 end")
       (try
         (let [output (with-out-str
-                       (repl/eval-code ctx "intern net/Tcp_Socket")
+                       (repl/eval-code ctx "intern test_net/Tcp_Socket")
                        (repl/eval-code ctx "let s := create Tcp_Socket")
                        (repl/eval-code ctx "s.show()"))]
-          (is (not (.contains output "Cannot find intern file for net/Tcp_Socket")))
+          (is (not (.contains output "Cannot find intern file for test_net/Tcp_Socket")))
           (is (.contains output "#<Tcp_Socket object>"))
           (is (.contains output "\"ok\"")))
         (finally
           (.delete socket-file)
-          (.delete net-dir)
-          (.delete (io/file "lib")))))))
+          (.delete net-dir))))))
+
+(deftest repl-intern-loads-checked-in-tcp-socket-library
+  (testing "REPL can load the checked-in TCP socket library and use its disconnected constructor"
+    (let [ctx (repl/init-repl-context)
+          output (with-out-str
+                   (repl/eval-code ctx "intern net/Tcp_Socket")
+                   (repl/eval-code ctx "let s: Tcp_Socket := create Tcp_Socket.make(\"example.com\", 80)")
+                   (repl/eval-code ctx "print(s.is_connected())")
+                   (repl/eval-code ctx "print(s.to_string())"))]
+      (is (not (.contains output "Cannot find intern file for net/Tcp_Socket")))
+      (is (.contains output "#<Tcp_Socket object>"))
+      (is (.contains output "false"))
+      (is (.contains output "\"Tcp_Socket(example.com:80, connected=false)\"")))))
+
+(deftest repl-intern-loads-checked-in-server-socket-library
+  (testing "REPL can load the checked-in Server_Socket library and use its disconnected constructor"
+    (let [ctx (repl/init-repl-context)
+          output (with-out-str
+                   (repl/eval-code ctx "intern net/Server_Socket")
+                   (repl/eval-code ctx "let s: Server_Socket := create Server_Socket.make(0)")
+                   (repl/eval-code ctx "print(s.is_listening())")
+                   (repl/eval-code ctx "print(s.to_string())"))]
+      (is (not (.contains output "Cannot find intern file for net/Server_Socket")))
+      (is (.contains output "#<Server_Socket object>"))
+      (is (.contains output "false"))
+      (is (.contains output "\"Server_Socket(port=0, listening=false)\"")))))

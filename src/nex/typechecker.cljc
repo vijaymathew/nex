@@ -40,16 +40,30 @@
 
 (defn env-lookup-method
   "Look up a method signature in the environment"
-  [env class-name method-name]
+  ([env class-name method-name]
+   (env-lookup-method env class-name method-name nil))
+  ([env class-name method-name arity]
   (if-let [class-methods (get @(:methods env) class-name)]
-    (get class-methods method-name)
+    (let [method-entry (get class-methods method-name)]
+      (cond
+        (nil? method-entry) nil
+        (nil? arity) (if (map? method-entry)
+                       (or (get method-entry 0) (val (first method-entry)))
+                       method-entry)
+        (map? method-entry) (get method-entry arity)
+        :else method-entry))
     (when (:parent env)
-      (env-lookup-method (:parent env) class-name method-name))))
+      (env-lookup-method (:parent env) class-name method-name arity)))))
 
 (defn env-add-method
   "Add a method signature to the environment"
   [env class-name method-name signature]
-  (swap! (:methods env) update class-name assoc method-name signature))
+  (let [arity (count (or (:params signature) []))]
+    (swap! (:methods env) update class-name
+           (fn [class-methods]
+             (assoc (or class-methods {})
+                    method-name
+                    (assoc (or (get class-methods method-name) {}) arity signature))))))
 
 (defn env-lookup-class
   "Look up a class definition in the environment"
@@ -364,12 +378,14 @@
 
 (defn lookup-class-method
   "Look up a method on a class and its parent chain"
-  [env class-name method-name]
-  (or (env-lookup-method env class-name method-name)
+  ([env class-name method-name]
+   (lookup-class-method env class-name method-name nil))
+  ([env class-name method-name arity]
+  (or (env-lookup-method env class-name method-name arity)
       (when-let [class-def (env-lookup-class env class-name)]
         (some (fn [{:keys [parent]}]
-                (lookup-class-method env parent method-name))
-              (:parents class-def)))))
+                (lookup-class-method env parent method-name arity))
+              (:parents class-def))))))
 
 (defn lookup-class-field
   "Look up a field on a class and its parent chain."
@@ -799,7 +815,7 @@
         :else
         (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
                                 (builtin-method-signature "Any" method (count args) type-map)
-                                (lookup-class-method env base-type method))]
+                                (lookup-class-method env base-type method (count args)))]
           (do
             ;; Check argument types
             (when (not= (count args) (count (:params method-sig)))
@@ -902,7 +918,7 @@
       (if-let [var-type (env-lookup-var env method)]
       (let [base-type (if (map? var-type) (:base-type var-type) var-type)
             call-name (str "call" (count args))
-            method-sig (env-lookup-method env base-type call-name)
+            method-sig (env-lookup-method env base-type call-name (count args))
             type-map (build-generic-type-map env var-type)]
         (when-not method-sig
           (throw (ex-info (str "Method not found: " call-name)
@@ -923,7 +939,7 @@
                                        (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
         (resolve-generic-type (:return-type method-sig) type-map))
         (if-let [current-class (env-lookup-var env "__current_class__")]
-          (if-let [method-sig (lookup-class-method env current-class method)]
+          (if-let [method-sig (lookup-class-method env current-class method (count args))]
             (do
               (when (not= (count args) (count (:params method-sig)))
                 (throw (ex-info (str "Method " method " expects " (count (:params method-sig))

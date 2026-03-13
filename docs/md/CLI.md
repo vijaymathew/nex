@@ -177,6 +177,30 @@ nex eval 'let x := 10 print(x * 2)'
 
 **Note:** The eval command creates a temporary file, parses it, and executes it. For complex programs, use the REPL or create a `.nex` file.
 
+### Run The Echo Server And Client
+
+The repository includes small JVM-only networking examples under `examples/`:
+
+```bash
+# Terminal 1: start the server REPL and load the server example
+nex
+:load examples/echo_server.nex
+create Echo_Server.make(4040)
+```
+
+In another terminal:
+
+```bash
+# Terminal 2: start the client REPL and load the client example
+nex
+:load examples/echo_client.nex
+create Echo_Client.make("127.0.0.1", 4040, "hello")
+```
+
+The server accepts one client, echoes one line, and exits.
+
+These examples use `intern net/Server_Socket` and `intern net/Tcp_Socket`, so they work on the JVM runtime and are not available in the browser IDE or JavaScript target.
+
 ### Help
 
 Display help information:

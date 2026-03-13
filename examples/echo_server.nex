@@ -1,0 +1,21 @@
+intern net/Server_Socket
+
+class Echo_Server
+  note "A small single-client echo server using the JVM-only net libraries."
+
+create
+  make(port: Integer) do
+    let server: Server_Socket := create Server_Socket.make(port)
+    server.open()
+    print("Listening on port " + server.port)
+
+    let client: Tcp_Socket := server.accept(30000)
+    let line: ?String := client.read_line()
+    if line /= nil then
+      client.send_line("echo: " + line)
+    end
+    client.close()
+
+    server.close()
+  end
+end

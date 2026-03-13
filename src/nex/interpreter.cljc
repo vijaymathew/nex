@@ -1403,7 +1403,7 @@
 
 (defn lookup-method-in-class
   "Look up a method in a specific class (without searching parents)."
-  [class-def method-name]
+  [class-def method-name arg-count]
   (->> (:body class-def)
        (mapcat (fn [section]
                  (cond
@@ -1412,16 +1412,18 @@
                    :else [])))
        (filter #(= (:type %) :method))
        (filter #(= (:name %) method-name))
+       (filter #(or (nil? arg-count)
+                    (= (count (or (:params %) [])) arg-count)))
        first))
 
 (defn lookup-method-with-inheritance
   "Look up a method in a class, searching parent classes if needed."
-  [ctx class-def method-name]
+  [ctx class-def method-name arg-count]
   ;; First look in the current class
-  (if-let [method (lookup-method-in-class class-def method-name)]
+  (if-let [method (lookup-method-in-class class-def method-name arg-count)]
     (let [base-lookup (when-let [parents (get-parent-classes ctx class-def)]
                         (some (fn [parent-info]
-                                (lookup-method-with-inheritance ctx (:class-def parent-info) method-name))
+                                (lookup-method-with-inheritance ctx (:class-def parent-info) method-name arg-count))
                               parents))
           effective-require (combine-preconditions (:effective-require base-lookup)
                                                    (:require method))
@@ -1434,7 +1436,7 @@
     ;; If not found, search parent classes
     (when-let [parents (get-parent-classes ctx class-def)]
       (some (fn [parent-info]
-              (lookup-method-with-inheritance ctx (:class-def parent-info) method-name))
+              (lookup-method-with-inheritance ctx (:class-def parent-info) method-name arg-count))
             parents))))
 
 (defn is-parent?
@@ -1836,7 +1838,7 @@
 
     (nex-object? value)
     (let [class-def (lookup-class ctx (:class-name value))
-          method-lookup (lookup-method-with-inheritance ctx class-def "to_string")]
+          method-lookup (lookup-method-with-inheritance ctx class-def "to_string" 0)]
       (if method-lookup
         (let [result (eval-node ctx {:type :call
                                      :target {:type :literal :value value}
@@ -1861,7 +1863,7 @@
 
        (nex-object? value)
        (let [class-def (lookup-class ctx (:class-name value))
-             method-lookup (lookup-method-with-inheritance ctx class-def "to_string")]
+             method-lookup (lookup-method-with-inheritance ctx class-def "to_string" 0)]
          (if method-lookup
            (.then (->promise (eval-node-async ctx {:type :call
                                                    :target {:type :literal :value value}
@@ -2571,7 +2573,7 @@
   [ctx current-obj parent-class-name method arg-values]
   (let [parent-class-def (lookup-class ctx parent-class-name)
         ;; Try method first
-        method-lookup (lookup-method-with-inheritance ctx parent-class-def method)
+        method-lookup (lookup-method-with-inheritance ctx parent-class-def method (count arg-values))
         ;; If no method found, try constructor
         ctor-def (when-not method-lookup
                    (lookup-constructor parent-class-def method))]
@@ -2678,7 +2680,7 @@
 
           (nex-object? obj)
           (let [class-def (lookup-class ctx (:class-name obj))
-                method-lookup (lookup-method-with-inheritance ctx class-def method)]
+                method-lookup (lookup-method-with-inheritance ctx class-def method (count arg-values))]
             (if method-lookup
                 (let [method-def (:method method-lookup)
                     params (:params method-def)]
@@ -2822,7 +2824,7 @@
                               {:function method}))))
           (if-let [current-obj (:current-object ctx)]
             (let [class-def (lookup-class ctx (:class-name current-obj))
-                  method-lookup (lookup-method-with-inheritance ctx class-def method)]
+                  method-lookup (lookup-method-with-inheritance ctx class-def method (count args))]
               (if method-lookup
                 (let [all-fields (get-all-fields ctx class-def)
                   current-env (:current-env ctx)
@@ -3166,7 +3168,7 @@
           (if-let [constant (lookup-class-constant ctx class-def name)]
             (eval-class-constant ctx (:declaring-class constant class-def) name)
             (if-let [current-obj (:current-object ctx)]
-              (let [method-lookup (lookup-method-with-inheritance ctx class-def name)]
+              (let [method-lookup (lookup-method-with-inheritance ctx class-def name 0)]
                 (if method-lookup
                   ;; It's a method - invoke it (implicit this)
                   (eval-node ctx {:type :call
@@ -3592,7 +3594,7 @@
      (dispatch-parent-call ctx current-obj parent-class-name method arg-values)
      :cljs
      (let [parent-class-def (lookup-class ctx parent-class-name)
-           method-lookup (lookup-method-with-inheritance ctx parent-class-def method)
+           method-lookup (lookup-method-with-inheritance ctx parent-class-def method (count arg-values))
            ctor-def (when-not method-lookup
                       (lookup-constructor parent-class-def method))]
        (if-let [callable (or (:method method-lookup) ctor-def)]
@@ -3751,7 +3753,7 @@
 
                                        (nex-object? obj)
                                        (let [class-def (lookup-class ctx (:class-name obj))
-                                             method-lookup (lookup-method-with-inheritance ctx class-def method)]
+                                             method-lookup (lookup-method-with-inheritance ctx class-def method (count arg-values))]
                                          (if method-lookup
                                            (let [method-def (:method method-lookup)
                                                  params (:params method-def)]
@@ -3874,7 +3876,7 @@
                             (:current-object ctx)
                             (let [current-obj (:current-object ctx)
                                   class-def (lookup-class ctx (:class-name current-obj))
-                                  method-lookup (lookup-method-with-inheritance ctx class-def method)]
+                                  method-lookup (lookup-method-with-inheritance ctx class-def method (count args))]
                               (if method-lookup
                                 (let [all-fields (get-all-fields ctx class-def)
                                       current-env (:current-env ctx)
