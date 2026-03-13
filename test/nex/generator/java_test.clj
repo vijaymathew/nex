@@ -291,6 +291,14 @@ end"
       (is (str/includes? java-code "this.port = NexRuntime.httpServerStart(this.handle);"))
       (is (str/includes? java-code "NexRuntime.httpServerIsRunning(this.handle)")))))
 
+(deftest json-library-generation-test
+  (testing "Json library lowers to ordinary class methods plus runtime JSON builtins"
+    (let [nex-code (slurp "lib/data/json.nex")
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "public class Json"))
+      (is (str/includes? java-code "result = NexRuntime.jsonParse(text);"))
+      (is (str/includes? java-code "result = NexRuntime.jsonStringify(value);")))))
+
 (deftest buffered-channel-generation-test
   (testing "buffered Channel constructors and accessors lower correctly in Java"
     (let [nex-code "class Test

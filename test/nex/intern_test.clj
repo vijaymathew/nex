@@ -257,3 +257,13 @@ end")
       (is (.contains output "#<Http_Server object>"))
       (is (.contains output "false"))
       (is (.contains output "\"Http_Server(port=0, running=false)\"")))))
+
+(deftest repl-intern-loads-checked-in-json-library
+  (testing "REPL can load the checked-in Json library and create a Json object"
+    (let [ctx (repl/init-repl-context)
+          output (with-out-str
+                   (repl/eval-code ctx "intern data/Json")
+                   (repl/eval-code ctx "let json: Json := create Json.make()")
+                   (repl/eval-code ctx "print(json.to_string())"))]
+      (is (not (.contains output "Cannot find intern file for data/Json")))
+      (is (.contains output "#<Json object>")))))

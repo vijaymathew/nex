@@ -61,6 +61,34 @@ Rules:
 
 This primitive is intended to support `lib/net/http_client.nex`.
 
+## `json_parse`
+
+```nex
+json_parse(text: String): Any
+```
+
+Parses JSON text into Nex values.
+
+Returned value mapping:
+
+- object -> `Map[String, Any]`
+- array -> `Array[Any]`
+- integer -> `Integer` or `Integer64`
+- decimal/exponent -> `Real`
+- `null` -> `nil`
+
+This primitive is intended to support `lib/data/json.nex`.
+
+## `json_stringify`
+
+```nex
+json_stringify(value: Any): String
+```
+
+Serializes Nex `Map`, `Array`, scalar values, and `nil` into JSON text.
+
+This primitive is intended to support `lib/data/json.nex`.
+
 ## `http_server_create`
 
 ```nex

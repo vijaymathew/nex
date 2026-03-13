@@ -1035,3 +1035,11 @@ end"
       (is (str/includes? js-code "__nexHttpServerDelete(this.handle, path, handler);"))
       (is (str/includes? js-code "this.port = await __nexHttpServerStart(this.handle);"))
       (is (str/includes? js-code "__nexHttpServerIsRunning(this.handle)")))))
+
+(deftest json-library-generation-test
+  (testing "Json library lowers to ordinary class methods plus runtime JSON builtins"
+    (let [nex-code (slurp "lib/data/json.nex")
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "class Json"))
+      (is (str/includes? js-code "result = __nexJsonParse(text);"))
+      (is (str/includes? js-code "result = __nexJsonStringify(value);")))))

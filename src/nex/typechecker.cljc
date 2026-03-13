@@ -962,6 +962,29 @@
                                             (display-type timeout-type)))})))))
         "Http_Response")
 
+      (= method "json_parse")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "json_parse expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "json_parse expects 1 argument, got " (count args)))})))
+        (let [text-type (check-expression env (first args))]
+          (when-not (= (attachable-type text-type) "String")
+            (throw (ex-info "json_parse argument must be String"
+                            {:error (type-error
+                                     (str "json_parse argument must be String, got "
+                                          (display-type text-type)))}))))
+        "Any")
+
+      (= method "json_stringify")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "json_stringify expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "json_stringify expects 1 argument, got " (count args)))})))
+        (check-expression env (first args))
+        "String")
+
       (= method "http_server_create")
       (do
         (when (not= (count args) 1)

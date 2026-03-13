@@ -280,6 +280,8 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
+                  "json_parse" "Any"
+                  "json_stringify" "String"
                   "http_get" "Http_Response"
                   "http_post" "Http_Response"
                   "http_server_create" "Any"
@@ -460,6 +462,8 @@
     "type_of" (str "__nexTypeOf(" args-code ")")
     "type_is" (str "__nexTypeIs(" args-code ")")
     "sleep" (str "await __nexSleep(" args-code ")")
+    "json_parse" (str "__nexJsonParse(" args-code ")")
+    "json_stringify" (str "__nexJsonStringify(" args-code ")")
     "http_get" (str "await __nexHttpGet(" args-code ")")
     "http_post" (str "await __nexHttpPost(" args-code ")")
     "http_server_create" (str "__nexHttpServerCreate(" args-code ")")
@@ -2044,6 +2048,32 @@
        "}\n"
        "function __nexParseInt(raw) {\n"
        "  return __nexParseLong(raw);\n"
+       "}\n"
+       "function __nexJsonToNex(value) {\n"
+       "  if (value === null || value === undefined) return null;\n"
+       "  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;\n"
+       "  if (Array.isArray(value)) return value.map(__nexJsonToNex);\n"
+       "  if (value instanceof Map) return new Map(Array.from(value.entries()).map(([k, v]) => [String(k), __nexJsonToNex(v)]));\n"
+       "  const out = new Map();\n"
+       "  for (const [k, v] of Object.entries(value)) out.set(String(k), __nexJsonToNex(v));\n"
+       "  return out;\n"
+       "}\n"
+       "function __nexValueToJson(value) {\n"
+       "  if (value === null || value === undefined || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;\n"
+       "  if (Array.isArray(value)) return value.map(__nexValueToJson);\n"
+       "  if (value instanceof Map) {\n"
+       "    const out = {};\n"
+       "    for (const [k, v] of value.entries()) out[String(k)] = __nexValueToJson(v);\n"
+       "    return out;\n"
+       "  }\n"
+       "  if (value instanceof Set) return Array.from(value.values()).map(__nexValueToJson);\n"
+       "  throw new Error('Value is not JSON-serializable');\n"
+       "}\n"
+       "function __nexJsonParse(text) {\n"
+       "  return __nexJsonToNex(JSON.parse(String(text)));\n"
+       "}\n"
+       "function __nexJsonStringify(value) {\n"
+       "  return JSON.stringify(__nexValueToJson(value));\n"
        "}\n"
        "function __nexIntPow(a, b) {\n"
        "  if (b < 0) throw new Error('Integral exponentiation requires a non-negative exponent');\n"

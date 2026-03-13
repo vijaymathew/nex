@@ -12,6 +12,7 @@
 (declare lookup-method-with-inheritance)
 (declare lookup-class)
 (declare call-builtin-method)
+(declare nex-set?)
 
 (defn- lowercase-filename
   [class-name]
@@ -63,6 +64,53 @@
   (let [entries #?(:clj (for [[k v] m] (str (nex-format-value k) ": " (nex-format-value v)))
                    :cljs (for [[k v] (es6-iterator-seq (.entries m))] (str (nex-format-value k) ": " (nex-format-value v))))]
     (str "{" (str/join ", " entries) "}")))
+
+#?(:clj
+   (defn- json-value->nex
+     [value]
+     (cond
+       (nil? value) nil
+       (or (string? value) (boolean? value) (char? value)) value
+       (integer? value)
+       (let [n (long value)]
+         (if (<= Integer/MIN_VALUE n Integer/MAX_VALUE)
+           (int n)
+           n))
+       (number? value) (double value)
+       (vector? value) (nex-array-from (mapv json-value->nex value))
+       (sequential? value) (nex-array-from (mapv json-value->nex value))
+       (map? value)
+       (let [m (nex-map)]
+         (doseq [[k v] value]
+           (nex-map-put m (str k) (json-value->nex v)))
+         m)
+       :else value)))
+
+#?(:clj
+   (defn- nex-value->json
+     [value]
+     (cond
+       (nil? value) nil
+       (or (string? value) (boolean? value) (number? value)) value
+       (char? value) (str value)
+       (nex-array? value) (mapv nex-value->json value)
+       (nex-map? value)
+       (into {}
+             (map (fn [[k v]] [(str k) (nex-value->json v)]))
+             value)
+       (nex-set? value) (mapv nex-value->json value)
+       :else (throw (ex-info (str "Value is not JSON-serializable: " (pr-str (type value)))
+                             {:value value})))))
+
+#?(:clj
+   (defn- nex-json-parse
+     [text]
+     (json-value->nex (json/read-str (str text)))))
+
+#?(:clj
+   (defn- nex-json-stringify
+     [value]
+     (json/write-str (nex-value->json value))))
 
 (defn nex-set [] #?(:clj (java.util.LinkedHashSet.) :cljs (js/Set.)))
 (defn nex-set-from [coll]
@@ -2012,6 +2060,24 @@
        #?(:clj (java-http-request "POST" (str url) (str body) timeout-ms)
           :cljs (throw (ex-info "http_post is not supported in the ClojureScript interpreter"
                                 {:function "http_post"})))))
+
+   "json_parse"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "json_parse expects exactly 1 argument"
+                       {:function "json_parse" :expected 1 :actual (count args)})))
+     #?(:clj (nex-json-parse (first args))
+        :cljs (throw (ex-info "json_parse is not supported in the ClojureScript interpreter"
+                              {:function "json_parse"}))))
+
+   "json_stringify"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "json_stringify expects exactly 1 argument"
+                       {:function "json_stringify" :expected 1 :actual (count args)})))
+     #?(:clj (nex-json-stringify (first args))
+        :cljs (throw (ex-info "json_stringify is not supported in the ClojureScript interpreter"
+                              {:function "json_stringify"}))))
 
    "http_server_create"
    (fn [_ctx & args]

@@ -1,0 +1,20 @@
+class Json
+  note "JSON parser and serializer built on top of runtime JSON primitives."
+
+create
+  make() do
+  end
+
+feature
+  parse(text: String): Any
+    note "Parse JSON text into Nex arrays, maps, strings, numbers, booleans, and nil."
+  do
+    result := json_parse(text)
+  end
+
+  stringify(value: Any): String
+    note "Serialize Nex arrays, maps, strings, numbers, booleans, and nil to JSON text."
+  do
+    result := json_stringify(value)
+  end
+end
