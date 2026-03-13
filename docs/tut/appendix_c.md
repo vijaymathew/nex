@@ -120,6 +120,10 @@ data.create_tree()
 let file: Path := data.child_path("items.txt")
 file.write_text("one\ntwo")
 
+let backup: Directory := root.child_dir("backup")
+data.copy_to(backup)
+print(backup.exists())
+
 print(root.directories().length)
 print(data.files().length)
 ```

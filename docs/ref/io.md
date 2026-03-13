@@ -110,6 +110,8 @@ feature
   create_tree()
   delete()
   delete_tree()
+  copy_to(target: Directory)
+  move_to(target: Directory)
   name(): String
   parent(): ?Directory
   child_dir(name: String): Directory
@@ -128,6 +130,8 @@ Notes:
 - `exists()` is true only when the underlying path both exists and is a directory
 - `directories()` returns immediate child directories
 - `files()` returns immediate child files
+- `copy_to()` copies the directory tree to the target directory path
+- `move_to()` renames or moves the directory tree to the target directory path
 
 Example:
 
@@ -144,8 +148,12 @@ logs.create_tree()
 let file: Path := logs.child_path("app.log")
 file.write_text("started")
 
+let archive: Directory := root.child_dir("archive")
+logs.copy_to(archive)
+
 print(root.directories().length)
 print(logs.files().length)
+print(archive.exists())
 print(logs.absolute().to_string())
 ```
 

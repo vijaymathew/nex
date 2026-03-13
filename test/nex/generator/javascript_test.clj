@@ -1066,6 +1066,8 @@ end"
       (is (str/includes? directory-code "class Directory"))
       (is (str/includes? directory-code "create_directory()"))
       (is (str/includes? directory-code "directories()"))
+      (is (str/includes? directory-code "copy_to(target)"))
+      (is (str/includes? directory-code "move_to(target)"))
       (is (str/includes? text-code "class Text_File"))
       (is (str/includes? text-code "__nexTextFileOpenRead("))
       (is (str/includes? text-code "__nexTextFileReadLine("))

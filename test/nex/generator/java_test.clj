@@ -321,6 +321,8 @@ end"
       (is (str/includes? directory-code "public class Directory"))
       (is (str/includes? directory-code "public void create_directory()"))
       (is (str/includes? directory-code "public ArrayList<Directory> directories()"))
+      (is (str/includes? directory-code "public void copy_to(Directory target)"))
+      (is (str/includes? directory-code "public void move_to(Directory target)"))
       (is (str/includes? text-code "public class Text_File"))
       (is (str/includes? text-code "NexRuntime.textFileOpenRead("))
       (is (str/includes? text-code "NexRuntime.textFileReadLine("))

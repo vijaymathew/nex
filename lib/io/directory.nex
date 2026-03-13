@@ -35,6 +35,14 @@ feature
     path.delete_tree()
   end
 
+  copy_to(target: Directory) do
+    path.copy_to(target.path)
+  end
+
+  move_to(target: Directory) do
+    path.move_to(target.path)
+  end
+
   name(): String do
     result := path.name()
   end
