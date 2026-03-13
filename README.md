@@ -40,7 +40,7 @@ Try Nex in the browser: https://schemer.in/nex.html
 ## Library Reference
 
 Shipped Nex libraries under `lib/` are documented separately from the core runtime reference.
-See [docs/ref/libraries.md](docs/ref/libraries.md) for the library index, including the JVM-only networking classes under `lib/net`.
+See [docs/ref/libraries.md](docs/ref/libraries.md) for the library index, including the portable `Http_Client` and the JVM-only networking classes under `lib/net`.
 
 Example:
 

@@ -280,6 +280,16 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
+                  "http_get" "Http_Response"
+                  "http_post" "Http_Response"
+                  "http_server_create" "Any"
+                  "http_server_get" "Void"
+                  "http_server_post" "Void"
+                  "http_server_put" "Void"
+                  "http_server_delete" "Void"
+                  "http_server_start" "Integer"
+                  "http_server_stop" "Void"
+                  "http_server_is_running" "Boolean"
                   "Any")
                 (case normalized-target
                 "Task" (case (:method expr)
@@ -450,6 +460,16 @@
     "type_of" (str "__nexTypeOf(" args-code ")")
     "type_is" (str "__nexTypeIs(" args-code ")")
     "sleep" (str "await __nexSleep(" args-code ")")
+    "http_get" (str "await __nexHttpGet(" args-code ")")
+    "http_post" (str "await __nexHttpPost(" args-code ")")
+    "http_server_create" (str "__nexHttpServerCreate(" args-code ")")
+    "http_server_get" (str "__nexHttpServerGet(" args-code ")")
+    "http_server_post" (str "__nexHttpServerPost(" args-code ")")
+    "http_server_put" (str "__nexHttpServerPut(" args-code ")")
+    "http_server_delete" (str "__nexHttpServerDelete(" args-code ")")
+    "http_server_start" (str "await __nexHttpServerStart(" args-code ")")
+    "http_server_stop" (str "await __nexHttpServerStop(" args-code ")")
+    "http_server_is_running" (str "__nexHttpServerIsRunning(" args-code ")")
     "await_any" (str "await __nexAwaitAny(" args-code ")")
     "await_all" (str "await __nexAwaitAll(" args-code ")")
     ;; Default: use as-is (regular method call)
@@ -857,6 +877,7 @@
       "Console" "({_type: 'Console'})"
       "File" (str "({_type: 'File', path: " args-code "})")
       "Process" "({_type: 'Process'})"
+      "Map" "new Map()"
       "Channel" (cond
                   (nil? constructor) "new __nexChannel()"
                   (= constructor "with_capacity") (str "new __nexChannel(" args-code ")")
@@ -1854,63 +1875,60 @@
   ([class-def opts classes-by-name]
    (let [{:keys [name generic-params parents body note deferred?]} class-def
          {:keys [fields methods constructors]} (extract-members body)
-         runtime-parents (vec (remove #(= "Any" (:parent %)) parents))
-         parent-names (mapv :parent runtime-parents)
-         own-flds (set (map :name fields))
-         all-constants (get-accessible-constants-js class-def classes-by-name)
-         constant-names (set (map :name all-constants))
-         own-method-names (set (map :name methods))
-         all-methods (into own-method-names
-                           (mapcat #(get-parent-method-names % classes-by-name)
-                                   parent-names))
-         fld-types (build-field-types-js fields parent-names classes-by-name)
-         effective-invariants (collect-effective-class-invariants class-def classes-by-name)]
-     (binding [*current-class-name* name
-               *class-registry* classes-by-name
-               *all-method-names* all-methods
-               *own-fields* own-flds
-               *constant-names* constant-names
-               *field-types* fld-types
-               *class-invariants* effective-invariants]
-       (let [;; Generate class JSDoc if note present
-             class-jsdoc (when note
-                          [(generate-jsdoc 0 note)])
-             generic-comment (generate-generic-comment generic-params)
-             class-header (generate-class-header name generic-params runtime-parents)
-             invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
-                                (indent 1 (str "// Class invariant: "
-                                              (str/join ", " (map :label effective-invariants)))))
-             constants-code (map #(generate-class-constant-js 1 name %) all-constants)
-             ;; Always generate a default no-arg constructor for field initialization
-             has-parent? (some? (:extends (analyze-inheritance runtime-parents)))
-             default-constructor (generate-default-constructor 1 name fields has-parent? deferred?)
-             ;; All Nex constructors become static factory methods
-             factory-methods (map #(generate-factory-constructor 1 name % opts) constructors)
-             inherited-constructor-shims (when (seq runtime-parents)
-                                           (generate-inherited-constructor-shims-js 1 name runtime-parents (set (map :name constructors)) classes-by-name))
-             methods-with-effective-contracts
-             (map (fn [m]
-                    (let [effective (lookup-method-effective-contracts class-def (:name m) classes-by-name)]
-                      (assoc m
-                             :require (:effective-require effective)
-                             :ensure (:effective-ensure effective))))
-                  methods)
-             methods-code (map #(generate-method 1 % opts) methods-with-effective-contracts)]
-         (str/join "\n"
-                   (concat
-                   class-jsdoc
-                   (when generic-comment [generic-comment])
-                   [class-header]
-                   (when invariant-comment [invariant-comment ""])
-                    constants-code
-                    (when (seq all-constants) [""])
-                    [default-constructor ""]
-                    factory-methods
-                    (when (seq factory-methods) [""])
-                    (when (seq inherited-constructor-shims) inherited-constructor-shims)
-                    (when (seq inherited-constructor-shims) [""])
-                    methods-code
-                    ["}"])))))))
+             runtime-parents (vec (remove #(= "Any" (:parent %)) parents))
+             parent-names (mapv :parent runtime-parents)
+             own-flds (set (map :name fields))
+             all-constants (get-accessible-constants-js class-def classes-by-name)
+             constant-names (set (map :name all-constants))
+             own-method-names (set (map :name methods))
+             all-methods (into own-method-names
+                               (mapcat #(get-parent-method-names % classes-by-name)
+                                       parent-names))
+             fld-types (build-field-types-js fields parent-names classes-by-name)
+             effective-invariants (collect-effective-class-invariants class-def classes-by-name)]
+         (binding [*current-class-name* name
+                   *class-registry* classes-by-name
+                   *all-method-names* all-methods
+                   *own-fields* own-flds
+                   *constant-names* constant-names
+                   *field-types* fld-types
+                   *class-invariants* effective-invariants]
+           (let [class-jsdoc (when note
+                               [(generate-jsdoc 0 note)])
+                 generic-comment (generate-generic-comment generic-params)
+                 class-header (generate-class-header name generic-params runtime-parents)
+                 invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
+                                     (indent 1 (str "// Class invariant: "
+                                                    (str/join ", " (map :label effective-invariants)))))
+                 constants-code (map #(generate-class-constant-js 1 name %) all-constants)
+                 has-parent? (some? (:extends (analyze-inheritance runtime-parents)))
+                 default-constructor (generate-default-constructor 1 name fields has-parent? deferred?)
+                 factory-methods (map #(generate-factory-constructor 1 name % opts) constructors)
+                 inherited-constructor-shims (when (seq runtime-parents)
+                                               (generate-inherited-constructor-shims-js 1 name runtime-parents (set (map :name constructors)) classes-by-name))
+                 methods-with-effective-contracts
+                 (map (fn [m]
+                        (let [effective (lookup-method-effective-contracts class-def (:name m) classes-by-name)]
+                          (assoc m
+                                 :require (:effective-require effective)
+                                 :ensure (:effective-ensure effective))))
+                      methods)
+                 methods-code (map #(generate-method 1 % opts) methods-with-effective-contracts)]
+             (str/join "\n"
+                       (concat
+                        class-jsdoc
+                        (when generic-comment [generic-comment])
+                        [class-header]
+                        (when invariant-comment [invariant-comment ""])
+                        constants-code
+                        (when (seq all-constants) [""])
+                        [default-constructor ""]
+                        factory-methods
+                        (when (seq factory-methods) [""])
+                        (when (seq inherited-constructor-shims) inherited-constructor-shims)
+                        (when (seq inherited-constructor-shims) [""])
+                        methods-code
+                        ["}"])))))))
 
 (defn generate-function-base-class
   "Generate the built-in Function base class."
@@ -2089,6 +2107,148 @@
        "}\n"
        "function __nexSleep(ms) {\n"
        "  return new Promise(resolve => setTimeout(resolve, ms));\n"
+       "}\n"
+       "async function __nexHttpRequest(method, url, body_text = null, timeout_ms = null) {\n"
+       "  let controller = null;\n"
+       "  let timeoutId = null;\n"
+       "  try {\n"
+       "    const options = { method };\n"
+       "    if (body_text !== null && body_text !== undefined) options.body = body_text;\n"
+       "    if (timeout_ms !== null && timeout_ms !== undefined) {\n"
+       "      controller = new AbortController();\n"
+       "      options.signal = controller.signal;\n"
+       "      timeoutId = setTimeout(() => controller.abort(), timeout_ms);\n"
+       "    }\n"
+       "    const response = await fetch(url, options);\n"
+       "    const text = await response.text();\n"
+       "    const headers = new Map(response.headers.entries());\n"
+       "    return await Http_Response.make(response.status, text, headers);\n"
+       "  } finally {\n"
+       "    if (timeoutId !== null) clearTimeout(timeoutId);\n"
+       "  }\n"
+       "}\n"
+       "async function __nexHttpGet(url, timeout_ms = null) {\n"
+       "  return await __nexHttpRequest('GET', url, null, timeout_ms);\n"
+       "}\n"
+       "async function __nexHttpPost(url, body_text, timeout_ms = null) {\n"
+       "  return await __nexHttpRequest('POST', url, body_text, timeout_ms);\n"
+       "}\n"
+       "function __nexHttpPathSegments(path) {\n"
+       "  if (!path || path === '/') return [];\n"
+       "  return path.split('/').filter(Boolean);\n"
+       "}\n"
+       "function __nexHttpUrlDecode(s) {\n"
+       "  return decodeURIComponent(String(s ?? '').replace(/\\+/g, '%20'));\n"
+       "}\n"
+       "function __nexHttpParseQuery(query) {\n"
+       "  const out = new Map();\n"
+       "  if (!query) return out;\n"
+       "  for (const part of String(query).split('&')) {\n"
+       "    if (!part) continue;\n"
+       "    const pieces = part.split('=', 2);\n"
+       "    out.set(__nexHttpUrlDecode(pieces[0]), __nexHttpUrlDecode(pieces.length > 1 ? pieces[1] : ''));\n"
+       "  }\n"
+       "  return out;\n"
+       "}\n"
+       "function __nexHttpMatchRoute(pattern, path) {\n"
+       "  const patternSegments = __nexHttpPathSegments(pattern);\n"
+       "  const pathSegments = __nexHttpPathSegments(path);\n"
+       "  const params = new Map();\n"
+       "  let i = 0;\n"
+       "  let j = 0;\n"
+       "  while (i < patternSegments.length && j < pathSegments.length) {\n"
+       "    const p = patternSegments[i];\n"
+       "    const x = pathSegments[j];\n"
+       "    if (p === '*') {\n"
+       "      params.set('*', pathSegments.slice(j).join('/'));\n"
+       "      return params;\n"
+       "    }\n"
+       "    if (p.startsWith(':')) {\n"
+       "      params.set(p.slice(1), __nexHttpUrlDecode(x));\n"
+       "      i += 1; j += 1;\n"
+       "      continue;\n"
+       "    }\n"
+       "    if (p !== x) return null;\n"
+       "    i += 1; j += 1;\n"
+       "  }\n"
+       "  if (i === patternSegments.length && j === pathSegments.length) return params;\n"
+       "  if (i < patternSegments.length && patternSegments[i] === '*') {\n"
+       "    params.set('*', pathSegments.slice(j).join('/'));\n"
+       "    return params;\n"
+       "  }\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexHttpFindRoute(handle, method, path) {\n"
+       "  for (const route of (handle.routes[method] || [])) {\n"
+       "    const params = __nexHttpMatchRoute(route.path, path);\n"
+       "    if (params !== null) return {handler: route.handler, params};\n"
+       "  }\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexHttpServerCreate(port) {\n"
+       "  return {_type: 'HttpServerHandle', port, server: null, routes: {GET: [], POST: [], PUT: [], DELETE: []}};\n"
+       "}\n"
+       "function __nexHttpServerGet(handle, path, handler) {\n"
+       "  handle.routes.GET.push({path, handler});\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexHttpServerPost(handle, path, handler) {\n"
+       "  handle.routes.POST.push({path, handler});\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexHttpServerPut(handle, path, handler) {\n"
+       "  handle.routes.PUT.push({path, handler});\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexHttpServerDelete(handle, path, handler) {\n"
+       "  handle.routes.DELETE.push({path, handler});\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexReadRequestBody(req) {\n"
+       "  return new Promise((resolve, reject) => {\n"
+       "    let body = '';\n"
+       "    req.on('data', chunk => { body += chunk; });\n"
+       "    req.on('end', () => resolve(body));\n"
+       "    req.on('error', reject);\n"
+       "  });\n"
+       "}\n"
+       "async function __nexHttpServerStart(handle) {\n"
+       "  const http = require('http');\n"
+       "  handle.server = http.createServer(async (req, res) => {\n"
+       "    const method = req.method || 'GET';\n"
+       "    const url = new URL(req.url || '/', 'http://127.0.0.1');\n"
+       "    const path = url.pathname;\n"
+       "    const match = __nexHttpFindRoute(handle, method, path);\n"
+       "    let response;\n"
+       "    if (!match) {\n"
+       "      response = await Http_Server_Response.with_status(404, 'Not Found');\n"
+       "    } else {\n"
+       "      const body = await __nexReadRequestBody(req);\n"
+       "      const headers = new Map(Object.entries(req.headers || {}));\n"
+       "      const request = await Http_Request.make(method, path, body, headers, match.params, __nexHttpParseQuery(url.search.length > 1 ? url.search.slice(1) : ''));\n"
+       "      response = await match.handler.call1(request);\n"
+       "      if (response === null || response === undefined) response = await Http_Server_Response.with_status(204, '');\n"
+       "    }\n"
+       "    const responseHeaders = await response.headers();\n"
+       "    for (const [k, v] of responseHeaders.entries()) res.setHeader(String(k), String(v));\n"
+       "    res.statusCode = await response.status();\n"
+       "    res.end(await response.body());\n"
+       "  });\n"
+       "  return await new Promise(resolve => {\n"
+       "    handle.server.listen(handle.port, '127.0.0.1', () => {\n"
+       "      handle.port = handle.server.address().port;\n"
+       "      resolve(handle.port);\n"
+       "    });\n"
+       "  });\n"
+       "}\n"
+       "async function __nexHttpServerStop(handle) {\n"
+       "  if (!handle.server) return null;\n"
+       "  const server = handle.server;\n"
+       "  handle.server = null;\n"
+       "  return await new Promise(resolve => server.close(() => resolve(null)));\n"
+       "}\n"
+       "function __nexHttpServerIsRunning(handle) {\n"
+       "  return handle.server !== null;\n"
        "}\n"
        "class __nexTask {\n"
        "  constructor(promise) {\n"

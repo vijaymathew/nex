@@ -1006,3 +1006,32 @@ end"
       (is (str/includes? js-code "let __parent = A.make(x)"))
       (is (str/includes? js-code "let b = new B()"))
       (is (str/includes? js-code "Object.assign(b, __parent)")))))
+
+(deftest http-client-library-generation-test
+  (testing "Http_Client library lowers to ordinary classes plus runtime HTTP builtins"
+    (let [nex-code (slurp "lib/net/http_client.nex")
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "class Http_Client"))
+      (is (str/includes? js-code "class Http_Response"))
+      (is (str/includes? js-code "await fetch(url, options)"))
+      (is (str/includes? js-code "new AbortController()"))
+      (is (str/includes? js-code "new Map(response.headers.entries())"))
+      (is (str/includes? js-code "result = await __nexHttpGet(url);"))
+      (is (str/includes? js-code "result = await __nexHttpGet(url, timeout_ms);"))
+      (is (str/includes? js-code "result = await __nexHttpPost(url, body_text);"))
+      (is (str/includes? js-code "result = await __nexHttpPost(url, body_text, timeout_ms);")))))
+
+(deftest http-server-library-generation-test
+  (testing "Http_Server library lowers to ordinary classes plus runtime HTTP server builtins"
+    (let [nex-code (slurp "lib/net/http_server.nex")
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "class Http_Server"))
+      (is (str/includes? js-code "class Http_Request"))
+      (is (str/includes? js-code "class Http_Server_Response"))
+      (is (str/includes? js-code ".handle = __nexHttpServerCreate(port_value);"))
+      (is (str/includes? js-code "__nexHttpServerGet(this.handle, path, handler);"))
+      (is (str/includes? js-code "__nexHttpServerPost(this.handle, path, handler);"))
+      (is (str/includes? js-code "__nexHttpServerPut(this.handle, path, handler);"))
+      (is (str/includes? js-code "__nexHttpServerDelete(this.handle, path, handler);"))
+      (is (str/includes? js-code "this.port = await __nexHttpServerStart(this.handle);"))
+      (is (str/includes? js-code "__nexHttpServerIsRunning(this.handle)")))))

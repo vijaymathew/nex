@@ -44,6 +44,105 @@ Blocks the current task for approximately `ms` milliseconds. Returns `nil`.
 
 `ms` must be a non-negative integer.
 
+## `http_get`
+
+```nex
+http_get(url: String): Http_Response
+http_get(url: String, timeout_ms: Integer): Http_Response
+```
+
+Performs an HTTP GET request and returns an `Http_Response` object.
+
+Rules:
+
+- `url` must be a string
+- `timeout_ms`, when provided, must be a non-negative integer
+- network failures are raised as runtime errors
+
+This primitive is intended to support `lib/net/http_client.nex`.
+
+## `http_server_create`
+
+```nex
+http_server_create(port: Integer)
+```
+
+Creates an opaque HTTP server handle used by `lib/net/http_server.nex`.
+
+## `http_server_get`
+
+```nex
+http_server_get(handle, path: String, handler: Function)
+```
+
+Registers a GET route on an opaque server handle.
+
+## `http_server_post`
+
+```nex
+http_server_post(handle, path: String, handler: Function)
+```
+
+Registers a POST route on an opaque server handle.
+
+## `http_server_put`
+
+```nex
+http_server_put(handle, path: String, handler: Function)
+```
+
+Registers a PUT route on an opaque server handle.
+
+## `http_server_delete`
+
+```nex
+http_server_delete(handle, path: String, handler: Function)
+```
+
+Registers a DELETE route on an opaque server handle.
+
+## `http_server_start`
+
+```nex
+http_server_start(handle): Integer
+```
+
+Starts an opaque server handle and returns the bound port.
+
+## `http_server_stop`
+
+```nex
+http_server_stop(handle)
+```
+
+Stops an opaque server handle.
+
+## `http_server_is_running`
+
+```nex
+http_server_is_running(handle): Boolean
+```
+
+Reports whether an opaque server handle is currently listening.
+
+## `http_post`
+
+```nex
+http_post(url: String, body_text: String): Http_Response
+http_post(url: String, body_text: String, timeout_ms: Integer): Http_Response
+```
+
+Performs an HTTP POST request with a text body and returns an `Http_Response` object.
+
+Rules:
+
+- `url` must be a string
+- `body_text` must be a string
+- `timeout_ms`, when provided, must be a non-negative integer
+- network failures are raised as runtime errors
+
+This primitive is intended to support `lib/net/http_client.nex`.
+
 ## `await_any`
 
 ```nex
@@ -81,6 +180,9 @@ let x := 12
 print(type_of(x))                 -- "Integer"
 print(type_is("Comparable", x))   -- true
 print(type_is("String", x))       -- false
+
+let response: Http_Response := http_get("https://example.com")
+print(response.status())
 
 let fast: Task[Integer] := spawn do
   result := 2

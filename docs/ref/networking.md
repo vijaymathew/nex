@@ -1,6 +1,180 @@
 # Networking Libraries
 
-These networking classes are JVM-only. They rely on Java imports from `java.net` and `java.io`, so they are not available in JavaScript, the browser IDE, or the Web REPL.
+The networking library surface under `lib/net` is target-specific:
+
+- `Tcp_Socket` and `Server_Socket` are JVM-only.
+- `Http_Client` is available in the JVM interpreter and in generated JVM and JavaScript code.
+- `Http_Server` is available in the JVM interpreter and in generated JVM and Node.js code.
+- `Http_Client` is not currently available in the browser/Web REPL ClojureScript interpreter.
+- `Http_Server` is not available in the browser/Web REPL or browser JavaScript target.
+
+## `net/Http_Client`
+
+`Http_Client` is a small portable HTTP client wrapper shipped as a Nex library under [`lib/net/http_client.nex`](/home/vijay/Projects/nex/lib/net/http_client.nex). Its Nex methods are implemented on top of the built-in `http_get` and `http_post` functions.
+
+### Loading
+
+```nex
+intern net/Http_Client
+```
+
+The loader accepts these common layouts:
+
+- `lib/net/http_client.nex`
+- `lib/net/Http_Client.nex`
+- `lib/net/src/http_client.nex`
+- `~/.nex/deps/net/http_client.nex`
+
+### Support
+
+| Target | Supported |
+|---|---|
+| JVM REPL / interpreter | Yes |
+| Generated JVM code | Yes |
+| Generated JavaScript / Node | Yes |
+| Browser IDE interpreter | No |
+
+### Construction
+
+```nex
+let client: Http_Client := create Http_Client.make()
+```
+
+### Response Values
+
+Requests return `Http_Response`, a small value object with:
+
+- `status(): Integer`
+- `body(): String`
+- `headers(): Map[String, String]`
+
+### Methods
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `make` | none | `Http_Client` | Create a client wrapper. |
+| `get` | `url: String` | `Http_Response` | Perform an HTTP GET request. |
+| `get` | `url: String, timeout_ms: Integer` | `Http_Response` | Perform an HTTP GET request with a timeout in milliseconds. |
+| `post` | `url: String, body_text: String` | `Http_Response` | Perform an HTTP POST request with a text body. |
+| `post` | `url: String, body_text: String, timeout_ms: Integer` | `Http_Response` | Perform an HTTP POST request with a text body and timeout in milliseconds. |
+
+### Example
+
+```nex
+intern net/Http_Client
+
+let client: Http_Client := create Http_Client.make()
+let response: Http_Response := client.get("https://example.com")
+print(response.status())
+print(response.body())
+```
+
+Timeout-aware request:
+
+```nex
+let response: Http_Response := client.get("https://example.com", 500)
+print(response.status())
+```
+
+### Notes
+
+- The JVM interpreter uses Java's built-in HTTP client.
+- Generated JavaScript uses `fetch`.
+- The public Nex API lives in `lib/net/http_client.nex`; the host-specific request work lives in the runtime built-ins.
+- Response headers are exposed as `Map[String, String]`, keeping the first value for each header name.
+- Network failures are raised as runtime errors.
+
+## `net/Http_Server`
+
+`Http_Server` is a small HTTP server wrapper shipped as a Nex library under [`lib/net/http_server.nex`](/home/vijay/Projects/nex/lib/net/http_server.nex). Its Nex methods are implemented on top of runtime HTTP server built-ins.
+
+### Loading
+
+```nex
+intern net/Http_Server
+```
+
+### Support
+
+| Target | Supported |
+|---|---|
+| JVM REPL / interpreter | Yes |
+| Generated JVM code | Yes |
+| Generated JavaScript / Node | Yes |
+| Browser IDE interpreter | No |
+| Browser JavaScript target | No |
+
+### Types
+
+Route handlers receive `Http_Request` and return `Http_Server_Response`.
+
+`Http_Request` exposes:
+
+- `method(): String`
+- `path(): String`
+- `body(): String`
+- `headers(): Map[String, String]`
+- `params(): Map[String, String]`
+- `query(): Map[String, String]`
+- `param(name: String): String`
+- `query_param(name: String): String`
+- `wildcard(): String`
+
+`Http_Server_Response` exposes:
+
+- `status(): Integer`
+- `body(): String`
+- `headers(): Map[String, String]`
+
+### Methods
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `make` | `port: Integer` | `Http_Server` | Create a server wrapper. `0` requests an ephemeral port. |
+| `get` | `path: String, handler: Function` | `nil` | Register a GET route handler. |
+| `post` | `path: String, handler: Function` | `nil` | Register a POST route handler. |
+| `put` | `path: String, handler: Function` | `nil` | Register a PUT route handler. |
+| `delete` | `path: String, handler: Function` | `nil` | Register a DELETE route handler. |
+| `start` | none | `nil` | Start listening. Updates `port` when the OS assigns an ephemeral port. |
+| `stop` | none | `nil` | Stop the server. |
+| `is_running` | none | `Boolean` | Return true when the server is listening. |
+| `to_string` | none | `String` | Return a descriptive string showing the current port and run state. |
+
+### Example
+
+```nex
+intern net/Http_Server
+
+let server: Http_Server := create Http_Server.make(8080)
+
+server.get("/hello/:name", fn(req: Http_Request): Http_Server_Response do
+  result := create Http_Server_Response.text("hello " + req.param("name"))
+end)
+
+server.get("/search", fn(req: Http_Request): Http_Server_Response do
+  result := create Http_Server_Response.text("q=" + req.query_param("q"))
+end)
+
+server.get("/files/*", fn(req: Http_Request): Http_Server_Response do
+  result := create Http_Server_Response.text(req.wildcard())
+end)
+
+server.put("/items/:id", fn(req: Http_Request): Http_Server_Response do
+  result := create Http_Server_Response.text("updated " + req.param("id"))
+end)
+
+server.start()
+print(server.port)
+```
+
+### Notes
+
+- Route patterns support exact paths, named parameters such as `:name`, and a trailing wildcard `*`.
+- Supported verbs are `GET`, `POST`, `PUT`, and `DELETE`.
+- Query strings are parsed into `req.query()` and `req.query_param("name")`.
+- Route handlers are ordinary Nex function values.
+- The JVM interpreter uses JDK `HttpServer`.
+- Generated JavaScript support is intended for Node.js and uses the built-in `http` module.
 
 ## `net/Tcp_Socket`
 

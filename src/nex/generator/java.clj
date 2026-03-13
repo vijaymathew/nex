@@ -269,6 +269,16 @@
     "type_of" (str "NexRuntime.typeOf(" args-code ")")
     "type_is" (str "NexRuntime.typeIs(" args-code ")")
     "sleep" (str "NexRuntime.sleep(" args-code ")")
+    "http_get" (str "NexRuntime.httpGet(" args-code ")")
+    "http_post" (str "NexRuntime.httpPost(" args-code ")")
+    "http_server_create" (str "NexRuntime.httpServerCreate(" args-code ")")
+    "http_server_get" (str "NexRuntime.httpServerGet(" args-code ")")
+    "http_server_post" (str "NexRuntime.httpServerPost(" args-code ")")
+    "http_server_put" (str "NexRuntime.httpServerPut(" args-code ")")
+    "http_server_delete" (str "NexRuntime.httpServerDelete(" args-code ")")
+    "http_server_start" (str "NexRuntime.httpServerStart(" args-code ")")
+    "http_server_stop" (str "NexRuntime.httpServerStop(" args-code ")")
+    "http_server_is_running" (str "NexRuntime.httpServerIsRunning(" args-code ")")
     "await_any" (str "NexRuntime.awaitAny(" args-code ")")
     "await_all" (str "NexRuntime.awaitAll(" args-code ")")
     ;; Default: use as-is (regular method call)
@@ -610,6 +620,16 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
+                  "http_get" "Http_Response"
+                  "http_post" "Http_Response"
+                  "http_server_create" "Any"
+                  "http_server_get" "Void"
+                  "http_server_post" "Void"
+                  "http_server_put" "Void"
+                  "http_server_delete" "Void"
+                  "http_server_start" "Integer"
+                  "http_server_stop" "Void"
+                  "http_server_is_running" "Boolean"
                   "Any")
                 (case normalized-target
                 "Task" (case (:method expr)
@@ -922,6 +942,7 @@
       "Console" "new Object() /* Console */"
       "File" (str "new java.io.File(" args-code ")")
       "Process" "new Object() /* Process */"
+      "Map" "new HashMap<>()"
       "Channel" (cond
                   (nil? constructor)
                   (str "new NexRuntime.Channel" (or type-params "<>") "()")
@@ -2042,71 +2063,67 @@
   "Generate Java code for a Nex class"
   ([class-def] (generate-class class-def {}))
   ([class-def opts]
-   (let [{:keys [name generic-params parents body note deferred?]} class-def
-         {:keys [fields constants methods constructors]} (extract-members body)
-         runtime-parents (vec (remove #(= "Any" (:parent %)) parents))
-         parent-names (mapv :parent runtime-parents)
-         parent-fm (build-parent-field-map parent-names)
-         own-flds (set (map :name fields))
-         all-constants (get-accessible-constants class-def)
-         constant-names (set (map :name all-constants))
-         own-method-names (set (map :name methods))
-         all-methods (get-all-method-names parent-names own-method-names)
-         fld-types (build-field-types fields parent-names)
-         effective-invariants (collect-effective-class-invariants class-def)]
-    (binding [*current-parents* (set parent-names)
-              *parent-field-map* parent-fm
-              *own-fields* own-flds
-              *constant-names* constant-names
-              *all-method-names* all-methods
-              *field-types* fld-types
-              *class-invariants* effective-invariants]
-     (let [
-           ;; Generate class Javadoc if note present
-           class-javadoc (when note
-                          [(generate-javadoc 0 note)])
-           class-header (generate-class-header name generic-params runtime-parents deferred?)
-           ;; Composition fields for parent classes
-           composition-fields (when (seq runtime-parents)
-                                (generate-composition-fields 1 runtime-parents))
-           invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
-                              (indent 1 (str "// Class invariant: "
-                                            (str/join ", " (map :label effective-invariants)))))
-           constants-code (map #(generate-field 1 (assoc % :constant? true)) all-constants)
-           fields-code (map #(generate-field 1 %) fields)
-           ;; Delegation methods for inherited methods not overridden
-           delegation-methods (when (seq runtime-parents)
-                                (generate-delegation-methods 1 runtime-parents own-method-names opts))
-           constructors-code (map #(generate-constructor 1 name % opts) constructors)
-           inherited-constructor-shims (when (seq runtime-parents)
-                                         (generate-inherited-constructor-shims 1 name runtime-parents (set (map :name constructors)) opts))
-           methods-with-effective-contracts
-           (map (fn [m]
-                  (let [effective (lookup-method-effective-contracts class-def (:name m))]
-                    (assoc m
-                           :require (:effective-require effective)
-                           :ensure (:effective-ensure effective))))
-                methods)
-           methods-code (map #(generate-method 1 % opts) methods-with-effective-contracts)]
-       (str/join "\n"
-                 (concat
-                  class-javadoc
-                  [class-header]
-                  (when invariant-comment [invariant-comment ""])
-                  composition-fields
-                  (when (seq composition-fields) [""])
-                  constants-code
-                  (when (seq all-constants) [""])
-                  fields-code
-                  (when (seq fields) [""])
-                  (when (seq delegation-methods) delegation-methods)
-                  (when (seq delegation-methods) [""])
-                  constructors-code
-                  (when (seq constructors) [""])
-                  (when (seq inherited-constructor-shims) inherited-constructor-shims)
-                  (when (seq inherited-constructor-shims) [""])
-                  methods-code
-                  ["}"])))))))
+   (let [{:keys [name generic-params parents body note deferred?]} class-def]
+     (let [{:keys [fields constants methods constructors]} (extract-members body)
+             runtime-parents (vec (remove #(= "Any" (:parent %)) parents))
+             parent-names (mapv :parent runtime-parents)
+             parent-fm (build-parent-field-map parent-names)
+             own-flds (set (map :name fields))
+             all-constants (get-accessible-constants class-def)
+             constant-names (set (map :name all-constants))
+             own-method-names (set (map :name methods))
+             all-methods (get-all-method-names parent-names own-method-names)
+             fld-types (build-field-types fields parent-names)
+             effective-invariants (collect-effective-class-invariants class-def)]
+         (binding [*current-parents* (set parent-names)
+                   *parent-field-map* parent-fm
+                   *own-fields* own-flds
+                   *constant-names* constant-names
+                   *all-method-names* all-methods
+                   *field-types* fld-types
+                   *class-invariants* effective-invariants]
+           (let [class-javadoc (when note
+                                 [(generate-javadoc 0 note)])
+                 class-header (generate-class-header name generic-params runtime-parents deferred?)
+                 composition-fields (when (seq runtime-parents)
+                                      (generate-composition-fields 1 runtime-parents))
+                 invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
+                                     (indent 1 (str "// Class invariant: "
+                                                    (str/join ", " (map :label effective-invariants)))))
+                 constants-code (map #(generate-field 1 (assoc % :constant? true)) all-constants)
+                 fields-code (map #(generate-field 1 %) fields)
+                 delegation-methods (when (seq runtime-parents)
+                                      (generate-delegation-methods 1 runtime-parents own-method-names opts))
+                 constructors-code (map #(generate-constructor 1 name % opts) constructors)
+                 inherited-constructor-shims (when (seq runtime-parents)
+                                               (generate-inherited-constructor-shims 1 name runtime-parents (set (map :name constructors)) opts))
+                 methods-with-effective-contracts
+                 (map (fn [m]
+                        (let [effective (lookup-method-effective-contracts class-def (:name m))]
+                          (assoc m
+                                 :require (:effective-require effective)
+                                 :ensure (:effective-ensure effective))))
+                      methods)
+                 methods-code (map #(generate-method 1 % opts) methods-with-effective-contracts)]
+             (str/join "\n"
+                       (concat
+                        class-javadoc
+                        [class-header]
+                        (when invariant-comment [invariant-comment ""])
+                        composition-fields
+                        (when (seq composition-fields) [""])
+                        constants-code
+                        (when (seq all-constants) [""])
+                        fields-code
+                        (when (seq fields) [""])
+                        (when (seq delegation-methods) delegation-methods)
+                        (when (seq delegation-methods) [""])
+                        constructors-code
+                        (when (seq constructors) [""])
+                        (when (seq inherited-constructor-shims) inherited-constructor-shims)
+                        (when (seq inherited-constructor-shims) [""])
+                        methods-code
+                        ["}"]))))))))
 
 (defn generate-nex-window-class
   "Generate Java source for NexWindow.java — Swing/AWT window with canvas."
@@ -2699,6 +2716,176 @@ public class NexTurtle {
        "      Thread.currentThread().interrupt();\n"
        "      throw new RuntimeException(e);\n"
        "    }\n"
+       "  }\n\n"
+       "  private static Http_Response httpRequest(String method, String url, String bodyText, Integer timeoutMs) {\n"
+       "    try {\n"
+       "      java.net.http.HttpRequest.Builder builder = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url));\n"
+       "      if (timeoutMs != null) builder.timeout(java.time.Duration.ofMillis(timeoutMs.longValue()));\n"
+       "      java.net.http.HttpRequest.BodyPublisher publisher = \"POST\".equals(method)\n"
+       "        ? java.net.http.HttpRequest.BodyPublishers.ofString(bodyText == null ? \"\" : bodyText)\n"
+       "        : java.net.http.HttpRequest.BodyPublishers.noBody();\n"
+       "      if (\"POST\".equals(method)) builder.POST(publisher); else builder.GET();\n"
+       "      java.net.http.HttpResponse<String> response = java.net.http.HttpClient.newBuilder().build()\n"
+       "        .send(builder.build(), java.net.http.HttpResponse.BodyHandlers.ofString());\n"
+       "      java.util.HashMap<String, String> headers = new java.util.HashMap<>();\n"
+       "      response.headers().map().forEach((k, v) -> headers.put(k, v.isEmpty() ? \"\" : String.valueOf(v.get(0))));\n"
+       "      return Http_Response.make(response.statusCode(), response.body(), headers);\n"
+       "    } catch (Exception ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n\n"
+       "  public static Http_Response httpGet(String url) { return httpRequest(\"GET\", url, null, null); }\n"
+       "  public static Http_Response httpGet(String url, int timeoutMs) { return httpRequest(\"GET\", url, null, timeoutMs); }\n"
+       "  public static Http_Response httpPost(String url, String bodyText) { return httpRequest(\"POST\", url, bodyText, null); }\n"
+       "  public static Http_Response httpPost(String url, String bodyText, int timeoutMs) { return httpRequest(\"POST\", url, bodyText, timeoutMs); }\n\n"
+       "  public static class HttpServerRoute {\n"
+       "    public final String pathPattern;\n"
+       "    public final Function handler;\n"
+       "    public HttpServerRoute(String pathPattern, Function handler) {\n"
+       "      this.pathPattern = pathPattern;\n"
+       "      this.handler = handler;\n"
+       "    }\n"
+       "  }\n\n"
+       "  public static class HttpServerMatch {\n"
+       "    public final Function handler;\n"
+       "    public final java.util.Map<String, String> params;\n"
+       "    public HttpServerMatch(Function handler, java.util.Map<String, String> params) {\n"
+       "      this.handler = handler;\n"
+       "      this.params = params;\n"
+       "    }\n"
+       "  }\n\n"
+       "  public static class HttpServerHandle {\n"
+       "    public int port;\n"
+       "    public com.sun.net.httpserver.HttpServer server;\n"
+       "    public java.util.Map<String, java.util.List<HttpServerRoute>> routes = new java.util.HashMap<>();\n"
+       "    public HttpServerHandle(int port) {\n"
+       "      this.port = port;\n"
+       "      this.routes.put(\"GET\", new java.util.ArrayList<>());\n"
+       "      this.routes.put(\"POST\", new java.util.ArrayList<>());\n"
+       "      this.routes.put(\"PUT\", new java.util.ArrayList<>());\n"
+       "      this.routes.put(\"DELETE\", new java.util.ArrayList<>());\n"
+       "    }\n"
+       "  }\n\n"
+       "  private static java.util.List<String> httpPathSegments(String path) {\n"
+       "    java.util.ArrayList<String> out = new java.util.ArrayList<>();\n"
+       "    if (path == null || path.isEmpty() || \"/\".equals(path)) return out;\n"
+       "    for (String part : path.split(\"/\")) if (!part.isEmpty()) out.add(part);\n"
+       "    return out;\n"
+       "  }\n"
+       "  private static String httpUrlDecode(String s) {\n"
+       "    try {\n"
+       "      return java.net.URLDecoder.decode(String.valueOf(s == null ? \"\" : s), java.nio.charset.StandardCharsets.UTF_8);\n"
+       "    } catch (Exception ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  private static java.util.Map<String, String> httpParseQuery(String query) {\n"
+       "    java.util.HashMap<String, String> out = new java.util.HashMap<>();\n"
+       "    if (query == null || query.isEmpty()) return out;\n"
+       "    for (String part : query.split(\"&\")) {\n"
+       "      if (part.isEmpty()) continue;\n"
+       "      String[] pieces = part.split(\"=\", 2);\n"
+       "      String key = httpUrlDecode(pieces[0]);\n"
+       "      String value = httpUrlDecode(pieces.length > 1 ? pieces[1] : \"\");\n"
+       "      out.put(key, value);\n"
+       "    }\n"
+       "    return out;\n"
+       "  }\n"
+       "  private static java.util.Map<String, String> httpMatchRoute(String pattern, String path) {\n"
+       "    java.util.List<String> patternSegments = httpPathSegments(pattern);\n"
+       "    java.util.List<String> pathSegments = httpPathSegments(path);\n"
+       "    java.util.HashMap<String, String> params = new java.util.HashMap<>();\n"
+       "    int i = 0;\n"
+       "    int j = 0;\n"
+       "    while (i < patternSegments.size() && j < pathSegments.size()) {\n"
+       "      String p = patternSegments.get(i);\n"
+       "      String x = pathSegments.get(j);\n"
+       "      if (\"*\".equals(p)) {\n"
+       "        params.put(\"*\", String.join(\"/\", pathSegments.subList(j, pathSegments.size())));\n"
+       "        return params;\n"
+       "      }\n"
+       "      if (p.startsWith(\":\")) {\n"
+       "        params.put(p.substring(1), httpUrlDecode(x));\n"
+       "        i++; j++;\n"
+       "        continue;\n"
+       "      }\n"
+       "      if (!p.equals(x)) return null;\n"
+       "      i++; j++;\n"
+       "    }\n"
+       "    if (i == patternSegments.size() && j == pathSegments.size()) return params;\n"
+       "    if (i < patternSegments.size() && \"*\".equals(patternSegments.get(i))) {\n"
+       "      params.put(\"*\", String.join(\"/\", pathSegments.subList(j, pathSegments.size())));\n"
+       "      return params;\n"
+       "    }\n"
+       "    return null;\n"
+       "  }\n"
+       "  private static HttpServerMatch httpFindRoute(HttpServerHandle handle, String method, String path) {\n"
+       "    for (HttpServerRoute route : handle.routes.getOrDefault(method, java.util.Collections.emptyList())) {\n"
+       "      java.util.Map<String, String> params = httpMatchRoute(route.pathPattern, path);\n"
+       "      if (params != null) return new HttpServerMatch(route.handler, params);\n"
+       "    }\n"
+       "    return null;\n"
+       "  }\n\n"
+       "  public static Object httpServerCreate(int port) { return new HttpServerHandle(port); }\n"
+       "  public static void httpServerGet(Object handleObj, String path, Function handler) {\n"
+       "    HttpServerHandle handle = (HttpServerHandle) handleObj;\n"
+       "    handle.routes.get(\"GET\").add(new HttpServerRoute(path, handler));\n"
+       "  }\n"
+       "  public static void httpServerPost(Object handleObj, String path, Function handler) {\n"
+       "    HttpServerHandle handle = (HttpServerHandle) handleObj;\n"
+       "    handle.routes.get(\"POST\").add(new HttpServerRoute(path, handler));\n"
+       "  }\n"
+       "  public static void httpServerPut(Object handleObj, String path, Function handler) {\n"
+       "    HttpServerHandle handle = (HttpServerHandle) handleObj;\n"
+       "    handle.routes.get(\"PUT\").add(new HttpServerRoute(path, handler));\n"
+       "  }\n"
+       "  public static void httpServerDelete(Object handleObj, String path, Function handler) {\n"
+       "    HttpServerHandle handle = (HttpServerHandle) handleObj;\n"
+       "    handle.routes.get(\"DELETE\").add(new HttpServerRoute(path, handler));\n"
+       "  }\n"
+       "  public static int httpServerStart(Object handleObj) {\n"
+       "    HttpServerHandle handle = (HttpServerHandle) handleObj;\n"
+       "    try {\n"
+       "      com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(\"127.0.0.1\", handle.port), 0);\n"
+       "      server.createContext(\"/\", exchange -> {\n"
+       "        String method = exchange.getRequestMethod();\n"
+       "        java.net.URI uri = exchange.getRequestURI();\n"
+       "        String path = uri.getPath();\n"
+       "        HttpServerMatch match = httpFindRoute(handle, method, path);\n"
+       "        Http_Server_Response response;\n"
+       "        if (match == null) {\n"
+       "          response = Http_Server_Response.with_status(404, \"Not Found\");\n"
+       "        } else {\n"
+       "          String body = new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);\n"
+       "          java.util.HashMap<String, String> headers = new java.util.HashMap<>();\n"
+       "          exchange.getRequestHeaders().forEach((k, v) -> headers.put(k, v.isEmpty() ? \"\" : String.valueOf(v.get(0))));\n"
+       "          Http_Request request = Http_Request.make(method, path, body, headers, match.params, httpParseQuery(uri.getRawQuery()));\n"
+       "          Object out = match.handler.call1(request);\n"
+       "          response = (out == null) ? Http_Server_Response.with_status(204, \"\") : (Http_Server_Response) out;\n"
+       "        }\n"
+       "        response.headers().forEach((k, v) -> exchange.getResponseHeaders().add(String.valueOf(k), String.valueOf(v)));\n"
+       "        byte[] bytes = response.body().getBytes(java.nio.charset.StandardCharsets.UTF_8);\n"
+       "        exchange.sendResponseHeaders(response.status(), bytes.length);\n"
+       "        try (java.io.OutputStream os = exchange.getResponseBody()) { os.write(bytes); }\n"
+       "      });\n"
+       "      server.start();\n"
+       "      handle.server = server;\n"
+       "      handle.port = server.getAddress().getPort();\n"
+       "      return handle.port;\n"
+       "    } catch (Exception ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void httpServerStop(Object handleObj) {\n"
+       "    HttpServerHandle handle = (HttpServerHandle) handleObj;\n"
+       "    if (handle.server != null) {\n"
+       "      handle.server.stop(0);\n"
+       "      handle.server = null;\n"
+       "    }\n"
+       "  }\n"
+       "  public static boolean httpServerIsRunning(Object handleObj) {\n"
+       "    HttpServerHandle handle = (HttpServerHandle) handleObj;\n"
+       "    return handle.server != null;\n"
        "  }\n\n"
        "  public static long parseLong(String raw) {\n"
        "    String s = raw.trim().replace(\"_\", \"\");\n"

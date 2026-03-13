@@ -914,6 +914,179 @@
           (or (first (or (:type-params task-type) (:type-args task-type)))
               "Any")))
 
+      (= method "http_get")
+      (do
+        (when-not (or (= (count args) 1) (= (count args) 2))
+          (throw (ex-info "http_get expects 1 or 2 arguments"
+                          {:error (type-error
+                                   (str "http_get expects 1 or 2 arguments, got " (count args)))})))
+        (let [url-type (check-expression env (first args))]
+          (when-not (= (attachable-type url-type) "String")
+            (throw (ex-info "http_get first argument must be String"
+                            {:error (type-error
+                                     (str "http_get first argument must be String, got "
+                                          (display-type url-type)))}))))
+        (when (= (count args) 2)
+          (let [timeout-type (check-expression env (second args))]
+            (when-not (= (attachable-type timeout-type) "Integer")
+              (throw (ex-info "http_get timeout argument must be Integer"
+                              {:error (type-error
+                                       (str "http_get timeout argument must be Integer, got "
+                                            (display-type timeout-type)))})))))
+        "Http_Response")
+
+      (= method "http_post")
+      (do
+        (when-not (or (= (count args) 2) (= (count args) 3))
+          (throw (ex-info "http_post expects 2 or 3 arguments"
+                          {:error (type-error
+                                   (str "http_post expects 2 or 3 arguments, got " (count args)))})))
+        (let [url-type (check-expression env (first args))
+              body-type (check-expression env (second args))]
+          (when-not (= (attachable-type url-type) "String")
+            (throw (ex-info "http_post first argument must be String"
+                            {:error (type-error
+                                     (str "http_post first argument must be String, got "
+                                          (display-type url-type)))})))
+          (when-not (= (attachable-type body-type) "String")
+            (throw (ex-info "http_post second argument must be String"
+                            {:error (type-error
+                                     (str "http_post second argument must be String, got "
+                                          (display-type body-type)))}))))
+        (when (= (count args) 3)
+          (let [timeout-type (check-expression env (nth args 2))]
+            (when-not (= (attachable-type timeout-type) "Integer")
+              (throw (ex-info "http_post timeout argument must be Integer"
+                              {:error (type-error
+                                       (str "http_post timeout argument must be Integer, got "
+                                            (display-type timeout-type)))})))))
+        "Http_Response")
+
+      (= method "http_server_create")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "http_server_create expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "http_server_create expects 1 argument, got " (count args)))})))
+        (let [port-type (check-expression env (first args))]
+          (when-not (= (attachable-type port-type) "Integer")
+            (throw (ex-info "http_server_create argument must be Integer"
+                            {:error (type-error
+                                     (str "http_server_create argument must be Integer, got "
+                                          (display-type port-type)))}))))
+        "Any")
+
+      (= method "http_server_get")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "http_server_get expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "http_server_get expects 3 arguments, got " (count args)))})))
+        (check-expression env (first args))
+        (let [path-type (check-expression env (second args))
+              handler-type (check-expression env (nth args 2))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "http_server_get path argument must be String"
+                            {:error (type-error
+                                     (str "http_server_get path argument must be String, got "
+                                          (display-type path-type)))})))
+          (when-not (= (attachable-type handler-type) "Function")
+            (throw (ex-info "http_server_get handler argument must be Function"
+                            {:error (type-error
+                                     (str "http_server_get handler argument must be Function, got "
+                                          (display-type handler-type)))}))))
+        "Void")
+
+      (= method "http_server_post")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "http_server_post expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "http_server_post expects 3 arguments, got " (count args)))})))
+        (check-expression env (first args))
+        (let [path-type (check-expression env (second args))
+              handler-type (check-expression env (nth args 2))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "http_server_post path argument must be String"
+                            {:error (type-error
+                                     (str "http_server_post path argument must be String, got "
+                                          (display-type path-type)))})))
+          (when-not (= (attachable-type handler-type) "Function")
+            (throw (ex-info "http_server_post handler argument must be Function"
+                            {:error (type-error
+                                     (str "http_server_post handler argument must be Function, got "
+                                         (display-type handler-type)))}))))
+        "Void")
+
+      (= method "http_server_put")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "http_server_put expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "http_server_put expects 3 arguments, got " (count args)))})))
+        (check-expression env (first args))
+        (let [path-type (check-expression env (second args))
+              handler-type (check-expression env (nth args 2))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "http_server_put path argument must be String"
+                            {:error (type-error
+                                     (str "http_server_put path argument must be String, got "
+                                          (display-type path-type)))})))
+          (when-not (= (attachable-type handler-type) "Function")
+            (throw (ex-info "http_server_put handler argument must be Function"
+                            {:error (type-error
+                                     (str "http_server_put handler argument must be Function, got "
+                                          (display-type handler-type)))}))))
+        "Void")
+
+      (= method "http_server_delete")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "http_server_delete expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "http_server_delete expects 3 arguments, got " (count args)))})))
+        (check-expression env (first args))
+        (let [path-type (check-expression env (second args))
+              handler-type (check-expression env (nth args 2))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "http_server_delete path argument must be String"
+                            {:error (type-error
+                                     (str "http_server_delete path argument must be String, got "
+                                          (display-type path-type)))})))
+          (when-not (= (attachable-type handler-type) "Function")
+            (throw (ex-info "http_server_delete handler argument must be Function"
+                            {:error (type-error
+                                     (str "http_server_delete handler argument must be Function, got "
+                                          (display-type handler-type)))}))))
+        "Void")
+
+      (= method "http_server_start")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "http_server_start expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "http_server_start expects 1 argument, got " (count args)))})))
+        (check-expression env (first args))
+        "Integer")
+
+      (= method "http_server_stop")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "http_server_stop expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "http_server_stop expects 1 argument, got " (count args)))})))
+        (check-expression env (first args))
+        "Void")
+
+      (= method "http_server_is_running")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "http_server_is_running expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "http_server_is_running expects 1 argument, got " (count args)))})))
+        (check-expression env (first args))
+        "Boolean")
+
       :else
       (if-let [var-type (env-lookup-var env method)]
       (let [base-type (if (map? var-type) (:base-type var-type) var-type)

@@ -264,6 +264,33 @@ end"
       (is (str/includes? java-code "t.await()"))
       (is (str/includes? java-code "t.is_done()")))))
 
+(deftest http-client-library-generation-test
+  (testing "Http_Client library lowers to ordinary classes plus runtime HTTP builtins"
+    (let [nex-code (slurp "lib/net/http_client.nex")
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "public class Http_Client"))
+      (is (str/includes? java-code "public class Http_Response"))
+      (is (str/includes? java-code "java.net.http.HttpClient"))
+      (is (str/includes? java-code "result = NexRuntime.httpGet(url);"))
+      (is (str/includes? java-code "result = NexRuntime.httpGet(url, timeout_ms);"))
+      (is (str/includes? java-code "result = NexRuntime.httpPost(url, body_text);"))
+      (is (str/includes? java-code "result = NexRuntime.httpPost(url, body_text, timeout_ms);")))))
+
+(deftest http-server-library-generation-test
+  (testing "Http_Server library lowers to ordinary classes plus runtime HTTP server builtins"
+    (let [nex-code (slurp "lib/net/http_server.nex")
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "public class Http_Server"))
+      (is (str/includes? java-code "public class Http_Request"))
+      (is (str/includes? java-code "public class Http_Server_Response"))
+      (is (str/includes? java-code ".handle = NexRuntime.httpServerCreate(port_value);"))
+      (is (str/includes? java-code "NexRuntime.httpServerGet(this.handle, path, handler);"))
+      (is (str/includes? java-code "NexRuntime.httpServerPost(this.handle, path, handler);"))
+      (is (str/includes? java-code "NexRuntime.httpServerPut(this.handle, path, handler);"))
+      (is (str/includes? java-code "NexRuntime.httpServerDelete(this.handle, path, handler);"))
+      (is (str/includes? java-code "this.port = NexRuntime.httpServerStart(this.handle);"))
+      (is (str/includes? java-code "NexRuntime.httpServerIsRunning(this.handle)")))))
+
 (deftest buffered-channel-generation-test
   (testing "buffered Channel constructors and accessors lower correctly in Java"
     (let [nex-code "class Test

@@ -222,6 +222,226 @@
   #?(:clj (nex-array-from (into [] (.getInputArguments (java.lang.management.ManagementFactory/getRuntimeMXBean))))
      :cljs (nex-array-from (vec (.-argv js/process)))))
 
+(declare make-object)
+
+#?(:clj
+   (defn- http-response-headers->nex-map
+     [headers]
+     (let [m (nex-map)]
+       (doseq [[k values] (.map ^java.net.http.HttpHeaders headers)]
+         (nex-map-put m k (if (seq values) (str (first values)) "")))
+       m)))
+
+#?(:clj
+   (defn- make-http-response-object
+     [status body headers]
+     (make-object "Http_Response"
+                  {"status_code" status
+                   "body_text" body
+                   "header_map" headers})))
+
+#?(:clj
+   (defn- make-http-server-request-object
+     [method-name path-value body-text header-map route-params query-map]
+     (make-object "Http_Request"
+                  {"method_name" method-name
+                   "path_value" path-value
+                   "body_text" body-text
+                   "header_map" header-map
+                   "route_params" route-params
+                   "query_map" query-map})))
+
+#?(:clj
+   (defn- make-http-server-default-response-object
+     []
+     (make-object "Http_Server_Response"
+                  {"status_code" 404
+                   "body_text" "Not Found"
+                   "header_map" (nex-map)})))
+
+#?(:clj
+   (defn- http-exchange-headers->nex-map
+     [headers]
+     (let [m (nex-map)]
+       (doseq [entry (.entrySet headers)]
+         (let [k (.getKey entry)
+               values (.getValue entry)]
+           (nex-map-put m (str k)
+                        (if (seq values)
+                          (str (first values))
+                          ""))))
+       m)))
+
+#?(:clj
+   (defn- java-http-request
+     [method url body timeout-ms]
+     (let [builder (java.net.http.HttpRequest/newBuilder
+                    (java.net.URI/create url))
+           _ (when (some? timeout-ms)
+               (.timeout builder (java.time.Duration/ofMillis (long timeout-ms))))
+           publisher (if (= method "POST")
+                       (java.net.http.HttpRequest$BodyPublishers/ofString (or body ""))
+                       (java.net.http.HttpRequest$BodyPublishers/noBody))
+           _ (if (= method "POST")
+               (.POST builder publisher)
+               (.GET builder))
+           request (.build builder)
+           client (.build (java.net.http.HttpClient/newBuilder))
+           response (.send client request (java.net.http.HttpResponse$BodyHandlers/ofString))]
+       (make-http-response-object (.statusCode response)
+                                  (.body response)
+                                  (http-response-headers->nex-map (.headers response))))))
+
+#?(:clj
+   (defn- make-http-server-handle
+     [port]
+     {:nex-builtin-type :HttpServerHandle
+      :port (atom port)
+      :server (atom nil)
+      :routes {"GET" (atom [])
+               "POST" (atom [])
+               "PUT" (atom [])
+               "DELETE" (atom [])}}))
+
+#?(:clj
+   (defn- url-decode
+     [s]
+     (java.net.URLDecoder/decode (str (or s "")) "UTF-8")))
+
+#?(:clj
+   (defn- path-segments
+     [path]
+     (let [trimmed (or path "")]
+       (if (or (= trimmed "") (= trimmed "/"))
+         []
+         (->> (clojure.string/split trimmed #"/")
+              (remove clojure.string/blank?)
+              vec)))))
+
+#?(:clj
+   (defn- parse-query-map
+     [query]
+     (let [m (nex-map)]
+       (when (seq query)
+         (doseq [part (clojure.string/split (str query) #"&")]
+           (when (seq part)
+             (let [[k v] (clojure.string/split part #"=" 2)]
+               (nex-map-put m (url-decode k) (url-decode (or v "")))))))
+       m)))
+
+#?(:clj
+   (defn- route-match
+     [pattern path]
+     (let [pattern-segments (path-segments pattern)
+           path-segments* (path-segments path)
+           params (nex-map)]
+       (loop [ps pattern-segments
+              xs path-segments*]
+         (cond
+           (and (empty? ps) (empty? xs))
+           params
+
+           (empty? ps)
+           nil
+
+           (= (first ps) "*")
+           (do
+             (nex-map-put params "*" (clojure.string/join "/" xs))
+             params)
+
+           (empty? xs)
+           nil
+
+           (clojure.string/starts-with? (first ps) ":")
+           (do
+             (nex-map-put params (subs (first ps) 1) (url-decode (first xs)))
+             (recur (rest ps) (rest xs)))
+
+           (= (first ps) (first xs))
+           (recur (rest ps) (rest xs))
+
+           :else nil)))))
+
+#?(:clj
+   (defn- find-route
+     [handle method path]
+     (some (fn [{:keys [path-pattern handler]}]
+             (when-let [params (route-match path-pattern path)]
+               {:handler handler :params params}))
+           @(get (:routes handle) method))))
+
+#?(:clj
+   (defn- invoke-http-server-handler
+     [ctx handler request-obj]
+     (eval-node ctx {:type :call
+                     :target {:type :literal :value handler}
+                     :method "call1"
+                     :args [{:type :literal :value request-obj}]})))
+
+#?(:clj
+   (defn- http-server-response-status
+     [response]
+     (let [fields (:fields response)]
+       (or (get fields :status_code)
+           200))))
+
+#?(:clj
+   (defn- http-server-response-body
+     [response]
+     (let [fields (:fields response)]
+       (str (or (get fields :body_text) "")))))
+
+#?(:clj
+   (defn- http-server-response-headers
+     [response]
+     (let [fields (:fields response)
+           headers (or (get fields :header_map) (nex-map))]
+       headers)))
+
+#?(:clj
+   (defn- start-http-server!
+     [ctx handle]
+     (let [server (com.sun.net.httpserver.HttpServer/create (java.net.InetSocketAddress. "127.0.0.1" (int @(:port handle))) 0)
+           dispatch
+           (proxy [com.sun.net.httpserver.HttpHandler] []
+             (handle [exchange]
+               (try
+                 (let [method (.getRequestMethod exchange)
+                       uri (.getRequestURI exchange)
+                       path (.getPath uri)
+                       query (.getRawQuery uri)
+                       body (slurp (.getRequestBody exchange))
+                       route (find-route handle method path)
+                       request-obj (make-http-server-request-object method path body
+                                                                    (http-exchange-headers->nex-map (.getRequestHeaders exchange))
+                                                                    (or (:params route) (nex-map))
+                                                                    (parse-query-map query))
+                       response-obj (if route
+                                      (invoke-http-server-handler ctx (:handler route) request-obj)
+                                      (make-http-server-default-response-object))
+                       status (int (http-server-response-status response-obj))
+                       response-body (http-server-response-body response-obj)
+                       response-bytes (.getBytes response-body java.nio.charset.StandardCharsets/UTF_8)
+                       response-headers (http-server-response-headers response-obj)]
+                   (doseq [[k v] response-headers]
+                     (.add (.getResponseHeaders exchange) (str k) (str v)))
+                   (.sendResponseHeaders exchange status (long (alength response-bytes)))
+                   (with-open [os (.getResponseBody exchange)]
+                     (.write os response-bytes))
+                   nil)
+                 (catch Exception ex
+                   (let [message (.getMessage ex)
+                         bytes (.getBytes (str "Server error: " (or message "unknown")) java.nio.charset.StandardCharsets/UTF_8)]
+                     (.sendResponseHeaders exchange 500 (long (alength bytes)))
+                     (with-open [os (.getResponseBody exchange)]
+                       (.write os bytes)))
+                   nil))))]
+       (.createContext server "/" dispatch)
+       (.start server)
+       (reset! (:server handle) server)
+       (reset! (:port handle) (.getPort (.getAddress server)))
+       @(:port handle))))
+
 ;; Built-in IO type detection
 (defn nex-console? [v] (and (map? v) (= (:nex-builtin-type v) :Console)))
 (defn nex-file? [v] (and (map? v) (= (:nex-builtin-type v) :File)))
@@ -1771,7 +1991,122 @@
                        {:function "sleep" :expected 1 :actual (count args)})))
      #?(:clj (Thread/sleep (long (first args)))
         :cljs nil)
-     nil)})
+     nil)
+
+   "http_get"
+   (fn [_ctx & args]
+     (when-not (or (= (count args) 1) (= (count args) 2))
+       (throw (ex-info "http_get expects 1 or 2 arguments"
+                       {:function "http_get" :expected "1 or 2" :actual (count args)})))
+     (let [[url timeout-ms] args]
+       #?(:clj (java-http-request "GET" (str url) nil timeout-ms)
+          :cljs (throw (ex-info "http_get is not supported in the ClojureScript interpreter"
+                                {:function "http_get"})))))
+
+   "http_post"
+   (fn [_ctx & args]
+     (when-not (or (= (count args) 2) (= (count args) 3))
+       (throw (ex-info "http_post expects 2 or 3 arguments"
+                       {:function "http_post" :expected "2 or 3" :actual (count args)})))
+     (let [[url body timeout-ms] args]
+       #?(:clj (java-http-request "POST" (str url) (str body) timeout-ms)
+          :cljs (throw (ex-info "http_post is not supported in the ClojureScript interpreter"
+                                {:function "http_post"})))))
+
+   "http_server_create"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "http_server_create expects exactly 1 argument"
+                       {:function "http_server_create" :expected 1 :actual (count args)})))
+     #?(:clj (make-http-server-handle (int (first args)))
+        :cljs (throw (ex-info "http_server_create is not supported in the ClojureScript interpreter"
+                              {:function "http_server_create"}))))
+
+   "http_server_get"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "http_server_get expects exactly 3 arguments"
+                       {:function "http_server_get" :expected 3 :actual (count args)})))
+     (let [[handle path handler] args]
+       #?(:clj (do
+                 (swap! (get-in handle [:routes "GET"]) conj {:path-pattern (str path)
+                                                              :handler handler})
+                 nil)
+          :cljs (throw (ex-info "http_server_get is not supported in the ClojureScript interpreter"
+                                {:function "http_server_get"})))))
+
+   "http_server_post"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "http_server_post expects exactly 3 arguments"
+                       {:function "http_server_post" :expected 3 :actual (count args)})))
+     (let [[handle path handler] args]
+       #?(:clj (do
+                 (swap! (get-in handle [:routes "POST"]) conj {:path-pattern (str path)
+                                                               :handler handler})
+                 nil)
+          :cljs (throw (ex-info "http_server_post is not supported in the ClojureScript interpreter"
+                                {:function "http_server_post"})))))
+
+   "http_server_put"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "http_server_put expects exactly 3 arguments"
+                       {:function "http_server_put" :expected 3 :actual (count args)})))
+     (let [[handle path handler] args]
+       #?(:clj (do
+                 (swap! (get-in handle [:routes "PUT"]) conj {:path-pattern (str path)
+                                                              :handler handler})
+                 nil)
+          :cljs (throw (ex-info "http_server_put is not supported in the ClojureScript interpreter"
+                                {:function "http_server_put"})))))
+
+   "http_server_delete"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "http_server_delete expects exactly 3 arguments"
+                       {:function "http_server_delete" :expected 3 :actual (count args)})))
+     (let [[handle path handler] args]
+       #?(:clj (do
+                 (swap! (get-in handle [:routes "DELETE"]) conj {:path-pattern (str path)
+                                                                 :handler handler})
+                 nil)
+          :cljs (throw (ex-info "http_server_delete is not supported in the ClojureScript interpreter"
+                                {:function "http_server_delete"})))))
+
+   "http_server_start"
+   (fn [ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "http_server_start expects exactly 1 argument"
+                       {:function "http_server_start" :expected 1 :actual (count args)})))
+     #?(:clj (start-http-server! ctx (first args))
+        :cljs (throw (ex-info "http_server_start is not supported in the ClojureScript interpreter"
+                              {:function "http_server_start"}))))
+
+   "http_server_stop"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "http_server_stop expects exactly 1 argument"
+                       {:function "http_server_stop" :expected 1 :actual (count args)})))
+     #?(:clj (let [handle (first args)
+                   server @(:server handle)]
+               (when server
+                 (.stop ^com.sun.net.httpserver.HttpServer server 0)
+                 (reset! (:server handle) nil))
+               nil)
+        :cljs (throw (ex-info "http_server_stop is not supported in the ClojureScript interpreter"
+                              {:function "http_server_stop"}))))
+
+   "http_server_is_running"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "http_server_is_running expects exactly 1 argument"
+                       {:function "http_server_is_running" :expected 1 :actual (count args)})))
+     #?(:clj (some? @(:server (first args)))
+        :cljs (throw (ex-info "http_server_is_running is not supported in the ClojureScript interpreter"
+                              {:function "http_server_is_running"}))))
+
+   })
 
 ;;
 ;; Operator Implementations
@@ -3227,6 +3562,7 @@
                (throw (ex-info "File requires constructor: create File.open(path)" {:class-name "File"})))
              {:nex-builtin-type :File :path (first arg-values)})
     "Process" {:nex-builtin-type :Process}
+    "Map" (nex-map)
     "Channel" #?(:clj (let [arg-values (mapv #(eval-node ctx %) args)]
                         (cond
                           (nil? constructor) (make-channel)
@@ -4135,6 +4471,7 @@
                                  (throw (ex-info "File requires constructor: create File.open(path)" {:class-name "File"})))
                                {:nex-builtin-type :File :path (first arg-values)})
                       "Process" {:nex-builtin-type :Process}
+                      "Map" (nex-map)
                       "Channel" (cond
                                   (nil? constructor) (make-channel)
                                   (= constructor "with_capacity")

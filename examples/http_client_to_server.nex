@@ -1,0 +1,10 @@
+intern net/Http_Client
+
+let client: Http_Client := create Http_Client.make()
+let base: String := "http://127.0.0.1:8080"
+
+print(client.get(base + "/hello/nex").body())
+print(client.get(base + "/files/css/site.css").body())
+print(client.get(base + "/search?q=design").body())
+print(client.post(base + "/echo", "payload").body())
+print("PUT and DELETE can be exercised with curl against /items/42.")

@@ -234,3 +234,26 @@ end")
       (is (.contains output "#<Server_Socket object>"))
       (is (.contains output "false"))
       (is (.contains output "\"Server_Socket(port=0, listening=false)\"")))))
+
+(deftest repl-intern-loads-checked-in-http-client-library
+  (testing "REPL can load the checked-in Http_Client library and create a client object"
+    (let [ctx (repl/init-repl-context)
+          output (with-out-str
+                   (repl/eval-code ctx "intern net/Http_Client")
+                   (repl/eval-code ctx "let client: Http_Client := create Http_Client.make()")
+                   (repl/eval-code ctx "print(client.to_string())"))]
+      (is (not (.contains output "Cannot find intern file for net/Http_Client")))
+      (is (.contains output "#<Http_Client object>")))))
+
+(deftest repl-intern-loads-checked-in-http-server-library
+  (testing "REPL can load the checked-in Http_Server library and create a server object"
+    (let [ctx (repl/init-repl-context)
+          output (with-out-str
+                   (repl/eval-code ctx "intern net/Http_Server")
+                   (repl/eval-code ctx "let server: Http_Server := create Http_Server.make(0)")
+                   (repl/eval-code ctx "print(server.is_running())")
+                   (repl/eval-code ctx "print(server.to_string())"))]
+      (is (not (.contains output "Cannot find intern file for net/Http_Server")))
+      (is (.contains output "#<Http_Server object>"))
+      (is (.contains output "false"))
+      (is (.contains output "\"Http_Server(port=0, running=false)\"")))))

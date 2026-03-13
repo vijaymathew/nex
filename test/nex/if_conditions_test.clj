@@ -18,6 +18,13 @@
       (interp/eval-node ctx-with-env stmt))
     @(:output ctx-with-env)))
 
+(defn test-class-java
+  [java]
+  (let [start (.indexOf java "class Test {")]
+    (if (not= start -1)
+      (subs java start)
+      java)))
+
 (deftest basic-if-then-else-test
   (testing "Basic if-then-else with true condition"
     (let [code "class Test
@@ -320,16 +327,16 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let x: Integer := 0
-      if x < 0 then
-        print(\"negative\")
-      elseif x > 100 then
-        print(\"big\")
-      end
-    end
+          let x: Integer := 0
+          if x < 0 then
+            print(\"negative\")
+          elseif x > 100 then
+            print(\"big\")
+          end
+        end
 end"
           ast (p/ast code)
-          java-code (java-gen/translate-ast ast)]
+          java-code (test-class-java (java-gen/translate-ast ast))]
       (is (str/includes? java-code "} else if ("))
       (is (not (str/includes? java-code "} else {"))))))
 
