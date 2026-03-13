@@ -199,7 +199,7 @@ create Echo_Client.make("127.0.0.1", 4040, "hello")
 
 The server accepts one client, echoes one line, and exits.
 
-These examples use `intern net/Server_Socket` and `intern net/Tcp_Socket`, so they work on the JVM runtime and are not available in the browser IDE or JavaScript target.
+These examples use `intern net/Server_Socket` and `intern net/Tcp_Socket`, so they work on the JVM runtime and are not available in the JavaScript target.
 
 ### Help
 

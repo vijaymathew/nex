@@ -110,19 +110,6 @@ clojure -M:test -e "(require 'nex.loops-test) (clojure.test/run-tests 'nex.loops
 clojure -M:test -e "(require 'nex.io-test) (clojure.test/run-tests 'nex.io-test)"
 ```
 
-### Run Browser Runtime Smoke Tests
-
-This exercises the ClojureScript/browser interpreter path for Promise-based
-features such as `spawn`, `Task`, and `Channel`.
-
-```bash
-./test/scripts/run_browser_smoke_tests.sh
-```
-
-The wrapper prefers a local `shadow-cljs` binary, falls back to a cached
-`~/.npm/_npx/...` install if present, and only uses `npx shadow-cljs` as a
-last resort.
-
 ### Run Tests in REPL
 
 ```clojure

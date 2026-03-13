@@ -61,7 +61,7 @@ This is a deliberate choice. Learning to think about preconditions, postconditio
 
 Nex is the medium. The engineering principles are the message. Both transfer directly to any serious language or environment you work in after this book.
 
-You do not need to install anything to begin. A browser-based IDE is available for all the examples that follow.
+You do not need a complex toolchain to begin. A local Nex REPL is enough for all the examples that follow.
 
 
 

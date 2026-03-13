@@ -31,12 +31,6 @@ This has consequences that go beyond style.
 
 ---
 
-## Online IDE
-
-Try Nex in the browser: https://schemer.in/nex.html
-
----
-
 ## Library Reference
 
 Shipped Nex libraries under `lib/` are documented separately from the core runtime reference.
@@ -310,29 +304,6 @@ nex> :vars      -- list defined variables
 nex> :quit      -- exit
 ```
 
-### Browser IDE
-
-```bash
-npx shadow-cljs compile browser
-npx serve public
-```
-
-See [docs/md/WEB_IDE.md](docs/md/WEB_IDE.md) for setup and usage.
-
-To sync the rebuilt Browser IDE into the website checkout used for deployment:
-
-```bash
-./scripts/sync-browser-ide.sh
-```
-
-Or with an explicit target:
-
-```bash
-./scripts/sync-browser-ide.sh ../vijaymathew.github.io/nex
-```
-
----
-
 ## Usage
 
 ### Running the Interpreter
@@ -488,8 +459,7 @@ nex/
 | Document | Description |
 |---|---|
 | [Syntax on a Postcard](docs/md/SYNTAX.md) | Core language syntax and quick reference |
-| [Tutorial](docs/md/TUTORIAL.md) | Step-by-step introduction used by the Web IDE |
-| [Web IDE Guide](docs/md/WEB_IDE.md) | Browser-based IDE setup and usage |
+| [Tutorial](docs/md/TUTORIAL.md) | Step-by-step introduction to the language |
 | [CLI Guide](docs/md/CLI.md) | Command-line options and workflows |
 | [Debugger Guide](docs/md/DEBUGGER.md) | REPL debugger commands |
 | [Concurrency Guide](docs/md/CONCURRENCY.md) | Task, channel, select, and runtime semantics |
@@ -530,7 +500,6 @@ Support for VS Code, Vim, and other editors is planned. Contributions welcome.
 |---|---|
 | Done | Java code generator |
 | Done | JavaScript (ES6+) code generator |
-| Done | Browser Web IDE |
 | Planned | TypeScript code generator |
 | Planned | Python code generator |
 | Planned | LSP server for IDE integration |

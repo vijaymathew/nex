@@ -483,43 +483,6 @@ Generated JS `select` lowers to:
 - task clauses via `is_done()` followed by `await task.await()`
 - `await __nexSleep(0)` between iterations when no clause is ready and there is no `else`
 
-## Browser IDE runtime
-
-The Browser IDE uses the ClojureScript interpreter/runtime path.
-
-Important distinction:
-
-- the synchronous ClojureScript interpreter path is not the concurrency path
-- the Browser IDE uses the async evaluator/runtime for concurrency features
-
-What is supported in the Browser IDE:
-
-- `spawn`
-- `Task.await`
-- `Task.await(ms)`
-- `Task.cancel`
-- `Task.is_done`
-- `Task.is_cancelled`
-- `await_any`
-- `await_all`
-- `Channel`
-- buffered channels
-- `try_send` / `try_receive`
-- `select`
-- `timeout`
-
-Implementation model:
-
-- tasks are Promise-backed
-- channels are Promise-backed
-- the IDE executes through async interpreter evaluation
-
-There is also a dedicated browser smoke-test script:
-
-```bash
-./test/scripts/run_browser_smoke_tests.sh
-```
-
 ## Failure semantics
 
 Task failure:

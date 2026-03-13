@@ -48,6 +48,3 @@ jobs:
 
       - name: Run JavaScript tests
         run: npm test
-
-      - name: Compile browser IDE
-        run: npx shadow-cljs compile browser

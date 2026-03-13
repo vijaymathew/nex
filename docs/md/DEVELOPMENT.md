@@ -124,14 +124,6 @@ npx shadow-cljs release node
 npx shadow-cljs watch node
 ```
 
-### Browser Build
-
-For browser applications:
-```bash
-npx shadow-cljs compile browser
-# Output: public/js/main.js
-```
-
 ## CI and Branch Protection
 
 GitHub Actions runs the repository CI workflow on every pull request. The
@@ -140,7 +132,6 @@ workflow currently does the following:
 - runs the full JVM test suite with `clojure -M:test test/scripts/run_tests.clj`
 - compiles the Node target with `npx shadow-cljs compile node`
 - runs the JavaScript tests with `npm test`
-- compiles the browser IDE with `npx shadow-cljs compile browser`
 
 The intended repository policy is to protect the default branch and require the
 `Test and Build` status check before merge. If branch protection is not yet

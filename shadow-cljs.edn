@@ -12,10 +12,4 @@
   {:target :node-test
    :output-to "target/test.js"
    :ns-regexp "-test$"
-   :autorun true}
-
-  :browser
-  {:target :browser
-   :output-dir "public/js"
-   :asset-path "js"
-   :modules {:main {:init-fn nex.core/init}}}}}
+   :autorun true}}}

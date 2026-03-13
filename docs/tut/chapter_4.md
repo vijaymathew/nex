@@ -176,7 +176,7 @@ Both the `value_if_true` and `value_if_false` must be expressions of compatible 
 
 ```
 nex> -- with if
-nex> let label: String
+nex> let label: String := ""
 nex> if score >= 50 then
        label := "pass"
     else

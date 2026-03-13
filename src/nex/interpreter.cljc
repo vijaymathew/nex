@@ -9,8 +9,7 @@
             [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo]
             [nex.types.bootstrap :as bootstrap]
-            #?(:clj [nex.turtle :as turtle]
-               :cljs [nex.turtle-browser :as turtle]))
+            #?(:clj [nex.turtle :as turtle]))
   #?(:clj (:import [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException])))
 
 (declare nex-format-value)
@@ -497,12 +496,23 @@
 #?(:cljs
    (defn- promise-reduce
      [items init f]
-     (reduce (fn [acc item]
-               (.then (->promise acc)
-                      (fn [state]
-                        (->promise (f state item)))))
-             (->promise init)
-             items)))
+     (let [yield-step 25]
+       (reduce (fn [acc [idx item]]
+                 (.then (->promise acc)
+                        (fn [state]
+                          (.then (if (and (pos? idx) (zero? (mod idx yield-step)))
+                                   (js/Promise. (fn [resolve _reject]
+                                                  (js/setTimeout #(resolve nil) 0)))
+                                   (js/Promise.resolve nil))
+                                 (fn [_]
+                                   (->promise (f state item)))))))
+               (->promise init)
+               (map-indexed vector items)))))
+
+#?(:cljs
+   (defn- yield-browser-async []
+     (js/Promise. (fn [resolve _reject]
+                    (js/setTimeout #(resolve nil) 0)))))
 
 #?(:cljs
    (defn- make-task [promise]
@@ -1451,9 +1461,11 @@
      (when (not= (count args) 1)
        (throw (ex-info "sleep expects exactly 1 argument"
                        {:function "sleep" :expected 1 :actual (count args)})))
-     #?(:clj (Thread/sleep (long (first args)))
-        :cljs nil)
-     nil)
+     #?(:clj (do
+               (Thread/sleep (long (first args)))
+               nil)
+        :cljs (js/Promise. (fn [resolve _reject]
+                             (js/setTimeout #(resolve nil) (long (first args)))))))
 
    "http_get"
    (fn [_ctx & args]
@@ -2151,7 +2163,8 @@
   "Methods available on built-in types"
   (letfn [(nex-compare [x y]
             (nex-ordering-compare x y))]
-  {:Any
+    (merge
+     {:Any
    {"to_string"   (fn [v & _] (nex-format-value v))
     "equals"      (fn [v other & _]
                     #?(:clj (identical? v other)
@@ -2476,7 +2489,7 @@
     "at_end"  (fn [c & _]
                 (>= @(:index c) (count @(:keys c))))}
 
-   :SetCursor
+      :SetCursor
    {"start"   (fn [c & _]
                 (reset! (:values c) #?(:clj (vec (:source c))
                                        :cljs (vec (es6-iterator-seq (.values (:source c)))))
@@ -2496,53 +2509,55 @@
                     (swap! (:index c) inc))
                   nil))
     "at_end"  (fn [c & _]
-                (>= @(:index c) (count @(:values c))))}
+                (>= @(:index c) (count @(:values c))))}}
+     #?(:clj
+        {:Window
+      {"show"          (fn [w & _] (turtle/show-window w))
+       "close"         (fn [w & _] (turtle/close-window w))
+       "clear"         (fn [w & _] (turtle/clear-window w))
+       "vw"            (fn [w & _] (turtle/window-width w))
+       "vh"            (fn [w & _] (turtle/window-height w))
+       "bgcolor"       (fn [w color & _] (turtle/set-bgcolor w (str color)))
+       "refresh"       (fn [w & _] (turtle/repaint-window w))
+       "set_color"     (fn [w color & _] (turtle/set-draw-color w (str color)))
+       "set_font_size" (fn [w size & _] (turtle/set-font-size w size))
+       "draw_line"     (fn [w x1 y1 x2 y2 & _] (turtle/draw-line w x1 y1 x2 y2))
+       "draw_rect"     (fn [w x y width height & _] (turtle/draw-rect w x y width height))
+       "fill_rect"     (fn [w x y width height & _] (turtle/fill-rect w x y width height))
+       "draw_circle"   (fn [w x y r & _] (turtle/draw-circle w x y r))
+       "fill_circle"   (fn [w x y r & _] (turtle/fill-circle w x y r))
+       "draw_text"     (fn [w text x y & _] (turtle/draw-text w text x y))
+       "draw_image"    (fn [w img x y & _] (turtle/draw-image w img x y))
+       "draw_image_scaled"  (fn [w img x y width height & _] (turtle/draw-image-scaled w img x y width height))
+       "draw_image_rotated" (fn [w img x y angle & _] (turtle/draw-image-rotated w img x y angle))
+       "sleep"         (fn [w ms & _] (turtle/window-sleep w ms))}
 
-   :Window
-   {"show"          (fn [w & _] (turtle/show-window w))
-    "close"         (fn [w & _] (turtle/close-window w))
-    "clear"         (fn [w & _] (turtle/clear-window w))
-    "vw"            (fn [w & _] (turtle/window-width w))
-    "vh"            (fn [w & _] (turtle/window-height w))
-    "bgcolor"       (fn [w color & _] (turtle/set-bgcolor w (str color)))
-    "refresh"       (fn [w & _] (turtle/repaint-window w))
-    "set_color"     (fn [w color & _] (turtle/set-draw-color w (str color)))
-    "set_font_size" (fn [w size & _] (turtle/set-font-size w size))
-    "draw_line"     (fn [w x1 y1 x2 y2 & _] (turtle/draw-line w x1 y1 x2 y2))
-    "draw_rect"     (fn [w x y width height & _] (turtle/draw-rect w x y width height))
-    "fill_rect"     (fn [w x y width height & _] (turtle/fill-rect w x y width height))
-    "draw_circle"   (fn [w x y r & _] (turtle/draw-circle w x y r))
-    "fill_circle"   (fn [w x y r & _] (turtle/fill-circle w x y r))
-    "draw_text"     (fn [w text x y & _] (turtle/draw-text w text x y))
-    "draw_image"    (fn [w img x y & _] (turtle/draw-image w img x y))
-    "draw_image_scaled"  (fn [w img x y width height & _] (turtle/draw-image-scaled w img x y width height))
-    "draw_image_rotated" (fn [w img x y angle & _] (turtle/draw-image-rotated w img x y angle))
-    "sleep"         (fn [w ms & _] (turtle/window-sleep w ms))}
+      :Image
+      {"width"  (fn [img & _] (turtle/image-width img))
+       "height" (fn [img & _] (turtle/image-height img))}
 
-   :Image
-   {"width"  (fn [img & _] (turtle/image-width img))
-    "height" (fn [img & _] (turtle/image-height img))}
-
-   :Turtle
-   {"forward"    (fn [t dist & _] (turtle/turtle-forward t dist))
-    "backward"   (fn [t dist & _] (turtle/turtle-backward t dist))
-    "right"      (fn [t angle & _] (turtle/turtle-right t angle))
-    "left"       (fn [t angle & _] (turtle/turtle-left t angle))
-    "penup"      (fn [t & _] (turtle/turtle-penup t))
-    "pendown"    (fn [t & _] (turtle/turtle-pendown t))
-    "color"      (fn [t c & _] (turtle/turtle-color t (str c)))
-    "pensize"    (fn [t s & _] (turtle/turtle-pensize t s))
-    "speed"      (fn [t s & _] (turtle/turtle-speed t s))
-    "shape"      (fn [t s & _] (turtle/turtle-shape t (str s)))
-    "goto"       (fn [t x y & _] (turtle/turtle-goto t x y))
-    "circle"     (fn [t r & _] (turtle/turtle-circle t r))
-    "begin_fill" (fn [t & _] (turtle/turtle-begin-fill t))
-    "end_fill"   (fn [t & _] (turtle/turtle-end-fill t))
-    "surface"    (fn [t & _] (turtle/turtle-window t))
-    "hide"       (fn [t & _] (turtle/turtle-hide t))
-    "xpos"       (fn [t & _] (turtle/turtle-x t))
-    "ypos"       (fn [t & _] (turtle/turtle-y t))
-    "show"       (fn [t & _] (turtle/turtle-show t))}}))
+      :Turtle
+      {"forward"    (fn [t dist & _] (turtle/turtle-forward t dist))
+       "backward"   (fn [t dist & _] (turtle/turtle-backward t dist))
+       "right"      (fn [t angle & _] (turtle/turtle-right t angle))
+       "left"       (fn [t angle & _] (turtle/turtle-left t angle))
+       "penup"      (fn [t & _] (turtle/turtle-penup t))
+       "pendown"    (fn [t & _] (turtle/turtle-pendown t))
+       "color"      (fn [t c & _] (turtle/turtle-color t (str c)))
+       "pensize"    (fn [t s & _] (turtle/turtle-pensize t s))
+       "speed"      (fn [t s & _] (turtle/turtle-speed t s))
+       "shape"      (fn [t s & _] (turtle/turtle-shape t (str s)))
+       "goto"       (fn [t x y & _] (turtle/turtle-goto t x y))
+       "circle"     (fn [t r & _] (turtle/turtle-circle t r))
+       "begin_fill" (fn [t & _] (turtle/turtle-begin-fill t))
+       "end_fill"   (fn [t & _] (turtle/turtle-end-fill t))
+       "surface"    (fn [t & _] (turtle/turtle-window t))
+       "hide"       (fn [t & _] (turtle/turtle-hide t))
+       "xpos"       (fn [t & _] (turtle/turtle-x t))
+       "ypos"       (fn [t & _] (turtle/turtle-y t))
+       "show"       (fn [t & _] (turtle/turtle-show t))}}
+        :cljs
+        {}))))
 
 (def get-type-name typeinfo/get-type-name)
 
@@ -3436,36 +3451,48 @@
                                                                      {:class-name "Set"}))))
               :else (throw (ex-info (str "Constructor not found: Set." constructor)
                                     {:class-name "Set" :constructor constructor}))))
-    "Window" (let [arg-values (mapv #(eval-node ctx %) args)]
-               (case constructor
-                 "with_title"
-                 (case (count arg-values)
-                   1 (turtle/create-window (first arg-values))
-                   3 (turtle/create-window (first arg-values) (second arg-values) (nth arg-values 2))
-                   (throw (ex-info "Window.with_title takes 1 or 3 arguments (title) or (title, width, height)"
-                                   {:class-name "Window"})))
-                 ;; No named constructor
-                 (case (count arg-values)
-                   0 (turtle/create-window)
-                   2 (turtle/create-window "Nex Turtle Graphics" (first arg-values) (second arg-values))
-                   (throw (ex-info "Window takes 0 or 2 arguments (width, height)"
-                                   {:class-name "Window"})))))
-    "Turtle" (let [arg-values (mapv #(eval-node ctx %) args)]
-               (when-not (= constructor "on_window")
-                 (throw (ex-info "Turtle requires constructor: create Turtle.on_window(window)"
-                                 {:class-name "Turtle"})))
-               (when-not (= (count arg-values) 1)
-                 (throw (ex-info "Turtle.on_window takes 1 argument (window)"
-                                 {:class-name "Turtle"})))
-               (turtle/create-turtle (first arg-values)))
-    "Image" (let [arg-values (mapv #(eval-node ctx %) args)]
-              (when-not (= constructor "from_file")
-                (throw (ex-info "Image requires constructor: create Image.from_file(path)"
-                                {:class-name "Image"})))
-              (when-not (= (count arg-values) 1)
-                (throw (ex-info "Image.from_file takes 1 argument (path)"
-                                {:class-name "Image"})))
-              (turtle/create-image (first arg-values)))
+    "Window" #?(:clj
+                (let [arg-values (mapv #(eval-node ctx %) args)]
+                  (case constructor
+                    "with_title"
+                    (case (count arg-values)
+                      1 (turtle/create-window (first arg-values))
+                      3 (turtle/create-window (first arg-values) (second arg-values) (nth arg-values 2))
+                      (throw (ex-info "Window.with_title takes 1 or 3 arguments (title) or (title, width, height)"
+                                      {:class-name "Window"})))
+                    ;; No named constructor
+                    (case (count arg-values)
+                      0 (turtle/create-window)
+                      2 (turtle/create-window "Nex Turtle Graphics" (first arg-values) (second arg-values))
+                      (throw (ex-info "Window takes 0 or 2 arguments (width, height)"
+                                      {:class-name "Window"})))))
+                :cljs
+                (throw (ex-info "Window is not supported in the ClojureScript runtime"
+                                {:class-name "Window"})))
+    "Turtle" #?(:clj
+                (let [arg-values (mapv #(eval-node ctx %) args)]
+                  (when-not (= constructor "on_window")
+                    (throw (ex-info "Turtle requires constructor: create Turtle.on_window(window)"
+                                    {:class-name "Turtle"})))
+                  (when-not (= (count arg-values) 1)
+                    (throw (ex-info "Turtle.on_window takes 1 argument (window)"
+                                    {:class-name "Turtle"})))
+                  (turtle/create-turtle (first arg-values)))
+                :cljs
+                (throw (ex-info "Turtle is not supported in the ClojureScript runtime"
+                                {:class-name "Turtle"})))
+    "Image" #?(:clj
+               (let [arg-values (mapv #(eval-node ctx %) args)]
+                 (when-not (= constructor "from_file")
+                   (throw (ex-info "Image requires constructor: create Image.from_file(path)"
+                                   {:class-name "Image"})))
+                 (when-not (= (count arg-values) 1)
+                   (throw (ex-info "Image.from_file takes 1 argument (path)"
+                                   {:class-name "Image"})))
+                 (turtle/create-image (first arg-values)))
+               :cljs
+               (throw (ex-info "Image is not supported in the ClojureScript runtime"
+                               {:class-name "Image"})))
   ;; Resolve effective class name (handle generic specialization)
   (let [effective-class-name
         (if (seq generic-args)
@@ -4228,30 +4255,34 @@
                                 (fn [_ stmt] (eval-node-async ctx stmt)))
                 (fn [_]
                   (letfn [(step [last-result prev-variant iteration]
-                            (.then (->promise (when-let [invariant (:invariant node)]
-                                                (check-assertions-async ctx invariant Loop-invariant)))
+                            (.then (if (and (pos? iteration) (zero? (mod iteration 25)))
+                                     (yield-browser-async)
+                                     (js/Promise.resolve nil))
                                    (fn [_]
-                                     (.then (->promise (eval-node-async ctx (:until node)))
-                                            (fn [until-val]
-                                              (if until-val
-                                                last-result
-                                                (.then (->promise (when-let [variant (:variant node)]
-                                                                    (eval-node-async ctx variant)))
-                                                       (fn [curr-variant]
-                                                         (when (and (:variant node) prev-variant)
-                                                           (when-not (< curr-variant prev-variant)
-                                                             (throw (ex-info "Loop variant must decrease"
-                                                                             {:iteration iteration
-                                                                              :previous-variant prev-variant
-                                                                              :current-variant curr-variant}))))
-                                                         (let [body-env (make-env (:current-env ctx))
-                                                               body-ctx (assoc ctx :current-env body-env)]
-                                                           (.then (eval-body-async body-ctx (:body node))
-                                                                  (fn [result]
-                                                                    (.then (->promise (when-let [invariant (:invariant node)]
-                                                                                        (check-assertions-async ctx invariant Loop-invariant)))
-                                                                           (fn [_]
-                                                                             (step result curr-variant (inc iteration)))))))))))))))]
+                                     (.then (->promise (when-let [invariant (:invariant node)]
+                                                         (check-assertions-async ctx invariant Loop-invariant)))
+                                            (fn [_]
+                                              (.then (->promise (eval-node-async ctx (:until node)))
+                                                     (fn [until-val]
+                                                       (if until-val
+                                                         last-result
+                                                         (.then (->promise (when-let [variant (:variant node)]
+                                                                             (eval-node-async ctx variant)))
+                                                                (fn [curr-variant]
+                                                                  (when (and (:variant node) prev-variant)
+                                                                    (when-not (< curr-variant prev-variant)
+                                                                      (throw (ex-info "Loop variant must decrease"
+                                                                                      {:iteration iteration
+                                                                                       :previous-variant prev-variant
+                                                                                       :current-variant curr-variant}))))
+                                                                  (let [body-env (make-env (:current-env ctx))
+                                                                        body-ctx (assoc ctx :current-env body-env)]
+                                                                    (.then (eval-body-async body-ctx (:body node))
+                                                                           (fn [result]
+                                                                             (.then (->promise (when-let [invariant (:invariant node)]
+                                                                                                 (check-assertions-async ctx invariant Loop-invariant)))
+                                                                                    (fn [_]
+                                                                                      (step result curr-variant (inc iteration)))))))))))))))))]
                     (step nil nil 0))))
 
          (= node-type :statement)

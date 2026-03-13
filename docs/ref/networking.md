@@ -5,8 +5,7 @@ The networking library surface under `lib/net` is target-specific:
 - `Tcp_Socket` and `Server_Socket` are JVM-only.
 - `Http_Client` is available in the JVM interpreter and in generated JVM and JavaScript code.
 - `Http_Server` is available in the JVM interpreter and in generated JVM and Node.js code.
-- `Http_Client` is not currently available in the browser/Web REPL ClojureScript interpreter.
-- `Http_Server` is not available in the browser/Web REPL or browser JavaScript target.
+- `Http_Server` is not available in the browser JavaScript target.
 
 ## `net/Http_Client`
 
@@ -32,7 +31,6 @@ The loader accepts these common layouts:
 | JVM REPL / interpreter | Yes |
 | Generated JVM code | Yes |
 | Generated JavaScript / Node | Yes |
-| Browser IDE interpreter | No |
 
 ### Construction
 
@@ -101,7 +99,6 @@ intern net/Http_Server
 | JVM REPL / interpreter | Yes |
 | Generated JVM code | Yes |
 | Generated JavaScript / Node | Yes |
-| Browser IDE interpreter | No |
 | Browser JavaScript target | No |
 
 ### Types

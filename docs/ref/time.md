@@ -8,7 +8,7 @@ These are library classes, not core built-in classes. Load them with `intern`.
 
 - `time/Date_Time`: JVM interpreter, generated JVM, generated JavaScript/Node
 - `time/Duration`: JVM interpreter, generated JVM, generated JavaScript/Node
-- Browser/Web REPL: not supported
+- Retired browser interpreter path: not supported
 
 ## Load
 
