@@ -396,7 +396,7 @@ On the JVM:
 - `await` can block normally
 - channels use blocking coordination underneath
 
-In generated JavaScript, and in the retired browser runtime path kept for internal testing:
+In generated JavaScript:
 
 - tasks and channels are implemented with Promise-based semantics
 - generated JavaScript lowers concurrency operations to `async` and `await`

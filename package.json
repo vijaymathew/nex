@@ -11,11 +11,7 @@
   "scripts": {
     "test": "npm run test:cljs && npm run test:wrapper",
     "test:cljs": "node test/js/test_cljs.js",
-    "test:wrapper": "node test/js/test_wrapper.js",
-    "test:debug": "node test/js/test_cljs2.js",
-    "test:cljs-unit": "./test/scripts/run_browser_smoke_tests.sh",
-    "test:browser-smoke": "./test/scripts/run_browser_smoke_tests.sh",
-    "sync:browser-ide": "./scripts/sync-browser-ide.sh"
+    "test:wrapper": "node test/js/test_wrapper.js"
   },
   "keywords": ["nex", "programming-language", "design-by-contract"],
   "author": "",

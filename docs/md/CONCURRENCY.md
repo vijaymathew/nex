@@ -483,23 +483,6 @@ Generated JS `select` lowers to:
 - task clauses via `is_done()` followed by `await task.await()`
 - `await __nexSleep(0)` between iterations when no clause is ready and there is no `else`
 
-## Retired browser runtime notes
-
-The repository still contains a ClojureScript/browser runtime path used for internal testing and historical reference.
-It is no longer a supported end-user workflow.
-
-That runtime models concurrency with:
-
-- Promise-backed tasks
-- Promise-backed channels
-- async interpreter evaluation
-
-There is also a dedicated browser smoke-test script that exercises this path:
-
-```bash
-./test/scripts/run_browser_smoke_tests.sh
-```
-
 ## Failure semantics
 
 Task failure:

@@ -77,16 +77,6 @@ Generates `target/nex.js` with exports:
 - `evalNode(ctx, ast)` - Evaluate an AST node
 - `registerClass(ctx, name, classdef)` - Register a class definition
 
-### Browser Application
-
-This build path still exists for development and internal testing, but the browser-based Web IDE has been retired as a supported user workflow.
-
-```bash
-npx shadow-cljs compile browser
-```
-
-Generates browser-compatible JavaScript in `public/js/`.
-
 ### Development
 
 ```bash
@@ -139,31 +129,6 @@ const ctx = nexCljs.makeContext();
 nexCljs.evalNode.call(null, ctx, ast);
 ```
 
-## Browser Usage Example
-
-This remains a low-level ClojureScript embedding example, not a supported IDE workflow.
-
-```html
-<!DOCTYPE html>
-<html>
-<head>
-  <script src="/js/main.js"></script>
-</head>
-<body>
-  <script>
-    // Fetch pre-parsed AST from server
-    fetch('/api/nex-ast')
-      .then(r => r.json())
-      .then(ast => {
-        const ctx = nex.core.makeContext();
-        nex.core.evalNode(ctx, ast);
-        // Use Nex classes in your app
-      });
-  </script>
-</body>
-</html>
-```
-
 ## Parser Support (Advanced)
 
 For applications that need runtime parsing in JavaScript, you can:
@@ -195,14 +160,6 @@ end
 ```
 
 When compiling to ClojureScript, only `with "javascript"` blocks are included.
-
-## Testing
-
-Run ClojureScript tests:
-
-```bash
-./test/scripts/run_browser_smoke_tests.sh
-```
 
 ## Dependencies
 
