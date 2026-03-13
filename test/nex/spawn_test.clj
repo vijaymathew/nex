@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [nex.interpreter :as interp]
             [nex.parser :as p]
+            [nex.repl :as repl]
             [nex.typechecker :as tc]))
 
 (defn- execute-method-output [code]
@@ -57,6 +58,18 @@ end"
 end"]
       (is (:success (tc/type-check (p/ast typed-code))))
       (is (:success (tc/type-check (p/ast plain-code)))))))
+
+(deftest spawn-typechecks-in-cli-repl
+  (testing "CLI REPL accepts typed task bindings when typechecking is enabled"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})]
+      (let [ctx (repl/init-repl-context)]
+        (repl/eval-code ctx "let t: Task[Integer] := spawn do result := 1 + 2 end")
+        (is (= :Task
+               (:nex-builtin-type
+                (interp/env-lookup (:globals ctx) "t"))))
+        (is (= {:base-type "Task" :type-params ["Integer"]}
+               (tc/normalize-type (get @repl/*repl-var-types* "t"))))))))
 
 (deftest spawn-await-runtime
   (testing "spawn returns a task whose await produces the computed result"
