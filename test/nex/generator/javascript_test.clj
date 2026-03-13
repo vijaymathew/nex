@@ -1062,6 +1062,16 @@ end"
       (is (str/includes? datetime-code "__nexDateTimeAddMillis("))
       (is (str/includes? datetime-code "__nexDateTimeDiffMillis(")))))
 
+(deftest text-library-generation-test
+  (testing "text libraries lower to ordinary classes plus runtime regex builtins"
+    (let [regex-code (js/translate (slurp "lib/text/regex.nex") {:skip-type-check true})]
+      (is (str/includes? regex-code "class Regex"))
+      (is (str/includes? regex-code "__nexRegexValidate("))
+      (is (str/includes? regex-code "__nexRegexMatches("))
+      (is (str/includes? regex-code "__nexRegexFindAll("))
+      (is (str/includes? regex-code "__nexRegexReplace("))
+      (is (str/includes? regex-code "__nexRegexSplit(")))))
+
 (deftest io-library-generation-test
   (testing "io libraries lower to ordinary classes plus runtime IO builtins"
     (let [path-code (js/translate (slurp "lib/io/path.nex"))

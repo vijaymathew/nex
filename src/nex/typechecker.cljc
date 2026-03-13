@@ -944,6 +944,96 @@
                                    (str "datetime_now expects 0 arguments, got " (count args)))})))
         "Integer64")
 
+      (= method "regex_validate")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "regex_validate expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "regex_validate expects 2 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "String")
+              (throw (ex-info "regex_validate arguments must be String"
+                              {:error (type-error
+                                       (str "regex_validate arguments must be String, got "
+                                            (display-type arg-type)))})))))
+        "Void")
+
+      (= method "regex_matches")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "regex_matches expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "regex_matches expects 3 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "String")
+              (throw (ex-info "regex_matches arguments must be String"
+                              {:error (type-error
+                                       (str "regex_matches arguments must be String, got "
+                                            (display-type arg-type)))})))))
+        "Boolean")
+
+      (= method "regex_find")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "regex_find expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "regex_find expects 3 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "String")
+              (throw (ex-info "regex_find arguments must be String"
+                              {:error (type-error
+                                       (str "regex_find arguments must be String, got "
+                                            (display-type arg-type)))})))))
+        {:base-type "String" :detachable true})
+
+      (= method "regex_find_all")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "regex_find_all expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "regex_find_all expects 3 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "String")
+              (throw (ex-info "regex_find_all arguments must be String"
+                              {:error (type-error
+                                       (str "regex_find_all arguments must be String, got "
+                                            (display-type arg-type)))})))))
+        {:base-type "Array" :type-args ["String"]})
+
+      (= method "regex_replace")
+      (do
+        (when (not= (count args) 4)
+          (throw (ex-info "regex_replace expects exactly 4 arguments"
+                          {:error (type-error
+                                   (str "regex_replace expects 4 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "String")
+              (throw (ex-info "regex_replace arguments must be String"
+                              {:error (type-error
+                                       (str "regex_replace arguments must be String, got "
+                                            (display-type arg-type)))})))))
+        "String")
+
+      (= method "regex_split")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "regex_split expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "regex_split expects 3 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "String")
+              (throw (ex-info "regex_split arguments must be String"
+                              {:error (type-error
+                                       (str "regex_split arguments must be String, got "
+                                            (display-type arg-type)))})))))
+        {:base-type "Array" :type-args ["String"]})
+
       (= method "datetime_from_epoch_millis")
       (do
         (when (not= (count args) 1)

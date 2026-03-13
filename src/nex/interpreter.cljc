@@ -5,6 +5,7 @@
             [nex.types.json :as json-types]
             [nex.types.http :as http]
             [nex.types.datetime :as dt]
+            [nex.types.regex :as regex-types]
             [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo]
             [nex.types.bootstrap :as bootstrap]
@@ -1491,6 +1492,54 @@
      #?(:clj (json-types/nex-json-stringify (first args))
         :cljs (throw (ex-info "json_stringify is not supported in the ClojureScript interpreter"
                               {:function "json_stringify"}))))
+
+   "regex_validate"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "regex_validate expects exactly 2 arguments" {:function "regex_validate"})))
+     #?(:clj (regex-types/regex-validate (first args) (second args))
+        :cljs (throw (ex-info "regex_validate is not supported in the ClojureScript interpreter"
+                              {:function "regex_validate"}))))
+
+   "regex_matches"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "regex_matches expects exactly 3 arguments" {:function "regex_matches"})))
+     #?(:clj (apply regex-types/regex-matches? args)
+        :cljs (throw (ex-info "regex_matches is not supported in the ClojureScript interpreter"
+                              {:function "regex_matches"}))))
+
+   "regex_find"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "regex_find expects exactly 3 arguments" {:function "regex_find"})))
+     #?(:clj (apply regex-types/regex-find args)
+        :cljs (throw (ex-info "regex_find is not supported in the ClojureScript interpreter"
+                              {:function "regex_find"}))))
+
+   "regex_find_all"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "regex_find_all expects exactly 3 arguments" {:function "regex_find_all"})))
+     #?(:clj (apply regex-types/regex-find-all args)
+        :cljs (throw (ex-info "regex_find_all is not supported in the ClojureScript interpreter"
+                              {:function "regex_find_all"}))))
+
+   "regex_replace"
+   (fn [_ctx & args]
+     (when (not= (count args) 4)
+       (throw (ex-info "regex_replace expects exactly 4 arguments" {:function "regex_replace"})))
+     #?(:clj (apply regex-types/regex-replace args)
+        :cljs (throw (ex-info "regex_replace is not supported in the ClojureScript interpreter"
+                              {:function "regex_replace"}))))
+
+   "regex_split"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "regex_split expects exactly 3 arguments" {:function "regex_split"})))
+     #?(:clj (apply regex-types/regex-split args)
+        :cljs (throw (ex-info "regex_split is not supported in the ClojureScript interpreter"
+                              {:function "regex_split"}))))
 
    "datetime_now"
    (fn [_ctx & args]

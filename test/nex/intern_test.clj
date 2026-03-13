@@ -298,3 +298,13 @@ end")
       (is (not (.contains output "Cannot find intern file for time/Date_Time")))
       (is (.contains output "\"Duration(5000 ms)\""))
       (is (.contains output "\"2026-03-13T10:30:00Z\"")))))
+
+(deftest repl-intern-loads-checked-in-text-libraries
+  (testing "REPL can load the checked-in Regex library and create a Regex object"
+    (let [ctx (repl/init-repl-context)
+          output (with-out-str
+                   (repl/eval-code ctx "intern text/Regex")
+                   (repl/eval-code ctx "let rx: Regex := create Regex.compile(\"[a-z]+\")")
+                   (repl/eval-code ctx "print(rx.to_string())"))]
+      (is (not (.contains output "Cannot find intern file for text/Regex")))
+      (is (.contains output "\"Regex(/[a-z]+/)\"")))))

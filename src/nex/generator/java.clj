@@ -266,6 +266,12 @@
     "type_of" (str "NexRuntime.typeOf(" args-code ")")
     "type_is" (str "NexRuntime.typeIs(" args-code ")")
     "sleep" (str "NexRuntime.sleep(" args-code ")")
+    "regex_validate" (str "NexRuntime.regexValidate(" args-code ")")
+    "regex_matches" (str "NexRuntime.regexMatches(" args-code ")")
+    "regex_find" (str "NexRuntime.regexFind(" args-code ")")
+    "regex_find_all" (str "NexRuntime.regexFindAll(" args-code ")")
+    "regex_replace" (str "NexRuntime.regexReplace(" args-code ")")
+    "regex_split" (str "NexRuntime.regexSplit(" args-code ")")
     "datetime_now" (str "NexRuntime.datetimeNow(" args-code ")")
     "datetime_from_epoch_millis" (str "NexRuntime.datetimeFromEpochMillis(" args-code ")")
     "datetime_parse_iso" (str "NexRuntime.datetimeParseIso(" args-code ")")
@@ -664,6 +670,12 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
+                  "regex_validate" "Void"
+                  "regex_matches" "Boolean"
+                  "regex_find" {:base-type "String" :detachable true}
+                  "regex_find_all" {:base-type "Array" :type-params ["String"]}
+                  "regex_replace" "String"
+                  "regex_split" {:base-type "Array" :type-params ["String"]}
                   "datetime_now" "Integer64"
                   "datetime_from_epoch_millis" "Integer64"
                   "datetime_parse_iso" "Integer64"
@@ -2816,6 +2828,37 @@ public class NexTurtle {
        "      throw new RuntimeException(e);\n"
        "    }\n"
        "  }\n\n"
+       "  private static int regexFlags(String flags) {\n"
+       "    int out = 0;\n"
+       "    if (flags != null) {\n"
+       "      if (flags.contains(\"i\")) out |= java.util.regex.Pattern.CASE_INSENSITIVE;\n"
+       "      if (flags.contains(\"m\")) out |= java.util.regex.Pattern.MULTILINE;\n"
+       "    }\n"
+       "    return out;\n"
+       "  }\n"
+       "  private static java.util.regex.Pattern regexPattern(String pattern, String flags) {\n"
+       "    return java.util.regex.Pattern.compile(pattern, regexFlags(flags));\n"
+       "  }\n"
+       "  public static void regexValidate(String pattern, String flags) { regexPattern(pattern, flags); }\n"
+       "  public static boolean regexMatches(String pattern, String flags, String text) {\n"
+       "    return regexPattern(pattern, flags).matcher(text).matches();\n"
+       "  }\n"
+       "  public static String regexFind(String pattern, String flags, String text) {\n"
+       "    java.util.regex.Matcher m = regexPattern(pattern, flags).matcher(text);\n"
+       "    return m.find() ? m.group() : null;\n"
+       "  }\n"
+       "  public static ArrayList<String> regexFindAll(String pattern, String flags, String text) {\n"
+       "    java.util.regex.Matcher m = regexPattern(pattern, flags).matcher(text);\n"
+       "    ArrayList<String> out = new ArrayList<>();\n"
+       "    while (m.find()) out.add(m.group());\n"
+       "    return out;\n"
+       "  }\n"
+       "  public static String regexReplace(String pattern, String flags, String text, String replacement) {\n"
+       "    return regexPattern(pattern, flags).matcher(text).replaceAll(replacement);\n"
+       "  }\n"
+       "  public static ArrayList<String> regexSplit(String pattern, String flags, String text) {\n"
+       "    return new ArrayList<>(Arrays.asList(regexPattern(pattern, flags).split(text)));\n"
+       "  }\n"
        "  public static long datetimeNow() { return java.time.Instant.now().toEpochMilli(); }\n"
        "  public static long datetimeFromEpochMillis(long ms) { return ms; }\n"
        "  public static long datetimeParseIso(String text) {\n"

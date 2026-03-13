@@ -76,6 +76,10 @@ Tests are organized following standard Clojure conventions:
   - `time/Date_Time`: UTC field access, ISO formatting/parsing, arithmetic and comparison
   - JVM interpreter coverage for shipped `lib/time` library classes
 
+- **regex_lib_test.clj** (`nex.regex-lib-test`)
+  - `text/Regex`: compile, matching, search, replacement, splitting
+  - JVM interpreter coverage for shipped `lib/text` library classes
+
 ### Code Generation
 
 - **generator/java_test.clj** (`nex.generator.java-test`)

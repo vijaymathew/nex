@@ -317,6 +317,16 @@ end"
       (is (str/includes? datetime-code "NexRuntime.datetimeAddMillis("))
       (is (str/includes? datetime-code "NexRuntime.datetimeDiffMillis(")))))
 
+(deftest text-library-generation-test
+  (testing "text libraries lower to ordinary classes plus runtime regex builtins"
+    (let [regex-code (java/translate (slurp "lib/text/regex.nex") {:skip-type-check true})]
+      (is (str/includes? regex-code "public class Regex"))
+      (is (str/includes? regex-code "NexRuntime.regexValidate("))
+      (is (str/includes? regex-code "NexRuntime.regexMatches("))
+      (is (str/includes? regex-code "NexRuntime.regexFindAll("))
+      (is (str/includes? regex-code "NexRuntime.regexReplace("))
+      (is (str/includes? regex-code "NexRuntime.regexSplit(")))))
+
 (deftest io-library-generation-test
   (testing "io libraries lower to ordinary classes plus runtime IO builtins"
     (let [path-code (java/translate (slurp "lib/io/path.nex"))

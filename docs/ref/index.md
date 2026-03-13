@@ -10,6 +10,7 @@ This reference documents the interpreter-level built-ins currently defined in `s
 - [System Classes](system-classes.md)
 - [Data Libraries](data.md)
 - [IO Libraries](io.md)
+- [Text Libraries](text.md)
 - [Time Libraries](time.md)
 - [Library Index](libraries.md)
 - [Networking Libraries](networking.md)

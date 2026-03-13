@@ -191,6 +191,33 @@ print("weekly cutoff " + weekly_cutoff.truncate_to_day().format_iso())
 This is a better fit for logging and scheduling code than manually building timestamp strings.
 
 
+## Pattern Matching And Text Cleanup
+
+Use `text/Regex` when string operations alone are too weak for validation, token extraction, or cleanup.
+
+```nex
+intern text/Regex
+
+let word: Regex := create Regex.compile_with_flags("[a-z]+", "i")
+print(word.matches("Nex"))
+print(word.find("123 Nex 456"))
+print(word.find_all("one two THREE"))
+
+let comma: Regex := create Regex.compile(",")
+print(comma.split("a,b,c"))
+print(word.replace("v1 test v2", "#"))
+```
+
+This is useful for:
+
+- validating input formats
+- extracting tokens from mixed text
+- splitting delimited text
+- performing cleanup and rewrite passes
+
+Keep regex usage near parsing and validation boundaries. Higher-level domain logic should usually work on already structured values.
+
+
 ## Graphics and Simple Visual Programs
 
 Nex includes a lightweight graphics layer through `Window`, `Turtle`, and `Image`.
@@ -305,6 +332,8 @@ That is why Chapter 24 matters. The standard library is enough to be productive,
 | Collections | `Array`, `Map` |
 | Type introspection | `type_of`, `type_is` |
 | Files and environment | `Process`, `io/Path`, `io/Directory`, `io/Text_File`, `io/Binary_File` |
+| Time and scheduling | `time/Date_Time`, `time/Duration` |
+| Text processing | `text/Regex` |
 | Graphics | `Window`, `Turtle`, `Image` |
 
 For exact method tables, see Appendix B and the files under `docs/ref/`.

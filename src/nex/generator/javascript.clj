@@ -278,6 +278,12 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
+                  "regex_validate" "Void"
+                  "regex_matches" "Boolean"
+                  "regex_find" {:base-type "String" :detachable true}
+                  "regex_find_all" {:base-type "Array" :type-params ["String"]}
+                  "regex_replace" "String"
+                  "regex_split" {:base-type "Array" :type-params ["String"]}
                   "datetime_now" "Integer64"
                   "datetime_from_epoch_millis" "Integer64"
                   "datetime_parse_iso" "Integer64"
@@ -514,6 +520,12 @@
     "type_of" (str "__nexTypeOf(" args-code ")")
     "type_is" (str "__nexTypeIs(" args-code ")")
     "sleep" (str "await __nexSleep(" args-code ")")
+    "regex_validate" (str "__nexRegexValidate(" args-code ")")
+    "regex_matches" (str "__nexRegexMatches(" args-code ")")
+    "regex_find" (str "__nexRegexFind(" args-code ")")
+    "regex_find_all" (str "__nexRegexFindAll(" args-code ")")
+    "regex_replace" (str "__nexRegexReplace(" args-code ")")
+    "regex_split" (str "__nexRegexSplit(" args-code ")")
     "datetime_now" (str "__nexDateTimeNow(" args-code ")")
     "datetime_from_epoch_millis" (str "__nexDateTimeFromEpochMillis(" args-code ")")
     "datetime_parse_iso" (str "__nexDateTimeParseIso(" args-code ")")
@@ -2233,6 +2245,34 @@
        "}\n"
        "function __nexSleep(ms) {\n"
        "  return new Promise(resolve => setTimeout(resolve, ms));\n"
+       "}\n"
+       "function __nexRegexFlags(flags) {\n"
+       "  let out = 'g';\n"
+       "  if (flags && flags.includes('i')) out += 'i';\n"
+       "  if (flags && flags.includes('m')) out += 'm';\n"
+       "  return out;\n"
+       "}\n"
+       "function __nexRegex(pattern, flags) {\n"
+       "  return new RegExp(pattern, __nexRegexFlags(flags));\n"
+       "}\n"
+       "function __nexRegexValidate(pattern, flags) { __nexRegex(pattern, flags); return null; }\n"
+       "function __nexRegexMatches(pattern, flags, text) {\n"
+       "  const anchored = new RegExp('^(?:' + pattern + ')$', __nexRegexFlags(flags).replace('g', ''));\n"
+       "  return anchored.test(String(text));\n"
+       "}\n"
+       "function __nexRegexFind(pattern, flags, text) {\n"
+       "  const m = String(text).match(__nexRegex(pattern, flags));\n"
+       "  return m && m.length > 0 ? m[0] : null;\n"
+       "}\n"
+       "function __nexRegexFindAll(pattern, flags, text) {\n"
+       "  const m = String(text).match(__nexRegex(pattern, flags));\n"
+       "  return m ? Array.from(m) : [];\n"
+       "}\n"
+       "function __nexRegexReplace(pattern, flags, text, replacement) {\n"
+       "  return String(text).replace(__nexRegex(pattern, flags), String(replacement));\n"
+       "}\n"
+       "function __nexRegexSplit(pattern, flags, text) {\n"
+       "  return String(text).split(__nexRegex(pattern, flags));\n"
        "}\n"
        "function __nexDateTimeNow() { return Date.now(); }\n"
        "function __nexDateTimeFromEpochMillis(ms) { return Number(ms); }\n"
