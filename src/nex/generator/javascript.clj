@@ -76,7 +76,6 @@
       "Task" "Task"
       "Channel" "Channel"
       "Console" "Object"
-      "File" "Object"
       "Process" "Object"
       "Window" "NexWindow"
       "Turtle" "NexTurtle"
@@ -117,7 +116,6 @@
       "Task" "null"
       "Channel" "null"
       "Console" "({_type: 'Console'})"
-      "File" "null"
       "Process" "({_type: 'Process'})"
       "Window" "null"
       "Turtle" "null"
@@ -280,6 +278,78 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
+                  "regex_validate" "Void"
+                  "regex_matches" "Boolean"
+                  "regex_find" {:base-type "String" :detachable true}
+                  "regex_find_all" {:base-type "Array" :type-params ["String"]}
+                  "regex_replace" "String"
+                  "regex_split" {:base-type "Array" :type-params ["String"]}
+                  "datetime_now" "Integer64"
+                  "datetime_from_epoch_millis" "Integer64"
+                  "datetime_parse_iso" "Integer64"
+                  "datetime_make" "Integer64"
+                  "datetime_year" "Integer"
+                  "datetime_month" "Integer"
+                  "datetime_day" "Integer"
+                  "datetime_weekday" "Integer"
+                  "datetime_day_of_year" "Integer"
+                  "datetime_hour" "Integer"
+                  "datetime_minute" "Integer"
+                  "datetime_second" "Integer"
+                  "datetime_epoch_millis" "Integer64"
+                  "datetime_add_millis" "Integer64"
+                  "datetime_diff_millis" "Integer64"
+                  "datetime_truncate_to_day" "Integer64"
+                  "datetime_truncate_to_hour" "Integer64"
+                  "datetime_format_iso" "String"
+                  "path_exists" "Boolean"
+                  "path_is_file" "Boolean"
+                  "path_is_directory" "Boolean"
+                  "path_name" "String"
+                  "path_extension" "String"
+                  "path_name_without_extension" "String"
+                  "path_absolute" "String"
+                  "path_normalize" "String"
+                  "path_size" "Integer64"
+                  "path_modified_time" "Integer64"
+                  "path_parent" {:base-type "String" :detachable true}
+                  "path_child" "String"
+                  "path_create_file" "Void"
+                  "path_create_directory" "Void"
+                  "path_create_directories" "Void"
+                  "path_delete" "Void"
+                  "path_delete_tree" "Void"
+                  "path_copy" "Void"
+                  "path_move" "Void"
+                  "path_read_text" "String"
+                  "path_write_text" "Void"
+                  "path_append_text" "Void"
+                  "path_list" {:base-type "Array" :type-params ["String"]}
+                  "text_file_open_read" "Any"
+                  "text_file_open_write" "Any"
+                  "text_file_open_append" "Any"
+                  "text_file_read_line" {:base-type "String" :detachable true}
+                  "text_file_write" "Void"
+                  "text_file_close" "Void"
+                  "binary_file_open_read" "Any"
+                  "binary_file_open_write" "Any"
+                  "binary_file_open_append" "Any"
+                  "binary_file_read_all" {:base-type "Array" :type-params ["Integer"]}
+                  "binary_file_read" {:base-type "Array" :type-params ["Integer"]}
+                  "binary_file_write" "Void"
+                  "binary_file_close" "Void"
+                  "json_parse" "Any"
+                  "json_stringify" "String"
+                  "http_get" "Http_Response"
+                  "http_post" "Http_Response"
+                  "http_server_create" "Any"
+                  "http_server_get" "Void"
+                  "http_server_post" "Void"
+                  "http_server_put" "Void"
+                  "http_server_delete" "Void"
+                  "http_server_start" "Integer"
+                  "http_server_stop" "Void"
+                  "http_server_is_running" "Boolean"
                   "Any")
                 (case normalized-target
                 "Task" (case (:method expr)
@@ -450,6 +520,78 @@
     "type_of" (str "__nexTypeOf(" args-code ")")
     "type_is" (str "__nexTypeIs(" args-code ")")
     "sleep" (str "await __nexSleep(" args-code ")")
+    "regex_validate" (str "__nexRegexValidate(" args-code ")")
+    "regex_matches" (str "__nexRegexMatches(" args-code ")")
+    "regex_find" (str "__nexRegexFind(" args-code ")")
+    "regex_find_all" (str "__nexRegexFindAll(" args-code ")")
+    "regex_replace" (str "__nexRegexReplace(" args-code ")")
+    "regex_split" (str "__nexRegexSplit(" args-code ")")
+    "datetime_now" (str "__nexDateTimeNow(" args-code ")")
+    "datetime_from_epoch_millis" (str "__nexDateTimeFromEpochMillis(" args-code ")")
+    "datetime_parse_iso" (str "__nexDateTimeParseIso(" args-code ")")
+    "datetime_make" (str "__nexDateTimeMake(" args-code ")")
+    "datetime_year" (str "__nexDateTimeYear(" args-code ")")
+    "datetime_month" (str "__nexDateTimeMonth(" args-code ")")
+    "datetime_day" (str "__nexDateTimeDay(" args-code ")")
+    "datetime_weekday" (str "__nexDateTimeWeekday(" args-code ")")
+    "datetime_day_of_year" (str "__nexDateTimeDayOfYear(" args-code ")")
+    "datetime_hour" (str "__nexDateTimeHour(" args-code ")")
+    "datetime_minute" (str "__nexDateTimeMinute(" args-code ")")
+    "datetime_second" (str "__nexDateTimeSecond(" args-code ")")
+    "datetime_epoch_millis" (str "__nexDateTimeEpochMillis(" args-code ")")
+    "datetime_add_millis" (str "__nexDateTimeAddMillis(" args-code ")")
+    "datetime_diff_millis" (str "__nexDateTimeDiffMillis(" args-code ")")
+    "datetime_truncate_to_day" (str "__nexDateTimeTruncateToDay(" args-code ")")
+    "datetime_truncate_to_hour" (str "__nexDateTimeTruncateToHour(" args-code ")")
+    "datetime_format_iso" (str "__nexDateTimeFormatIso(" args-code ")")
+    "path_exists" (str "__nexPathExists(" args-code ")")
+    "path_is_file" (str "__nexPathIsFile(" args-code ")")
+    "path_is_directory" (str "__nexPathIsDirectory(" args-code ")")
+    "path_name" (str "__nexPathName(" args-code ")")
+    "path_extension" (str "__nexPathExtension(" args-code ")")
+    "path_name_without_extension" (str "__nexPathNameWithoutExtension(" args-code ")")
+    "path_absolute" (str "__nexPathAbsolute(" args-code ")")
+    "path_normalize" (str "__nexPathNormalize(" args-code ")")
+    "path_size" (str "__nexPathSize(" args-code ")")
+    "path_modified_time" (str "__nexPathModifiedTime(" args-code ")")
+    "path_parent" (str "__nexPathParent(" args-code ")")
+    "path_child" (str "__nexPathChild(" args-code ")")
+    "path_create_file" (str "__nexPathCreateFile(" args-code ")")
+    "path_create_directory" (str "__nexPathCreateDirectory(" args-code ")")
+    "path_create_directories" (str "__nexPathCreateDirectories(" args-code ")")
+    "path_delete" (str "__nexPathDelete(" args-code ")")
+    "path_delete_tree" (str "__nexPathDeleteTree(" args-code ")")
+    "path_copy" (str "__nexPathCopy(" args-code ")")
+    "path_move" (str "__nexPathMove(" args-code ")")
+    "path_read_text" (str "__nexPathReadText(" args-code ")")
+    "path_write_text" (str "__nexPathWriteText(" args-code ")")
+    "path_append_text" (str "__nexPathAppendText(" args-code ")")
+    "path_list" (str "__nexPathList(" args-code ")")
+    "text_file_open_read" (str "__nexTextFileOpenRead(" args-code ")")
+    "text_file_open_write" (str "__nexTextFileOpenWrite(" args-code ")")
+    "text_file_open_append" (str "__nexTextFileOpenAppend(" args-code ")")
+    "text_file_read_line" (str "__nexTextFileReadLine(" args-code ")")
+    "text_file_write" (str "__nexTextFileWrite(" args-code ")")
+    "text_file_close" (str "__nexTextFileClose(" args-code ")")
+    "binary_file_open_read" (str "__nexBinaryFileOpenRead(" args-code ")")
+    "binary_file_open_write" (str "__nexBinaryFileOpenWrite(" args-code ")")
+    "binary_file_open_append" (str "__nexBinaryFileOpenAppend(" args-code ")")
+    "binary_file_read_all" (str "__nexBinaryFileReadAll(" args-code ")")
+    "binary_file_read" (str "__nexBinaryFileRead(" args-code ")")
+    "binary_file_write" (str "__nexBinaryFileWrite(" args-code ")")
+    "binary_file_close" (str "__nexBinaryFileClose(" args-code ")")
+    "json_parse" (str "__nexJsonParse(" args-code ")")
+    "json_stringify" (str "__nexJsonStringify(" args-code ")")
+    "http_get" (str "await __nexHttpGet(" args-code ")")
+    "http_post" (str "await __nexHttpPost(" args-code ")")
+    "http_server_create" (str "__nexHttpServerCreate(" args-code ")")
+    "http_server_get" (str "__nexHttpServerGet(" args-code ")")
+    "http_server_post" (str "__nexHttpServerPost(" args-code ")")
+    "http_server_put" (str "__nexHttpServerPut(" args-code ")")
+    "http_server_delete" (str "__nexHttpServerDelete(" args-code ")")
+    "http_server_start" (str "await __nexHttpServerStart(" args-code ")")
+    "http_server_stop" (str "await __nexHttpServerStop(" args-code ")")
+    "http_server_is_running" (str "__nexHttpServerIsRunning(" args-code ")")
     "await_any" (str "await __nexAwaitAny(" args-code ")")
     "await_all" (str "await __nexAwaitAll(" args-code ")")
     ;; Default: use as-is (regular method call)
@@ -678,15 +820,6 @@
     "read_integer" (fn [_ _] "__nexParseInt(require('readline-sync').question(''))")
     "read_real"    (fn [_ _] "parseFloat(require('readline-sync').question(''))")}
 
-   :File
-   {"read"   (fn [t _] (str "require('fs').readFileSync(" t ".path, 'utf8')"))
-    "write"  (fn [t a] (str "require('fs').writeFileSync(" t ".path, " a ", 'utf8')"))
-    "append" (fn [t a] (str "require('fs').appendFileSync(" t ".path, " a ", 'utf8')"))
-    "exists" (fn [t _] (str "require('fs').existsSync(" t ".path)"))
-    "delete" (fn [t _] (str "require('fs').unlinkSync(" t ".path)"))
-    "lines"  (fn [t _] (str "require('fs').readFileSync(" t ".path, 'utf8').split('\\n')"))
-    "close"  (fn [t _] (str "/* " t ".close() */"))}
-
    :Process
    {"getenv"       (fn [_ a] (str "process.env[" a "]"))
    "setenv"       (fn [_ a] (str "process.env[" a "]"))
@@ -701,7 +834,7 @@
     (and (nil? method)
          (map? target)
          (= :create (:type target))
-         (not (#{"Console" "File" "Process" "Set" "Window" "Turtle" "Image" "Channel"} (:class-name target))))
+        (not (#{"Console" "Process" "Set" "Window" "Turtle" "Image" "Channel"} (:class-name target))))
     true
 
     (nil? method) false
@@ -855,8 +988,8 @@
   (let [args-code (str/join ", " (map generate-expression args))]
     (case class-name
       "Console" "({_type: 'Console'})"
-      "File" (str "({_type: 'File', path: " args-code "})")
       "Process" "({_type: 'Process'})"
+      "Map" "new Map()"
       "Channel" (cond
                   (nil? constructor) "new __nexChannel()"
                   (= constructor "with_capacity") (str "new __nexChannel(" args-code ")")
@@ -1854,63 +1987,60 @@
   ([class-def opts classes-by-name]
    (let [{:keys [name generic-params parents body note deferred?]} class-def
          {:keys [fields methods constructors]} (extract-members body)
-         runtime-parents (vec (remove #(= "Any" (:parent %)) parents))
-         parent-names (mapv :parent runtime-parents)
-         own-flds (set (map :name fields))
-         all-constants (get-accessible-constants-js class-def classes-by-name)
-         constant-names (set (map :name all-constants))
-         own-method-names (set (map :name methods))
-         all-methods (into own-method-names
-                           (mapcat #(get-parent-method-names % classes-by-name)
-                                   parent-names))
-         fld-types (build-field-types-js fields parent-names classes-by-name)
-         effective-invariants (collect-effective-class-invariants class-def classes-by-name)]
-     (binding [*current-class-name* name
-               *class-registry* classes-by-name
-               *all-method-names* all-methods
-               *own-fields* own-flds
-               *constant-names* constant-names
-               *field-types* fld-types
-               *class-invariants* effective-invariants]
-       (let [;; Generate class JSDoc if note present
-             class-jsdoc (when note
-                          [(generate-jsdoc 0 note)])
-             generic-comment (generate-generic-comment generic-params)
-             class-header (generate-class-header name generic-params runtime-parents)
-             invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
-                                (indent 1 (str "// Class invariant: "
-                                              (str/join ", " (map :label effective-invariants)))))
-             constants-code (map #(generate-class-constant-js 1 name %) all-constants)
-             ;; Always generate a default no-arg constructor for field initialization
-             has-parent? (some? (:extends (analyze-inheritance runtime-parents)))
-             default-constructor (generate-default-constructor 1 name fields has-parent? deferred?)
-             ;; All Nex constructors become static factory methods
-             factory-methods (map #(generate-factory-constructor 1 name % opts) constructors)
-             inherited-constructor-shims (when (seq runtime-parents)
-                                           (generate-inherited-constructor-shims-js 1 name runtime-parents (set (map :name constructors)) classes-by-name))
-             methods-with-effective-contracts
-             (map (fn [m]
-                    (let [effective (lookup-method-effective-contracts class-def (:name m) classes-by-name)]
-                      (assoc m
-                             :require (:effective-require effective)
-                             :ensure (:effective-ensure effective))))
-                  methods)
-             methods-code (map #(generate-method 1 % opts) methods-with-effective-contracts)]
-         (str/join "\n"
-                   (concat
-                   class-jsdoc
-                   (when generic-comment [generic-comment])
-                   [class-header]
-                   (when invariant-comment [invariant-comment ""])
-                    constants-code
-                    (when (seq all-constants) [""])
-                    [default-constructor ""]
-                    factory-methods
-                    (when (seq factory-methods) [""])
-                    (when (seq inherited-constructor-shims) inherited-constructor-shims)
-                    (when (seq inherited-constructor-shims) [""])
-                    methods-code
-                    ["}"])))))))
+             runtime-parents (vec (remove #(= "Any" (:parent %)) parents))
+             parent-names (mapv :parent runtime-parents)
+             own-flds (set (map :name fields))
+             all-constants (get-accessible-constants-js class-def classes-by-name)
+             constant-names (set (map :name all-constants))
+             own-method-names (set (map :name methods))
+             all-methods (into own-method-names
+                               (mapcat #(get-parent-method-names % classes-by-name)
+                                       parent-names))
+             fld-types (build-field-types-js fields parent-names classes-by-name)
+             effective-invariants (collect-effective-class-invariants class-def classes-by-name)]
+         (binding [*current-class-name* name
+                   *class-registry* classes-by-name
+                   *all-method-names* all-methods
+                   *own-fields* own-flds
+                   *constant-names* constant-names
+                   *field-types* fld-types
+                   *class-invariants* effective-invariants]
+           (let [class-jsdoc (when note
+                               [(generate-jsdoc 0 note)])
+                 generic-comment (generate-generic-comment generic-params)
+                 class-header (generate-class-header name generic-params runtime-parents)
+                 invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
+                                     (indent 1 (str "// Class invariant: "
+                                                    (str/join ", " (map :label effective-invariants)))))
+                 constants-code (map #(generate-class-constant-js 1 name %) all-constants)
+                 has-parent? (some? (:extends (analyze-inheritance runtime-parents)))
+                 default-constructor (generate-default-constructor 1 name fields has-parent? deferred?)
+                 factory-methods (map #(generate-factory-constructor 1 name % opts) constructors)
+                 inherited-constructor-shims (when (seq runtime-parents)
+                                               (generate-inherited-constructor-shims-js 1 name runtime-parents (set (map :name constructors)) classes-by-name))
+                 methods-with-effective-contracts
+                 (map (fn [m]
+                        (let [effective (lookup-method-effective-contracts class-def (:name m) classes-by-name)]
+                          (assoc m
+                                 :require (:effective-require effective)
+                                 :ensure (:effective-ensure effective))))
+                      methods)
+                 methods-code (map #(generate-method 1 % opts) methods-with-effective-contracts)]
+             (str/join "\n"
+                       (concat
+                        class-jsdoc
+                        (when generic-comment [generic-comment])
+                        [class-header]
+                        (when invariant-comment [invariant-comment ""])
+                        constants-code
+                        (when (seq all-constants) [""])
+                        [default-constructor ""]
+                        factory-methods
+                        (when (seq factory-methods) [""])
+                        (when (seq inherited-constructor-shims) inherited-constructor-shims)
+                        (when (seq inherited-constructor-shims) [""])
+                        methods-code
+                        ["}"])))))))
 
 (defn generate-function-base-class
   "Generate the built-in Function base class."
@@ -2027,6 +2157,32 @@
        "function __nexParseInt(raw) {\n"
        "  return __nexParseLong(raw);\n"
        "}\n"
+       "function __nexJsonToNex(value) {\n"
+       "  if (value === null || value === undefined) return null;\n"
+       "  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;\n"
+       "  if (Array.isArray(value)) return value.map(__nexJsonToNex);\n"
+       "  if (value instanceof Map) return new Map(Array.from(value.entries()).map(([k, v]) => [String(k), __nexJsonToNex(v)]));\n"
+       "  const out = new Map();\n"
+       "  for (const [k, v] of Object.entries(value)) out.set(String(k), __nexJsonToNex(v));\n"
+       "  return out;\n"
+       "}\n"
+       "function __nexValueToJson(value) {\n"
+       "  if (value === null || value === undefined || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;\n"
+       "  if (Array.isArray(value)) return value.map(__nexValueToJson);\n"
+       "  if (value instanceof Map) {\n"
+       "    const out = {};\n"
+       "    for (const [k, v] of value.entries()) out[String(k)] = __nexValueToJson(v);\n"
+       "    return out;\n"
+       "  }\n"
+       "  if (value instanceof Set) return Array.from(value.values()).map(__nexValueToJson);\n"
+       "  throw new Error('Value is not JSON-serializable');\n"
+       "}\n"
+       "function __nexJsonParse(text) {\n"
+       "  return __nexJsonToNex(JSON.parse(String(text)));\n"
+       "}\n"
+       "function __nexJsonStringify(value) {\n"
+       "  return JSON.stringify(__nexValueToJson(value));\n"
+       "}\n"
        "function __nexIntPow(a, b) {\n"
        "  if (b < 0) throw new Error('Integral exponentiation requires a non-negative exponent');\n"
        "  let acc = 1;\n"
@@ -2089,6 +2245,373 @@
        "}\n"
        "function __nexSleep(ms) {\n"
        "  return new Promise(resolve => setTimeout(resolve, ms));\n"
+       "}\n"
+       "function __nexRegexFlags(flags) {\n"
+       "  let out = 'g';\n"
+       "  if (flags && flags.includes('i')) out += 'i';\n"
+       "  if (flags && flags.includes('m')) out += 'm';\n"
+       "  return out;\n"
+       "}\n"
+       "function __nexRegex(pattern, flags) {\n"
+       "  return new RegExp(pattern, __nexRegexFlags(flags));\n"
+       "}\n"
+       "function __nexRegexValidate(pattern, flags) { __nexRegex(pattern, flags); return null; }\n"
+       "function __nexRegexMatches(pattern, flags, text) {\n"
+       "  const anchored = new RegExp('^(?:' + pattern + ')$', __nexRegexFlags(flags).replace('g', ''));\n"
+       "  return anchored.test(String(text));\n"
+       "}\n"
+       "function __nexRegexFind(pattern, flags, text) {\n"
+       "  const m = String(text).match(__nexRegex(pattern, flags));\n"
+       "  return m && m.length > 0 ? m[0] : null;\n"
+       "}\n"
+       "function __nexRegexFindAll(pattern, flags, text) {\n"
+       "  const m = String(text).match(__nexRegex(pattern, flags));\n"
+       "  return m ? Array.from(m) : [];\n"
+       "}\n"
+       "function __nexRegexReplace(pattern, flags, text, replacement) {\n"
+       "  return String(text).replace(__nexRegex(pattern, flags), String(replacement));\n"
+       "}\n"
+       "function __nexRegexSplit(pattern, flags, text) {\n"
+       "  return String(text).split(__nexRegex(pattern, flags));\n"
+       "}\n"
+       "function __nexDateTimeNow() { return Date.now(); }\n"
+       "function __nexDateTimeFromEpochMillis(ms) { return Number(ms); }\n"
+       "function __nexDateTimeParseIso(text) { return Date.parse(String(text)); }\n"
+       "function __nexDateTimeMake(year, month, day, hour, minute, second) { return Date.UTC(year, month - 1, day, hour, minute, second); }\n"
+       "function __nexDateTimeYear(epochMs) { return new Date(epochMs).getUTCFullYear(); }\n"
+       "function __nexDateTimeMonth(epochMs) { return new Date(epochMs).getUTCMonth() + 1; }\n"
+       "function __nexDateTimeDay(epochMs) { return new Date(epochMs).getUTCDate(); }\n"
+       "function __nexDateTimeWeekday(epochMs) { const d = new Date(epochMs).getUTCDay(); return d === 0 ? 7 : d; }\n"
+       "function __nexDateTimeDayOfYear(epochMs) { const d = new Date(epochMs); const start = Date.UTC(d.getUTCFullYear(), 0, 1); return Math.floor((epochMs - start) / 86400000) + 1; }\n"
+       "function __nexDateTimeHour(epochMs) { return new Date(epochMs).getUTCHours(); }\n"
+       "function __nexDateTimeMinute(epochMs) { return new Date(epochMs).getUTCMinutes(); }\n"
+       "function __nexDateTimeSecond(epochMs) { return new Date(epochMs).getUTCSeconds(); }\n"
+       "function __nexDateTimeEpochMillis(epochMs) { return Number(epochMs); }\n"
+       "function __nexDateTimeAddMillis(epochMs, deltaMs) { return Number(epochMs) + Number(deltaMs); }\n"
+       "function __nexDateTimeDiffMillis(leftMs, rightMs) { return Number(leftMs) - Number(rightMs); }\n"
+       "function __nexDateTimeTruncateToDay(epochMs) { const d = new Date(epochMs); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0); }\n"
+       "function __nexDateTimeTruncateToHour(epochMs) { const d = new Date(epochMs); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), 0, 0, 0); }\n"
+       "function __nexDateTimeFormatIso(epochMs) { return new Date(epochMs).toISOString(); }\n"
+       "function __nexPathFs() {\n"
+       "  return require('fs');\n"
+       "}\n"
+       "function __nexPathMod() {\n"
+       "  return require('path');\n"
+       "}\n"
+       "function __nexPathExists(path) {\n"
+       "  return __nexPathFs().existsSync(path);\n"
+       "}\n"
+       "function __nexPathIsFile(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  return fs.existsSync(path) && fs.statSync(path).isFile();\n"
+       "}\n"
+       "function __nexPathIsDirectory(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  return fs.existsSync(path) && fs.statSync(path).isDirectory();\n"
+       "}\n"
+       "function __nexPathName(path) {\n"
+       "  return __nexPathMod().basename(path);\n"
+       "}\n"
+       "function __nexPathExtension(path) {\n"
+       "  const name = __nexPathName(path);\n"
+       "  const dot = name.lastIndexOf('.');\n"
+       "  return (dot <= 0 || dot === name.length - 1) ? \"\" : name.substring(dot + 1);\n"
+       "}\n"
+       "function __nexPathNameWithoutExtension(path) {\n"
+       "  const name = __nexPathName(path);\n"
+       "  const dot = name.lastIndexOf('.');\n"
+       "  return dot <= 0 ? name : name.substring(0, dot);\n"
+       "}\n"
+       "function __nexPathAbsolute(path) {\n"
+       "  return __nexPathMod().resolve(path);\n"
+       "}\n"
+       "function __nexPathNormalize(path) {\n"
+       "  return __nexPathMod().normalize(path);\n"
+       "}\n"
+       "function __nexPathSize(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  return fs.existsSync(path) ? fs.statSync(path).size : 0;\n"
+       "}\n"
+       "function __nexPathModifiedTime(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  return fs.existsSync(path) ? fs.statSync(path).mtimeMs : 0;\n"
+       "}\n"
+       "function __nexPathParent(path) {\n"
+       "  const parent = __nexPathMod().dirname(path);\n"
+       "  return parent === path ? null : parent;\n"
+       "}\n"
+       "function __nexPathChild(path, childName) {\n"
+       "  return __nexPathMod().join(path, childName);\n"
+       "}\n"
+       "function __nexPathCreateFile(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  if (!fs.existsSync(path)) fs.writeFileSync(path, '', 'utf8');\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathCreateDirectory(path) {\n"
+       "  __nexPathFs().mkdirSync(path, {recursive: false});\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathCreateDirectories(path) {\n"
+       "  __nexPathFs().mkdirSync(path, {recursive: true});\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathDelete(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  if (!fs.existsSync(path)) return null;\n"
+       "  if (fs.statSync(path).isDirectory()) throw new Error('path_delete does not remove directories');\n"
+       "  fs.unlinkSync(path);\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathDeleteTree(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  if (fs.existsSync(path)) fs.rmSync(path, {recursive: true, force: true});\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathCopy(src, dst) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  const pathMod = __nexPathMod();\n"
+       "  const copy = (source, target) => {\n"
+       "    const stat = fs.statSync(source);\n"
+       "    if (stat.isDirectory()) {\n"
+       "      fs.mkdirSync(target, {recursive: true});\n"
+       "      for (const name of fs.readdirSync(source)) copy(pathMod.join(source, name), pathMod.join(target, name));\n"
+       "    } else {\n"
+       "      fs.mkdirSync(pathMod.dirname(target), {recursive: true});\n"
+       "      fs.copyFileSync(source, target);\n"
+       "    }\n"
+       "  };\n"
+       "  copy(src, dst);\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathMove(src, dst) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  const pathMod = __nexPathMod();\n"
+       "  fs.mkdirSync(pathMod.dirname(dst), {recursive: true});\n"
+       "  try {\n"
+       "    fs.renameSync(src, dst);\n"
+       "  } catch (err) {\n"
+       "    __nexPathCopy(src, dst);\n"
+       "    __nexPathDeleteTree(src);\n"
+       "  }\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathReadText(path) {\n"
+       "  return __nexPathFs().readFileSync(path, 'utf8').toString();\n"
+       "}\n"
+       "function __nexPathWriteText(path, text) {\n"
+       "  __nexPathFs().writeFileSync(path, String(text), 'utf8');\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathAppendText(path, text) {\n"
+       "  __nexPathFs().appendFileSync(path, String(text), 'utf8');\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexPathList(path) {\n"
+       "  const fs = __nexPathFs();\n"
+       "  const pathMod = __nexPathMod();\n"
+       "  return fs.readdirSync(path).map(name => pathMod.join(path, name));\n"
+       "}\n"
+       "function __nexTextFileOpenRead(path) {\n"
+       "  const content = __nexPathFs().readFileSync(path, 'utf8').toString();\n"
+       "  return {_type: 'TextFileHandle', mode: 'read', lines: content.split(/\\r?\\n/), index: 0, path};\n"
+       "}\n"
+       "function __nexTextFileOpenWrite(path) {\n"
+       "  __nexPathFs().writeFileSync(path, '', 'utf8');\n"
+       "  return {_type: 'TextFileHandle', mode: 'write', path};\n"
+       "}\n"
+       "function __nexTextFileOpenAppend(path) {\n"
+       "  return {_type: 'TextFileHandle', mode: 'append', path};\n"
+       "}\n"
+       "function __nexTextFileReadLine(handle) {\n"
+       "  if (handle.index >= handle.lines.length) return null;\n"
+       "  const line = handle.lines[handle.index];\n"
+       "  handle.index += 1;\n"
+       "  return line;\n"
+       "}\n"
+       "function __nexTextFileWrite(handle, text) {\n"
+       "  __nexPathFs().appendFileSync(handle.path, String(text), 'utf8');\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexTextFileClose(handle) {\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexBytesToIntArray(buf) {\n"
+       "  return Array.from(buf.values());\n"
+       "}\n"
+       "function __nexIntArrayToBuffer(values) {\n"
+       "  return Buffer.from(values.map(v => {\n"
+       "    if (v < 0 || v > 255) throw new Error('Binary byte values must be in range 0..255');\n"
+       "    return v;\n"
+       "  }));\n"
+       "}\n"
+       "function __nexBinaryFileOpenRead(path) {\n"
+       "  return {_type: 'BinaryFileHandle', mode: 'read', data: __nexPathFs().readFileSync(path), index: 0, path};\n"
+       "}\n"
+       "function __nexBinaryFileOpenWrite(path) {\n"
+       "  __nexPathFs().writeFileSync(path, Buffer.alloc(0));\n"
+       "  return {_type: 'BinaryFileHandle', mode: 'write', path};\n"
+       "}\n"
+       "function __nexBinaryFileOpenAppend(path) {\n"
+       "  return {_type: 'BinaryFileHandle', mode: 'append', path};\n"
+       "}\n"
+       "function __nexBinaryFileReadAll(handle) {\n"
+       "  return __nexBytesToIntArray(handle.data);\n"
+       "}\n"
+       "function __nexBinaryFileRead(handle, count) {\n"
+       "  const end = Math.min(handle.index + count, handle.data.length);\n"
+       "  const out = handle.data.subarray(handle.index, end);\n"
+       "  handle.index = end;\n"
+       "  return __nexBytesToIntArray(out);\n"
+       "}\n"
+       "function __nexBinaryFileWrite(handle, values) {\n"
+       "  __nexPathFs().appendFileSync(handle.path, __nexIntArrayToBuffer(values));\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexBinaryFileClose(handle) {\n"
+       "  return null;\n"
+       "}\n"
+       "async function __nexHttpRequest(method, url, body_text = null, timeout_ms = null) {\n"
+       "  let controller = null;\n"
+       "  let timeoutId = null;\n"
+       "  try {\n"
+       "    const options = { method };\n"
+       "    if (body_text !== null && body_text !== undefined) options.body = body_text;\n"
+       "    if (timeout_ms !== null && timeout_ms !== undefined) {\n"
+       "      controller = new AbortController();\n"
+       "      options.signal = controller.signal;\n"
+       "      timeoutId = setTimeout(() => controller.abort(), timeout_ms);\n"
+       "    }\n"
+       "    const response = await fetch(url, options);\n"
+       "    const text = await response.text();\n"
+       "    const headers = new Map(response.headers.entries());\n"
+       "    return await Http_Response.make(response.status, text, headers);\n"
+       "  } finally {\n"
+       "    if (timeoutId !== null) clearTimeout(timeoutId);\n"
+       "  }\n"
+       "}\n"
+       "async function __nexHttpGet(url, timeout_ms = null) {\n"
+       "  return await __nexHttpRequest('GET', url, null, timeout_ms);\n"
+       "}\n"
+       "async function __nexHttpPost(url, body_text, timeout_ms = null) {\n"
+       "  return await __nexHttpRequest('POST', url, body_text, timeout_ms);\n"
+       "}\n"
+       "function __nexHttpPathSegments(path) {\n"
+       "  if (!path || path === '/') return [];\n"
+       "  return path.split('/').filter(Boolean);\n"
+       "}\n"
+       "function __nexHttpUrlDecode(s) {\n"
+       "  return decodeURIComponent(String(s ?? '').replace(/\\+/g, '%20'));\n"
+       "}\n"
+       "function __nexHttpParseQuery(query) {\n"
+       "  const out = new Map();\n"
+       "  if (!query) return out;\n"
+       "  for (const part of String(query).split('&')) {\n"
+       "    if (!part) continue;\n"
+       "    const pieces = part.split('=', 2);\n"
+       "    out.set(__nexHttpUrlDecode(pieces[0]), __nexHttpUrlDecode(pieces.length > 1 ? pieces[1] : ''));\n"
+       "  }\n"
+       "  return out;\n"
+       "}\n"
+       "function __nexHttpMatchRoute(pattern, path) {\n"
+       "  const patternSegments = __nexHttpPathSegments(pattern);\n"
+       "  const pathSegments = __nexHttpPathSegments(path);\n"
+       "  const params = new Map();\n"
+       "  let i = 0;\n"
+       "  let j = 0;\n"
+       "  while (i < patternSegments.length && j < pathSegments.length) {\n"
+       "    const p = patternSegments[i];\n"
+       "    const x = pathSegments[j];\n"
+       "    if (p === '*') {\n"
+       "      params.set('*', pathSegments.slice(j).join('/'));\n"
+       "      return params;\n"
+       "    }\n"
+       "    if (p.startsWith(':')) {\n"
+       "      params.set(p.slice(1), __nexHttpUrlDecode(x));\n"
+       "      i += 1; j += 1;\n"
+       "      continue;\n"
+       "    }\n"
+       "    if (p !== x) return null;\n"
+       "    i += 1; j += 1;\n"
+       "  }\n"
+       "  if (i === patternSegments.length && j === pathSegments.length) return params;\n"
+       "  if (i < patternSegments.length && patternSegments[i] === '*') {\n"
+       "    params.set('*', pathSegments.slice(j).join('/'));\n"
+       "    return params;\n"
+       "  }\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexHttpFindRoute(handle, method, path) {\n"
+       "  for (const route of (handle.routes[method] || [])) {\n"
+       "    const params = __nexHttpMatchRoute(route.path, path);\n"
+       "    if (params !== null) return {handler: route.handler, params};\n"
+       "  }\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexHttpServerCreate(port) {\n"
+       "  return {_type: 'HttpServerHandle', port, server: null, routes: {GET: [], POST: [], PUT: [], DELETE: []}};\n"
+       "}\n"
+       "function __nexHttpServerGet(handle, path, handler) {\n"
+       "  handle.routes.GET.push({path, handler});\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexHttpServerPost(handle, path, handler) {\n"
+       "  handle.routes.POST.push({path, handler});\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexHttpServerPut(handle, path, handler) {\n"
+       "  handle.routes.PUT.push({path, handler});\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexHttpServerDelete(handle, path, handler) {\n"
+       "  handle.routes.DELETE.push({path, handler});\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexReadRequestBody(req) {\n"
+       "  return new Promise((resolve, reject) => {\n"
+       "    let body = '';\n"
+       "    req.on('data', chunk => { body += chunk; });\n"
+       "    req.on('end', () => resolve(body));\n"
+       "    req.on('error', reject);\n"
+       "  });\n"
+       "}\n"
+       "async function __nexHttpServerStart(handle) {\n"
+       "  const http = require('http');\n"
+       "  handle.server = http.createServer(async (req, res) => {\n"
+       "    const method = req.method || 'GET';\n"
+       "    const url = new URL(req.url || '/', 'http://127.0.0.1');\n"
+       "    const path = url.pathname;\n"
+       "    const match = __nexHttpFindRoute(handle, method, path);\n"
+       "    let response;\n"
+       "    if (!match) {\n"
+       "      response = await Http_Server_Response.with_status(404, 'Not Found');\n"
+       "    } else {\n"
+       "      const body = await __nexReadRequestBody(req);\n"
+       "      const headers = new Map(Object.entries(req.headers || {}));\n"
+       "      const request = await Http_Request.make(method, path, body, headers, match.params, __nexHttpParseQuery(url.search.length > 1 ? url.search.slice(1) : ''));\n"
+       "      response = await match.handler.call1(request);\n"
+       "      if (response === null || response === undefined) response = await Http_Server_Response.with_status(204, '');\n"
+       "    }\n"
+       "    const responseHeaders = await response.headers();\n"
+       "    for (const [k, v] of responseHeaders.entries()) res.setHeader(String(k), String(v));\n"
+       "    res.statusCode = await response.status();\n"
+       "    res.end(await response.body());\n"
+       "  });\n"
+       "  return await new Promise(resolve => {\n"
+       "    handle.server.listen(handle.port, '127.0.0.1', () => {\n"
+       "      handle.port = handle.server.address().port;\n"
+       "      resolve(handle.port);\n"
+       "    });\n"
+       "  });\n"
+       "}\n"
+       "async function __nexHttpServerStop(handle) {\n"
+       "  if (!handle.server) return null;\n"
+       "  const server = handle.server;\n"
+       "  handle.server = null;\n"
+       "  return await new Promise(resolve => server.close(() => resolve(null)));\n"
+       "}\n"
+       "function __nexHttpServerIsRunning(handle) {\n"
+       "  return handle.server !== null;\n"
        "}\n"
        "class __nexTask {\n"
        "  constructor(promise) {\n"

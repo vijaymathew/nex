@@ -1,0 +1,170 @@
+class Http_Request
+  note "Inbound HTTP request value passed to Http_Server route handlers."
+
+create
+  make(method_name_value: String, path_value_value: String, body_text_value: String, header_map_value: Map[String, String], route_params_value: Map[String, String], query_map_value: Map[String, String]) do
+    this.method_name := method_name_value
+    this.path_value := path_value_value
+    this.body_text := body_text_value
+    this.header_map := header_map_value
+    this.route_params := route_params_value
+    this.query_map := query_map_value
+  end
+
+feature
+  method_name: String
+  path_value: String
+  body_text: String
+  header_map: Map[String, String]
+  route_params: Map[String, String]
+  query_map: Map[String, String]
+
+  method(): String do
+    result := method_name
+  end
+
+  path(): String do
+    result := path_value
+  end
+
+  body(): String do
+    result := body_text
+  end
+
+  headers(): Map[String, String] do
+    result := header_map
+  end
+
+  params(): Map[String, String] do
+    result := route_params
+  end
+
+  query(): Map[String, String] do
+    result := query_map
+  end
+
+  param(name: String): String do
+    result := route_params.try_get(name, "")
+  end
+
+  query_param(name: String): String do
+    result := query_map.try_get(name, "")
+  end
+
+  wildcard(): String do
+    result := route_params.try_get("*", "")
+  end
+end
+
+class Http_Server_Response
+  note "HTTP response value returned by Http_Server route handlers."
+
+create
+  make(status_code_value: Integer, body_text_value: String, header_map_value: Map[String, String]) do
+    this.status_code := status_code_value
+    this.body_text := body_text_value
+    this.header_map := header_map_value
+  end
+
+  text(body_text_value: String) do
+    this.status_code := 200
+    this.body_text := body_text_value
+    this.header_map := create Map[String, String]
+  end
+
+  with_status(status_code_value: Integer, body_text_value: String) do
+    this.status_code := status_code_value
+    this.body_text := body_text_value
+    this.header_map := create Map[String, String]
+  end
+
+feature
+  status_code: Integer
+  body_text: String
+  header_map: Map[String, String]
+
+  status(): Integer do
+    result := status_code
+  end
+
+  body(): String do
+    result := body_text
+  end
+
+  headers(): Map[String, String] do
+    result := header_map
+  end
+end
+
+class Http_Server
+  note "HTTP server wrapper for the JVM interpreter and generated JVM/Node targets."
+
+create
+  make(port_value: Integer)
+    require
+      valid_port: port_value >= 0 and port_value <= 65535
+    do
+      this.port := port_value
+      this.handle := http_server_create(port_value)
+    ensure
+      port_set: port = port_value
+    end
+
+feature
+  port: Integer
+  handle: Any
+
+feature
+  get(path: String, handler: Function)
+    require
+      path_not_empty: path /= ""
+      handler_attached: handler /= nil
+    do
+      http_server_get(this.handle, path, handler)
+    end
+
+  post(path: String, handler: Function)
+    require
+      path_not_empty: path /= ""
+      handler_attached: handler /= nil
+    do
+      http_server_post(this.handle, path, handler)
+    end
+
+  put(path: String, handler: Function)
+    require
+      path_not_empty: path /= ""
+      handler_attached: handler /= nil
+    do
+      http_server_put(this.handle, path, handler)
+    end
+
+  delete(path: String, handler: Function)
+    require
+      path_not_empty: path /= ""
+      handler_attached: handler /= nil
+    do
+      http_server_delete(this.handle, path, handler)
+    end
+
+  start()
+    note "Start listening. If port is 0, the actual bound port is written back to port."
+  do
+    this.port := http_server_start(this.handle)
+  end
+
+  stop()
+  do
+    http_server_stop(this.handle)
+  end
+
+  is_running(): Boolean
+  do
+    result := http_server_is_running(this.handle)
+  end
+
+  to_string(): String
+  do
+    result := "Http_Server(port=" + port + ", running=" + is_running() + ")"
+  end
+end

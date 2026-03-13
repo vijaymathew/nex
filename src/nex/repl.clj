@@ -34,7 +34,7 @@
 
 (def nex-types
   ["Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-   "Array" "Map" "Set" "Task" "Channel" "Function" "Cursor" "Console" "File" "Process" "Window" "Turtle" "Image"])
+   "Array" "Map" "Set" "Task" "Channel" "Function" "Cursor" "Console" "Process" "Window" "Turtle" "Image"])
 
 (def nex-builtins ["print" "println" "type_of" "type_is"])
 
@@ -922,10 +922,12 @@
       (format-type t))))
 
 (defn looks-like-class?
-  "Check if input looks like a class or function definition"
+  "Check if input looks like a top-level declaration"
   [input]
   (or (re-find #"^\s*class\s+" input)
-      (re-find #"^\s*function\s+" input)))
+      (re-find #"^\s*function\s+" input)
+      (re-find #"^\s*import\s+" input)
+      (re-find #"^\s*intern\s+" input)))
 
 (defn looks-like-statement?
   "Check if input needs to be wrapped in a method"
@@ -1082,13 +1084,16 @@
         (= (:type ast) :program)
         (let [classes (:classes ast)
               functions (:functions ast)
+              interns (:interns ast)
+              imports (:imports ast)
               statements (:statements ast)
               calls (:calls ast)
               real-class-names (filter #(not= % "__ReplTemp__")
                                       (map :name (filter map? classes)))
               function-names (map :name (filter map? functions))]
-          ;; If there are classes or functions, evaluate the program to register them
-          (when (or (seq real-class-names) (seq function-names))
+          ;; If there are imports/interns/classes/functions, evaluate the program
+          ;; as a whole so registration side effects happen.
+          (when (or (seq imports) (seq interns) (seq real-class-names) (seq function-names))
             (interp/eval-node exec-ctx ast)
             (when @*type-checking-enabled*
               (doseq [fn-def (filter map? functions)]

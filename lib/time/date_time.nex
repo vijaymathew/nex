@@ -1,0 +1,108 @@
+intern time/Duration
+
+class Date_Time
+  note "UTC date-time value stored as epoch milliseconds."
+
+create
+  now() do
+    this.millis := datetime_now()
+  end
+
+  from_epoch_millis(ms: Integer64) do
+    this.millis := datetime_from_epoch_millis(ms)
+  end
+
+  parse_iso(text: String) do
+    this.millis := datetime_parse_iso(text)
+  end
+
+  make(year, month, day, hour, minute, second: Integer) do
+    this.millis := datetime_make(year, month, day, hour, minute, second)
+  end
+
+feature
+  millis: Integer64
+
+  year(): Integer do
+    result := datetime_year(millis)
+  end
+
+  month(): Integer do
+    result := datetime_month(millis)
+  end
+
+  month_name(): String do
+    let names: Array[String] := ["January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"]
+    result := names.get(month() - 1)
+  end
+
+  day(): Integer do
+    result := datetime_day(millis)
+  end
+
+  weekday(): Integer do
+    result := datetime_weekday(millis)
+  end
+
+  weekday_name(): String do
+    let names: Array[String] := ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    result := names.get(weekday() - 1)
+  end
+
+  day_of_year(): Integer do
+    result := datetime_day_of_year(millis)
+  end
+
+  hour(): Integer do
+    result := datetime_hour(millis)
+  end
+
+  minute(): Integer do
+    result := datetime_minute(millis)
+  end
+
+  second(): Integer do
+    result := datetime_second(millis)
+  end
+
+  epoch_millis(): Integer64 do
+    result := datetime_epoch_millis(millis)
+  end
+
+  add(duration: Duration): Date_Time do
+    result := create Date_Time.from_epoch_millis(datetime_add_millis(millis, duration.total_milliseconds()))
+  end
+
+  subtract(duration: Duration): Date_Time do
+    result := create Date_Time.from_epoch_millis(datetime_add_millis(millis, -duration.total_milliseconds()))
+  end
+
+  difference(other: Date_Time): Duration do
+    result := create Duration.milliseconds(datetime_diff_millis(millis, other.epoch_millis()))
+  end
+
+  truncate_to_day(): Date_Time do
+    result := create Date_Time.from_epoch_millis(datetime_truncate_to_day(millis))
+  end
+
+  truncate_to_hour(): Date_Time do
+    result := create Date_Time.from_epoch_millis(datetime_truncate_to_hour(millis))
+  end
+
+  is_before(other: Date_Time): Boolean do
+    result := millis < other.epoch_millis()
+  end
+
+  is_after(other: Date_Time): Boolean do
+    result := millis > other.epoch_millis()
+  end
+
+  format_iso(): String do
+    result := datetime_format_iso(millis)
+  end
+
+  to_string(): String do
+    result := format_iso()
+  end
+end

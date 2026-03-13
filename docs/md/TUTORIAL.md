@@ -547,6 +547,9 @@ intern math/Calculator
 intern math/Calculator as Calc
 ```
 
+`intern` first searches relative to the loaded file, then the current working directory, then `~/.nex/deps`.
+For path-qualified classes it accepts `lib/<path>/<Class>.nex`, `lib/<path>/<class>.nex`, and the corresponding `src/` variants.
+
 Use `intern` for Nex-to-Nex modularity and `import` for target-platform interop.
 
 ## 14. A Complete Example

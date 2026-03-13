@@ -1,0 +1,37 @@
+intern net/Http_Server
+
+let server: Http_Server := create Http_Server.make(8080)
+
+server.get("/hello/:name", fn(req: Http_Request): Http_Server_Response do
+  result := create Http_Server_Response.text("hello " + req.param("name"))
+end)
+
+server.get("/files/*", fn(req: Http_Request): Http_Server_Response do
+  result := create Http_Server_Response.text("wildcard=" + req.wildcard())
+end)
+
+server.get("/search", fn(req: Http_Request): Http_Server_Response do
+  result := create Http_Server_Response.text("q=" + req.query_param("q"))
+end)
+
+server.post("/echo", fn(req: Http_Request): Http_Server_Response do
+  result := create Http_Server_Response.text(req.body())
+end)
+
+server.put("/items/:id", fn(req: Http_Request): Http_Server_Response do
+  result := create Http_Server_Response.text("updated " + req.param("id") + ":" + req.body())
+end)
+
+server.delete("/items/:id", fn(req: Http_Request): Http_Server_Response do
+  result := create Http_Server_Response.text("deleted " + req.param("id"))
+end)
+
+server.start()
+
+print("listening on http://127.0.0.1:" + server.port)
+print("GET  /hello/nex")
+print("GET  /files/css/site.css")
+print("GET  /search?q=design")
+print("POST /echo")
+print("PUT  /items/42")
+print("DELETE /items/42")

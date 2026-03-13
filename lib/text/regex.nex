@@ -1,0 +1,44 @@
+class Regex
+  note "Regular expression wrapper built on top of runtime regex primitives."
+
+create
+  compile(pattern_value: String) do
+    regex_validate(pattern_value, "")
+    this.pattern := pattern_value
+    this.flags := ""
+  end
+
+  compile_with_flags(pattern_value: String, flags_value: String) do
+    regex_validate(pattern_value, flags_value)
+    this.pattern := pattern_value
+    this.flags := flags_value
+  end
+
+feature
+  pattern: String
+  flags: String
+
+  matches(text: String): Boolean do
+    result := regex_matches(pattern, flags, text)
+  end
+
+  find(text: String): ?String do
+    result := regex_find(pattern, flags, text)
+  end
+
+  find_all(text: String): Array[String] do
+    result := regex_find_all(pattern, flags, text)
+  end
+
+  replace(text, replacement: String): String do
+    result := regex_replace(pattern, flags, text, replacement)
+  end
+
+  split(text: String): Array[String] do
+    result := regex_split(pattern, flags, text)
+  end
+
+  to_string(): String do
+    result := "Regex(/" + pattern + "/" + flags + ")"
+  end
+end

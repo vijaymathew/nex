@@ -1,0 +1,122 @@
+class Path
+  note "Filesystem path wrapper built on top of runtime path primitives."
+
+create
+  make(path_value: String) do
+    this.path := path_value
+  end
+
+feature
+  path: String
+
+  exists(): Boolean do
+    result := path_exists(path)
+  end
+
+  is_file(): Boolean do
+    result := path_is_file(path)
+  end
+
+  is_directory(): Boolean do
+    result := path_is_directory(path)
+  end
+
+  name(): String do
+    result := path_name(path)
+  end
+
+  extension(): String do
+    result := path_extension(path)
+  end
+
+  name_without_extension(): String do
+    result := path_name_without_extension(path)
+  end
+
+  absolute(): Path do
+    result := create Path.make(path_absolute(path))
+  end
+
+  normalize(): Path do
+    result := create Path.make(path_normalize(path))
+  end
+
+  size(): Integer64 do
+    result := path_size(path)
+  end
+
+  modified_time(): Integer64 do
+    result := path_modified_time(path)
+  end
+
+  parent(): ?Path do
+      let parent_path: ?String := path_parent(path)
+      if convert parent_path to attached_parent:String then
+        result := create Path.make(attached_parent)
+      end
+    end
+
+  child(name: String): Path do
+    result := create Path.make(path_child(path, name))
+  end
+
+  create_file() do
+    path_create_file(path)
+  end
+
+  create_directory() do
+    path_create_directory(path)
+  end
+
+  create_directories() do
+    path_create_directories(path)
+  end
+
+  delete() do
+    path_delete(path)
+  end
+
+  delete_tree() do
+    path_delete_tree(path)
+  end
+
+  copy_to(target: Path) do
+    path_copy(path, target.path)
+  end
+
+  move_to(target: Path) do
+    path_move(path, target.path)
+  end
+
+  read_text(): String do
+    result := path_read_text(path)
+  end
+
+  write_text(text: String) do
+    path_write_text(path, text)
+  end
+
+  append_text(text: String) do
+    path_append_text(path, text)
+  end
+
+  list(): Array[Path] do
+      let raw_paths: Array[String] := path_list(path)
+      let results: Array[Path] := []
+      let c: Cursor := raw_paths.cursor()
+      from
+        c.start()
+      until
+        c.at_end()
+      do
+        let item_path: String := c.item()
+        results.add(create Path.make(item_path))
+        c.next()
+      end
+      result := results
+    end
+
+  to_string(): String do
+    result := path
+  end
+end

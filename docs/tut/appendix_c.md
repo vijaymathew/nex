@@ -10,11 +10,17 @@ The material here is drawn from the runtime behavior documented in `docs/ref` an
 The most commonly used built-in service classes are:
 
 - `Console`
-- `File`
 - `Process`
 - `Window`
 - `Turtle`
 - `Image`
+
+For filesystem and file I/O, use the `lib/io` library:
+
+- `intern io/Path`
+- `intern io/Directory`
+- `intern io/Text_File`
+- `intern io/Binary_File`
 
 Together with the scalar and collection classes, they form the everyday standard environment of Nex programs.
 
@@ -50,34 +56,90 @@ con.print_line("Hello, " + name)
 
 ## File Access
 
-`File` supports basic file operations.
+Filesystem operations lives in the `io` library.
+
+`Path` is the main entry point for filesystem probing and convenience file operations.
 
 Construction:
 
 ```nex
-let f: File := create File.open("notes.txt")
+intern io/Path
+
+let p: Path := create Path.make("notes.txt")
 ```
 
 Useful operations:
 
-- `read()`
-- `write(content)`
-- `append(content)`
 - `exists()`
+- `is_file()`
+- `is_directory()`
+- `size()`
+- `modified_time()`
+- `read_text()`
+- `write_text(text)`
+- `append_text(text)`
+- `copy_to(target)`
+- `move_to(target)`
 - `delete()`
-- `lines()`
-- `close()`
+- `delete_tree()`
 
 Example:
 
 ```nex
-let f: File := create File.open("notes.txt")
-f.write("line 1")
-f.append("\nline 2")
-print(f.lines())
+intern io/Path
+
+let src: Path := create Path.make("notes.txt")
+src.write_text("line 1")
+src.append_text("\nline 2")
+
+let copy: Path := create Path.make("notes_copy.txt")
+src.copy_to(copy)
+print(copy.read_text())
+
+let moved: Path := create Path.make("notes_moved.txt")
+copy.move_to(moved)
+print(moved.exists())
+print(moved.size())
+print(moved.modified_time())
 ```
 
-Use file routines at the boundary of the system. Core logic should usually operate on strings, arrays, maps, and classes rather than on file handles directly.
+For sequential text and binary access, use `Text_File` and `Binary_File`.
+
+If your code is directory-oriented, use `Directory` as a thin wrapper over `Path`.
+
+```nex
+intern io/Path
+intern io/Directory
+
+let root: Directory := create Directory.make("tmp")
+root.create_tree()
+
+let data: Directory := root.child_dir("data")
+data.create_tree()
+
+let file: Path := data.child_path("items.txt")
+file.write_text("one\ntwo")
+
+let backup: Directory := root.child_dir("backup")
+data.copy_to(backup)
+print(backup.exists())
+
+print(root.directories().length)
+print(data.files().length)
+```
+
+```nex
+intern io/Path
+intern io/Text_File
+
+let path: Path := create Path.make("notes.txt")
+let writer: Text_File := create Text_File.open_write(path)
+writer.write_line("alpha")
+writer.write_line("beta")
+writer.close()
+```
+
+Use file routines at the boundary of the system. Core logic should usually operate on strings, arrays, maps, and classes rather than on filesystem objects directly.
 
 
 ## Process Information
@@ -103,6 +165,57 @@ let p: Process := create Process
 print(p.getenv("HOME"))
 print(p.command_line())
 ```
+
+
+## Time And Scheduling
+
+Use `time/Date_Time` and `time/Duration` for UTC timestamps, scheduling offsets, and log formatting.
+
+```nex
+intern time/Duration
+intern time/Date_Time
+
+let started_at: Date_Time := create Date_Time.now()
+let next_run: Date_Time := started_at.add(create Duration.minutes(15))
+let weekly_cutoff: Date_Time := started_at.add(create Duration.weeks(1))
+
+print("started at " + started_at.format_iso())
+print("month=" + started_at.month_name())
+print("weekday=" + started_at.weekday())
+print("weekday-name=" + started_at.weekday_name())
+print("day-of-year=" + started_at.day_of_year())
+print("next run at " + next_run.truncate_to_hour().format_iso())
+print("weekly cutoff " + weekly_cutoff.truncate_to_day().format_iso())
+```
+
+This is a better fit for logging and scheduling code than manually building timestamp strings.
+
+
+## Pattern Matching And Text Cleanup
+
+Use `text/Regex` when string operations alone are too weak for validation, token extraction, or cleanup.
+
+```nex
+intern text/Regex
+
+let word: Regex := create Regex.compile_with_flags("[a-z]+", "i")
+print(word.matches("Nex"))
+print(word.find("123 Nex 456"))
+print(word.find_all("one two THREE"))
+
+let comma: Regex := create Regex.compile(",")
+print(comma.split("a,b,c"))
+print(word.replace("v1 test v2", "#"))
+```
+
+This is useful for:
+
+- validating input formats
+- extracting tokens from mixed text
+- splitting delimited text
+- performing cleanup and rewrite passes
+
+Keep regex usage near parsing and validation boundaries. Higher-level domain logic should usually work on already structured values.
 
 
 ## Graphics and Simple Visual Programs
@@ -218,7 +331,9 @@ That is why Chapter 24 matters. The standard library is enough to be productive,
 | Numbers | `Integer`, `Integer64`, `Real`, `Decimal` |
 | Collections | `Array`, `Map` |
 | Type introspection | `type_of`, `type_is` |
-| Files and environment | `File`, `Process` |
+| Files and environment | `Process`, `io/Path`, `io/Directory`, `io/Text_File`, `io/Binary_File` |
+| Time and scheduling | `time/Date_Time`, `time/Duration` |
+| Text processing | `text/Regex` |
 | Graphics | `Window`, `Turtle`, `Image` |
 
 For exact method tables, see Appendix B and the files under `docs/ref/`.

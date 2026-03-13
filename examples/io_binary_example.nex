@@ -1,0 +1,25 @@
+intern io/Path
+intern io/Binary_File
+
+let root: Path := create Path.make("tmp_bin_io")
+root.create_directories()
+
+let original: Path := root.child("data.bin")
+
+let writer: Binary_File := create Binary_File.open_write(original)
+writer.write([65, 66, 67, 68, 69])
+writer.close()
+
+let reader: Binary_File := create Binary_File.open_read(original)
+print(reader.read(3))
+reader.close()
+
+let reader_all: Binary_File := create Binary_File.open_read(original)
+print(reader_all.read_all())
+reader_all.close()
+
+let moved: Path := root.child("moved.bin")
+original.move_to(moved)
+print(moved.exists())
+
+root.delete_tree()

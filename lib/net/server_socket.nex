@@ -1,0 +1,90 @@
+import java.net.ServerSocket
+intern net/Tcp_Socket
+
+class Server_Socket
+  note "Blocking TCP server socket wrapper for the JVM runtime. This class is JVM-only and is not available in JavaScript or the browser."
+
+feature
+  port: Integer note "Local TCP port. A value of 0 requests an ephemeral port from the OS."
+
+private feature
+  server_socket: ?ServerSocket note "Underlying Java server socket when listening."
+
+create
+  make(port_value: Integer)
+    require
+      valid_port: port_value >= 0 and port_value <= 65535
+    do
+      port := port_value
+      server_socket := nil
+    ensure
+      port_set: port = port_value or port = 0
+      disconnected: server_socket = nil
+    end
+
+feature
+  open()
+    note "Bind the server socket to the configured port. If port is 0, the OS chooses an available port."
+    require
+      not_listening: server_socket = nil
+    do
+      let opened_server: ServerSocket := create ServerSocket.make(port)
+      server_socket := opened_server
+      port := opened_server.getLocalPort()
+    ensure
+      listening: server_socket /= nil
+    end
+
+  is_listening(): Boolean
+    note "Return true when the server socket is bound and open."
+  do
+    result := server_socket /= nil
+  end
+
+  accept(): Tcp_Socket
+    note "Block until a client connects, then wrap the accepted socket as a Tcp_Socket."
+    require
+      listening: server_socket /= nil
+    do
+      if server_socket /= nil then
+        result := create Tcp_Socket.from_socket(server_socket.accept())
+      end
+    end
+
+  accept(timeout_ms: Integer): Tcp_Socket
+    note "Wait up to timeout_ms milliseconds for a client connection. Raises on timeout or accept failure."
+    require
+      listening: server_socket /= nil
+      valid_timeout: timeout_ms >= 0
+    do
+      if server_socket /= nil then
+        do
+          server_socket.setSoTimeout(timeout_ms)
+          result := create Tcp_Socket.from_socket(server_socket.accept())
+          server_socket.setSoTimeout(0)
+        rescue
+          if server_socket /= nil then
+            server_socket.setSoTimeout(0)
+          end
+          result := nil
+        end
+      end
+    end
+
+  close()
+    note "Close the server socket if it is open. Safe to call multiple times."
+  do
+    if server_socket /= nil then
+      server_socket.close()
+    end
+    server_socket := nil
+  ensure
+    disconnected: server_socket = nil
+  end
+
+  to_string(): String
+    note "Return a descriptive string showing the bound port and listen state."
+  do
+    result := "Server_Socket(port=" + port + ", listening=" + (server_socket /= nil) + ")"
+  end
+end

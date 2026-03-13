@@ -53,7 +53,6 @@
       "Task" "NexRuntime.Task"
       "Channel" "NexRuntime.Channel"
       "Console" "Object"
-      "File" "java.io.File"
       "Process" "Object"
       "Function" "Function"
       "Window" "NexWindow"
@@ -108,7 +107,6 @@
         "Task" "NexRuntime.Task"
         "Channel" "NexRuntime.Channel"
         "Console" "Object"
-        "File" "java.io.File"
         "Process" "Object"
         "Function" "Function"
         "Window" "NexWindow"
@@ -150,7 +148,6 @@
       "Task" "null"
       "Channel" "null"
       "Console" "new Object() /* Console */"
-      "File" "null"
       "Process" "new Object() /* Process */"
       "Window" "null"
       "Turtle" "null"
@@ -269,6 +266,78 @@
     "type_of" (str "NexRuntime.typeOf(" args-code ")")
     "type_is" (str "NexRuntime.typeIs(" args-code ")")
     "sleep" (str "NexRuntime.sleep(" args-code ")")
+    "regex_validate" (str "NexRuntime.regexValidate(" args-code ")")
+    "regex_matches" (str "NexRuntime.regexMatches(" args-code ")")
+    "regex_find" (str "NexRuntime.regexFind(" args-code ")")
+    "regex_find_all" (str "NexRuntime.regexFindAll(" args-code ")")
+    "regex_replace" (str "NexRuntime.regexReplace(" args-code ")")
+    "regex_split" (str "NexRuntime.regexSplit(" args-code ")")
+    "datetime_now" (str "NexRuntime.datetimeNow(" args-code ")")
+    "datetime_from_epoch_millis" (str "NexRuntime.datetimeFromEpochMillis(" args-code ")")
+    "datetime_parse_iso" (str "NexRuntime.datetimeParseIso(" args-code ")")
+    "datetime_make" (str "NexRuntime.datetimeMake(" args-code ")")
+    "datetime_year" (str "NexRuntime.datetimeYear(" args-code ")")
+    "datetime_month" (str "NexRuntime.datetimeMonth(" args-code ")")
+    "datetime_day" (str "NexRuntime.datetimeDay(" args-code ")")
+    "datetime_weekday" (str "NexRuntime.datetimeWeekday(" args-code ")")
+    "datetime_day_of_year" (str "NexRuntime.datetimeDayOfYear(" args-code ")")
+    "datetime_hour" (str "NexRuntime.datetimeHour(" args-code ")")
+    "datetime_minute" (str "NexRuntime.datetimeMinute(" args-code ")")
+    "datetime_second" (str "NexRuntime.datetimeSecond(" args-code ")")
+    "datetime_epoch_millis" (str "NexRuntime.datetimeEpochMillis(" args-code ")")
+    "datetime_add_millis" (str "NexRuntime.datetimeAddMillis(" args-code ")")
+    "datetime_diff_millis" (str "NexRuntime.datetimeDiffMillis(" args-code ")")
+    "datetime_truncate_to_day" (str "NexRuntime.datetimeTruncateToDay(" args-code ")")
+    "datetime_truncate_to_hour" (str "NexRuntime.datetimeTruncateToHour(" args-code ")")
+    "datetime_format_iso" (str "NexRuntime.datetimeFormatIso(" args-code ")")
+    "path_exists" (str "NexRuntime.pathExists(" args-code ")")
+    "path_is_file" (str "NexRuntime.pathIsFile(" args-code ")")
+    "path_is_directory" (str "NexRuntime.pathIsDirectory(" args-code ")")
+    "path_name" (str "NexRuntime.pathName(" args-code ")")
+    "path_extension" (str "NexRuntime.pathExtension(" args-code ")")
+    "path_name_without_extension" (str "NexRuntime.pathNameWithoutExtension(" args-code ")")
+    "path_absolute" (str "NexRuntime.pathAbsolute(" args-code ")")
+    "path_normalize" (str "NexRuntime.pathNormalize(" args-code ")")
+    "path_size" (str "NexRuntime.pathSize(" args-code ")")
+    "path_modified_time" (str "NexRuntime.pathModifiedTime(" args-code ")")
+    "path_parent" (str "NexRuntime.pathParent(" args-code ")")
+    "path_child" (str "NexRuntime.pathChild(" args-code ")")
+    "path_create_file" (str "NexRuntime.pathCreateFile(" args-code ")")
+    "path_create_directory" (str "NexRuntime.pathCreateDirectory(" args-code ")")
+    "path_create_directories" (str "NexRuntime.pathCreateDirectories(" args-code ")")
+    "path_delete" (str "NexRuntime.pathDelete(" args-code ")")
+    "path_delete_tree" (str "NexRuntime.pathDeleteTree(" args-code ")")
+    "path_copy" (str "NexRuntime.pathCopy(" args-code ")")
+    "path_move" (str "NexRuntime.pathMove(" args-code ")")
+    "path_read_text" (str "NexRuntime.pathReadText(" args-code ")")
+    "path_write_text" (str "NexRuntime.pathWriteText(" args-code ")")
+    "path_append_text" (str "NexRuntime.pathAppendText(" args-code ")")
+    "path_list" (str "NexRuntime.pathList(" args-code ")")
+    "text_file_open_read" (str "NexRuntime.textFileOpenRead(" args-code ")")
+    "text_file_open_write" (str "NexRuntime.textFileOpenWrite(" args-code ")")
+    "text_file_open_append" (str "NexRuntime.textFileOpenAppend(" args-code ")")
+    "text_file_read_line" (str "NexRuntime.textFileReadLine(" args-code ")")
+    "text_file_write" (str "NexRuntime.textFileWrite(" args-code ")")
+    "text_file_close" (str "NexRuntime.textFileClose(" args-code ")")
+    "binary_file_open_read" (str "NexRuntime.binaryFileOpenRead(" args-code ")")
+    "binary_file_open_write" (str "NexRuntime.binaryFileOpenWrite(" args-code ")")
+    "binary_file_open_append" (str "NexRuntime.binaryFileOpenAppend(" args-code ")")
+    "binary_file_read_all" (str "NexRuntime.binaryFileReadAll(" args-code ")")
+    "binary_file_read" (str "NexRuntime.binaryFileRead(" args-code ")")
+    "binary_file_write" (str "NexRuntime.binaryFileWrite(" args-code ")")
+    "binary_file_close" (str "NexRuntime.binaryFileClose(" args-code ")")
+    "json_parse" (str "NexRuntime.jsonParse(" args-code ")")
+    "json_stringify" (str "NexRuntime.jsonStringify(" args-code ")")
+    "http_get" (str "NexRuntime.httpGet(" args-code ")")
+    "http_post" (str "NexRuntime.httpPost(" args-code ")")
+    "http_server_create" (str "NexRuntime.httpServerCreate(" args-code ")")
+    "http_server_get" (str "NexRuntime.httpServerGet(" args-code ")")
+    "http_server_post" (str "NexRuntime.httpServerPost(" args-code ")")
+    "http_server_put" (str "NexRuntime.httpServerPut(" args-code ")")
+    "http_server_delete" (str "NexRuntime.httpServerDelete(" args-code ")")
+    "http_server_start" (str "NexRuntime.httpServerStart(" args-code ")")
+    "http_server_stop" (str "NexRuntime.httpServerStop(" args-code ")")
+    "http_server_is_running" (str "NexRuntime.httpServerIsRunning(" args-code ")")
     "await_any" (str "NexRuntime.awaitAny(" args-code ")")
     "await_all" (str "NexRuntime.awaitAll(" args-code ")")
     ;; Default: use as-is (regular method call)
@@ -499,15 +568,6 @@
     "read_integer" (fn [_ _] "NexRuntime.parseInt(new java.util.Scanner(System.in).nextLine())")
     "read_real"    (fn [_ _] "Double.parseDouble(new java.util.Scanner(System.in).nextLine().trim())")}
 
-   :File
-   {"read"   (fn [t _] (str "java.nio.file.Files.readString(" t ".toPath())"))
-    "write"  (fn [t a] (str "java.nio.file.Files.writeString(" t ".toPath(), " a ")"))
-    "append" (fn [t a] (str "java.nio.file.Files.writeString(" t ".toPath(), " a ", java.nio.file.StandardOpenOption.APPEND)"))
-    "exists" (fn [t _] (str t ".exists()"))
-    "delete" (fn [t _] (str t ".delete()"))
-    "lines"  (fn [t _] (str "new ArrayList<>(java.nio.file.Files.readAllLines(" t ".toPath()))"))
-    "close"  (fn [t _] (str "/* " t ".close() */"))}
-
    :Process
    {"getenv"       (fn [_ a] (str "System.getenv(" a ")"))
     "setenv"       (fn [_ a] (str "/* setenv not supported in Java: " a " */"))
@@ -610,6 +670,78 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
+                  "regex_validate" "Void"
+                  "regex_matches" "Boolean"
+                  "regex_find" {:base-type "String" :detachable true}
+                  "regex_find_all" {:base-type "Array" :type-params ["String"]}
+                  "regex_replace" "String"
+                  "regex_split" {:base-type "Array" :type-params ["String"]}
+                  "datetime_now" "Integer64"
+                  "datetime_from_epoch_millis" "Integer64"
+                  "datetime_parse_iso" "Integer64"
+                  "datetime_make" "Integer64"
+                  "datetime_year" "Integer"
+                  "datetime_month" "Integer"
+                  "datetime_day" "Integer"
+                  "datetime_weekday" "Integer"
+                  "datetime_day_of_year" "Integer"
+                  "datetime_hour" "Integer"
+                  "datetime_minute" "Integer"
+                  "datetime_second" "Integer"
+                  "datetime_epoch_millis" "Integer64"
+                  "datetime_add_millis" "Integer64"
+                  "datetime_diff_millis" "Integer64"
+                  "datetime_truncate_to_day" "Integer64"
+                  "datetime_truncate_to_hour" "Integer64"
+                  "datetime_format_iso" "String"
+                  "path_exists" "Boolean"
+                  "path_is_file" "Boolean"
+                  "path_is_directory" "Boolean"
+                  "path_name" "String"
+                  "path_extension" "String"
+                  "path_name_without_extension" "String"
+                  "path_absolute" "String"
+                  "path_normalize" "String"
+                  "path_size" "Integer64"
+                  "path_modified_time" "Integer64"
+                  "path_parent" {:base-type "String" :detachable true}
+                  "path_child" "String"
+                  "path_create_file" "Void"
+                  "path_create_directory" "Void"
+                  "path_create_directories" "Void"
+                  "path_delete" "Void"
+                  "path_delete_tree" "Void"
+                  "path_copy" "Void"
+                  "path_move" "Void"
+                  "path_read_text" "String"
+                  "path_write_text" "Void"
+                  "path_append_text" "Void"
+                  "path_list" {:base-type "Array" :type-params ["String"]}
+                  "text_file_open_read" "Any"
+                  "text_file_open_write" "Any"
+                  "text_file_open_append" "Any"
+                  "text_file_read_line" {:base-type "String" :detachable true}
+                  "text_file_write" "Void"
+                  "text_file_close" "Void"
+                  "binary_file_open_read" "Any"
+                  "binary_file_open_write" "Any"
+                  "binary_file_open_append" "Any"
+                  "binary_file_read_all" {:base-type "Array" :type-params ["Integer"]}
+                  "binary_file_read" {:base-type "Array" :type-params ["Integer"]}
+                  "binary_file_write" "Void"
+                  "binary_file_close" "Void"
+                  "json_parse" "Any"
+                  "json_stringify" "String"
+                  "http_get" "Http_Response"
+                  "http_post" "Http_Response"
+                  "http_server_create" "Any"
+                  "http_server_get" "Void"
+                  "http_server_post" "Void"
+                  "http_server_put" "Void"
+                  "http_server_delete" "Void"
+                  "http_server_start" "Integer"
+                  "http_server_stop" "Void"
+                  "http_server_is_running" "Boolean"
                   "Any")
                 (case normalized-target
                 "Task" (case (:method expr)
@@ -920,8 +1052,8 @@
                       (str "<" (str/join ", " (map nex-type-to-java-boxed generic-args)) ">"))]
     (case class-name
       "Console" "new Object() /* Console */"
-      "File" (str "new java.io.File(" args-code ")")
       "Process" "new Object() /* Process */"
+      "Map" "new HashMap<>()"
       "Channel" (cond
                   (nil? constructor)
                   (str "new NexRuntime.Channel" (or type-params "<>") "()")
@@ -2042,71 +2174,67 @@
   "Generate Java code for a Nex class"
   ([class-def] (generate-class class-def {}))
   ([class-def opts]
-   (let [{:keys [name generic-params parents body note deferred?]} class-def
-         {:keys [fields constants methods constructors]} (extract-members body)
-         runtime-parents (vec (remove #(= "Any" (:parent %)) parents))
-         parent-names (mapv :parent runtime-parents)
-         parent-fm (build-parent-field-map parent-names)
-         own-flds (set (map :name fields))
-         all-constants (get-accessible-constants class-def)
-         constant-names (set (map :name all-constants))
-         own-method-names (set (map :name methods))
-         all-methods (get-all-method-names parent-names own-method-names)
-         fld-types (build-field-types fields parent-names)
-         effective-invariants (collect-effective-class-invariants class-def)]
-    (binding [*current-parents* (set parent-names)
-              *parent-field-map* parent-fm
-              *own-fields* own-flds
-              *constant-names* constant-names
-              *all-method-names* all-methods
-              *field-types* fld-types
-              *class-invariants* effective-invariants]
-     (let [
-           ;; Generate class Javadoc if note present
-           class-javadoc (when note
-                          [(generate-javadoc 0 note)])
-           class-header (generate-class-header name generic-params runtime-parents deferred?)
-           ;; Composition fields for parent classes
-           composition-fields (when (seq runtime-parents)
-                                (generate-composition-fields 1 runtime-parents))
-           invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
-                              (indent 1 (str "// Class invariant: "
-                                            (str/join ", " (map :label effective-invariants)))))
-           constants-code (map #(generate-field 1 (assoc % :constant? true)) all-constants)
-           fields-code (map #(generate-field 1 %) fields)
-           ;; Delegation methods for inherited methods not overridden
-           delegation-methods (when (seq runtime-parents)
-                                (generate-delegation-methods 1 runtime-parents own-method-names opts))
-           constructors-code (map #(generate-constructor 1 name % opts) constructors)
-           inherited-constructor-shims (when (seq runtime-parents)
-                                         (generate-inherited-constructor-shims 1 name runtime-parents (set (map :name constructors)) opts))
-           methods-with-effective-contracts
-           (map (fn [m]
-                  (let [effective (lookup-method-effective-contracts class-def (:name m))]
-                    (assoc m
-                           :require (:effective-require effective)
-                           :ensure (:effective-ensure effective))))
-                methods)
-           methods-code (map #(generate-method 1 % opts) methods-with-effective-contracts)]
-       (str/join "\n"
-                 (concat
-                  class-javadoc
-                  [class-header]
-                  (when invariant-comment [invariant-comment ""])
-                  composition-fields
-                  (when (seq composition-fields) [""])
-                  constants-code
-                  (when (seq all-constants) [""])
-                  fields-code
-                  (when (seq fields) [""])
-                  (when (seq delegation-methods) delegation-methods)
-                  (when (seq delegation-methods) [""])
-                  constructors-code
-                  (when (seq constructors) [""])
-                  (when (seq inherited-constructor-shims) inherited-constructor-shims)
-                  (when (seq inherited-constructor-shims) [""])
-                  methods-code
-                  ["}"])))))))
+   (let [{:keys [name generic-params parents body note deferred?]} class-def]
+     (let [{:keys [fields constants methods constructors]} (extract-members body)
+             runtime-parents (vec (remove #(= "Any" (:parent %)) parents))
+             parent-names (mapv :parent runtime-parents)
+             parent-fm (build-parent-field-map parent-names)
+             own-flds (set (map :name fields))
+             all-constants (get-accessible-constants class-def)
+             constant-names (set (map :name all-constants))
+             own-method-names (set (map :name methods))
+             all-methods (get-all-method-names parent-names own-method-names)
+             fld-types (build-field-types fields parent-names)
+             effective-invariants (collect-effective-class-invariants class-def)]
+         (binding [*current-parents* (set parent-names)
+                   *parent-field-map* parent-fm
+                   *own-fields* own-flds
+                   *constant-names* constant-names
+                   *all-method-names* all-methods
+                   *field-types* fld-types
+                   *class-invariants* effective-invariants]
+           (let [class-javadoc (when note
+                                 [(generate-javadoc 0 note)])
+                 class-header (generate-class-header name generic-params runtime-parents deferred?)
+                 composition-fields (when (seq runtime-parents)
+                                      (generate-composition-fields 1 runtime-parents))
+                 invariant-comment (when (and (seq effective-invariants) (not (:skip-contracts opts)))
+                                     (indent 1 (str "// Class invariant: "
+                                                    (str/join ", " (map :label effective-invariants)))))
+                 constants-code (map #(generate-field 1 (assoc % :constant? true)) all-constants)
+                 fields-code (map #(generate-field 1 %) fields)
+                 delegation-methods (when (seq runtime-parents)
+                                      (generate-delegation-methods 1 runtime-parents own-method-names opts))
+                 constructors-code (map #(generate-constructor 1 name % opts) constructors)
+                 inherited-constructor-shims (when (seq runtime-parents)
+                                               (generate-inherited-constructor-shims 1 name runtime-parents (set (map :name constructors)) opts))
+                 methods-with-effective-contracts
+                 (map (fn [m]
+                        (let [effective (lookup-method-effective-contracts class-def (:name m))]
+                          (assoc m
+                                 :require (:effective-require effective)
+                                 :ensure (:effective-ensure effective))))
+                      methods)
+                 methods-code (map #(generate-method 1 % opts) methods-with-effective-contracts)]
+             (str/join "\n"
+                       (concat
+                        class-javadoc
+                        [class-header]
+                        (when invariant-comment [invariant-comment ""])
+                        composition-fields
+                        (when (seq composition-fields) [""])
+                        constants-code
+                        (when (seq all-constants) [""])
+                        fields-code
+                        (when (seq fields) [""])
+                        (when (seq delegation-methods) delegation-methods)
+                        (when (seq delegation-methods) [""])
+                        constructors-code
+                        (when (seq constructors) [""])
+                        (when (seq inherited-constructor-shims) inherited-constructor-shims)
+                        (when (seq inherited-constructor-shims) [""])
+                        methods-code
+                        ["}"]))))))))
 
 (defn generate-nex-window-class
   "Generate Java source for NexWindow.java — Swing/AWT window with canvas."
@@ -2700,6 +2828,472 @@ public class NexTurtle {
        "      throw new RuntimeException(e);\n"
        "    }\n"
        "  }\n\n"
+       "  private static int regexFlags(String flags) {\n"
+       "    int out = 0;\n"
+       "    if (flags != null) {\n"
+       "      if (flags.contains(\"i\")) out |= java.util.regex.Pattern.CASE_INSENSITIVE;\n"
+       "      if (flags.contains(\"m\")) out |= java.util.regex.Pattern.MULTILINE;\n"
+       "    }\n"
+       "    return out;\n"
+       "  }\n"
+       "  private static java.util.regex.Pattern regexPattern(String pattern, String flags) {\n"
+       "    return java.util.regex.Pattern.compile(pattern, regexFlags(flags));\n"
+       "  }\n"
+       "  public static void regexValidate(String pattern, String flags) { regexPattern(pattern, flags); }\n"
+       "  public static boolean regexMatches(String pattern, String flags, String text) {\n"
+       "    return regexPattern(pattern, flags).matcher(text).matches();\n"
+       "  }\n"
+       "  public static String regexFind(String pattern, String flags, String text) {\n"
+       "    java.util.regex.Matcher m = regexPattern(pattern, flags).matcher(text);\n"
+       "    return m.find() ? m.group() : null;\n"
+       "  }\n"
+       "  public static ArrayList<String> regexFindAll(String pattern, String flags, String text) {\n"
+       "    java.util.regex.Matcher m = regexPattern(pattern, flags).matcher(text);\n"
+       "    ArrayList<String> out = new ArrayList<>();\n"
+       "    while (m.find()) out.add(m.group());\n"
+       "    return out;\n"
+       "  }\n"
+       "  public static String regexReplace(String pattern, String flags, String text, String replacement) {\n"
+       "    return regexPattern(pattern, flags).matcher(text).replaceAll(replacement);\n"
+       "  }\n"
+       "  public static ArrayList<String> regexSplit(String pattern, String flags, String text) {\n"
+       "    return new ArrayList<>(Arrays.asList(regexPattern(pattern, flags).split(text)));\n"
+       "  }\n"
+       "  public static long datetimeNow() { return java.time.Instant.now().toEpochMilli(); }\n"
+       "  public static long datetimeFromEpochMillis(long ms) { return ms; }\n"
+       "  public static long datetimeParseIso(String text) {\n"
+       "    try {\n"
+       "      return java.time.Instant.parse(text).toEpochMilli();\n"
+       "    } catch (Exception ex) {\n"
+       "      java.time.LocalDateTime ldt = java.time.LocalDateTime.parse(text);\n"
+       "      return ldt.atZone(java.time.ZoneOffset.UTC).toInstant().toEpochMilli();\n"
+       "    }\n"
+       "  }\n"
+       "  public static long datetimeMake(int year, int month, int day, int hour, int minute, int second) {\n"
+       "    return java.time.LocalDateTime.of(year, month, day, hour, minute, second)\n"
+       "      .atZone(java.time.ZoneOffset.UTC).toInstant().toEpochMilli();\n"
+       "  }\n"
+       "  private static java.time.ZonedDateTime datetimeUtc(long epochMs) {\n"
+       "    return java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(epochMs), java.time.ZoneOffset.UTC);\n"
+       "  }\n"
+       "  public static int datetimeYear(long epochMs) { return datetimeUtc(epochMs).getYear(); }\n"
+       "  public static int datetimeMonth(long epochMs) { return datetimeUtc(epochMs).getMonthValue(); }\n"
+       "  public static int datetimeDay(long epochMs) { return datetimeUtc(epochMs).getDayOfMonth(); }\n"
+       "  public static int datetimeWeekday(long epochMs) { return datetimeUtc(epochMs).getDayOfWeek().getValue(); }\n"
+       "  public static int datetimeDayOfYear(long epochMs) { return datetimeUtc(epochMs).getDayOfYear(); }\n"
+       "  public static int datetimeHour(long epochMs) { return datetimeUtc(epochMs).getHour(); }\n"
+       "  public static int datetimeMinute(long epochMs) { return datetimeUtc(epochMs).getMinute(); }\n"
+       "  public static int datetimeSecond(long epochMs) { return datetimeUtc(epochMs).getSecond(); }\n"
+       "  public static long datetimeEpochMillis(long epochMs) { return epochMs; }\n"
+       "  public static long datetimeAddMillis(long epochMs, long deltaMs) { return epochMs + deltaMs; }\n"
+       "  public static long datetimeDiffMillis(long leftMs, long rightMs) { return leftMs - rightMs; }\n"
+       "  public static long datetimeTruncateToDay(long epochMs) {\n"
+       "    return datetimeUtc(epochMs).withHour(0).withMinute(0).withSecond(0).withNano(0).toInstant().toEpochMilli();\n"
+       "  }\n"
+       "  public static long datetimeTruncateToHour(long epochMs) {\n"
+       "    return datetimeUtc(epochMs).withMinute(0).withSecond(0).withNano(0).toInstant().toEpochMilli();\n"
+       "  }\n"
+       "  public static String datetimeFormatIso(long epochMs) { return java.time.format.DateTimeFormatter.ISO_INSTANT.format(java.time.Instant.ofEpochMilli(epochMs)); }\n"
+       "  public static boolean pathExists(String path) { return new java.io.File(path).exists(); }\n"
+       "  public static boolean pathIsFile(String path) { return new java.io.File(path).isFile(); }\n"
+       "  public static boolean pathIsDirectory(String path) { return new java.io.File(path).isDirectory(); }\n"
+       "  public static String pathName(String path) { return new java.io.File(path).getName(); }\n"
+       "  public static String pathExtension(String path) {\n"
+       "    String name = pathName(path);\n"
+       "    int dot = name.lastIndexOf('.');\n"
+       "    return (dot <= 0 || dot == name.length() - 1) ? \"\" : name.substring(dot + 1);\n"
+       "  }\n"
+       "  public static String pathNameWithoutExtension(String path) {\n"
+       "    String name = pathName(path);\n"
+       "    int dot = name.lastIndexOf('.');\n"
+       "    return (dot <= 0) ? name : name.substring(0, dot);\n"
+       "  }\n"
+       "  public static String pathAbsolute(String path) { return new java.io.File(path).getAbsolutePath(); }\n"
+       "  public static String pathNormalize(String path) { return new java.io.File(path).toPath().normalize().toString(); }\n"
+       "  public static long pathSize(String path) { return new java.io.File(path).length(); }\n"
+       "  public static long pathModifiedTime(String path) { return new java.io.File(path).lastModified(); }\n"
+       "  public static String pathParent(String path) { return new java.io.File(path).getParent(); }\n"
+       "  public static String pathChild(String path, String childName) { return new java.io.File(path, childName).getPath(); }\n"
+       "  public static void pathCreateFile(String path) {\n"
+       "    try {\n"
+       "      new java.io.File(path).createNewFile();\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void pathCreateDirectory(String path) {\n"
+       "    if (!new java.io.File(path).mkdir() && !new java.io.File(path).isDirectory()) throw new RuntimeException(\"Could not create directory: \" + path);\n"
+       "  }\n"
+       "  public static void pathCreateDirectories(String path) {\n"
+       "    if (!new java.io.File(path).mkdirs() && !new java.io.File(path).isDirectory()) throw new RuntimeException(\"Could not create directories: \" + path);\n"
+       "  }\n"
+       "  public static void pathDelete(String path) {\n"
+       "    java.io.File f = new java.io.File(path);\n"
+       "    if (!f.exists()) return;\n"
+       "    if (f.isDirectory()) throw new RuntimeException(\"path_delete does not remove directories\");\n"
+       "    if (!f.delete()) throw new RuntimeException(\"Could not delete path: \" + path);\n"
+       "  }\n"
+       "  private static void deleteTree(java.io.File f) {\n"
+       "    if (!f.exists()) return;\n"
+       "    java.io.File[] children = f.listFiles();\n"
+       "    if (children != null) for (java.io.File child : children) deleteTree(child);\n"
+       "    if (!f.delete()) throw new RuntimeException(\"Could not delete path: \" + f.getPath());\n"
+       "  }\n"
+       "  public static void pathDeleteTree(String path) {\n"
+       "    deleteTree(new java.io.File(path));\n"
+       "  }\n"
+       "  private static void copyTree(java.io.File source, java.io.File target) {\n"
+       "    try {\n"
+       "      if (source.isDirectory()) {\n"
+       "        target.mkdirs();\n"
+       "        java.io.File[] children = source.listFiles();\n"
+       "        if (children != null) for (java.io.File child : children) copyTree(child, new java.io.File(target, child.getName()));\n"
+       "      } else {\n"
+       "        java.io.File parent = target.getParentFile();\n"
+       "        if (parent != null) parent.mkdirs();\n"
+       "        java.nio.file.Files.copy(source.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);\n"
+       "      }\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void pathCopy(String sourcePath, String targetPath) {\n"
+       "    copyTree(new java.io.File(sourcePath), new java.io.File(targetPath));\n"
+       "  }\n"
+       "  public static void pathMove(String sourcePath, String targetPath) {\n"
+       "    java.io.File source = new java.io.File(sourcePath);\n"
+       "    java.io.File target = new java.io.File(targetPath);\n"
+       "    java.io.File parent = target.getParentFile();\n"
+       "    if (parent != null) parent.mkdirs();\n"
+       "    if (!source.renameTo(target)) {\n"
+       "      copyTree(source, target);\n"
+       "      deleteTree(source);\n"
+       "    }\n"
+       "  }\n"
+       "  public static String pathReadText(String path) {\n"
+       "    try {\n"
+       "      return java.nio.file.Files.readString(java.nio.file.Paths.get(path), java.nio.charset.StandardCharsets.UTF_8);\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void pathWriteText(String path, String text) {\n"
+       "    try {\n"
+       "      java.nio.file.Files.writeString(java.nio.file.Paths.get(path), String.valueOf(text), java.nio.charset.StandardCharsets.UTF_8);\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void pathAppendText(String path, String text) {\n"
+       "    try {\n"
+       "      java.nio.file.Files.writeString(java.nio.file.Paths.get(path), String.valueOf(text), java.nio.charset.StandardCharsets.UTF_8,\n"
+       "        java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static ArrayList<String> pathList(String path) {\n"
+       "    java.io.File[] files = new java.io.File(path).listFiles();\n"
+       "    ArrayList<String> out = new ArrayList<>();\n"
+       "    if (files != null) for (java.io.File f : files) out.add(f.getPath());\n"
+       "    return out;\n"
+       "  }\n\n"
+       "  public static class TextFileHandle {\n"
+       "    public final java.io.BufferedReader reader;\n"
+       "    public final java.io.BufferedWriter writer;\n"
+       "    public TextFileHandle(java.io.BufferedReader reader, java.io.BufferedWriter writer) {\n"
+       "      this.reader = reader;\n"
+       "      this.writer = writer;\n"
+       "    }\n"
+       "  }\n"
+       "  public static Object textFileOpenRead(String path) {\n"
+       "    try {\n"
+       "      return new TextFileHandle(new java.io.BufferedReader(new java.io.InputStreamReader(new java.io.FileInputStream(path), java.nio.charset.StandardCharsets.UTF_8)), null);\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static Object textFileOpenWrite(String path) {\n"
+       "    try {\n"
+       "      return new TextFileHandle(null, new java.io.BufferedWriter(new java.io.OutputStreamWriter(new java.io.FileOutputStream(path, false), java.nio.charset.StandardCharsets.UTF_8)));\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static Object textFileOpenAppend(String path) {\n"
+       "    try {\n"
+       "      return new TextFileHandle(null, new java.io.BufferedWriter(new java.io.OutputStreamWriter(new java.io.FileOutputStream(path, true), java.nio.charset.StandardCharsets.UTF_8)));\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static String textFileReadLine(Object handleObj) {\n"
+       "    try {\n"
+       "      return ((TextFileHandle) handleObj).reader.readLine();\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void textFileWrite(Object handleObj, String text) {\n"
+       "    try {\n"
+       "      TextFileHandle handle = (TextFileHandle) handleObj;\n"
+       "      handle.writer.write(String.valueOf(text));\n"
+       "      handle.writer.flush();\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void textFileClose(Object handleObj) {\n"
+       "    try {\n"
+       "      TextFileHandle handle = (TextFileHandle) handleObj;\n"
+       "      if (handle.reader != null) handle.reader.close();\n"
+       "      if (handle.writer != null) handle.writer.close();\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n\n"
+       "  public static class BinaryFileHandle {\n"
+       "    public final byte[] data;\n"
+       "    public int index;\n"
+       "    public final java.io.FileOutputStream out;\n"
+       "    public BinaryFileHandle(byte[] data, int index, java.io.FileOutputStream out) {\n"
+       "      this.data = data;\n"
+       "      this.index = index;\n"
+       "      this.out = out;\n"
+       "    }\n"
+       "  }\n"
+       "  private static ArrayList<Integer> bytesToIntArray(byte[] bytes) {\n"
+       "    ArrayList<Integer> out = new ArrayList<>();\n"
+       "    for (byte b : bytes) out.add(b & 0xFF);\n"
+       "    return out;\n"
+       "  }\n"
+       "  private static byte[] intArrayToBytes(ArrayList<Integer> values) {\n"
+       "    byte[] out = new byte[values.size()];\n"
+       "    for (int i = 0; i < values.size(); i++) {\n"
+       "      int v = values.get(i);\n"
+       "      if (v < 0 || v > 255) throw new RuntimeException(\"Binary byte values must be in range 0..255\");\n"
+       "      out[i] = (byte) v;\n"
+       "    }\n"
+       "    return out;\n"
+       "  }\n"
+       "  public static Object binaryFileOpenRead(String path) {\n"
+       "    try {\n"
+       "      return new BinaryFileHandle(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)), 0, null);\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static Object binaryFileOpenWrite(String path) {\n"
+       "    try {\n"
+       "      return new BinaryFileHandle(null, 0, new java.io.FileOutputStream(path, false));\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static Object binaryFileOpenAppend(String path) {\n"
+       "    try {\n"
+       "      return new BinaryFileHandle(null, 0, new java.io.FileOutputStream(path, true));\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static ArrayList<Integer> binaryFileReadAll(Object handleObj) {\n"
+       "    return bytesToIntArray(((BinaryFileHandle) handleObj).data);\n"
+       "  }\n"
+       "  public static ArrayList<Integer> binaryFileRead(Object handleObj, int count) {\n"
+       "    BinaryFileHandle handle = (BinaryFileHandle) handleObj;\n"
+       "    int end = Math.min(handle.index + count, handle.data.length);\n"
+       "    byte[] out = java.util.Arrays.copyOfRange(handle.data, handle.index, end);\n"
+       "    handle.index = end;\n"
+       "    return bytesToIntArray(out);\n"
+       "  }\n"
+       "  public static void binaryFileWrite(Object handleObj, ArrayList<Integer> values) {\n"
+       "    try {\n"
+       "      BinaryFileHandle handle = (BinaryFileHandle) handleObj;\n"
+       "      handle.out.write(intArrayToBytes(values));\n"
+       "      handle.out.flush();\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void binaryFileClose(Object handleObj) {\n"
+       "    try {\n"
+       "      BinaryFileHandle handle = (BinaryFileHandle) handleObj;\n"
+       "      if (handle.out != null) handle.out.close();\n"
+       "    } catch (java.io.IOException ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n\n"
+       "  private static Http_Response httpRequest(String method, String url, String bodyText, Integer timeoutMs) {\n"
+       "    try {\n"
+       "      java.net.http.HttpRequest.Builder builder = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url));\n"
+       "      if (timeoutMs != null) builder.timeout(java.time.Duration.ofMillis(timeoutMs.longValue()));\n"
+       "      java.net.http.HttpRequest.BodyPublisher publisher = \"POST\".equals(method)\n"
+       "        ? java.net.http.HttpRequest.BodyPublishers.ofString(bodyText == null ? \"\" : bodyText)\n"
+       "        : java.net.http.HttpRequest.BodyPublishers.noBody();\n"
+       "      if (\"POST\".equals(method)) builder.POST(publisher); else builder.GET();\n"
+       "      java.net.http.HttpResponse<String> response = java.net.http.HttpClient.newBuilder().build()\n"
+       "        .send(builder.build(), java.net.http.HttpResponse.BodyHandlers.ofString());\n"
+       "      java.util.HashMap<String, String> headers = new java.util.HashMap<>();\n"
+       "      response.headers().map().forEach((k, v) -> headers.put(k, v.isEmpty() ? \"\" : String.valueOf(v.get(0))));\n"
+       "      return Http_Response.make(response.statusCode(), response.body(), headers);\n"
+       "    } catch (Exception ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n\n"
+       "  public static Http_Response httpGet(String url) { return httpRequest(\"GET\", url, null, null); }\n"
+       "  public static Http_Response httpGet(String url, int timeoutMs) { return httpRequest(\"GET\", url, null, timeoutMs); }\n"
+       "  public static Http_Response httpPost(String url, String bodyText) { return httpRequest(\"POST\", url, bodyText, null); }\n"
+       "  public static Http_Response httpPost(String url, String bodyText, int timeoutMs) { return httpRequest(\"POST\", url, bodyText, timeoutMs); }\n\n"
+       "  public static class HttpServerRoute {\n"
+       "    public final String pathPattern;\n"
+       "    public final Function handler;\n"
+       "    public HttpServerRoute(String pathPattern, Function handler) {\n"
+       "      this.pathPattern = pathPattern;\n"
+       "      this.handler = handler;\n"
+       "    }\n"
+       "  }\n\n"
+       "  public static class HttpServerMatch {\n"
+       "    public final Function handler;\n"
+       "    public final java.util.Map<String, String> params;\n"
+       "    public HttpServerMatch(Function handler, java.util.Map<String, String> params) {\n"
+       "      this.handler = handler;\n"
+       "      this.params = params;\n"
+       "    }\n"
+       "  }\n\n"
+       "  public static class HttpServerHandle {\n"
+       "    public int port;\n"
+       "    public com.sun.net.httpserver.HttpServer server;\n"
+       "    public java.util.Map<String, java.util.List<HttpServerRoute>> routes = new java.util.HashMap<>();\n"
+       "    public HttpServerHandle(int port) {\n"
+       "      this.port = port;\n"
+       "      this.routes.put(\"GET\", new java.util.ArrayList<>());\n"
+       "      this.routes.put(\"POST\", new java.util.ArrayList<>());\n"
+       "      this.routes.put(\"PUT\", new java.util.ArrayList<>());\n"
+       "      this.routes.put(\"DELETE\", new java.util.ArrayList<>());\n"
+       "    }\n"
+       "  }\n\n"
+       "  private static java.util.List<String> httpPathSegments(String path) {\n"
+       "    java.util.ArrayList<String> out = new java.util.ArrayList<>();\n"
+       "    if (path == null || path.isEmpty() || \"/\".equals(path)) return out;\n"
+       "    for (String part : path.split(\"/\")) if (!part.isEmpty()) out.add(part);\n"
+       "    return out;\n"
+       "  }\n"
+       "  private static String httpUrlDecode(String s) {\n"
+       "    try {\n"
+       "      return java.net.URLDecoder.decode(String.valueOf(s == null ? \"\" : s), java.nio.charset.StandardCharsets.UTF_8);\n"
+       "    } catch (Exception ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  private static java.util.Map<String, String> httpParseQuery(String query) {\n"
+       "    java.util.HashMap<String, String> out = new java.util.HashMap<>();\n"
+       "    if (query == null || query.isEmpty()) return out;\n"
+       "    for (String part : query.split(\"&\")) {\n"
+       "      if (part.isEmpty()) continue;\n"
+       "      String[] pieces = part.split(\"=\", 2);\n"
+       "      String key = httpUrlDecode(pieces[0]);\n"
+       "      String value = httpUrlDecode(pieces.length > 1 ? pieces[1] : \"\");\n"
+       "      out.put(key, value);\n"
+       "    }\n"
+       "    return out;\n"
+       "  }\n"
+       "  private static java.util.Map<String, String> httpMatchRoute(String pattern, String path) {\n"
+       "    java.util.List<String> patternSegments = httpPathSegments(pattern);\n"
+       "    java.util.List<String> pathSegments = httpPathSegments(path);\n"
+       "    java.util.HashMap<String, String> params = new java.util.HashMap<>();\n"
+       "    int i = 0;\n"
+       "    int j = 0;\n"
+       "    while (i < patternSegments.size() && j < pathSegments.size()) {\n"
+       "      String p = patternSegments.get(i);\n"
+       "      String x = pathSegments.get(j);\n"
+       "      if (\"*\".equals(p)) {\n"
+       "        params.put(\"*\", String.join(\"/\", pathSegments.subList(j, pathSegments.size())));\n"
+       "        return params;\n"
+       "      }\n"
+       "      if (p.startsWith(\":\")) {\n"
+       "        params.put(p.substring(1), httpUrlDecode(x));\n"
+       "        i++; j++;\n"
+       "        continue;\n"
+       "      }\n"
+       "      if (!p.equals(x)) return null;\n"
+       "      i++; j++;\n"
+       "    }\n"
+       "    if (i == patternSegments.size() && j == pathSegments.size()) return params;\n"
+       "    if (i < patternSegments.size() && \"*\".equals(patternSegments.get(i))) {\n"
+       "      params.put(\"*\", String.join(\"/\", pathSegments.subList(j, pathSegments.size())));\n"
+       "      return params;\n"
+       "    }\n"
+       "    return null;\n"
+       "  }\n"
+       "  private static HttpServerMatch httpFindRoute(HttpServerHandle handle, String method, String path) {\n"
+       "    for (HttpServerRoute route : handle.routes.getOrDefault(method, java.util.Collections.emptyList())) {\n"
+       "      java.util.Map<String, String> params = httpMatchRoute(route.pathPattern, path);\n"
+       "      if (params != null) return new HttpServerMatch(route.handler, params);\n"
+       "    }\n"
+       "    return null;\n"
+       "  }\n\n"
+       "  public static Object httpServerCreate(int port) { return new HttpServerHandle(port); }\n"
+       "  public static void httpServerGet(Object handleObj, String path, Function handler) {\n"
+       "    HttpServerHandle handle = (HttpServerHandle) handleObj;\n"
+       "    handle.routes.get(\"GET\").add(new HttpServerRoute(path, handler));\n"
+       "  }\n"
+       "  public static void httpServerPost(Object handleObj, String path, Function handler) {\n"
+       "    HttpServerHandle handle = (HttpServerHandle) handleObj;\n"
+       "    handle.routes.get(\"POST\").add(new HttpServerRoute(path, handler));\n"
+       "  }\n"
+       "  public static void httpServerPut(Object handleObj, String path, Function handler) {\n"
+       "    HttpServerHandle handle = (HttpServerHandle) handleObj;\n"
+       "    handle.routes.get(\"PUT\").add(new HttpServerRoute(path, handler));\n"
+       "  }\n"
+       "  public static void httpServerDelete(Object handleObj, String path, Function handler) {\n"
+       "    HttpServerHandle handle = (HttpServerHandle) handleObj;\n"
+       "    handle.routes.get(\"DELETE\").add(new HttpServerRoute(path, handler));\n"
+       "  }\n"
+       "  public static int httpServerStart(Object handleObj) {\n"
+       "    HttpServerHandle handle = (HttpServerHandle) handleObj;\n"
+       "    try {\n"
+       "      com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(\"127.0.0.1\", handle.port), 0);\n"
+       "      server.createContext(\"/\", exchange -> {\n"
+       "        String method = exchange.getRequestMethod();\n"
+       "        java.net.URI uri = exchange.getRequestURI();\n"
+       "        String path = uri.getPath();\n"
+       "        HttpServerMatch match = httpFindRoute(handle, method, path);\n"
+       "        Http_Server_Response response;\n"
+       "        if (match == null) {\n"
+       "          response = Http_Server_Response.with_status(404, \"Not Found\");\n"
+       "        } else {\n"
+       "          String body = new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);\n"
+       "          java.util.HashMap<String, String> headers = new java.util.HashMap<>();\n"
+       "          exchange.getRequestHeaders().forEach((k, v) -> headers.put(k, v.isEmpty() ? \"\" : String.valueOf(v.get(0))));\n"
+       "          Http_Request request = Http_Request.make(method, path, body, headers, match.params, httpParseQuery(uri.getRawQuery()));\n"
+       "          Object out = match.handler.call1(request);\n"
+       "          response = (out == null) ? Http_Server_Response.with_status(204, \"\") : (Http_Server_Response) out;\n"
+       "        }\n"
+       "        response.headers().forEach((k, v) -> exchange.getResponseHeaders().add(String.valueOf(k), String.valueOf(v)));\n"
+       "        byte[] bytes = response.body().getBytes(java.nio.charset.StandardCharsets.UTF_8);\n"
+       "        exchange.sendResponseHeaders(response.status(), bytes.length);\n"
+       "        try (java.io.OutputStream os = exchange.getResponseBody()) { os.write(bytes); }\n"
+       "      });\n"
+       "      server.start();\n"
+       "      handle.server = server;\n"
+       "      handle.port = server.getAddress().getPort();\n"
+       "      return handle.port;\n"
+       "    } catch (Exception ex) {\n"
+       "      throw new RuntimeException(ex);\n"
+       "    }\n"
+       "  }\n"
+       "  public static void httpServerStop(Object handleObj) {\n"
+       "    HttpServerHandle handle = (HttpServerHandle) handleObj;\n"
+       "    if (handle.server != null) {\n"
+       "      handle.server.stop(0);\n"
+       "      handle.server = null;\n"
+       "    }\n"
+       "  }\n"
+       "  public static boolean httpServerIsRunning(Object handleObj) {\n"
+       "    HttpServerHandle handle = (HttpServerHandle) handleObj;\n"
+       "    return handle.server != null;\n"
+       "  }\n\n"
        "  public static long parseLong(String raw) {\n"
        "    String s = raw.trim().replace(\"_\", \"\");\n"
        "    boolean negative = s.startsWith(\"-\");\n"
@@ -2721,6 +3315,183 @@ public class NexTurtle {
        "  }\n\n"
        "  public static int parseInt(String raw) {\n"
        "    return (int) parseLong(raw);\n"
+       "  }\n\n"
+       "  private static String jsonEscape(String s) {\n"
+       "    StringBuilder out = new StringBuilder();\n"
+       "    for (int i = 0; i < s.length(); i++) {\n"
+       "      char c = s.charAt(i);\n"
+       "      switch (c) {\n"
+       "        case '\"': out.append(\"\\\\\\\"\"); break;\n"
+       "        case '\\\\': out.append(\"\\\\\\\\\"); break;\n"
+       "        case '\\b': out.append(\"\\\\b\"); break;\n"
+       "        case '\\f': out.append(\"\\\\f\"); break;\n"
+       "        case '\\n': out.append(\"\\\\n\"); break;\n"
+       "        case '\\r': out.append(\"\\\\r\"); break;\n"
+       "        case '\\t': out.append(\"\\\\t\"); break;\n"
+       "        default:\n"
+       "          if (c < 0x20) out.append(String.format(\"\\\\u%04x\", (int) c));\n"
+       "          else out.append(c);\n"
+       "      }\n"
+       "    }\n"
+       "    return out.toString();\n"
+       "  }\n"
+       "  private static String jsonStringifyValue(Object value) {\n"
+       "    if (value == null) return \"null\";\n"
+       "    if (value instanceof String || value instanceof Character) return \"\\\"\" + jsonEscape(String.valueOf(value)) + \"\\\"\";\n"
+       "    if (value instanceof Boolean || value instanceof Integer || value instanceof Long || value instanceof Double || value instanceof Float || value instanceof Short || value instanceof Byte || value instanceof java.math.BigDecimal) return String.valueOf(value);\n"
+       "    if (value instanceof java.util.Map<?, ?> map) {\n"
+       "      StringBuilder out = new StringBuilder(\"{\");\n"
+       "      boolean first = true;\n"
+       "      for (java.util.Map.Entry<?, ?> entry : map.entrySet()) {\n"
+       "        if (!first) out.append(',');\n"
+       "        first = false;\n"
+       "        out.append(\"\\\"\").append(jsonEscape(String.valueOf(entry.getKey()))).append(\"\\\":\").append(jsonStringifyValue(entry.getValue()));\n"
+       "      }\n"
+       "      out.append('}');\n"
+       "      return out.toString();\n"
+       "    }\n"
+       "    if (value instanceof java.util.Collection<?> coll) {\n"
+       "      StringBuilder out = new StringBuilder(\"[\");\n"
+       "      boolean first = true;\n"
+       "      for (Object item : coll) {\n"
+       "        if (!first) out.append(',');\n"
+       "        first = false;\n"
+       "        out.append(jsonStringifyValue(item));\n"
+       "      }\n"
+       "      out.append(']');\n"
+       "      return out.toString();\n"
+       "    }\n"
+       "    throw new RuntimeException(\"Value is not JSON-serializable: \" + value.getClass().getName());\n"
+       "  }\n"
+       "  public static String jsonStringify(Object value) {\n"
+       "    return jsonStringifyValue(value);\n"
+       "  }\n"
+       "  private static final class JsonParser {\n"
+       "    private final String src;\n"
+       "    private int idx;\n"
+       "    JsonParser(String src) { this.src = src; this.idx = 0; }\n"
+       "    Object parse() {\n"
+       "      skipWs();\n"
+       "      Object value = parseValue();\n"
+       "      skipWs();\n"
+       "      if (idx != src.length()) throw new RuntimeException(\"Unexpected trailing JSON content\");\n"
+       "      return value;\n"
+       "    }\n"
+       "    private void skipWs() {\n"
+       "      while (idx < src.length()) {\n"
+       "        char c = src.charAt(idx);\n"
+       "        if (c == ' ' || c == '\\n' || c == '\\r' || c == '\\t') idx++;\n"
+       "        else break;\n"
+       "      }\n"
+       "    }\n"
+       "    private Object parseValue() {\n"
+       "      skipWs();\n"
+       "      if (idx >= src.length()) throw new RuntimeException(\"Unexpected end of JSON input\");\n"
+       "      char c = src.charAt(idx);\n"
+       "      if (c == '{') return parseObject();\n"
+       "      if (c == '[') return parseArray();\n"
+       "      if (c == '\"') return parseString();\n"
+       "      if (c == 't' || c == 'f') return parseBoolean();\n"
+       "      if (c == 'n') return parseNull();\n"
+       "      return parseNumber();\n"
+       "    }\n"
+       "    private java.util.Map<String, Object> parseObject() {\n"
+       "      idx++;\n"
+       "      java.util.HashMap<String, Object> out = new java.util.HashMap<>();\n"
+       "      skipWs();\n"
+       "      if (idx < src.length() && src.charAt(idx) == '}') { idx++; return out; }\n"
+       "      while (true) {\n"
+       "        skipWs();\n"
+       "        String key = parseString();\n"
+       "        skipWs();\n"
+       "        expect(':');\n"
+       "        Object value = parseValue();\n"
+       "        out.put(key, value);\n"
+       "        skipWs();\n"
+       "        if (idx < src.length() && src.charAt(idx) == '}') { idx++; return out; }\n"
+       "        expect(',');\n"
+       "      }\n"
+       "    }\n"
+       "    private java.util.ArrayList<Object> parseArray() {\n"
+       "      idx++;\n"
+       "      java.util.ArrayList<Object> out = new java.util.ArrayList<>();\n"
+       "      skipWs();\n"
+       "      if (idx < src.length() && src.charAt(idx) == ']') { idx++; return out; }\n"
+       "      while (true) {\n"
+       "        out.add(parseValue());\n"
+       "        skipWs();\n"
+       "        if (idx < src.length() && src.charAt(idx) == ']') { idx++; return out; }\n"
+       "        expect(',');\n"
+       "      }\n"
+       "    }\n"
+       "    private String parseString() {\n"
+       "      expect('\"');\n"
+       "      StringBuilder out = new StringBuilder();\n"
+       "      while (idx < src.length()) {\n"
+       "        char c = src.charAt(idx++);\n"
+       "        if (c == '\"') return out.toString();\n"
+       "        if (c == '\\\\') {\n"
+       "          if (idx >= src.length()) throw new RuntimeException(\"Invalid JSON escape\");\n"
+       "          char e = src.charAt(idx++);\n"
+       "          switch (e) {\n"
+       "            case '\"': out.append('\"'); break;\n"
+       "            case '\\\\': out.append('\\\\'); break;\n"
+       "            case '/': out.append('/'); break;\n"
+       "            case 'b': out.append('\\b'); break;\n"
+       "            case 'f': out.append('\\f'); break;\n"
+       "            case 'n': out.append('\\n'); break;\n"
+       "            case 'r': out.append('\\r'); break;\n"
+       "            case 't': out.append('\\t'); break;\n"
+       "            case 'u':\n"
+       "              if (idx + 4 > src.length()) throw new RuntimeException(\"Invalid unicode escape\");\n"
+       "              out.append((char) Integer.parseInt(src.substring(idx, idx + 4), 16));\n"
+       "              idx += 4;\n"
+       "              break;\n"
+       "            default: throw new RuntimeException(\"Invalid JSON escape: \" + e);\n"
+       "          }\n"
+       "        } else {\n"
+       "          out.append(c);\n"
+       "        }\n"
+       "      }\n"
+       "      throw new RuntimeException(\"Unterminated JSON string\");\n"
+       "    }\n"
+       "    private Object parseBoolean() {\n"
+       "      if (src.startsWith(\"true\", idx)) { idx += 4; return true; }\n"
+       "      if (src.startsWith(\"false\", idx)) { idx += 5; return false; }\n"
+       "      throw new RuntimeException(\"Invalid JSON boolean\");\n"
+       "    }\n"
+       "    private Object parseNull() {\n"
+       "      if (src.startsWith(\"null\", idx)) { idx += 4; return null; }\n"
+       "      throw new RuntimeException(\"Invalid JSON null\");\n"
+       "    }\n"
+       "    private Object parseNumber() {\n"
+       "      int start = idx;\n"
+       "      if (src.charAt(idx) == '-') idx++;\n"
+       "      while (idx < src.length() && Character.isDigit(src.charAt(idx))) idx++;\n"
+       "      boolean real = false;\n"
+       "      if (idx < src.length() && src.charAt(idx) == '.') {\n"
+       "        real = true;\n"
+       "        idx++;\n"
+       "        while (idx < src.length() && Character.isDigit(src.charAt(idx))) idx++;\n"
+       "      }\n"
+       "      if (idx < src.length() && (src.charAt(idx) == 'e' || src.charAt(idx) == 'E')) {\n"
+       "        real = true;\n"
+       "        idx++;\n"
+       "        if (idx < src.length() && (src.charAt(idx) == '+' || src.charAt(idx) == '-')) idx++;\n"
+       "        while (idx < src.length() && Character.isDigit(src.charAt(idx))) idx++;\n"
+       "      }\n"
+       "      String token = src.substring(start, idx);\n"
+       "      if (real) return Double.parseDouble(token);\n"
+       "      long n = Long.parseLong(token);\n"
+       "      return (n >= Integer.MIN_VALUE && n <= Integer.MAX_VALUE) ? (int) n : n;\n"
+       "    }\n"
+       "    private void expect(char c) {\n"
+       "      if (idx >= src.length() || src.charAt(idx) != c) throw new RuntimeException(\"Expected '\" + c + \"' in JSON input\");\n"
+       "      idx++;\n"
+       "    }\n"
+       "  }\n"
+       "  public static Object jsonParse(String text) {\n"
+       "    return new JsonParser(String.valueOf(text)).parse();\n"
        "  }\n\n"
        "  public static int intPow(int base, int exponent) {\n"
        "    if (exponent < 0) throw new RuntimeException(\"Integral exponentiation requires a non-negative exponent\");\n"

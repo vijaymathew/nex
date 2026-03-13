@@ -37,6 +37,27 @@ Try Nex in the browser: https://schemer.in/nex.html
 
 ---
 
+## Library Reference
+
+Shipped Nex libraries under `lib/` are documented separately from the core runtime reference.
+See [docs/ref/libraries.md](docs/ref/libraries.md) for the library index, including the portable `Http_Client` and the JVM-only networking classes under `lib/net`.
+
+Example:
+
+```nex
+intern net/Tcp_Socket
+
+let sock: Tcp_Socket := create Tcp_Socket.make("example.com", 80)
+if sock.connect(500) then
+  sock.send_line("GET / HTTP/1.0")
+  sock.send_line("")
+  print(sock.read_line())
+  sock.close()
+end
+```
+
+---
+
 ## Language at a Glance
 
 ### Design by Contract
@@ -251,6 +272,10 @@ To install without `sudo`, target a user-local prefix:
 bash bootstrap-install.sh jvm --prefix "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+The installer also copies the shipped Nex libraries from `lib/` into `~/.nex/deps`,
+so `intern` can resolve standard library namespaces such as `io/Path`, `time/Date_Time`,
+and `net/Http_Client` from an installed Nex command.
 
 Supported platforms: Ubuntu, Debian, Fedora, CentOS, RHEL, Arch, Manjaro, macOS.
 

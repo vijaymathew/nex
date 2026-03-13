@@ -1006,3 +1006,101 @@ end"
       (is (str/includes? js-code "let __parent = A.make(x)"))
       (is (str/includes? js-code "let b = new B()"))
       (is (str/includes? js-code "Object.assign(b, __parent)")))))
+
+(deftest http-client-library-generation-test
+  (testing "Http_Client library lowers to ordinary classes plus runtime HTTP builtins"
+    (let [nex-code (slurp "lib/net/http_client.nex")
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "class Http_Client"))
+      (is (str/includes? js-code "class Http_Response"))
+      (is (str/includes? js-code "await fetch(url, options)"))
+      (is (str/includes? js-code "new AbortController()"))
+      (is (str/includes? js-code "new Map(response.headers.entries())"))
+      (is (str/includes? js-code "result = await __nexHttpGet(url);"))
+      (is (str/includes? js-code "result = await __nexHttpGet(url, timeout_ms);"))
+      (is (str/includes? js-code "result = await __nexHttpPost(url, body_text);"))
+      (is (str/includes? js-code "result = await __nexHttpPost(url, body_text, timeout_ms);")))))
+
+(deftest http-server-library-generation-test
+  (testing "Http_Server library lowers to ordinary classes plus runtime HTTP server builtins"
+    (let [nex-code (slurp "lib/net/http_server.nex")
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "class Http_Server"))
+      (is (str/includes? js-code "class Http_Request"))
+      (is (str/includes? js-code "class Http_Server_Response"))
+      (is (str/includes? js-code ".handle = __nexHttpServerCreate(port_value);"))
+      (is (str/includes? js-code "__nexHttpServerGet(this.handle, path, handler);"))
+      (is (str/includes? js-code "__nexHttpServerPost(this.handle, path, handler);"))
+      (is (str/includes? js-code "__nexHttpServerPut(this.handle, path, handler);"))
+      (is (str/includes? js-code "__nexHttpServerDelete(this.handle, path, handler);"))
+      (is (str/includes? js-code "this.port = await __nexHttpServerStart(this.handle);"))
+      (is (str/includes? js-code "__nexHttpServerIsRunning(this.handle)")))))
+
+(deftest json-library-generation-test
+  (testing "Json library lowers to ordinary class methods plus runtime JSON builtins"
+    (let [nex-code (slurp "lib/data/json.nex")
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "class Json"))
+      (is (str/includes? js-code "result = __nexJsonParse(text);"))
+      (is (str/includes? js-code "result = __nexJsonStringify(value);")))))
+
+(deftest time-library-generation-test
+  (testing "time libraries lower to ordinary classes plus runtime datetime builtins"
+    (let [duration-code (js/translate (slurp "lib/time/duration.nex") {:skip-type-check true})
+          datetime-code (js/translate (slurp "lib/time/date_time.nex") {:skip-type-check true})]
+      (is (str/includes? duration-code "class Duration"))
+      (is (str/includes? duration-code "static async minutes"))
+      (is (str/includes? datetime-code "class Date_Time"))
+      (is (str/includes? datetime-code "__nexDateTimeNow("))
+      (is (str/includes? datetime-code "__nexDateTimeParseIso("))
+      (is (str/includes? datetime-code "__nexDateTimeMake("))
+      (is (str/includes? datetime-code "__nexDateTimeWeekday("))
+      (is (str/includes? datetime-code "__nexDateTimeDayOfYear("))
+      (is (str/includes? datetime-code "__nexDateTimeTruncateToDay("))
+      (is (str/includes? datetime-code "__nexDateTimeTruncateToHour("))
+      (is (str/includes? datetime-code "__nexDateTimeFormatIso("))
+      (is (str/includes? datetime-code "__nexDateTimeAddMillis("))
+      (is (str/includes? datetime-code "__nexDateTimeDiffMillis(")))))
+
+(deftest text-library-generation-test
+  (testing "text libraries lower to ordinary classes plus runtime regex builtins"
+    (let [regex-code (js/translate (slurp "lib/text/regex.nex") {:skip-type-check true})]
+      (is (str/includes? regex-code "class Regex"))
+      (is (str/includes? regex-code "__nexRegexValidate("))
+      (is (str/includes? regex-code "__nexRegexMatches("))
+      (is (str/includes? regex-code "__nexRegexFindAll("))
+      (is (str/includes? regex-code "__nexRegexReplace("))
+      (is (str/includes? regex-code "__nexRegexSplit(")))))
+
+(deftest io-library-generation-test
+  (testing "io libraries lower to ordinary classes plus runtime IO builtins"
+    (let [path-code (js/translate (slurp "lib/io/path.nex"))
+          directory-code (js/translate (slurp "lib/io/directory.nex") {:skip-type-check true})
+          text-code (js/translate (slurp "lib/io/text_file.nex") {:skip-type-check true})
+          binary-code (js/translate (slurp "lib/io/binary_file.nex") {:skip-type-check true})]
+      (is (str/includes? path-code "class Path"))
+      (is (str/includes? path-code "__nexPathExists("))
+      (is (str/includes? path-code "__nexPathChild("))
+      (is (str/includes? path-code "__nexPathExtension("))
+      (is (str/includes? path-code "__nexPathNameWithoutExtension("))
+      (is (str/includes? path-code "__nexPathAbsolute("))
+      (is (str/includes? path-code "__nexPathNormalize("))
+      (is (str/includes? path-code "__nexPathSize("))
+      (is (str/includes? path-code "__nexPathModifiedTime("))
+      (is (str/includes? path-code "__nexPathList("))
+      (is (str/includes? path-code "__nexPathCopy("))
+      (is (str/includes? path-code "__nexPathMove("))
+      (is (str/includes? path-code "__nexPathDeleteTree("))
+      (is (str/includes? directory-code "class Directory"))
+      (is (str/includes? directory-code "create_directory()"))
+      (is (str/includes? directory-code "directories()"))
+      (is (str/includes? directory-code "copy_to(target)"))
+      (is (str/includes? directory-code "move_to(target)"))
+      (is (str/includes? text-code "class Text_File"))
+      (is (str/includes? text-code "__nexTextFileOpenRead("))
+      (is (str/includes? text-code "__nexTextFileReadLine("))
+      (is (str/includes? text-code "__nexTextFileWrite("))
+      (is (str/includes? binary-code "class Binary_File"))
+      (is (str/includes? binary-code "__nexBinaryFileOpenWrite("))
+      (is (str/includes? binary-code "__nexBinaryFileRead("))
+      (is (str/includes? binary-code "__nexBinaryFileWrite(")))))

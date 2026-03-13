@@ -10,6 +10,7 @@ INSTALL_DEPS=false
 INSTALL_PREFIX="${INSTALL_PREFIX:-/usr/local}"
 BIN_DIR="$INSTALL_PREFIX/bin"
 LIB_DIR="$INSTALL_PREFIX/lib/nex"
+USER_DEPS_DIR="${HOME}/.nex/deps"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -331,6 +332,26 @@ install_files() {
     echo ""
 }
 
+install_shipped_libraries() {
+    echo "Installing shipped Nex libraries to $USER_DEPS_DIR..."
+
+    mkdir -p "$USER_DEPS_DIR"
+
+    if [[ -d "lib" ]]; then
+        shopt -s nullglob
+        for entry in lib/*; do
+            name="$(basename "$entry")"
+            target="$USER_DEPS_DIR/$name"
+            rm -rf "$target"
+            cp -r "$entry" "$target"
+            echo "  ✓ Installed library namespace $name"
+        done
+        shopt -u nullglob
+    fi
+
+    echo ""
+}
+
 # Install executable
 install_executable() {
     echo "Installing nex executable..."
@@ -377,6 +398,7 @@ main() {
     build
     setup_directories
     install_files
+    install_shipped_libraries
     install_executable
     verify_installation
 
@@ -388,6 +410,7 @@ main() {
     echo "  Target:      $TARGET"
     echo "  Executable:  $BIN_DIR/nex"
     echo "  Library:     $LIB_DIR"
+    echo "  Shipped lib: $USER_DEPS_DIR"
     echo ""
     echo "Try it out:"
     echo "  nex                  # Start REPL"

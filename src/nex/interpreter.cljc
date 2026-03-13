@@ -1,7 +1,14 @@
 (ns nex.interpreter
   (:require [clojure.string :as str]
             #?(:clj [nex.parser :as parser])
-            #?(:clj [clojure.data.json :as json])
+            [nex.types.runtime :as rt]
+            [nex.types.json :as json-types]
+            [nex.types.http :as http]
+            [nex.types.datetime :as dt]
+            [nex.types.regex :as regex-types]
+            [nex.types.value :as value]
+            [nex.types.typeinfo :as typeinfo]
+            [nex.types.bootstrap :as bootstrap]
             #?(:clj [nex.turtle :as turtle]
                :cljs [nex.turtle-browser :as turtle]))
   #?(:clj (:import [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException])))
@@ -12,234 +19,170 @@
 (declare lookup-method-with-inheritance)
 (declare lookup-class)
 (declare call-builtin-method)
+(declare make-object)
+(declare invoke-http-server-handler)
+
+(defn- lowercase-filename
+  [class-name]
+  (-> class-name str/lower-case))
+
+(defn- intern-filenames
+  [class-name]
+  (distinct [(str class-name ".nex")
+             (str (lowercase-filename class-name) ".nex")]))
 
 ;;
-;; Mutable Collections (platform abstraction)
+;; Runtime type helpers imported from nex.types.*
 ;;
 
-;; Array helpers
-(defn nex-array [] #?(:clj (java.util.ArrayList.) :cljs #js []))
-(defn nex-array-from [coll] #?(:clj (java.util.ArrayList. (vec coll)) :cljs (js/Array.from (to-array coll))))
-(defn nex-array? [v] #?(:clj (instance? java.util.ArrayList v) :cljs (array? v)))
-(defn nex-array-get [arr idx] #?(:clj (.get arr idx) :cljs (aget arr idx)))
-(defn nex-array-add [arr val] #?(:clj (.add arr val) :cljs (.push arr val)))
-(defn nex-array-add-at [arr idx val] #?(:clj (.add arr idx val) :cljs (.splice arr idx 0 val)))
-(defn nex-array-set [arr idx val] #?(:clj (.set arr idx val) :cljs (aset arr idx val)))
-(defn nex-array-size [arr] #?(:clj (.size arr) :cljs (.-length arr)))
-(defn nex-array-empty? [arr] #?(:clj (.isEmpty arr) :cljs (zero? (.-length arr))))
-(defn nex-array-contains [arr elem] #?(:clj (.contains arr elem) :cljs (.includes arr elem)))
-(defn nex-array-index-of [arr elem] #?(:clj (.indexOf arr elem) :cljs (.indexOf arr elem)))
-(defn nex-array-remove [arr idx] #?(:clj (.remove arr (int idx)) :cljs (.splice arr idx 1)))
-(defn nex-array-reverse [arr] #?(:clj (java.util.ArrayList. (.reversed arr)) :cljs (js/Array.from (.reverse (.slice arr)))))
-(defn nex-array-sort [arr] #?(:clj (.sort arr nil) :cljs (.sort arr)))
-(defn nex-array-slice [arr start end] #?(:clj (.subList arr start end) :cljs (.slice arr start end)))
-(defn nex-array-str [arr]
-  (str "[" (str/join ", " (map nex-format-value #?(:clj arr :cljs (array-seq arr)))) "]"))
+(def nex-array rt/nex-array)
+(def nex-array-from rt/nex-array-from)
+(def nex-array? rt/nex-array?)
+(def nex-array-get rt/nex-array-get)
+(def nex-array-add rt/nex-array-add)
+(def nex-array-add-at rt/nex-array-add-at)
+(def nex-array-set rt/nex-array-set)
+(def nex-array-size rt/nex-array-size)
+(def nex-array-empty? rt/nex-array-empty?)
+(def nex-array-contains rt/nex-array-contains)
+(def nex-array-index-of rt/nex-array-index-of)
+(def nex-array-remove rt/nex-array-remove)
+(def nex-array-reverse rt/nex-array-reverse)
+(def nex-array-sort rt/nex-array-sort)
+(def nex-array-slice rt/nex-array-slice)
+(defn nex-array-str [arr] (rt/nex-array-str nex-format-value arr))
 
-;; Map helpers
-(defn nex-map [] #?(:clj (java.util.HashMap.) :cljs (js/Map.)))
-(defn nex-map-from [pairs]
-  #?(:clj (java.util.HashMap. (into {} pairs))
-     :cljs (js/Map. (to-array (map to-array pairs)))))
-(defn nex-map? [v] #?(:clj (instance? java.util.HashMap v) :cljs (instance? js/Map v)))
-(defn nex-map-get [m key] #?(:clj (.get m key) :cljs (.get m key)))
-(defn nex-map-put [m key val] #?(:clj (.put m key val) :cljs (.set m key val)))
-(defn nex-map-size [m] #?(:clj (.size m) :cljs (.-size m)))
-(defn nex-map-empty? [m] #?(:clj (.isEmpty m) :cljs (zero? (.-size m))))
-(defn nex-map-contains-key [m key] #?(:clj (.containsKey m key) :cljs (.has m key)))
-(defn nex-map-keys [m] #?(:clj (vec (.keySet m)) :cljs (vec (es6-iterator-seq (.keys m)))))
-(defn nex-map-values [m] #?(:clj (vec (.values m)) :cljs (vec (es6-iterator-seq (.values m)))))
-(defn nex-map-remove [m key] #?(:clj (.remove m key) :cljs (.delete m key)))
-(defn nex-map-str [m]
-  (let [entries #?(:clj (for [[k v] m] (str (nex-format-value k) ": " (nex-format-value v)))
-                   :cljs (for [[k v] (es6-iterator-seq (.entries m))] (str (nex-format-value k) ": " (nex-format-value v))))]
-    (str "{" (str/join ", " entries) "}")))
+(def nex-map rt/nex-map)
+(def nex-map-from rt/nex-map-from)
+(def nex-map? rt/nex-map?)
+(def nex-map-get rt/nex-map-get)
+(def nex-map-put rt/nex-map-put)
+(def nex-map-size rt/nex-map-size)
+(def nex-map-empty? rt/nex-map-empty?)
+(def nex-map-contains-key rt/nex-map-contains-key)
+(def nex-map-keys rt/nex-map-keys)
+(def nex-map-values rt/nex-map-values)
+(def nex-map-remove rt/nex-map-remove)
+(defn nex-map-str [m] (rt/nex-map-str nex-format-value m))
 
-(defn nex-set [] #?(:clj (java.util.LinkedHashSet.) :cljs (js/Set.)))
-(defn nex-set-from [coll]
-  #?(:clj (doto (java.util.LinkedHashSet.)
-            (#(doseq [v coll] (.add % v))))
-     :cljs (js/Set. (to-array coll))))
-(defn nex-set? [v] #?(:clj (instance? java.util.LinkedHashSet v) :cljs (instance? js/Set v)))
-(defn nex-set-contains [s v] #?(:clj (.contains s v) :cljs (.has s v)))
-(defn nex-set-size [s] #?(:clj (.size s) :cljs (.-size s)))
-(defn nex-set-empty? [s] #?(:clj (.isEmpty s) :cljs (zero? (.-size s))))
-(defn nex-set-union [a b]
-  #?(:clj (let [out (java.util.LinkedHashSet. a)]
-            (.addAll out b)
-            out)
-     :cljs (nex-set-from (concat (es6-iterator-seq (.values a))
-                                 (es6-iterator-seq (.values b))))))
-(defn nex-set-difference [a b]
-  #?(:clj (let [out (java.util.LinkedHashSet. a)]
-            (.removeAll out b)
-            out)
-     :cljs (nex-set-from (remove #(.has b %) (es6-iterator-seq (.values a))))))
-(defn nex-set-intersection [a b]
-  #?(:clj (let [out (java.util.LinkedHashSet. a)]
-            (.retainAll out b)
-            out)
-     :cljs (nex-set-from (filter #(.has b %) (es6-iterator-seq (.values a))))))
-(defn nex-set-symmetric-difference [a b]
-  #?(:clj (let [out (java.util.LinkedHashSet.)]
-            (doseq [v a]
-              (when-not (.contains b v) (.add out v)))
-            (doseq [v b]
-              (when-not (.contains a v) (.add out v)))
-            out)
-     :cljs (nex-set-from (concat (remove #(.has b %) (es6-iterator-seq (.values a)))
-                                 (remove #(.has a %) (es6-iterator-seq (.values b)))))))
-(defn nex-set-str [s]
-  (str "#{"
-       (str/join ", " (map nex-format-value #?(:clj (seq s) :cljs (es6-iterator-seq (.values s)))))
-       "}"))
+(def nex-set rt/nex-set)
+(def nex-set-from rt/nex-set-from)
+(def nex-set? rt/nex-set?)
+(def nex-set-contains rt/nex-set-contains)
+(def nex-set-size rt/nex-set-size)
+(def nex-set-empty? rt/nex-set-empty?)
+(def nex-set-union rt/nex-set-union)
+(def nex-set-difference rt/nex-set-difference)
+(def nex-set-intersection rt/nex-set-intersection)
+(def nex-set-symmetric-difference rt/nex-set-symmetric-difference)
+(defn nex-set-str [s] (rt/nex-set-str nex-format-value s))
 
-;; 32-bit bitwise helpers for Integer built-ins
-(defn- int32 [n]
-  #?(:clj (int n)
-     :cljs (bit-or n 0)))
+(def nex-bitwise-left-shift rt/nex-bitwise-left-shift)
+(def nex-bitwise-right-shift rt/nex-bitwise-right-shift)
+(def nex-bitwise-logical-right-shift rt/nex-bitwise-logical-right-shift)
+(def nex-bitwise-rotate-left rt/nex-bitwise-rotate-left)
+(def nex-bitwise-rotate-right rt/nex-bitwise-rotate-right)
+(def nex-bitwise-and rt/nex-bitwise-and)
+(def nex-bitwise-or rt/nex-bitwise-or)
+(def nex-bitwise-xor rt/nex-bitwise-xor)
+(def nex-bitwise-not rt/nex-bitwise-not)
+(def nex-bitwise-is-set rt/nex-bitwise-is-set)
+(def nex-bitwise-set rt/nex-bitwise-set)
+(def nex-bitwise-unset rt/nex-bitwise-unset)
+(def nex-abs rt/nex-abs)
+(def nex-round rt/nex-round)
+(def nex-int-pow rt/nex-int-pow)
 
-(defn- bit-index [n]
-  #?(:clj (bit-and (int n) 31)
-     :cljs (bit-and n 31)))
+(def nex-console-print rt/nex-console-print)
+(def nex-console-println rt/nex-console-println)
+(def nex-console-error rt/nex-console-error)
+(def nex-console-newline rt/nex-console-newline)
+(def nex-console-read-line rt/nex-console-read-line)
+(def nex-parse-integer64-string rt/nex-parse-integer64-string)
+(def nex-parse-integer rt/nex-parse-integer)
+(def nex-parse-real rt/nex-parse-real)
 
-(defn nex-bitwise-left-shift [n shift]
-  (int32 (bit-shift-left (int32 n) (bit-index shift))))
+(def nex-process-getenv rt/nex-process-getenv)
+(def nex-process-setenv rt/nex-process-setenv)
+(def nex-process-command-line rt/nex-process-command-line)
 
-(defn nex-bitwise-right-shift [n shift]
-  (int32 (bit-shift-right (int32 n) (bit-index shift))))
+#?(:clj
+   (defn- http-response-headers->nex-map
+     [headers]
+     (http/http-response-headers->nex-map headers)))
 
-(defn nex-bitwise-logical-right-shift [n shift]
-  #?(:clj (long (bit-shift-right (bit-and 0xFFFFFFFF (long (int32 n)))
-                                 (bit-index shift)))
-     :cljs (js* "(~{} >>> ~{})" (int32 n) (bit-index shift))))
+#?(:clj
+   (defn- make-http-response-object
+     [status body headers]
+     (http/make-http-response-object make-object status body headers)))
 
-(defn nex-bitwise-rotate-left [n shift]
-  #?(:clj (Integer/rotateLeft (int32 n) (bit-index shift))
-     :cljs (let [x (int32 n)
-                 s (bit-index shift)]
-             (int32 (bit-or (bit-shift-left x s)
-                            (js* "(~{} >>> ~{})" x (- 32 s)))))))
+#?(:clj
+   (defn- make-http-server-request-object
+     [method-name path-value body-text header-map route-params query-map]
+     (http/make-http-server-request-object make-object method-name path-value body-text header-map route-params query-map)))
 
-(defn nex-bitwise-rotate-right [n shift]
-  #?(:clj (Integer/rotateRight (int32 n) (bit-index shift))
-     :cljs (let [x (int32 n)
-                 s (bit-index shift)]
-             (int32 (bit-or (js* "(~{} >>> ~{})" x s)
-                            (bit-shift-left x (- 32 s)))))))
+#?(:clj
+   (defn- make-http-server-default-response-object
+     []
+     (http/make-http-server-default-response-object make-object)))
 
-(defn nex-bitwise-and [n other]
-  (int32 (bit-and (int32 n) (int32 other))))
+#?(:clj
+   (defn- http-exchange-headers->nex-map
+     [headers]
+     (http/http-exchange-headers->nex-map headers)))
 
-(defn nex-bitwise-or [n other]
-  (int32 (bit-or (int32 n) (int32 other))))
+#?(:clj
+   (defn- java-http-request
+     [method url body timeout-ms]
+     (http/java-http-request make-object method url body timeout-ms)))
 
-(defn nex-bitwise-xor [n other]
-  (int32 (bit-xor (int32 n) (int32 other))))
+#?(:clj
+   (defn- make-http-server-handle
+     [port]
+     (http/make-http-server-handle port)))
 
-(defn nex-bitwise-not [n]
-  (int32 (bit-not (int32 n))))
+#?(:clj (def url-decode http/url-decode))
+#?(:clj (def path-segments http/path-segments))
+#?(:clj (def parse-query-map http/parse-query-map))
+#?(:clj (def route-match http/route-match))
+#?(:clj (def find-route http/find-route))
+#?(:clj (def http-server-response-status http/http-server-response-status))
+#?(:clj (def http-server-response-body http/http-server-response-body))
+#?(:clj (def http-server-response-headers http/http-server-response-headers))
 
-(defn nex-bitwise-is-set [n idx]
-  (not (zero? (bit-and (int32 n) (bit-shift-left 1 (bit-index idx))))))
+#?(:clj
+   (defn- start-http-server!
+     [ctx handle]
+     (http/start-http-server!
+      make-object
+      (fn [inner-ctx handler request-obj]
+        (invoke-http-server-handler inner-ctx handler request-obj))
+      ctx
+      handle)))
 
-(defn nex-bitwise-set [n idx]
-  (int32 (bit-or (int32 n) (bit-shift-left 1 (bit-index idx)))))
+#?(:clj
+   (defn- invoke-http-server-handler
+     [ctx handler request-obj]
+     (eval-node ctx {:type :call
+                     :target {:type :literal :value handler}
+                     :method "call1"
+                     :args [{:type :literal :value request-obj}]})))
 
-(defn nex-bitwise-unset [n idx]
-  (int32 (bit-and (int32 n) (bit-not (bit-shift-left 1 (bit-index idx))))))
 
-;; Math helpers
-(defn nex-abs [n]
-  (if (neg? n) (- n) n))
-(defn nex-round [n] #?(:clj (Math/round (double n)) :cljs (js/Math.round n)))
-
-(defn nex-int-pow
-  "Raise an integral base to an integral exponent, preserving an integral result.
-   Negative exponents are rejected because they cannot be represented as integers."
-  [base exponent]
-  (when (neg? exponent)
-    (throw (ex-info "Integral exponentiation requires a non-negative exponent"
-                    {:base base :exponent exponent})))
-  (loop [acc 1
-         b base
-         e exponent]
-    (if (zero? e)
-      acc
-      (recur (if (odd? e) (* acc b) acc)
-             (* b b)
-             (quot e 2)))))
-
-;; Console helpers
-(defn nex-console-print [msg] #?(:clj (print msg) :cljs (.write js/process.stdout (str msg))))
-(defn nex-console-println [msg] #?(:clj (println msg) :cljs (js/console.log msg)))
-(defn nex-console-error [msg] #?(:clj (binding [*out* *err*] (println msg)) :cljs (js/console.error msg)))
-(defn nex-console-newline [] #?(:clj (println) :cljs (js/console.log "")))
-(defn nex-console-read-line [] #?(:clj (read-line) :cljs (throw (ex-info "read-line not supported in ClojureScript" {}))))
-(defn nex-parse-integer64-string [s]
-  (let [trimmed (str/trim s)
-        negative? (str/starts-with? trimmed "-")
-        unsigned (if negative? (subs trimmed 1) trimmed)
-        normalized (str/replace unsigned "_" "")
-        [radix digits] (cond
-                         (str/starts-with? normalized "0b") [2 (subs normalized 2)]
-                         (str/starts-with? normalized "0o") [8 (subs normalized 2)]
-                         (str/starts-with? normalized "0x") [16 (subs normalized 2)]
-                         :else [10 normalized])
-        parsed #?(:clj (Long/parseLong digits radix)
-                  :cljs (js/parseInt digits radix))]
-    (if negative? (- parsed) parsed)))
-(defn nex-parse-integer [s] #?(:clj (int (nex-parse-integer64-string s))
-                               :cljs (nex-parse-integer64-string s)))
-(defn nex-parse-real [s] #?(:clj (Double/parseDouble (.trim s)) :cljs (js/parseFloat s)))
-
-;; File helpers
-(defn nex-file-read [path] #?(:clj (slurp path) :cljs (.toString (.readFileSync (js/require "fs") path "utf8"))))
-(defn nex-file-write [path content] #?(:clj (spit path content) :cljs (.writeFileSync (js/require "fs") path content "utf8")))
-(defn nex-file-append [path content] #?(:clj (spit path content :append true) :cljs (.appendFileSync (js/require "fs") path content "utf8")))
-(defn nex-file-exists? [path] #?(:clj (.exists (java.io.File. path)) :cljs (.existsSync (js/require "fs") path)))
-(defn nex-file-delete [path] #?(:clj (.delete (java.io.File. path)) :cljs (.unlinkSync (js/require "fs") path)))
-(defn nex-file-lines [path] #?(:clj (nex-array-from (str/split-lines (slurp path)))
-                                :cljs (nex-array-from (.split (.toString (.readFileSync (js/require "fs") path "utf8")) "\n"))))
-
-;; Process helpers
-(defn nex-process-getenv [name]
-  #?(:clj (System/getenv name)
-     :cljs (aget (.-env js/process) name)))
-(defn nex-process-setenv [name value]
-  #?(:clj (throw (ex-info "setenv is not supported on the JVM" {:name name}))
-     :cljs (aset (.-env js/process) name value)))
-(defn nex-process-command-line []
-  #?(:clj (nex-array-from (into [] (.getInputArguments (java.lang.management.ManagementFactory/getRuntimeMXBean))))
-     :cljs (nex-array-from (vec (.-argv js/process)))))
-
-;; Built-in IO type detection
-(defn nex-console? [v] (and (map? v) (= (:nex-builtin-type v) :Console)))
-(defn nex-file? [v] (and (map? v) (= (:nex-builtin-type v) :File)))
-(defn nex-process? [v] (and (map? v) (= (:nex-builtin-type v) :Process)))
-(defn nex-window? [v] (and (map? v) (= (:nex-builtin-type v) :Window)))
-(defn nex-turtle? [v] (and (map? v) (= (:nex-builtin-type v) :Turtle)))
-(defn nex-image? [v] (and (map? v) (= (:nex-builtin-type v) :Image)))
-(defn nex-task? [v] (and (map? v) (= (:nex-builtin-type v) :Task)))
-(defn nex-channel? [v] (and (map? v) (= (:nex-builtin-type v) :Channel)))
-
-;; Cursor type detection
-(defn nex-array-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :ArrayCursor)))
-(defn nex-string-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :StringCursor)))
-(defn nex-map-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :MapCursor)))
-(defn nex-set-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :SetCursor)))
-
-;; Subscript helper (works on both Array and Map)
-(defn nex-coll-get [coll idx]
-  (cond
-    (nex-array? coll) (nex-array-get coll idx)
-    (nex-map? coll) (nex-map-get coll idx)
-    :else #?(:clj (.get coll idx) :cljs (aget coll idx))))
-
-;; Char detection helper
-(defn nex-char? [v]
-  #?(:clj (char? v)
-     :cljs (and (string? v) (== (.-length v) 1))))
+;; Built-in IO / cursor / primitive predicates imported from nex.types.runtime
+(def nex-console? rt/nex-console?)
+(def nex-process? rt/nex-process?)
+(def nex-window? rt/nex-window?)
+(def nex-turtle? rt/nex-turtle?)
+(def nex-image? rt/nex-image?)
+(def nex-task? rt/nex-task?)
+(def nex-channel? rt/nex-channel?)
+(def nex-array-cursor? rt/nex-array-cursor?)
+(def nex-string-cursor? rt/nex-string-cursor?)
+(def nex-map-cursor? rt/nex-map-cursor?)
+(def nex-set-cursor? rt/nex-set-cursor?)
+(def nex-coll-get rt/nex-coll-get)
+(def nex-char? rt/nex-char?)
 
 ;;
 ;; Runtime Environment
@@ -289,112 +232,12 @@
 
 (declare register-class)
 
-(defn- build-function-base-class
-  "Create the built-in Function base class definition."
-  []
-  (let [make-method (fn [n]
-                      {:type :method
-                       :name (str "call" n)
-                       :params (if (zero? 0)
-                                 []
-                                 (mapv (fn [i]
-                                         {:name (str "arg" i) :type "Any"})
-                                       (range 1 (inc n))))
-                       :return-type "Any"
-                       :note nil
-                       :require nil
-                       :body []
-                       :ensure nil})
-        methods (vec (cons (make-method 0) (mapv make-method (range 1 33))))]
-    {:type :class
-     :name "Function"
-     :generic-params nil
-     :note nil
-     :parents nil
-     :body [{:type :feature-section
-             :visibility {:type :public}
-             :members methods}]
-     :invariant nil}))
-
-(defn- build-cursor-base-class
-  "Create the built-in Cursor base class definition.
-   Cursor defines the iteration interface: start, item, next, at_end.
-   Array, String, and Map are conceptual subclasses."
-  []
-  {:type :class
-   :name "Cursor"
-   :generic-params nil
-   :note nil
-   :parents nil
-   :body [{:type :feature-section
-           :visibility {:type :public}
-           :members [{:type :method :name "start" :params nil :return-type nil
-                      :note nil :require nil :body [] :ensure nil}
-                     {:type :method :name "item" :params nil :return-type "Any"
-                      :note nil :require nil :body [] :ensure nil}
-                     {:type :method :name "next" :params nil :return-type nil
-                      :note nil :require nil :body [] :ensure nil}
-                     {:type :method :name "at_end" :params nil :return-type "Boolean"
-                      :note nil :require nil :body [] :ensure nil}]}]
-   :invariant nil})
-
-(defn- build-comparable-base-class
-  "Create the built-in deferred Comparable class."
-  []
-  {:type :class
-   :name "Comparable"
-   :deferred? true
-   :generic-params nil
-   :note nil
-   :parents nil
-   :body [{:type :feature-section
-           :visibility {:type :public}
-           :members [{:type :method :name "compare"
-                      :params [{:name "a" :type "Any"}]
-                      :return-type "Integer"
-                      :note nil :require nil :body [] :ensure nil}]}]
-   :invariant nil})
-
-(defn- build-any-base-class
-  "Create the built-in Any root class definition."
-  []
-  {:type :class
-   :name "Any"
-   :deferred? false
-   :generic-params nil
-   :note nil
-   :parents nil
-   :body []
-   :invariant nil})
-
-(defn- build-hashable-base-class
-  "Create the built-in deferred Hashable class."
-  []
-  {:type :class
-   :name "Hashable"
-   :deferred? true
-   :generic-params nil
-   :note nil
-   :parents nil
-   :body [{:type :feature-section
-           :visibility {:type :public}
-           :members [{:type :method :name "hash"
-                      :params nil
-                      :return-type "Integer"
-                      :note nil :require nil :body [] :ensure nil}]}]
-   :invariant nil})
-
-(defn- build-builtin-scalar-class
-  "Create a built-in scalar class definition that implements Comparable and Hashable."
-  [name]
-  {:type :class
-   :name name
-   :deferred? false
-   :generic-params nil
-   :note nil
-   :parents [{:parent "Any"} {:parent "Comparable"} {:parent "Hashable"}]
-   :body []
-   :invariant nil})
+(def build-function-base-class bootstrap/build-function-base-class)
+(def build-cursor-base-class bootstrap/build-cursor-base-class)
+(def build-comparable-base-class bootstrap/build-comparable-base-class)
+(def build-any-base-class bootstrap/build-any-base-class)
+(def build-hashable-base-class bootstrap/build-hashable-base-class)
+(def build-builtin-scalar-class bootstrap/build-builtin-scalar-class)
 
 (defn make-context
   "Create a new runtime context."
@@ -1394,7 +1237,7 @@
 
 (defn lookup-method-in-class
   "Look up a method in a specific class (without searching parents)."
-  [class-def method-name]
+  [class-def method-name arg-count]
   (->> (:body class-def)
        (mapcat (fn [section]
                  (cond
@@ -1403,16 +1246,18 @@
                    :else [])))
        (filter #(= (:type %) :method))
        (filter #(= (:name %) method-name))
+       (filter #(or (nil? arg-count)
+                    (= (count (or (:params %) [])) arg-count)))
        first))
 
 (defn lookup-method-with-inheritance
   "Look up a method in a class, searching parent classes if needed."
-  [ctx class-def method-name]
+  [ctx class-def method-name arg-count]
   ;; First look in the current class
-  (if-let [method (lookup-method-in-class class-def method-name)]
+  (if-let [method (lookup-method-in-class class-def method-name arg-count)]
     (let [base-lookup (when-let [parents (get-parent-classes ctx class-def)]
                         (some (fn [parent-info]
-                                (lookup-method-with-inheritance ctx (:class-def parent-info) method-name))
+                                (lookup-method-with-inheritance ctx (:class-def parent-info) method-name arg-count))
                               parents))
           effective-require (combine-preconditions (:effective-require base-lookup)
                                                    (:require method))
@@ -1425,7 +1270,7 @@
     ;; If not found, search parent classes
     (when-let [parents (get-parent-classes ctx class-def)]
       (some (fn [parent-info]
-              (lookup-method-with-inheritance ctx (:class-def parent-info) method-name))
+              (lookup-method-with-inheritance ctx (:class-def parent-info) method-name arg-count))
             parents))))
 
 (defn is-parent?
@@ -1436,51 +1281,17 @@
       (or (some #(= (:parent %) parent-name) parents)
           (some #(is-parent? ctx (:parent %) parent-name) parents)))))
 
-(defn- runtime-type-name
-  "Return runtime type/class name as string for convert checks."
-  [value]
-  (cond
-    (nil? value) "Nil"
-    (nex-object? value) (:class-name value)
-    :else (some-> (get-type-name value) name)))
+(defn- runtime-type-name [value]
+  (typeinfo/runtime-type-name nex-object? get-type-name value))
 
-(defn- numeric-subtype-runtime?
-  "Runtime numeric widening chain used by type_is:
-   Integer <: Integer64 <: Real <: Decimal."
-  [runtime-type target-type]
-  (or (and (= runtime-type "Integer")
-           (#{"Integer64" "Real" "Decimal"} target-type))
-      (and (= runtime-type "Integer64")
-           (#{"Real" "Decimal"} target-type))
-      (and (= runtime-type "Real")
-           (= target-type "Decimal"))))
+(def numeric-subtype-runtime? typeinfo/numeric-subtype-runtime?)
+(def cursor-subtype-runtime? typeinfo/cursor-subtype-runtime?)
 
-(defn- cursor-subtype-runtime?
-  [runtime-type target-type]
-  (and (#{"ArrayCursor" "StringCursor" "MapCursor" "SetCursor"} runtime-type)
-       (= target-type "Cursor")))
+(defn- runtime-type-is? [ctx target-type value]
+  (typeinfo/runtime-type-is? runtime-type-name is-parent? ctx target-type value))
 
-(defn- runtime-type-is?
-  "Whether value's runtime type is target-type or subtype of target-type."
-  [ctx target-type value]
-  (let [runtime-type (runtime-type-name value)]
-    (cond
-      (not (string? target-type)) false
-      (nil? runtime-type) false
-      (= target-type "Any") true
-      (= runtime-type target-type) true
-      (numeric-subtype-runtime? runtime-type target-type) true
-      (cursor-subtype-runtime? runtime-type target-type) true
-      (and runtime-type (is-parent? ctx runtime-type target-type)) true
-      :else false)))
-
-(defn- convert-compatible-runtime?
-  "Java-style runtime conversion relation:
-   value must be an instance of target type (or target supertype)."
-  [ctx runtime-type target-type]
-  (or (= target-type "Any")
-      (= runtime-type target-type)
-      (and runtime-type (is-parent? ctx runtime-type target-type))))
+(defn- convert-compatible-runtime? [ctx runtime-type target-type]
+  (typeinfo/convert-compatible-runtime? is-parent? ctx runtime-type target-type))
 
 (defn eval-class-constant
   "Evaluate a class constant value with inherited constant bindings available."
@@ -1558,138 +1369,20 @@
       :else
       nil)))
 
-(defn nex-format-value
-  "Format a value as-per Nex syntax rules."
-  [value]
-  (cond
-    ;; Nex objects
-    (instance? nex.interpreter.NexObject value)
-    (str "#<" (:class-name value) " object>")
-
-    ;; Built-in types with :nex-builtin-type
-    (and (map? value) (:nex-builtin-type value))
-    (str "#<" (name (:nex-builtin-type value)) ">")
-
-    ;; Strings - show without quotes for direct display
-    (string? value)
-    (str \" value \")
-
-    ;; Clojure integer division can produce exact ratios; format them as reals
-    ;; so JVM REPL output matches the browser/runtime surface.
-    #?(:clj (ratio? value) :cljs false)
-    (str (double value))
-
-    ;; Numbers
-    (number? value)
-    (str value)
-
-    ;; Booleans
-    (boolean? value)
-    (str value)
-
-    ;; Nil
-    (nil? value)
-    "nil"
-
-    ;; Collections
-    (nex-map? value)
-    (nex-map-str value)
-
-    (nex-array? value)
-    (nex-array-str value)
-
-    (nex-set? value)
-    (nex-set-str value)
-
-    (coll? value)
-    (pr-str value)
-
-    (char? value)
-    (str "#" value)
-
-    ;; Everything else
-    :else
-    (pr-str value)))
+(defn nex-format-value [value]
+  (value/nex-format-value nex-object? nex-map-str nex-array-str nex-set-str value))
 
 (defn- nex-clone-value [value]
-  (cond
-    (instance? nex.interpreter.NexObject value)
-    (make-object (:class-name value)
-                 (into {} (map (fn [[k v]] [k (nex-clone-value v)]) (:fields value)))
-                 (:closure-env value))
+  (value/nex-clone-value nex-object? make-object value))
 
-    (nex-array? value)
-    (nex-array-from (map nex-clone-value #?(:clj value :cljs (array-seq value))))
-
-    (nex-map? value)
-    #?(:clj (java.util.HashMap. (into {} (map (fn [[k v]] [(nex-clone-value k) (nex-clone-value v)]) value)))
-       :cljs (js/Map. (to-array (map (fn [[k v]] (to-array [(nex-clone-value k) (nex-clone-value v)]))
-                                     (es6-iterator-seq (.entries value))))))
-
-    (nex-set? value)
-    #?(:clj (doto (java.util.LinkedHashSet.)
-              (#(doseq [v value] (.add % (nex-clone-value v)))))
-       :cljs (js/Set. (to-array (map nex-clone-value (es6-iterator-seq (.values value))))))
-
-    (and (map? value) (:nex-builtin-type value))
-    (into {} value)
-
-    :else
-    value))
-
-(declare nex-deep-equals?)
-
-(defn- nex-map-entry-match?
-  [m2 k1 v1]
-  (some (fn [[k2 v2]]
-          (and (nex-deep-equals? k1 k2)
-               (nex-deep-equals? v1 v2)))
-        #?(:clj m2 :cljs (es6-iterator-seq (.entries m2)))))
+(defn- nex-map-entry-match? [m2 k1 v1]
+  (value/nex-map-entry-match? nex-object? k1 v1 m2))
 
 (defn- nex-deep-equals? [a b]
-  (cond
-    (and (instance? nex.interpreter.NexObject a)
-         (instance? nex.interpreter.NexObject b))
-    (and (= (:class-name a) (:class-name b))
-         (= (set (keys (:fields a))) (set (keys (:fields b))))
-         (every? (fn [k] (nex-deep-equals? (get (:fields a) k) (get (:fields b) k)))
-                 (keys (:fields a))))
+  (value/nex-deep-equals? nex-object? a b))
 
-    (and (nex-array? a) (nex-array? b))
-    (and (= (nex-array-size a) (nex-array-size b))
-         (every? true? (map nex-deep-equals?
-                            #?(:clj a :cljs (array-seq a))
-                            #?(:clj b :cljs (array-seq b)))))
-
-    (and (nex-map? a) (nex-map? b))
-    (and (= (nex-map-size a) (nex-map-size b))
-         (every? (fn [[k v]] (nex-map-entry-match? b k v))
-                 #?(:clj a :cljs (es6-iterator-seq (.entries a)))))
-
-    (and (nex-set? a) (nex-set? b))
-    (and (= (nex-set-size a) (nex-set-size b))
-         (every? (fn [v1]
-                   (some #(nex-deep-equals? v1 %)
-                         #?(:clj b :cljs (es6-iterator-seq (.values b)))))
-                 #?(:clj a :cljs (es6-iterator-seq (.values a)))))
-
-    :else
-    (= a b)))
-
-(defn nex-display-value
-  "Format a value for Console output.
-   Scalars keep their user-facing form; structured values use Nex syntax."
-  [value]
-  (cond
-    (or (nex-map? value)
-        (nex-array? value)
-        (nex-set? value)
-        (nil? value)
-        (nex-object? value)
-        (and (map? value) (:nex-builtin-type value)))
-    (nex-format-value value)
-    :else
-    (str value)))
+(defn nex-display-value [value]
+  (value/nex-display-value nex-object? nex-format-value value))
 
 ;;
 ;; Built-in Functions
@@ -1760,7 +1453,548 @@
                        {:function "sleep" :expected 1 :actual (count args)})))
      #?(:clj (Thread/sleep (long (first args)))
         :cljs nil)
-     nil)})
+     nil)
+
+   "http_get"
+   (fn [_ctx & args]
+     (when-not (or (= (count args) 1) (= (count args) 2))
+       (throw (ex-info "http_get expects 1 or 2 arguments"
+                       {:function "http_get" :expected "1 or 2" :actual (count args)})))
+     (let [[url timeout-ms] args]
+       #?(:clj (java-http-request "GET" (str url) nil timeout-ms)
+          :cljs (throw (ex-info "http_get is not supported in the ClojureScript interpreter"
+                                {:function "http_get"})))))
+
+   "http_post"
+   (fn [_ctx & args]
+     (when-not (or (= (count args) 2) (= (count args) 3))
+       (throw (ex-info "http_post expects 2 or 3 arguments"
+                       {:function "http_post" :expected "2 or 3" :actual (count args)})))
+     (let [[url body timeout-ms] args]
+       #?(:clj (java-http-request "POST" (str url) (str body) timeout-ms)
+          :cljs (throw (ex-info "http_post is not supported in the ClojureScript interpreter"
+                                {:function "http_post"})))))
+
+   "json_parse"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "json_parse expects exactly 1 argument"
+                       {:function "json_parse" :expected 1 :actual (count args)})))
+     #?(:clj (json-types/nex-json-parse (first args))
+        :cljs (throw (ex-info "json_parse is not supported in the ClojureScript interpreter"
+                              {:function "json_parse"}))))
+
+   "json_stringify"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "json_stringify expects exactly 1 argument"
+                       {:function "json_stringify" :expected 1 :actual (count args)})))
+     #?(:clj (json-types/nex-json-stringify (first args))
+        :cljs (throw (ex-info "json_stringify is not supported in the ClojureScript interpreter"
+                              {:function "json_stringify"}))))
+
+   "regex_validate"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "regex_validate expects exactly 2 arguments" {:function "regex_validate"})))
+     #?(:clj (regex-types/regex-validate (first args) (second args))
+        :cljs (throw (ex-info "regex_validate is not supported in the ClojureScript interpreter"
+                              {:function "regex_validate"}))))
+
+   "regex_matches"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "regex_matches expects exactly 3 arguments" {:function "regex_matches"})))
+     #?(:clj (apply regex-types/regex-matches? args)
+        :cljs (throw (ex-info "regex_matches is not supported in the ClojureScript interpreter"
+                              {:function "regex_matches"}))))
+
+   "regex_find"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "regex_find expects exactly 3 arguments" {:function "regex_find"})))
+     #?(:clj (apply regex-types/regex-find args)
+        :cljs (throw (ex-info "regex_find is not supported in the ClojureScript interpreter"
+                              {:function "regex_find"}))))
+
+   "regex_find_all"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "regex_find_all expects exactly 3 arguments" {:function "regex_find_all"})))
+     #?(:clj (apply regex-types/regex-find-all args)
+        :cljs (throw (ex-info "regex_find_all is not supported in the ClojureScript interpreter"
+                              {:function "regex_find_all"}))))
+
+   "regex_replace"
+   (fn [_ctx & args]
+     (when (not= (count args) 4)
+       (throw (ex-info "regex_replace expects exactly 4 arguments" {:function "regex_replace"})))
+     #?(:clj (apply regex-types/regex-replace args)
+        :cljs (throw (ex-info "regex_replace is not supported in the ClojureScript interpreter"
+                              {:function "regex_replace"}))))
+
+   "regex_split"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "regex_split expects exactly 3 arguments" {:function "regex_split"})))
+     #?(:clj (apply regex-types/regex-split args)
+        :cljs (throw (ex-info "regex_split is not supported in the ClojureScript interpreter"
+                              {:function "regex_split"}))))
+
+   "datetime_now"
+   (fn [_ctx & args]
+     (when (not= (count args) 0)
+       (throw (ex-info "datetime_now expects exactly 0 arguments" {:function "datetime_now"})))
+     #?(:clj (dt/datetime-now)
+        :cljs (throw (ex-info "datetime_now is not supported in the ClojureScript interpreter"
+                              {:function "datetime_now"}))))
+
+   "datetime_from_epoch_millis"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_from_epoch_millis expects exactly 1 argument" {:function "datetime_from_epoch_millis"})))
+     #?(:clj (dt/datetime-from-epoch-millis (first args))
+        :cljs (throw (ex-info "datetime_from_epoch_millis is not supported in the ClojureScript interpreter"
+                              {:function "datetime_from_epoch_millis"}))))
+
+   "datetime_parse_iso"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_parse_iso expects exactly 1 argument" {:function "datetime_parse_iso"})))
+     #?(:clj (dt/datetime-parse-iso (first args))
+        :cljs (throw (ex-info "datetime_parse_iso is not supported in the ClojureScript interpreter"
+                              {:function "datetime_parse_iso"}))))
+
+   "datetime_make"
+   (fn [_ctx & args]
+     (when (not= (count args) 6)
+       (throw (ex-info "datetime_make expects exactly 6 arguments" {:function "datetime_make"})))
+     #?(:clj (apply dt/datetime-make args)
+        :cljs (throw (ex-info "datetime_make is not supported in the ClojureScript interpreter"
+                              {:function "datetime_make"}))))
+
+   "datetime_year"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_year expects exactly 1 argument" {:function "datetime_year"})))
+     #?(:clj (dt/datetime-year (first args))
+        :cljs (throw (ex-info "datetime_year is not supported in the ClojureScript interpreter"
+                              {:function "datetime_year"}))))
+
+   "datetime_month"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_month expects exactly 1 argument" {:function "datetime_month"})))
+     #?(:clj (dt/datetime-month (first args))
+        :cljs (throw (ex-info "datetime_month is not supported in the ClojureScript interpreter"
+                              {:function "datetime_month"}))))
+
+   "datetime_day"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_day expects exactly 1 argument" {:function "datetime_day"})))
+     #?(:clj (dt/datetime-day (first args))
+        :cljs (throw (ex-info "datetime_day is not supported in the ClojureScript interpreter"
+                              {:function "datetime_day"}))))
+
+   "datetime_weekday"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_weekday expects exactly 1 argument" {:function "datetime_weekday"})))
+     #?(:clj (dt/datetime-weekday (first args))
+        :cljs (throw (ex-info "datetime_weekday is not supported in the ClojureScript interpreter"
+                              {:function "datetime_weekday"}))))
+
+   "datetime_day_of_year"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_day_of_year expects exactly 1 argument" {:function "datetime_day_of_year"})))
+     #?(:clj (dt/datetime-day-of-year (first args))
+        :cljs (throw (ex-info "datetime_day_of_year is not supported in the ClojureScript interpreter"
+                              {:function "datetime_day_of_year"}))))
+
+   "datetime_hour"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_hour expects exactly 1 argument" {:function "datetime_hour"})))
+     #?(:clj (dt/datetime-hour (first args))
+        :cljs (throw (ex-info "datetime_hour is not supported in the ClojureScript interpreter"
+                              {:function "datetime_hour"}))))
+
+   "datetime_minute"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_minute expects exactly 1 argument" {:function "datetime_minute"})))
+     #?(:clj (dt/datetime-minute (first args))
+        :cljs (throw (ex-info "datetime_minute is not supported in the ClojureScript interpreter"
+                              {:function "datetime_minute"}))))
+
+   "datetime_second"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_second expects exactly 1 argument" {:function "datetime_second"})))
+     #?(:clj (dt/datetime-second (first args))
+        :cljs (throw (ex-info "datetime_second is not supported in the ClojureScript interpreter"
+                              {:function "datetime_second"}))))
+
+   "datetime_epoch_millis"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_epoch_millis expects exactly 1 argument" {:function "datetime_epoch_millis"})))
+     #?(:clj (dt/datetime-epoch-millis (first args))
+        :cljs (throw (ex-info "datetime_epoch_millis is not supported in the ClojureScript interpreter"
+                              {:function "datetime_epoch_millis"}))))
+
+   "datetime_add_millis"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "datetime_add_millis expects exactly 2 arguments" {:function "datetime_add_millis"})))
+     #?(:clj (apply dt/datetime-add-millis args)
+        :cljs (throw (ex-info "datetime_add_millis is not supported in the ClojureScript interpreter"
+                              {:function "datetime_add_millis"}))))
+
+   "datetime_diff_millis"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "datetime_diff_millis expects exactly 2 arguments" {:function "datetime_diff_millis"})))
+     #?(:clj (apply dt/datetime-diff-millis args)
+        :cljs (throw (ex-info "datetime_diff_millis is not supported in the ClojureScript interpreter"
+                              {:function "datetime_diff_millis"}))))
+
+   "datetime_truncate_to_day"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_truncate_to_day expects exactly 1 argument" {:function "datetime_truncate_to_day"})))
+     #?(:clj (dt/datetime-truncate-to-day (first args))
+        :cljs (throw (ex-info "datetime_truncate_to_day is not supported in the ClojureScript interpreter"
+                              {:function "datetime_truncate_to_day"}))))
+
+   "datetime_truncate_to_hour"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_truncate_to_hour expects exactly 1 argument" {:function "datetime_truncate_to_hour"})))
+     #?(:clj (dt/datetime-truncate-to-hour (first args))
+        :cljs (throw (ex-info "datetime_truncate_to_hour is not supported in the ClojureScript interpreter"
+                              {:function "datetime_truncate_to_hour"}))))
+
+   "datetime_format_iso"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_format_iso expects exactly 1 argument" {:function "datetime_format_iso"})))
+     #?(:clj (dt/datetime-format-iso (first args))
+        :cljs (throw (ex-info "datetime_format_iso is not supported in the ClojureScript interpreter"
+                              {:function "datetime_format_iso"}))))
+
+   "path_exists"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_exists expects exactly 1 argument" {:function "path_exists"})))
+     (rt/path-exists? (str (first args))))
+
+   "path_is_file"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_is_file expects exactly 1 argument" {:function "path_is_file"})))
+     (rt/path-is-file? (str (first args))))
+
+   "path_is_directory"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_is_directory expects exactly 1 argument" {:function "path_is_directory"})))
+     (rt/path-is-directory? (str (first args))))
+
+   "path_name"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_name expects exactly 1 argument" {:function "path_name"})))
+     (rt/path-name (str (first args))))
+
+   "path_extension"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_extension expects exactly 1 argument" {:function "path_extension"})))
+     (rt/path-extension (str (first args))))
+
+   "path_name_without_extension"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_name_without_extension expects exactly 1 argument" {:function "path_name_without_extension"})))
+     (rt/path-name-without-extension (str (first args))))
+
+   "path_absolute"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_absolute expects exactly 1 argument" {:function "path_absolute"})))
+     (str (rt/path-absolute (str (first args)))))
+
+   "path_normalize"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_normalize expects exactly 1 argument" {:function "path_normalize"})))
+     (str (rt/path-normalize (str (first args)))))
+
+   "path_size"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_size expects exactly 1 argument" {:function "path_size"})))
+     (rt/path-size (str (first args))))
+
+   "path_modified_time"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_modified_time expects exactly 1 argument" {:function "path_modified_time"})))
+     (rt/path-modified-time (str (first args))))
+
+   "path_parent"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_parent expects exactly 1 argument" {:function "path_parent"})))
+     (rt/path-parent (str (first args))))
+
+   "path_child"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_child expects exactly 2 arguments" {:function "path_child"})))
+     (rt/path-child (str (first args)) (str (second args))))
+
+   "path_create_file"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_create_file expects exactly 1 argument" {:function "path_create_file"})))
+     (rt/path-create-file (str (first args))))
+
+   "path_create_directory"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_create_directory expects exactly 1 argument" {:function "path_create_directory"})))
+     (rt/path-create-directory (str (first args))))
+
+   "path_create_directories"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_create_directories expects exactly 1 argument" {:function "path_create_directories"})))
+     (rt/path-create-directories (str (first args))))
+
+   "path_delete"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_delete expects exactly 1 argument" {:function "path_delete"})))
+     (rt/path-delete (str (first args))))
+
+   "path_delete_tree"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_delete_tree expects exactly 1 argument" {:function "path_delete_tree"})))
+     (rt/path-delete-tree (str (first args))))
+
+   "path_copy"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_copy expects exactly 2 arguments" {:function "path_copy"})))
+     (rt/path-copy (str (first args)) (str (second args))))
+
+   "path_move"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_move expects exactly 2 arguments" {:function "path_move"})))
+     (rt/path-move (str (first args)) (str (second args))))
+
+   "path_read_text"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_read_text expects exactly 1 argument" {:function "path_read_text"})))
+     (rt/path-read-text (str (first args))))
+
+   "path_write_text"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_write_text expects exactly 2 arguments" {:function "path_write_text"})))
+     (rt/path-write-text (str (first args)) (str (second args))))
+
+   "path_append_text"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_append_text expects exactly 2 arguments" {:function "path_append_text"})))
+     (rt/path-append-text (str (first args)) (str (second args))))
+
+   "path_list"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_list expects exactly 1 argument" {:function "path_list"})))
+     (rt/path-list (str (first args))))
+
+   "text_file_open_read"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_open_read expects exactly 1 argument" {:function "text_file_open_read"})))
+     (rt/text-file-open-read (str (first args))))
+
+   "text_file_open_write"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_open_write expects exactly 1 argument" {:function "text_file_open_write"})))
+     (rt/text-file-open-write (str (first args))))
+
+   "text_file_open_append"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_open_append expects exactly 1 argument" {:function "text_file_open_append"})))
+     (rt/text-file-open-append (str (first args))))
+
+   "text_file_read_line"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_read_line expects exactly 1 argument" {:function "text_file_read_line"})))
+     (rt/text-file-read-line (first args)))
+
+   "text_file_write"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "text_file_write expects exactly 2 arguments" {:function "text_file_write"})))
+     (rt/text-file-write (first args) (str (second args))))
+
+   "text_file_close"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_close expects exactly 1 argument" {:function "text_file_close"})))
+     (rt/text-file-close (first args)))
+
+   "binary_file_open_read"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_open_read expects exactly 1 argument" {:function "binary_file_open_read"})))
+     (rt/binary-file-open-read (str (first args))))
+
+   "binary_file_open_write"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_open_write expects exactly 1 argument" {:function "binary_file_open_write"})))
+     (rt/binary-file-open-write (str (first args))))
+
+   "binary_file_open_append"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_open_append expects exactly 1 argument" {:function "binary_file_open_append"})))
+     (rt/binary-file-open-append (str (first args))))
+
+   "binary_file_read_all"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_read_all expects exactly 1 argument" {:function "binary_file_read_all"})))
+     (rt/binary-file-read-all (first args)))
+
+   "binary_file_read"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "binary_file_read expects exactly 2 arguments" {:function "binary_file_read"})))
+     (rt/binary-file-read (first args) (second args)))
+
+   "binary_file_write"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "binary_file_write expects exactly 2 arguments" {:function "binary_file_write"})))
+     (rt/binary-file-write (first args) (second args)))
+
+   "binary_file_close"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_close expects exactly 1 argument" {:function "binary_file_close"})))
+     (rt/binary-file-close (first args)))
+
+   "http_server_create"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "http_server_create expects exactly 1 argument"
+                       {:function "http_server_create" :expected 1 :actual (count args)})))
+     #?(:clj (make-http-server-handle (int (first args)))
+        :cljs (throw (ex-info "http_server_create is not supported in the ClojureScript interpreter"
+                              {:function "http_server_create"}))))
+
+   "http_server_get"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "http_server_get expects exactly 3 arguments"
+                       {:function "http_server_get" :expected 3 :actual (count args)})))
+     (let [[handle path handler] args]
+       #?(:clj (do
+                 (swap! (get-in handle [:routes "GET"]) conj {:path-pattern (str path)
+                                                              :handler handler})
+                 nil)
+          :cljs (throw (ex-info "http_server_get is not supported in the ClojureScript interpreter"
+                                {:function "http_server_get"})))))
+
+   "http_server_post"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "http_server_post expects exactly 3 arguments"
+                       {:function "http_server_post" :expected 3 :actual (count args)})))
+     (let [[handle path handler] args]
+       #?(:clj (do
+                 (swap! (get-in handle [:routes "POST"]) conj {:path-pattern (str path)
+                                                               :handler handler})
+                 nil)
+          :cljs (throw (ex-info "http_server_post is not supported in the ClojureScript interpreter"
+                                {:function "http_server_post"})))))
+
+   "http_server_put"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "http_server_put expects exactly 3 arguments"
+                       {:function "http_server_put" :expected 3 :actual (count args)})))
+     (let [[handle path handler] args]
+       #?(:clj (do
+                 (swap! (get-in handle [:routes "PUT"]) conj {:path-pattern (str path)
+                                                              :handler handler})
+                 nil)
+          :cljs (throw (ex-info "http_server_put is not supported in the ClojureScript interpreter"
+                                {:function "http_server_put"})))))
+
+   "http_server_delete"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "http_server_delete expects exactly 3 arguments"
+                       {:function "http_server_delete" :expected 3 :actual (count args)})))
+     (let [[handle path handler] args]
+       #?(:clj (do
+                 (swap! (get-in handle [:routes "DELETE"]) conj {:path-pattern (str path)
+                                                                 :handler handler})
+                 nil)
+          :cljs (throw (ex-info "http_server_delete is not supported in the ClojureScript interpreter"
+                                {:function "http_server_delete"})))))
+
+   "http_server_start"
+   (fn [ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "http_server_start expects exactly 1 argument"
+                       {:function "http_server_start" :expected 1 :actual (count args)})))
+     #?(:clj (start-http-server! ctx (first args))
+        :cljs (throw (ex-info "http_server_start is not supported in the ClojureScript interpreter"
+                              {:function "http_server_start"}))))
+
+   "http_server_stop"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "http_server_stop expects exactly 1 argument"
+                       {:function "http_server_stop" :expected 1 :actual (count args)})))
+     #?(:clj (let [handle (first args)
+                   server @(:server handle)]
+               (when server
+                 (.stop ^com.sun.net.httpserver.HttpServer server 0)
+                 (reset! (:server handle) nil))
+               nil)
+        :cljs (throw (ex-info "http_server_stop is not supported in the ClojureScript interpreter"
+                              {:function "http_server_stop"}))))
+
+   "http_server_is_running"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "http_server_is_running expects exactly 1 argument"
+                       {:function "http_server_is_running" :expected 1 :actual (count args)})))
+     #?(:clj (some? @(:server (first args)))
+        :cljs (throw (ex-info "http_server_is_running is not supported in the ClojureScript interpreter"
+                              {:function "http_server_is_running"}))))
+
+   })
 
 ;;
 ;; Operator Implementations
@@ -1827,7 +2061,7 @@
 
     (nex-object? value)
     (let [class-def (lookup-class ctx (:class-name value))
-          method-lookup (lookup-method-with-inheritance ctx class-def "to_string")]
+          method-lookup (lookup-method-with-inheritance ctx class-def "to_string" 0)]
       (if method-lookup
         (let [result (eval-node ctx {:type :call
                                      :target {:type :literal :value value}
@@ -1852,7 +2086,7 @@
 
        (nex-object? value)
        (let [class-def (lookup-class ctx (:class-name value))
-             method-lookup (lookup-method-with-inheritance ctx class-def "to_string")]
+             method-lookup (lookup-method-with-inheritance ctx class-def "to_string" 0)]
          (if method-lookup
            (.then (->promise (eval-node-async ctx {:type :call
                                                    :target {:type :literal :value value}
@@ -1899,7 +2133,6 @@
       "Boolean" false
       "String" ""
       "Console" {:nex-builtin-type :Console}
-      "File" nil
       "Process" {:nex-builtin-type :Process}
       "Task" nil
       "Channel" nil
@@ -2182,15 +2415,6 @@
     "read_integer" (fn [_ & _] (nex-parse-integer (nex-console-read-line)))
     "read_real"    (fn [_ & _] (nex-parse-real (nex-console-read-line)))}
 
-   :File
-   {"read"   (fn [f & _] (nex-file-read (:path f)))
-    "write"  (fn [f content & _] (nex-file-write (:path f) (str content)) nil)
-    "append" (fn [f content & _] (nex-file-append (:path f) (str content)) nil)
-    "exists" (fn [f & _] (nex-file-exists? (:path f)))
-    "delete" (fn [f & _] (nex-file-delete (:path f)) nil)
-    "lines"  (fn [f & _] (nex-file-lines (:path f)))
-    "close"  (fn [_ & _] nil)}
-
    :Process
    {"getenv"       (fn [_ name & _] (or (nex-process-getenv (str name)) ""))
     "setenv"       (fn [_ name value & _] (nex-process-setenv (str name) (str value)) nil)
@@ -2320,36 +2544,7 @@
     "ypos"       (fn [t & _] (turtle/turtle-y t))
     "show"       (fn [t & _] (turtle/turtle-show t))}}))
 
-(defn get-type-name
-  "Get the type name for a value"
-  [value]
-  (cond
-    (string? value) :String
-    #?(:clj (instance? java.math.BigDecimal value)
-       :cljs false) :Decimal
-    ;; Real literals are parsed as doubles on the JVM.
-    #?(:clj (or (double? value) (float? value))
-       :cljs (and (number? value) (not (integer? value)))) :Real
-    #?(:clj (ratio? value) :cljs false) :Real
-    (integer? value) :Integer
-    (nex-char? value) :Char
-    (boolean? value) :Boolean
-    (nex-array? value) :Array
-    (nex-map? value) :Map
-    (nex-set? value) :Set
-    (nex-console? value) :Console
-    (nex-file? value) :File
-    (nex-process? value) :Process
-    (nex-task? value) :Task
-    (nex-channel? value) :Channel
-    (nex-window? value) :Window
-    (nex-turtle? value) :Turtle
-    (nex-image? value) :Image
-    (nex-array-cursor? value) :ArrayCursor
-    (nex-string-cursor? value) :StringCursor
-    (nex-map-cursor? value) :MapCursor
-    (nex-set-cursor? value) :SetCursor
-    :else nil))
+(def get-type-name typeinfo/get-type-name)
 
 (defn call-builtin-method
   "Call a built-in method on a primitive value"
@@ -2374,20 +2569,68 @@
       :else :literal)))
 
 #?(:clj
+   (defn- intern-search-roots
+     "Return directories to search for project-local interned classes.
+      Prefer the currently loaded source file's directory when available, then
+      fall back to the user's original working directory."
+     [ctx]
+     (let [source-dir (when-let [source (:debug-source ctx)]
+                        (let [f (clojure.java.io/file source)]
+                          (when (.isAbsolute f)
+                            (.getParentFile f))))
+           user-dir (when-let [udir (System/getProperty "nex.user.dir")]
+                      (clojure.java.io/file udir))
+           pwd (clojure.java.io/file ".")]
+       (->> [source-dir user-dir pwd]
+            (remove nil?)
+            distinct)))
+
+   :cljs
+   (defn- intern-search-roots
+     [ctx]
+     (let [path-module (js/require "path")
+           source-dir (when-let [source (:debug-source ctx)]
+                        (when (.isAbsolute path-module source)
+                          (.dirname path-module source)))
+           user-dir (or (.-nex_user_dir js/process.env)
+                        (.-NEX_USER_DIR js/process.env)
+                        (.-PWD js/process.env))
+           pwd (.resolve path-module ".")]
+       (->> [source-dir user-dir pwd]
+            (remove nil?)
+            distinct))))
+
+#?(:clj
    (defn find-intern-file
      "Search for an intern file in the specified locations.
       Returns the absolute path if found, otherwise throws an exception."
-     [path class-name]
-     (let [filename (str class-name ".nex")
-           ;; Search locations in order
-           locations [(str "./" filename)                                          ; 1. Current directory
-                      (str "./libs/" path "/src/" filename)                        ; 2. ./libs/path/src/
-                      (str (System/getProperty "user.home") "/.nex/deps/"
-                           path "/src/" filename)]                                 ; 3. ~/.nex/deps/path/src/
+     [ctx path class-name]
+     (let [filenames (intern-filenames class-name)
+           local-roots (intern-search-roots ctx)
+           local-direct (mapcat (fn [root]
+                                  (map #(str (clojure.java.io/file root %)) filenames))
+                                local-roots)
+           local-lib (when (seq path)
+                       (mapcat (fn [root]
+                                 (concat
+                                  (map #(str (clojure.java.io/file root "lib" path %)) filenames)
+                                  (map #(str (clojure.java.io/file root "lib" path "src" %)) filenames)))
+                               local-roots))
+           home-deps (if (seq path)
+                       (concat
+                        (map #(str (System/getProperty "user.home") "/.nex/deps/" path "/" %) filenames)
+                        (map #(str (System/getProperty "user.home") "/.nex/deps/" path "/src/" %) filenames))
+                       (concat
+                        (map #(str (System/getProperty "user.home") "/.nex/deps/" %) filenames)
+                        (map #(str (System/getProperty "user.home") "/.nex/deps/src/" %) filenames)))
+           locations (vec (concat local-direct local-lib home-deps))
            found (first (filter #(-> % clojure.java.io/file .exists) locations))]
        (if found
          found
-         (throw (ex-info (str "Cannot find intern file for " path "/" class-name)
+         (throw (ex-info (str "Cannot find intern file for "
+                              (if (seq path)
+                                (str path "/" class-name)
+                                class-name))
                         {:path path
                          :class-name class-name
                          :searched-locations locations})))))
@@ -2395,19 +2638,36 @@
    (defn find-intern-file
      "Search for an intern file in the specified locations.
       Returns the absolute path if found, otherwise throws an exception."
-     [path class-name]
+     [ctx path class-name]
      (let [fs (js/require "fs")
            path-module (js/require "path")
-           filename (str class-name ".nex")
+           filenames (intern-filenames class-name)
            home (or (.-HOME js/process.env) (.-USERPROFILE js/process.env) ".")
-           ;; Search locations in order
-           locations [(str "./" filename)
-                      (str "./libs/" path "/src/" filename)
-                      (str home "/.nex/deps/" path "/src/" filename)]
+           local-roots (intern-search-roots ctx)
+           local-direct (mapcat (fn [root]
+                                  (map #(.join path-module root %) filenames))
+                                local-roots)
+           local-lib (when (seq path)
+                       (mapcat (fn [root]
+                                 (concat
+                                  (map #(.join path-module root "lib" path %) filenames)
+                                  (map #(.join path-module root "lib" path "src" %) filenames)))
+                               local-roots))
+           home-deps (if (seq path)
+                       (concat
+                        (map #(str home "/.nex/deps/" path "/" %) filenames)
+                        (map #(str home "/.nex/deps/" path "/src/" %) filenames))
+                       (concat
+                        (map #(str home "/.nex/deps/" %) filenames)
+                        (map #(str home "/.nex/deps/src/" %) filenames)))
+           locations (vec (concat local-direct local-lib home-deps))
            found (first (filter #(.existsSync fs %) locations))]
        (if found
          found
-         (throw (ex-info (str "Cannot find intern file for " path "/" class-name)
+         (throw (ex-info (str "Cannot find intern file for "
+                              (if (seq path)
+                                (str path "/" class-name)
+                                class-name))
                         {:path path
                          :class-name class-name
                          :searched-locations locations}))))))
@@ -2416,7 +2676,7 @@
    (defn process-intern
      "Load and interpret an external file, then register the class with the given alias."
      [ctx {:keys [path class-name alias]}]
-     (let [file-path (find-intern-file path class-name)
+     (let [file-path (find-intern-file ctx path class-name)
            ;; Load and parse the external file
            file-content (slurp file-path)
            file-ast (parser/ast file-content)
@@ -2497,7 +2757,7 @@
   [ctx current-obj parent-class-name method arg-values]
   (let [parent-class-def (lookup-class ctx parent-class-name)
         ;; Try method first
-        method-lookup (lookup-method-with-inheritance ctx parent-class-def method)
+        method-lookup (lookup-method-with-inheritance ctx parent-class-def method (count arg-values))
         ;; If no method found, try constructor
         ctor-def (when-not method-lookup
                    (lookup-constructor parent-class-def method))]
@@ -2604,7 +2864,7 @@
 
           (nex-object? obj)
           (let [class-def (lookup-class ctx (:class-name obj))
-                method-lookup (lookup-method-with-inheritance ctx class-def method)]
+                method-lookup (lookup-method-with-inheritance ctx class-def method (count arg-values))]
             (if method-lookup
                 (let [method-def (:method method-lookup)
                     params (:params method-def)]
@@ -2748,7 +3008,7 @@
                               {:function method}))))
           (if-let [current-obj (:current-object ctx)]
             (let [class-def (lookup-class ctx (:class-name current-obj))
-                  method-lookup (lookup-method-with-inheritance ctx class-def method)]
+                  method-lookup (lookup-method-with-inheritance ctx class-def method (count args))]
               (if method-lookup
                 (let [all-fields (get-all-fields ctx class-def)
                   current-env (:current-env ctx)
@@ -3092,7 +3352,7 @@
           (if-let [constant (lookup-class-constant ctx class-def name)]
             (eval-class-constant ctx (:declaring-class constant class-def) name)
             (if-let [current-obj (:current-object ctx)]
-              (let [method-lookup (lookup-method-with-inheritance ctx class-def name)]
+              (let [method-lookup (lookup-method-with-inheritance ctx class-def name 0)]
                 (if method-lookup
                   ;; It's a method - invoke it (implicit this)
                   (eval-node ctx {:type :call
@@ -3146,11 +3406,8 @@
   ;; Handle built-in IO types
   (case class-name
     "Console" {:nex-builtin-type :Console}
-    "File" (let [arg-values (mapv #(eval-node ctx %) args)]
-             (when-not (= constructor "open")
-               (throw (ex-info "File requires constructor: create File.open(path)" {:class-name "File"})))
-             {:nex-builtin-type :File :path (first arg-values)})
     "Process" {:nex-builtin-type :Process}
+    "Map" (nex-map)
     "Channel" #?(:clj (let [arg-values (mapv #(eval-node ctx %) args)]
                         (cond
                           (nil? constructor) (make-channel)
@@ -3518,7 +3775,7 @@
      (dispatch-parent-call ctx current-obj parent-class-name method arg-values)
      :cljs
      (let [parent-class-def (lookup-class ctx parent-class-name)
-           method-lookup (lookup-method-with-inheritance ctx parent-class-def method)
+           method-lookup (lookup-method-with-inheritance ctx parent-class-def method (count arg-values))
            ctor-def (when-not method-lookup
                       (lookup-constructor parent-class-def method))]
        (if-let [callable (or (:method method-lookup) ctor-def)]
@@ -3677,7 +3934,7 @@
 
                                        (nex-object? obj)
                                        (let [class-def (lookup-class ctx (:class-name obj))
-                                             method-lookup (lookup-method-with-inheritance ctx class-def method)]
+                                             method-lookup (lookup-method-with-inheritance ctx class-def method (count arg-values))]
                                          (if method-lookup
                                            (let [method-def (:method method-lookup)
                                                  params (:params method-def)]
@@ -3800,7 +4057,7 @@
                             (:current-object ctx)
                             (let [current-obj (:current-object ctx)
                                   class-def (lookup-class ctx (:class-name current-obj))
-                                  method-lookup (lookup-method-with-inheritance ctx class-def method)]
+                                  method-lookup (lookup-method-with-inheritance ctx class-def method (count args))]
                               (if method-lookup
                                 (let [all-fields (get-all-fields ctx class-def)
                                       current-env (:current-env ctx)
@@ -4052,13 +4309,10 @@
          (let [{:keys [class-name generic-args constructor args]} node]
            (.then (promise-all (map #(eval-node-async ctx %) args))
                   (fn [arg-values]
-                    (case class-name
+                   (case class-name
                       "Console" {:nex-builtin-type :Console}
-                      "File" (do
-                               (when-not (= constructor "open")
-                                 (throw (ex-info "File requires constructor: create File.open(path)" {:class-name "File"})))
-                               {:nex-builtin-type :File :path (first arg-values)})
                       "Process" {:nex-builtin-type :Process}
+                      "Map" (nex-map)
                       "Channel" (cond
                                   (nil? constructor) (make-channel)
                                   (= constructor "with_capacity")

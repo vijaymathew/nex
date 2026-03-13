@@ -1,0 +1,66 @@
+class Http_Response
+  note "Portable HTTP response value returned by Http_Client."
+
+create
+  make(status_code: Integer, body_text: String, header_map: Map[String, String]) do
+    this.status_code := status_code
+    this.body_text := body_text
+    this.header_map := header_map
+  end
+
+feature
+  status_code: Integer
+  body_text: String
+  header_map: Map[String, String]
+
+  status(): Integer
+    note "Return the HTTP status code."
+  do
+    result := status_code
+  end
+
+  body(): String
+    note "Return the response body as text."
+  do
+    result := body_text
+  end
+
+  headers(): Map[String, String]
+    note "Return response headers as a string map."
+  do
+    result := header_map
+  end
+end
+
+class Http_Client
+  note "Portable HTTP client built on top of runtime HTTP primitives."
+
+create
+  make() do
+  end
+
+feature
+  get(url: String): Http_Response
+    note "Perform an HTTP GET request."
+  do
+    result := http_get(url)
+  end
+
+  get(url: String, timeout_ms: Integer): Http_Response
+    note "Perform an HTTP GET request with a timeout in milliseconds."
+  do
+    result := http_get(url, timeout_ms)
+  end
+
+  post(url: String, body_text: String): Http_Response
+    note "Perform an HTTP POST request with a text body."
+  do
+    result := http_post(url, body_text)
+  end
+
+  post(url: String, body_text: String, timeout_ms: Integer): Http_Response
+    note "Perform an HTTP POST request with a text body and timeout in milliseconds."
+  do
+    result := http_post(url, body_text, timeout_ms)
+  end
+end

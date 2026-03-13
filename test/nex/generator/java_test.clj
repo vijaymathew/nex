@@ -264,6 +264,102 @@ end"
       (is (str/includes? java-code "t.await()"))
       (is (str/includes? java-code "t.is_done()")))))
 
+(deftest http-client-library-generation-test
+  (testing "Http_Client library lowers to ordinary classes plus runtime HTTP builtins"
+    (let [nex-code (slurp "lib/net/http_client.nex")
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "public class Http_Client"))
+      (is (str/includes? java-code "public class Http_Response"))
+      (is (str/includes? java-code "java.net.http.HttpClient"))
+      (is (str/includes? java-code "result = NexRuntime.httpGet(url);"))
+      (is (str/includes? java-code "result = NexRuntime.httpGet(url, timeout_ms);"))
+      (is (str/includes? java-code "result = NexRuntime.httpPost(url, body_text);"))
+      (is (str/includes? java-code "result = NexRuntime.httpPost(url, body_text, timeout_ms);")))))
+
+(deftest http-server-library-generation-test
+  (testing "Http_Server library lowers to ordinary classes plus runtime HTTP server builtins"
+    (let [nex-code (slurp "lib/net/http_server.nex")
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "public class Http_Server"))
+      (is (str/includes? java-code "public class Http_Request"))
+      (is (str/includes? java-code "public class Http_Server_Response"))
+      (is (str/includes? java-code ".handle = NexRuntime.httpServerCreate(port_value);"))
+      (is (str/includes? java-code "NexRuntime.httpServerGet(this.handle, path, handler);"))
+      (is (str/includes? java-code "NexRuntime.httpServerPost(this.handle, path, handler);"))
+      (is (str/includes? java-code "NexRuntime.httpServerPut(this.handle, path, handler);"))
+      (is (str/includes? java-code "NexRuntime.httpServerDelete(this.handle, path, handler);"))
+      (is (str/includes? java-code "this.port = NexRuntime.httpServerStart(this.handle);"))
+      (is (str/includes? java-code "NexRuntime.httpServerIsRunning(this.handle)")))))
+
+(deftest json-library-generation-test
+  (testing "Json library lowers to ordinary class methods plus runtime JSON builtins"
+    (let [nex-code (slurp "lib/data/json.nex")
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "public class Json"))
+      (is (str/includes? java-code "result = NexRuntime.jsonParse(text);"))
+      (is (str/includes? java-code "result = NexRuntime.jsonStringify(value);")))))
+
+(deftest time-library-generation-test
+  (testing "time libraries lower to ordinary classes plus runtime datetime builtins"
+    (let [duration-code (java/translate (slurp "lib/time/duration.nex") {:skip-type-check true})
+          datetime-code (java/translate (slurp "lib/time/date_time.nex") {:skip-type-check true})]
+      (is (str/includes? duration-code "public class Duration"))
+      (is (str/includes? duration-code "public static Duration minutes"))
+      (is (str/includes? datetime-code "public class Date_Time"))
+      (is (str/includes? datetime-code "NexRuntime.datetimeNow("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeParseIso("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeMake("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeWeekday("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeDayOfYear("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeTruncateToDay("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeTruncateToHour("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeFormatIso("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeAddMillis("))
+      (is (str/includes? datetime-code "NexRuntime.datetimeDiffMillis(")))))
+
+(deftest text-library-generation-test
+  (testing "text libraries lower to ordinary classes plus runtime regex builtins"
+    (let [regex-code (java/translate (slurp "lib/text/regex.nex") {:skip-type-check true})]
+      (is (str/includes? regex-code "public class Regex"))
+      (is (str/includes? regex-code "NexRuntime.regexValidate("))
+      (is (str/includes? regex-code "NexRuntime.regexMatches("))
+      (is (str/includes? regex-code "NexRuntime.regexFindAll("))
+      (is (str/includes? regex-code "NexRuntime.regexReplace("))
+      (is (str/includes? regex-code "NexRuntime.regexSplit(")))))
+
+(deftest io-library-generation-test
+  (testing "io libraries lower to ordinary classes plus runtime IO builtins"
+    (let [path-code (java/translate (slurp "lib/io/path.nex"))
+          directory-code (java/translate (slurp "lib/io/directory.nex") {:skip-type-check true})
+          text-code (java/translate (slurp "lib/io/text_file.nex") {:skip-type-check true})
+          binary-code (java/translate (slurp "lib/io/binary_file.nex") {:skip-type-check true})]
+      (is (str/includes? path-code "public class Path"))
+      (is (str/includes? path-code "NexRuntime.pathExists("))
+      (is (str/includes? path-code "NexRuntime.pathChild("))
+      (is (str/includes? path-code "NexRuntime.pathExtension("))
+      (is (str/includes? path-code "NexRuntime.pathNameWithoutExtension("))
+      (is (str/includes? path-code "NexRuntime.pathAbsolute("))
+      (is (str/includes? path-code "NexRuntime.pathNormalize("))
+      (is (str/includes? path-code "NexRuntime.pathSize("))
+      (is (str/includes? path-code "NexRuntime.pathModifiedTime("))
+      (is (str/includes? path-code "NexRuntime.pathList("))
+      (is (str/includes? path-code "NexRuntime.pathCopy("))
+      (is (str/includes? path-code "NexRuntime.pathMove("))
+      (is (str/includes? path-code "NexRuntime.pathDeleteTree("))
+      (is (str/includes? directory-code "public class Directory"))
+      (is (str/includes? directory-code "public void create_directory()"))
+      (is (str/includes? directory-code "public ArrayList<Directory> directories()"))
+      (is (str/includes? directory-code "public void copy_to(Directory target)"))
+      (is (str/includes? directory-code "public void move_to(Directory target)"))
+      (is (str/includes? text-code "public class Text_File"))
+      (is (str/includes? text-code "NexRuntime.textFileOpenRead("))
+      (is (str/includes? text-code "NexRuntime.textFileReadLine("))
+      (is (str/includes? text-code "NexRuntime.textFileWrite("))
+      (is (str/includes? binary-code "public class Binary_File"))
+      (is (str/includes? binary-code "NexRuntime.binaryFileOpenWrite("))
+      (is (str/includes? binary-code "NexRuntime.binaryFileRead("))
+      (is (str/includes? binary-code "NexRuntime.binaryFileWrite(")))))
+
 (deftest buffered-channel-generation-test
   (testing "buffered Channel constructors and accessors lower correctly in Java"
     (let [nex-code "class Test

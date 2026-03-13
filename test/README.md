@@ -60,11 +60,25 @@ Tests are organized following standard Clojure conventions:
 
 - **io_test.clj** (`nex.io-test`)
   - Console: create, print, print_line, error, new_line, type detection
-  - File: create, read, write, append, exists, delete, lines, close
   - Process: create, getenv, setenv, command_line
-  - Typechecker validation for Console, File, and Process
-  - Java and JavaScript code generation for IO types
-  - **39 tests, 70 assertions**
+  - Typechecker validation for Console and Process
+  - Java and JavaScript code generation for built-in IO types
+
+- **io_lib_test.clj** (`nex.io-lib-test`)
+  - `io/Path`: create, probe, read/write, copy, move, recursive delete
+  - `io/Directory`: create, child discovery, file/directory filtering
+  - `io/Text_File`: open_read, open_write, read_line, write_line, close
+  - `io/Binary_File`: open_read, open_write, read, read_all, write, close
+  - JVM interpreter coverage for shipped `lib/io` library classes
+
+- **time_lib_test.clj** (`nex.time-lib-test`)
+  - `time/Duration`: construction and arithmetic
+  - `time/Date_Time`: UTC field access, ISO formatting/parsing, arithmetic and comparison
+  - JVM interpreter coverage for shipped `lib/time` library classes
+
+- **regex_lib_test.clj** (`nex.regex-lib-test`)
+  - `text/Regex`: compile, matching, search, replacement, splitting
+  - JVM interpreter coverage for shipped `lib/text` library classes
 
 ### Code Generation
 
@@ -136,7 +150,7 @@ The test suite covers:
 - ✓ Expression translation
 - ✓ Statement translation
 - ✓ Built-in Console IO (print, read, error)
-- ✓ Built-in File IO (read, write, append, delete, lines)
+- ✓ `lib/io` filesystem, text, and binary I/O
 - ✓ Built-in Process (getenv, setenv, command_line)
 
 ## Adding New Tests

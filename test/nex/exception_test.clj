@@ -1,5 +1,6 @@
 (ns nex.exception-test
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [nex.parser :as p]
             [nex.interpreter :as interp]
             [nex.typechecker :as tc]
@@ -9,6 +10,13 @@
 ;; Helper to get AST
 (defn parse [code]
   (p/ast code))
+
+(defn test-class-java
+  [java]
+  (let [start (.indexOf java "class Test {")]
+    (if (not= start -1)
+      (subs java start)
+      java)))
 
 ;; Helper to execute a method body and get output
 (defn execute-method [code]
@@ -279,7 +287,7 @@ end")
       end
     end
 end")
-          java (java-gen/translate-ast ast {:skip-contracts true})]
+          java (test-class-java (java-gen/translate-ast ast {:skip-contracts true}))]
       (is (re-find #"try \{" java))
       (is (re-find #"catch \(Exception _nex_e\)" java))
       (is (re-find #"throw _nex_e;" java))

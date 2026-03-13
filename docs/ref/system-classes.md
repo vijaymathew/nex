@@ -20,26 +20,6 @@ create Console
 | `read_integer` | none | `Integer` | Read and parse integer. |
 | `read_real` | none | `Real` | Read and parse real number. |
 
-## `File`
-
-### Construction
-
-```nex
-create File.open(path)
-```
-
-### Methods
-
-| Method | Arguments | Returns | Description |
-|---|---|---|---|
-| `read` | none | `String` | Read full file as string. |
-| `write` | `content: Any` | `Void` | Overwrite file with content. |
-| `append` | `content: Any` | `Void` | Append content to file. |
-| `exists` | none | `Boolean` | Check file existence. |
-| `delete` | none | `Void` | Delete file. |
-| `lines` | none | `Array[String]` | Read file as array of lines. |
-| `close` | none | `Void` | No-op placeholder for compatibility. |
-
 ## `Process`
 
 ### Construction
@@ -126,11 +106,12 @@ con.print_line("Enter your name:")
 let name := con.read_line()
 con.print_line("Hello, " + name)
 
-let f := create File.open("notes.txt")
-f.write("line 1")
-f.append("\nline 2")
-print(f.exists())
-print(f.lines())
+intern io/Path
+let path: Path := create Path.make("notes.txt")
+path.write_text("line 1")
+path.append_text("\nline 2")
+print(path.exists())
+print(path.read_text())
 
 let p := create Process
 print(p.getenv("HOME"))

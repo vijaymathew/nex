@@ -245,24 +245,6 @@ Main methods:
 - `read_integer`
 - `read_real`
 
-### `File`
-
-Construction:
-
-```text
-create File.open(path)
-```
-
-Main methods:
-
-- `read`
-- `write`
-- `append`
-- `exists`
-- `delete`
-- `lines`
-- `close`
-
 ### `Process`
 
 Construction:

@@ -1,0 +1,152 @@
+import java.net.Socket
+import java.net.InetSocketAddress
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.PrintWriter
+
+class Tcp_Socket
+  note "Blocking TCP socket wrapper for the JVM runtime. This class is JVM-only and is not available in JavaScript or the browser."
+
+feature
+  host: String note "Remote host name or IP address."
+  port: Integer note "Remote TCP port."
+
+private feature
+  socket: ?Socket note "Underlying Java socket when connected."
+  reader: ?BufferedReader note "Line-oriented reader for the socket input stream."
+  writer: ?PrintWriter note "Writer for the socket output stream."
+
+create
+  make(host_value: String, port_value: Integer)
+    require
+      host_not_empty: host_value /= ""
+      valid_port: port_value > 0 and port_value <= 65535
+    do
+      host := host_value
+      port := port_value
+      socket := nil
+      reader := nil
+      writer := nil
+    ensure
+      endpoint_set: host = host_value and port = port_value
+      disconnected: socket = nil and reader = nil and writer = nil
+    end
+
+  from_socket(open_socket: Socket)
+    require
+      socket_attached: open_socket /= nil
+    do
+      host := open_socket.getInetAddress().getHostAddress()
+      port := open_socket.getPort()
+      socket := open_socket
+      reader := create BufferedReader.make(create InputStreamReader.make(open_socket.getInputStream()))
+      writer := create PrintWriter.make(open_socket.getOutputStream(), true)
+    ensure
+      connected: socket /= nil and reader /= nil and writer /= nil
+    end
+
+feature
+  connect()
+    note "Open the TCP connection. Fails if the endpoint cannot be reached."
+    require
+      not_connected: socket = nil
+    do
+      let opened_socket: Socket := create Socket.make(host, port)
+      let opened_reader: BufferedReader := create BufferedReader.make(create InputStreamReader.make(opened_socket.getInputStream()))
+      let opened_writer: PrintWriter := create PrintWriter.make(opened_socket.getOutputStream(), true)
+      socket := opened_socket
+      reader := opened_reader
+      writer := opened_writer
+    ensure
+      connected: socket /= nil and reader /= nil and writer /= nil
+    end
+
+  connect(timeout_ms: Integer): Boolean
+    note "Open the TCP connection with a timeout in milliseconds. Returns false if the connection does not complete."
+    require
+      not_connected: socket = nil
+      valid_timeout: timeout_ms >= 0
+    do
+      do
+        let opened_socket: Socket := create Socket
+        let endpoint: InetSocketAddress := create InetSocketAddress.make(host, port)
+        opened_socket.connect(endpoint, timeout_ms)
+        socket := opened_socket
+        reader := create BufferedReader.make(create InputStreamReader.make(opened_socket.getInputStream()))
+        writer := create PrintWriter.make(opened_socket.getOutputStream(), true)
+        result := true
+      rescue
+        if socket /= nil then
+          socket.close()
+        end
+        socket := nil
+        reader := nil
+        writer := nil
+        result := false
+      end
+    end
+
+  is_connected(): Boolean
+    note "Return true when a socket connection has been opened and not yet closed."
+  do
+    result := socket /= nil
+  end
+
+  send(text: String)
+    note "Write text to the socket without appending a newline."
+    require
+      connected: writer /= nil
+    do
+      if writer /= nil then
+        writer.print(text)
+        writer.flush()
+      end
+    end
+
+  send_line(text: String)
+    note "Write text followed by a newline."
+    require
+      connected: writer /= nil
+    do
+      if writer /= nil then
+        writer.println(text)
+        writer.flush()
+      end
+    end
+
+  read_line(): ?String
+    note "Read one line from the peer. Returns nil on end-of-stream."
+    require
+      connected: reader /= nil
+    do
+      if reader /= nil then
+        result := reader.readLine()
+      end
+    end
+
+  close()
+    note "Close the connection if it is open. Safe to call multiple times."
+  do
+    if reader /= nil then
+      reader.close()
+    end
+    if writer /= nil then
+      writer.flush()
+      writer.close()
+    end
+    if socket /= nil then
+      socket.close()
+    end
+    reader := nil
+    writer := nil
+    socket := nil
+  ensure
+    disconnected: socket = nil and reader = nil and writer = nil
+  end
+
+  to_string(): String
+    note "Return a descriptive string showing the endpoint and connection state."
+  do
+    result := "Tcp_Socket(" + host + ":" + port + ", connected=" + (socket /= nil) + ")"
+  end
+end

@@ -28,6 +28,14 @@ These imports are primarily meaningful when translating Nex programs to the targ
 
 `intern` loads Nex classes from Nex files.
 
+File resolution follows the current Nex loader:
+
+1. the loaded file's directory
+2. the current working directory
+3. `~/.nex/deps`
+
+For path-qualified classes, Nex checks `lib/<path>/...` layouts and also accepts lowercase filenames such as `tcp_socket.nex`.
+
 `import` names external Java or JavaScript symbols.
 
 This distinction should remain sharp:

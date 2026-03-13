@@ -1,0 +1,45 @@
+intern io/Path
+
+class Text_File
+  note "Sequential text file IO wrapper built on top of runtime text-file primitives."
+
+create
+  open_read(path_value: Path) do
+    this.path := path_value
+    this.handle := text_file_open_read(path_value.path)
+  end
+
+  open_write(path_value: Path) do
+    this.path := path_value
+    this.handle := text_file_open_write(path_value.path)
+  end
+
+  open_append(path_value: Path) do
+    this.path := path_value
+    this.handle := text_file_open_append(path_value.path)
+  end
+
+feature
+  path: Path
+  handle: Any
+
+  read_line(): ?String do
+    result := text_file_read_line(handle)
+  end
+
+  write(text: String) do
+    text_file_write(handle, text)
+  end
+
+  write_line(text: String) do
+    text_file_write(handle, text + #10)
+  end
+
+  close() do
+    text_file_close(handle)
+  end
+
+  to_string(): String do
+    result := "Text_File(" + path.to_string() + ")"
+  end
+end

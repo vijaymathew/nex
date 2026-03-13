@@ -338,6 +338,14 @@ intern math/Calculator
 intern math/Calculator as Calc
 ```
 
+Resolution order is:
+
+1. the loaded file's directory
+2. the current working directory
+3. `~/.nex/deps`
+
+Path-qualified classes also support `lib/<path>/Class.nex`, lowercase filenames such as `tcp_socket.nex`, and the matching `src/` variants.
+
 Import host symbols:
 
 ```text

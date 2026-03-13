@@ -40,16 +40,30 @@
 
 (defn env-lookup-method
   "Look up a method signature in the environment"
-  [env class-name method-name]
+  ([env class-name method-name]
+   (env-lookup-method env class-name method-name nil))
+  ([env class-name method-name arity]
   (if-let [class-methods (get @(:methods env) class-name)]
-    (get class-methods method-name)
+    (let [method-entry (get class-methods method-name)]
+      (cond
+        (nil? method-entry) nil
+        (nil? arity) (if (map? method-entry)
+                       (or (get method-entry 0) (val (first method-entry)))
+                       method-entry)
+        (map? method-entry) (get method-entry arity)
+        :else method-entry))
     (when (:parent env)
-      (env-lookup-method (:parent env) class-name method-name))))
+      (env-lookup-method (:parent env) class-name method-name arity)))))
 
 (defn env-add-method
   "Add a method signature to the environment"
   [env class-name method-name signature]
-  (swap! (:methods env) update class-name assoc method-name signature))
+  (let [arity (count (or (:params signature) []))]
+    (swap! (:methods env) update class-name
+           (fn [class-methods]
+             (assoc (or class-methods {})
+                    method-name
+                    (assoc (or (get class-methods method-name) {}) arity signature))))))
 
 (defn env-lookup-class
   "Look up a class definition in the environment"
@@ -84,7 +98,7 @@
 
 (def builtin-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Set" "Task" "Channel" "Any" "Void" "Nil" "Console" "File" "Process" "Function"
+    "Array" "Map" "Set" "Task" "Channel" "Any" "Void" "Nil" "Console" "Process" "Function"
     "Cursor" "Window" "Turtle" "Image"})
 
 (defn builtin-type? [type-name]
@@ -259,6 +273,14 @@
 
       :else
       (or (and (map? a1) (map? a2)
+               (= (:base-type a1) "Array")
+               (= (:base-type a2) "Array")
+               (= (:type-params a1) ["__EmptyArrayElement"]))
+          (and (map? a1) (map? a2)
+               (= (:base-type a1) "Map")
+               (= (:base-type a2) "Map")
+               (= (:type-params a1) ["__EmptyMapKey" "__EmptyMapValue"]))
+          (and (map? a1) (map? a2)
                (= (:base-type a1) "Set")
                (= (:base-type a2) "Set")
                (= (:type-params a1) ["__EmptySetElement"]))
@@ -364,12 +386,14 @@
 
 (defn lookup-class-method
   "Look up a method on a class and its parent chain"
-  [env class-name method-name]
-  (or (env-lookup-method env class-name method-name)
+  ([env class-name method-name]
+   (lookup-class-method env class-name method-name nil))
+  ([env class-name method-name arity]
+  (or (env-lookup-method env class-name method-name arity)
       (when-let [class-def (env-lookup-class env class-name)]
         (some (fn [{:keys [parent]}]
-                (lookup-class-method env parent method-name))
-              (:parents class-def)))))
+                (lookup-class-method env parent method-name arity))
+              (:parents class-def))))))
 
 (defn lookup-class-field
   "Look up a field on a class and its parent chain."
@@ -799,7 +823,7 @@
         :else
         (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
                                 (builtin-method-signature "Any" method (count args) type-map)
-                                (lookup-class-method env base-type method))]
+                                (lookup-class-method env base-type method (count args)))]
           (do
             ;; Check argument types
             (when (not= (count args) (count (:params method-sig)))
@@ -898,11 +922,1009 @@
           (or (first (or (:type-params task-type) (:type-args task-type)))
               "Any")))
 
+      (= method "path_exists")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_exists expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_exists expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_exists argument must be String"
+                            {:error (type-error
+                                     (str "path_exists argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Boolean")
+
+      (= method "datetime_now")
+      (do
+        (when (not= (count args) 0)
+          (throw (ex-info "datetime_now expects exactly 0 arguments"
+                          {:error (type-error
+                                   (str "datetime_now expects 0 arguments, got " (count args)))})))
+        "Integer64")
+
+      (= method "regex_validate")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "regex_validate expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "regex_validate expects 2 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "String")
+              (throw (ex-info "regex_validate arguments must be String"
+                              {:error (type-error
+                                       (str "regex_validate arguments must be String, got "
+                                            (display-type arg-type)))})))))
+        "Void")
+
+      (= method "regex_matches")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "regex_matches expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "regex_matches expects 3 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "String")
+              (throw (ex-info "regex_matches arguments must be String"
+                              {:error (type-error
+                                       (str "regex_matches arguments must be String, got "
+                                            (display-type arg-type)))})))))
+        "Boolean")
+
+      (= method "regex_find")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "regex_find expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "regex_find expects 3 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "String")
+              (throw (ex-info "regex_find arguments must be String"
+                              {:error (type-error
+                                       (str "regex_find arguments must be String, got "
+                                            (display-type arg-type)))})))))
+        {:base-type "String" :detachable true})
+
+      (= method "regex_find_all")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "regex_find_all expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "regex_find_all expects 3 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "String")
+              (throw (ex-info "regex_find_all arguments must be String"
+                              {:error (type-error
+                                       (str "regex_find_all arguments must be String, got "
+                                            (display-type arg-type)))})))))
+        {:base-type "Array" :type-args ["String"]})
+
+      (= method "regex_replace")
+      (do
+        (when (not= (count args) 4)
+          (throw (ex-info "regex_replace expects exactly 4 arguments"
+                          {:error (type-error
+                                   (str "regex_replace expects 4 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "String")
+              (throw (ex-info "regex_replace arguments must be String"
+                              {:error (type-error
+                                       (str "regex_replace arguments must be String, got "
+                                            (display-type arg-type)))})))))
+        "String")
+
+      (= method "regex_split")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "regex_split expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "regex_split expects 3 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "String")
+              (throw (ex-info "regex_split arguments must be String"
+                              {:error (type-error
+                                       (str "regex_split arguments must be String, got "
+                                            (display-type arg-type)))})))))
+        {:base-type "Array" :type-args ["String"]})
+
+      (= method "datetime_from_epoch_millis")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_from_epoch_millis expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_from_epoch_millis expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_from_epoch_millis argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_from_epoch_millis argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer64")
+
+      (= method "datetime_parse_iso")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_parse_iso expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_parse_iso expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "String")
+            (throw (ex-info "datetime_parse_iso argument must be String"
+                            {:error (type-error
+                                     (str "datetime_parse_iso argument must be String, got "
+                                          (display-type arg-type)))}))))
+        "Integer64")
+
+      (= method "datetime_make")
+      (do
+        (when (not= (count args) 6)
+          (throw (ex-info "datetime_make expects exactly 6 arguments"
+                          {:error (type-error
+                                   (str "datetime_make expects 6 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "Integer")
+              (throw (ex-info "datetime_make arguments must be Integer"
+                              {:error (type-error
+                                       (str "datetime_make arguments must be Integer, got "
+                                            (display-type arg-type)))})))))
+        "Integer64")
+
+      (= method "datetime_year")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_year expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_year expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_year argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_year argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer")
+
+      (= method "datetime_month")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_month expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_month expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_month argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_month argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer")
+
+      (= method "datetime_day")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_day expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_day expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_day argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_day argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer")
+
+      (= method "datetime_hour")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_hour expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_hour expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_hour argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_hour argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer")
+
+      (= method "datetime_minute")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_minute expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_minute expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_minute argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_minute argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer")
+
+      (= method "datetime_second")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_second expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_second expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_second argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_second argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer")
+
+      (= method "datetime_epoch_millis")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_epoch_millis expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_epoch_millis expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_epoch_millis argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_epoch_millis argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer64")
+
+      (= method "datetime_add_millis")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "datetime_add_millis expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "datetime_add_millis expects 2 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "Integer64")
+              (throw (ex-info "datetime_add_millis arguments must be Integer64"
+                              {:error (type-error
+                                       (str "datetime_add_millis arguments must be Integer64, got "
+                                            (display-type arg-type)))})))))
+        "Integer64")
+
+      (= method "datetime_diff_millis")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "datetime_diff_millis expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "datetime_diff_millis expects 2 arguments, got " (count args)))})))
+        (doseq [arg args]
+          (let [arg-type (check-expression env arg)]
+            (when-not (= (attachable-type arg-type) "Integer64")
+              (throw (ex-info "datetime_diff_millis arguments must be Integer64"
+                              {:error (type-error
+                                       (str "datetime_diff_millis arguments must be Integer64, got "
+                                            (display-type arg-type)))})))))
+        "Integer64")
+
+      (= method "datetime_format_iso")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_format_iso expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_format_iso expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_format_iso argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_format_iso argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "String")
+
+      (= method "path_is_file")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_is_file expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_is_file expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_is_file argument must be String"
+                            {:error (type-error
+                                     (str "path_is_file argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Boolean")
+
+      (= method "path_is_directory")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_is_directory expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_is_directory expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_is_directory argument must be String"
+                            {:error (type-error
+                                     (str "path_is_directory argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Boolean")
+
+      (= method "path_name")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_name expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_name expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_name argument must be String"
+                            {:error (type-error
+                                     (str "path_name argument must be String, got "
+                                         (display-type path-type)))}))))
+        "String")
+
+      (= method "path_extension")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_extension expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_extension expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_extension argument must be String"
+                            {:error (type-error
+                                     (str "path_extension argument must be String, got "
+                                          (display-type path-type)))}))))
+        "String")
+
+      (= method "path_name_without_extension")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_name_without_extension expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_name_without_extension expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_name_without_extension argument must be String"
+                            {:error (type-error
+                                     (str "path_name_without_extension argument must be String, got "
+                                          (display-type path-type)))}))))
+        "String")
+
+      (= method "path_absolute")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_absolute expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_absolute expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_absolute argument must be String"
+                            {:error (type-error
+                                     (str "path_absolute argument must be String, got "
+                                          (display-type path-type)))}))))
+        "String")
+
+      (= method "path_normalize")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_normalize expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_normalize expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_normalize argument must be String"
+                            {:error (type-error
+                                     (str "path_normalize argument must be String, got "
+                                          (display-type path-type)))}))))
+        "String")
+
+      (= method "path_size")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_size expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_size expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_size argument must be String"
+                            {:error (type-error
+                                     (str "path_size argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Integer64")
+
+      (= method "path_modified_time")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_modified_time expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_modified_time expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_modified_time argument must be String"
+                            {:error (type-error
+                                     (str "path_modified_time argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Integer64")
+
+      (= method "path_parent")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_parent expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_parent expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_parent argument must be String"
+                            {:error (type-error
+                                     (str "path_parent argument must be String, got "
+                                          (display-type path-type)))}))))
+        {:base-type "String" :detachable true})
+
+      (= method "path_child")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "path_child expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "path_child expects 2 arguments, got " (count args)))})))
+        (let [path-type (check-expression env (first args))
+              child-type (check-expression env (second args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_child first argument must be String"
+                            {:error (type-error
+                                     (str "path_child first argument must be String, got "
+                                          (display-type path-type)))})))
+          (when-not (= (attachable-type child-type) "String")
+            (throw (ex-info "path_child second argument must be String"
+                            {:error (type-error
+                                     (str "path_child second argument must be String, got "
+                                          (display-type child-type)))}))))
+        "String")
+
+      (= method "path_create_file")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_create_file expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_create_file expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_create_file argument must be String"
+                            {:error (type-error
+                                     (str "path_create_file argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Void")
+
+      (= method "path_create_directory")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_create_directory expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_create_directory expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_create_directory argument must be String"
+                            {:error (type-error
+                                     (str "path_create_directory argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Void")
+
+      (= method "path_create_directories")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_create_directories expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_create_directories expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_create_directories argument must be String"
+                            {:error (type-error
+                                     (str "path_create_directories argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Void")
+
+      (= method "path_delete")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_delete expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_delete expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_delete argument must be String"
+                            {:error (type-error
+                                     (str "path_delete argument must be String, got "
+                                         (display-type path-type)))}))))
+        "Void")
+
+      (= method "path_delete_tree")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_delete_tree expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_delete_tree expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_delete_tree argument must be String"
+                            {:error (type-error
+                                     (str "path_delete_tree argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Void")
+
+      (= method "path_copy")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "path_copy expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "path_copy expects 2 arguments, got " (count args)))})))
+        (let [source-type (check-expression env (first args))
+              target-type (check-expression env (second args))]
+          (when-not (= (attachable-type source-type) "String")
+            (throw (ex-info "path_copy first argument must be String"
+                            {:error (type-error
+                                     (str "path_copy first argument must be String, got "
+                                          (display-type source-type)))})))
+          (when-not (= (attachable-type target-type) "String")
+            (throw (ex-info "path_copy second argument must be String"
+                            {:error (type-error
+                                     (str "path_copy second argument must be String, got "
+                                          (display-type target-type)))}))))
+        "Void")
+
+      (= method "path_move")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "path_move expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "path_move expects 2 arguments, got " (count args)))})))
+        (let [source-type (check-expression env (first args))
+              target-type (check-expression env (second args))]
+          (when-not (= (attachable-type source-type) "String")
+            (throw (ex-info "path_move first argument must be String"
+                            {:error (type-error
+                                     (str "path_move first argument must be String, got "
+                                          (display-type source-type)))})))
+          (when-not (= (attachable-type target-type) "String")
+            (throw (ex-info "path_move second argument must be String"
+                            {:error (type-error
+                                     (str "path_move second argument must be String, got "
+                                          (display-type target-type)))}))))
+        "Void")
+
+      (= method "path_read_text")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_read_text expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_read_text expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_read_text argument must be String"
+                            {:error (type-error
+                                     (str "path_read_text argument must be String, got "
+                                          (display-type path-type)))}))))
+        "String")
+
+      (= method "path_write_text")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "path_write_text expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "path_write_text expects 2 arguments, got " (count args)))})))
+        (let [path-type (check-expression env (first args))
+              text-type (check-expression env (second args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_write_text first argument must be String"
+                            {:error (type-error
+                                     (str "path_write_text first argument must be String, got "
+                                          (display-type path-type)))})))
+          (when-not (= (attachable-type text-type) "String")
+            (throw (ex-info "path_write_text second argument must be String"
+                            {:error (type-error
+                                     (str "path_write_text second argument must be String, got "
+                                          (display-type text-type)))}))))
+        "Void")
+
+      (= method "path_append_text")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "path_append_text expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "path_append_text expects 2 arguments, got " (count args)))})))
+        (let [path-type (check-expression env (first args))
+              text-type (check-expression env (second args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_append_text first argument must be String"
+                            {:error (type-error
+                                     (str "path_append_text first argument must be String, got "
+                                          (display-type path-type)))})))
+          (when-not (= (attachable-type text-type) "String")
+            (throw (ex-info "path_append_text second argument must be String"
+                            {:error (type-error
+                                     (str "path_append_text second argument must be String, got "
+                                          (display-type text-type)))}))))
+        "Void")
+
+      (= method "path_list")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "path_list expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "path_list expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "path_list argument must be String"
+                            {:error (type-error
+                                     (str "path_list argument must be String, got "
+                                          (display-type path-type)))}))))
+        {:base-type "Array" :type-params ["String"]})
+
+      (= method "text_file_open_read")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "text_file_open_read expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "text_file_open_read expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "text_file_open_read argument must be String"
+                            {:error (type-error
+                                     (str "text_file_open_read argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Any")
+
+      (= method "text_file_open_write")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "text_file_open_write expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "text_file_open_write expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "text_file_open_write argument must be String"
+                            {:error (type-error
+                                     (str "text_file_open_write argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Any")
+
+      (= method "text_file_open_append")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "text_file_open_append expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "text_file_open_append expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "text_file_open_append argument must be String"
+                            {:error (type-error
+                                     (str "text_file_open_append argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Any")
+
+      (= method "text_file_read_line")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "text_file_read_line expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "text_file_read_line expects 1 argument, got " (count args)))})))
+        (check-expression env (first args))
+        {:base-type "String" :detachable true})
+
+      (= method "text_file_write")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "text_file_write expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "text_file_write expects 2 arguments, got " (count args)))})))
+        (check-expression env (first args))
+        (let [text-type (check-expression env (second args))]
+          (when-not (= (attachable-type text-type) "String")
+            (throw (ex-info "text_file_write second argument must be String"
+                            {:error (type-error
+                                     (str "text_file_write second argument must be String, got "
+                                          (display-type text-type)))}))))
+        "Void")
+
+      (= method "text_file_close")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "text_file_close expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "text_file_close expects 1 argument, got " (count args)))})))
+        (check-expression env (first args))
+        "Void")
+
+      (= method "binary_file_open_read")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "binary_file_open_read expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "binary_file_open_read expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "binary_file_open_read argument must be String"
+                            {:error (type-error
+                                     (str "binary_file_open_read argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Any")
+
+      (= method "binary_file_open_write")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "binary_file_open_write expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "binary_file_open_write expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "binary_file_open_write argument must be String"
+                            {:error (type-error
+                                     (str "binary_file_open_write argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Any")
+
+      (= method "binary_file_open_append")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "binary_file_open_append expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "binary_file_open_append expects 1 argument, got " (count args)))})))
+        (let [path-type (check-expression env (first args))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "binary_file_open_append argument must be String"
+                            {:error (type-error
+                                     (str "binary_file_open_append argument must be String, got "
+                                          (display-type path-type)))}))))
+        "Any")
+
+      (= method "binary_file_read_all")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "binary_file_read_all expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "binary_file_read_all expects 1 argument, got " (count args)))})))
+        (check-expression env (first args))
+        {:base-type "Array" :type-params ["Integer"]})
+
+      (= method "binary_file_read")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "binary_file_read expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "binary_file_read expects 2 arguments, got " (count args)))})))
+        (check-expression env (first args))
+        (let [count-type (check-expression env (second args))]
+          (when-not (= (attachable-type count-type) "Integer")
+            (throw (ex-info "binary_file_read second argument must be Integer"
+                            {:error (type-error
+                                     (str "binary_file_read second argument must be Integer, got "
+                                          (display-type count-type)))}))))
+        {:base-type "Array" :type-params ["Integer"]})
+
+      (= method "binary_file_write")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "binary_file_write expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "binary_file_write expects 2 arguments, got " (count args)))})))
+        (check-expression env (first args))
+        (let [bytes-type (normalize-type (check-expression env (second args)))]
+          (when-not (and (map? bytes-type)
+                         (= (:base-type bytes-type) "Array")
+                         (= (first (or (:type-params bytes-type) (:type-args bytes-type))) "Integer"))
+            (throw (ex-info "binary_file_write second argument must be Array[Integer]"
+                            {:error (type-error
+                                     (str "binary_file_write second argument must be Array[Integer], got "
+                                          (display-type bytes-type)))}))))
+        "Void")
+
+      (= method "binary_file_close")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "binary_file_close expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "binary_file_close expects 1 argument, got " (count args)))})))
+        (check-expression env (first args))
+        "Void")
+
+      (= method "http_get")
+      (do
+        (when-not (or (= (count args) 1) (= (count args) 2))
+          (throw (ex-info "http_get expects 1 or 2 arguments"
+                          {:error (type-error
+                                   (str "http_get expects 1 or 2 arguments, got " (count args)))})))
+        (let [url-type (check-expression env (first args))]
+          (when-not (= (attachable-type url-type) "String")
+            (throw (ex-info "http_get first argument must be String"
+                            {:error (type-error
+                                     (str "http_get first argument must be String, got "
+                                          (display-type url-type)))}))))
+        (when (= (count args) 2)
+          (let [timeout-type (check-expression env (second args))]
+            (when-not (= (attachable-type timeout-type) "Integer")
+              (throw (ex-info "http_get timeout argument must be Integer"
+                              {:error (type-error
+                                       (str "http_get timeout argument must be Integer, got "
+                                            (display-type timeout-type)))})))))
+        "Http_Response")
+
+      (= method "http_post")
+      (do
+        (when-not (or (= (count args) 2) (= (count args) 3))
+          (throw (ex-info "http_post expects 2 or 3 arguments"
+                          {:error (type-error
+                                   (str "http_post expects 2 or 3 arguments, got " (count args)))})))
+        (let [url-type (check-expression env (first args))
+              body-type (check-expression env (second args))]
+          (when-not (= (attachable-type url-type) "String")
+            (throw (ex-info "http_post first argument must be String"
+                            {:error (type-error
+                                     (str "http_post first argument must be String, got "
+                                          (display-type url-type)))})))
+          (when-not (= (attachable-type body-type) "String")
+            (throw (ex-info "http_post second argument must be String"
+                            {:error (type-error
+                                     (str "http_post second argument must be String, got "
+                                          (display-type body-type)))}))))
+        (when (= (count args) 3)
+          (let [timeout-type (check-expression env (nth args 2))]
+            (when-not (= (attachable-type timeout-type) "Integer")
+              (throw (ex-info "http_post timeout argument must be Integer"
+                              {:error (type-error
+                                       (str "http_post timeout argument must be Integer, got "
+                                            (display-type timeout-type)))})))))
+        "Http_Response")
+
+      (= method "json_parse")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "json_parse expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "json_parse expects 1 argument, got " (count args)))})))
+        (let [text-type (check-expression env (first args))]
+          (when-not (= (attachable-type text-type) "String")
+            (throw (ex-info "json_parse argument must be String"
+                            {:error (type-error
+                                     (str "json_parse argument must be String, got "
+                                          (display-type text-type)))}))))
+        "Any")
+
+      (= method "json_stringify")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "json_stringify expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "json_stringify expects 1 argument, got " (count args)))})))
+        (check-expression env (first args))
+        "String")
+
+      (= method "http_server_create")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "http_server_create expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "http_server_create expects 1 argument, got " (count args)))})))
+        (let [port-type (check-expression env (first args))]
+          (when-not (= (attachable-type port-type) "Integer")
+            (throw (ex-info "http_server_create argument must be Integer"
+                            {:error (type-error
+                                     (str "http_server_create argument must be Integer, got "
+                                          (display-type port-type)))}))))
+        "Any")
+
+      (= method "http_server_get")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "http_server_get expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "http_server_get expects 3 arguments, got " (count args)))})))
+        (check-expression env (first args))
+        (let [path-type (check-expression env (second args))
+              handler-type (check-expression env (nth args 2))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "http_server_get path argument must be String"
+                            {:error (type-error
+                                     (str "http_server_get path argument must be String, got "
+                                          (display-type path-type)))})))
+          (when-not (= (attachable-type handler-type) "Function")
+            (throw (ex-info "http_server_get handler argument must be Function"
+                            {:error (type-error
+                                     (str "http_server_get handler argument must be Function, got "
+                                          (display-type handler-type)))}))))
+        "Void")
+
+      (= method "http_server_post")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "http_server_post expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "http_server_post expects 3 arguments, got " (count args)))})))
+        (check-expression env (first args))
+        (let [path-type (check-expression env (second args))
+              handler-type (check-expression env (nth args 2))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "http_server_post path argument must be String"
+                            {:error (type-error
+                                     (str "http_server_post path argument must be String, got "
+                                          (display-type path-type)))})))
+          (when-not (= (attachable-type handler-type) "Function")
+            (throw (ex-info "http_server_post handler argument must be Function"
+                            {:error (type-error
+                                     (str "http_server_post handler argument must be Function, got "
+                                         (display-type handler-type)))}))))
+        "Void")
+
+      (= method "http_server_put")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "http_server_put expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "http_server_put expects 3 arguments, got " (count args)))})))
+        (check-expression env (first args))
+        (let [path-type (check-expression env (second args))
+              handler-type (check-expression env (nth args 2))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "http_server_put path argument must be String"
+                            {:error (type-error
+                                     (str "http_server_put path argument must be String, got "
+                                          (display-type path-type)))})))
+          (when-not (= (attachable-type handler-type) "Function")
+            (throw (ex-info "http_server_put handler argument must be Function"
+                            {:error (type-error
+                                     (str "http_server_put handler argument must be Function, got "
+                                          (display-type handler-type)))}))))
+        "Void")
+
+      (= method "http_server_delete")
+      (do
+        (when (not= (count args) 3)
+          (throw (ex-info "http_server_delete expects exactly 3 arguments"
+                          {:error (type-error
+                                   (str "http_server_delete expects 3 arguments, got " (count args)))})))
+        (check-expression env (first args))
+        (let [path-type (check-expression env (second args))
+              handler-type (check-expression env (nth args 2))]
+          (when-not (= (attachable-type path-type) "String")
+            (throw (ex-info "http_server_delete path argument must be String"
+                            {:error (type-error
+                                     (str "http_server_delete path argument must be String, got "
+                                          (display-type path-type)))})))
+          (when-not (= (attachable-type handler-type) "Function")
+            (throw (ex-info "http_server_delete handler argument must be Function"
+                            {:error (type-error
+                                     (str "http_server_delete handler argument must be Function, got "
+                                          (display-type handler-type)))}))))
+        "Void")
+
+      (= method "http_server_start")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "http_server_start expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "http_server_start expects 1 argument, got " (count args)))})))
+        (check-expression env (first args))
+        "Integer")
+
+      (= method "http_server_stop")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "http_server_stop expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "http_server_stop expects 1 argument, got " (count args)))})))
+        (check-expression env (first args))
+        "Void")
+
+      (= method "http_server_is_running")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "http_server_is_running expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "http_server_is_running expects 1 argument, got " (count args)))})))
+        (check-expression env (first args))
+        "Boolean")
+
       :else
       (if-let [var-type (env-lookup-var env method)]
       (let [base-type (if (map? var-type) (:base-type var-type) var-type)
             call-name (str "call" (count args))
-            method-sig (env-lookup-method env base-type call-name)
+            method-sig (env-lookup-method env base-type call-name (count args))
             type-map (build-generic-type-map env var-type)]
         (when-not method-sig
           (throw (ex-info (str "Method not found: " call-name)
@@ -923,7 +1945,7 @@
                                        (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
         (resolve-generic-type (:return-type method-sig) type-map))
         (if-let [current-class (env-lookup-var env "__current_class__")]
-          (if-let [method-sig (lookup-class-method env current-class method)]
+          (if-let [method-sig (lookup-class-method env current-class method (count args))]
             (do
               (when (not= (count args) (count (:params method-sig)))
                 (throw (ex-info (str "Method " method " expects " (count (:params method-sig))
@@ -980,16 +2002,6 @@
     (= class-name "Turtle") "Turtle"
     ;; Handle built-in Image type
     (= class-name "Image") "Image"
-    ;; Handle built-in File type
-    (= class-name "File")
-    (do
-      (when (= constructor "open")
-        (doseq [arg args]
-          (let [arg-type (check-expression env arg)]
-            (when-not (= arg-type "String")
-              (throw (ex-info "File.open requires a String path argument"
-                              {:error (type-error "File.open requires a String path argument")}))))))
-      "File")
     :else
     (do
       ;; Check if class exists
@@ -1049,7 +2061,7 @@
   "Check the type of an array literal"
   [env {:keys [elements] :as expr}]
   (if (empty? elements)
-    {:base-type "Array" :type-params ["Any"]}
+    {:base-type "Array" :type-params ["__EmptyArrayElement"]}
     (let [first-type (check-expression env (first elements))]
       ;; Check all elements have same type
       (doseq [elem (rest elements)]
@@ -1065,7 +2077,7 @@
   "Check the type of a map literal"
   [env {:keys [entries] :as expr}]
   (if (empty? entries)
-    {:base-type "Map" :type-params ["Any" "Any"]}
+    {:base-type "Map" :type-params ["__EmptyMapKey" "__EmptyMapValue"]}
     (let [first-entry (first entries)
           key-type (check-expression env (:key first-entry))
           val-type (check-expression env (:value first-entry))]
@@ -1805,15 +2817,6 @@
            "is_done" {:params [] :return-type "Boolean"}
            "is_cancelled" {:params [] :return-type "Boolean"}}]
     (env-add-method env "Task" method-name sig))
-  (doseq [[method-name sig]
-          {"read" {:params [] :return-type "String"}
-           "write" {:params [{:name "content" :type "String"}] :return-type "Void"}
-           "append" {:params [{:name "content" :type "String"}] :return-type "Void"}
-           "exists" {:params [] :return-type "Boolean"}
-           "delete" {:params [] :return-type "Void"}
-           "lines" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}
-           "close" {:params [] :return-type "Void"}}]
-    (env-add-method env "File" method-name sig))
   (doseq [[method-name sig]
           {"getenv" {:params [{:name "name" :type "String"}] :return-type "String"}
            "setenv" {:params [{:name "name" :type "String"} {:name "value" :type "String"}] :return-type "Void"}
