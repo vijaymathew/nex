@@ -675,7 +675,7 @@
                 (when closed?
                   (throw (ex-info "Cannot send on a closed channel" {:channel ch})))
                 (cond
-                  (and (zero? capacity) (seq receivers))
+                  (seq receivers)
                   (let [[receiver rest-receivers] (queue-pop receivers)]
                     (swap! (:state ch) assoc :receivers rest-receivers)
                     [:receiver receiver])
@@ -713,7 +713,7 @@
          (when closed?
            (throw (ex-info "Cannot send on a closed channel" {:channel ch})))
          (cond
-           (and (zero? capacity) (seq receivers))
+           (seq receivers)
            (let [[receiver rest-receivers] (queue-pop receivers)]
              (swap! (:state ch) assoc :receivers rest-receivers)
              (deliver receiver value)
@@ -838,7 +838,7 @@
              closed?
              (reject (ex-info "Cannot send on a closed channel" {:channel ch}))
 
-             (and (zero? capacity) (seq receivers))
+             (seq receivers)
              (let [receiver (first receivers)]
                (swap! (:state ch) update :receivers #(vec (rest %)))
                ((:resolve receiver) value)
@@ -878,7 +878,7 @@
          closed?
          (throw (ex-info "Cannot send on a closed channel" {:channel ch}))
 
-         (and (zero? capacity) (seq receivers))
+         (seq receivers)
          (let [receiver (first receivers)]
            (swap! (:state ch) update :receivers #(vec (rest %)))
            ((:resolve receiver) value)
