@@ -187,6 +187,24 @@ end"
           output (execute-method-output code)]
       (is (= ["2" "2" "10" "20" "true" "0"] output)))))
 
+(deftest buffered-channel-send-wakes-waiting-receiver
+  (testing "buffered channel send delivers directly to an already waiting receiver"
+    (let [code "class Test
+  feature
+    demo() do
+      let input: Channel[Integer] := create Channel[Integer].with_capacity(4)
+      let output: Channel[Integer] := create Channel[Integer].with_capacity(4)
+      let worker: Task := spawn do
+        let v: Integer := input.receive
+        output.send(v * v)
+      end
+      input.send(9)
+      print(output.receive)
+    end
+end"
+          output (execute-method-output code)]
+      (is (= ["81"] output)))))
+
 (deftest channel-try-methods-and-select-runtime
   (testing "try_send/try_receive and select work with buffered channels"
     (let [code "class Test
