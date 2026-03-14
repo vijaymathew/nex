@@ -1,0 +1,47 @@
+project:
+  type: book
+
+book:
+  title: "The Design and Implementation of Nex"
+  subtitle: "A Short Implementation Manual"
+  author: "Vijay Mathew"
+  date: today
+  date-format: "MMMM D, YYYY"
+  chapters:
+    - index.md
+    - introduction.md
+    - chapter_1.md
+    - chapter_2.md
+    - chapter_3.md
+    - chapter_4.md
+    - chapter_5.md
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    smooth-scroll: true
+    link-external-newwindow: true
+    css: styles.css
+    code-copy: true
+    code-overflow: wrap
+  pdf:
+    output-file: design-and-implementation-of-nex.pdf
+    pdf-engine: pdflatex
+    documentclass: scrbook
+    number-sections: true
+    toc: true
+    toc-depth: 2
+  epub:
+    output-file: design-and-implementation-of-nex.epub
+    toc: true
+    toc-depth: 2
+    number-sections: true
+
+crossref:
+  chapters: true
+
+execute:
+  freeze: auto

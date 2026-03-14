@@ -1,0 +1,47 @@
+:root {
+  --book-bg: #f8f7f4;
+  --ink: #1d232b;
+  --muted: #5b6673;
+  --accent: #1f5f8b;
+  --rule: #d9dee5;
+  --code-bg: #f2f4f7;
+}
+
+body {
+  background: var(--book-bg);
+  color: var(--ink);
+  line-height: 1.72;
+  font-size: 1.04rem;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--ink);
+}
+
+#quarto-content main {
+  max-width: 880px;
+}
+
+p,
+li {
+  max-width: 74ch;
+}
+
+a {
+  color: var(--accent);
+}
+
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 0.95rem 1rem;
+}
+
+pre,
+code {
+  font-size: 0.96em;
+}
