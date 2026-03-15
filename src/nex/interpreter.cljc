@@ -2716,6 +2716,38 @@
      (throw (ex-info "intern is not supported in ClojureScript. Parse on the JVM and send the AST, or use registerClass to manually register classes."
                     {:path path :class-name class-name :alias alias}))))
 
+#?(:clj
+   (defn resolve-interned-classes
+     "Resolve intern declarations to the class ASTs they bring into scope for static analysis.
+      Returns a flat sequence of class definitions, including recursively interned classes.
+      Aliased interns are represented as an additional class entry with the alias name."
+     ([source-id program]
+      (resolve-interned-classes source-id program #{}))
+     ([source-id program seen-files]
+      (let [ctx (assoc (make-context) :debug-source source-id)]
+        (:classes
+         (reduce
+          (fn [{:keys [classes seen]} {:keys [path class-name alias]}]
+            (let [file-path (find-intern-file ctx path class-name)
+                  canonical (.getCanonicalPath (clojure.java.io/file file-path))]
+              (if (contains? seen canonical)
+                {:classes classes :seen seen}
+                (let [file-ast (parser/ast (slurp file-path))
+                      nested (resolve-interned-classes canonical file-ast (conj seen canonical))
+                      direct-classes (:classes file-ast)
+                      all-file-classes (concat direct-classes nested)
+                      aliased-class (when alias
+                                      (when-let [class-def (some #(when (= (:name %) class-name) %) all-file-classes)]
+                                        [(assoc class-def :name alias)]))]
+                  {:classes (into classes (concat all-file-classes aliased-class))
+                   :seen (conj (:seen nested) canonical)}))))
+          {:classes [] :seen seen-files}
+          (:interns program))))))
+   :cljs
+   (defn resolve-interned-classes
+     [& _]
+     []))
+
 (defmethod eval-node :program
   [ctx {:keys [imports interns classes functions statements calls]}]
   ;; First, store all import statements (for code generation)

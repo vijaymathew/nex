@@ -1021,12 +1021,29 @@
         (let [prev-classes (remove #(or (= "__ReplTemp__" (:name %))
                                        (.startsWith (:name %) "AnonymousFunction_"))
                                   (vals @(:classes ctx)))
+              intern-classes (interp/resolve-interned-classes source-id ast)
               prev-imports @(:imports ctx)
               augmented-ast (cond
+                              (and (seq prev-classes) (seq prev-imports) (seq intern-classes))
+                              (assoc ast
+                                     :classes (concat prev-classes intern-classes (:classes ast))
+                                     :imports (concat prev-imports (:imports ast)))
+
                               (and (seq prev-classes) (seq prev-imports))
                               (assoc ast
                                      :classes (concat prev-classes (:classes ast))
                                      :imports (concat prev-imports (:imports ast)))
+
+                              (and (seq prev-classes) (seq intern-classes))
+                              (assoc ast :classes (concat prev-classes intern-classes (:classes ast)))
+
+                              (and (seq prev-imports) (seq intern-classes))
+                              (assoc ast
+                                     :classes (concat intern-classes (:classes ast))
+                                     :imports (concat prev-imports (:imports ast)))
+
+                              (seq intern-classes)
+                              (assoc ast :classes (concat intern-classes (:classes ast)))
 
                               (seq prev-classes)
                               (assoc ast :classes (concat prev-classes (:classes ast)))

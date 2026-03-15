@@ -1,6 +1,7 @@
 (ns nex.generator.java
   "Translates Nex (Eiffel-based) code to Java"
   (:require [nex.parser :as p]
+            [nex.interpreter :as interp]
             [nex.typechecker :as tc]
             [clojure.string :as str]
             [clojure.set :as set]
@@ -24,6 +25,13 @@
 
 (declare extract-members)
 (declare get-accessible-constants)
+
+(defn- augment-ast-with-interns
+  [source-id ast]
+  (let [intern-classes (interp/resolve-interned-classes source-id ast)]
+    (if (seq intern-classes)
+      (update ast :classes #(vec (concat intern-classes %)))
+      ast)))
 
 (defn class-name-to-local
   "Convert a class name to a local variable name (e.g., 'Point' -> 'point')"
@@ -2847,17 +2855,17 @@ public class NexTurtle {
        "    java.util.regex.Matcher m = regexPattern(pattern, flags).matcher(text);\n"
        "    return m.find() ? m.group() : null;\n"
        "  }\n"
-       "  public static ArrayList<String> regexFindAll(String pattern, String flags, String text) {\n"
+       "  public static java.util.ArrayList<String> regexFindAll(String pattern, String flags, String text) {\n"
        "    java.util.regex.Matcher m = regexPattern(pattern, flags).matcher(text);\n"
-       "    ArrayList<String> out = new ArrayList<>();\n"
+       "    java.util.ArrayList<String> out = new java.util.ArrayList<>();\n"
        "    while (m.find()) out.add(m.group());\n"
        "    return out;\n"
        "  }\n"
        "  public static String regexReplace(String pattern, String flags, String text, String replacement) {\n"
        "    return regexPattern(pattern, flags).matcher(text).replaceAll(replacement);\n"
        "  }\n"
-       "  public static ArrayList<String> regexSplit(String pattern, String flags, String text) {\n"
-       "    return new ArrayList<>(Arrays.asList(regexPattern(pattern, flags).split(text)));\n"
+       "  public static java.util.ArrayList<String> regexSplit(String pattern, String flags, String text) {\n"
+       "    return new java.util.ArrayList<>(java.util.Arrays.asList(regexPattern(pattern, flags).split(text)));\n"
        "  }\n"
        "  public static long datetimeNow() { return java.time.Instant.now().toEpochMilli(); }\n"
        "  public static long datetimeFromEpochMillis(long ms) { return ms; }\n"
@@ -2992,9 +3000,9 @@ public class NexTurtle {
        "      throw new RuntimeException(ex);\n"
        "    }\n"
        "  }\n"
-       "  public static ArrayList<String> pathList(String path) {\n"
+       "  public static java.util.ArrayList<String> pathList(String path) {\n"
        "    java.io.File[] files = new java.io.File(path).listFiles();\n"
-       "    ArrayList<String> out = new ArrayList<>();\n"
+       "    java.util.ArrayList<String> out = new java.util.ArrayList<>();\n"
        "    if (files != null) for (java.io.File f : files) out.add(f.getPath());\n"
        "    return out;\n"
        "  }\n\n"
@@ -3062,12 +3070,12 @@ public class NexTurtle {
        "      this.out = out;\n"
        "    }\n"
        "  }\n"
-       "  private static ArrayList<Integer> bytesToIntArray(byte[] bytes) {\n"
-       "    ArrayList<Integer> out = new ArrayList<>();\n"
+       "  private static java.util.ArrayList<Integer> bytesToIntArray(byte[] bytes) {\n"
+       "    java.util.ArrayList<Integer> out = new java.util.ArrayList<>();\n"
        "    for (byte b : bytes) out.add(b & 0xFF);\n"
        "    return out;\n"
        "  }\n"
-       "  private static byte[] intArrayToBytes(ArrayList<Integer> values) {\n"
+       "  private static byte[] intArrayToBytes(java.util.ArrayList<Integer> values) {\n"
        "    byte[] out = new byte[values.size()];\n"
        "    for (int i = 0; i < values.size(); i++) {\n"
        "      int v = values.get(i);\n"
@@ -3097,17 +3105,17 @@ public class NexTurtle {
        "      throw new RuntimeException(ex);\n"
        "    }\n"
        "  }\n"
-       "  public static ArrayList<Integer> binaryFileReadAll(Object handleObj) {\n"
+       "  public static java.util.ArrayList<Integer> binaryFileReadAll(Object handleObj) {\n"
        "    return bytesToIntArray(((BinaryFileHandle) handleObj).data);\n"
        "  }\n"
-       "  public static ArrayList<Integer> binaryFileRead(Object handleObj, int count) {\n"
+       "  public static java.util.ArrayList<Integer> binaryFileRead(Object handleObj, int count) {\n"
        "    BinaryFileHandle handle = (BinaryFileHandle) handleObj;\n"
        "    int end = Math.min(handle.index + count, handle.data.length);\n"
        "    byte[] out = java.util.Arrays.copyOfRange(handle.data, handle.index, end);\n"
        "    handle.index = end;\n"
        "    return bytesToIntArray(out);\n"
        "  }\n"
-       "  public static void binaryFileWrite(Object handleObj, ArrayList<Integer> values) {\n"
+       "  public static void binaryFileWrite(Object handleObj, java.util.ArrayList<Integer> values) {\n"
        "    try {\n"
        "      BinaryFileHandle handle = (BinaryFileHandle) handleObj;\n"
        "      handle.out.write(intArrayToBytes(values));\n"
@@ -3124,7 +3132,8 @@ public class NexTurtle {
        "      throw new RuntimeException(ex);\n"
        "    }\n"
        "  }\n\n"
-       "  private static Http_Response httpRequest(String method, String url, String bodyText, Integer timeoutMs) {\n"
+       "  @SuppressWarnings(\"unchecked\")\n"
+       "  private static <T> T httpRequest(String method, String url, String bodyText, Integer timeoutMs) {\n"
        "    try {\n"
        "      java.net.http.HttpRequest.Builder builder = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url));\n"
        "      if (timeoutMs != null) builder.timeout(java.time.Duration.ofMillis(timeoutMs.longValue()));\n"
@@ -3136,15 +3145,17 @@ public class NexTurtle {
        "        .send(builder.build(), java.net.http.HttpResponse.BodyHandlers.ofString());\n"
        "      java.util.HashMap<String, String> headers = new java.util.HashMap<>();\n"
        "      response.headers().map().forEach((k, v) -> headers.put(k, v.isEmpty() ? \"\" : String.valueOf(v.get(0))));\n"
-       "      return Http_Response.make(response.statusCode(), response.body(), headers);\n"
+       "      Class<?> responseClass = Class.forName(\"Http_Response\");\n"
+       "      java.lang.reflect.Method make = responseClass.getMethod(\"make\", int.class, String.class, java.util.HashMap.class);\n"
+       "      return (T) make.invoke(null, response.statusCode(), response.body(), headers);\n"
        "    } catch (Exception ex) {\n"
        "      throw new RuntimeException(ex);\n"
        "    }\n"
        "  }\n\n"
-       "  public static Http_Response httpGet(String url) { return httpRequest(\"GET\", url, null, null); }\n"
-       "  public static Http_Response httpGet(String url, int timeoutMs) { return httpRequest(\"GET\", url, null, timeoutMs); }\n"
-       "  public static Http_Response httpPost(String url, String bodyText) { return httpRequest(\"POST\", url, bodyText, null); }\n"
-       "  public static Http_Response httpPost(String url, String bodyText, int timeoutMs) { return httpRequest(\"POST\", url, bodyText, timeoutMs); }\n\n"
+       "  public static <T> T httpGet(String url) { return httpRequest(\"GET\", url, null, null); }\n"
+       "  public static <T> T httpGet(String url, int timeoutMs) { return httpRequest(\"GET\", url, null, timeoutMs); }\n"
+       "  public static <T> T httpPost(String url, String bodyText) { return httpRequest(\"POST\", url, bodyText, null); }\n"
+       "  public static <T> T httpPost(String url, String bodyText, int timeoutMs) { return httpRequest(\"POST\", url, bodyText, timeoutMs); }\n\n"
        "  public static class HttpServerRoute {\n"
        "    public final String pathPattern;\n"
        "    public final Function handler;\n"
@@ -3259,21 +3270,41 @@ public class NexTurtle {
        "        java.net.URI uri = exchange.getRequestURI();\n"
        "        String path = uri.getPath();\n"
        "        HttpServerMatch match = httpFindRoute(handle, method, path);\n"
-       "        Http_Server_Response response;\n"
-       "        if (match == null) {\n"
-       "          response = Http_Server_Response.with_status(404, \"Not Found\");\n"
-       "        } else {\n"
-       "          String body = new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);\n"
-       "          java.util.HashMap<String, String> headers = new java.util.HashMap<>();\n"
-       "          exchange.getRequestHeaders().forEach((k, v) -> headers.put(k, v.isEmpty() ? \"\" : String.valueOf(v.get(0))));\n"
-       "          Http_Request request = Http_Request.make(method, path, body, headers, match.params, httpParseQuery(uri.getRawQuery()));\n"
-       "          Object out = match.handler.call1(request);\n"
-       "          response = (out == null) ? Http_Server_Response.with_status(204, \"\") : (Http_Server_Response) out;\n"
+       "        try {\n"
+       "          Object response;\n"
+       "          if (match == null) {\n"
+       "            Class<?> responseClass = Class.forName(\"Http_Server_Response\");\n"
+       "            java.lang.reflect.Method withStatus = responseClass.getMethod(\"with_status\", int.class, String.class);\n"
+       "            response = withStatus.invoke(null, 404, \"Not Found\");\n"
+       "          } else {\n"
+       "            String body = new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);\n"
+       "            java.util.HashMap<String, String> headers = new java.util.HashMap<>();\n"
+       "            exchange.getRequestHeaders().forEach((k, v) -> headers.put(k, v.isEmpty() ? \"\" : String.valueOf(v.get(0))));\n"
+       "            Class<?> requestClass = Class.forName(\"Http_Request\");\n"
+       "            java.lang.reflect.Method makeRequest = requestClass.getMethod(\"make\", String.class, String.class, String.class, java.util.HashMap.class, java.util.Map.class, java.util.Map.class);\n"
+       "            Object request = makeRequest.invoke(null, method, path, body, headers, match.params, httpParseQuery(uri.getRawQuery()));\n"
+       "            Object out = match.handler.call1(request);\n"
+       "            if (out == null) {\n"
+       "              Class<?> responseClass = Class.forName(\"Http_Server_Response\");\n"
+       "              java.lang.reflect.Method withStatus = responseClass.getMethod(\"with_status\", int.class, String.class);\n"
+       "              response = withStatus.invoke(null, 204, \"\");\n"
+       "            } else {\n"
+       "              response = out;\n"
+       "            }\n"
+       "          }\n"
+       "          java.lang.reflect.Method headersMethod = response.getClass().getMethod(\"headers\");\n"
+       "          java.util.Map<?, ?> responseHeaders = (java.util.Map<?, ?>) headersMethod.invoke(response);\n"
+       "          responseHeaders.forEach((k, v) -> exchange.getResponseHeaders().add(String.valueOf(k), String.valueOf(v)));\n"
+       "          java.lang.reflect.Method bodyMethod = response.getClass().getMethod(\"body\");\n"
+       "          String responseBody = String.valueOf(bodyMethod.invoke(response));\n"
+       "          byte[] bytes = responseBody.getBytes(java.nio.charset.StandardCharsets.UTF_8);\n"
+       "          java.lang.reflect.Method statusMethod = response.getClass().getMethod(\"status\");\n"
+       "          int status = ((Number) statusMethod.invoke(response)).intValue();\n"
+       "          exchange.sendResponseHeaders(status, bytes.length);\n"
+       "          try (java.io.OutputStream os = exchange.getResponseBody()) { os.write(bytes); }\n"
+       "        } catch (Exception ex) {\n"
+       "          throw new RuntimeException(ex);\n"
        "        }\n"
-       "        response.headers().forEach((k, v) -> exchange.getResponseHeaders().add(String.valueOf(k), String.valueOf(v)));\n"
-       "        byte[] bytes = response.body().getBytes(java.nio.charset.StandardCharsets.UTF_8);\n"
-       "        exchange.sendResponseHeaders(response.status(), bytes.length);\n"
-       "        try (java.io.OutputStream os = exchange.getResponseBody()) { os.write(bytes); }\n"
        "      });\n"
        "      server.start();\n"
        "      handle.server = server;\n"
@@ -3903,7 +3934,7 @@ public class NexTurtle {
             call (cond
                    (and class-name no-arg-ctor)
                    (str class-name "." (:name no-arg-ctor) "()")
-                   class-name
+                   (and class-name (empty? constructors))
                    (str "new " class-name "()")
                    :else
                    "/* no-op */")]
@@ -3966,7 +3997,8 @@ public class NexTurtle {
     (translate nex-code {:skip-contracts true})    ; Without contracts (production)"
   ([nex-code] (translate nex-code {}))
   ([nex-code opts]
-   (let [ast (p/ast nex-code)]
+   (let [source-id (or (:source-id opts) "<input>")
+         ast (augment-ast-with-interns source-id (p/ast nex-code))]
      ;; Run type checker unless explicitly skipped
      (when-not (:skip-type-check opts)
        (let [result (tc/type-check ast)]
@@ -3979,7 +4011,7 @@ public class NexTurtle {
   "Compile .java files in dir with javac, package into a JAR with Main-Class
    manifest, then delete the .java and .class files.
    Returns the path to the created JAR."
-  [dir jar-name]
+  [dir jar-name main-class]
   (let [java-files (vec (filter #(str/ends-with? (.getName %) ".java")
                                 (.listFiles (io/file dir))))
         jar-file (io/file dir (str jar-name ".jar"))]
@@ -3992,7 +4024,7 @@ public class NexTurtle {
       (when-not (zero? exit-code)
         (throw (ex-info "javac compilation failed" {:exit-code exit-code}))))
     ;; Build JAR with manifest
-    (let [manifest-str "Manifest-Version: 1.0\nMain-Class: Main\n\n"
+    (let [manifest-str (str "Manifest-Version: 1.0\nMain-Class: " main-class "\n\n")
           manifest (Manifest. (ByteArrayInputStream. (.getBytes manifest-str)))
           class-files (vec (filter #(str/ends-with? (.getName %) ".class")
                                    (.listFiles (io/file dir))))]
@@ -4028,7 +4060,7 @@ public class NexTurtle {
   ([nex-file output-dir] (translate-file nex-file output-dir {}))
   ([nex-file output-dir opts]
    (let [nex-code (slurp nex-file)
-         ast (p/ast nex-code)
+         ast (augment-ast-with-interns nex-file (p/ast nex-code))
          _ (when-not (:skip-type-check opts)
              (let [result (tc/type-check ast)]
                (when-not (:success result)
@@ -4038,7 +4070,9 @@ public class NexTurtle {
          functions (:functions ast)
          function-names (set (map :name functions))
          function-base (generate-function-base-class)
+         runtime-helpers (generate-runtime-helpers)
          function-globals (generate-function-globals functions)
+         launcher-class (if (some #(= "Main" (:name %)) classes) "NexProgram" "Main")
          main-code (binding [*function-names* function-names
                              *class-registry* (into {} (map (juxt :name identity) classes))]
                      (generate-main ast))
@@ -4046,6 +4080,7 @@ public class NexTurtle {
                               *class-registry* (into {} (map (juxt :name identity) classes))]
                        (mapv (fn [cls] [(:name cls) (generate-class cls opts)]) classes))
          files (into {"Function.java" function-base
+                      "NexRuntime.java" runtime-helpers
                       "NexWindow.java" (generate-nex-window-class)
                       "NexImage.java" (generate-nex-image-class)
                       "NexTurtle.java" (generate-nex-turtle-class)}
@@ -4053,7 +4088,10 @@ public class NexTurtle {
                       (when function-globals
                         [["NexGlobals.java" function-globals]])
                       (map (fn [[name code]] [(str name ".java") code]) class-codes)
-                      [["Main.java" main-code]]))]
+                      [[(str launcher-class ".java")
+                        (if (= launcher-class "Main")
+                          main-code
+                          (str/replace main-code #"public class Main" (str "public class " launcher-class)) )]]))]
      (if output-dir
        (let [jar-name (or (:jar-name opts)
                           (-> (io/file nex-file)
@@ -4064,7 +4102,7 @@ public class NexTurtle {
              _ (.mkdirs build-dir)
              _ (doseq [[filename code] files]
                  (spit (io/file build-dir filename) code))
-             _ (compile-jar build-dir jar-name)
+             _ (compile-jar build-dir jar-name launcher-class)
              out-dir (io/file output-dir)
              _ (.mkdirs out-dir)
              final-jar (io/file out-dir (str jar-name ".jar"))]

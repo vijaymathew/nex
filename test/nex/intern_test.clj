@@ -90,6 +90,40 @@ end")
           (.delete main-file)
           (.delete tmp-dir))))))
 
+(deftest load-file-typechecks-bare-intern-relative-to-loaded-file
+  (testing ":load-style evaluation typechecks files that use bare intern classes"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-intern-typecheck-" (System/nanoTime)))
+          a-file (io/file tmp-dir "A.nex")
+          main-file (io/file tmp-dir "main.nex")
+          ctx (repl/init-repl-context)]
+      (.mkdirs tmp-dir)
+      (spit a-file "class A
+feature
+  greet(name: String) do
+    print(\"hello \" + name)
+  end
+end")
+      (spit main-file "intern A
+
+class Main
+create
+  make(name: String) do
+    let a: A := create A
+    a.greet(name)
+  end
+end")
+      (try
+        (binding [repl/*type-checking-enabled* (atom true)
+                  repl/*repl-var-types* (atom {})]
+          (let [output (with-out-str
+                         (repl/eval-code ctx (slurp main-file) (.getPath main-file)))]
+            (is (not (.contains output "Type error: Undefined class: A")))
+            (is (not (.contains output "Error: Type checking failed")))))
+        (finally
+          (.delete a-file)
+          (.delete main-file)
+          (.delete tmp-dir))))))
+
 (deftest repl-intern-loads-bare-class-from-home-deps
   (testing "REPL resolves bare intern names from ~/.nex/deps"
     (let [fake-home (io/file (System/getProperty "java.io.tmpdir") (str "nex-home-" (System/nanoTime)))
