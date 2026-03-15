@@ -1,6 +1,7 @@
 (ns nex.generator.javascript
   "Translates Nex (Eiffel-based) code to JavaScript (ES6+)"
   (:require [nex.parser :as p]
+            [nex.interpreter :as interp]
             [nex.typechecker :as tc]
             [clojure.string :as str]
             [clojure.set :as set]
@@ -25,6 +26,13 @@
 (declare collect-convert-bindings-block)
 (declare generate-convert-declarations)
 (declare generate-call-expr)
+
+(defn- augment-ast-with-interns
+  [source-id ast]
+  (let [intern-classes (interp/resolve-interned-classes source-id ast)]
+    (if (seq intern-classes)
+      (update ast :classes #(vec (concat intern-classes %)))
+      ast)))
 
 (defn class-name-to-local
   "Convert a class name to a local variable name (e.g., 'Point' -> 'point')"
@@ -2937,7 +2945,7 @@
             call (cond
                    (and class-name no-arg-ctor)
                    (str "await " class-name "." (:name no-arg-ctor) "()")
-                   class-name
+                   (and class-name (empty? constructors))
                    (str "new " class-name "()")
                    :else
                    "/* no-op */")]
@@ -3005,7 +3013,8 @@
     (translate nex-code {:skip-contracts true})    ; Without contracts (production)"
   ([nex-code] (translate nex-code {}))
   ([nex-code opts]
-   (let [ast (p/ast nex-code)]
+   (let [source-id (or (:source-id opts) "<input>")
+         ast (augment-ast-with-interns source-id (p/ast nex-code))]
      ;; Run type checker unless explicitly skipped
      (when-not (:skip-type-check opts)
        (let [result (tc/type-check ast)]
@@ -3031,7 +3040,7 @@
   ([nex-file output-dir] (translate-file nex-file output-dir {}))
   ([nex-file output-dir opts]
    (let [nex-code (slurp nex-file)
-         ast (p/ast nex-code)
+         ast (augment-ast-with-interns nex-file (p/ast nex-code))
          _ (when-not (:skip-type-check opts)
              (let [result (tc/type-check ast)]
                (when-not (:success result)
