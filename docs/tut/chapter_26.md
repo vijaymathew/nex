@@ -171,8 +171,8 @@ nex> todo.size
 nex> todo.completed_count
 0
 
-nex> todo.mark_task_done(0)
-nex> todo.mark_task_done(1)
+nex> todo.task_at(0).mark_done()
+nex> todo.task_at(1).mark_done()
 
 nex> todo.completed_count
 2
@@ -186,16 +186,14 @@ The program already works. But we can still improve the interface.
 
 ## Raising the Level of the Interface
 
-Calling `task_at(i).mark_done()` looks attractive, but it is not the best interface here. In Nex, if an object is fetched out of a collection, updated, and not written back, the collection still holds the older value. The list itself should offer a routine that performs the full update:
+The call `task_at(i).mark_done()` now works correctly. Still, a list class can offer a better public routine. Marking a task done is an operation in the vocabulary of the problem, not just a low-level storage update. A dedicated command also gives one clear place for contracts and future changes:
 
 ```
 nex> mark_task_done(index: Integer)
        require
          index_in_range: index >= 0 and index < tasks.length
        do
-         let item := tasks.get(index)
-         item.mark_done()
-         tasks.put(index, item)
+         task_at(index).mark_done()
        ensure
          selected_done: tasks.get(index).done
        end
@@ -229,9 +227,7 @@ nex> class Task_List
            require
              index_in_range: index >= 0 and index < tasks.length
            do
-             let item := tasks.get(index)
-             item.mark_done()
-             tasks.put(index, item)
+             task_at(index).mark_done()
            ensure
              selected_done: tasks.get(index).done
            end
