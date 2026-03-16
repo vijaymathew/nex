@@ -124,6 +124,22 @@
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-special-char-names-remain-valid-identifiers
+  (testing "newline/tab/space style names can be used as identifiers while #newline still parses as a char literal"
+    (let [code "class Test
+                  feature
+                    demo(): Char
+                    do
+                      let newline: Char := #newline
+                      let tab: Char := #tab
+                      result := newline
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-member-field-access-types-correctly
   (testing "Field access via obj.field should resolve declared field type"
     (let [code "class A
