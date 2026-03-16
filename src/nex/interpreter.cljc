@@ -3276,48 +3276,50 @@
 (defmethod eval-node :loop
   [ctx {:keys [init invariant variant until body]}]
   (maybe-debug-pause ctx {:type :loop :init init :invariant invariant :variant variant :until until :body body})
-  ;; Execute initialization statements
-  (doseq [stmt init]
-    (eval-node ctx stmt))
+  (let [loop-env (make-env (:current-env ctx))
+        loop-ctx (assoc ctx :current-env loop-env)]
+    ;; Execute initialization statements inside the loop scope.
+    (doseq [stmt init]
+      (eval-node loop-ctx stmt))
 
-  ;; Loop until the 'until' condition becomes true
-  (loop [last-result nil
-         prev-variant nil
-         iteration 0]
-    ;; Check invariant before iteration (if present)
-    (when invariant
-      (check-assertions ctx invariant Loop-invariant))
+    ;; Loop until the 'until' condition becomes true
+    (loop [last-result nil
+           prev-variant nil
+           iteration 0]
+      ;; Check invariant before iteration (if present)
+      (when invariant
+        (check-assertions loop-ctx invariant Loop-invariant))
 
-    ;; Check exit condition
-    (let [until-val (eval-node ctx until)]
-      (if until-val
-        ;; Exit loop
-        last-result
-        ;; Continue loop
-        (let [;; Evaluate variant before body (if present)
-              curr-variant (when variant (eval-node ctx variant))
+      ;; Check exit condition
+      (let [until-val (eval-node loop-ctx until)]
+        (if until-val
+          ;; Exit loop
+          last-result
+          ;; Continue loop
+          (let [;; Evaluate variant before body (if present)
+                curr-variant (when variant (eval-node loop-ctx variant))
 
-              ;; Check variant decreases (if present and not first iteration)
-              _ (when (and variant prev-variant)
-                  (when-not (< curr-variant prev-variant)
-                    (throw (ex-info "Loop variant must decrease"
-                                    {:iteration iteration
-                                     :previous-variant prev-variant
-                                     :current-variant curr-variant}))))
+                ;; Check variant decreases (if present and not first iteration)
+                _ (when (and variant prev-variant)
+                    (when-not (< curr-variant prev-variant)
+                      (throw (ex-info "Loop variant must decrease"
+                                      {:iteration iteration
+                                       :previous-variant prev-variant
+                                       :current-variant curr-variant}))))
 
-              ;; Execute loop body in a NEW scope each iteration
-              ;; This ensures 'let' creates shadowed variables that don't persist
-              ;; while plain ':=' can still update variables in parent scopes
-              body-env (make-env (:current-env ctx))
-              body-ctx (assoc ctx :current-env body-env)
-              result (last (map #(eval-node body-ctx %) body))]
+                ;; Execute loop body in a NEW scope each iteration
+                ;; This ensures 'let' creates shadowed variables that don't persist
+                ;; while plain ':=' can still update variables in parent scopes
+                body-env (make-env (:current-env loop-ctx))
+                body-ctx (assoc loop-ctx :current-env body-env)
+                result (last (map #(eval-node body-ctx %) body))]
 
-          ;; Check invariant after iteration (if present)
-          (when invariant
-            (check-assertions ctx invariant Loop-invariant))
+            ;; Check invariant after iteration (if present)
+            (when invariant
+              (check-assertions loop-ctx invariant Loop-invariant))
 
-          ;; Recur with new state
-          (recur result curr-variant (inc iteration)))))))
+            ;; Recur with new state
+            (recur result curr-variant (inc iteration))))))))
 
 (defmethod eval-node :statement
   [ctx node]
@@ -4283,39 +4285,41 @@
                                  (attempt-loop)))))))
 
          (= node-type :loop)
-         (.then (promise-reduce (:init node) nil
-                                (fn [_ stmt] (eval-node-async ctx stmt)))
-                (fn [_]
-                  (letfn [(step [last-result prev-variant iteration]
-                            (.then (if (and (pos? iteration) (zero? (mod iteration 25)))
-                                     (yield-browser-async)
-                                     (js/Promise.resolve nil))
-                                   (fn [_]
-                                     (.then (->promise (when-let [invariant (:invariant node)]
-                                                         (check-assertions-async ctx invariant Loop-invariant)))
-                                            (fn [_]
-                                              (.then (->promise (eval-node-async ctx (:until node)))
-                                                     (fn [until-val]
-                                                       (if until-val
-                                                         last-result
-                                                         (.then (->promise (when-let [variant (:variant node)]
-                                                                             (eval-node-async ctx variant)))
-                                                                (fn [curr-variant]
-                                                                  (when (and (:variant node) prev-variant)
-                                                                    (when-not (< curr-variant prev-variant)
-                                                                      (throw (ex-info "Loop variant must decrease"
-                                                                                      {:iteration iteration
-                                                                                       :previous-variant prev-variant
-                                                                                       :current-variant curr-variant}))))
-                                                                  (let [body-env (make-env (:current-env ctx))
-                                                                        body-ctx (assoc ctx :current-env body-env)]
-                                                                    (.then (eval-body-async body-ctx (:body node))
-                                                                           (fn [result]
-                                                                             (.then (->promise (when-let [invariant (:invariant node)]
-                                                                                                 (check-assertions-async ctx invariant Loop-invariant)))
-                                                                                    (fn [_]
-                                                                                      (step result curr-variant (inc iteration)))))))))))))))))]
-                    (step nil nil 0))))
+         (let [loop-env (make-env (:current-env ctx))
+               loop-ctx (assoc ctx :current-env loop-env)]
+           (.then (promise-reduce (:init node) nil
+                                  (fn [_ stmt] (eval-node-async loop-ctx stmt)))
+                  (fn [_]
+                    (letfn [(step [last-result prev-variant iteration]
+                              (.then (if (and (pos? iteration) (zero? (mod iteration 25)))
+                                       (yield-browser-async)
+                                       (js/Promise.resolve nil))
+                                     (fn [_]
+                                       (.then (->promise (when-let [invariant (:invariant node)]
+                                                           (check-assertions-async loop-ctx invariant Loop-invariant)))
+                                              (fn [_]
+                                                (.then (->promise (eval-node-async loop-ctx (:until node)))
+                                                       (fn [until-val]
+                                                         (if until-val
+                                                           last-result
+                                                           (.then (->promise (when-let [variant (:variant node)]
+                                                                               (eval-node-async loop-ctx variant)))
+                                                                  (fn [curr-variant]
+                                                                    (when (and (:variant node) prev-variant)
+                                                                      (when-not (< curr-variant prev-variant)
+                                                                        (throw (ex-info "Loop variant must decrease"
+                                                                                        {:iteration iteration
+                                                                                         :previous-variant prev-variant
+                                                                                         :current-variant curr-variant}))))
+                                                                    (let [body-env (make-env (:current-env loop-ctx))
+                                                                          body-ctx (assoc loop-ctx :current-env body-env)]
+                                                                      (.then (eval-body-async body-ctx (:body node))
+                                                                             (fn [result]
+                                                                               (.then (->promise (when-let [invariant (:invariant node)]
+                                                                                                   (check-assertions-async loop-ctx invariant Loop-invariant)))
+                                                                                      (fn [_]
+                                                                                        (step result curr-variant (inc iteration)))))))))))))))))]
+                      (step nil nil 0)))))
 
          (= node-type :statement)
          (eval-node-async ctx (:node node))
