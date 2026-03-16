@@ -42,6 +42,17 @@ It is worth tracing through a loop step by step to build a precise mental model 
 nex> from
        let total := 0
        let i := 1
+    do
+       -- placeholder
+    end
+```
+
+That first sketch is not quite what we want. Variables introduced in the `from` section belong to the loop's scope. They are available in the loop condition and body, but they are not visible after the loop has finished. If you want to inspect a value after the loop, define it outside the loop and then update it inside:
+
+```
+nex> let total := 0
+nex> from
+       let i := 1
     until
        i > 4
     do
@@ -54,7 +65,7 @@ nex> total
 
 The execution proceeds as follows:
 
-1. **Initialisation:** `total` is set to `0`, `i` is set to `1`.
+1. **Initialisation before the loop:** `total` is set to `0`, `i` is set to `1`.
 2. **Check condition:** `i > 4` is `false` (1 is not greater than 4). Enter body.
 3. **Body:** `total` becomes `0 + 1 = 1`. `i` becomes `2`.
 4. **Check condition:** `i > 4` is `false`. Enter body.
@@ -65,7 +76,7 @@ The execution proceeds as follows:
 9. **Body:** `total` becomes `6 + 4 = 10`. `i` becomes `5`.
 10. **Check condition:** `i > 4` is `true`. Loop ends.
 
-After the loop, `total` holds `10` — the sum of 1 through 4. Tracing through a loop like this is tedious on paper but invaluable when a loop is not behaving as expected. The discipline of knowing exactly what state the loop is in at each step is what separates confident debugging from guessing.
+After the loop, `total` still holds `10` because it was defined outside the loop. Tracing through a loop like this is tedious on paper but invaluable when a loop is not behaving as expected. The discipline of knowing exactly what state the loop is in at each step is what separates confident debugging from guessing.
 
 
 
@@ -106,8 +117,8 @@ nex> from
 Accumulating a result by building it up one step at a time:
 
 ```
+nex> let product := 1
 nex> from
-       let product := 1
        let i := 1
     until
        i > 5

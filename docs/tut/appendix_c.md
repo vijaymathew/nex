@@ -107,9 +107,14 @@ For sequential text and binary access, use `Text_File` and `Binary_File`.
 
 If your code is directory-oriented, use `Directory` as a thin wrapper over `Path`.
 
-```nex
+```text
 intern io/Path
 intern io/Directory
+
+let root_path: Path := create Path.make("tmp")
+if root_path.exists() then
+  root_path.delete_tree()
+end
 
 let root: Directory := create Directory.make("tmp")
 root.create_tree()
@@ -128,7 +133,7 @@ print(root.directories().length)
 print(data.files().length)
 ```
 
-```nex
+```text
 intern io/Path
 intern io/Text_File
 

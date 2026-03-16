@@ -246,8 +246,8 @@ nex> -- this will fail for large n due to stack overflow
 nex> sum_to(100000)
 
 nex> -- this handles any n safely
+nex> let total := 0
 nex> from
-       let total := 0
        let i := 1
     until
        i > 100000
