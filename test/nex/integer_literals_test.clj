@@ -108,3 +108,30 @@ end")]
       (is (str/includes? js-code "let mask = 10;"))
       (is (str/includes? js-code "let perms = 8;"))
       (is (str/includes? js-code "let color = 255;")))))
+
+(deftest integer-literal-member-call-parses-as-call
+  (testing "integer literal followed by .identifier parses as member access, not a real literal"
+    (let [ast (p/ast "class Test
+  feature
+    demo() do
+      print(10.pick)
+      print(10.bitwise_left_shift(1))
+    end
+end")
+          print-calls (-> ast :classes first :body first :members first :body)]
+      (is (= :call (-> print-calls first :args first :type)))
+      (is (= :integer (-> print-calls first :args first :target :type)))
+      (is (= 10 (-> print-calls first :args first :target :value)))
+      (is (= "pick" (-> print-calls first :args first :method)))
+      (is (= :call (-> print-calls second :args first :type)))
+      (is (= "bitwise_left_shift" (-> print-calls second :args first :method))))))
+
+(deftest integer-literal-member-call-runs
+  (testing "member calls on integer literals execute without parentheses"
+    (let [output (execute-method-output "class Test
+  feature
+    demo() do
+      print(8.bitwise_left_shift(1))
+    end
+end")]
+      (is (= ["16"] output)))))

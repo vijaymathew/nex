@@ -490,18 +490,16 @@ GTE          : '>=';
  * Real numbers:
  *  - optional integer part
  *  - required dot
- *  - optional fractional part
+ *  - required fractional part
  *  - optional exponent
  *
  * Examples:
  *  3.1415
  *  0.6
- *  12.e-3
  *  .5
- *  10.
  */
 REAL
-    : DIGITS? '.' DIGITS? EXPONENT?
+    : DIGITS? '.' DIGITS EXPONENT?
     ;
 
 /*

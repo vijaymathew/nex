@@ -315,7 +315,7 @@ The following program combines a loop with conditional logic to make a simple in
 
 ```
 nex> let con := create Console
-nex> let target := (10).pick + 1
+nex> let target := 10.pick + 1
 nex> let guess := 0
 nex> let attempts := 0
 

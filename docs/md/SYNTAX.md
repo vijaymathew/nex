@@ -16,6 +16,9 @@ let height: Real := 4.5          -- a decimal number (Real)
 let likes_cats: Boolean := true  -- true or false (Boolean)
 ```
 
+Real literals must include at least one digit after the decimal point. Valid
+examples: `4.5`, `10.0`, `.5`, `12.0e-3`. Invalid examples: `10.`, `12.e-3`.
+
 ## Printing
 
 ```nex

@@ -85,24 +85,26 @@ nex> (5).bitwise_is_set(0)
 true
 ```
 
-The parentheses around integer literals matter. Without them, `5.bitwise_left_shift(1)`
-would be read as the start of a real literal rather than as a method call. Bitwise
-operations use 32-bit integer semantics; Appendix B lists the full set of methods.
+Calls on integer literals can be written directly, as in `5.bitwise_left_shift(1)`.
+Bitwise operations use 32-bit integer semantics; Appendix B lists the full set of methods.
 
 One method worth knowing early is `pick`:
 
 ```
-nex> (6).pick
+nex> 6.pick
 4
 ```
 
-`pick` returns a random integer in the range from zero up to but not including the value it is called on. `(6).pick` returns a random integer from 0 to 5. The result will differ each time you call it. This is useful for simulations and exercises, and we will use it in several places later in the book.
+`pick` returns a random integer in the range from zero up to but not including the value it is called on. `6.pick` returns a random integer from 0 to 5. The result will differ each time you call it. This is useful for simulations and exercises, and we will use it in several places later in the book.
 
 
 
 ## Real Numbers
 
 A `Real` value is a number with a fractional part. Write real literals with a decimal point:
+
+Nex requires at least one digit after the decimal point. So `10.0`, `.5`, and
+`12.0e-3` are valid real literals, but `10.` and `12.e-3` are not.
 
 ```
 nex> let pi := 3.14159
