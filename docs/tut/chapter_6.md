@@ -203,6 +203,44 @@ nex> sum_of_squares(3, 4)
 
 `sum_of_squares` delegates the squaring work to `square` and focuses only on the addition. Each function has a single, clear responsibility. This decomposition is the subject of Chapter 7; for now, the key observation is that calling a function inside another function is natural and encouraged.
 
+## Forward Declarations
+
+Sometimes a function needs to call another function whose body will be defined
+later. If the typechecker sees the first definition before it has seen the
+later function's signature, it does not yet know what type that call should
+return. The solution is to declare the later function's signature first and
+define its body afterwards.
+
+In the REPL, this matters when static checking is enabled:
+
+```
+nex> :typecheck on
+Type checking enabled. Code will be validated before execution.
+```
+
+```
+nex> function normalize_name(name: String): String
+
+nex> function greet_user(name: String): String
+     do
+       result := "Hello, " + normalize_name(name)
+     end
+
+nex> function normalize_name(name: String): String
+     do
+       result := name.trim()
+     end
+
+nex> greet_user("  Vijay  ")
+"Hello, Vijay"
+```
+
+The first line is a declaration only. It introduces the function name,
+parameter type, and return type. The later full definition must match that
+signature exactly.
+
+This preserves static typechecking and keeps the program structure explicit.
+
 
 
 ## Anonymous Functions
@@ -325,6 +363,7 @@ Each function does one thing. The code that uses them reads like a series of cle
 ## Summary
 
 - A function is defined with `function name(parameters): return_type do ... end`
+- A function signature may be declared without a body when later definitions need forward references
 - Parameters are declared with their types; multiple parameters of the same type can be grouped: `(a, b: Integer)`
 - The return value is assigned to the special variable `result`; the function returns whatever `result` holds when the body finishes
 - A function with no `result` assignment returns no value and should not be used as an expression

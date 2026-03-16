@@ -1,4 +1,4 @@
-# Chapter 5: From Stories to Specifications
+# From Stories to Specifications
 
 Every system in this book began as a story. A robot navigates a building to deliver packages. A knowledge engine answers questions by searching a document collection. A virtual world simulates the interactions of objects governed by rules. These stories are genuinely useful — they communicate intent, establish context, and give purpose to the engineering work that follows. Without them, we would not know what we were building or why.
 

@@ -329,6 +329,15 @@
         (= t "Real")
         (= t "Decimal"))))
 
+(defn sortable-array-element-type?
+  [env elem-type]
+  (let [t (attachable-type (normalize-type elem-type))]
+    (or (= t "String")
+        (= t "Char")
+        (= t "Boolean")
+        (is-numeric-type? t)
+        (types-compatible? env t "Comparable"))))
+
 (defn integral-type?
   "Check if a type is an integral numeric type."
   [type]
@@ -820,6 +829,23 @@
           (resolve-generic-type (:field-type constant) type-map)
           "Any")
 
+        (and (= base-type "Array") (= method "sort"))
+        (do
+          (when (not= (count args) 0)
+            (throw (ex-info "Method sort expects 0 arguments"
+                            {:error (type-error
+                                     (str "Method sort expects 0 arguments, got " (count args)))})))
+          (let [elem-type (if (map? target-type)
+                            (or (first (or (:type-params target-type) (:type-args target-type)))
+                                "Any")
+                            "Any")]
+            (when-not (sortable-array-element-type? env elem-type)
+              (throw (ex-info "Array.sort requires Comparable element type"
+                              {:error (type-error
+                                       (str "Array.sort requires elements of a built-in sortable type or Comparable, got "
+                                            (display-type elem-type)))})))
+            (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map)))
+
         :else
         (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
                                 (builtin-method-signature "Any" method (count args) type-map)
@@ -850,6 +876,32 @@
             "Any"))))
     ;; Function call (built-in like print/type_of/type_is) or function object call
     (cond
+      (= method "print")
+      (do
+        (doseq [arg args]
+          (check-expression env arg))
+        "Void")
+
+      (= method "println")
+      (do
+        (doseq [arg args]
+          (check-expression env arg))
+        "Void")
+
+      (= method "sleep")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "sleep expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "sleep expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (types-compatible? env arg-type "Integer")
+            (throw (ex-info "sleep argument must be Integer"
+                            {:error (type-error
+                                     (str "sleep argument must be Integer, got "
+                                          (display-type arg-type)))}))))
+        "Void")
+
       (= method "type_of")
       (do
         (when (not= (count args) 1)
@@ -1960,8 +2012,16 @@
                                     {:error (type-error
                                              (str "Expected " (:type param) ", got " arg-type))})))))
               (or (:return-type method-sig) "Void"))
-            (do (doseq [arg args] (check-expression env arg)) "Void"))
-          (do (doseq [arg args] (check-expression env arg)) "Void")))))))
+            (do
+              (doseq [arg args] (check-expression env arg))
+              (throw (ex-info (str "Undefined function or method: " method)
+                              {:error (type-error
+                                       (str "Undefined function or method: " method))}))))
+          (do
+            (doseq [arg args] (check-expression env arg))
+            (throw (ex-info (str "Undefined function: " method)
+                            {:error (type-error
+                                     (str "Undefined function: " method))})))))))))
 
 (defn check-create
   "Check the type of a create expression"
@@ -2646,7 +2706,8 @@
       (doseq [member (:members section)]
         (cond
           (= (:type member) :method)
-          (check-method env name member)
+          (when-not (:declaration-only? member)
+            (check-method env name member))
           (= (:type member) :field)
           (when-not (:constant? member)
             (validate-type-annotation env (:field-type member)))))
@@ -2890,7 +2951,7 @@
            "index_of"    {:params [{:name "elem" :type "T"}] :return-type "Integer"}
            "remove"      {:params [{:name "index" :type "Integer"}] :return-type "Void"}
            "reverse"     {:params [] :return-type "Void"}
-           "sort"        {:params [] :return-type "Void"}
+           "sort"        {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
            "slice"       {:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}]
                           :return-type {:base-type "Array" :type-params ["T"]}}
            "first"       {:params [] :return-type "T"}

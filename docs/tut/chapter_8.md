@@ -156,6 +156,10 @@ Two functions can be mutually recursive — each calling the other. A classic ex
 
 ```
 nex> function is_even(n: Integer): Boolean
+
+nex> function is_odd(n: Integer): Boolean
+
+nex> function is_even(n: Integer): Boolean
      do
        if n = 0 then
          result := true
@@ -179,6 +183,11 @@ true
 nex> is_odd(7)
 true
 ```
+
+The first two lines are forward declarations. They tell the typechecker the
+signatures of both functions before either body is checked. Without those
+declarations, the first function body would refer to a function whose return
+type is not yet known.
 
 `is_even(4)` calls `is_odd(3)`, which calls `is_even(2)`, which calls `is_odd(1)`, which calls `is_even(0)`, which returns `true`. The base cases anchor both functions: zero is even and zero is not odd.
 
@@ -246,8 +255,8 @@ nex> -- this will fail for large n due to stack overflow
 nex> sum_to(100000)
 
 nex> -- this handles any n safely
+nex> let total := 0
 nex> from
-       let total := 0
        let i := 1
     until
        i > 100000

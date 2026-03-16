@@ -28,7 +28,7 @@ classDecl
     ;
 
 functionDecl
-    : FUNCTION IDENTIFIER '(' paramList? ')' (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
+    : FUNCTION IDENTIFIER '(' paramList? ')' (':' type)? noteClause? (requireClause? DO block ensureClause? rescueClause? END)?
     ;
 
 genericParams
@@ -490,18 +490,16 @@ GTE          : '>=';
  * Real numbers:
  *  - optional integer part
  *  - required dot
- *  - optional fractional part
+ *  - required fractional part
  *  - optional exponent
  *
  * Examples:
  *  3.1415
  *  0.6
- *  12.e-3
  *  .5
- *  10.
  */
 REAL
-    : DIGITS? '.' DIGITS? EXPONENT?
+    : DIGITS? '.' DIGITS EXPONENT?
     ;
 
 /*
@@ -536,8 +534,9 @@ fragment EXPONENT
     : [eE] [+\-]? DIGITS
     ;
 
-SPECIAL_CHAR  : 'nul' | 'space' | 'newline' | 'tab' | 'return'
-;
+fragment SPECIAL_CHAR_NAME
+    : 'nul' | 'space' | 'newline' | 'tab' | 'return'
+    ;
 
 /*
  * -------------------------
@@ -553,7 +552,7 @@ SET_START
     ;
 
 CHAR_LITERAL
-    : '#' ( ~[0-9 \t\r\n] | SPECIAL_CHAR | DIGITS )
+    : '#' ( ~[0-9 \t\r\n] | SPECIAL_CHAR_NAME | DIGITS )
     ;
 
 /*

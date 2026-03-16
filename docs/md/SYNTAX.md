@@ -16,6 +16,9 @@ let height: Real := 4.5          -- a decimal number (Real)
 let likes_cats: Boolean := true  -- true or false (Boolean)
 ```
 
+Real literals must include at least one digit after the decimal point. Valid
+examples: `4.5`, `10.0`, `.5`, `12.0e-3`. Invalid examples: `10.`, `12.e-3`.
+
 ## Printing
 
 ```nex
@@ -143,6 +146,34 @@ end
 
 print(double(5))                 -- 10
 ```
+
+For mutually recursive functions, declare the signatures first and define the
+bodies afterwards:
+
+```nex
+function is_even(n: Integer): Boolean
+function is_odd(n: Integer): Boolean
+
+function is_even(n: Integer): Boolean
+do
+  if n = 0 then
+    result := true
+  else
+    result := is_odd(n - 1)
+  end
+end
+
+function is_odd(n: Integer): Boolean
+do
+  if n = 0 then
+    result := false
+  else
+    result := is_even(n - 1)
+  end
+end
+```
+
+The later definition must match the earlier declaration exactly.
 
 ## Arrays
 

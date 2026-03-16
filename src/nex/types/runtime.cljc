@@ -7,17 +7,43 @@
 (defn nex-array-from [coll] #?(:clj (java.util.ArrayList. (vec coll)) :cljs (js/Array.from (to-array coll))))
 (defn nex-array? [v] #?(:clj (instance? java.util.ArrayList v) :cljs (array? v)))
 (defn nex-array-get [arr idx] #?(:clj (.get arr idx) :cljs (aget arr idx)))
-(defn nex-array-add [arr val] #?(:clj (.add arr val) :cljs (.push arr val)))
-(defn nex-array-add-at [arr idx val] #?(:clj (.add arr idx val) :cljs (.splice arr idx 0 val)))
-(defn nex-array-set [arr idx val] #?(:clj (.set arr idx val) :cljs (aset arr idx val)))
+(defn nex-array-add [arr val]
+  #?(:clj (do
+            (.add arr val)
+            nil)
+     :cljs (do
+             (.push arr val)
+             nil)))
+(defn nex-array-add-at [arr idx val]
+  #?(:clj (do
+            (.add arr idx val)
+            nil)
+     :cljs (do
+             (.splice arr idx 0 val)
+             nil)))
+(defn nex-array-set [arr idx val]
+  #?(:clj (do
+            (.set arr idx val)
+            nil)
+     :cljs (do
+             (aset arr idx val)
+             nil)))
 (defn nex-array-size [arr] #?(:clj (.size arr) :cljs (.-length arr)))
 (defn nex-array-empty? [arr] #?(:clj (.isEmpty arr) :cljs (zero? (.-length arr))))
 (defn nex-array-contains [arr elem] #?(:clj (.contains arr elem) :cljs (.includes arr elem)))
 (defn nex-array-index-of [arr elem] #?(:clj (.indexOf arr elem) :cljs (.indexOf arr elem)))
-(defn nex-array-remove [arr idx] #?(:clj (.remove arr (int idx)) :cljs (.splice arr idx 1)))
+(defn nex-array-remove [arr idx]
+  #?(:clj (do
+            (.remove ^java.util.ArrayList arr ^int (int idx))
+            nil)
+     :cljs (do
+             (.splice arr idx 1)
+             nil)))
 (defn nex-array-reverse [arr] #?(:clj (java.util.ArrayList. (.reversed arr)) :cljs (js/Array.from (.reverse (.slice arr)))))
 (defn nex-array-sort [arr] #?(:clj (.sort arr nil) :cljs (.sort arr)))
-(defn nex-array-slice [arr start end] #?(:clj (.subList arr start end) :cljs (.slice arr start end)))
+(defn nex-array-slice [arr start end]
+  #?(:clj (java.util.ArrayList. (.subList arr start end))
+     :cljs (.slice arr start end)))
 (defn nex-array-str [formatter arr]
   (str "[" (str/join ", " (map formatter #?(:clj arr :cljs (array-seq arr)))) "]"))
 
@@ -27,13 +53,25 @@
      :cljs (js/Map. (to-array (map to-array pairs)))))
 (defn nex-map? [v] #?(:clj (instance? java.util.HashMap v) :cljs (instance? js/Map v)))
 (defn nex-map-get [m key] #?(:clj (.get m key) :cljs (.get m key)))
-(defn nex-map-put [m key val] #?(:clj (.put m key val) :cljs (.set m key val)))
+(defn nex-map-put [m key val]
+  #?(:clj (do
+            (.put m key val)
+            nil)
+     :cljs (do
+             (.set m key val)
+             nil)))
 (defn nex-map-size [m] #?(:clj (.size m) :cljs (.-size m)))
 (defn nex-map-empty? [m] #?(:clj (.isEmpty m) :cljs (zero? (.-size m))))
 (defn nex-map-contains-key [m key] #?(:clj (.containsKey m key) :cljs (.has m key)))
 (defn nex-map-keys [m] #?(:clj (vec (.keySet m)) :cljs (vec (es6-iterator-seq (.keys m)))))
 (defn nex-map-values [m] #?(:clj (vec (.values m)) :cljs (vec (es6-iterator-seq (.values m)))))
-(defn nex-map-remove [m key] #?(:clj (.remove m key) :cljs (.delete m key)))
+(defn nex-map-remove [m key]
+  #?(:clj (do
+            (.remove m key)
+            nil)
+     :cljs (do
+             (.delete m key)
+             nil)))
 (defn nex-map-str [formatter m]
   (let [entries #?(:clj (for [[k v] m] (str (formatter k) ": " (formatter v)))
                    :cljs (for [[k v] (es6-iterator-seq (.entries m))] (str (formatter k) ": " (formatter v))))]

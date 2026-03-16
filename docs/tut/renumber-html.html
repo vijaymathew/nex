@@ -1,0 +1,47 @@
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  function isNumeric(text) {
+    return /^\d+$/.test(text.trim());
+  }
+
+  function decrementNumericText(el) {
+    const text = el.textContent.trim();
+    if (isNumeric(text)) {
+      el.textContent = String(parseInt(text, 10) - 1);
+    }
+  }
+
+  function decrementSectionText(el) {
+    const text = el.textContent.trim();
+    const match = text.match(/^(\d+)(\..*)?$/);
+    if (match) {
+      const lead = parseInt(match[1], 10) - 1;
+      el.textContent = String(lead) + (match[2] || "");
+    }
+  }
+
+  const indexLinks = document.querySelectorAll('a[href$="index.html"]');
+  indexLinks.forEach(function (link) {
+    const num = link.querySelector(".chapter-number");
+    if (num) num.remove();
+    const title = link.querySelector(".chapter-title");
+    if (title && title.textContent.trim() === "index.html") {
+      title.textContent = "Home";
+    }
+  });
+
+  document.querySelectorAll(".chapter-number").forEach(function (el) {
+    if (el.closest('a[href$="index.html"]')) return;
+    decrementNumericText(el);
+  });
+
+  document.querySelectorAll(".header-section-number").forEach(decrementSectionText);
+
+  const titleEl = document.querySelector("title");
+  if (titleEl) {
+    titleEl.textContent = titleEl.textContent.replace(/^(\d+)(\u00a0|\s+)/, function (_, n, space) {
+      return String(parseInt(n, 10) - 1) + space;
+    });
+  }
+});
+</script>

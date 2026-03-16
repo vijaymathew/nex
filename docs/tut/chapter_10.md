@@ -95,12 +95,10 @@ nex> scores.try_get("Alice", 0)
 
 ## Removing Entries
 
-The `remove` method deletes an entry by key and returns the value that was associated with it:
+The `remove` method deletes an entry by key:
 
 ```
-nex> let removed := scores.remove("Bob")
-nex> removed
-78
+nex> scores.remove("Bob")
 
 nex> scores
 {Alice: 95, Carol: 85}

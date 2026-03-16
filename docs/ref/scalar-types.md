@@ -97,6 +97,10 @@ bit. For method calls on integer literals, wrap the literal in parentheses:
 
 ## `Real`
 
+Real literals must include at least one digit after the decimal point. Valid
+forms include `3.14`, `10.0`, `.5`, and `12.0e-3`. Forms such as `10.` and
+`12.e-3` are not valid real literals.
+
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
 | `to_string` | none | `String` | Convert to string. |
@@ -172,8 +176,8 @@ print(s.contains("ex"))           -- true
 let n: Integer := 7
 print(n.plus(5))                  -- 12
 print(n.pick())                   -- random integer in [0, 7)
-print((5).bitwise_left_shift(1))  -- 10
-print((6).bitwise_and(3))         -- 2
+print(5.bitwise_left_shift(1))    -- 10
+print(6.bitwise_and(3))           -- 2
 
 let r: Real := 3.6
 print(r.round())                  -- 4

@@ -98,9 +98,9 @@ end"
     (let [code "class Math
   feature
     gcd(a, b: Integer) do
+      let x := a
+      let y := b
       from
-        let x := a
-        let y := b
       until
         x = y
       do
@@ -161,4 +161,3 @@ end"
         (doseq [stmt (:body method-def)]
           (interp/eval-node ctx-with-env stmt))
         (is (= ["60"] @(:output ctx-with-env)))))))
-

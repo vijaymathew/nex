@@ -756,15 +756,15 @@
    :Array
    {"length"    (fn [target _] (str target ".length"))
     "get"       (fn [target args] (str target "[" args "]"))
-    "add_at"    (fn [target args] (str target ".set(" args ")"))
-    "add"       (fn [target args] (str target ".push(" args ")"))
-    "put"       (fn [target args] (str target ".set(" args ")"))
+    "add_at"    (fn [target args] (str "__nexArrayAddAt(" target ", " args ")"))
+    "add"       (fn [target args] (str "__nexArrayAdd(" target ", " args ")"))
+    "put"       (fn [target args] (str "__nexArrayPut(" target ", " args ")"))
     "is_empty"  (fn [target _] (str "(" target ".length === 0)"))
-    "contains"  (fn [target args] (str target ".includes(" args ")"))
-    "index_of"  (fn [target args] (str target ".indexOf(" args ")"))
-    "remove"    (fn [target args] (str "(" target ".splice(" args ", 1), " target ")"))
+    "contains"  (fn [target args] (str "__nexArrayContains(" target ", " args ")"))
+    "index_of"  (fn [target args] (str "__nexArrayIndexOf(" target ", " args ")"))
+    "remove"    (fn [target args] (str "(" target ".splice(" args ", 1), null)"))
     "reverse"   (fn [target _] (str "[..." target "].reverse()"))
-    "sort"      (fn [target _] (str "[..." target "].sort()"))
+    "sort"      (fn [target _] (str "__nexArraySort(" target ")"))
     "slice"     (fn [target args] (str target ".slice(" args ")"))
     "to_string" (fn [target _] (str "__nexToString(" target ")"))
     "equals"    (fn [target args] (str "__nexDeepEquals(" target ", " args ")"))
@@ -776,18 +776,18 @@
     "is_empty"     (fn [target _] (str "(" target ".size === 0)"))
     "get"          (fn [target args] (str target ".get(" args ")"))
     "try_get"      (fn [target args] (str target ".get(" args ")"))
-    "put"          (fn [target args] (str "(" target ".set(" args "), " target ")"))
-    "contains_key" (fn [target args] (str target ".has(" args ")"))
+    "put"          (fn [target args] (str "__nexMapPut(" target ", " args ")"))
+    "contains_key" (fn [target args] (str "__nexMapContainsKey(" target ", " args ")"))
     "keys"         (fn [target _] (str "Array.from(" target ".keys())"))
     "values"       (fn [target _] (str "Array.from(" target ".values())"))
-    "remove"       (fn [target args] (str "(" target ".delete(" args "), " target ")"))
+    "remove"       (fn [target args] (str "(" target ".delete(" args "), null)"))
     "to_string"    (fn [target _] (str "__nexToString(" target ")"))
     "equals"       (fn [target args] (str "__nexDeepEquals(" target ", " args ")"))
     "clone"        (fn [target _] (str "__nexDeepClone(" target ")"))
     "cursor"       (fn [target _] (str "__nexMapCursor(" target ")"))}
 
    :Set
-   {"contains"             (fn [target args] (str target ".has(" args ")"))
+   {"contains"             (fn [target args] (str "__nexSetContains(" target ", " args ")"))
     "union"                (fn [target args] (str "__nexSetUnion(" target ", " args ")"))
     "difference"           (fn [target args] (str "__nexSetDifference(" target ", " args ")"))
     "intersection"         (fn [target args] (str "__nexSetIntersection(" target ", " args ")"))
@@ -1622,7 +1622,7 @@
 
 (defn generate-method
   "Generate JavaScript code for a method"
-  [level {:keys [name params return-type body require ensure rescue visibility note]} opts]
+  [level {:keys [name params return-type body require ensure rescue visibility note declaration-only?]} opts]
   (let [param-names (set (map :name params))
         param-types (into {} (map (juxt :name :type) params))
         convert-bindings (collect-convert-bindings-block (concat body (or rescue [])))
@@ -1655,13 +1655,19 @@
                                        (str "let old_" field-name " = this." field-name ";")))
                               old-refs))
             preconditions (generate-assertions (+ level 1) require "Precondition" opts)
-            statements (if rescue
+            statements (cond
+                         declaration-only?
+                         [(indent (+ level 1)
+                                  (str "throw new Error(\"Function or method declared but not defined: "
+                                       name "\");"))]
+                         rescue
                          [(generate-rescue (+ level 1) body rescue #{})]
+                         :else
                          (map #(generate-statement (+ level 1) %) body))
             postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)
             class-invariant-checks (generate-assertions (+ level 1) *class-invariants* "Class invariant" opts)
             ;; Add return statement if method has return type
-            return-stmt (when return-type
+            return-stmt (when (and return-type (not declaration-only?))
                          [(indent (+ level 1) "return result;")])
             ;; Generate JSDoc comment for type information and note
             jsdoc (when (or note (seq params) return-type)
@@ -2102,6 +2108,7 @@
        "function __nexDeepEquals(a, b) {\n"
        "  if (a === b) return true;\n"
        "  if (a == null || b == null) return false;\n"
+       "  if (typeof a === 'string' || typeof a === 'number' || typeof a === 'boolean') return a === b;\n"
        "  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => __nexDeepEquals(v, b[i]));\n"
        "  if (a instanceof Map && b instanceof Map) {\n"
        "    if (a.size !== b.size) return false;\n"
@@ -2123,7 +2130,46 @@
        "    }\n"
        "    return true;\n"
        "  }\n"
+       "  if (typeof a === 'object' && typeof b === 'object' && a.constructor === b.constructor) {\n"
+       "    const aKeys = Object.keys(a);\n"
+       "    const bKeys = Object.keys(b);\n"
+       "    if (aKeys.length !== bKeys.length) return false;\n"
+       "    for (const key of aKeys) {\n"
+       "      if (!Object.prototype.hasOwnProperty.call(b, key)) return false;\n"
+       "      if (!__nexDeepEquals(a[key], b[key])) return false;\n"
+       "    }\n"
+       "    return true;\n"
+       "  }\n"
        "  return a === b;\n"
+       "}\n"
+       "function __nexArrayContains(values, needle) {\n"
+       "  return values.some(v => __nexDeepEquals(v, needle));\n"
+       "}\n"
+       "function __nexArrayIndexOf(values, needle) {\n"
+       "  for (let i = 0; i < values.length; i++) if (__nexDeepEquals(values[i], needle)) return i;\n"
+       "  return -1;\n"
+       "}\n"
+       "function __nexMapContainsKey(values, needle) {\n"
+       "  for (const key of values.keys()) if (__nexDeepEquals(key, needle)) return true;\n"
+       "  return false;\n"
+       "}\n"
+       "function __nexSetContains(values, needle) {\n"
+       "  for (const value of values.values()) if (__nexDeepEquals(value, needle)) return true;\n"
+       "  return false;\n"
+       "}\n"
+       "function __nexCompareValues(a, b) {\n"
+       "  if (a === b) return 0;\n"
+       "  if (a === null || a === undefined || b === null || b === undefined) throw new Error('Array.sort cannot compare null values');\n"
+       "  const ta = typeof a;\n"
+       "  const tb = typeof b;\n"
+       "  if (ta === 'number' && tb === 'number') return a < b ? -1 : (a > b ? 1 : 0);\n"
+       "  if (ta === 'string' && tb === 'string') return a < b ? -1 : (a > b ? 1 : 0);\n"
+       "  if (ta === 'boolean' && tb === 'boolean') return a === b ? 0 : (a ? 1 : -1);\n"
+       "  if (a && typeof a.compare === 'function') return a.compare(b);\n"
+       "  throw new Error('Array.sort requires Comparable elements');\n"
+       "}\n"
+       "function __nexArraySort(values) {\n"
+       "  return [...values].sort((a, b) => __nexCompareValues(a, b));\n"
        "}\n"
        "function __nexCloneValue(v) {\n"
        "  if (v === null || v === undefined || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;\n"
@@ -2784,6 +2830,22 @@
        "function __nexSetSymmetricDifference(a, b) {\n"
        "  return new Set([...a].filter(v => !b.has(v)).concat([...b].filter(v => !a.has(v))));\n"
        "}\n"
+       "function __nexArrayAdd(target, value) {\n"
+       "  target.push(value);\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexArrayAddAt(target, index, value) {\n"
+       "  target.splice(index, 0, value);\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexArrayPut(target, index, value) {\n"
+       "  target[index] = value;\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexMapPut(target, key, value) {\n"
+       "  target.set(key, value);\n"
+       "  return null;\n"
+       "}\n"
        "function __nexArrayCursor(source) {\n"
        "  return {_type: 'ArrayCursor', source, index: 0, start() { this.index = 0; }, item() { if (this.index >= this.source.length) throw new Error('Cursor is at end'); return this.source[this.index]; }, next() { if (this.index < this.source.length) this.index += 1; }, at_end() { return this.index >= this.source.length; }};\n"
        "}\n"
@@ -2899,13 +2961,14 @@
 (defn generate-function-globals
   "Generate a globals holder for function instances."
   [functions]
-  (when (seq functions)
-    (let [lines (map (fn [{:keys [name class-name]}]
+  (let [functions (remove :declaration-only? functions)]
+    (when (seq functions)
+      (let [lines (map (fn [{:keys [name class-name]}]
                        (str "  " name ": new " class-name "(),"))
                      functions)]
-      (str "const NexGlobals = {\n"
-           (str/join "\n" lines)
-           "\n};"))))
+        (str "const NexGlobals = {\n"
+             (str/join "\n" lines)
+             "\n};")))))
 
 ;;
 ;; Main Class Generation

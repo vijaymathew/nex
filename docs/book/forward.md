@@ -1,3 +1,7 @@
+---
+numbered: false
+---
+
 # Foreword: What This Book Is For {-}
 
 There is no shortage of programming books.

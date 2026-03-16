@@ -53,8 +53,8 @@ book:
       chapters:
         - chapter_26.md
         - chapter_27.md
-        - chapter_29.md
         - chapter_28.md
+        - chapter_29.md
   appendices:
     - appendix_a.md
     - appendix_b.md
@@ -71,6 +71,7 @@ format:
     smooth-scroll: true
     link-external-newwindow: true
     css: styles.css
+    include-after-body: renumber-html.html
     code-copy: true
     code-overflow: wrap
   pdf:

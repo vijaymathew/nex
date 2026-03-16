@@ -28,7 +28,7 @@ All built-in collection types inherit `Any`. Their `to_string`, `equals`, and
 | `is_empty` | none | `Boolean` | True when array has no elements. |
 | `contains` | `elem: Any` | `Boolean` | Membership test. |
 | `index_of` | `elem: Any` | `Integer` | First index or `-1` if not found. |
-| `remove` | `index: Integer` | `Any` | Remove element at index. |
+| `remove` | `index: Integer` | `Void` | Remove element at index. |
 | `reverse` | none | `Array[Any]` | Return reversed array. |
 | `sort` | none | `Array[Any]` | Sort array in-place/runtime order. |
 | `slice` | `start: Integer, end: Integer` | `Array[Any]` | Subrange from `start` to `end`. |
@@ -57,7 +57,7 @@ All built-in collection types inherit `Any`. Their `to_string`, `equals`, and
 | `contains_key` | `key: Any` | `Boolean` | Key existence test. |
 | `keys` | none | `Array[Any]` | Array of keys. |
 | `values` | none | `Array[Any]` | Array of values. |
-| `remove` | `key: Any` | `Any` | Delete entry by key. |
+| `remove` | `key: Any` | `Void` | Delete entry by key. |
 | `to_string` | none | `String` | Render the map and its nested values as text. |
 | `equals` | `other: Any` | `Boolean` | Deep structural equality. |
 | `clone` | none | `Map[K, V]` | Deep-copy the map and its nested keys and values while preserving key/value types. |

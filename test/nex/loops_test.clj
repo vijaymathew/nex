@@ -1,7 +1,8 @@
 (ns nex.loops-test
   (:require [clojure.test :refer [deftest is testing run-tests]]
             [nex.parser :as p]
-            [nex.interpreter :as interp]))
+            [nex.interpreter :as interp]
+            [nex.repl :as repl]))
 
 ;; Helper function to execute a method body
 (defn execute-method [code]
@@ -54,9 +55,9 @@ end"
     (let [code "class Test
   feature
     gcd(a: Integer, b: Integer) do
+      let x := a
+      let y := b
       from
-        let x := a
-        let y := b
       until
         x = y
       do
@@ -79,7 +80,6 @@ end"
     demo() do
       let x := 10
       from
-        let x := 10
       invariant
         positive: x > 0
       until
@@ -120,9 +120,9 @@ end"
     (let [code "class Test
   feature
     gcd(a: Integer, b: Integer) do
+      let x := a
+      let y := b
       from
-        let x := a
-        let y := b
       invariant
         x_positive: x > 0
         y_positive: y > 0
@@ -178,8 +178,6 @@ end"
       let sum := 0
       let i := 1
       from
-        let sum := 0
-        let i := 1
       until
         i > 10
       do
@@ -192,3 +190,18 @@ end"
           output (execute-method code)]
       (is (= ["55"] output) "Sum of 1 to 10 should be 55"))))
 
+(deftest loop-init-locals-do-not-leak-from-repl
+  (testing "variables introduced by loop init are scoped to the loop"
+    (let [ctx (repl/init-repl-context)
+          output (with-out-str
+                   (repl/eval-code ctx "from
+  let total := 0
+  let i := 1
+until
+  i > 4
+do
+  total := total + i
+  i := i + 1
+end")
+                   (repl/eval-code ctx "total"))]
+      (is (.contains output "Error: Undefined variable: total")))))

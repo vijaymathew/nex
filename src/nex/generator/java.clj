@@ -503,14 +503,14 @@
    {"length"    (fn [target _] (str target ".size()"))
     "is_empty"  (fn [target _] (str target ".isEmpty()"))
     "get"       (fn [target args] (str target ".get(" args ")"))
-    "add"       (fn [target args] (str target ".add(" args ")"))
-    "add_at"    (fn [target args] (str target ".add(" args ")"))
-    "put"       (fn [target args] (str target ".set(" args ")"))
-    "contains"  (fn [target args] (str target ".contains(" args ")"))
-    "index_of"  (fn [target args] (str target ".indexOf(" args ")"))
-    "remove"    (fn [target args] (str "(" target ".remove((int)" args "), " target ")"))
+    "add"       (fn [target args] (str "NexRuntime.arrayAdd(" target ", " args ")"))
+    "add_at"    (fn [target args] (str "NexRuntime.arrayAddAt(" target ", " args ")"))
+    "put"       (fn [target args] (str "NexRuntime.arrayPut(" target ", " args ")"))
+    "contains"  (fn [target args] (str "NexRuntime.arrayContains(" target ", " args ")"))
+    "index_of"  (fn [target args] (str "NexRuntime.arrayIndexOf(" target ", " args ")"))
+    "remove"    (fn [target args] (str "(" target ".remove((int)" args "), null)"))
     "reverse"   (fn [target _] (str "new ArrayList<>(" target ".reversed())"))
-    "sort"      (fn [target _] (str "(Collections.sort(" target "), " target ")"))
+    "sort"      (fn [target _] (str "NexRuntime.arraySort(" target ")"))
     "slice"     (fn [target args] (str "new ArrayList<>(" target ".subList(" args "))"))
     "to_string" (fn [target _] (str "NexRuntime.toStringValue(" target ")"))
     "equals"    (fn [target args] (str "NexRuntime.deepEquals(" target ", " args ")"))
@@ -520,20 +520,20 @@
    :Map
    {"get"          (fn [target args] (str target ".get(" args ")"))
     "try_get"      (fn [target args] (str target ".get(" args ")"))
-    "put"          (fn [target args] (str "(" target ".put(" args "), " target ")"))
+    "put"          (fn [target args] (str "NexRuntime.mapPut(" target ", " args ")"))
     "size"         (fn [target _] (str target ".size()"))
     "is_empty"     (fn [target _] (str target ".isEmpty()"))
-    "contains_key" (fn [target args] (str target ".containsKey(" args ")"))
+    "contains_key" (fn [target args] (str "NexRuntime.mapContainsKey(" target ", " args ")"))
     "keys"         (fn [target _] (str "new ArrayList<>(" target ".keySet())"))
     "values"       (fn [target _] (str "new ArrayList<>(" target ".values())"))
-    "remove"       (fn [target args] (str "(" target ".remove(" args "), " target ")"))
+    "remove"       (fn [target args] (str "(" target ".remove(" args "), null)"))
     "to_string"    (fn [target _] (str "NexRuntime.toStringValue(" target ")"))
     "equals"       (fn [target args] (str "NexRuntime.deepEquals(" target ", " args ")"))
     "clone"        (fn [target _] (str "(HashMap) NexRuntime.deepClone(" target ")"))
     "cursor"       (fn [target _] (str "NexRuntime.mapCursor(" target ")"))}
 
    :Set
-   {"contains"             (fn [target args] (str target ".contains(" args ")"))
+   {"contains"             (fn [target args] (str "NexRuntime.setContains(" target ", " args ")"))
     "union"                (fn [target args] (str "NexRuntime.setUnion(" target ", " args ")"))
     "difference"           (fn [target args] (str "NexRuntime.setDifference(" target ", " args ")"))
     "intersection"         (fn [target args] (str "NexRuntime.setIntersection(" target ", " args ")"))
@@ -1742,7 +1742,7 @@
 
 (defn generate-method
   "Generate Java code for a method"
-  [level {:keys [name params return-type body require ensure rescue visibility note]} opts]
+  [level {:keys [name params return-type body require ensure rescue visibility note declaration-only?]} opts]
   (let [param-names (set (map :name params))
         param-types (into {} (map (juxt :name :type) params))
         convert-bindings (collect-convert-bindings-block (concat body (or rescue [])))
@@ -1783,13 +1783,19 @@
                                        (str "var old_" field-name " = " (resolve-field-name field-name) ";")))
                               old-refs))
             preconditions (generate-assertions (+ level 1) require "Precondition" opts)
-            statements (if rescue
+            statements (cond
+                         declaration-only?
+                         [(indent (+ level 1)
+                                  (str "throw new RuntimeException(\"Function or method declared but not defined: "
+                                       name "\");"))]
+                         rescue
                          [(generate-rescue (+ level 1) body rescue #{})]
+                         :else
                          (map #(generate-statement (+ level 1) %) body))
             postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)
             class-invariant-checks (generate-assertions (+ level 1) *class-invariants* "Class invariant" opts)
             ;; Add return statement if method has return type
-            return-stmt (when return-type
+            return-stmt (when (and return-type (not declaration-only?))
                          [(indent (+ level 1) "return result;")])]
         (str/join "\n"
                   (concat
@@ -2752,7 +2758,7 @@ public class NexTurtle {
        "    return toConcatString(left) + toConcatString(right);\n"
        "  }\n\n"
        "  public static boolean anyEquals(Object a, Object b) {\n"
-       "    return a == b;\n"
+       "    return deepEquals(a, b);\n"
        "  }\n\n"
        "  public static Object cloneValue(Object value) {\n"
        "    if (value == null || value instanceof String || value instanceof Number || value instanceof Boolean || value instanceof Character || value instanceof java.math.BigDecimal) return value;\n"
@@ -2776,6 +2782,9 @@ public class NexTurtle {
        "  public static boolean deepEquals(Object a, Object b) {\n"
        "    if (a == b) return true;\n"
        "    if (a == null || b == null) return false;\n"
+       "    if (a instanceof String || a instanceof Number || a instanceof Boolean || a instanceof Character || a instanceof java.math.BigDecimal) {\n"
+       "      return java.util.Objects.equals(a, b);\n"
+       "    }\n"
        "    if (a instanceof java.util.List && b instanceof java.util.List) {\n"
        "      java.util.List<?> la = (java.util.List<?>) a;\n"
        "      java.util.List<?> lb = (java.util.List<?>) b;\n"
@@ -2807,7 +2816,63 @@ public class NexTurtle {
        "      }\n"
        "      return true;\n"
        "    }\n"
+       "    if (a.getClass() == b.getClass()) {\n"
+       "      java.lang.reflect.Field[] fields = a.getClass().getDeclaredFields();\n"
+       "      for (java.lang.reflect.Field field : fields) {\n"
+       "        if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;\n"
+       "        try {\n"
+       "          field.setAccessible(true);\n"
+       "          if (!deepEquals(field.get(a), field.get(b))) return false;\n"
+       "        } catch (IllegalAccessException e) {\n"
+       "          throw new RuntimeException(e);\n"
+       "        }\n"
+       "      }\n"
+       "      return true;\n"
+       "    }\n"
        "    return java.util.Objects.equals(a, b);\n"
+       "  }\n\n"
+       "  public static boolean arrayContains(java.util.List<?> values, Object needle) {\n"
+       "    for (Object value : values) if (deepEquals(value, needle)) return true;\n"
+       "    return false;\n"
+       "  }\n\n"
+       "  public static int arrayIndexOf(java.util.List<?> values, Object needle) {\n"
+       "    for (int i = 0; i < values.size(); i++) if (deepEquals(values.get(i), needle)) return i;\n"
+       "    return -1;\n"
+       "  }\n\n"
+       "  public static boolean mapContainsKey(java.util.Map<?, ?> values, Object needle) {\n"
+       "    for (Object key : values.keySet()) if (deepEquals(key, needle)) return true;\n"
+       "    return false;\n"
+       "  }\n\n"
+       "  public static boolean setContains(java.util.Set<?> values, Object needle) {\n"
+       "    for (Object value : values) if (deepEquals(value, needle)) return true;\n"
+       "    return false;\n"
+       "  }\n\n"
+       "  public static int compareValues(Object a, Object b) {\n"
+       "    if (a == b) return 0;\n"
+       "    if (a == null || b == null) throw new RuntimeException(\"Array.sort cannot compare null values\");\n"
+       "    if (a instanceof String && b instanceof String) return ((String) a).compareTo((String) b);\n"
+       "    if (a instanceof Integer && b instanceof Integer) return Integer.compare((Integer) a, (Integer) b);\n"
+       "    if (a instanceof Long && b instanceof Long) return Long.compare((Long) a, (Long) b);\n"
+       "    if (a instanceof Double && b instanceof Double) return Double.compare((Double) a, (Double) b);\n"
+       "    if (a instanceof java.math.BigDecimal && b instanceof java.math.BigDecimal) return ((java.math.BigDecimal) a).compareTo((java.math.BigDecimal) b);\n"
+       "    if (a instanceof Character && b instanceof Character) return Character.compare((Character) a, (Character) b);\n"
+       "    if (a instanceof Boolean && b instanceof Boolean) return Boolean.compare((Boolean) a, (Boolean) b);\n"
+       "    try {\n"
+       "      for (java.lang.reflect.Method m : a.getClass().getMethods()) {\n"
+       "        if (m.getName().equals(\"compare\") && m.getParameterCount() == 1) {\n"
+       "          Object result = m.invoke(a, b);\n"
+       "          return ((Number) result).intValue();\n"
+       "        }\n"
+       "      }\n"
+       "    } catch (Exception ex) {\n"
+       "      throw new RuntimeException(\"Array.sort requires Comparable elements\", ex);\n"
+       "    }\n"
+       "    throw new RuntimeException(\"Array.sort requires Comparable elements\");\n"
+       "  }\n\n"
+       "  public static <T> java.util.ArrayList<T> arraySort(java.util.List<T> values) {\n"
+       "    java.util.ArrayList<T> out = new java.util.ArrayList<>(values);\n"
+       "    out.sort((a, b) -> compareValues(a, b));\n"
+       "    return out;\n"
        "  }\n\n"
        "  public static Object deepClone(Object value) {\n"
        "    if (value == null || value instanceof String || value instanceof Number || value instanceof Boolean || value instanceof Character || value instanceof java.math.BigDecimal) return value;\n"
@@ -3823,6 +3888,22 @@ public class NexTurtle {
        "  public static <T> java.util.LinkedHashSet<T> setFromArray(java.util.Collection<T> values) {\n"
        "    return new java.util.LinkedHashSet<>(values);\n"
        "  }\n\n"
+       "  public static <T> Object arrayAdd(java.util.List<T> target, T value) {\n"
+       "    target.add(value);\n"
+       "    return null;\n"
+       "  }\n\n"
+       "  public static <T> Object arrayAddAt(java.util.List<T> target, int index, T value) {\n"
+       "    target.add(index, value);\n"
+       "    return null;\n"
+       "  }\n\n"
+       "  public static <T> Object arrayPut(java.util.List<T> target, int index, T value) {\n"
+       "    target.set(index, value);\n"
+       "    return null;\n"
+       "  }\n\n"
+       "  public static <K, V> Object mapPut(java.util.Map<K, V> target, K key, V value) {\n"
+       "    target.put(key, value);\n"
+       "    return null;\n"
+       "  }\n\n"
        "  public static <T> java.util.LinkedHashSet<T> setUnion(java.util.Set<T> a, java.util.Set<T> b) {\n"
        "    java.util.LinkedHashSet<T> out = new java.util.LinkedHashSet<>(a);\n"
        "    out.addAll(b);\n"
@@ -3891,14 +3972,15 @@ public class NexTurtle {
 (defn generate-function-globals
   "Generate a globals holder for function instances."
   [functions]
-  (when (seq functions)
-    (let [lines (map (fn [{:keys [name class-name]}]
+  (let [functions (remove :declaration-only? functions)]
+    (when (seq functions)
+      (let [lines (map (fn [{:keys [name class-name]}]
                        (str "  public static final " class-name " " name
                             " = new " class-name "();"))
                      functions)]
-      (str "public class NexGlobals {\n"
-           (str/join "\n" lines)
-           "\n}"))))
+        (str "public class NexGlobals {\n"
+             (str/join "\n" lines)
+             "\n}")))))
 
 ;;
 ;; Main Class Generation

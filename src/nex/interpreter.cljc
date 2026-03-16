@@ -18,6 +18,8 @@
 (declare lookup-method-with-inheritance)
 (declare lookup-class)
 (declare call-builtin-method)
+(declare eval-node)
+(declare nex-ordering-compare)
 (declare make-object)
 (declare invoke-http-server-handler)
 
@@ -1283,6 +1285,13 @@
               (lookup-method-with-inheritance ctx (:class-def parent-info) method-name arg-count))
             parents))))
 
+(defn- ensure-callable-defined!
+  [callable]
+  (when (:declaration-only? callable)
+    (throw (ex-info (str "Function or method declared but not defined: " (:name callable))
+                    {:name (:name callable)
+                     :declaration-only? true}))))
+
 (defn is-parent?
   "Check if parent-name appears in the parent chain of class-name."
   [ctx class-name parent-name]
@@ -1390,6 +1399,86 @@
 
 (defn- nex-deep-equals? [a b]
   (value/nex-deep-equals? nex-object? a b))
+
+(defn- builtin-scalar-value?
+  [v]
+  (or (nil? v)
+      (string? v)
+      (number? v)
+      (boolean? v)
+      (char? v)))
+
+(defn- membership-equals?
+  [a b]
+  (if (and (builtin-scalar-value? a) (builtin-scalar-value? b))
+    (= a b)
+    (nex-deep-equals? a b)))
+
+(defn- nex-array-contains-value?
+  [arr elem]
+  (boolean
+   (some #(membership-equals? % elem)
+         #?(:clj (seq arr) :cljs (array-seq arr)))))
+
+(defn- nex-array-index-of-value
+  [arr elem]
+  (loop [idx 0
+         values #?(:clj (seq arr) :cljs (seq (array-seq arr)))]
+    (cond
+      (nil? values) -1
+      (membership-equals? (first values) elem) idx
+      :else (recur (inc idx) (next values)))))
+
+(defn- nex-map-contains-key-value?
+  [m key]
+  (boolean
+   (some #(membership-equals? #?(:clj (.getKey %) :cljs (first %)) key)
+         #?(:clj (.entrySet m) :cljs (es6-iterator-seq (.entries m))))))
+
+(defn- nex-set-contains-value?
+  [s value]
+  (boolean
+   (some #(membership-equals? % value)
+         #?(:clj (seq s) :cljs (es6-iterator-seq (.values s))))))
+
+(defn- sortable-builtin-scalar-value?
+  [v]
+  (or (string? v)
+      (number? v)
+      (boolean? v)
+      (char? v)))
+
+(defn- nex-value-compare
+  [ctx a b]
+  (cond
+    (and (sortable-builtin-scalar-value? a)
+         (sortable-builtin-scalar-value? b))
+    (nex-ordering-compare a b)
+
+    (nex-object? a)
+    (let [result (eval-node ctx {:type :call
+                                 :target {:type :literal :value a}
+                                 :method "compare"
+                                 :args [{:type :literal :value b}]})]
+      (if (number? result)
+        result
+        (throw (ex-info "Comparable.compare must return Integer"
+                        {:left a :right b :result result}))))
+
+    :else
+    (throw (ex-info "Array.sort requires Comparable elements"
+                    {:left a :right b}))))
+
+(defn- nex-array-sort-with-ctx
+  [ctx arr]
+  #?(:clj (let [out (java.util.ArrayList. arr)]
+            (.sort out (reify java.util.Comparator
+                         (compare [_ a b]
+                           (int (nex-value-compare ctx a b)))))
+            out)
+     :cljs (let [out (.slice arr)]
+             (.sort out (fn [a b] (nex-value-compare ctx a b)))
+             out)))
 
 (defn nex-display-value [value]
   (value/nex-display-value nex-object? nex-format-value value))
@@ -2082,10 +2171,10 @@
           (if (string? result)
             result
             (nex-format-value result)))
-        (call-builtin-method nil value "to_string" [])))
+        (call-builtin-method nil nil value "to_string" [])))
 
     :else
-    (call-builtin-method nil value "to_string" [])))
+    (call-builtin-method nil nil value "to_string" [])))
 
 (defn- concat-string-value-async
   "Async variant of concat-string-value for the browser interpreter."
@@ -2108,10 +2197,10 @@
                     (if (string? result)
                       result
                       (nex-format-value result))))
-           (js/Promise.resolve (call-builtin-method nil value "to_string" []))))
+           (js/Promise.resolve (call-builtin-method nil nil value "to_string" []))))
 
        :else
-       (js/Promise.resolve (call-builtin-method nil value "to_string" [])))))
+       (js/Promise.resolve (call-builtin-method nil nil value "to_string" [])))))
 
 (defn apply-unary-op
   "Apply a unary operator to a value."
@@ -2330,13 +2419,13 @@
     "put"         (fn [arr index value & _] (nex-array-set arr index value))
     "length"      (fn [arr & _] (nex-array-size arr))
     "is_empty"    (fn [arr & _] (nex-array-empty? arr))
-    "contains"    (fn [arr elem & _] (nex-array-contains arr elem))
+    "contains"    (fn [arr elem & _] (nex-array-contains-value? arr elem))
     "index_of"    (fn [arr elem & _]
-                    (let [idx (nex-array-index-of arr elem)]
+                    (let [idx (nex-array-index-of-value arr elem)]
                       (if (>= idx 0) idx -1)))
     "remove"      (fn [arr idx & _] (nex-array-remove arr idx))
-    "reverse"     (fn [arr _] (nex-array-reverse arr))
-    "sort"        (fn [arr & _] (nex-array-sort arr))
+    "reverse"     (fn [arr & _] (nex-array-reverse arr))
+    "sort"        (fn [arr & [ctx]] (nex-array-sort-with-ctx ctx arr))
     "slice"       (fn [arr start end & _] (nex-array-slice arr start end))
     "to_string"   (fn [arr & _] (nex-array-str arr))
     "equals"      (fn [arr other & _] (nex-deep-equals? arr other))
@@ -2360,7 +2449,7 @@
     "put"          (fn [m key val & _] (nex-map-put m key val))
     "size"         (fn [m & _] (nex-map-size m))
     "is_empty"     (fn [m & _] (nex-map-empty? m))
-    "contains_key" (fn [m key & _] (nex-map-contains-key m key))
+    "contains_key" (fn [m key & _] (nex-map-contains-key-value? m key))
     "keys"         (fn [m & _] (nex-map-keys m))
     "values"       (fn [m & _] (nex-map-values m))
     "remove"       (fn [m key & _] (nex-map-remove m key))
@@ -2374,7 +2463,7 @@
                      :index (atom 0)})}
 
    :Set
-   {"contains"             (fn [s value & _] (nex-set-contains s value))
+   {"contains"             (fn [s value & _] (nex-set-contains-value? s value))
     "union"                (fn [s other & _] (nex-set-union s other))
     "difference"           (fn [s other & _] (nex-set-difference s other))
     "intersection"         (fn [s other & _] (nex-set-intersection s other))
@@ -2563,15 +2652,21 @@
 
 (defn call-builtin-method
   "Call a built-in method on a primitive value"
-  [target value method-name args]
-  (if-let [method-fn
-           (or (when-let [type-name (get-type-name value)]
-                 (when-let [methods (get builtin-type-methods type-name)]
-                   (get methods method-name)))
-               (get-in builtin-type-methods [:Any method-name]))]
-    (apply method-fn value args)
-    (throw (ex-info (str "Method not found on type: " method-name)
-                    {:target target :value value :method method-name}))))
+  ([target value method-name args]
+   (call-builtin-method nil target value method-name args))
+  ([ctx target value method-name args]
+   (if-let [method-fn
+            (or (when-let [type-name (get-type-name value)]
+                  (when-let [methods (get builtin-type-methods type-name)]
+                    (get methods method-name)))
+                (get-in builtin-type-methods [:Any method-name]))]
+     (if (and ctx
+              (= method-name "sort")
+              (= (get-type-name value) :Array))
+       (apply method-fn value (concat args [ctx]))
+       (apply method-fn value args))
+     (throw (ex-info (str "Method not found on type: " method-name)
+                     {:target target :value value :method method-name})))))
 ;;
 ;; Node Evaluators
 ;;
@@ -2819,6 +2914,7 @@
             _ (doseq [[field-name field-val] (:fields current-obj)]
                 (env-define method-env (name field-name) field-val))
             params (:params callable)
+            _ (ensure-callable-defined! callable)
             _ (when params
                 (doseq [[param arg-val] (map vector params arg-values)]
                   (env-define method-env (:name param) arg-val)))
@@ -2915,6 +3011,7 @@
             (if method-lookup
                 (let [method-def (:method method-lookup)
                     params (:params method-def)]
+                (ensure-callable-defined! method-def)
                 ;; Bug fix: disallow paren-less calls to methods that require arguments
                 (when (and (false? has-parens) (seq params))
                   (throw (ex-info (str method " requires arguments")
@@ -3021,12 +3118,12 @@
                         (throw (ex-info (str "Method not found: " method)
                                         {:object obj :method method})))))
                   (if (get-in builtin-type-methods [:Any method])
-                    (call-builtin-method (or target-name target) obj method arg-values)
+                    (call-builtin-method ctx (or target-name target) obj method arg-values)
                     (throw (ex-info (str "Method not found: " method)
                                     {:object obj :method method})))))))
 
           (get-type-name obj)
-          (call-builtin-method (or target-name target) obj method arg-values)
+          (call-builtin-method ctx (or target-name target) obj method arg-values)
 
           :else
           #?(:clj (java-call-method obj method arg-values)
@@ -3276,48 +3373,50 @@
 (defmethod eval-node :loop
   [ctx {:keys [init invariant variant until body]}]
   (maybe-debug-pause ctx {:type :loop :init init :invariant invariant :variant variant :until until :body body})
-  ;; Execute initialization statements
-  (doseq [stmt init]
-    (eval-node ctx stmt))
+  (let [loop-env (make-env (:current-env ctx))
+        loop-ctx (assoc ctx :current-env loop-env)]
+    ;; Execute initialization statements inside the loop scope.
+    (doseq [stmt init]
+      (eval-node loop-ctx stmt))
 
-  ;; Loop until the 'until' condition becomes true
-  (loop [last-result nil
-         prev-variant nil
-         iteration 0]
-    ;; Check invariant before iteration (if present)
-    (when invariant
-      (check-assertions ctx invariant Loop-invariant))
+    ;; Loop until the 'until' condition becomes true
+    (loop [last-result nil
+           prev-variant nil
+           iteration 0]
+      ;; Check invariant before iteration (if present)
+      (when invariant
+        (check-assertions loop-ctx invariant Loop-invariant))
 
-    ;; Check exit condition
-    (let [until-val (eval-node ctx until)]
-      (if until-val
-        ;; Exit loop
-        last-result
-        ;; Continue loop
-        (let [;; Evaluate variant before body (if present)
-              curr-variant (when variant (eval-node ctx variant))
+      ;; Check exit condition
+      (let [until-val (eval-node loop-ctx until)]
+        (if until-val
+          ;; Exit loop
+          last-result
+          ;; Continue loop
+          (let [;; Evaluate variant before body (if present)
+                curr-variant (when variant (eval-node loop-ctx variant))
 
-              ;; Check variant decreases (if present and not first iteration)
-              _ (when (and variant prev-variant)
-                  (when-not (< curr-variant prev-variant)
-                    (throw (ex-info "Loop variant must decrease"
-                                    {:iteration iteration
-                                     :previous-variant prev-variant
-                                     :current-variant curr-variant}))))
+                ;; Check variant decreases (if present and not first iteration)
+                _ (when (and variant prev-variant)
+                    (when-not (< curr-variant prev-variant)
+                      (throw (ex-info "Loop variant must decrease"
+                                      {:iteration iteration
+                                       :previous-variant prev-variant
+                                       :current-variant curr-variant}))))
 
-              ;; Execute loop body in a NEW scope each iteration
-              ;; This ensures 'let' creates shadowed variables that don't persist
-              ;; while plain ':=' can still update variables in parent scopes
-              body-env (make-env (:current-env ctx))
-              body-ctx (assoc ctx :current-env body-env)
-              result (last (map #(eval-node body-ctx %) body))]
+                ;; Execute loop body in a NEW scope each iteration
+                ;; This ensures 'let' creates shadowed variables that don't persist
+                ;; while plain ':=' can still update variables in parent scopes
+                body-env (make-env (:current-env loop-ctx))
+                body-ctx (assoc loop-ctx :current-env body-env)
+                result (last (map #(eval-node body-ctx %) body))]
 
-          ;; Check invariant after iteration (if present)
-          (when invariant
-            (check-assertions ctx invariant Loop-invariant))
+            ;; Check invariant after iteration (if present)
+            (when invariant
+              (check-assertions loop-ctx invariant Loop-invariant))
 
-          ;; Recur with new state
-          (recur result curr-variant (inc iteration)))))))
+            ;; Recur with new state
+            (recur result curr-variant (inc iteration))))))))
 
 (defmethod eval-node :statement
   [ctx node]
@@ -3846,6 +3945,7 @@
                _ (doseq [[field-name field-val] (:fields current-obj)]
                    (env-define method-env (name field-name) field-val))
                params (:params callable)
+               _ (ensure-callable-defined! callable)
                _ (doseq [[param arg-val] (map vector params arg-values)]
                    (env-define method-env (:name param) arg-val))
                return-type (:return-type callable)
@@ -3997,6 +4097,7 @@
                                          (if method-lookup
                                            (let [method-def (:method method-lookup)
                                                  params (:params method-def)]
+                                             (ensure-callable-defined! method-def)
                                              (when (and (false? has-parens) (seq params))
                                                (throw (ex-info (str method " requires arguments")
                                                                {:method method :params (mapv :name params)})))
@@ -4085,12 +4186,12 @@
                                                     (js/Promise.reject (ex-info (str "Method not found: " method)
                                                                                 {:object obj :method method})))))
                                                (if (get-in builtin-type-methods [:Any method])
-                                                 (->promise (call-builtin-method (or target-name target) obj method arg-values))
+                                                 (->promise (call-builtin-method ctx (or target-name target) obj method arg-values))
                                                  (js/Promise.reject (ex-info (str "Method not found: " method)
                                                                              {:object obj :method method})))))))))
 
                                        (get-type-name obj)
-                                       (->promise (call-builtin-method (or target-name target) obj method arg-values))
+                                       (->promise (call-builtin-method ctx (or target-name target) obj method arg-values))
 
                                        :else
                                        (js/Promise.reject
@@ -4283,39 +4384,41 @@
                                  (attempt-loop)))))))
 
          (= node-type :loop)
-         (.then (promise-reduce (:init node) nil
-                                (fn [_ stmt] (eval-node-async ctx stmt)))
-                (fn [_]
-                  (letfn [(step [last-result prev-variant iteration]
-                            (.then (if (and (pos? iteration) (zero? (mod iteration 25)))
-                                     (yield-browser-async)
-                                     (js/Promise.resolve nil))
-                                   (fn [_]
-                                     (.then (->promise (when-let [invariant (:invariant node)]
-                                                         (check-assertions-async ctx invariant Loop-invariant)))
-                                            (fn [_]
-                                              (.then (->promise (eval-node-async ctx (:until node)))
-                                                     (fn [until-val]
-                                                       (if until-val
-                                                         last-result
-                                                         (.then (->promise (when-let [variant (:variant node)]
-                                                                             (eval-node-async ctx variant)))
-                                                                (fn [curr-variant]
-                                                                  (when (and (:variant node) prev-variant)
-                                                                    (when-not (< curr-variant prev-variant)
-                                                                      (throw (ex-info "Loop variant must decrease"
-                                                                                      {:iteration iteration
-                                                                                       :previous-variant prev-variant
-                                                                                       :current-variant curr-variant}))))
-                                                                  (let [body-env (make-env (:current-env ctx))
-                                                                        body-ctx (assoc ctx :current-env body-env)]
-                                                                    (.then (eval-body-async body-ctx (:body node))
-                                                                           (fn [result]
-                                                                             (.then (->promise (when-let [invariant (:invariant node)]
-                                                                                                 (check-assertions-async ctx invariant Loop-invariant)))
-                                                                                    (fn [_]
-                                                                                      (step result curr-variant (inc iteration)))))))))))))))))]
-                    (step nil nil 0))))
+         (let [loop-env (make-env (:current-env ctx))
+               loop-ctx (assoc ctx :current-env loop-env)]
+           (.then (promise-reduce (:init node) nil
+                                  (fn [_ stmt] (eval-node-async loop-ctx stmt)))
+                  (fn [_]
+                    (letfn [(step [last-result prev-variant iteration]
+                              (.then (if (and (pos? iteration) (zero? (mod iteration 25)))
+                                       (yield-browser-async)
+                                       (js/Promise.resolve nil))
+                                     (fn [_]
+                                       (.then (->promise (when-let [invariant (:invariant node)]
+                                                           (check-assertions-async loop-ctx invariant Loop-invariant)))
+                                              (fn [_]
+                                                (.then (->promise (eval-node-async loop-ctx (:until node)))
+                                                       (fn [until-val]
+                                                         (if until-val
+                                                           last-result
+                                                           (.then (->promise (when-let [variant (:variant node)]
+                                                                               (eval-node-async loop-ctx variant)))
+                                                                  (fn [curr-variant]
+                                                                    (when (and (:variant node) prev-variant)
+                                                                      (when-not (< curr-variant prev-variant)
+                                                                        (throw (ex-info "Loop variant must decrease"
+                                                                                        {:iteration iteration
+                                                                                         :previous-variant prev-variant
+                                                                                         :current-variant curr-variant}))))
+                                                                    (let [body-env (make-env (:current-env loop-ctx))
+                                                                          body-ctx (assoc loop-ctx :current-env body-env)]
+                                                                      (.then (eval-body-async body-ctx (:body node))
+                                                                             (fn [result]
+                                                                               (.then (->promise (when-let [invariant (:invariant node)]
+                                                                                                   (check-assertions-async loop-ctx invariant Loop-invariant)))
+                                                                                      (fn [_]
+                                                                                        (step result curr-variant (inc iteration)))))))))))))))))]
+                      (step nil nil 0)))))
 
          (= node-type :statement)
          (eval-node-async ctx (:node node))
