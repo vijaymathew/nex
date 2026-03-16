@@ -47,8 +47,8 @@ book:
       chapters:
         - chapter_26.md
         - chapter_27.md
-        - chapter_29.md
         - chapter_28.md
+        - chapter_29.md
     - appendix_a.md
     - appendix_b.md
     - appendix_c.md

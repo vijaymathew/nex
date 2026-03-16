@@ -88,6 +88,7 @@ format:
     smooth-scroll: true
     link-external-newwindow: true
     css: styles.css
+    include-after-body: renumber-html.html
     code-copy: true
     code-overflow: wrap
   pdf:
