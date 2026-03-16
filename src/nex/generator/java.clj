@@ -506,8 +506,8 @@
     "add"       (fn [target args] (str "NexRuntime.arrayAdd(" target ", " args ")"))
     "add_at"    (fn [target args] (str "NexRuntime.arrayAddAt(" target ", " args ")"))
     "put"       (fn [target args] (str "NexRuntime.arrayPut(" target ", " args ")"))
-    "contains"  (fn [target args] (str target ".contains(" args ")"))
-    "index_of"  (fn [target args] (str target ".indexOf(" args ")"))
+    "contains"  (fn [target args] (str "NexRuntime.arrayContains(" target ", " args ")"))
+    "index_of"  (fn [target args] (str "NexRuntime.arrayIndexOf(" target ", " args ")"))
     "remove"    (fn [target args] (str "(" target ".remove((int)" args "), null)"))
     "reverse"   (fn [target _] (str "new ArrayList<>(" target ".reversed())"))
     "sort"      (fn [target _] (str "(Collections.sort(" target "), " target ")"))
@@ -523,7 +523,7 @@
     "put"          (fn [target args] (str "NexRuntime.mapPut(" target ", " args ")"))
     "size"         (fn [target _] (str target ".size()"))
     "is_empty"     (fn [target _] (str target ".isEmpty()"))
-    "contains_key" (fn [target args] (str target ".containsKey(" args ")"))
+    "contains_key" (fn [target args] (str "NexRuntime.mapContainsKey(" target ", " args ")"))
     "keys"         (fn [target _] (str "new ArrayList<>(" target ".keySet())"))
     "values"       (fn [target _] (str "new ArrayList<>(" target ".values())"))
     "remove"       (fn [target args] (str "(" target ".remove(" args "), null)"))
@@ -533,7 +533,7 @@
     "cursor"       (fn [target _] (str "NexRuntime.mapCursor(" target ")"))}
 
    :Set
-   {"contains"             (fn [target args] (str target ".contains(" args ")"))
+   {"contains"             (fn [target args] (str "NexRuntime.setContains(" target ", " args ")"))
     "union"                (fn [target args] (str "NexRuntime.setUnion(" target ", " args ")"))
     "difference"           (fn [target args] (str "NexRuntime.setDifference(" target ", " args ")"))
     "intersection"         (fn [target args] (str "NexRuntime.setIntersection(" target ", " args ")"))
@@ -2758,7 +2758,7 @@ public class NexTurtle {
        "    return toConcatString(left) + toConcatString(right);\n"
        "  }\n\n"
        "  public static boolean anyEquals(Object a, Object b) {\n"
-       "    return a == b;\n"
+       "    return deepEquals(a, b);\n"
        "  }\n\n"
        "  public static Object cloneValue(Object value) {\n"
        "    if (value == null || value instanceof String || value instanceof Number || value instanceof Boolean || value instanceof Character || value instanceof java.math.BigDecimal) return value;\n"
@@ -2782,6 +2782,9 @@ public class NexTurtle {
        "  public static boolean deepEquals(Object a, Object b) {\n"
        "    if (a == b) return true;\n"
        "    if (a == null || b == null) return false;\n"
+       "    if (a instanceof String || a instanceof Number || a instanceof Boolean || a instanceof Character || a instanceof java.math.BigDecimal) {\n"
+       "      return java.util.Objects.equals(a, b);\n"
+       "    }\n"
        "    if (a instanceof java.util.List && b instanceof java.util.List) {\n"
        "      java.util.List<?> la = (java.util.List<?>) a;\n"
        "      java.util.List<?> lb = (java.util.List<?>) b;\n"
@@ -2813,7 +2816,36 @@ public class NexTurtle {
        "      }\n"
        "      return true;\n"
        "    }\n"
+       "    if (a.getClass() == b.getClass()) {\n"
+       "      java.lang.reflect.Field[] fields = a.getClass().getDeclaredFields();\n"
+       "      for (java.lang.reflect.Field field : fields) {\n"
+       "        if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;\n"
+       "        try {\n"
+       "          field.setAccessible(true);\n"
+       "          if (!deepEquals(field.get(a), field.get(b))) return false;\n"
+       "        } catch (IllegalAccessException e) {\n"
+       "          throw new RuntimeException(e);\n"
+       "        }\n"
+       "      }\n"
+       "      return true;\n"
+       "    }\n"
        "    return java.util.Objects.equals(a, b);\n"
+       "  }\n\n"
+       "  public static boolean arrayContains(java.util.List<?> values, Object needle) {\n"
+       "    for (Object value : values) if (deepEquals(value, needle)) return true;\n"
+       "    return false;\n"
+       "  }\n\n"
+       "  public static int arrayIndexOf(java.util.List<?> values, Object needle) {\n"
+       "    for (int i = 0; i < values.size(); i++) if (deepEquals(values.get(i), needle)) return i;\n"
+       "    return -1;\n"
+       "  }\n\n"
+       "  public static boolean mapContainsKey(java.util.Map<?, ?> values, Object needle) {\n"
+       "    for (Object key : values.keySet()) if (deepEquals(key, needle)) return true;\n"
+       "    return false;\n"
+       "  }\n\n"
+       "  public static boolean setContains(java.util.Set<?> values, Object needle) {\n"
+       "    for (Object value : values) if (deepEquals(value, needle)) return true;\n"
+       "    return false;\n"
        "  }\n\n"
        "  public static Object deepClone(Object value) {\n"
        "    if (value == null || value instanceof String || value instanceof Number || value instanceof Boolean || value instanceof Character || value instanceof java.math.BigDecimal) return value;\n"

@@ -1398,6 +1398,47 @@
 (defn- nex-deep-equals? [a b]
   (value/nex-deep-equals? nex-object? a b))
 
+(defn- builtin-scalar-value?
+  [v]
+  (or (nil? v)
+      (string? v)
+      (number? v)
+      (boolean? v)
+      (char? v)))
+
+(defn- membership-equals?
+  [a b]
+  (if (and (builtin-scalar-value? a) (builtin-scalar-value? b))
+    (= a b)
+    (nex-deep-equals? a b)))
+
+(defn- nex-array-contains-value?
+  [arr elem]
+  (boolean
+   (some #(membership-equals? % elem)
+         #?(:clj (seq arr) :cljs (array-seq arr)))))
+
+(defn- nex-array-index-of-value
+  [arr elem]
+  (loop [idx 0
+         values #?(:clj (seq arr) :cljs (seq (array-seq arr)))]
+    (cond
+      (nil? values) -1
+      (membership-equals? (first values) elem) idx
+      :else (recur (inc idx) (next values)))))
+
+(defn- nex-map-contains-key-value?
+  [m key]
+  (boolean
+   (some #(membership-equals? #?(:clj (.getKey %) :cljs (first %)) key)
+         #?(:clj (.entrySet m) :cljs (es6-iterator-seq (.entries m))))))
+
+(defn- nex-set-contains-value?
+  [s value]
+  (boolean
+   (some #(membership-equals? % value)
+         #?(:clj (seq s) :cljs (es6-iterator-seq (.values s))))))
+
 (defn nex-display-value [value]
   (value/nex-display-value nex-object? nex-format-value value))
 
@@ -2337,9 +2378,9 @@
     "put"         (fn [arr index value & _] (nex-array-set arr index value))
     "length"      (fn [arr & _] (nex-array-size arr))
     "is_empty"    (fn [arr & _] (nex-array-empty? arr))
-    "contains"    (fn [arr elem & _] (nex-array-contains arr elem))
+    "contains"    (fn [arr elem & _] (nex-array-contains-value? arr elem))
     "index_of"    (fn [arr elem & _]
-                    (let [idx (nex-array-index-of arr elem)]
+                    (let [idx (nex-array-index-of-value arr elem)]
                       (if (>= idx 0) idx -1)))
     "remove"      (fn [arr idx & _] (nex-array-remove arr idx))
     "reverse"     (fn [arr _] (nex-array-reverse arr))
@@ -2367,7 +2408,7 @@
     "put"          (fn [m key val & _] (nex-map-put m key val))
     "size"         (fn [m & _] (nex-map-size m))
     "is_empty"     (fn [m & _] (nex-map-empty? m))
-    "contains_key" (fn [m key & _] (nex-map-contains-key m key))
+    "contains_key" (fn [m key & _] (nex-map-contains-key-value? m key))
     "keys"         (fn [m & _] (nex-map-keys m))
     "values"       (fn [m & _] (nex-map-values m))
     "remove"       (fn [m key & _] (nex-map-remove m key))
@@ -2381,7 +2422,7 @@
                      :index (atom 0)})}
 
    :Set
-   {"contains"             (fn [s value & _] (nex-set-contains s value))
+   {"contains"             (fn [s value & _] (nex-set-contains-value? s value))
     "union"                (fn [s other & _] (nex-set-union s other))
     "difference"           (fn [s other & _] (nex-set-difference s other))
     "intersection"         (fn [s other & _] (nex-set-intersection s other))

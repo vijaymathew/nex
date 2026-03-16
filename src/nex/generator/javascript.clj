@@ -760,8 +760,8 @@
     "add"       (fn [target args] (str "__nexArrayAdd(" target ", " args ")"))
     "put"       (fn [target args] (str "__nexArrayPut(" target ", " args ")"))
     "is_empty"  (fn [target _] (str "(" target ".length === 0)"))
-    "contains"  (fn [target args] (str target ".includes(" args ")"))
-    "index_of"  (fn [target args] (str target ".indexOf(" args ")"))
+    "contains"  (fn [target args] (str "__nexArrayContains(" target ", " args ")"))
+    "index_of"  (fn [target args] (str "__nexArrayIndexOf(" target ", " args ")"))
     "remove"    (fn [target args] (str "(" target ".splice(" args ", 1), null)"))
     "reverse"   (fn [target _] (str "[..." target "].reverse()"))
     "sort"      (fn [target _] (str "[..." target "].sort()"))
@@ -777,7 +777,7 @@
     "get"          (fn [target args] (str target ".get(" args ")"))
     "try_get"      (fn [target args] (str target ".get(" args ")"))
     "put"          (fn [target args] (str "__nexMapPut(" target ", " args ")"))
-    "contains_key" (fn [target args] (str target ".has(" args ")"))
+    "contains_key" (fn [target args] (str "__nexMapContainsKey(" target ", " args ")"))
     "keys"         (fn [target _] (str "Array.from(" target ".keys())"))
     "values"       (fn [target _] (str "Array.from(" target ".values())"))
     "remove"       (fn [target args] (str "(" target ".delete(" args "), null)"))
@@ -787,7 +787,7 @@
     "cursor"       (fn [target _] (str "__nexMapCursor(" target ")"))}
 
    :Set
-   {"contains"             (fn [target args] (str target ".has(" args ")"))
+   {"contains"             (fn [target args] (str "__nexSetContains(" target ", " args ")"))
     "union"                (fn [target args] (str "__nexSetUnion(" target ", " args ")"))
     "difference"           (fn [target args] (str "__nexSetDifference(" target ", " args ")"))
     "intersection"         (fn [target args] (str "__nexSetIntersection(" target ", " args ")"))
@@ -2108,6 +2108,7 @@
        "function __nexDeepEquals(a, b) {\n"
        "  if (a === b) return true;\n"
        "  if (a == null || b == null) return false;\n"
+       "  if (typeof a === 'string' || typeof a === 'number' || typeof a === 'boolean') return a === b;\n"
        "  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => __nexDeepEquals(v, b[i]));\n"
        "  if (a instanceof Map && b instanceof Map) {\n"
        "    if (a.size !== b.size) return false;\n"
@@ -2129,7 +2130,32 @@
        "    }\n"
        "    return true;\n"
        "  }\n"
+       "  if (typeof a === 'object' && typeof b === 'object' && a.constructor === b.constructor) {\n"
+       "    const aKeys = Object.keys(a);\n"
+       "    const bKeys = Object.keys(b);\n"
+       "    if (aKeys.length !== bKeys.length) return false;\n"
+       "    for (const key of aKeys) {\n"
+       "      if (!Object.prototype.hasOwnProperty.call(b, key)) return false;\n"
+       "      if (!__nexDeepEquals(a[key], b[key])) return false;\n"
+       "    }\n"
+       "    return true;\n"
+       "  }\n"
        "  return a === b;\n"
+       "}\n"
+       "function __nexArrayContains(values, needle) {\n"
+       "  return values.some(v => __nexDeepEquals(v, needle));\n"
+       "}\n"
+       "function __nexArrayIndexOf(values, needle) {\n"
+       "  for (let i = 0; i < values.length; i++) if (__nexDeepEquals(values[i], needle)) return i;\n"
+       "  return -1;\n"
+       "}\n"
+       "function __nexMapContainsKey(values, needle) {\n"
+       "  for (const key of values.keys()) if (__nexDeepEquals(key, needle)) return true;\n"
+       "  return false;\n"
+       "}\n"
+       "function __nexSetContains(values, needle) {\n"
+       "  for (const value of values.values()) if (__nexDeepEquals(value, needle)) return true;\n"
+       "  return false;\n"
        "}\n"
        "function __nexCloneValue(v) {\n"
        "  if (v === null || v === undefined || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;\n"
