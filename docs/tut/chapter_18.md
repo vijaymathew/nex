@@ -35,7 +35,6 @@ nex> class Bank_Account
        invariant
          never_negative: balance >= 0.0
      end
-Class(es) registered: Bank_Account
 ```
 
 The invariant says that every valid account has a non-negative balance. This is not just a rule for `deposit` or `withdraw`. It is a rule for the class itself.
@@ -146,7 +145,6 @@ nex> class Running_Average
        invariant
          count_non_negative: count >= 0
      end
-Class(es) registered: Running_Average
 ```
 
 If `add` updates `total` first and `count` second, there is a brief moment in the middle when the object is only partially updated. That is acceptable. The invariant is about stable states at routine boundaries, not every intermediate machine step.
@@ -178,7 +176,6 @@ nex> class Loan
          title_not_empty: title.length > 0
          borrower_not_empty: borrower.length > 0
      end
-Class(es) registered: Loan
 ```
 
 The invariant does not try to state every fact about the world. It states only what must always hold inside a valid `Loan` object.
@@ -246,7 +243,6 @@ nex> class Bounded_Counter
          count_non_negative: count >= 0
          count_within_limit: count <= limit
      end
-Class(es) registered: Bounded_Counter
 ```
 
 The invariant tells us what the class *is*: a counter that never goes below zero and never exceeds its limit.

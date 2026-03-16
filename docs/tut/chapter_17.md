@@ -66,7 +66,6 @@ nex> class Counter
              advanced: count = old count + 1
            end
      end
-Class(es) registered: Counter
 ```
 
 The postcondition does not describe the code line by line. It describes the observable result: after `increment`, the count is exactly one larger than before.
@@ -95,7 +94,6 @@ nex> class Counter
              advanced: count = old count + 1
            end
      end
-Class(es) registered: Counter
 ```
 
 Then:
@@ -206,7 +204,6 @@ nex> class Account
              sender_lost_amount: balance = old balance - amount
            end
      end
-Class(es) registered: Account
 ```
 
 The postconditions on `withdraw` and `deposit` explain why `transfer_to` is trustworthy. The postcondition on `transfer_to` then states the exact effect on the source account. The corresponding effect on the destination account is guaranteed indirectly through the contract of `deposit`.
@@ -268,7 +265,6 @@ nex> class Stack [G]
              returned_old_last: result = old items.get(old items.length - 1)
            end
      end
-Class(es) registered: Stack
 ```
 
 The postcondition on `pop` is particularly good because it specifies both effects:

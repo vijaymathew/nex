@@ -219,7 +219,6 @@ nex> class Word_Set
        invariant
          storage_exists: items /= nil
      end
-Class(es) registered: Word_Set
 ```
 
 The postcondition on `add` is the important part. It says what the routine must achieve, not how. The body then chooses one reasonable implementation.

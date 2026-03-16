@@ -23,7 +23,6 @@ nex> class Wallet
            money := money - amount
          end
      end
-Class(es) registered: Wallet
 ```
 
 This class works mechanically, but the routine `spend` is underspecified. What if `amount` is negative? What if `amount` is larger than `money`? The body says what the routine does, but not when it is valid to call it.
@@ -46,7 +45,6 @@ nex> class Wallet
              money := money - amount
            end
      end
-Class(es) registered: Wallet
 ```
 
 Now the routine says two things:
@@ -223,7 +221,6 @@ nex> class Bounded_Stack [G]
            result := items.length
          end
      end
-Class(es) registered: Bounded_Stack
 ```
 
 Earlier, Chapter 15 showed a version of `push` that silently ignored extra insertions. That design is convenient but weak. It hides mistakes. A caller can believe the item was pushed even when it was not.
@@ -298,7 +295,6 @@ nex> class Account
              other.deposit(amount)
            end
      end
-Class(es) registered: Account
 ```
 
 `transfer_to` expresses its rules cleanly:

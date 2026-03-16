@@ -172,7 +172,6 @@ nex> class Result [V]
            result := ok
          end
      end
-Class(es) registered: Result
 ```
 
 A routine may then choose:
