@@ -850,6 +850,32 @@
             "Any"))))
     ;; Function call (built-in like print/type_of/type_is) or function object call
     (cond
+      (= method "print")
+      (do
+        (doseq [arg args]
+          (check-expression env arg))
+        "Void")
+
+      (= method "println")
+      (do
+        (doseq [arg args]
+          (check-expression env arg))
+        "Void")
+
+      (= method "sleep")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "sleep expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "sleep expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (types-compatible? env arg-type "Integer")
+            (throw (ex-info "sleep argument must be Integer"
+                            {:error (type-error
+                                     (str "sleep argument must be Integer, got "
+                                          (display-type arg-type)))}))))
+        "Void")
+
       (= method "type_of")
       (do
         (when (not= (count args) 1)
@@ -1960,8 +1986,16 @@
                                     {:error (type-error
                                              (str "Expected " (:type param) ", got " arg-type))})))))
               (or (:return-type method-sig) "Void"))
-            (do (doseq [arg args] (check-expression env arg)) "Void"))
-          (do (doseq [arg args] (check-expression env arg)) "Void")))))))
+            (do
+              (doseq [arg args] (check-expression env arg))
+              (throw (ex-info (str "Undefined function or method: " method)
+                              {:error (type-error
+                                       (str "Undefined function or method: " method))}))))
+          (do
+            (doseq [arg args] (check-expression env arg))
+            (throw (ex-info (str "Undefined function: " method)
+                            {:error (type-error
+                                     (str "Undefined function: " method))})))))))))
 
 (defn check-create
   "Check the type of a create expression"

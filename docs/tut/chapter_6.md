@@ -205,47 +205,41 @@ nex> sum_of_squares(3, 4)
 
 ## Forward Declarations
 
-Sometimes two functions need to call each other. If the typechecker sees the
-first definition before it has seen the second function's signature, it does not
-yet know what type the call should return. The solution is to declare both
-signatures first and define the bodies afterwards.
+Sometimes a function needs to call another function whose body will be defined
+later. If the typechecker sees the first definition before it has seen the
+later function's signature, it does not yet know what type that call should
+return. The solution is to declare the later function's signature first and
+define its body afterwards.
+
+In the REPL, this matters when static checking is enabled:
 
 ```
-nex> function is_even(n: Integer): Boolean
-
-nex> function is_odd(n: Integer): Boolean
-
-nex> function is_even(n: Integer): Boolean
-     do
-       if n = 0 then
-         result := true
-       else
-         result := is_odd(n - 1)
-       end
-     end
-
-nex> function is_odd(n: Integer): Boolean
-     do
-       if n = 0 then
-         result := false
-       else
-         result := is_even(n - 1)
-       end
-     end
-
-nex> is_even(4)
-true
-
-nex> is_odd(5)
-true
+nex> :typecheck on
+Type checking enabled. Code will be validated before execution.
 ```
 
-The first two lines are declarations only. They introduce the function names,
-parameter types, and return types. The later full definitions must match those
-signatures exactly.
+```
+nex> function normalize_name(name: String): String
 
-This is the standard way to handle mutual recursion in Nex. It preserves static
-typechecking and keeps the program structure explicit.
+nex> function greet_user(name: String): String
+     do
+       result := "Hello, " + normalize_name(name)
+     end
+
+nex> function normalize_name(name: String): String
+     do
+       result := name.trim()
+     end
+
+nex> greet_user("  Vijay  ")
+"Hello, Vijay"
+```
+
+The first line is a declaration only. It introduces the function name,
+parameter type, and return type. The later full definition must match that
+signature exactly.
+
+This preserves static typechecking and keeps the program structure explicit.
 
 
 

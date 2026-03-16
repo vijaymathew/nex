@@ -57,12 +57,25 @@ do
     result := is_even(n - 1)
   end
 end")
-                     (repl/eval-code ctx "print(is_even(4))")
-                     (repl/eval-code ctx "print(is_odd(5))"))]
+                     (repl/eval-code ctx "is_even(4)")
+                     (repl/eval-code ctx "is_odd(5)"))]
         (is (not (str/includes? output "Type checking failed")))
         (is (not (str/includes? output "Cannot assign Void to variable of type Boolean")))
         (is (str/includes? output "true"))
         (is (= 2 (count (re-seq #"true" output))))))))
+
+(deftest repl-rejects-forward-reference-without-declaration
+  (testing "REPL typechecker rejects a function body that calls an undeclared later function"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})]
+      (let [ctx (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx "function greet_user(name: String): String
+do
+  result := \"Hello, \" + normalize_name(name)
+end"))]
+        (is (str/includes? output "Undefined function or method: normalize_name"))
+        (is (str/includes? output "Type checking failed"))))))
 
 (deftest calling-unresolved-declaration-fails-cleanly
   (testing "calling a declaration without a later definition raises a clear runtime error"
