@@ -138,7 +138,7 @@ Main methods:
 | `is_empty` | Check emptiness. |
 | `contains(elem)` | Membership test. |
 | `index_of(elem)` | First index or `-1`. |
-| `remove(index)` | Remove and return element. |
+| `remove(index)` | Remove element at index. |
 | `reverse` | Return reversed array. |
 | `sort` | Sort array. |
 | `slice(start, end)` | Subrange. |
