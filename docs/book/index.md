@@ -1,5 +1,5 @@
 ---
-title: ""
+title: "Home"
 numbered: false
 title-block: false
 ---
