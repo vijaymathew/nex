@@ -39,8 +39,8 @@ The structure is more verbose than loops in some other languages, and deliberate
 It is worth tracing through a loop step by step to build a precise mental model of how execution proceeds.
 
 ```
+nex> let total := 0
 nex> from
-       let total := 0
        let i := 1
     do
        -- placeholder
@@ -315,7 +315,7 @@ The following program combines a loop with conditional logic to make a simple in
 
 ```
 nex> let con := create Console
-nex> let target := 10.pick + 1
+nex> let target := (10).pick + 1
 nex> let guess := 0
 nex> let attempts := 0
 
