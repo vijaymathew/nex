@@ -175,20 +175,7 @@ hello
 
 `repeat n do ... end` executes the body exactly `n` times. The count must be a non-negative integer. There is no loop variable — if you need access to the iteration number, use `from ... until ... do` with an explicit counter instead.
 
-`repeat` is most useful for simple repeated actions where the count matters but the iteration number does not:
-
-```
-nex> let con := create Console
-nex> repeat 5 do
-       con.print_line("")
-    end
-
-
-
-
-
-```
-
+`repeat` is most useful for simple repeated actions where the count matters but the iteration number does not.
 
 
 ## The `across` Loop
