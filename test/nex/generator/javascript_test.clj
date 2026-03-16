@@ -730,18 +730,91 @@ end"
       (is (str/includes? js-code "[\"a\", 1]"))
       (is (str/includes? js-code "[\"b\", 2]")))))
 
-(deftest subscript-access-test
-  (testing "Subscript access for arrays and maps"
+(deftest get-access-test
+  (testing "get access for arrays and maps"
     (let [nex-code "class Test
   feature
     items: Array [Integer]
 
     demo() do
-      let x: Integer := items[0]
+      let x: Integer := items.get(0)
     end
 end"
           js-code (js/translate nex-code)]
-      (is (str/includes? js-code "items.get")))))
+      (is (str/includes? js-code "let x = items[0];")))))
+
+(deftest query-chain-reference-update-generation-test
+  (testing "Query chains that end in a command are preserved in generated JavaScript"
+    (let [nex-code "class C
+  feature
+    value: Integer
+    set_value(x: Integer) do
+      value := x
+    end
+end
+
+class B
+  create
+    make(x: C) do
+      c := x
+    end
+  feature
+    c: C
+    child(): C do
+      result := c
+    end
+end
+
+class A
+  create
+    make(x: B) do
+      b := x
+    end
+  feature
+    b: B
+    middle(): B do
+      result := b
+    end
+    demo() do
+      let c: C := create C
+      let b: B := create B.make(c)
+      let a: A := create A.make(b)
+      a.middle().child().set_value(42)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "a.middle().child().set_value(42);")))))
+
+(deftest query-alias-reference-update-generation-test
+  (testing "Assignments from queries still allow command calls on the alias in generated JavaScript"
+    (let [nex-code "class C
+  feature
+    value: Integer
+    set_value(x: Integer) do
+      value := x
+    end
+end
+
+class B
+  create
+    make(x: C) do
+      c := x
+    end
+  feature
+    c: C
+    some_query(): C do
+      result := c
+    end
+    demo() do
+      let c0: C := create C
+      let b0: B := create B.make(c0)
+      let a: C := b0.some_query()
+      a.set_value(10)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "let a = await b0.some_query();"))
+      (is (str/includes? js-code "a.set_value(10);")))))
 
 (deftest create-expression-test
   (testing "Create expression translation"

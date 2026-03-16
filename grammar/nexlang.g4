@@ -286,7 +286,6 @@ postfix
 postfixPart
     : memberAccess
     | callSuffix
-    | subscript
     ;
 
 memberAccess
@@ -295,10 +294,6 @@ memberAccess
 
 callSuffix
     : '(' argumentList? ')'
-    ;
-
-subscript
-    : '[' expression ']'
     ;
 
 primary

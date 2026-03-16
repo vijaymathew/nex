@@ -2193,14 +2193,6 @@
       :array-literal (check-array-literal env expr)
       :set-literal (check-set-literal env expr)
       :map-literal (check-map-literal env expr)
-      :subscript (let [target-type (check-expression env (:target expr))]
-                       (if (map? target-type)
-                         (let [type-params (or (:type-params target-type) (:type-args target-type))]
-                           (cond
-                             (= (:base-type target-type) "Array") (first type-params)
-                             (= (:base-type target-type) "Map") (second type-params)
-                             :else target-type))
-                         target-type))
       :anonymous-function (let [class-def (:class-def expr)
                                  class-name (:class-name expr)]
                             ;; Register the dynamic class definition in the type environment

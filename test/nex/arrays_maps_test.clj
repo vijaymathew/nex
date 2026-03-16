@@ -61,12 +61,12 @@ end"
       (is (str/includes? java-code "new ArrayList<>(Arrays.asList(1, 2, 3))")))))
 
 (deftest array-access-parsing-test
-  (testing "Parse array subscript access"
+  (testing "Parse array get access"
     (let [code "class Test
   feature
     demo() do
       let arr: Array [Integer] := [1, 2, 3]
-      let x: Integer := arr[0]
+      let x: Integer := arr.get(0)
       print(x)
     end
 end"
@@ -74,10 +74,10 @@ end"
           class-def (first (:classes ast))
           method (-> class-def :body first :members first)
           let-stmt (-> method :body second)
-          subscript-expr (:value let-stmt)]
-      (is (= :subscript (:type subscript-expr)))
-      (is (= "arr" (-> subscript-expr :target :name)))
-      (is (= 0 (-> subscript-expr :index :value))))))
+          call-expr (:value let-stmt)]
+      (is (= :call (:type call-expr)))
+      (is (= "arr" (:target call-expr)))
+      (is (= "get" (:method call-expr))))))
 
 (deftest array-access-java-generation-test
   (testing "Generate Java code for array access"
@@ -86,7 +86,7 @@ end"
     items: Array [Integer]
 
     demo() do
-      let x: Integer := items[0]
+      let x: Integer := items.get(0)
     end
 end"
           java-code (java/translate code)]
@@ -106,12 +106,12 @@ end"
       (is (str/includes? java-code "ArrayList<Double> reals = new ArrayList<>();")))))
 
 (deftest nested-array-access-test
-  (testing "Nested array access arr[i][j]"
+  (testing "Nested array access matrix.get(i).get(j)"
     (let [code "class Test
   feature
     demo() do
       let matrix: Array [Array [Integer]] := create Array
-      let x: Integer := matrix[0][1]
+      let x: Integer := matrix.get(0).get(1)
     end
 end"
           ast (p/ast code)]
@@ -162,12 +162,12 @@ end"
       (is (= 2 (count (:entries map-expr)))))))
 
 (deftest map-access-parsing-test
-  (testing "Parse map subscript access"
+  (testing "Parse map get access"
     (let [code "class Test
   feature
     demo() do
       let m: Map [String, Integer] := {\"a\": 1, \"b\": 2}
-      let x: Integer := m[\"a\"]
+      let x: Integer := m.get(\"a\")
       print(x)
     end
 end"
@@ -175,9 +175,10 @@ end"
           class-def (first (:classes ast))
           method (-> class-def :body first :members first)
           let-stmt (-> method :body second)
-          subscript-expr (:value let-stmt)]
-      (is (= :subscript (:type subscript-expr)))
-      (is (= "m" (-> subscript-expr :target :name))))))
+          call-expr (:value let-stmt)]
+      (is (= :call (:type call-expr)))
+      (is (= "m" (:target call-expr)))
+      (is (= "get" (:method call-expr))))))
 
 (deftest map-access-java-generation-test
   (testing "Generate Java code for map access"
@@ -186,7 +187,7 @@ end"
     data: Map [String, Integer]
 
     demo() do
-      let x: Integer := data[\"key\"]
+      let x: Integer := data.get(\"key\")
     end
 end"
           java-code (java/translate code)]
@@ -217,8 +218,8 @@ end"
     lookup: Map [String, Integer]
 
     demo() do
-      let x: String := items[0]
-      let y: Integer := lookup[\"key\"]
+      let x: String := items.get(0)
+      let y: Integer := lookup.get(\"key\")
     end
 end"
           java-code (java/translate code)]
@@ -282,7 +283,7 @@ end"
     (let [code "class Test
   feature
     process(items: Array [Integer]) do
-      let x: Integer := items[0]
+      let x: Integer := items.get(0)
     end
 end"
           java-code (java/translate code)]
@@ -294,7 +295,7 @@ end"
     (let [code "class Test
   feature
     process(data: Map [String, Integer]) do
-      let x: Integer := data[\"key\"]
+      let x: Integer := data.get(\"key\")
     end
 end"
           java-code (java/translate code)]
@@ -335,7 +336,7 @@ end"
     demo() do
       let arr: Array [Integer] := [1, 2, 3]
       let i: Integer := 1
-      let x: Integer := arr[i]
+      let x: Integer := arr.get(i)
     end
 end"
           java-code (java/translate code)]
@@ -348,7 +349,7 @@ end"
     demo() do
       let m: Map [String, Integer] := {\"a\": 1, \"b\": 2}
       let key: String := \"a\"
-      let x: Integer := m[key]
+      let x: Integer := m.get(key)
     end
 end"
           java-code (java/translate code)]

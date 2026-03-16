@@ -49,6 +49,24 @@ ensure
 
 In practice, the simplest use of `old` in Nex is on fields of the current object, or on expressions built from those fields. That is the style used throughout this tutorial.
 
+There is an important practical limitation to keep in mind. `old` is not a deep immutable snapshot of every object reachable from the current routine. If a field refers to a mutable object and that object is updated in place, then `old` may still refer to the same underlying object rather than to a frozen copy of its earlier contents.
+
+For example, if a class field is an `Array` and a routine calls `items.add(value)`, a postcondition such as:
+
+```
+ensure
+  size_increased: items.length = old items.length + 1
+```
+
+is not reliable in the current implementation, because both `items` and `old items` may observe the same mutated array object. In such cases, it is better to write a postcondition about the visible result after the update, for example:
+
+```
+ensure
+  last_is_value: items.get(items.length - 1) = value
+```
+
+So the safest rule in current Nex is this: use `old` mainly for current-object fields and value-like expressions whose earlier state is not being mutated in place through the same reference.
+
 For example:
 
 ```

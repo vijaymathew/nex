@@ -83,7 +83,7 @@ nex> class Task_List
            do
              tasks.add(create Todo_Item.make(title))
            ensure
-             size_increased: tasks.length = old tasks.length + 1
+             added_title_visible: tasks.get(tasks.length - 1).title = title
            end
          task_at(index: Integer): Todo_Item
            require
@@ -120,7 +120,7 @@ nex> class Task_List
            do
              tasks.add(create Todo_Item.make(title))
            ensure
-             size_increased: tasks.length = old tasks.length + 1
+             added_title_visible: tasks.get(tasks.length - 1).title = title
            end
          task_at(index: Integer): Todo_Item
            require
@@ -132,7 +132,7 @@ nex> class Task_List
            do
              result := 0
              across tasks as task do
-               if task.is_done then
+               if task.is_done() then
                  result := result + 1
                end
              end
@@ -171,8 +171,8 @@ nex> todo.size
 nex> todo.completed_count
 0
 
-nex> todo.task_at(0).mark_done
-nex> todo.task_at(1).mark_done
+nex> todo.mark_task_done(0)
+nex> todo.mark_task_done(1)
 
 nex> todo.completed_count
 2
@@ -186,14 +186,16 @@ The program already works. But we can still improve the interface.
 
 ## Raising the Level of the Interface
 
-Calling `task_at(i).mark_done` is acceptable, but it exposes more representation than necessary. The list itself should offer a routine:
+Calling `task_at(i).mark_done()` looks attractive, but it is not the best interface here. In Nex, if an object is fetched out of a collection, updated, and not written back, the collection still holds the older value. The list itself should offer a routine that performs the full update:
 
 ```
 nex> mark_task_done(index: Integer)
        require
          index_in_range: index >= 0 and index < tasks.length
        do
-         tasks.get(index).mark_done
+         let item := tasks.get(index)
+         item.mark_done()
+         tasks.put(index, item)
        ensure
          selected_done: tasks.get(index).done
        end
@@ -215,7 +217,7 @@ nex> class Task_List
            do
              tasks.add(create Todo_Item.make(title))
            ensure
-             size_increased: tasks.length = old tasks.length + 1
+             added_title_visible: tasks.get(tasks.length - 1).title = title
            end
          task_at(index: Integer): Todo_Item
            require
@@ -227,7 +229,9 @@ nex> class Task_List
            require
              index_in_range: index >= 0 and index < tasks.length
            do
-             tasks.get(index).mark_done
+             let item := tasks.get(index)
+             item.mark_done()
+             tasks.put(index, item)
            ensure
              selected_done: tasks.get(index).done
            end
@@ -235,7 +239,7 @@ nex> class Task_List
            do
              result := 0
              across tasks as task do
-               if task.is_done then
+               if task.is_done() then
                  result := result + 1
                end
              end
