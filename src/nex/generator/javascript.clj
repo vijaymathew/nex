@@ -764,7 +764,7 @@
     "index_of"  (fn [target args] (str "__nexArrayIndexOf(" target ", " args ")"))
     "remove"    (fn [target args] (str "(" target ".splice(" args ", 1), null)"))
     "reverse"   (fn [target _] (str "[..." target "].reverse()"))
-    "sort"      (fn [target _] (str "[..." target "].sort()"))
+    "sort"      (fn [target _] (str "__nexArraySort(" target ")"))
     "slice"     (fn [target args] (str target ".slice(" args ")"))
     "to_string" (fn [target _] (str "__nexToString(" target ")"))
     "equals"    (fn [target args] (str "__nexDeepEquals(" target ", " args ")"))
@@ -2156,6 +2156,20 @@
        "function __nexSetContains(values, needle) {\n"
        "  for (const value of values.values()) if (__nexDeepEquals(value, needle)) return true;\n"
        "  return false;\n"
+       "}\n"
+       "function __nexCompareValues(a, b) {\n"
+       "  if (a === b) return 0;\n"
+       "  if (a === null || a === undefined || b === null || b === undefined) throw new Error('Array.sort cannot compare null values');\n"
+       "  const ta = typeof a;\n"
+       "  const tb = typeof b;\n"
+       "  if (ta === 'number' && tb === 'number') return a < b ? -1 : (a > b ? 1 : 0);\n"
+       "  if (ta === 'string' && tb === 'string') return a < b ? -1 : (a > b ? 1 : 0);\n"
+       "  if (ta === 'boolean' && tb === 'boolean') return a === b ? 0 : (a ? 1 : -1);\n"
+       "  if (a && typeof a.compare === 'function') return a.compare(b);\n"
+       "  throw new Error('Array.sort requires Comparable elements');\n"
+       "}\n"
+       "function __nexArraySort(values) {\n"
+       "  return [...values].sort((a, b) => __nexCompareValues(a, b));\n"
        "}\n"
        "function __nexCloneValue(v) {\n"
        "  if (v === null || v === undefined || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;\n"

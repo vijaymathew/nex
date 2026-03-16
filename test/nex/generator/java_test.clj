@@ -264,6 +264,47 @@ end"
       (is (str/includes? java-code "t.await()"))
       (is (str/includes? java-code "t.is_done()")))))
 
+(deftest array-slice-and-reverse-generation-test
+  (testing "Array slice and reverse lower to copied Java collections"
+    (let [nex-code "class Test
+  feature
+    demo(scores: Array[Integer]) do
+      print(scores.slice(1, 4))
+      print(scores.reverse)
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "new ArrayList<>(scores.subList(1, 4))"))
+      (is (str/includes? java-code "new ArrayList<>(scores.reversed())")))))
+
+(deftest array-sort-generation-test
+  (testing "Array sort lowers to runtime comparator-based helper in Java"
+    (let [nex-code "class Box inherit Comparable
+  feature
+    value: Integer
+  create
+    make(value: Integer) do
+      this.value := value
+    end
+  feature
+    compare(other: Box): Integer do
+      result := value.compare(other.value)
+    end
+end
+
+class Test
+  feature
+    demo(scores: Array[Integer], boxes: Array[Box]) do
+      print(scores.sort)
+      print(boxes.sort)
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "NexRuntime.arraySort(scores)"))
+      (is (str/includes? java-code "NexRuntime.arraySort(boxes)"))
+      (is (str/includes? java-code "public static int compareValues(Object a, Object b)"))
+      (is (str/includes? java-code "public static <T> java.util.ArrayList<T> arraySort(java.util.List<T> values)")))))
+
 (deftest http-client-library-generation-test
   (testing "Http_Client library lowers to ordinary classes plus runtime HTTP builtins"
     (let [nex-code (slurp "lib/net/http_client.nex")

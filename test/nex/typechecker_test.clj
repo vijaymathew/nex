@@ -1,5 +1,6 @@
 (ns nex.typechecker-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [nex.parser :as p]
             [nex.typechecker :as tc]))
 
@@ -1057,3 +1058,51 @@ end"
           result (tc/type-check ast)]
       (is (:success result))
       (is (empty? (:errors result))))))
+
+(deftest test-array-sort-requires-sortable-elements
+  (testing "Array.sort accepts built-in sortable types and Comparable classes"
+    (let [ok-code "class Box inherit Comparable
+  feature
+    value: Integer
+  create
+    make(value: Integer) do
+      this.value := value
+    end
+  feature
+    compare(other: Box): Integer do
+      result := value.compare(other.value)
+    end
+end
+
+class Main
+  feature
+    demo() do
+      let xs: Array[Integer] := [10, 2, 3]
+      let ys: Array[Box] := [create Box.make(2), create Box.make(1)]
+      let a: Array[Integer] := xs.sort
+      let b: Array[Box] := ys.sort
+    end
+end"
+          ok-result (tc/type-check (p/ast ok-code))
+          bad-code "class Box
+  feature
+    value: Integer
+  create
+    make(value: Integer) do
+      this.value := value
+    end
+end
+
+class Main
+  feature
+    demo() do
+      let ys: Array[Box] := [create Box.make(2), create Box.make(1)]
+      let b := ys.sort
+    end
+end"
+          bad-result (tc/type-check (p/ast bad-code))]
+      (is (:success ok-result))
+      (is (empty? (:errors ok-result)))
+      (is (false? (:success bad-result)))
+      (is (some #(str/includes? (tc/format-type-error %) "Array.sort requires elements of a built-in sortable type or Comparable")
+                (:errors bad-result))))))

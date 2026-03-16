@@ -41,7 +41,9 @@
              nil)))
 (defn nex-array-reverse [arr] #?(:clj (java.util.ArrayList. (.reversed arr)) :cljs (js/Array.from (.reverse (.slice arr)))))
 (defn nex-array-sort [arr] #?(:clj (.sort arr nil) :cljs (.sort arr)))
-(defn nex-array-slice [arr start end] #?(:clj (.subList arr start end) :cljs (.slice arr start end)))
+(defn nex-array-slice [arr start end]
+  #?(:clj (java.util.ArrayList. (.subList arr start end))
+     :cljs (.slice arr start end)))
 (defn nex-array-str [formatter arr]
   (str "[" (str/join ", " (map formatter #?(:clj arr :cljs (array-seq arr)))) "]"))
 

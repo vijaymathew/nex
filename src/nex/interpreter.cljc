@@ -18,6 +18,8 @@
 (declare lookup-method-with-inheritance)
 (declare lookup-class)
 (declare call-builtin-method)
+(declare eval-node)
+(declare nex-ordering-compare)
 (declare make-object)
 (declare invoke-http-server-handler)
 
@@ -1439,6 +1441,45 @@
    (some #(membership-equals? % value)
          #?(:clj (seq s) :cljs (es6-iterator-seq (.values s))))))
 
+(defn- sortable-builtin-scalar-value?
+  [v]
+  (or (string? v)
+      (number? v)
+      (boolean? v)
+      (char? v)))
+
+(defn- nex-value-compare
+  [ctx a b]
+  (cond
+    (and (sortable-builtin-scalar-value? a)
+         (sortable-builtin-scalar-value? b))
+    (nex-ordering-compare a b)
+
+    (nex-object? a)
+    (let [result (eval-node ctx {:type :call
+                                 :target {:type :literal :value a}
+                                 :method "compare"
+                                 :args [{:type :literal :value b}]})]
+      (if (number? result)
+        result
+        (throw (ex-info "Comparable.compare must return Integer"
+                        {:left a :right b :result result}))))
+
+    :else
+    (throw (ex-info "Array.sort requires Comparable elements"
+                    {:left a :right b}))))
+
+(defn- nex-array-sort-with-ctx
+  [ctx arr]
+  #?(:clj (let [out (java.util.ArrayList. arr)]
+            (.sort out (reify java.util.Comparator
+                         (compare [_ a b]
+                           (int (nex-value-compare ctx a b)))))
+            out)
+     :cljs (let [out (.slice arr)]
+             (.sort out (fn [a b] (nex-value-compare ctx a b)))
+             out)))
+
 (defn nex-display-value [value]
   (value/nex-display-value nex-object? nex-format-value value))
 
@@ -2130,10 +2171,10 @@
           (if (string? result)
             result
             (nex-format-value result)))
-        (call-builtin-method nil value "to_string" [])))
+        (call-builtin-method nil nil value "to_string" [])))
 
     :else
-    (call-builtin-method nil value "to_string" [])))
+    (call-builtin-method nil nil value "to_string" [])))
 
 (defn- concat-string-value-async
   "Async variant of concat-string-value for the browser interpreter."
@@ -2156,10 +2197,10 @@
                     (if (string? result)
                       result
                       (nex-format-value result))))
-           (js/Promise.resolve (call-builtin-method nil value "to_string" []))))
+           (js/Promise.resolve (call-builtin-method nil nil value "to_string" []))))
 
        :else
-       (js/Promise.resolve (call-builtin-method nil value "to_string" [])))))
+       (js/Promise.resolve (call-builtin-method nil nil value "to_string" [])))))
 
 (defn apply-unary-op
   "Apply a unary operator to a value."
@@ -2383,8 +2424,8 @@
                     (let [idx (nex-array-index-of-value arr elem)]
                       (if (>= idx 0) idx -1)))
     "remove"      (fn [arr idx & _] (nex-array-remove arr idx))
-    "reverse"     (fn [arr _] (nex-array-reverse arr))
-    "sort"        (fn [arr & _] (nex-array-sort arr))
+    "reverse"     (fn [arr & _] (nex-array-reverse arr))
+    "sort"        (fn [arr & [ctx]] (nex-array-sort-with-ctx ctx arr))
     "slice"       (fn [arr start end & _] (nex-array-slice arr start end))
     "to_string"   (fn [arr & _] (nex-array-str arr))
     "equals"      (fn [arr other & _] (nex-deep-equals? arr other))
@@ -2611,15 +2652,21 @@
 
 (defn call-builtin-method
   "Call a built-in method on a primitive value"
-  [target value method-name args]
-  (if-let [method-fn
-           (or (when-let [type-name (get-type-name value)]
-                 (when-let [methods (get builtin-type-methods type-name)]
-                   (get methods method-name)))
-               (get-in builtin-type-methods [:Any method-name]))]
-    (apply method-fn value args)
-    (throw (ex-info (str "Method not found on type: " method-name)
-                    {:target target :value value :method method-name}))))
+  ([target value method-name args]
+   (call-builtin-method nil target value method-name args))
+  ([ctx target value method-name args]
+   (if-let [method-fn
+            (or (when-let [type-name (get-type-name value)]
+                  (when-let [methods (get builtin-type-methods type-name)]
+                    (get methods method-name)))
+                (get-in builtin-type-methods [:Any method-name]))]
+     (if (and ctx
+              (= method-name "sort")
+              (= (get-type-name value) :Array))
+       (apply method-fn value (concat args [ctx]))
+       (apply method-fn value args))
+     (throw (ex-info (str "Method not found on type: " method-name)
+                     {:target target :value value :method method-name})))))
 ;;
 ;; Node Evaluators
 ;;
@@ -3071,12 +3118,12 @@
                         (throw (ex-info (str "Method not found: " method)
                                         {:object obj :method method})))))
                   (if (get-in builtin-type-methods [:Any method])
-                    (call-builtin-method (or target-name target) obj method arg-values)
+                    (call-builtin-method ctx (or target-name target) obj method arg-values)
                     (throw (ex-info (str "Method not found: " method)
                                     {:object obj :method method})))))))
 
           (get-type-name obj)
-          (call-builtin-method (or target-name target) obj method arg-values)
+          (call-builtin-method ctx (or target-name target) obj method arg-values)
 
           :else
           #?(:clj (java-call-method obj method arg-values)
@@ -4139,12 +4186,12 @@
                                                     (js/Promise.reject (ex-info (str "Method not found: " method)
                                                                                 {:object obj :method method})))))
                                                (if (get-in builtin-type-methods [:Any method])
-                                                 (->promise (call-builtin-method (or target-name target) obj method arg-values))
+                                                 (->promise (call-builtin-method ctx (or target-name target) obj method arg-values))
                                                  (js/Promise.reject (ex-info (str "Method not found: " method)
                                                                              {:object obj :method method})))))))))
 
                                        (get-type-name obj)
-                                       (->promise (call-builtin-method (or target-name target) obj method arg-values))
+                                       (->promise (call-builtin-method ctx (or target-name target) obj method arg-values))
 
                                        :else
                                        (js/Promise.reject

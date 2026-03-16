@@ -510,7 +510,7 @@
     "index_of"  (fn [target args] (str "NexRuntime.arrayIndexOf(" target ", " args ")"))
     "remove"    (fn [target args] (str "(" target ".remove((int)" args "), null)"))
     "reverse"   (fn [target _] (str "new ArrayList<>(" target ".reversed())"))
-    "sort"      (fn [target _] (str "(Collections.sort(" target "), " target ")"))
+    "sort"      (fn [target _] (str "NexRuntime.arraySort(" target ")"))
     "slice"     (fn [target args] (str "new ArrayList<>(" target ".subList(" args "))"))
     "to_string" (fn [target _] (str "NexRuntime.toStringValue(" target ")"))
     "equals"    (fn [target args] (str "NexRuntime.deepEquals(" target ", " args ")"))
@@ -2846,6 +2846,33 @@ public class NexTurtle {
        "  public static boolean setContains(java.util.Set<?> values, Object needle) {\n"
        "    for (Object value : values) if (deepEquals(value, needle)) return true;\n"
        "    return false;\n"
+       "  }\n\n"
+       "  public static int compareValues(Object a, Object b) {\n"
+       "    if (a == b) return 0;\n"
+       "    if (a == null || b == null) throw new RuntimeException(\"Array.sort cannot compare null values\");\n"
+       "    if (a instanceof String && b instanceof String) return ((String) a).compareTo((String) b);\n"
+       "    if (a instanceof Integer && b instanceof Integer) return Integer.compare((Integer) a, (Integer) b);\n"
+       "    if (a instanceof Long && b instanceof Long) return Long.compare((Long) a, (Long) b);\n"
+       "    if (a instanceof Double && b instanceof Double) return Double.compare((Double) a, (Double) b);\n"
+       "    if (a instanceof java.math.BigDecimal && b instanceof java.math.BigDecimal) return ((java.math.BigDecimal) a).compareTo((java.math.BigDecimal) b);\n"
+       "    if (a instanceof Character && b instanceof Character) return Character.compare((Character) a, (Character) b);\n"
+       "    if (a instanceof Boolean && b instanceof Boolean) return Boolean.compare((Boolean) a, (Boolean) b);\n"
+       "    try {\n"
+       "      for (java.lang.reflect.Method m : a.getClass().getMethods()) {\n"
+       "        if (m.getName().equals(\"compare\") && m.getParameterCount() == 1) {\n"
+       "          Object result = m.invoke(a, b);\n"
+       "          return ((Number) result).intValue();\n"
+       "        }\n"
+       "      }\n"
+       "    } catch (Exception ex) {\n"
+       "      throw new RuntimeException(\"Array.sort requires Comparable elements\", ex);\n"
+       "    }\n"
+       "    throw new RuntimeException(\"Array.sort requires Comparable elements\");\n"
+       "  }\n\n"
+       "  public static <T> java.util.ArrayList<T> arraySort(java.util.List<T> values) {\n"
+       "    java.util.ArrayList<T> out = new java.util.ArrayList<>(values);\n"
+       "    out.sort((a, b) -> compareValues(a, b));\n"
+       "    return out;\n"
        "  }\n\n"
        "  public static Object deepClone(Object value) {\n"
        "    if (value == null || value instanceof String || value instanceof Number || value instanceof Boolean || value instanceof Character || value instanceof java.math.BigDecimal) return value;\n"

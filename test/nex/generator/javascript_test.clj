@@ -284,6 +284,47 @@ end"
       (is (str/includes? js-code "console.log(ch.capacity())"))
       (is (str/includes? js-code "console.log(ch.size())")))))
 
+(deftest array-slice-and-reverse-generation-test
+  (testing "Array slice and reverse lower to JavaScript array helpers"
+    (let [nex-code "class Test
+  feature
+    demo(scores: Array[Integer]) do
+      print(scores.slice(1, 4))
+      print(scores.reverse)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "console.log(scores.slice(1, 4))"))
+      (is (str/includes? js-code "console.log([...scores].reverse())")))))
+
+(deftest array-sort-generation-test
+  (testing "Array sort lowers to comparator-based helper in JavaScript"
+    (let [nex-code "class Box inherit Comparable
+  feature
+    value: Integer
+  create
+    make(value: Integer) do
+      this.value := value
+    end
+  feature
+    compare(other: Box): Integer do
+      result := value.compare(other.value)
+    end
+end
+
+class Test
+  feature
+    demo(scores: Array[Integer], boxes: Array[Box]) do
+      print(scores.sort)
+      print(boxes.sort)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "console.log(__nexArraySort(scores))"))
+      (is (str/includes? js-code "console.log(__nexArraySort(boxes))"))
+      (is (str/includes? js-code "function __nexCompareValues(a, b)"))
+      (is (str/includes? js-code "function __nexArraySort(values)")))))
+
 (deftest select-generation-test
   (testing "select lowers to try_send/try_receive polling in JavaScript"
     (let [nex-code "class Test
