@@ -49,6 +49,24 @@ ensure
 
 In practice, the simplest use of `old` in Nex is on fields of the current object, or on expressions built from those fields. That is the style used throughout this tutorial.
 
+There is an important practical limitation to keep in mind. `old` is not a deep immutable snapshot of every object reachable from the current routine. If a field refers to a mutable object and that object is updated in place, then `old` may still refer to the same underlying object rather than to a frozen copy of its earlier contents.
+
+For example, if a class field is an `Array` and a routine calls `items.add(value)`, a postcondition such as:
+
+```
+ensure
+  size_increased: items.length = old items.length + 1
+```
+
+is not reliable in the current implementation, because both `items` and `old items` may observe the same mutated array object. In such cases, it is better to write a postcondition about the visible result after the update, for example:
+
+```
+ensure
+  last_is_value: items.get(items.length - 1) = value
+```
+
+So the safest rule in current Nex is this: use `old` mainly for current-object fields and value-like expressions whose earlier state is not being mutated in place through the same reference.
+
 For example:
 
 ```
@@ -66,7 +84,6 @@ nex> class Counter
              advanced: count = old count + 1
            end
      end
-Class(es) registered: Counter
 ```
 
 The postcondition does not describe the code line by line. It describes the observable result: after `increment`, the count is exactly one larger than before.
@@ -95,7 +112,6 @@ nex> class Counter
              advanced: count = old count + 1
            end
      end
-Class(es) registered: Counter
 ```
 
 Then:
@@ -206,7 +222,6 @@ nex> class Account
              sender_lost_amount: balance = old balance - amount
            end
      end
-Class(es) registered: Account
 ```
 
 The postconditions on `withdraw` and `deposit` explain why `transfer_to` is trustworthy. The postcondition on `transfer_to` then states the exact effect on the source account. The corresponding effect on the destination account is guaranteed indirectly through the contract of `deposit`.
@@ -268,7 +283,6 @@ nex> class Stack [G]
              returned_old_last: result = old items.get(old items.length - 1)
            end
      end
-Class(es) registered: Stack
 ```
 
 The postcondition on `pop` is particularly good because it specifies both effects:

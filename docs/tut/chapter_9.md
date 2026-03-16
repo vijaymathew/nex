@@ -55,7 +55,7 @@ Error: index out of bounds
 
 This is the array equivalent of calling `.to_integer` on a non-numeric string — the language enforces the boundary rather than returning a silent wrong answer. The precondition for array access is that the index must be in the range `[0, length - 1]`.
 
-The last element is accessed with `scores[scores.length - 1]`, 
+The last element is accessed with `scores.get(scores.length - 1)`, 
 
 ```
 nex> scores.get(scores.length - 1)

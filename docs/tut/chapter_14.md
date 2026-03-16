@@ -23,7 +23,6 @@ nex> class Shape
            result := "A " + colour + " shape"
          end
      end
-Class(es) registered: Shape
 
 nex> class Circle inherit Shape
        create
@@ -40,7 +39,6 @@ nex> class Circle inherit Shape
            result := "A " + colour + " circle with radius " + radius.to_string
          end
      end
-Class(es) registered: Circle
 
 nex> class Rectangle inherit Shape
        create
@@ -59,7 +57,6 @@ nex> class Rectangle inherit Shape
            result := "A " + colour + " rectangle (" + width.to_string + " x " + height.to_string + ")"
          end
      end
-Class(es) registered: Rectangle
 ```
 
 Both `Circle` and `Rectangle` inherit the `colour` field from `Shape`. Each has its own additional fields and overrides `describe`.
@@ -202,7 +199,6 @@ nex> class Circle inherit Shape
            result := 3.14159 * radius * radius
          end
      end
-Class(es) registered: Circle
 
 nex> let c := create Circle.make("red", 5.0)
 nex> c.describe
@@ -351,7 +347,6 @@ nex> class Account
            result := owner + ": " + balance.to_string
          end
      end
-Class(es) registered: Account
 
 nex> class SavingsAccount inherit Account
        create
@@ -368,7 +363,6 @@ nex> class SavingsAccount inherit Account
            result := super.describe + " (savings, rate: " + interest_rate.to_string + ")"
          end
      end
-Class(es) registered: SavingsAccount
 
 nex> class OverdraftAccount inherit Account
        create
@@ -390,7 +384,6 @@ nex> class OverdraftAccount inherit Account
            result := super.describe + " (overdraft limit: " + overdraft_limit.to_string + ")"
          end
      end
-Class(es) registered: OverdraftAccount
 ```
 
 ```

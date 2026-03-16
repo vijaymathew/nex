@@ -54,9 +54,9 @@
 end")
                    (repl/eval-code ctx "let boxes := [create Box.make(7), create Box.make(2), create Box.make(5)]")
                    (repl/eval-code ctx "let sorted := boxes.sort")
-                   (repl/eval-code ctx "print(sorted[0].value)")
-                   (repl/eval-code ctx "print(sorted[1].value)")
-                   (repl/eval-code ctx "print(sorted[2].value)"))]
+                   (repl/eval-code ctx "print(sorted.get(0).value)")
+                   (repl/eval-code ctx "print(sorted.get(1).value)")
+                   (repl/eval-code ctx "print(sorted.get(2).value)"))]
       (is (str/includes? output "[2, 3, 10]"))
       (is (str/includes? output "2"))
       (is (str/includes? output "5"))

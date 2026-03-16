@@ -125,7 +125,6 @@ nex> class BankAccount
            result := balance
          end
      end
-Class(es) registered: BankAccount
 ```
 
 `withdraw` returns `false` when the withdrawal would exceed the limit rather than silently allowing an invalid state. The rule lives once, inside the class, and applies everywhere. No external code can bypass it.
@@ -156,7 +155,6 @@ nex> class Card
            result := rank > other.rank
          end
      end
-Class(es) registered: Card
 
 nex> let ace   := create Card.make(14, "Spades")
 nex> let seven := create Card.make(7, "Hearts")

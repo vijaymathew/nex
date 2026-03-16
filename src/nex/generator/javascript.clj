@@ -1017,18 +1017,6 @@
         ;; Default: new ClassName()
         (str "new " class-name "()")))))
 
-(defn generate-subscript-expr
-  "Generate JavaScript code for subscript access (array/map access)"
-  [{:keys [target index]}]
-  (let [target-code (generate-expression target)
-        index-code (generate-expression index)]
-    ;; In JavaScript, we need to check if it's a Map or Array
-    ;; For simplicity, we'll use a helper: use .get() for Maps, [] for Arrays
-    ;; We'll detect Maps by checking if target is 'Map' type at runtime
-    ;; For now, we'll generate code that works for both
-    (str target-code ".get ? " target-code ".get(" index-code ") : "
-         target-code "[" index-code "]")))
-
 (defn generate-array-literal
   "Generate JavaScript code for array literal"
   [elements]
@@ -1082,7 +1070,6 @@
                 :call (into (if (map? (:target e)) (walk (:target e)) [])
                             (mapcat walk (:args e)))
                 :create (mapcat walk (:args e))
-                :subscript (into (walk (:target e)) (walk (:index e)))
                 :array-literal (mapcat walk (:elements e))
                 :map-literal (mapcat (fn [{:keys [key value]}]
                                        (into (walk key) (walk value)))
@@ -1192,7 +1179,6 @@
     :unary (generate-unary-expr expr)
     :call (generate-call-expr expr)
     :create (generate-create-expr expr)
-    :subscript (generate-subscript-expr expr)
     :array-literal (generate-array-literal (:elements expr))
     :set-literal (generate-set-literal (:elements expr))
     :map-literal (generate-map-literal (:entries expr))

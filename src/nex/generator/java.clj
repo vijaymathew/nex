@@ -1084,13 +1084,6 @@
         ;; Default: new ClassName()
         (str "new " class-name (or type-params "") "()")))))
 
-(defn generate-subscript-expr
-  "Generate Java code for subscript access (array/map access)"
-  [{:keys [target index]}]
-  (let [target-code (generate-expression target)
-        index-code (generate-expression index)]
-    (str target-code ".get(" index-code ")")))
-
 (defn generate-array-literal
   "Generate Java code for array literal"
   [elements]
@@ -1154,7 +1147,6 @@
                 :call (into (if (map? (:target e)) (walk (:target e)) [])
                             (mapcat walk (:args e)))
                 :create (mapcat walk (:args e))
-                :subscript (into (walk (:target e)) (walk (:index e)))
                 :array-literal (mapcat walk (:elements e))
                 :map-literal (mapcat (fn [{:keys [key value]}]
                                        (into (walk key) (walk value)))
@@ -1250,7 +1242,6 @@
     :unary (generate-unary-expr expr)
     :call (generate-call-expr expr)
     :create (generate-create-expr expr)
-    :subscript (generate-subscript-expr expr)
     :array-literal (generate-array-literal (:elements expr))
     :set-literal (generate-set-literal (:elements expr))
     :map-literal (generate-map-literal (:entries expr))

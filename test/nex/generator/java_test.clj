@@ -529,6 +529,79 @@ end"
       (is (str/includes? java-code "NexRuntime.setFromArray(new ArrayList<>(Arrays.asList(2, 3)))"))
       (is (str/includes? java-code "NexRuntime.setUnion(s, t)")))))
 
+(deftest query-chain-reference-update-generation-test
+  (testing "Query chains that end in a command are preserved in generated Java"
+    (let [nex-code "class C
+  feature
+    value: Integer
+    set_value(x: Integer) do
+      value := x
+    end
+end
+
+class B
+  create
+    make(x: C) do
+      c := x
+    end
+  feature
+    c: C
+    child(): C do
+      result := c
+    end
+end
+
+class A
+  create
+    make(x: B) do
+      b := x
+    end
+  feature
+    b: B
+    middle(): B do
+      result := b
+    end
+    demo() do
+      let c: C := create C
+      let b: B := create B.make(c)
+      let a: A := create A.make(b)
+      a.middle().child().set_value(42)
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "a.middle().child().set_value(42);")))))
+
+(deftest query-alias-reference-update-generation-test
+  (testing "Assignments from queries still allow command calls on the alias in generated Java"
+    (let [nex-code "class C
+  feature
+    value: Integer
+    set_value(x: Integer) do
+      value := x
+    end
+end
+
+class B
+  create
+    make(x: C) do
+      c := x
+    end
+  feature
+    c: C
+    some_query(): C do
+      result := c
+    end
+    demo() do
+      let c0: C := create C
+      let b0: B := create B.make(c0)
+      let a: C := b0.some_query()
+      a.set_value(10)
+    end
+end"
+          java-code (java/translate nex-code)]
+      (is (str/includes? java-code "C a = b0.some_query();"))
+      (is (str/includes? java-code "a.set_value(10);")))))
+
 (deftest set-cursor-generation-test
   (testing "Across on sets translates via runtime set cursor helper"
     (let [nex-code "class Test

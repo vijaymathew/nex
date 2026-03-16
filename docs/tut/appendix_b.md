@@ -171,8 +171,7 @@ Main methods:
 
 Construction:
 
-```text
-create Set[Integer]
+```nex
 create Set[Integer].from_array([1, 2, 3])
 #{}
 #{1, 2, 3}
@@ -259,6 +258,46 @@ Main methods:
 - `setenv`
 - `command_line`
 
+### `Task[T]`
+
+Construction:
+
+```nex
+let t: Task[Integer] := spawn do
+  result := 42
+end
+```
+
+Main methods:
+
+- `await`
+- `await(ms)`
+- `cancel`
+- `is_done`
+- `is_cancelled`
+
+### `Channel[T]`
+
+Construction:
+
+```nex
+create Channel[Integer]
+create Channel[Integer].with_capacity(2)
+```
+
+Main methods:
+
+- `send`
+- `send(value, ms)`
+- `try_send`
+- `receive`
+- `receive(ms)`
+- `try_receive`
+- `close`
+- `is_closed`
+- `capacity`
+- `size`
+
 
 ## Graphics Classes
 
@@ -315,8 +354,9 @@ Main methods:
 ## Practical Notes
 
 - All scalar types are modeled as `Comparable` and `Hashable`.
-- Array element count is `length`; map entry count is `size`.
+- Array element count is `length`; map and set element counts use `size`.
 - Built-in method names in this appendix match the interpreter-level names.
 - Some system behavior differs between JVM and JavaScript runtimes, especially for file and process access.
+- `Task` and `Channel` are built-in concurrency abstractions available directly in Nex programs.
 
 For the fuller per-type reference, see the pages under `docs/ref/`.

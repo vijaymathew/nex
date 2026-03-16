@@ -877,11 +877,6 @@
                         :args (:args part)
                         :has-parens true})
 
-                     :subscript
-                     {:type :subscript
-                      :target acc
-                      :index (:index part)}
-
                      acc))
                  base
                  parts))))
@@ -980,11 +975,6 @@
                       :args (:args part)
                       :has-parens true})
 
-                   :subscript
-                   {:type :subscript
-                    :target acc
-                    :index (:index part)}
-
                    acc))
                base
                parts)))
@@ -1015,11 +1005,6 @@
         :args (if args-node
                (transform-node args-node)
                [])}))
-
-   :subscript
-   (fn [[_ _open-bracket expr _close-bracket]]
-     {:type :subscript
-      :index (transform-node expr)})
 
    :primaryExpr
    (fn [[_ primary]]

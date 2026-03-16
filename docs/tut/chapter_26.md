@@ -25,11 +25,11 @@ Even in a small program like this, good design matters. We do not begin by typin
 
 The obvious concepts are:
 
-- a `Task`
+- a `Todo_Item`
 - a `Task_List`
 
 
-## The First Class: `Task`
+## The First Class: `Todo_Item`
 
 A task needs:
 
@@ -39,7 +39,7 @@ A task needs:
 Here is the class:
 
 ```
-nex> class Task
+nex> class Todo_Item
        create
          make(t: String) do
            title := t
@@ -60,7 +60,6 @@ nex> class Task
        invariant
          title_not_empty: title.length > 0
      end
-Class(es) registered: Task
 ```
 
 The invariant says a task must have a non-empty title. The method `mark_done` has a simple postcondition. Already the class has a clear meaning.
@@ -77,16 +76,16 @@ nex> class Task_List
            tasks := []
          end
        feature
-         tasks: Array[Task]
+         tasks: Array[Todo_Item]
          add_task(title: String)
            require
              title_not_empty: title.length > 0
            do
-             tasks.add(create Task.make(title))
+             tasks.add(create Todo_Item.make(title))
            ensure
-             size_increased: tasks.length = old tasks.length + 1
+             added_title_visible: tasks.get(tasks.length - 1).title = title
            end
-         task_at(index: Integer): Task
+         task_at(index: Integer): Todo_Item
            require
              index_in_range: index >= 0 and index < tasks.length
            do
@@ -98,7 +97,6 @@ nex> class Task_List
        invariant
          storage_exists: tasks /= nil
      end
-Class(es) registered: Task_List
 ```
 
 This is enough to create and access tasks, but not yet enough to report progress.
@@ -115,16 +113,16 @@ nex> class Task_List
            tasks := []
          end
        feature
-         tasks: Array[Task]
+         tasks: Array[Todo_Item]
          add_task(title: String)
            require
              title_not_empty: title.length > 0
            do
-             tasks.add(create Task.make(title))
+             tasks.add(create Todo_Item.make(title))
            ensure
-             size_increased: tasks.length = old tasks.length + 1
+             added_title_visible: tasks.get(tasks.length - 1).title = title
            end
-         task_at(index: Integer): Task
+         task_at(index: Integer): Todo_Item
            require
              index_in_range: index >= 0 and index < tasks.length
            do
@@ -134,7 +132,7 @@ nex> class Task_List
            do
              result := 0
              across tasks as task do
-               if task.is_done then
+               if task.is_done() then
                  result := result + 1
                end
              end
@@ -150,7 +148,6 @@ nex> class Task_List
        invariant
          storage_exists: tasks /= nil
      end
-Class(es) registered: Task_List
 ```
 
 Notice the style:
@@ -174,8 +171,8 @@ nex> todo.size
 nex> todo.completed_count
 0
 
-nex> todo.task_at(0).mark_done
-nex> todo.task_at(1).mark_done
+nex> todo.task_at(0).mark_done()
+nex> todo.task_at(1).mark_done()
 
 nex> todo.completed_count
 2
@@ -189,14 +186,14 @@ The program already works. But we can still improve the interface.
 
 ## Raising the Level of the Interface
 
-Calling `task_at(i).mark_done` is acceptable, but it exposes more representation than necessary. The list itself should offer a routine:
+The call `task_at(i).mark_done()` now works correctly. Still, a list class can offer a better public routine. Marking a task done is an operation in the vocabulary of the problem, not just a low-level storage update. A dedicated command also gives one clear place for contracts and future changes:
 
 ```
 nex> mark_task_done(index: Integer)
        require
          index_in_range: index >= 0 and index < tasks.length
        do
-         tasks.get(index).mark_done
+         task_at(index).mark_done()
        ensure
          selected_done: tasks.get(index).done
        end
@@ -211,16 +208,16 @@ nex> class Task_List
            tasks := []
          end
        feature
-         tasks: Array[Task]
+         tasks: Array[Todo_Item]
          add_task(title: String)
            require
              title_not_empty: title.length > 0
            do
-             tasks.add(create Task.make(title))
+             tasks.add(create Todo_Item.make(title))
            ensure
-             size_increased: tasks.length = old tasks.length + 1
+             added_title_visible: tasks.get(tasks.length - 1).title = title
            end
-         task_at(index: Integer): Task
+         task_at(index: Integer): Todo_Item
            require
              index_in_range: index >= 0 and index < tasks.length
            do
@@ -230,7 +227,7 @@ nex> class Task_List
            require
              index_in_range: index >= 0 and index < tasks.length
            do
-             tasks.get(index).mark_done
+             task_at(index).mark_done()
            ensure
              selected_done: tasks.get(index).done
            end
@@ -238,7 +235,7 @@ nex> class Task_List
            do
              result := 0
              across tasks as task do
-               if task.is_done then
+               if task.is_done() then
                  result := result + 1
                end
              end
@@ -254,7 +251,6 @@ nex> class Task_List
        invariant
          storage_exists: tasks /= nil
      end
-Class(es) registered: Task_List
 ```
 
 The class now offers a cleaner interface.
@@ -317,7 +313,7 @@ The finished program is not complicated, but it demonstrates the whole method of
 
 Start from concepts.
 
-`Task` and `Task_List` emerged from the problem statement.
+`Todo_Item` and `Task_List` emerged from the problem statement.
 
 Use contracts to shape the interface.
 
@@ -348,7 +344,7 @@ The tests operate through the public interface, which is exactly how clients wil
 
 ## Exercises
 
-**1.** Extend `Task` with a `description: ?String` field and a routine for setting it. Decide whether an invariant is needed.
+**1.** Extend `Todo_Item` with a `description: ?String` field and a routine for setting it. Decide whether an invariant is needed.
 
 **2.** Add a routine `remaining_count(): Integer` to `Task_List` and write a postcondition for it.
 

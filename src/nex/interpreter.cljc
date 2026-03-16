@@ -22,6 +22,7 @@
 (declare nex-ordering-compare)
 (declare make-object)
 (declare invoke-http-server-handler)
+(declare nex-object?)
 
 (defn- lowercase-filename
   [class-name]
@@ -224,6 +225,78 @@
       (env-set! parent var-name value)
       (throw (ex-info (str "Cannot assign to undefined variable: " var-name)
                       {:var-name var-name})))))
+
+(defn- env-replace-object-aliases!
+  "Replace all bindings in the environment chain that still point at old-obj."
+  [env old-obj new-obj]
+  (when (and env (some? old-obj) (not (identical? old-obj new-obj)))
+    (swap! (:bindings env)
+           (fn [bindings]
+             (reduce-kv (fn [m k v]
+                          (assoc m k (if (identical? v old-obj) new-obj v)))
+                        {}
+                        bindings)))
+    (when-let [parent (:parent env)]
+      (env-replace-object-aliases! parent old-obj new-obj))))
+
+(def ^:private write-back-target-key ::write-back-target)
+(def ^:private write-back-source-key ::write-back-source)
+
+(defn- make-literal-node
+  [value]
+  {:type :literal :value value})
+
+(defn- infer-reference-target-expr
+  "Infer an assignable target expression for an object result returned from a query.
+   This supports query chains such as obj.child().grandchild().mutate()."
+  [base-target current-obj result]
+  (when (and base-target (nex-object? current-obj) (some? result))
+    (some (fn [[field-key field-val]]
+            (let [field-name (name field-key)
+                  field-expr {:type :call
+                              :target base-target
+                              :method field-name
+                              :args []
+                              :has-parens false}]
+              (cond
+                (identical? field-val result)
+                field-expr
+
+                (nex-array? field-val)
+                (when-let [idx (first (keep-indexed (fn [i item]
+                                                      (when (identical? item result) i))
+                                                    field-val))]
+                  {:type :call
+                   :target field-expr
+                   :method "get"
+                   :args [(make-literal-node idx)]
+                   :has-parens true})
+
+                (nex-map? field-val)
+                (when-let [entry (some (fn [[k v]]
+                                         (when (identical? v result) [k v]))
+                                       field-val)]
+                  {:type :call
+                   :target field-expr
+                   :method "get"
+                   :args [(make-literal-node (first entry))]
+                   :has-parens true})
+
+                :else
+                nil)))
+          (:fields current-obj))))
+
+(defn- annotate-reference-result
+  [target-expr current-obj result]
+  (if-let [origin (and (nex-object? result)
+                       (infer-reference-target-expr target-expr current-obj result))]
+    (try
+      (with-meta result (assoc (meta result)
+                               write-back-target-key origin
+                               write-back-source-key result))
+      (catch #?(:clj Exception :cljs :default) _
+        result))
+    result))
 
 ;;
 ;; Runtime Context (holds classes, globals, current environment)
@@ -2894,6 +2967,53 @@
   (register-class ctx class-def)
   (make-object class-name {} (:current-env ctx)))
 
+(defn- write-back-target!
+  "Propagate an updated object value back into a direct target expression.
+   Supports plain variables, collection access (`get`), and field access."
+  [ctx target-expr value & [old-value]]
+  (letfn [(eval-target [expr]
+            (if (string? expr)
+              (env-lookup (:current-env ctx) expr)
+              (eval-node ctx expr)))]
+    (let [updated? (cond
+                     (string? target-expr)
+                     (do
+                       (env-set! (:current-env ctx) target-expr value)
+                       true)
+
+                     (and (map? target-expr) (= :call (:type target-expr)))
+                     (let [{:keys [target method args has-parens]} target-expr]
+                       (cond
+                         (some-> (-> (eval-target target-expr) meta write-back-target-key)
+                                 (#(write-back-target! ctx % value old-value)))
+                         true
+
+                         (and has-parens (= method "get") (= 1 (count args)))
+                         (let [coll (eval-target target)
+                               idx  (eval-node ctx (first args))]
+                           (cond
+                             (nex-array? coll) (do (nex-array-set coll idx value) true)
+                             (nex-map? coll)   (do (nex-map-put coll idx value) true)
+                             :else false))
+
+                         (and (false? has-parens)
+                              target)
+                         (let [parent (eval-target target)]
+                           (if (and (nex-object? parent)
+                                    (contains? (:fields parent) (keyword method)))
+                             (let [updated-parent (make-object (:class-name parent)
+                                                               (assoc (:fields parent) (keyword method) value)
+                                                               (:closure-env parent))]
+                               (write-back-target! ctx target updated-parent parent))
+                             false))
+
+                         :else false))
+
+                     :else false)]
+      (when updated?
+        (env-replace-object-aliases! (:current-env ctx) old-value value))
+      updated?)))
+
 (defn dispatch-parent-call
   "Dispatch a call to a specific parent class's method/constructor on the current object."
   [ctx current-obj parent-class-name method arg-values]
@@ -3021,7 +3141,8 @@
                     effective-require (:effective-require method-lookup)
                     effective-ensure (:effective-ensure method-lookup)
                     has-postconditions? (seq effective-ensure)
-                    old-values (when has-postconditions? (:fields obj))]
+                    old-values (when has-postconditions? (:fields obj))
+                    source-obj (or (-> obj meta write-back-source-key) obj)]
                 (let [method-env (make-env (or (:closure-env obj) (:current-env ctx)))
                       param-names (set (map :name params))
                       ;; Define fields first, then params — so params shadow fields
@@ -3093,12 +3214,10 @@
                     (when-let [ensure-assertions effective-ensure]
                       (check-assertions new-ctx ensure-assertions Postcondition))
                     (check-class-invariant new-ctx class-def)
-                    (when target-name
-                      (env-set! (:current-env ctx) target-name updated-obj))
-                    result
+                    (write-back-target! ctx target updated-obj source-obj)
+                    (annotate-reference-result target obj result)
                     (catch #?(:clj Exception :cljs :default) e
-                      (when target-name
-                        (env-set! (:current-env ctx) target-name obj))
+                      (write-back-target! ctx target source-obj source-obj)
                       (throw e))))))
               (let [all-fields (get-all-fields ctx class-def)
                     field (first (filter #(= (:name %) method) all-fields))]
@@ -3477,13 +3596,6 @@
   (nex-map-from (mapv (fn [{:keys [key value]}]
                         [(eval-node ctx key) (eval-node ctx value)])
                       entries)))
-
-(defmethod eval-node :subscript
-  [ctx {:keys [target index]}]
-  ;; Evaluate target (array or map) and index, then access element
-  (let [coll (eval-node ctx target)
-        idx (eval-node ctx index)]
-    (nex-coll-get coll idx)))
 
 (defmethod eval-node :identifier
   [ctx {:keys [name]}]
@@ -3887,8 +3999,6 @@
       :unary (async-free-node? (:expr node))
       :binary (and (async-free-node? (:left node))
                    (async-free-node? (:right node)))
-      :subscript (and (async-free-node? (:target node))
-                      (async-free-node? (:index node)))
       :array-literal (every? async-free-node? (:elements node))
       :set-literal (every? async-free-node? (:elements node))
       :map-literal (every? (fn [{:keys [key value]}]
@@ -4106,6 +4216,7 @@
                                                    effective-ensure (:effective-ensure method-lookup)
                                                    has-postconditions? (seq effective-ensure)
                                                    old-values (when has-postconditions? (:fields obj))
+                                                   source-obj (or (-> obj meta write-back-source-key) obj)
                                                    method-env (make-env (or (:closure-env obj) (:current-env ctx)))
                                                    param-names (set (map :name params))
                                                    _ (doseq [[field-name field-val] (:fields obj)]
@@ -4160,23 +4271,23 @@
                                                                                              all-fields)
                                                                        updated-obj (make-object (:class-name obj) updated-fields (:closure-env obj))
                                                                        result (async-result-value method-env)]
-                                                                   (.then (->promise (if effective-ensure
-                                                                                       (check-assertions-async new-ctx effective-ensure Postcondition)
-                                                                                       nil))
-                                                                          (fn [_]
-                                                                            (.then (check-class-invariant-async new-ctx class-def)
-                                                                                   (fn [_]
-                                                                                     (when target-name
-                                                                                       (env-set! (:current-env ctx) target-name updated-obj))
-                                                                                     result))))
-                                                                   ))))))
+                                                                   (.then
+                                                                    (->promise
+                                                                    (if effective-ensure
+                                                                       (check-assertions-async new-ctx effective-ensure Postcondition)
+                                                                       nil))
+                                                                    (fn [_]
+                                                                      (.then (check-class-invariant-async new-ctx class-def)
+                                                                             (fn [_]
+                                                                               (write-back-target! ctx target updated-obj source-obj)
+                                                                               (annotate-reference-result target obj result)))))))))))
                                            (let [all-fields (get-all-fields ctx class-def)
                                                  field (first (filter #(= (:name %) method) all-fields))]
                                              (if field
                                                (let [field-val (get (:fields obj) (keyword method))]
                                                (if (and has-parens (nex-object? field-val))
-                                                   (let [call-method (str "call" (count arg-values))
-                                                         literal-args (mapv (fn [v] {:type :literal :value v}) arg-values)]
+                                                  (let [call-method (str "call" (count arg-values))
+                                                        literal-args (mapv (fn [v] {:type :literal :value v}) arg-values)]
                                                      (eval-node-async ctx {:type :call
                                                                            :target {:type :literal :value field-val}
                                                                            :method call-method
@@ -4461,12 +4572,6 @@
                                                   (eval-node-async ctx value)]))
                                   (:entries node)))
                 nex-map-from)
-
-         (= node-type :subscript)
-         (.then (promise-all [(eval-node-async ctx (:target node))
-                              (eval-node-async ctx (:index node))])
-                (fn [[coll idx]]
-                  (nex-coll-get coll idx)))
 
          (= node-type :identifier)
          (js/Promise.resolve (eval-node ctx node))

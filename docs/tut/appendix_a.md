@@ -23,6 +23,10 @@ nil
 #a
 ```
 
+Real literals must include at least one digit after the decimal point. Valid
+examples include `4.5`, `10.0`, `.5`, and `12.0e-3`. Forms such as `10.` and
+`12.e-3` are not valid.
+
 
 ## Variables and Assignment
 
@@ -170,6 +174,31 @@ let f: Function := fn (x: Integer): Integer do
 end
 ```
 
+Mutually recursive functions must declare their signatures before their bodies:
+
+```nex
+function is_even(n: Integer): Boolean
+function is_odd(n: Integer): Boolean
+
+function is_even(n: Integer): Boolean
+do
+  if n = 0 then
+    result := true
+  else
+    result := is_odd(n - 1)
+  end
+end
+
+function is_odd(n: Integer): Boolean
+do
+  if n = 0 then
+    result := false
+  else
+    result := is_even(n - 1)
+  end
+end
+```
+
 
 ## Collections
 
@@ -188,6 +217,17 @@ let m: Map[String, Integer] := {"a": 1, "b": 2}
 m.put("c", 3)
 print(m.get("a"))
 ```
+
+Set:
+
+```nex
+let seen: Set[Integer] := #{1, 2, 3}
+let empty: Set[Integer] := #{}
+let from_items: Set[Integer] := create Set[Integer].from_array([1, 2, 2, 3])
+print(seen.union(#{3, 4}))
+```
+
+Use `#{...}` for set literals. The literal `{}` remains the empty map.
 
 
 ## Classes
@@ -297,6 +337,35 @@ class Wallet
 end
 ```
 
+## Concurrency
+
+Spawn a task:
+
+```nex
+let t: Task[Integer] := spawn do
+  result := 1 + 2
+end
+```
+
+Communicate with channels:
+
+```nex
+let ch: Channel[String] := create Channel[String].with_capacity(1)
+ch.send("ready")
+print(ch.receive)
+```
+
+Select across multiple channel operations:
+
+```nex
+select
+when ch1.receive() as msg then
+  print(msg)
+when ch2.send("tick") then
+  print("sent")
+end
+```
+
 
 ## Error Handling
 
@@ -357,9 +426,12 @@ import Math from './math.js'
 ## Notes
 
 - `result` is the implicit return variable in functions and query methods.
-- `old` is available in postconditions to refer to entry-state values.
+- `old` is available in postconditions to refer to entry-state values, but it is
+  not a deep immutable snapshot. Be careful with in-place mutation of values
+  such as arrays.
 - `this` refers to the current object.
 - `nil` is used for detachable or absent values.
-- Arrays use `length`; maps use `size`.
+- Arrays use `length`; maps and sets use `size`.
 
-For a fuller tutorial presentation, return to Chapters 1 through 28. For implementation-level details, see `grammar/nexlang.g4`.
+For a fuller tutorial presentation, return to Chapters 1 through 29. For
+implementation-level details, see `grammar/nexlang.g4`.

@@ -23,7 +23,6 @@ nex> class Point
            result := ((x * x) + (y * y)) ^ 0.5
          end
      end
-Class(es) registered: Point
 ```
 
 This defines a class `Point` with a constructor named `make`, two fields `x` and `y`, and one method `distance_from_origin`.
@@ -76,7 +75,6 @@ nex> class Point
            result := ((x * x) + (y * y)) ^ 0.5
          end
      end
-Class(es) registered: Point
 
 nex> let p1 := create Point.origin
 nex> p1.x
@@ -126,7 +124,6 @@ nex> class Point
            result := ((x * x) + (y * y)) ^ 0.5
          end
      end
-Class(es) registered: Point
 
 nex> let p := create Point.make(1.0, 2.0)
 nex> p.move(2.0, 2.0)
@@ -145,7 +142,6 @@ nex> class Layout
            result := MAX_WIDTH + 10
          end
      end
-Class(es) registered: Layout
 
 nex> let layout := create Layout
 nex> Layout.MAX_WIDTH
@@ -212,7 +208,6 @@ nex> class Person
            end
          end
      end
-Class(es) registered: Person
 
 nex> let p := create Person.make("Ada")
 nex> p.describe
@@ -272,7 +267,6 @@ nex> class BankAccount
            result := owner + ": " + balance.to_string
          end
      end
-Class(es) registered: BankAccount
 
 nex> let account := create BankAccount.make("Alice", 1000.0)
 nex> account.deposit(500.0)
@@ -320,7 +314,6 @@ nex> class Point
            result := ((dx * dx) + (dy * dy)) ^ 0.5
          end
      end
-Class(es) registered: Point
 
 nex> let p1 := create Point.make(0.0, 0.0)
 nex> let p2 := create Point.make(3.0, 4.0)
@@ -363,7 +356,6 @@ nex> class Circle
            result := 3.14159 * radius * radius
          end
      end
-Class(es) registered: Circle
 
 nex> let c := create Circle.make(5.0)
 nex> c.radius
@@ -404,7 +396,6 @@ nex> class Stack
            result := items.length
          end
      end
-Class(es) registered: Stack
 
 nex> let s := create Stack.make
 nex> s.push(10)

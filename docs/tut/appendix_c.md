@@ -11,6 +11,8 @@ The most commonly used built-in service classes are:
 
 - `Console`
 - `Process`
+- `Task`
+- `Channel`
 - `Window`
 - `Turtle`
 - `Image`
@@ -23,6 +25,14 @@ For filesystem and file I/O, use the `lib/io` library:
 - `intern io/Binary_File`
 
 Together with the scalar and collection classes, they form the everyday standard environment of Nex programs.
+
+Other important shipped libraries include:
+
+- `time/Date_Time`
+- `time/Duration`
+- `text/Regex`
+- `net/Http_Client`
+- `net/Http_Server`
 
 
 ## Console I/O
@@ -56,7 +66,7 @@ con.print_line("Hello, " + name)
 
 ## File Access
 
-Filesystem operations lives in the `io` library.
+Filesystem operations live in the `io` library.
 
 `Path` is the main entry point for filesystem probing and convenience file operations.
 
@@ -172,6 +182,28 @@ print(p.command_line())
 ```
 
 
+## Tasks and Channels
+
+Use `spawn` to start concurrent work and `Channel[T]` to move values between
+tasks.
+
+```nex
+let jobs: Channel[String] := create Channel[String].with_capacity(2)
+
+let worker: Task := spawn do
+  let item := jobs.receive
+  print("worker saw " + item)
+end
+
+jobs.send("compile docs")
+worker.await
+```
+
+Channels can be buffered or unbuffered. Unbuffered channels synchronize sender
+and receiver directly; buffered channels allow a limited number of queued
+values. `select` lets one task wait on several channel operations at once.
+
+
 ## Time And Scheduling
 
 Use `time/Date_Time` and `time/Duration` for UTC timestamps, scheduling offsets, and log formatting.
@@ -223,6 +255,28 @@ This is useful for:
 Keep regex usage near parsing and validation boundaries. Higher-level domain logic should usually work on already structured values.
 
 
+## HTTP and Network Services
+
+The `net` library provides client and server building blocks when a Nex program
+needs to talk over HTTP.
+
+```nex
+intern net/Http_Client
+intern net/Http_Request
+
+let client: Http_Client := create Http_Client
+let req: Http_Request := create Http_Request.get("https://example.com")
+let res := client.send(req)
+
+print(res.status_code())
+print(res.body())
+```
+
+For server-side code, `Http_Server` and related request/response classes let a
+program register handlers and return structured responses. This is host-backed
+functionality, so exact behavior can differ between runtimes.
+
+
 ## Graphics and Simple Visual Programs
 
 Nex includes a lightweight graphics layer through `Window`, `Turtle`, and `Image`.
@@ -267,7 +321,8 @@ w.draw_image(img, 220, 100)
 
 ## Collections as Library Foundations
 
-Much of the practical "standard library" feel of Nex comes from `Array` and `Map`.
+Much of the practical "standard library" feel of Nex comes from `Array`, `Map`,
+and `Set`.
 
 Use arrays for:
 
@@ -281,6 +336,12 @@ Use maps for:
 - counters and tables
 - grouped data
 
+Use sets for:
+
+- membership tests
+- removing duplicates
+- set algebra such as union and intersection
+
 These classes are generic and work with user-defined classes just as naturally as with built-in scalar values.
 
 
@@ -291,6 +352,7 @@ The `across` loop depends on cursor types behind the scenes:
 - `ArrayCursor`
 - `StringCursor`
 - `MapCursor`
+- `SetCursor`
 
 You will usually not construct these directly. Their practical value is that they make one iteration form work uniformly across strings, arrays, and maps.
 
@@ -303,7 +365,7 @@ At the core:
 
 - plain functions
 - classes with contracts
-- arrays and maps
+- arrays, maps, and sets
 
 At the edge:
 
@@ -334,10 +396,13 @@ That is why Chapter 24 matters. The standard library is enough to be productive,
 | Output and input | `print`, `println`, `Console` |
 | Text | `String`, `Char` |
 | Numbers | `Integer`, `Integer64`, `Real`, `Decimal` |
-| Collections | `Array`, `Map` |
+| Collections | `Array`, `Map`, `Set` |
 | Type introspection | `type_of`, `type_is` |
+| Concurrency | `spawn`, `Task`, `Channel`, `select` |
 | Files and environment | `Process`, `io/Path`, `io/Directory`, `io/Text_File`, `io/Binary_File` |
 | Time and scheduling | `time/Date_Time`, `time/Duration` |
+| Text processing | `text/Regex` |
+| Networking | `net/Http_Client`, `net/Http_Server` |
 | Text processing | `text/Regex` |
 | Graphics | `Window`, `Turtle`, `Image` |
 

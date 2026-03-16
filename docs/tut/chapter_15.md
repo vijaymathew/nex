@@ -36,7 +36,6 @@ nex> class Stack [G]
            result := items.length
          end
      end
-Class(es) registered: Stack
 ```
 
 `G` is the type parameter — a placeholder for whatever type will be used when the class is instantiated. `items` is an `Array[G]`; `push` takes a `G`; `pop` and `peek` return a `G`. Everything that was `Integer` in the original `Stack` is now `G`.
@@ -94,7 +93,6 @@ nex> class Pair [F, S]
            result := "(" + first.to_string + ", " + second.to_string + ")"
          end
      end
-Class(es) registered: Pair
 ```
 
 ```
@@ -142,7 +140,6 @@ nex> class Sorted_List [G -> Comparable]
            result := items.length
          end
      end
-Class(es) registered: Sorted_List
 ```
 
 `[G -> Comparable]` means: `G` can be any type that implements `Comparable`. Inside the class, Nex knows that `G` values can be compared, so `items.sort` — which requires `Comparable` elements — is valid.
@@ -196,7 +193,6 @@ nex> class Dictionary [K -> Hashable, V]
            result := entries.size
          end
      end
-Class(es) registered: Dictionary
 ```
 
 `K` must be `Hashable` because map keys require hashing. `V` is unconstrained — values can be any type. This mirrors the design of the built-in `Map` type, which is itself a generic class with exactly these constraints.
@@ -236,7 +232,6 @@ nex> class Bounded_Stack [G] inherit Stack[G]
            end
          end
      end
-Class(es) registered: Bounded_Stack
 ```
 
 `Bounded_Stack[G]` inherits from `Stack[G]` and adds a `max_size` field and an `is_full` check. The `push` override silently ignores pushes when the stack is full (a real implementation might signal this — we will see how with contracts in Part V).
@@ -296,7 +291,6 @@ nex> class Result [V]
            end
          end
      end
-Class(es) registered: Result
 ```
 
 ```
