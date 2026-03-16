@@ -28,7 +28,7 @@ classDecl
     ;
 
 functionDecl
-    : FUNCTION IDENTIFIER '(' paramList? ')' (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
+    : FUNCTION IDENTIFIER '(' paramList? ')' (':' type)? noteClause? (requireClause? DO block ensureClause? rescueClause? END)?
     ;
 
 genericParams

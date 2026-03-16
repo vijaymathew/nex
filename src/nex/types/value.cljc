@@ -3,6 +3,16 @@
 
 (declare nex-deep-equals?)
 
+(defn- nex-char-literal
+  [value]
+  (case value
+    \space "#space"
+    \tab "#tab"
+    \newline "#newline"
+    \return "#return"
+    \u0000 "#nul"
+    (str "#" value)))
+
 (defn nex-format-value
   [nex-object? formatter-map formatter-array formatter-set value]
   (cond
@@ -40,7 +50,7 @@
     (pr-str value)
 
     (char? value)
-    (str "#" value)
+    (nex-char-literal value)
 
     :else
     (pr-str value)))

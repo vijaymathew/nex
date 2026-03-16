@@ -1622,7 +1622,7 @@
 
 (defn generate-method
   "Generate JavaScript code for a method"
-  [level {:keys [name params return-type body require ensure rescue visibility note]} opts]
+  [level {:keys [name params return-type body require ensure rescue visibility note declaration-only?]} opts]
   (let [param-names (set (map :name params))
         param-types (into {} (map (juxt :name :type) params))
         convert-bindings (collect-convert-bindings-block (concat body (or rescue [])))
@@ -1655,13 +1655,19 @@
                                        (str "let old_" field-name " = this." field-name ";")))
                               old-refs))
             preconditions (generate-assertions (+ level 1) require "Precondition" opts)
-            statements (if rescue
+            statements (cond
+                         declaration-only?
+                         [(indent (+ level 1)
+                                  (str "throw new Error(\"Function or method declared but not defined: "
+                                       name "\");"))]
+                         rescue
                          [(generate-rescue (+ level 1) body rescue #{})]
+                         :else
                          (map #(generate-statement (+ level 1) %) body))
             postconditions (generate-assertions (+ level 1) ensure "Postcondition" opts)
             class-invariant-checks (generate-assertions (+ level 1) *class-invariants* "Class invariant" opts)
             ;; Add return statement if method has return type
-            return-stmt (when return-type
+            return-stmt (when (and return-type (not declaration-only?))
                          [(indent (+ level 1) "return result;")])
             ;; Generate JSDoc comment for type information and note
             jsdoc (when (or note (seq params) return-type)
@@ -2899,13 +2905,14 @@
 (defn generate-function-globals
   "Generate a globals holder for function instances."
   [functions]
-  (when (seq functions)
-    (let [lines (map (fn [{:keys [name class-name]}]
+  (let [functions (remove :declaration-only? functions)]
+    (when (seq functions)
+      (let [lines (map (fn [{:keys [name class-name]}]
                        (str "  " name ": new " class-name "(),"))
                      functions)]
-      (str "const NexGlobals = {\n"
-           (str/join "\n" lines)
-           "\n};"))))
+        (str "const NexGlobals = {\n"
+             (str/join "\n" lines)
+             "\n};")))))
 
 ;;
 ;; Main Class Generation

@@ -111,7 +111,11 @@
      (let [cleaned-nodes (remove string? nodes) ; Filter out "<EOF>" token
            transformed (mapv transform-node cleaned-nodes)
            classes (filter #(= :class (:type %)) transformed)
-           functions (filter #(= :function (:type %)) transformed)
+           functions (->> transformed
+                          (filter #(= :function (:type %)))
+                          (reduce (fn [m f] (assoc m (:name f) f)) {})
+                          vals
+                          vec)
            interns (filter #(= :intern (:type %)) transformed)
            imports (filter #(= :import (:type %)) transformed)
            statements (filter #(not (#{:class :function :intern :import} (:type %))) transformed)
@@ -230,7 +234,8 @@
                                 cleaned))
            params-v (when params (transform-node params))
            return-type-v (when return-type (transform-node return-type))
-           body (transform-node block)
+           declaration-only? (nil? block)
+           body (when block (transform-node block))
            fn-name (token-text name)
            class-name (str fn-name "_Function")
            method-name (str "call" (count params-v))
@@ -238,6 +243,7 @@
                        :name method-name
                        :params params-v
                        :return-type return-type-v
+                       :declaration-only? declaration-only?
                        :note (when note-clause (transform-node note-clause))
                        :require (when require-clause (transform-node require-clause))
                        :body body
@@ -255,6 +261,7 @@
        {:type :function
         :name fn-name
         :class-name class-name
+        :declaration-only? declaration-only?
         :params params-v
         :return-type return-type-v
         :body body

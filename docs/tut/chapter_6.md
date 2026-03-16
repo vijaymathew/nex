@@ -203,6 +203,50 @@ nex> sum_of_squares(3, 4)
 
 `sum_of_squares` delegates the squaring work to `square` and focuses only on the addition. Each function has a single, clear responsibility. This decomposition is the subject of Chapter 7; for now, the key observation is that calling a function inside another function is natural and encouraged.
 
+## Forward Declarations
+
+Sometimes two functions need to call each other. If the typechecker sees the
+first definition before it has seen the second function's signature, it does not
+yet know what type the call should return. The solution is to declare both
+signatures first and define the bodies afterwards.
+
+```
+nex> function is_even(n: Integer): Boolean
+
+nex> function is_odd(n: Integer): Boolean
+
+nex> function is_even(n: Integer): Boolean
+     do
+       if n = 0 then
+         result := true
+       else
+         result := is_odd(n - 1)
+       end
+     end
+
+nex> function is_odd(n: Integer): Boolean
+     do
+       if n = 0 then
+         result := false
+       else
+         result := is_even(n - 1)
+       end
+     end
+
+nex> is_even(4)
+true
+
+nex> is_odd(5)
+true
+```
+
+The first two lines are declarations only. They introduce the function names,
+parameter types, and return types. The later full definitions must match those
+signatures exactly.
+
+This is the standard way to handle mutual recursion in Nex. It preserves static
+typechecking and keeps the program structure explicit.
+
 
 
 ## Anonymous Functions
@@ -325,6 +369,7 @@ Each function does one thing. The code that uses them reads like a series of cle
 ## Summary
 
 - A function is defined with `function name(parameters): return_type do ... end`
+- A function signature may be declared without a body when later definitions need forward references
 - Parameters are declared with their types; multiple parameters of the same type can be grouped: `(a, b: Integer)`
 - The return value is assigned to the special variable `result`; the function returns whatever `result` holds when the body finishes
 - A function with no `result` assignment returns no value and should not be used as an expression

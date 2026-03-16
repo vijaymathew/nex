@@ -1283,6 +1283,13 @@
               (lookup-method-with-inheritance ctx (:class-def parent-info) method-name arg-count))
             parents))))
 
+(defn- ensure-callable-defined!
+  [callable]
+  (when (:declaration-only? callable)
+    (throw (ex-info (str "Function or method declared but not defined: " (:name callable))
+                    {:name (:name callable)
+                     :declaration-only? true}))))
+
 (defn is-parent?
   "Check if parent-name appears in the parent chain of class-name."
   [ctx class-name parent-name]
@@ -2819,6 +2826,7 @@
             _ (doseq [[field-name field-val] (:fields current-obj)]
                 (env-define method-env (name field-name) field-val))
             params (:params callable)
+            _ (ensure-callable-defined! callable)
             _ (when params
                 (doseq [[param arg-val] (map vector params arg-values)]
                   (env-define method-env (:name param) arg-val)))
@@ -2915,6 +2923,7 @@
             (if method-lookup
                 (let [method-def (:method method-lookup)
                     params (:params method-def)]
+                (ensure-callable-defined! method-def)
                 ;; Bug fix: disallow paren-less calls to methods that require arguments
                 (when (and (false? has-parens) (seq params))
                   (throw (ex-info (str method " requires arguments")
@@ -3848,6 +3857,7 @@
                _ (doseq [[field-name field-val] (:fields current-obj)]
                    (env-define method-env (name field-name) field-val))
                params (:params callable)
+               _ (ensure-callable-defined! callable)
                _ (doseq [[param arg-val] (map vector params arg-values)]
                    (env-define method-env (:name param) arg-val))
                return-type (:return-type callable)
@@ -3999,6 +4009,7 @@
                                          (if method-lookup
                                            (let [method-def (:method method-lookup)
                                                  params (:params method-def)]
+                                             (ensure-callable-defined! method-def)
                                              (when (and (false? has-parens) (seq params))
                                                (throw (ex-info (str method " requires arguments")
                                                                {:method method :params (mapv :name params)})))

@@ -147,6 +147,34 @@ end
 print(double(5))                 -- 10
 ```
 
+For mutually recursive functions, declare the signatures first and define the
+bodies afterwards:
+
+```nex
+function is_even(n: Integer): Boolean
+function is_odd(n: Integer): Boolean
+
+function is_even(n: Integer): Boolean
+do
+  if n = 0 then
+    result := true
+  else
+    result := is_odd(n - 1)
+  end
+end
+
+function is_odd(n: Integer): Boolean
+do
+  if n = 0 then
+    result := false
+  else
+    result := is_even(n - 1)
+  end
+end
+```
+
+The later definition must match the earlier declaration exactly.
+
 ## Arrays
 
 ```nex

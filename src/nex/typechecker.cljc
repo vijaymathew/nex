@@ -2646,7 +2646,8 @@
       (doseq [member (:members section)]
         (cond
           (= (:type member) :method)
-          (check-method env name member)
+          (when-not (:declaration-only? member)
+            (check-method env name member))
           (= (:type member) :field)
           (when-not (:constant? member)
             (validate-type-annotation env (:field-type member)))))
