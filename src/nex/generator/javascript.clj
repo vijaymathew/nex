@@ -756,9 +756,9 @@
    :Array
    {"length"    (fn [target _] (str target ".length"))
     "get"       (fn [target args] (str target "[" args "]"))
-    "add_at"    (fn [target args] (str target ".set(" args ")"))
-    "add"       (fn [target args] (str target ".push(" args ")"))
-    "put"       (fn [target args] (str target ".set(" args ")"))
+    "add_at"    (fn [target args] (str "__nexArrayAddAt(" target ", " args ")"))
+    "add"       (fn [target args] (str "__nexArrayAdd(" target ", " args ")"))
+    "put"       (fn [target args] (str "__nexArrayPut(" target ", " args ")"))
     "is_empty"  (fn [target _] (str "(" target ".length === 0)"))
     "contains"  (fn [target args] (str target ".includes(" args ")"))
     "index_of"  (fn [target args] (str target ".indexOf(" args ")"))
@@ -776,7 +776,7 @@
     "is_empty"     (fn [target _] (str "(" target ".size === 0)"))
     "get"          (fn [target args] (str target ".get(" args ")"))
     "try_get"      (fn [target args] (str target ".get(" args ")"))
-    "put"          (fn [target args] (str "(" target ".set(" args "), " target ")"))
+    "put"          (fn [target args] (str "__nexMapPut(" target ", " args ")"))
     "contains_key" (fn [target args] (str target ".has(" args ")"))
     "keys"         (fn [target _] (str "Array.from(" target ".keys())"))
     "values"       (fn [target _] (str "Array.from(" target ".values())"))
@@ -2789,6 +2789,22 @@
        "}\n"
        "function __nexSetSymmetricDifference(a, b) {\n"
        "  return new Set([...a].filter(v => !b.has(v)).concat([...b].filter(v => !a.has(v))));\n"
+       "}\n"
+       "function __nexArrayAdd(target, value) {\n"
+       "  target.push(value);\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexArrayAddAt(target, index, value) {\n"
+       "  target.splice(index, 0, value);\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexArrayPut(target, index, value) {\n"
+       "  target[index] = value;\n"
+       "  return null;\n"
+       "}\n"
+       "function __nexMapPut(target, key, value) {\n"
+       "  target.set(key, value);\n"
+       "  return null;\n"
        "}\n"
        "function __nexArrayCursor(source) {\n"
        "  return {_type: 'ArrayCursor', source, index: 0, start() { this.index = 0; }, item() { if (this.index >= this.source.length) throw new Error('Cursor is at end'); return this.source[this.index]; }, next() { if (this.index < this.source.length) this.index += 1; }, at_end() { return this.index >= this.source.length; }};\n"

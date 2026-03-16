@@ -13,3 +13,13 @@
                    (repl/eval-code ctx "names"))]
       (is (str/includes? output "[\"Alice\", \"Bob\"]"))
       (is (not (str/includes? output "[\"Alice\", \"Bob\", \"Carol\"]"))))))
+
+(deftest array-add-returns-nil
+  (testing "Array.add is a command-style mutator and returns nil"
+    (let [ctx (repl/init-repl-context)
+          output (with-out-str
+                   (repl/eval-code ctx "let names: Array[String] := [\"Alice\", \"Bob\"]")
+                   (repl/eval-code ctx "names.add(\"Carol\")")
+                   (repl/eval-code ctx "names"))]
+      (is (not (str/includes? output "true")))
+      (is (str/includes? output "[\"Alice\", \"Bob\", \"Carol\"]")))))

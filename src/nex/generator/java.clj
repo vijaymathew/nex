@@ -503,9 +503,9 @@
    {"length"    (fn [target _] (str target ".size()"))
     "is_empty"  (fn [target _] (str target ".isEmpty()"))
     "get"       (fn [target args] (str target ".get(" args ")"))
-    "add"       (fn [target args] (str target ".add(" args ")"))
-    "add_at"    (fn [target args] (str target ".add(" args ")"))
-    "put"       (fn [target args] (str target ".set(" args ")"))
+    "add"       (fn [target args] (str "NexRuntime.arrayAdd(" target ", " args ")"))
+    "add_at"    (fn [target args] (str "NexRuntime.arrayAddAt(" target ", " args ")"))
+    "put"       (fn [target args] (str "NexRuntime.arrayPut(" target ", " args ")"))
     "contains"  (fn [target args] (str target ".contains(" args ")"))
     "index_of"  (fn [target args] (str target ".indexOf(" args ")"))
     "remove"    (fn [target args] (str "(" target ".remove((int)" args "), null)"))
@@ -520,7 +520,7 @@
    :Map
    {"get"          (fn [target args] (str target ".get(" args ")"))
     "try_get"      (fn [target args] (str target ".get(" args ")"))
-    "put"          (fn [target args] (str "(" target ".put(" args "), " target ")"))
+    "put"          (fn [target args] (str "NexRuntime.mapPut(" target ", " args ")"))
     "size"         (fn [target _] (str target ".size()"))
     "is_empty"     (fn [target _] (str target ".isEmpty()"))
     "contains_key" (fn [target args] (str target ".containsKey(" args ")"))
@@ -3828,6 +3828,22 @@ public class NexTurtle {
        "  }\n\n"
        "  public static <T> java.util.LinkedHashSet<T> setFromArray(java.util.Collection<T> values) {\n"
        "    return new java.util.LinkedHashSet<>(values);\n"
+       "  }\n\n"
+       "  public static <T> Object arrayAdd(java.util.List<T> target, T value) {\n"
+       "    target.add(value);\n"
+       "    return null;\n"
+       "  }\n\n"
+       "  public static <T> Object arrayAddAt(java.util.List<T> target, int index, T value) {\n"
+       "    target.add(index, value);\n"
+       "    return null;\n"
+       "  }\n\n"
+       "  public static <T> Object arrayPut(java.util.List<T> target, int index, T value) {\n"
+       "    target.set(index, value);\n"
+       "    return null;\n"
+       "  }\n\n"
+       "  public static <K, V> Object mapPut(java.util.Map<K, V> target, K key, V value) {\n"
+       "    target.put(key, value);\n"
+       "    return null;\n"
        "  }\n\n"
        "  public static <T> java.util.LinkedHashSet<T> setUnion(java.util.Set<T> a, java.util.Set<T> b) {\n"
        "    java.util.LinkedHashSet<T> out = new java.util.LinkedHashSet<>(a);\n"
