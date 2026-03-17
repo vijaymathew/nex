@@ -187,3 +187,60 @@
           eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))]
       (.invoke eval-a nil (object-array [state]))
       (is (= 42 (.invoke eval-b nil (object-array [state])))))))
+
+(deftest compile-top-level-function-call-smoke-test
+  (testing "compiled repl cells can define and call a top-level function through state"
+    (let [state-loader (loader/make-loader)
+          state (runtime/make-repl-state state-loader)
+          def-ast (p/ast "function inc(n: Integer): Integer\ndo\n  result := n + 1\nend")
+          unit-a (-> def-ast
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0061"})
+                     :unit)
+          unit-b (-> (p/ast "inc(41)")
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0062"
+                                             :functions (:functions def-ast)})
+                     :unit)
+          class-a (loader/define-class! state-loader
+                                        "nex.repl.Cell_0061"
+                                        (emit/compile-unit->bytes unit-a))
+          class-b (loader/define-class! state-loader
+                                        "nex.repl.Cell_0062"
+                                        (emit/compile-unit->bytes unit-b))
+          eval-a (.getMethod class-a "eval" (into-array Class [(class state)]))
+          eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))]
+      (.invoke eval-a nil (object-array [state]))
+      (is (some? (runtime/state-get-fn state "inc")))
+      (is (= 42 (.invoke eval-b nil (object-array [state])))))))
+
+(deftest compile-function-redefinition-smoke-test
+  (testing "later compiled cells can redefine a top-level function through state"
+    (let [state-loader (loader/make-loader)
+          state (runtime/make-repl-state state-loader)
+          def-ast-a (p/ast "function inc(n: Integer): Integer\ndo\n  result := n + 1\nend")
+          def-ast-b (p/ast "function inc(n: Integer): Integer\ndo\n  result := n + 2\nend")
+          unit-a (-> def-ast-a
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0063"})
+                     :unit)
+          unit-b (-> def-ast-b
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0064"})
+                     :unit)
+          unit-c (-> (p/ast "inc(40)")
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0065"
+                                             :functions (:functions def-ast-b)})
+                     :unit)
+          class-a (loader/define-class! state-loader
+                                        "nex.repl.Cell_0063"
+                                        (emit/compile-unit->bytes unit-a))
+          class-b (loader/define-class! state-loader
+                                        "nex.repl.Cell_0064"
+                                        (emit/compile-unit->bytes unit-b))
+          class-c (loader/define-class! state-loader
+                                        "nex.repl.Cell_0065"
+                                        (emit/compile-unit->bytes unit-c))
+          eval-a (.getMethod class-a "eval" (into-array Class [(class state)]))
+          eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))
+          eval-c (.getMethod class-c "eval" (into-array Class [(class state)]))]
+      (.invoke eval-a nil (object-array [state]))
+      (is (= 41 (.invoke eval-c nil (object-array [state]))))
+      (.invoke eval-b nil (object-array [state]))
+      (is (= 42 (.invoke eval-c nil (object-array [state])))))))

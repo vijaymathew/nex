@@ -31,16 +31,18 @@
   - `:state-slot` local slot holding NexReplState in compiled REPL methods
   - `:next-slot`  next free JVM local slot
   - `:classes`    visible class defs for type inference
+  - `:functions`  visible top-level function defs for type inference/lowering
   - `:imports`    visible imports for type inference
   - `:var-types`  visible variable types"
   ([] (make-lowering-env {}))
-  ([{:keys [locals top-level? repl? state-slot next-slot classes imports var-types] :as opts}]
+  ([{:keys [locals top-level? repl? state-slot next-slot classes functions imports var-types] :as opts}]
    {:locals (or locals {})
     :top-level? (if (contains? opts :top-level?) top-level? true)
     :repl? (if (contains? opts :repl?) repl? true)
     :state-slot (or state-slot 0)
     :next-slot (or next-slot 1)
     :classes (vec (or classes []))
+    :functions (vec (or functions []))
     :imports (vec (or imports []))
     :var-types (or var-types {})}))
 
@@ -55,6 +57,7 @@
 (defn- infer-type
   [env expr]
   (or (tc/infer-expression-type expr {:classes (:classes env)
+                                      :functions (:functions env)
                                       :imports (:imports env)
                                       :var-types (env-visible-var-types env)})
       (throw (ex-info "Unable to infer expression type during lowering"
@@ -81,6 +84,16 @@
       :slot slot
       :nex-type nex-type
       :jvm-type jvm-type}]))
+
+(defn- lowered-function-method-name
+  [fn-def]
+  (str "__repl_fn_" (:name fn-def) "$arity" (count (:params fn-def))))
+
+(defn- function-return-type
+  [fn-def]
+  (or (:return-type fn-def) "Any"))
+
+(declare lower-function)
 
 (defn lower-expression
   [env expr]
@@ -151,8 +164,13 @@
              (not (:has-parens expr)))
       (lower-expression env {:type :identifier
                              :name (:method expr)})
-      (throw (ex-info "Unsupported call expression for lowering"
-                      {:expr expr})))
+      (if (nil? (:target expr))
+        (let [arg-irs (mapv #(lower-expression env %) (:args expr))
+              nex-type (infer-type env expr)
+              jvm-type (desc/nex-type->jvm-type nex-type)]
+          (ir/call-repl-fn-node (:method expr) arg-irs nex-type jvm-type))
+        (throw (ex-info "Unsupported call expression for lowering"
+                        {:expr expr}))))
 
     (throw (ex-info "Unsupported expression node for lowering"
                     {:expr expr :node-type (:type expr)}))))
@@ -197,10 +215,60 @@
           [env []]
           statements))
 
+(defn lower-function
+  [unit-name fn-def]
+  (let [return-type (function-return-type fn-def)
+        env0 (make-lowering-env {:classes [(:class-def fn-def)]
+                                 :functions []
+                                 :imports []
+                                 :var-types {}
+                                 :top-level? true
+                                 :repl? true
+                                 :state-slot 0
+                                 :next-slot 2})
+        [env-with-params params]
+        (reduce (fn [[env acc] {:keys [name type]}]
+                  (let [[env' local] (env-add-local env name type)]
+                    [env' (conj acc (assoc local :arg-index (count acc)))]))
+                [env0 []]
+                (:params fn-def))
+        body (vec (:body fn-def))
+        leading-statements (butlast body)
+        final-stmt (last body)
+        [env' lowered-leading] (lower-statements env-with-params leading-statements)
+        return-expr (cond
+                      (and (= :assign (:type final-stmt))
+                           (= "result" (:target final-stmt)))
+                      (lower-expression env' (:value final-stmt))
+
+                      (contains? expression-node-types (:type final-stmt))
+                      (lower-expression env' final-stmt)
+
+                      :else
+                      (throw (ex-info "Unsupported function tail for lowering"
+                                      {:function (:name fn-def)
+                                       :stmt final-stmt})))]
+    (ir/fn-node {:name (:name fn-def)
+                 :owner unit-name
+                 :emitted-name (lowered-function-method-name fn-def)
+                 :params params
+                 :return-type return-type
+                 :return-jvm-type (ir/object-jvm-type "java/lang/Object")
+                 :locals (vec (vals (:locals env')))
+                 :body (conj lowered-leading
+                             (ir/return-node return-expr
+                                             return-type
+                                             (ir/object-jvm-type "java/lang/Object")))})))
+
 (defn lower-repl-cell
   "Lower a narrow REPL/program body to a first compiler unit."
   [program opts]
-  (let [env (make-lowering-env {:classes (:classes program)
+  (let [unit-name (or (:name opts) "nex/repl/Cell_0001")
+        visible-functions (vec (concat (:functions program) (:functions opts)))
+        visible-classes (vec (concat (:classes program)
+                                     (keep :class-def visible-functions)))
+        env (make-lowering-env {:classes visible-classes
+                                :functions visible-functions
                                 :imports (:imports program)
                                 :var-types (:var-types opts)
                                 :top-level? true
@@ -228,6 +296,6 @@
     {:env env'
      :unit (ir/unit {:name (or (:name opts) "nex/repl/Cell_0001")
                      :kind :repl-cell
-                     :functions []
+                     :functions (mapv #(lower-function unit-name %) (:functions program))
                      :body lowered-body'
                      :result-jvm-type (ir/object-jvm-type "java/lang/Object")})}))

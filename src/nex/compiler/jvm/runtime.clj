@@ -1,6 +1,8 @@
 (ns nex.compiler.jvm.runtime
   "Small runtime support for the future JVM bytecode compiler."
+  (:require [clojure.string :as str])
   (:import [clojure.lang DynamicClassLoader]
+           [java.lang.reflect Method]
            [java.util HashMap]))
 
 (defrecord NexReplState [^clojure.lang.Atom values
@@ -53,6 +55,30 @@
            (doto m
              (.put name fn-wrapper))))
   fn-wrapper)
+
+(defn register-repl-fn!
+  [state name owner-binary-name method-name]
+  (state-set-fn! state name {:owner owner-binary-name
+                             :method method-name}))
+
+(defn- resolve-owner-class
+  [state owner-binary-name]
+  (if-let [^DynamicClassLoader loader (:loader state)]
+    (.loadClass loader owner-binary-name)
+    (Class/forName owner-binary-name)))
+
+(defn invoke-repl-fn
+  [state name args]
+  (let [{:keys [owner method]} (state-get-fn state name)]
+    (when-not (and owner method)
+      (throw (ex-info (str "Undefined compiled REPL function: " name)
+                      {:name name})))
+    (let [^Class owner-class (resolve-owner-class state owner)
+          ^Method target-method (.getDeclaredMethod owner-class
+                                                    method
+                                                    (into-array Class [nex.compiler.jvm.runtime.NexReplState
+                                                                       (class (object-array 0))]))]
+      (.invoke target-method nil (object-array [state (object-array args)])))))
 
 (defn next-class-name!
   ([state prefix]

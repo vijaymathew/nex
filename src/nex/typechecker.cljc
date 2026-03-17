@@ -3086,7 +3086,8 @@
 
 (defn infer-expression-type
   "Infer the type of an expression AST node.
-   opts: :classes - seq of class defs, :var-types - {name type} map.
+   opts: :classes - seq of class defs, :functions - seq of function defs,
+   :var-types - {name type} map.
    Returns the type (string or map) or nil on failure."
   [expr opts]
   (try
@@ -3098,6 +3099,8 @@
       (doseq [class-def (:classes opts)]
         (collect-class-info env class-def))
       (register-builtin-methods env)
+      (doseq [fn-def (:functions opts)]
+        (env-add-var env (:name fn-def) (:class-name fn-def)))
       (doseq [[var-name var-type] (:var-types opts)]
         (env-add-var env var-name var-type))
       (check-expression env expr))

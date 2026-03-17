@@ -9,7 +9,7 @@
   The initial `eval` body ignores the IR and returns `null`."
   (:require [nex.compiler.jvm.descriptor :as desc]
             [nex.ir :as ir])
-  (:import [org.objectweb.asm ClassWriter Label MethodVisitor Opcodes]))
+  (:import [org.objectweb.asm ClassWriter Label MethodVisitor Opcodes Type]))
 
 (def ^:private class-version Opcodes/V17)
 (def ^:private repl-state-internal-name "nex/compiler/jvm/runtime/NexReplState")
@@ -22,6 +22,10 @@
    [(ir/object-jvm-type "nex/compiler/jvm/runtime/NexReplState")]
    (ir/object-jvm-type "java/lang/Object")))
 
+(defn repl-fn-method-descriptor
+  []
+  "(Lnex/compiler/jvm/runtime/NexReplState;[Ljava/lang/Object;)Ljava/lang/Object;")
+
 (defn minimal-class-spec
   "Create a minimal class spec for a compiled REPL cell."
   [unit]
@@ -30,15 +34,26 @@
    :super-name "java/lang/Object"
    :interfaces []
    :flags Opcodes/ACC_PUBLIC
-   :methods [{:name "<init>"
-              :descriptor "()V"
-              :flags Opcodes/ACC_PUBLIC
-              :kind :default-constructor}
-             {:name "eval"
-              :descriptor (eval-method-descriptor)
-              :flags (+ Opcodes/ACC_PUBLIC Opcodes/ACC_STATIC)
-              :kind :eval-from-ir
-              :body (:body unit)}]})
+   :methods (vec
+             (concat
+              [{:name "<init>"
+                :descriptor "()V"
+                :flags Opcodes/ACC_PUBLIC
+                :kind :default-constructor}
+               {:name "eval"
+                :descriptor (eval-method-descriptor)
+                :flags (+ Opcodes/ACC_PUBLIC Opcodes/ACC_STATIC)
+                :kind :eval-from-ir
+                :owner (:name unit)
+                :functions (:functions unit)
+                :body (:body unit)}]
+              (map (fn [fn-node]
+                     {:name (:emitted-name fn-node)
+                      :descriptor (repl-fn-method-descriptor)
+                      :flags (+ Opcodes/ACC_PUBLIC Opcodes/ACC_STATIC)
+                      :kind :repl-fn
+                      :fn-node fn-node})
+                   (:functions unit))))})
 
 (defn- emit-default-constructor!
   [^ClassWriter cw {:keys [name descriptor flags]}]
@@ -238,6 +253,65 @@
 (declare emit-expr!)
 (declare emit-stmt!)
 
+(defn- emit-state-load-functions-map!
+  [^MethodVisitor mv]
+  (.visitVarInsn mv Opcodes/ALOAD 0)
+  (.visitFieldInsn mv
+                   Opcodes/GETFIELD
+                   repl-state-internal-name
+                   "functions"
+                   "Ljava/lang/Object;")
+  (.visitTypeInsn mv Opcodes/CHECKCAST atom-internal-name)
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    atom-internal-name
+                    "deref"
+                    "()Ljava/lang/Object;"
+                    false)
+  (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name))
+
+(defn- emit-boxed-arg-array!
+  [^MethodVisitor mv args]
+  (.visitLdcInsn mv (int (count args)))
+  (.visitTypeInsn mv Opcodes/ANEWARRAY "java/lang/Object")
+  (doseq [[idx arg] (map-indexed vector args)]
+    (.visitInsn mv Opcodes/DUP)
+    (.visitLdcInsn mv (int idx))
+    (let [arg-type (emit-expr! mv arg)]
+      (when (contains? ir/primitive-jvm-types arg-type)
+        (emit-box! mv arg-type)))
+    (.visitInsn mv Opcodes/AASTORE)))
+
+(defn- emit-register-repl-fn!
+  [^MethodVisitor mv owner-internal-name fn-node]
+  (emit-state-load-functions-map! mv)
+  (.visitLdcInsn mv ^String (:name fn-node))
+  (.visitLdcInsn mv (Type/getObjectType owner-internal-name))
+  (.visitLdcInsn mv ^String (:emitted-name fn-node))
+  (.visitInsn mv Opcodes/ICONST_2)
+  (.visitTypeInsn mv Opcodes/ANEWARRAY "java/lang/Class")
+  (.visitInsn mv Opcodes/DUP)
+  (.visitInsn mv Opcodes/ICONST_0)
+  (.visitLdcInsn mv (Type/getObjectType repl-state-internal-name))
+  (.visitInsn mv Opcodes/AASTORE)
+  (.visitInsn mv Opcodes/DUP)
+  (.visitInsn mv Opcodes/ICONST_1)
+  (.visitLdcInsn mv (Type/getType "[Ljava/lang/Object;"))
+  (.visitInsn mv Opcodes/AASTORE)
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    "java/lang/Class"
+                    "getDeclaredMethod"
+                    "(Ljava/lang/String;[Ljava/lang/Class;)Ljava/lang/reflect/Method;"
+                    false)
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    hashmap-internal-name
+                    "put"
+                    "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                    false)
+  (.visitInsn mv Opcodes/POP))
+
 (defn- emit-expr!
   [^MethodVisitor mv expr]
   (case (:op expr)
@@ -260,6 +334,37 @@
                         hashmap-internal-name
                         "get"
                         "(Ljava/lang/Object;)Ljava/lang/Object;"
+                        false)
+      (emit-unbox-or-cast! mv (:jvm-type expr))
+      (:jvm-type expr))
+
+    :call-repl-fn
+    (do
+      (emit-state-load-functions-map! mv)
+      (.visitLdcInsn mv ^String (:name expr))
+      (.visitMethodInsn mv
+                        Opcodes/INVOKEVIRTUAL
+                        hashmap-internal-name
+                        "get"
+                        "(Ljava/lang/Object;)Ljava/lang/Object;"
+                        false)
+      (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/reflect/Method")
+      (.visitInsn mv Opcodes/ACONST_NULL)
+      (.visitInsn mv Opcodes/ICONST_2)
+      (.visitTypeInsn mv Opcodes/ANEWARRAY "java/lang/Object")
+      (.visitInsn mv Opcodes/DUP)
+      (.visitInsn mv Opcodes/ICONST_0)
+      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (.visitInsn mv Opcodes/AASTORE)
+      (.visitInsn mv Opcodes/DUP)
+      (.visitInsn mv Opcodes/ICONST_1)
+      (emit-boxed-arg-array! mv (:args expr))
+      (.visitInsn mv Opcodes/AASTORE)
+      (.visitMethodInsn mv
+                        Opcodes/INVOKEVIRTUAL
+                        "java/lang/reflect/Method"
+                        "invoke"
+                        "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;"
                         false)
       (emit-unbox-or-cast! mv (:jvm-type expr))
       (:jvm-type expr))
@@ -379,11 +484,34 @@
     (throw (ex-info "Unsupported IR statement emission"
                     {:stmt stmt :op (:op stmt)}))))
 
+(defn- emit-function-arg-prologue!
+  [^MethodVisitor mv fn-node]
+  (doseq [{:keys [arg-index slot jvm-type]} (:params fn-node)]
+    (.visitVarInsn mv Opcodes/ALOAD 1)
+    (.visitLdcInsn mv (int arg-index))
+    (.visitInsn mv Opcodes/AALOAD)
+    (emit-unbox-or-cast! mv jvm-type)
+    (.visitVarInsn mv (local-store-op jvm-type) slot)))
+
 (defn- emit-eval-method!
-  [^ClassWriter cw {:keys [name descriptor flags body]}]
+  [^ClassWriter cw {:keys [name descriptor flags body owner functions]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
+    (doseq [fn-node functions]
+      (emit-register-repl-fn! mv owner fn-node))
     (doseq [stmt body]
+      (emit-stmt! mv stmt))
+    (.visitInsn mv Opcodes/ACONST_NULL)
+    (.visitInsn mv Opcodes/ARETURN)
+    (.visitMaxs mv 0 0)
+    (.visitEnd mv)))
+
+(defn- emit-repl-fn-method!
+  [^ClassWriter cw {:keys [name descriptor flags fn-node]}]
+  (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
+    (.visitCode mv)
+    (emit-function-arg-prologue! mv fn-node)
+    (doseq [stmt (:body fn-node)]
       (emit-stmt! mv stmt))
     (.visitInsn mv Opcodes/ACONST_NULL)
     (.visitInsn mv Opcodes/ARETURN)
@@ -395,6 +523,7 @@
   (case (:kind method-spec)
     :default-constructor (emit-default-constructor! cw method-spec)
     :eval-from-ir (emit-eval-method! cw method-spec)
+    :repl-fn (emit-repl-fn-method! cw method-spec)
     (throw (ex-info "Unsupported method emission kind"
                     {:method-spec method-spec}))))
 

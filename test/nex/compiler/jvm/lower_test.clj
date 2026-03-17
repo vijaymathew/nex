@@ -82,3 +82,15 @@
       (is (= "score" (:name lowered)))
       (is (= "Integer" (:nex-type lowered)))
       (is (= :int (:jvm-type lowered))))))
+
+(deftest lower-top-level-function-call-test
+  (testing "top-level function calls lower to call-repl-fn nodes"
+    (let [program (p/ast "function inc(n: Integer): Integer\ndo\n  result := n + 1\nend\n\ninc(4)")
+          {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0060"})
+          stmt (first (:body unit))]
+      (is (= 1 (count (:functions unit))))
+      (is (= :return (:op stmt)))
+      (is (= :call-repl-fn (-> stmt :expr :op)))
+      (is (= "inc" (-> stmt :expr :name)))
+      (is (= 1 (count (-> stmt :expr :args))))
+      (is (= 4 (-> stmt :expr :args first :value))))))
