@@ -466,6 +466,7 @@ nex/
 | [Arrays and Maps](docs/md/ARRAYS_MAPS.md) | Collection operations and examples |
 | [Emacs Support](docs/md/EMACS.md) | Emacs mode setup and key bindings |
 | [Development Notes](docs/md/DEVELOPMENT.md) | Architecture and contribution notes |
+| [JVM Bytecode Compiler Plan](docs/design/JVM_BYTECODE_COMPILER_PLAN.md) | Concrete staged plan for a dynamic JVM compiler backend |
 
 ---
 
