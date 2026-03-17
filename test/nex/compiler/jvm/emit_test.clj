@@ -3,7 +3,9 @@
             [nex.compiler.jvm.classloader :as loader]
             [nex.compiler.jvm.emit :as emit]
             [nex.compiler.jvm.runtime :as runtime]
-            [nex.ir :as ir]))
+            [nex.ir :as ir]
+            [nex.lower :as lower]
+            [nex.parser :as p]))
 
 (deftest minimal-class-spec-test
   (testing "minimal class spec for a repl cell is stable"
@@ -24,7 +26,11 @@
     (let [unit (ir/unit {:name "nex/repl/Cell_0001"
                          :kind :repl-cell
                          :functions []
-                         :body []
+                         :body [(ir/return-node
+                                 (ir/const-node nil "Any"
+                                                (ir/object-jvm-type "java/lang/Object"))
+                                 "Any"
+                                 (ir/object-jvm-type "java/lang/Object"))]
                          :result-jvm-type (ir/object-jvm-type "java/lang/Object")})
           bytecode (emit/compile-unit->bytes unit)
           l (loader/make-loader)
@@ -35,3 +41,54 @@
       (is (bytes? bytecode))
       (is (= "nex.repl.Cell_0001" (.getName cls)))
       (is (nil? result)))))
+
+(deftest compile-constant-return-repl-cell-test
+  (testing "emitted repl cell can return a boxed constant"
+    (let [unit (ir/unit {:name "nex/repl/Cell_0002"
+                         :kind :repl-cell
+                         :functions []
+                         :body [(ir/return-node
+                                 (ir/const-node 42 "Integer" :int)
+                                 "Any"
+                                 (ir/object-jvm-type "java/lang/Object"))]
+                         :result-jvm-type (ir/object-jvm-type "java/lang/Object")})
+          bytecode (emit/compile-unit->bytes unit)
+          l (loader/make-loader)
+          cls (loader/define-class! l "nex.repl.Cell_0002" bytecode)
+          state (runtime/make-repl-state l)
+          method (.getMethod cls "eval" (into-array Class [(class state)]))
+          result (.invoke method nil (object-array [state]))]
+      (is (= 42 result))
+      (is (instance? Integer result)))))
+
+(deftest compile-pop-then-return-test
+  (testing "pop discards intermediate constants before returning"
+    (let [unit (ir/unit {:name "nex/repl/Cell_0003"
+                         :kind :repl-cell
+                         :functions []
+                         :body [(ir/pop-node (ir/const-node 7 "Integer" :int))
+                                (ir/return-node
+                                 (ir/const-node "done" "String"
+                                                (ir/object-jvm-type "java/lang/String"))
+                                 "Any"
+                                 (ir/object-jvm-type "java/lang/Object"))]
+                         :result-jvm-type (ir/object-jvm-type "java/lang/Object")})
+          bytecode (emit/compile-unit->bytes unit)
+          l (loader/make-loader)
+          cls (loader/define-class! l "nex.repl.Cell_0003" bytecode)
+          state (runtime/make-repl-state l)
+          method (.getMethod cls "eval" (into-array Class [(class state)]))
+          result (.invoke method nil (object-array [state]))]
+      (is (= "done" result)))))
+
+(deftest lower-and-compile-repl-expression-smoke-test
+  (testing "parsed repl expression lowers and compiles end-to-end"
+    (let [program (p/ast "42")
+          {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0042"})
+          bytecode (emit/compile-unit->bytes unit)
+          l (loader/make-loader)
+          cls (loader/define-class! l "nex.repl.Cell_0042" bytecode)
+          state (runtime/make-repl-state l)
+          method (.getMethod cls "eval" (into-array Class [(class state)]))
+          result (.invoke method nil (object-array [state]))]
+      (is (= 42 result)))))

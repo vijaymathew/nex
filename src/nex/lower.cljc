@@ -18,6 +18,9 @@
 (declare lower-expression)
 (declare lower-statement)
 
+(def ^:private expression-node-types
+  #{:integer :real :string :char :boolean :nil :identifier :binary})
+
 (defn make-lowering-env
   "Create the first lowering environment.
 
@@ -152,6 +155,9 @@
     (= :call (:type stmt))
     [env (ir/pop-node (lower-expression env stmt))]
 
+    (contains? expression-node-types (:type stmt))
+    [env (ir/pop-node (lower-expression env stmt))]
+
     :else
     (throw (ex-info "Unsupported statement node for lowering"
                     {:stmt stmt :node-type (:type stmt)}))))
@@ -174,10 +180,25 @@
                                 :repl? true
                                 :state-slot 0
                                 :next-slot 1})
-        [env' lowered-body] (lower-statements env (:statements program))]
+        statements (vec (:statements program))
+        expr-tail? (contains? expression-node-types (:type (last statements)))
+        leading-statements (if expr-tail? (pop statements) statements)
+        [env' lowered-body] (lower-statements env leading-statements)
+        lowered-body' (if expr-tail?
+                        (conj lowered-body
+                              (ir/return-node
+                               (lower-expression env' (last statements))
+                               (infer-type env' (last statements))
+                               (ir/object-jvm-type "java/lang/Object")))
+                        (conj lowered-body
+                              (ir/return-node
+                               (ir/const-node nil "Any"
+                                              (ir/object-jvm-type "java/lang/Object"))
+                               "Any"
+                               (ir/object-jvm-type "java/lang/Object"))))]
     {:env env'
      :unit (ir/unit {:name (or (:name opts) "nex/repl/Cell_0001")
                      :kind :repl-cell
                      :functions []
-                     :body lowered-body
+                     :body lowered-body'
                      :result-jvm-type (ir/object-jvm-type "java/lang/Object")})}))

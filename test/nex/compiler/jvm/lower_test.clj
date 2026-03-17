@@ -33,6 +33,18 @@
       (is (= "Integer" (get-in env [:var-types "x"])))
       (is (= 2 (:next-slot env))))))
 
+(deftest lower-final-expression-to-return-test
+  (testing "final repl expression lowers to a return"
+    (let [program (p/ast "42")
+          {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0042"})
+          stmt (first (:body unit))]
+      (is (= 1 (count (:body unit))))
+      (is (= :return (:op stmt)))
+      (is (= :const (-> stmt :expr :op)))
+      (is (= 42 (-> stmt :expr :value)))
+      (is (= :int (-> stmt :expr :jvm-type)))
+      (is (= (ir/object-jvm-type "java/lang/Object") (:jvm-type stmt))))))
+
 (deftest lower-top-level-identifier-and-assign-test
   (testing "top-level identifiers and assignments lower through REPL state ops"
     (let [program (p/ast "x := x + 1")
