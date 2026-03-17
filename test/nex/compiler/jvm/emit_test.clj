@@ -244,3 +244,61 @@
       (is (= 41 (.invoke eval-c nil (object-array [state]))))
       (.invoke eval-b nil (object-array [state]))
       (is (= 42 (.invoke eval-c nil (object-array [state])))))))
+
+(deftest compile-function-body-calls-top-level-function-smoke-test
+  (testing "compiled function bodies can call other top-level functions through shared state"
+    (let [state-loader (loader/make-loader)
+          state (runtime/make-repl-state state-loader)
+          def-ast (p/ast "function add1(n: Integer): Integer\ndo\n  result := n + 1\nend\n\nfunction add2(n: Integer): Integer\ndo\n  result := add1(n) + 1\nend")
+          unit-a (-> def-ast
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0066"})
+                     :unit)
+          unit-b (-> (p/ast "add2(40)")
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0067"
+                                             :functions (:functions def-ast)})
+                     :unit)
+          class-a (loader/define-class! state-loader
+                                        "nex.repl.Cell_0066"
+                                        (emit/compile-unit->bytes unit-a))
+          class-b (loader/define-class! state-loader
+                                        "nex.repl.Cell_0067"
+                                        (emit/compile-unit->bytes unit-b))
+          eval-a (.getMethod class-a "eval" (into-array Class [(class state)]))
+          eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))]
+      (.invoke eval-a nil (object-array [state]))
+      (is (= 42 (.invoke eval-b nil (object-array [state])))))))
+
+(deftest compile-mutually-dependent-multi-cell-functions-smoke-test
+  (testing "compiled mutually dependent functions across cells resolve dynamically through state"
+    (let [state-loader (loader/make-loader)
+          state (runtime/make-repl-state state-loader)
+          def-ast-a (p/ast "function is_odd(n: Integer): Boolean\n\nfunction is_even(n: Integer): Boolean\ndo\n  if n = 0 then\n    result := true\n  else\n    result := is_odd(n - 1)\n  end\nend")
+          def-ast-b (p/ast "function is_even(n: Integer): Boolean\n\nfunction is_odd(n: Integer): Boolean\ndo\n  if n = 0 then\n    result := false\n  else\n    result := is_even(n - 1)\n  end\nend")
+          visible-fns (vec (concat (:functions def-ast-a) (:functions def-ast-b)))
+          unit-a (-> def-ast-a
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0068"
+                                             :functions (:functions def-ast-b)})
+                     :unit)
+          unit-b (-> def-ast-b
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0069"
+                                             :functions (:functions def-ast-a)})
+                     :unit)
+          unit-c (-> (p/ast "is_even(4)")
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0070"
+                                             :functions visible-fns})
+                     :unit)
+          class-a (loader/define-class! state-loader
+                                        "nex.repl.Cell_0068"
+                                        (emit/compile-unit->bytes unit-a))
+          class-b (loader/define-class! state-loader
+                                        "nex.repl.Cell_0069"
+                                        (emit/compile-unit->bytes unit-b))
+          class-c (loader/define-class! state-loader
+                                        "nex.repl.Cell_0070"
+                                        (emit/compile-unit->bytes unit-c))
+          eval-a (.getMethod class-a "eval" (into-array Class [(class state)]))
+          eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))
+          eval-c (.getMethod class-c "eval" (into-array Class [(class state)]))]
+      (.invoke eval-a nil (object-array [state]))
+      (.invoke eval-b nil (object-array [state]))
+      (is (= true (.invoke eval-c nil (object-array [state])))))))

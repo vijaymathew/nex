@@ -93,6 +93,21 @@
   [fn-def]
   (or (:return-type fn-def) "Any"))
 
+(defn- if-branch-expression
+  [branch]
+  (when (= 1 (count branch))
+    (let [stmt (first branch)]
+      (cond
+        (contains? expression-node-types (:type stmt))
+        stmt
+
+        (and (= :assign (:type stmt))
+             (= "result" (:target stmt)))
+        (:value stmt)
+
+        :else
+        nil))))
+
 (declare lower-function)
 
 (defn lower-expression
@@ -143,17 +158,19 @@
     :if
     (let [elseif (:elseif expr)
           then-branch (:then expr)
-          else-branch (:else expr)]
+          else-branch (:else expr)
+          then-expr (if-branch-expression then-branch)
+          else-expr (if-branch-expression else-branch)]
       (when (seq elseif)
         (throw (ex-info "Elseif is not yet supported in lowering"
                         {:expr expr})))
-      (when (or (not= 1 (count then-branch))
-                (not= 1 (count else-branch)))
-        (throw (ex-info "Only expression-shaped if branches are supported in lowering"
+      (when (or (nil? then-expr)
+                (nil? else-expr))
+        (throw (ex-info "Only expression-shaped or result-assignment if branches are supported in lowering"
                         {:expr expr})))
       (let [test-ir (lower-expression env (:condition expr))
-            then-ir (lower-expression env (first then-branch))
-            else-ir (lower-expression env (first else-branch))
+            then-ir (lower-expression env then-expr)
+            else-ir (lower-expression env else-expr)
             nex-type (infer-type env expr)
             jvm-type (desc/nex-type->jvm-type nex-type)]
         (ir/if-node test-ir [then-ir] [else-ir] nex-type jvm-type)))
@@ -216,11 +233,13 @@
           statements))
 
 (defn lower-function
-  [unit-name fn-def]
+  [unit-name visible-functions visible-imports fn-def]
   (let [return-type (function-return-type fn-def)
-        env0 (make-lowering-env {:classes [(:class-def fn-def)]
-                                 :functions []
-                                 :imports []
+        visible-classes (vec (concat [(:class-def fn-def)]
+                                     (keep :class-def visible-functions)))
+        env0 (make-lowering-env {:classes visible-classes
+                                 :functions visible-functions
+                                 :imports visible-imports
                                  :var-types {}
                                  :top-level? true
                                  :repl? true
@@ -296,6 +315,7 @@
     {:env env'
      :unit (ir/unit {:name (or (:name opts) "nex/repl/Cell_0001")
                      :kind :repl-cell
-                     :functions (mapv #(lower-function unit-name %) (:functions program))
+                     :functions (mapv #(lower-function unit-name visible-functions (:imports program) %)
+                                      (remove :declaration-only? (:functions program)))
                      :body lowered-body'
                      :result-jvm-type (ir/object-jvm-type "java/lang/Object")})}))
