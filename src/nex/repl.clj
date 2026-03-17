@@ -2,6 +2,7 @@
   "Interactive REPL for the Nex programming language"
   (:require [nex.parser :as p]
             [nex.interpreter :as interp]
+            [nex.compiler.jvm.repl :as compiled-repl]
             [nex.debugger :as dbg]
             [nex.typechecker :as tc]
             [clojure.string :as str]
@@ -22,6 +23,8 @@
 (defonce ^:dynamic *repl-context* nil)
 (defonce ^:dynamic *type-checking-enabled* (atom false))
 (defonce ^:dynamic *repl-var-types* (atom {}))
+(defonce ^:dynamic *repl-backend* (atom :interpreter))
+(defonce ^:dynamic *compiled-repl-session* (atom (compiled-repl/make-session)))
 
 (def nex-keywords
   ["class" "deferred" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
@@ -40,7 +43,7 @@
 
 (def nex-repl-commands
   [":help" ":quit" ":exit" ":clear" ":reset" ":classes" ":vars"
-   ":typecheck" ":load"
+   ":typecheck" ":load" ":backend"
    ":debug" ":break" ":tbreak" ":breaks" ":clearbreak" ":breakon"
    ":enable" ":disable" ":watch" ":watches" ":clearwatch"
    ":enablewatch" ":disablewatch"
@@ -221,6 +224,9 @@
   (println "  :typecheck off    - Disable type checking (default)")
   (println "  :typecheck status - Show current type checking status")
   (println "  :load <path>      - Load and evaluate a .nex file")
+  (println "  :backend interpreter - Use the tree-walking interpreter (default)")
+  (println "  :backend compiled    - Use the experimental compiled REPL fast path")
+  (println "  :backend status      - Show current backend")
   (println "  :debug on|off     - Enable/disable debugger")
   (println "  :debug status     - Show debugger status")
   (println "  :break <spec>     - Breakpoint: n | Class.method | Class.method:line | file.nex:line | field:name | Class#field")
@@ -369,6 +375,7 @@
       (do
         (println "Context cleared.")
         (reset! *repl-var-types* {})
+        (reset! *compiled-repl-session* (compiled-repl/reset-session))
         (dbg/reset-run-state!)
         (init-repl-context))
 
@@ -397,6 +404,23 @@
       (do
         (println (str "Type checking is currently: "
                      (if @*type-checking-enabled* "ENABLED" "DISABLED")))
+        ctx)
+
+      (= input-lower ":backend interpreter")
+      (do
+        (reset! *repl-backend* :interpreter)
+        (println "REPL backend set to INTERPRETER.")
+        ctx)
+
+      (= input-lower ":backend compiled")
+      (do
+        (reset! *repl-backend* :compiled)
+        (println "REPL backend set to COMPILED (experimental). Unsupported inputs will fall back to the interpreter.")
+        ctx)
+
+      (or (= input-lower ":backend") (= input-lower ":backend status"))
+      (do
+        (println (str "REPL backend is currently: " (-> @*repl-backend* name str/upper-case)))
         ctx)
 
       ;; Load file command
@@ -1061,6 +1085,50 @@
 
         ;; Evaluate based on type
         (cond
+        ;; Experimental compiled path for narrow expression-shaped program inputs.
+        (and (= (:type ast) :program)
+             (not was-wrapped?)
+             (not (dbg/enabled?))
+             (= :compiled @*repl-backend*))
+        (if-let [{:keys [session result]} (compiled-repl/compile-and-eval! @*compiled-repl-session*
+                                                                            exec-ctx
+                                                                            ast
+                                                                            @*repl-var-types*)]
+          (do
+            (reset! *compiled-repl-session* session)
+            (when (some? result)
+              (if-let [type-str (infer-result-type exec-ctx (first (:statements ast)))]
+                (println (str type-str " " (format-value result)))
+                (println (format-value result))))
+            exec-ctx)
+          (let [classes (:classes ast)
+                functions (:functions ast)
+                interns (:interns ast)
+                imports (:imports ast)
+                statements (:statements ast)
+                calls (:calls ast)
+                real-class-names (filter #(not= % "__ReplTemp__")
+                                         (map :name (filter map? classes)))
+                function-names (map :name (filter map? functions))]
+            (when (or (seq imports) (seq interns) (seq real-class-names) (seq function-names))
+              (interp/eval-node exec-ctx ast)
+              (when @*type-checking-enabled*
+                (doseq [fn-def (filter map? functions)]
+                  (swap! *repl-var-types* assoc (:name fn-def) (:class-name fn-def)))))
+            (let [top-nodes (if (seq statements) statements calls)
+                  result (when (and (seq top-nodes) (empty? real-class-names) (empty? function-names))
+                           (last (map #(interp/eval-node exec-ctx %) top-nodes)))
+                  output @(:output exec-ctx)]
+              (when (seq output)
+                (doseq [line output]
+                  (println line)))
+              (when (and (some? result) (empty? output) (empty? real-class-names) (empty? function-names))
+                (if-let [type-str (when (seq calls)
+                                    (infer-result-type exec-ctx (last calls)))]
+                  (println (str type-str " " (format-value result)))
+                  (println (format-value result)))))
+            exec-ctx))
+
         ;; If we wrapped the code, execute the temp method in GLOBAL context
         was-wrapped?
         (let [class-def (first (:classes ast))
