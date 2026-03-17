@@ -28,9 +28,10 @@
 (declare function-return-type)
 (declare lookup-class-constant)
 (declare constant-nex-type)
-(declare resolve-parent-meta)
+(declare resolve-parent-metas)
 (declare method-override?)
 (declare class-jvm-meta)
+(declare inherited-method-def)
 
 (def ^:private expression-node-types
   #{:integer :real :string :char :boolean :nil :identifier :binary :call :if :this})
@@ -97,8 +98,12 @@
   [env nex-type]
   (let [base (base-type-name nex-type)]
     (if-let [compiled (get (:compiled-classes env) base)]
-      (ir/object-jvm-type (:internal-name compiled))
+      (ir/object-jvm-type "java/lang/Object")
       (desc/nex-type->jvm-type nex-type))))
+
+(defn- exact-class-jvm-type
+  [env class-name]
+  (ir/object-jvm-type (:internal-name (class-jvm-meta env class-name))))
 
 (defn- env-visible-var-types
   [env]
@@ -141,22 +146,34 @@
               (some-> (:else expr) if-branch-expression (infer-type env)))
 
           :call
-          (let [target-expr (normalize-call-target (:target expr))]
+          (let [raw-target (:target expr)
+                class-target-name (when (string? raw-target)
+                                    (some #(when (= (:name %) raw-target)
+                                             (:name %))
+                                          (:classes env)))
+                target-expr (normalize-call-target raw-target)]
             (if (nil? target-expr)
               (when (:this-type env)
-                (some-> (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+                (some-> (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+                            (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr))))
                         function-return-type))
-              (let [target-type (infer-type env target-expr)
+              (let [target-type (when-not class-target-name
+                                  (infer-type env target-expr))
                     base-type (base-type-name target-type)
-                    class-def (get (visible-class-map env) base-type)]
+                    class-def (or (when class-target-name
+                                    (get (visible-class-map env) class-target-name))
+                                  (get (visible-class-map env) base-type))]
                 (when class-def
-                  (if (false? (:has-parens expr))
+                  (if (and class-target-name (false? (:has-parens expr)))
+                    (some-> (lookup-class-constant env class-target-name (:method expr))
+                            (#(constant-nex-type env %)))
+                    (if (false? (:has-parens expr))
                     (or (some-> (class-field-def class-def (:method expr))
                                 :field-type)
                         (some-> (class-method-def class-def (:method expr) (count (:args expr)))
                                 function-return-type))
                     (some-> (class-method-def class-def (:method expr) (count (:args expr)))
-                            function-return-type))))))
+                            function-return-type)))))))
 
           nil)]
     (or direct-type
@@ -304,14 +321,41 @@
            %)
         (class-constructors class-def)))
 
-(defn- resolve-parent-meta
+(defn- resolve-parent-metas
   [env class-def]
-  (when-let [parent-name (some-> class-def :parents first :parent)]
-    (let [compiled (class-jvm-meta env parent-name)]
-      {:nex-name parent-name
-       :jvm-name (:jvm-name compiled)
-       :internal-name (:internal-name compiled)
-       :binary-name (:binary-name compiled)})))
+  (->> (:parents class-def)
+       (remove #(= "Any" (:parent %)))
+       (mapv (fn [{:keys [parent]}]
+               (let [compiled (class-jvm-meta env parent)]
+                 {:nex-name parent
+                  :jvm-name (:jvm-name compiled)
+                  :internal-name (:internal-name compiled)
+                  :binary-name (:binary-name compiled)
+                  :composition-field (str "_parent_" parent)
+                  :deferred? (boolean (:deferred? (get (visible-class-map env) parent)))})))))
+
+(defn- direct-parent-field-map
+  [env class-def]
+  (reduce (fn [m {:keys [parent]}]
+            (let [parent-def (get (visible-class-map env) parent)
+                  composition-field (str "_parent_" parent)]
+              (reduce (fn [m2 field]
+                        (if (or (:constant? field)
+                                (contains? m2 (:name field)))
+                          m2
+                          (assoc m2
+                                 (:name field)
+                                 {:owner parent
+                                  :field (:name field)
+                                  :carrier-owner (:name class-def)
+                                  :carrier-field composition-field
+                                  :nex-type (:field-type field)
+                                  :jvm-type (resolve-jvm-type env (:field-type field))
+                                  :carrier-jvm-type (exact-class-jvm-type env parent)})))
+                      m
+                      (class-fields parent-def))))
+          {}
+          (remove #(= "Any" (:parent %)) (:parents class-def))))
 
 (defn- inherited-method-def
   [env class-def method-name arity]
@@ -351,14 +395,16 @@
 
 (defn- field-info-map
   [env class-def]
-  (into {}
-        (map (fn [field]
-               [(:name field)
-                {:owner (:name class-def)
-                 :field (:name field)
-                 :nex-type (:field-type field)
-                 :jvm-type (resolve-jvm-type env (:field-type field))}]))
-        (remove :constant? (class-fields class-def))))
+  (merge
+   (direct-parent-field-map env class-def)
+   (into {}
+         (map (fn [field]
+                [(:name field)
+                 {:owner (:name class-def)
+                  :field (:name field)
+                  :nex-type (:field-type field)
+                  :jvm-type (resolve-jvm-type env (:field-type field))}]))
+         (remove :constant? (class-fields class-def)))))
 
 (defn- field-type-map
   [class-def]
@@ -366,6 +412,48 @@
         (map (fn [field]
                [(:name field) (:field-type field)]))
         (remove :constant? (class-fields class-def))))
+
+(defn- inherited-constructor-def
+  [env class-def constructor-name arity]
+  (let [class-map (visible-class-map env)]
+    (letfn [(lookup-ctor [parents visited]
+              (some (fn [{:keys [parent]}]
+                      (when-not (contains? visited parent)
+                        (let [parent-def (get class-map parent)
+                              visited' (conj visited parent)]
+                          (or (when parent-def
+                                (class-constructor-def parent-def constructor-name arity))
+                              (when parent-def
+                                (lookup-ctor (:parents parent-def) visited'))))))
+                    parents))]
+      (lookup-ctor (:parents class-def) #{}))))
+
+(defn- own-or-inherited-constructor-def
+  [env class-def constructor-name arity]
+  (or (class-constructor-def class-def constructor-name arity)
+      (inherited-constructor-def env class-def constructor-name arity)))
+
+(defn- direct-parent-method-map
+  [env class-def]
+  (reduce (fn [m {:keys [parent]}]
+            (let [parent-def (get (visible-class-map env) parent)
+                  parent-meta (class-jvm-meta env parent)
+                  composition-field (str "_parent_" parent)]
+              (reduce (fn [m2 method-def]
+                        (if (contains? m2 [(:name method-def) (count (or (:params method-def) []))])
+                          m2
+                          (assoc m2
+                                 [(:name method-def) (count (or (:params method-def) []))]
+                                 {:source-class parent
+                                  :carrier-owner (:name class-def)
+                                  :carrier-field composition-field
+                                  :owner-internal-name (:internal-name parent-meta)
+                                  :method-def method-def
+                                  :carrier-jvm-type (exact-class-jvm-type env parent)})))
+                      m
+                      (class-methods parent-def))))
+          {}
+          (remove #(= "Any" (:parent %)) (:parents class-def))))
 
 (defn- class-jvm-meta
   [env class-name]
@@ -388,24 +476,79 @@
         field-def (when (and class-def (false? has-parens))
                     (class-field-def class-def method))
         method-def (when class-def
-                     (class-method-def class-def method (count args)))]
+                     (or (class-method-def class-def method (count args))
+                         (inherited-method-def env class-def method (count args))))]
     (cond
+      (and (= (:type target-expr) :this)
+           (if-let [{:keys [owner field carrier-owner carrier-field nex-type jvm-type carrier-jvm-type]}
+                    (get (:fields env) method)]
+             (false? has-parens)
+             false))
+      (let [{:keys [owner field carrier-owner carrier-field nex-type jvm-type carrier-jvm-type]}
+            (get (:fields env) method)
+            target' (if carrier-field
+                      (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
+                                         carrier-field
+                                         (ir/this-node (:this-type env)
+                                                       (exact-class-jvm-type env (:this-type env)))
+                                         owner
+                                         carrier-jvm-type)
+                      (ir/this-node (:this-type env)
+                                    (exact-class-jvm-type env (:this-type env))))]
+        (ir/field-get-node (:internal-name (class-jvm-meta env owner))
+                           field
+                           target'
+                           nex-type
+                           jvm-type))
+
       field-def
       (let [nex-type (:field-type field-def)
             jvm-type (resolve-jvm-type env nex-type)]
-        (ir/field-get-node (:internal-name (class-jvm-meta env base-type))
-                           method
-                           target-ir
-                           nex-type
-                           jvm-type))
+        (if (= (:type target-expr) :this)
+          (ir/field-get-node (:internal-name (class-jvm-meta env base-type))
+                             method
+                             target-ir
+                             nex-type
+                             jvm-type)
+          (ir/call-runtime-node (str "user-field-get:" method)
+                                [target-ir]
+                                nex-type
+                                jvm-type)))
 
       method-def
       (let [nex-type (function-return-type method-def)
             jvm-type (resolve-jvm-type env nex-type)]
-        (ir/call-virtual-node (:internal-name (class-jvm-meta env base-type))
+        (if (= (:type target-expr) :this)
+          (ir/call-virtual-node (:internal-name (class-jvm-meta env base-type))
+                                (lowered-instance-method-name method-def)
+                                (desc/repl-instance-method-descriptor)
+                                target-ir
+                                (mapv #(lower-expression env %) args)
+                                nex-type
+                                jvm-type)
+          (ir/call-runtime-node (str "user-method:" method)
+                                (into [target-ir] (mapv #(lower-expression env %) args))
+                                nex-type
+                                jvm-type)))
+
+      (and (= (:type target-expr) :this)
+           (get (direct-parent-method-map env (current-class-def env))
+                [method (count args)]))
+      (let [{:keys [owner-internal-name method-def carrier-owner carrier-field carrier-jvm-type]}
+            (get (direct-parent-method-map env (current-class-def env))
+                 [method (count args)])
+            nex-type (function-return-type method-def)
+            jvm-type (resolve-jvm-type env nex-type)]
+        (ir/call-virtual-node owner-internal-name
                               (lowered-instance-method-name method-def)
                               (desc/repl-instance-method-descriptor)
-                              target-ir
+                              (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
+                                                 carrier-field
+                                                 (ir/this-node (:this-type env)
+                                                               (exact-class-jvm-type env (:this-type env)))
+                                                 (:source-class (get (direct-parent-method-map env (current-class-def env))
+                                                                     [method (count args)]))
+                                                 carrier-jvm-type)
                               (mapv #(lower-expression env %) args)
                               nex-type
                               jvm-type))
@@ -459,7 +602,7 @@
     :this
     (if (:this-type env)
       (ir/this-node (:this-type env)
-                    (resolve-jvm-type env (:this-type env)))
+                    (exact-class-jvm-type env (:this-type env)))
       (throw (ex-info "this is only valid in instance-method lowering"
                       {:expr expr})))
 
@@ -521,7 +664,7 @@
         (throw (ex-info "Unsupported create of deferred class in compiled lowering"
                         {:expr expr :class-name class-name})))
       (if-let [constructor-name (:constructor expr)]
-        (let [ctor-def (class-constructor-def class-def constructor-name (count (:args expr)))]
+        (let [ctor-def (own-or-inherited-constructor-def env class-def constructor-name (count (:args expr)))]
           (when-not ctor-def
             (throw (ex-info "Constructor not found during lowering"
                             {:expr expr
@@ -534,10 +677,10 @@
                                 (ir/new-node (:internal-name compiled)
                                              class-name
                                              class-name
-                                             (ir/object-jvm-type (:internal-name compiled)))
+                                             (exact-class-jvm-type env class-name))
                                 (mapv #(lower-expression env %) (:args expr))
                                 class-name
-                                (ir/object-jvm-type (:internal-name compiled))))
+                                (resolve-jvm-type env class-name)))
         (do
           (when (seq (:args expr))
             (throw (ex-info "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
@@ -545,7 +688,7 @@
           (ir/new-node (:internal-name compiled)
                        class-name
                        class-name
-                       (ir/object-jvm-type (:internal-name compiled))))))
+                       (resolve-jvm-type env class-name)))))
 
     :call
     (if (and (nil? (:target expr))
@@ -563,18 +706,37 @@
         (if (nil? target-expr)
           (cond
             (and (:this-type env)
-                 (class-method-def (current-class-def env) (:method expr) (count (:args expr))))
-            (let [method-def (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+                 (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+                     (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr)))))
+            (let [method-def (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+                                 (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr))))
                   nex-type (function-return-type method-def)
                   jvm-type (resolve-jvm-type env nex-type)]
-              (ir/call-virtual-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                    (lowered-instance-method-name method-def)
-                                    (desc/repl-instance-method-descriptor)
-                                    (ir/this-node (:this-type env)
-                                                  (resolve-jvm-type env (:this-type env)))
-                                    arg-irs
-                                    nex-type
-                                    jvm-type))
+              (if (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+                (ir/call-virtual-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                      (lowered-instance-method-name method-def)
+                                      (desc/repl-instance-method-descriptor)
+                                      (ir/this-node (:this-type env)
+                                                    (exact-class-jvm-type env (:this-type env)))
+                                      arg-irs
+                                      nex-type
+                                      jvm-type)
+                (let [{:keys [owner-internal-name carrier-owner carrier-field carrier-jvm-type]}
+                      (get (direct-parent-method-map env (current-class-def env))
+                           [(:method expr) (count (:args expr))])]
+                  (ir/call-virtual-node owner-internal-name
+                                        (lowered-instance-method-name method-def)
+                                        (desc/repl-instance-method-descriptor)
+                                        (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
+                                                           carrier-field
+                                                           (ir/this-node (:this-type env)
+                                                                         (exact-class-jvm-type env (:this-type env)))
+                                                           (:source-class (get (direct-parent-method-map env (current-class-def env))
+                                                                               [(:method expr) (count (:args expr))]))
+                                                           carrier-jvm-type)
+                                        arg-irs
+                                        nex-type
+                                        jvm-type))))
 
             (contains? builtin-function-names (:method expr))
             (let [nex-type (infer-type env expr)
@@ -586,6 +748,32 @@
                   jvm-type (resolve-jvm-type env nex-type)]
               (ir/call-repl-fn-node (:method expr) arg-irs nex-type jvm-type)))
           (cond
+            (and class-target-name
+                 (:this-type env)
+                 (some #(= class-target-name (:parent %))
+                       (:parents (current-class-def env)))
+                 (if-let [parent-def (get (visible-class-map env) class-target-name)]
+                   (class-method-def parent-def (:method expr) (count (:args expr)))
+                   false))
+            (let [parent-meta (class-jvm-meta env class-target-name)
+                  method-def (class-method-def (get (visible-class-map env) class-target-name)
+                                               (:method expr)
+                                               (count (:args expr)))
+                  nex-type (function-return-type method-def)
+                  jvm-type (resolve-jvm-type env nex-type)]
+              (ir/call-virtual-node (:internal-name parent-meta)
+                                    (lowered-instance-method-name method-def)
+                                    (desc/repl-instance-method-descriptor)
+                                    (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                                       (str "_parent_" class-target-name)
+                                                       (ir/this-node (:this-type env)
+                                                                     (exact-class-jvm-type env (:this-type env)))
+                                                       class-target-name
+                                                       (exact-class-jvm-type env class-target-name))
+                                    arg-irs
+                                    nex-type
+                                    jvm-type))
+
             (and class-target-name (false? (:has-parens expr)))
             (if-let [constant (lookup-class-constant env class-target-name (:method expr))]
               (let [owner (:declaring-class constant)
@@ -635,13 +823,22 @@
       (if-let [{:keys [slot nex-type jvm-type]} (get (:locals env) target-name)]
         [env (ir/set-local-node slot value-ir nex-type jvm-type)]
         (if-let [{:keys [owner field nex-type jvm-type]} (get (:fields env) target-name)]
-          [env (ir/field-set-node (:internal-name (class-jvm-meta env owner))
-                                  field
-                                  (ir/this-node (:this-type env)
-                                                (resolve-jvm-type env (:this-type env)))
-                                  value-ir
-                                  nex-type
-                                  jvm-type)]
+          (let [field-info (get (:fields env) target-name)
+                target-ir (if-let [carrier-field (:carrier-field field-info)]
+                            (ir/field-get-node (:internal-name (class-jvm-meta env (:carrier-owner field-info)))
+                                               carrier-field
+                                               (ir/this-node (:this-type env)
+                                                             (exact-class-jvm-type env (:this-type env)))
+                                               owner
+                                               (:carrier-jvm-type field-info))
+                            (ir/this-node (:this-type env)
+                                          (exact-class-jvm-type env (:this-type env))))]
+            [env (ir/field-set-node (:internal-name (class-jvm-meta env owner))
+                                    field
+                                    target-ir
+                                    value-ir
+                                    nex-type
+                                    jvm-type)])
           (let [nex-type (or (get (:var-types env) target-name)
                              (infer-type env {:type :identifier :name target-name}))
                 jvm-type (resolve-jvm-type env nex-type)]
@@ -659,20 +856,65 @@
           class-def (get (visible-class-map env) owner)
           field-def (when class-def (class-field-def class-def field-name))
           value-ir (lower-expression env (:value stmt))]
-      (when-not field-def
+      (cond
+        (and (= (:type target-expr) :this)
+             (get (:fields env) field-name))
+        (let [field-info (get (:fields env) field-name)
+              target-ir (if-let [carrier-field (:carrier-field field-info)]
+                          (ir/field-get-node (:internal-name (class-jvm-meta env (:carrier-owner field-info)))
+                                             carrier-field
+                                             (ir/this-node (:this-type env)
+                                                           (exact-class-jvm-type env (:this-type env)))
+                                             (:owner field-info)
+                                             (:carrier-jvm-type field-info))
+                          (ir/this-node (:this-type env)
+                                        (exact-class-jvm-type env (:this-type env))))]
+          [env (ir/field-set-node (:internal-name (class-jvm-meta env (:owner field-info)))
+                                  field-name
+                                  target-ir
+                                  value-ir
+                                  (:nex-type field-info)
+                                  (:jvm-type field-info))])
+
+        field-def
+        [env (ir/call-runtime-node (str "user-field-set:" field-name)
+                                   [(lower-expression env target-expr) value-ir]
+                                   "Void"
+                                   :void)]
+
+        :else
         (throw (ex-info "Unknown field in member assignment during lowering"
                         {:field field-name
                          :target target-expr
-                         :target-type target-type})))
-      [env (ir/field-set-node (:internal-name (class-jvm-meta env owner))
-                              field-name
-                              (lower-expression env target-expr)
-                              value-ir
-                              (:field-type field-def)
-                              (resolve-jvm-type env (:field-type field-def)))])
+                         :target-type target-type}))))
 
     (= :call (:type stmt))
-    [env (ir/pop-node (lower-expression env stmt))]
+    (if (and (:this-type env)
+             (string? (:target stmt))
+             (some #(= (:target stmt) (:parent %))
+                   (:parents (current-class-def env)))
+             (class-constructor-def (get (visible-class-map env) (:target stmt))
+                                    (:method stmt)
+                                    (count (:args stmt))))
+      (let [parent-name (:target stmt)
+            ctor-def (class-constructor-def (get (visible-class-map env) parent-name)
+                                            (:method stmt)
+                                            (count (:args stmt)))
+            parent-meta (class-jvm-meta env parent-name)
+            call-ir (ir/call-virtual-node (:internal-name parent-meta)
+                                          (lowered-constructor-method-name ctor-def)
+                                          (desc/repl-instance-method-descriptor)
+                                          (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                                             (str "_parent_" parent-name)
+                                                             (ir/this-node (:this-type env)
+                                                                           (exact-class-jvm-type env (:this-type env)))
+                                                             parent-name
+                                                             (exact-class-jvm-type env parent-name))
+                                          (mapv #(lower-expression env %) (:args stmt))
+                                          parent-name
+                                          (resolve-jvm-type env parent-name))]
+        [env (ir/pop-node call-ir)])
+      [env (ir/pop-node (lower-expression env stmt))])
 
     (contains? expression-node-types (:type stmt))
     [env (ir/pop-node (lower-expression env stmt))]
@@ -724,7 +966,8 @@
 (defn lower-function
   [unit-name visible-functions visible-imports fn-def]
   (let [return-type (function-return-type fn-def)
-        visible-classes (vec (concat [(:class-def fn-def)]
+        visible-classes (vec (concat (:visible-classes fn-def)
+                                     [(:class-def fn-def)]
                                      (keep :class-def visible-functions)))
         current-class (:class-name fn-def)
         env0 (make-lowering-env {:classes visible-classes
@@ -733,7 +976,9 @@
                                  :var-types (field-type-map (:class-def fn-def))
                                  :compiled-classes (:compiled-classes fn-def)
                                  :current-class current-class
-                                 :fields (field-info-map {:compiled-classes (:compiled-classes fn-def)} (:class-def fn-def))
+                                 :fields (field-info-map {:compiled-classes (:compiled-classes fn-def)
+                                                          :classes visible-classes}
+                                                         (:class-def fn-def))
                                  :this-type current-class
                                  :top-level? false
                                  :repl? true
@@ -792,15 +1037,17 @@
                      :override? (boolean (:override? fn-def))})))))
 
 (defn- lower-constructor
-  [unit-name visible-functions visible-imports class-def ctor-def compiled-classes]
+  [unit-name visible-functions visible-imports visible-classes class-def ctor-def compiled-classes]
   (let [class-name (:name class-def)
-        env0 (make-lowering-env {:classes [class-def]
+        env0 (make-lowering-env {:classes visible-classes
                                  :functions visible-functions
                                  :imports visible-imports
                                  :var-types (field-type-map class-def)
                                  :compiled-classes compiled-classes
                                  :current-class class-name
-                                 :fields (field-info-map {:compiled-classes compiled-classes} class-def)
+                                 :fields (field-info-map {:compiled-classes compiled-classes
+                                                          :classes visible-classes}
+                                                         class-def)
                                  :this-type class-name
                                  :top-level? false
                                  :repl? true
@@ -811,21 +1058,91 @@
                   (let [[env' local] (env-add-local env name type)]
                     [env' (conj acc (assoc local :arg-index (count acc)))]))
                 [env0 []]
-                (:params ctor-def))
-        [env' lowered-body] (lower-statements env-with-params (vec (:body ctor-def)))]
-    (ir/fn-node {:name (:name ctor-def)
-                 :owner unit-name
-                 :emitted-name (lowered-constructor-method-name ctor-def)
+                (:params ctor-def))]
+    (if-let [shim-parent (:shim-parent ctor-def)]
+      (let [parent-meta (class-jvm-meta {:compiled-classes compiled-classes} shim-parent)
+            target-ir (ir/field-get-node (:internal-name (class-jvm-meta {:compiled-classes compiled-classes} class-name))
+                                         (str "_parent_" shim-parent)
+                                         (ir/this-node class-name
+                                                       (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                         shim-parent
+                                         (exact-class-jvm-type {:compiled-classes compiled-classes} shim-parent))
+            call-ir (ir/call-virtual-node (:internal-name parent-meta)
+                                          (lowered-constructor-method-name ctor-def)
+                                          (desc/repl-instance-method-descriptor)
+                                          target-ir
+                                          (mapv (fn [{:keys [name]}]
+                                                  (let [{:keys [slot nex-type jvm-type]}
+                                                        (get (:locals env-with-params) name)]
+                                                    (ir/local-node name slot nex-type jvm-type)))
+                                                (:params ctor-def))
+                                          shim-parent
+                                          (resolve-jvm-type {:compiled-classes compiled-classes} shim-parent))]
+        (ir/fn-node {:name (:name ctor-def)
+                     :owner unit-name
+                     :emitted-name (lowered-constructor-method-name ctor-def)
+                     :params params
+                     :return-type class-name
+                     :return-jvm-type (ir/object-jvm-type "java/lang/Object")
+                     :locals (vec (vals (:locals env-with-params)))
+                     :body [(ir/pop-node call-ir)
+                            (ir/return-node
+                             (ir/this-node class-name
+                                           (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                             class-name
+                             (ir/object-jvm-type "java/lang/Object"))]}))
+      (let [[env' lowered-body] (lower-statements env-with-params (vec (:body ctor-def)))]
+        (ir/fn-node {:name (:name ctor-def)
+                     :owner unit-name
+                     :emitted-name (lowered-constructor-method-name ctor-def)
+                     :params params
+                     :return-type class-name
+                     :return-jvm-type (ir/object-jvm-type "java/lang/Object")
+                     :locals (vec (vals (:locals env')))
+                     :body (conj lowered-body
+                                 (ir/return-node
+                                  (ir/this-node class-name
+                                                (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                  class-name
+                                  (ir/object-jvm-type "java/lang/Object")))})))))
+
+(defn- make-delegation-method-node
+  [env class-meta class-name compiled-classes {:keys [source-class carrier-owner carrier-field owner-internal-name method-def carrier-jvm-type]}]
+  (let [return-type (function-return-type method-def)
+        params (map-indexed (fn [idx {:keys [name type]}]
+                              {:name name
+                               :slot (+ 2 idx)
+                               :arg-index idx
+                               :nex-type type
+                               :jvm-type (resolve-jvm-type {:compiled-classes compiled-classes} type)})
+                            (:params method-def))
+        call-args (mapv (fn [{:keys [name slot nex-type jvm-type]}]
+                          (ir/local-node name slot nex-type jvm-type))
+                        params)
+        target-ir (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
+                                     carrier-field
+                                     (ir/this-node class-name
+                                                   (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                     source-class
+                                     carrier-jvm-type)
+        call-ir (ir/call-virtual-node owner-internal-name
+                                      (lowered-instance-method-name method-def)
+                                      (desc/repl-instance-method-descriptor)
+                                      target-ir
+                                      call-args
+                                      return-type
+                                      (resolve-jvm-type {:compiled-classes compiled-classes} return-type))]
+    (ir/fn-node {:name (:name method-def)
+                 :owner (:jvm-name class-meta)
+                 :emitted-name (lowered-instance-method-name method-def)
                  :params params
-                 :return-type class-name
+                 :return-type return-type
                  :return-jvm-type (ir/object-jvm-type "java/lang/Object")
-                 :locals (vec (vals (:locals env')))
-                 :body (conj lowered-body
-                             (ir/return-node
-                              (ir/this-node class-name
-                                            (resolve-jvm-type {:compiled-classes compiled-classes} class-name))
-                              class-name
-                              (ir/object-jvm-type "java/lang/Object")))})))
+                 :locals (vec params)
+                 :body [(ir/return-node call-ir
+                                        return-type
+                                        (ir/object-jvm-type "java/lang/Object"))]
+                 :override? false})))
 
 (defn lower-class-def
   [class-def opts]
@@ -838,25 +1155,48 @@
                                 :compiled-classes compiled-classes})
         visible-functions (vec (:functions opts))
         visible-imports (vec (:imports opts))
-        constructors (->> (class-constructors class-def)
+        own-ctor-names (set (map :name (class-constructors class-def)))
+        inherited-shims (->> (:parents class-def)
+                             (remove #(= "Any" (:parent %)))
+                             (mapcat (fn [{:keys [parent]}]
+                                       (let [parent-def (get (visible-class-map {:classes (:classes opts)}) parent)]
+                                         (for [ctor-def (class-constructors parent-def)
+                                               :when (not (contains? own-ctor-names (:name ctor-def)))]
+                                           (assoc ctor-def :shim-parent parent)))))
+                             vec)
+        constructors (->> (concat (class-constructors class-def) inherited-shims)
                           (mapv (fn [ctor-def]
                                   (lower-constructor (:jvm-name class-meta)
                                                      visible-functions
                                                      visible-imports
+                                                     (:classes opts)
                                                      class-def
                                                      ctor-def
                                                      compiled-classes))))
-        methods (->> (class-methods class-def)
-                     (mapv (fn [method-def]
-                             (lower-function (:jvm-name class-meta)
-                                             visible-functions
-                                             visible-imports
-                                             (assoc method-def
-                                                    :class-name class-name
-                                                    :class-def class-def
-                                                    :deferred? (lowered-deferred-method? class-def method-def)
-                                                    :override? (method-override? env class-def method-def)
-                                                    :compiled-classes compiled-classes)))))
+        own-methods (->> (class-methods class-def)
+                         (mapv (fn [method-def]
+                                 (lower-function (:jvm-name class-meta)
+                                                 visible-functions
+                                                 visible-imports
+                                                 (assoc method-def
+                                                        :class-name class-name
+                                                        :class-def class-def
+                                                        :visible-classes (:classes opts)
+                                                        :deferred? (lowered-deferred-method? class-def method-def)
+                                                        :override? (method-override? env class-def method-def)
+                                                        :compiled-classes compiled-classes)))))
+        own-method-names (set (map (fn [m] [(:name m) (count (:params m))]) (class-methods class-def)))
+        delegation-methods (->> (direct-parent-method-map env class-def)
+                                vals
+                                (remove (fn [{:keys [method-def]}]
+                                          (contains? own-method-names
+                                                     [(:name method-def) (count (or (:params method-def) []))])))
+                                (mapv #(make-delegation-method-node env
+                                                                    class-meta
+                                                                    class-name
+                                                                    compiled-classes
+                                                                    %)))
+        methods (vec (concat own-methods delegation-methods))
         fields (mapv (fn [field]
                        {:name (:name field)
                         :nex-type (:field-type field)
@@ -882,7 +1222,13 @@
      :jvm-name (:jvm-name class-meta)
      :internal-name (:internal-name class-meta)
      :deferred? (boolean (:deferred? class-def))
-     :parent (resolve-parent-meta env class-def)
+     :parents (resolve-parent-metas env class-def)
+     :composition-fields (mapv (fn [{:keys [nex-name internal-name composition-field deferred?]}]
+                                 {:name composition-field
+                                  :parent nex-name
+                                  :deferred? deferred?
+                                  :jvm-type (exact-class-jvm-type {:compiled-classes compiled-classes} nex-name)})
+                               (resolve-parent-metas env class-def))
      :fields fields
      :constants constants
      :constructors constructors

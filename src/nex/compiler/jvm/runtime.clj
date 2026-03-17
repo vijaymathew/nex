@@ -3,7 +3,7 @@
   (:require [clojure.string :as str]
             [nex.interpreter :as interp])
   (:import [clojure.lang DynamicClassLoader]
-           [java.lang.reflect Method]
+           [java.lang.reflect Field Method]
            [java.util HashMap]))
 
 (defrecord NexReplState [^clojure.lang.Atom values
@@ -132,6 +132,65 @@
       (interp/env-define (:globals ctx) k v))
     ctx))
 
+(defn- lowered-instance-method-name
+  [method-name arity]
+  (str "__method_" method-name "$arity" arity))
+
+(defn- reflected-field
+  [^Class cls field-name]
+  (or (try
+        (.getField cls field-name)
+        (catch Exception _ nil))
+      (some (fn [^Field f]
+              (when (= (.getName f) field-name)
+                (.setAccessible f true)
+                f))
+            (.getDeclaredFields cls))))
+
+(defn- composition-fields
+  [^Class cls]
+  (->> (.getDeclaredFields cls)
+       (filter (fn [^Field f] (str/starts-with? (.getName f) "_parent_")))
+       (map (fn [^Field f]
+              (.setAccessible f true)
+              f))))
+
+(defn- deep-reflected-field
+  [value field-name]
+  (or (when-let [^Field f (reflected-field (.getClass value) field-name)]
+        [value f])
+      (some (fn [^Field parent-field]
+              (when-let [parent-value (.get parent-field value)]
+                (deep-reflected-field parent-value field-name)))
+            (composition-fields (.getClass value)))))
+
+(defn- invoke-user-method
+  [state target method-name args]
+  (let [^Class cls (.getClass target)
+        lowered-name (lowered-instance-method-name method-name (count args))
+        ^Method method (.getDeclaredMethod cls
+                                          lowered-name
+                                          (into-array Class [nex.compiler.jvm.runtime.NexReplState
+                                                             (class (object-array 0))]))]
+    (.invoke method target (object-array [state (object-array args)]))))
+
+(defn- get-user-field
+  [target field-name]
+  (let [[owner ^Field field] (or (deep-reflected-field target field-name)
+                                 (throw (ex-info (str "Undefined compiled field: " field-name)
+                                                 {:field field-name
+                                                  :class (.getName (.getClass target))})))]
+    (.get field owner)))
+
+(defn- set-user-field!
+  [target field-name value]
+  (let [[owner ^Field field] (or (deep-reflected-field target field-name)
+                                 (throw (ex-info (str "Undefined compiled field: " field-name)
+                                                 {:field field-name
+                                                  :class (.getName (.getClass target))})))]
+    (.set field owner value)
+    nil))
+
 (defn invoke-builtin
   [state name args]
   (let [ctx (rebuild-interpreter-ctx state)]
@@ -142,12 +201,23 @@
             result (interp/call-builtin-method ctx target target method-name method-args)]
         (reset! (:output state) @(:output ctx))
         result)
+      (cond
+        (str/starts-with? name "user-method:")
+        (invoke-user-method state (first args) (subs name (count "user-method:")) (rest args))
+
+        (str/starts-with? name "user-field-get:")
+        (get-user-field (first args) (subs name (count "user-field-get:")))
+
+        (str/starts-with? name "user-field-set:")
+        (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
+
+        :else
       (let [builtin-fn (get interp/builtins name)]
         (when-not builtin-fn
           (throw (ex-info (str "Undefined compiled builtin: " name) {:name name})))
         (let [result (apply builtin-fn ctx args)]
           (reset! (:output state) @(:output ctx))
-          result)))))
+          result))))))
 
 (defn invoke_builtin
   [state name args]

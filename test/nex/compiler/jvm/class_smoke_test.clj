@@ -89,6 +89,53 @@ feature
   end
 end")
 
+(def ^:private multi-parent-program
+  "class A
+create
+  make_a(v: Integer) do
+    this.x := v
+  end
+feature
+  x: Integer
+
+  show_a(): Integer
+  do
+    result := x
+  end
+end
+
+class B
+create
+  make_b(v: Integer) do
+    this.y := v
+  end
+feature
+  y: Integer
+
+  show_b(): Integer
+  do
+    result := y
+  end
+end
+
+class C inherit A, B
+create
+  make(vx, vy: Integer) do
+    A.make_a(vx)
+    B.make_b(vy)
+  end
+feature
+  sum(): Integer
+  do
+    result := show_a() + show_b()
+  end
+
+  parent_sum(): Integer
+  do
+    result := A.show_a() + B.show_b()
+  end
+end")
+
 (deftest compiled-class-batch-smoke-test
   (testing "compiled helper can define a simple class, create an instance, mutate it through methods, and read a field"
     (let [session (compiled-repl/make-session)
@@ -196,3 +243,26 @@ end")
       (is (= 16.0 (:result define-result)))
       (is (= 16.0 (:result cross-cell-result)))
       (is (= "Shape" (runtime/state-get-type (:state session) "s"))))))
+
+(deftest compiled-multiple-inheritance-composition-smoke-test
+  (testing "compiled helper supports multiple direct parents through composition and delegation"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str multi-parent-program
+                                                                     "\n\n"
+                                                                     "let c: C := create C.make(10, 20)\n"
+                                                                     "c.sum()")))
+          inherited-a (compiled-repl/compile-and-eval! session
+                                                       (p/ast "c.show_a()"))
+          inherited-b (compiled-repl/compile-and-eval! session
+                                                       (p/ast "c.show_b()"))
+          parent-sum (compiled-repl/compile-and-eval! session
+                                                      (p/ast "c.parent_sum()"))]
+      (is (:compiled? define-result))
+      (is (:compiled? inherited-a))
+      (is (:compiled? inherited-b))
+      (is (:compiled? parent-sum))
+      (is (= 30 (:result define-result)))
+      (is (= 10 (:result inherited-a)))
+      (is (= 20 (:result inherited-b)))
+      (is (= 30 (:result parent-sum))))))

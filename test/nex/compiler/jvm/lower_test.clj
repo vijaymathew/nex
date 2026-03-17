@@ -155,16 +155,23 @@ end")
           shape-area (first (:methods shape-ir))
           square-area (first (:methods square-ir))]
       (is (true? (:deferred? shape-ir)))
-      (is (nil? (:parent shape-ir)))
+      (is (= [] (:parents shape-ir)))
       (is (true? (:deferred? shape-area)))
       (is (false? (:override? shape-area)))
       (is (= [] (:body shape-area)))
       (is (false? (:deferred? square-ir)))
-      (is (= {:nex-name "Shape"
-              :jvm-name "nex/repl/Shape_0001"
-              :internal-name "nex/repl/Shape_0001"
-              :binary-name "nex.repl.Shape_0001"}
-             (:parent square-ir)))
+      (is (= [{:nex-name "Shape"
+               :jvm-name "nex/repl/Shape_0001"
+               :internal-name "nex/repl/Shape_0001"
+               :binary-name "nex.repl.Shape_0001"
+               :composition-field "_parent_Shape"
+               :deferred? true}]
+             (:parents square-ir)))
+      (is (= [{:name "_parent_Shape"
+               :parent "Shape"
+               :deferred? true
+               :jvm-type [:object "nex/repl/Shape_0001"]}]
+             (:composition-fields square-ir)))
       (is (false? (:deferred? square-area)))
       (is (true? (:override? square-area))))))
 

@@ -327,8 +327,8 @@ end")
       (is (Modifier/isAbstract (.getModifiers cls)))
       (is (Modifier/isAbstract (.getModifiers area))))))
 
-(deftest compile-child-class-uses-parent-jvm-superclass-test
-  (testing "compiled child classes use the resolved parent JVM class as superclass"
+(deftest compile-child-class-uses-composition-parent-fields-test
+  (testing "compiled child classes keep Object as JVM superclass and use composition fields for parents"
     (let [program (p/ast "deferred class Shape
 feature
   area(): Real do end
@@ -364,6 +364,65 @@ end")
           shape-cls (loader/define-class! l "nex.repl.Shape_0001"
                                           (emit/compile-user-class->bytes shape-lowered))
           square-cls (loader/define-class! l "nex.repl.Square_0002"
-                                           (emit/compile-user-class->bytes square-lowered))]
-      (is (= "nex.repl.Shape_0001" (.getName (.getSuperclass square-cls))))
-      (is (= shape-cls (.getSuperclass square-cls)))))) 
+                                           (emit/compile-user-class->bytes square-lowered))
+          parent-field (.getDeclaredField square-cls "_parent_Shape")]
+      (is (= "java.lang.Object" (.getName (.getSuperclass square-cls))))
+      (is (= shape-cls (.getType parent-field)))
+      (is (= "_parent_Shape" (.getName parent-field)))))) 
+
+(deftest compile-multi-parent-class-emits-composition-fields-test
+  (testing "compiled classes with multiple parents emit one composition field per parent"
+    (let [program (p/ast "class A
+feature
+  ping(): Integer do
+    result := 1
+  end
+end
+
+class B
+feature
+  pong(): Integer do
+    result := 2
+  end
+end
+
+class C inherit A, B
+feature
+  sum(): Integer do
+    result := ping() + pong()
+  end
+end")
+          [a b c] (:classes program)
+          compiled-classes {"A" {:name "A"
+                                 :internal-name "nex/repl/A_0001"
+                                 :jvm-name "nex/repl/A_0001"
+                                 :binary-name "nex.repl.A_0001"}
+                            "B" {:name "B"
+                                 :internal-name "nex/repl/B_0002"
+                                 :jvm-name "nex/repl/B_0002"
+                                 :binary-name "nex.repl.B_0002"}
+                            "C" {:name "C"
+                                 :internal-name "nex/repl/C_0003"
+                                 :jvm-name "nex/repl/C_0003"
+                                 :binary-name "nex.repl.C_0003"}}
+          a-lowered (lower/lower-class-def a {:compiled-classes compiled-classes
+                                              :classes (:classes program)
+                                              :functions []
+                                              :imports []})
+          b-lowered (lower/lower-class-def b {:compiled-classes compiled-classes
+                                              :classes (:classes program)
+                                              :functions []
+                                              :imports []})
+          c-lowered (lower/lower-class-def c {:compiled-classes compiled-classes
+                                              :classes (:classes program)
+                                              :functions []
+                                              :imports []})
+          l (loader/make-loader)
+          a-cls (loader/define-class! l "nex.repl.A_0001" (emit/compile-user-class->bytes a-lowered))
+          b-cls (loader/define-class! l "nex.repl.B_0002" (emit/compile-user-class->bytes b-lowered))
+          c-cls (loader/define-class! l "nex.repl.C_0003" (emit/compile-user-class->bytes c-lowered))
+          parent-a (.getDeclaredField c-cls "_parent_A")
+          parent-b (.getDeclaredField c-cls "_parent_B")]
+      (is (= "java.lang.Object" (.getName (.getSuperclass c-cls))))
+      (is (= a-cls (.getType parent-a)))
+      (is (= b-cls (.getType parent-b))))))

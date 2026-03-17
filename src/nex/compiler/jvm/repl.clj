@@ -93,6 +93,25 @@
          (contains? builtin-runtime-receiver-types
                     (base-type-name (infer-type-in-ctx ctx target-expr))))))
 
+(defn- class-method-in-ctx
+  [ctx class-name method-name arity]
+  (let [class-map (into {} (map (juxt :name identity) (:classes ctx)))]
+    (letfn [(lookup-method [cn visited]
+              (when (and cn (not (contains? visited cn)))
+                (let [class-def (get class-map cn)
+                      visited' (conj visited cn)
+                      local-method (some #(when (and (= :method (:type %))
+                                                     (= method-name (:name %))
+                                                     (= arity (count (or (:params %) []))))
+                                            %)
+                                         (mapcat :members
+                                                 (filter #(= :feature-section (:type %))
+                                                         (:body class-def))))]
+                  (or local-method
+                      (some #(lookup-method (:parent %) visited')
+                            (:parents class-def))))))]
+      (lookup-method class-name #{}))))
+
 (defn- user-target-call-in-ctx?
   [ctx expr]
   (let [raw-target (:target expr)
@@ -116,14 +135,7 @@
                                   (filter #(= :feature-section (:type %))
                                           (:body class-def)))))
         method-def (when class-def
-                     (some #(when (and (= :method (:type %))
-                                       (= (:method expr) (:name %))
-                                       (= (count (:args expr))
-                                          (count (or (:params %) []))))
-                              %)
-                           (mapcat :members
-                                   (filter #(= :feature-section (:type %))
-                                           (:body class-def)))))]
+                     (class-method-in-ctx ctx (:name class-def) (:method expr) (count (:args expr))))]
     (and (or class-target-def target-expr)
          (or class-target-def (supported-expr-in-ctx? ctx target-expr))
          (contains? (:compiled-class-names ctx) base)
@@ -138,10 +150,18 @@
 
 (defn- known-constructor-in-ctx?
   [ctx class-name constructor-name arity]
-  (some #(when (and (= (:name %) constructor-name)
-                    (= (count (or (:params %) [])) arity))
-           %)
-        (class-constructors-in-ctx ctx class-name)))
+  (let [class-map (into {} (map (juxt :name identity) (:classes ctx)))]
+    (letfn [(lookup-ctor [cn visited]
+              (when (and cn (not (contains? visited cn)))
+                (let [class-def (get class-map cn)
+                      visited' (conj visited cn)]
+                  (or (some #(when (and (= (:name %) constructor-name)
+                                        (= (count (or (:params %) [])) arity))
+                               %)
+                            (class-constructors-in-ctx ctx cn))
+                      (some #(lookup-ctor (:parent %) visited')
+                            (:parents class-def))))))]
+      (lookup-ctor class-name #{}))))
 
 (defn- class-def-in-ctx
   [ctx class-name]
@@ -289,7 +309,8 @@
    :internal-name (:internal-name lowered-class)
    :binary-name (desc/binary-class-name (:jvm-name lowered-class))
    :deferred? (boolean (:deferred? lowered-class))
-   :parent (:parent lowered-class)
+   :parents (:parents lowered-class)
+   :composition-fields (:composition-fields lowered-class)
    :fields (:fields lowered-class)
    :constants (:constants lowered-class)
    :constructors (:constructors lowered-class)

@@ -73,18 +73,25 @@
   [class-spec]
   {:internal-name (:internal-name class-spec)
    :binary-name (desc/binary-class-name (:jvm-name class-spec))
-   :super-name (or (get-in class-spec [:parent :internal-name])
-                   "java/lang/Object")
+   :super-name "java/lang/Object"
    :interfaces []
    :flags (if (:deferred? class-spec)
             (+ Opcodes/ACC_PUBLIC Opcodes/ACC_ABSTRACT)
             Opcodes/ACC_PUBLIC)
-   :fields (mapv (fn [{:keys [name jvm-type]}]
-                   {:name name
-                    :descriptor (desc/jvm-type->descriptor jvm-type)
-                    :flags Opcodes/ACC_PUBLIC
-                    :jvm-type jvm-type})
-                 (:fields class-spec))
+   :fields (vec
+            (concat
+             (map (fn [{:keys [name jvm-type]}]
+                    {:name name
+                     :descriptor (desc/jvm-type->descriptor jvm-type)
+                     :flags Opcodes/ACC_PRIVATE
+                     :jvm-type jvm-type})
+                  (:composition-fields class-spec))
+             (map (fn [{:keys [name jvm-type]}]
+                    {:name name
+                     :descriptor (desc/jvm-type->descriptor jvm-type)
+                     :flags Opcodes/ACC_PUBLIC
+                     :jvm-type jvm-type})
+                  (:fields class-spec))))
    :static-fields (mapv (fn [{:keys [name jvm-type]}]
                           {:name name
                            :descriptor (desc/jvm-type->descriptor jvm-type)
@@ -98,8 +105,8 @@
                 :flags Opcodes/ACC_PUBLIC
                 :kind :user-default-constructor
                 :owner (:internal-name class-spec)
-                :super-name (or (get-in class-spec [:parent :internal-name])
-                                "java/lang/Object")
+                :super-name "java/lang/Object"
+                :composition-fields (:composition-fields class-spec)
                 :fields (:fields class-spec)}
                {:name "<clinit>"
                 :descriptor "()V"
@@ -137,11 +144,24 @@
     (.visitEnd mv)))
 
 (defn- emit-user-default-constructor!
-  [^ClassWriter cw {:keys [name descriptor flags fields owner super-name]}]
+  [^ClassWriter cw {:keys [name descriptor flags fields composition-fields owner super-name]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
     (.visitVarInsn mv Opcodes/ALOAD 0)
     (.visitMethodInsn mv Opcodes/INVOKESPECIAL super-name "<init>" "()V" false)
+    (doseq [{:keys [name jvm-type deferred?]} composition-fields]
+      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (if deferred?
+        (.visitInsn mv Opcodes/ACONST_NULL)
+        (do
+          (.visitTypeInsn mv Opcodes/NEW (second jvm-type))
+          (.visitInsn mv Opcodes/DUP)
+          (.visitMethodInsn mv Opcodes/INVOKESPECIAL (second jvm-type) "<init>" "()V" false)))
+      (.visitFieldInsn mv
+                       Opcodes/PUTFIELD
+                       owner
+                       name
+                       (desc/jvm-type->descriptor jvm-type)))
     (doseq [{:keys [name jvm-type]} fields]
       (.visitVarInsn mv Opcodes/ALOAD 0)
       (emit-const! mv {:value (class-default-value jvm-type) :jvm-type jvm-type})
@@ -445,6 +465,7 @@
     :field-get
     (do
       (emit-expr! mv (:target expr) state-slot)
+      (.visitTypeInsn mv Opcodes/CHECKCAST (:owner expr))
       (.visitFieldInsn mv
                        Opcodes/GETFIELD
                        (:owner expr)
@@ -495,6 +516,7 @@
     :call-virtual
     (do
       (emit-expr! mv (:target expr) state-slot)
+      (.visitTypeInsn mv Opcodes/CHECKCAST (:owner expr))
       (.visitVarInsn mv Opcodes/ALOAD state-slot)
       (emit-boxed-arg-array! mv (:args expr) state-slot)
       (.visitMethodInsn mv
@@ -643,12 +665,16 @@
     :field-set
     (do
       (emit-expr! mv (:target stmt) state-slot)
+      (.visitTypeInsn mv Opcodes/CHECKCAST (:owner stmt))
       (emit-expr! mv (:expr stmt) state-slot)
       (.visitFieldInsn mv
                        Opcodes/PUTFIELD
                        (:owner stmt)
                        (:field stmt)
                        (desc/jvm-type->descriptor (:jvm-type stmt))))
+
+    :call-runtime
+    (emit-pop! mv (emit-expr! mv stmt state-slot))
 
     (throw (ex-info "Unsupported IR statement emission"
                     {:stmt stmt :op (:op stmt)}))))
