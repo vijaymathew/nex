@@ -73,9 +73,12 @@
   [class-spec]
   {:internal-name (:internal-name class-spec)
    :binary-name (desc/binary-class-name (:jvm-name class-spec))
-   :super-name "java/lang/Object"
+   :super-name (or (get-in class-spec [:parent :internal-name])
+                   "java/lang/Object")
    :interfaces []
-   :flags Opcodes/ACC_PUBLIC
+   :flags (if (:deferred? class-spec)
+            (+ Opcodes/ACC_PUBLIC Opcodes/ACC_ABSTRACT)
+            Opcodes/ACC_PUBLIC)
    :fields (mapv (fn [{:keys [name jvm-type]}]
                    {:name name
                     :descriptor (desc/jvm-type->descriptor jvm-type)
@@ -95,6 +98,8 @@
                 :flags Opcodes/ACC_PUBLIC
                 :kind :user-default-constructor
                 :owner (:internal-name class-spec)
+                :super-name (or (get-in class-spec [:parent :internal-name])
+                                "java/lang/Object")
                 :fields (:fields class-spec)}
                {:name "<clinit>"
                 :descriptor "()V"
@@ -112,8 +117,12 @@
               (map (fn [fn-node]
                      {:name (:emitted-name fn-node)
                       :descriptor (repl-fn-method-descriptor)
-                      :flags Opcodes/ACC_PUBLIC
-                      :kind :instance-fn
+                      :flags (if (:deferred? fn-node)
+                               (+ Opcodes/ACC_PUBLIC Opcodes/ACC_ABSTRACT)
+                               Opcodes/ACC_PUBLIC)
+                      :kind (if (:deferred? fn-node)
+                              :abstract-instance-fn
+                              :instance-fn)
                       :fn-node fn-node})
                    (:methods class-spec))))})
 
@@ -128,11 +137,11 @@
     (.visitEnd mv)))
 
 (defn- emit-user-default-constructor!
-  [^ClassWriter cw {:keys [name descriptor flags fields owner]}]
+  [^ClassWriter cw {:keys [name descriptor flags fields owner super-name]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
     (.visitVarInsn mv Opcodes/ALOAD 0)
-    (.visitMethodInsn mv Opcodes/INVOKESPECIAL "java/lang/Object" "<init>" "()V" false)
+    (.visitMethodInsn mv Opcodes/INVOKESPECIAL super-name "<init>" "()V" false)
     (doseq [{:keys [name jvm-type]} fields]
       (.visitVarInsn mv Opcodes/ALOAD 0)
       (emit-const! mv {:value (class-default-value jvm-type) :jvm-type jvm-type})
@@ -690,6 +699,11 @@
     (.visitMaxs mv 0 0)
     (.visitEnd mv)))
 
+(defn- emit-abstract-instance-fn-method!
+  [^ClassWriter cw {:keys [name descriptor flags]}]
+  (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
+    (.visitEnd mv)))
+
 (defn- emit-field!
   [^ClassWriter cw {:keys [name descriptor flags]}]
   (let [fv (.visitField cw flags name descriptor nil nil)]
@@ -719,6 +733,7 @@
     :eval-from-ir (emit-eval-method! cw method-spec)
     :repl-fn (emit-repl-fn-method! cw method-spec)
     :instance-ctor-fn (emit-instance-fn-method! cw method-spec)
+    :abstract-instance-fn (emit-abstract-instance-fn-method! cw method-spec)
     :instance-fn (emit-instance-fn-method! cw method-spec)
     (throw (ex-info "Unsupported method emission kind"
                     {:method-spec method-spec}))))

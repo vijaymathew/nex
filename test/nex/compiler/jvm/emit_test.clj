@@ -5,7 +5,8 @@
             [nex.compiler.jvm.runtime :as runtime]
             [nex.ir :as ir]
             [nex.lower :as lower]
-            [nex.parser :as p]))
+            [nex.parser :as p])
+  (:import [java.lang.reflect Modifier]))
 
 (deftest minimal-class-spec-test
   (testing "minimal class spec for a repl cell is stable"
@@ -302,3 +303,67 @@
       (.invoke eval-a nil (object-array [state]))
       (.invoke eval-b nil (object-array [state]))
       (is (= true (.invoke eval-c nil (object-array [state])))))))
+
+(deftest compile-deferred-class-emits-abstract-jvm-members-test
+  (testing "deferred classes emit as abstract JVM classes with abstract methods"
+    (let [program (p/ast "deferred class Shape
+feature
+  area(): Real do end
+end")
+          shape (first (:classes program))
+          lowered (lower/lower-class-def shape {:compiled-classes {"Shape" {:name "Shape"
+                                                                           :internal-name "nex/repl/Shape_0001"
+                                                                           :jvm-name "nex/repl/Shape_0001"
+                                                                           :binary-name "nex.repl.Shape_0001"}}
+                                                :classes (:classes program)
+                                                :functions []
+                                                :imports []})
+          bytecode (emit/compile-user-class->bytes lowered)
+          l (loader/make-loader)
+          cls (loader/define-class! l "nex.repl.Shape_0001" bytecode)
+          area (.getDeclaredMethod cls "__method_area$arity0"
+                                   (into-array Class [(class (runtime/make-repl-state l))
+                                                      (class (object-array 0))]))]
+      (is (Modifier/isAbstract (.getModifiers cls)))
+      (is (Modifier/isAbstract (.getModifiers area))))))
+
+(deftest compile-child-class-uses-parent-jvm-superclass-test
+  (testing "compiled child classes use the resolved parent JVM class as superclass"
+    (let [program (p/ast "deferred class Shape
+feature
+  area(): Real do end
+end
+
+class Square inherit Shape
+feature
+  side: Real
+
+  area(): Real
+  do
+    result := side * side
+  end
+end")
+          [shape square] (:classes program)
+          compiled-classes {"Shape" {:name "Shape"
+                                     :internal-name "nex/repl/Shape_0001"
+                                     :jvm-name "nex/repl/Shape_0001"
+                                     :binary-name "nex.repl.Shape_0001"}
+                            "Square" {:name "Square"
+                                      :internal-name "nex/repl/Square_0002"
+                                      :jvm-name "nex/repl/Square_0002"
+                                      :binary-name "nex.repl.Square_0002"}}
+          shape-lowered (lower/lower-class-def shape {:compiled-classes compiled-classes
+                                                      :classes (:classes program)
+                                                      :functions []
+                                                      :imports []})
+          square-lowered (lower/lower-class-def square {:compiled-classes compiled-classes
+                                                        :classes (:classes program)
+                                                        :functions []
+                                                        :imports []})
+          l (loader/make-loader)
+          shape-cls (loader/define-class! l "nex.repl.Shape_0001"
+                                          (emit/compile-user-class->bytes shape-lowered))
+          square-cls (loader/define-class! l "nex.repl.Square_0002"
+                                           (emit/compile-user-class->bytes square-lowered))]
+      (is (= "nex.repl.Shape_0001" (.getName (.getSuperclass square-cls))))
+      (is (= shape-cls (.getSuperclass square-cls)))))) 

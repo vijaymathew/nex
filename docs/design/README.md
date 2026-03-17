@@ -20,3 +20,4 @@ Run commands from `docs/design`.
 - `COMPILED_REPL_STATUS.md` - current boundary of the experimental JVM compiled REPL backend
 - `JVM_BYTECODE_COMPILER_PLAN.md` - implementation plan for the JVM bytecode compiler
 - `USER_DEFINED_CLASSES_COMPILER_PLAN.md` - implementation checklist for compiled support of simple user-defined classes
+- `DEFERRED_CLASSES_COMPILER_PLAN.md` - implementation checklist for compiled support of deferred classes and parent-typed virtual dispatch

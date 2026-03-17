@@ -28,6 +28,9 @@
 (declare function-return-type)
 (declare lookup-class-constant)
 (declare constant-nex-type)
+(declare resolve-parent-meta)
+(declare method-override?)
+(declare class-jvm-meta)
 
 (def ^:private expression-node-types
   #{:integer :real :string :char :boolean :nil :identifier :binary :call :if :this})
@@ -301,11 +304,50 @@
            %)
         (class-constructors class-def)))
 
+(defn- resolve-parent-meta
+  [env class-def]
+  (when-let [parent-name (some-> class-def :parents first :parent)]
+    (let [compiled (class-jvm-meta env parent-name)]
+      {:nex-name parent-name
+       :jvm-name (:jvm-name compiled)
+       :internal-name (:internal-name compiled)
+       :binary-name (:binary-name compiled)})))
+
+(defn- inherited-method-def
+  [env class-def method-name arity]
+  (let [class-map (visible-class-map env)]
+    (letfn [(lookup-method [parents visited]
+              (some (fn [{:keys [parent]}]
+                      (when-not (contains? visited parent)
+                        (let [parent-def (get class-map parent)
+                              visited' (conj visited parent)]
+                          (or (when parent-def
+                                (class-method-def parent-def method-name arity))
+                              (when parent-def
+                                (lookup-method (:parents parent-def) visited'))))))
+                    parents))]
+      (lookup-method (:parents class-def) #{}))))
+
+(defn- method-override?
+  [env class-def method-def]
+  (boolean
+   (inherited-method-def env
+                         class-def
+                         (:name method-def)
+                         (count (or (:params method-def) [])))))
+
 (defn- constant-nex-type
   [env constant]
   (or (:field-type constant)
       (when-let [value-expr (:value constant)]
         (infer-type env value-expr))))
+
+(defn- lowered-deferred-method?
+  [class-def method-def]
+  (or (:deferred? method-def)
+      (:declaration-only? method-def)
+      (and (:deferred? class-def)
+           (empty? (vec (:body method-def))))))
 
 (defn- field-info-map
   [env class-def]
@@ -425,7 +467,7 @@
     (let [left-ir (lower-expression env (:left expr))
           right-ir (lower-expression env (:right expr))
           nex-type (infer-type env expr)
-          jvm-type (desc/nex-type->jvm-type nex-type)
+          jvm-type (resolve-jvm-type env nex-type)
           op (:operator expr)]
       (if (#{"+" "-" "*" "/" "and" "or"} op)
         (ir/binary-node (get {"+" :add
@@ -474,6 +516,9 @@
                         {:expr expr})))
       (when-not compiled
         (throw (ex-info "Create of non-compiled class is not supported in lowering"
+                        {:expr expr :class-name class-name})))
+      (when (:deferred? class-def)
+        (throw (ex-info "Unsupported create of deferred class in compiled lowering"
                         {:expr expr :class-name class-name})))
       (if-let [constructor-name (:constructor expr)]
         (let [ctor-def (class-constructor-def class-def constructor-name (count (:args expr)))]
@@ -580,7 +625,7 @@
           nex-type (or (:var-type stmt) (infer-type env (:value stmt)))]
       (if (:top-level? env)
         [(update env :var-types assoc (:name stmt) nex-type)
-         (ir/top-set-node (:name stmt) value-ir nex-type (desc/nex-type->jvm-type nex-type))]
+         (ir/top-set-node (:name stmt) value-ir nex-type (resolve-jvm-type env nex-type))]
         (let [[env' local] (env-add-local env (:name stmt) nex-type)]
           [env' (ir/set-local-node (:slot local) value-ir (:nex-type local) (:jvm-type local))])))
 
@@ -656,7 +701,7 @@
     (= :let (:type stmt))
     (let [[env' lowered] (lower-statement env stmt)
           nex-type (or (:var-type stmt) (infer-type env (:value stmt)))
-          jvm-type (desc/nex-type->jvm-type nex-type)]
+          jvm-type (resolve-jvm-type env' nex-type)]
       [env' [lowered] (if (:top-level? env')
                         (ir/top-get-node (:name stmt) nex-type jvm-type)
                         (ir/local-node (:name stmt)
@@ -668,7 +713,7 @@
     (let [[env' lowered] (lower-statement env stmt)
           nex-type (or (get (:var-types env') (:target stmt))
                        (infer-type env' {:type :identifier :name (:target stmt)}))
-          jvm-type (desc/nex-type->jvm-type nex-type)]
+          jvm-type (resolve-jvm-type env' nex-type)]
       [env' [lowered] (if-let [{:keys [slot]} (get (:locals env') (:target stmt))]
                         (ir/local-node (:target stmt) slot nex-type jvm-type)
                         (ir/top-get-node (:target stmt) nex-type jvm-type))])
@@ -700,35 +745,51 @@
                     [env' (conj acc (assoc local :arg-index (count acc)))]))
                 [env0 []]
                 (:params fn-def))
-        body (vec (:body fn-def))
-        leading-statements (butlast body)
-        final-stmt (last body)
-        [env' lowered-leading] (lower-statements env-with-params leading-statements)
-        return-expr (cond
-                      (and (= :assign (:type final-stmt))
-                           (= "result" (:target final-stmt)))
-                      (lower-expression env' (:value final-stmt))
+        body (vec (:body fn-def))]
+    (if (or (:declaration-only? fn-def)
+            (:deferred? fn-def))
+      (ir/fn-node {:name (:name fn-def)
+                   :owner unit-name
+                   :emitted-name (if (:class-name fn-def)
+                                   (lowered-instance-method-name fn-def)
+                                   (lowered-function-method-name fn-def))
+                   :params params
+                   :return-type return-type
+                   :return-jvm-type (ir/object-jvm-type "java/lang/Object")
+                   :locals (vec (vals (:locals env-with-params)))
+                   :body []
+                   :deferred? true
+                   :override? (boolean (:override? fn-def))})
+      (let [leading-statements (butlast body)
+            final-stmt (last body)
+            [env' lowered-leading] (lower-statements env-with-params leading-statements)
+            return-expr (cond
+                          (and (= :assign (:type final-stmt))
+                               (= "result" (:target final-stmt)))
+                          (lower-expression env' (:value final-stmt))
 
-                      (contains? expression-node-types (:type final-stmt))
-                      (lower-expression env' final-stmt)
+                          (contains? expression-node-types (:type final-stmt))
+                          (lower-expression env' final-stmt)
 
-                      :else
-                      (throw (ex-info "Unsupported function tail for lowering"
-                                      {:function (:name fn-def)
-                                       :stmt final-stmt})))]
-    (ir/fn-node {:name (:name fn-def)
-                 :owner unit-name
-                 :emitted-name (if (:class-name fn-def)
-                                 (lowered-instance-method-name fn-def)
-                                 (lowered-function-method-name fn-def))
-                 :params params
-                 :return-type return-type
-                 :return-jvm-type (ir/object-jvm-type "java/lang/Object")
-                 :locals (vec (vals (:locals env')))
-                 :body (conj lowered-leading
-                             (ir/return-node return-expr
-                                             return-type
-                                             (ir/object-jvm-type "java/lang/Object")))})))
+                          :else
+                          (throw (ex-info "Unsupported function tail for lowering"
+                                          {:function (:name fn-def)
+                                           :stmt final-stmt})))]
+        (ir/fn-node {:name (:name fn-def)
+                     :owner unit-name
+                     :emitted-name (if (:class-name fn-def)
+                                     (lowered-instance-method-name fn-def)
+                                     (lowered-function-method-name fn-def))
+                     :params params
+                     :return-type return-type
+                     :return-jvm-type (ir/object-jvm-type "java/lang/Object")
+                     :locals (vec (vals (:locals env')))
+                     :body (conj lowered-leading
+                                 (ir/return-node return-expr
+                                                 return-type
+                                                 (ir/object-jvm-type "java/lang/Object")))
+                     :deferred? (boolean (:deferred? fn-def))
+                     :override? (boolean (:override? fn-def))})))))
 
 (defn- lower-constructor
   [unit-name visible-functions visible-imports class-def ctor-def compiled-classes]
@@ -771,6 +832,10 @@
   (let [compiled-classes (:compiled-classes opts)
         class-name (:name class-def)
         class-meta (class-jvm-meta {:compiled-classes compiled-classes} class-name)
+        env (make-lowering-env {:classes (:classes opts)
+                                :functions (:functions opts)
+                                :imports (:imports opts)
+                                :compiled-classes compiled-classes})
         visible-functions (vec (:functions opts))
         visible-imports (vec (:imports opts))
         constructors (->> (class-constructors class-def)
@@ -789,6 +854,8 @@
                                              (assoc method-def
                                                     :class-name class-name
                                                     :class-def class-def
+                                                    :deferred? (lowered-deferred-method? class-def method-def)
+                                                    :override? (method-override? env class-def method-def)
                                                     :compiled-classes compiled-classes)))))
         fields (mapv (fn [field]
                        {:name (:name field)
@@ -814,6 +881,8 @@
     {:name class-name
      :jvm-name (:jvm-name class-meta)
      :internal-name (:internal-name class-meta)
+     :deferred? (boolean (:deferred? class-def))
+     :parent (resolve-parent-meta env class-def)
      :fields fields
      :constants constants
      :constructors constructors

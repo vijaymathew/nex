@@ -952,12 +952,15 @@
    Returns a formatted type string, or nil if inference fails."
   [ctx expr-node]
   (when (and @*type-checking-enabled* expr-node)
-    (when-let [t (tc/infer-expression-type
-                   expr-node
-                   {:classes (vals @(:classes ctx))
-                    :imports @(:imports ctx)
-                    :var-types @*repl-var-types*})]
-      (format-type t))))
+    (try
+      (when-let [t (tc/infer-expression-type
+                     expr-node
+                     {:classes (vals @(:classes ctx))
+                      :imports @(:imports ctx)
+                      :var-types @*repl-var-types*})]
+        (format-type t))
+      (catch Exception _
+        nil))))
 
 (defn- sync-compiled-session-into-interpreter!
   [ctx]
@@ -995,6 +998,13 @@
       (re-find #"^\s*across\s+" input)
       (re-find #"^\s*do\s+" input)))
 
+(defn looks-like-top-level-mutation?
+  "Check if input is a top-level let/assignment shape that should get a raw
+   compiled-path parse attempt before falling back to wrapper-based execution."
+  [input]
+  (or (re-find #"^\s*let\s+" input)
+      (re-find #"^\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?\s*:=" input)))
+
 (defn looks-like-identifier?
   "Check if input is a simple identifier (variable name)"
   [input]
@@ -1031,42 +1041,56 @@
                      base-ctx)]
       (reset! exec-ctx* exec-ctx)
 
-      ;; Determine if we need to wrap the input
-      (let [code-to-parse (cond
-                          ;; Class definition - parse as is
-                          (looks-like-class? input)
-                          input
+      ;; Determine if we need to wrap the input. In compiled REPL mode, give
+      ;; top-level let/assignment inputs a raw parse + compiled-eligibility
+      ;; attempt before falling back to wrapper-based execution.
+      (let [compiled-raw-candidate? (and (= :compiled @*repl-backend*)
+                                         (not (dbg/enabled?))
+                                         (looks-like-top-level-mutation? input))
+            raw-compiled-attempt (when compiled-raw-candidate?
+                                   (try
+                                     (let [raw-ast (p/ast input)]
+                                       (when (compiled-repl/eligible-ast?
+                                              @*compiled-repl-session*
+                                              raw-ast)
+                                         [raw-ast false false]))
+                                     (catch Exception _
+                                       nil)))
+            [ast was-wrapped? is-expression?]
+            (or raw-compiled-attempt
+                (let [code-to-parse (cond
+                                      ;; Class definition - parse as is
+                                      (looks-like-class? input)
+                                      input
 
-                          ;; Statement that needs wrapping
-                          (looks-like-statement? input)
-                          (wrap-as-method input)
+                                      ;; Statement that needs wrapping
+                                      (looks-like-statement? input)
+                                      (wrap-as-method input)
 
-                          ;; Try as a method call first, if it fails, wrap it
-                          :else
-                          input)
-
-          ;; Try to parse, track if we wrapped
-            [ast was-wrapped? is-expression?] (try
-                                              ;; Bare identifiers parse as methodCall but should
-                                              ;; evaluate as expressions (return their value)
-                                              (if (and (= code-to-parse input)
-                                                       (looks-like-identifier? input))
-                                                [(p/ast (wrap-expression input)) true true]
-                                                [(p/ast code-to-parse) (not= code-to-parse input) false])
-                                              (catch Exception e
-                                                ;; If parsing failed and we haven't wrapped yet, try wrapping
-                                                (if (= code-to-parse input)
-                                                  (try
-                                                    [(p/ast (wrap-expression input)) true true]
-                                                    (catch Exception _e2
-                                                      ;; If expression wrapping fails, try as statement
-                                                      (try
-                                                        [(p/ast (wrap-as-method input)) true false]
-                                                        (catch Exception _e3
-                                                          ;; All attempts failed - throw the ORIGINAL error
-                                                          ;; so line numbers reference the user's actual code
-                                                          (throw e)))))
-                                                  (throw e))))]
+                                      ;; Try as a method call first, if it fails, wrap it
+                                      :else
+                                      input)]
+                  (try
+                    ;; Bare identifiers parse as methodCall but should
+                    ;; evaluate as expressions (return their value)
+                    (if (and (= code-to-parse input)
+                             (looks-like-identifier? input))
+                      [(p/ast (wrap-expression input)) true true]
+                      [(p/ast code-to-parse) (not= code-to-parse input) false])
+                    (catch Exception e
+                      ;; If parsing failed and we haven't wrapped yet, try wrapping
+                      (if (= code-to-parse input)
+                        (try
+                          [(p/ast (wrap-expression input)) true true]
+                          (catch Exception _e2
+                            ;; If expression wrapping fails, try as statement
+                            (try
+                              [(p/ast (wrap-as-method input)) true false]
+                              (catch Exception _e3
+                                ;; All attempts failed - throw the ORIGINAL error
+                                ;; so line numbers reference the user's actual code
+                                (throw e)))))
+                        (throw e))))))]
         (sync-compiled-session-into-interpreter! exec-ctx)
         ;; Type check if enabled
         (when (and @*type-checking-enabled*

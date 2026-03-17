@@ -1,6 +1,8 @@
 (ns nex.compiler.jvm.repl-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [nex.interpreter :as interp]
+            [nex.parser :as p]
             [nex.compiler.jvm.repl :as compiled-repl]
             [nex.compiler.jvm.runtime :as runtime]
             [nex.repl :as repl]))
@@ -16,11 +18,16 @@
                 (repl/handle-command ctx0 ":backend compiled"))
             let-output (with-out-str
                          (repl/eval-code ctx0 "let x: Integer := 40"))
+            globals-after-let @(:bindings (:globals ctx0))
+            session @repl/*compiled-repl-session*
             ctx1 ctx0
             output (with-out-str
                      (repl/eval-code ctx1 "x + 2"))]
         (is (= :compiled @repl/*repl-backend*))
         (is (str/includes? let-output "40"))
+        (is (= {} globals-after-let))
+        (is (= 40 (runtime/state-get-value (:state session) "x")))
+        (is (= "Integer" (runtime/state-get-type (:state session) "x")))
         (is (str/includes? output "42"))))))
 
 (deftest repl-compiled-backend-syncs-existing-interpreter-state-test
@@ -217,9 +224,11 @@ x"))
       (let [ctx0 (repl/init-repl-context)
             _ (with-out-str (repl/eval-code ctx0 "let x: Integer := 40"))
             assign-output (with-out-str (repl/eval-code ctx0 "x := x + 2"))
-            read-output (with-out-str (repl/eval-code ctx0 "x"))]
+            read-output (with-out-str (repl/eval-code ctx0 "x"))
+            session @repl/*compiled-repl-session*]
         (is (str/includes? assign-output "42"))
-        (is (str/includes? read-output "42"))))))
+        (is (str/includes? read-output "42"))
+        (is (= 42 (runtime/state-get-value (:state session) "x")))))))
 
 (deftest repl-compiled-backend-status-command-test
   (testing "backend status command reports the current backend"
@@ -228,3 +237,96 @@ x"))
             output (with-out-str
                      (repl/handle-command ctx ":backend status"))]
         (is (str/includes? output "COMPILED"))))))
+
+(deftest compiled-session-stores-deferred-class-metadata-test
+  (testing "compiled session keeps deferred and parent metadata as canonical class state"
+    (let [session (compiled-repl/make-session)
+          deferred-result (compiled-repl/compile-and-eval! session
+                                                           (p/ast "deferred class Shape
+feature
+  area(): Real do end
+end"))
+          child-result (compiled-repl/compile-and-eval! session
+                                                        (p/ast "class Square inherit Shape
+feature
+  side: Real
+
+  area(): Real
+  do
+    result := side * side
+  end
+end"))
+          shape-meta (get @(:compiled-classes session) "Shape")
+          square-meta (get @(:compiled-classes session) "Square")
+          square-area (some #(when (= "area" (:name %)) %) (:methods square-meta))
+          shape-area (some #(when (= "area" (:name %)) %) (:methods shape-meta))]
+      (is (:compiled? deferred-result))
+      (is (:compiled? child-result))
+      (is (true? (:deferred? shape-meta)))
+      (is (nil? (:parent shape-meta)))
+      (is (false? (:deferred? square-meta)))
+      (is (= "Shape" (get-in square-meta [:parent :nex-name])))
+      (is (string? (get-in square-meta [:parent :jvm-name])))
+      (is (true? (:deferred? shape-area)))
+      (is (false? (:override? shape-area)))
+      (is (false? (:deferred? square-area)))
+      (is (true? (:override? square-area))))))
+
+(deftest compiled-repl-deferred-class-create-deopts-test
+  (testing "compiled helper declines direct instantiation of deferred classes"
+    (let [session (compiled-repl/make-session)
+          _ (compiled-repl/compile-and-eval! session
+                                             (p/ast "deferred class Shape
+feature
+  area(): Real do end
+end"))
+          result (compiled-repl/compile-and-eval! session
+                                                  (p/ast "let s := create Shape"))]
+      (is (nil? result)))))
+
+(deftest repl-compiled-backend-deferred-class-metadata-survives-deopt-sync-test
+  (testing "compiled deferred-parent class metadata survives explicit interpreter deopt/sync and later compiled dispatch"
+    (let [session (compiled-repl/make-session)
+          _ (compiled-repl/compile-and-eval! session
+                                             (p/ast "deferred class Shape
+feature
+  area(): Real do end
+end"))
+          _ (compiled-repl/compile-and-eval! session
+                                             (p/ast "class Square inherit Shape
+create
+  with_side(v: Real) do
+    this.side := v
+  end
+feature
+  side: Real
+
+  area(): Real
+  do
+    result := side * side
+  end
+end"))
+          ctx0 (interp/make-context)
+          {:keys [ctx var-types]} (compiled-repl/sync-session->interpreter! session ctx0)
+          loop-ast (p/ast "from
+  let i: Integer := 0
+until
+  i > 0
+do
+  i := i + 1
+end")
+          _ (doseq [stmt (:statements loop-ast)]
+              (interp/eval-node ctx stmt))
+          _ (compiled-repl/sync-interpreter->session! session ctx var-types loop-ast)
+          assign-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast "let s: Shape := create Square.with_side(4.0)"))
+          call-result (compiled-repl/compile-and-eval! session
+                                                       (p/ast "s.area()"))
+          shape-meta (get @(:compiled-classes session) "Shape")
+          square-meta (get @(:compiled-classes session) "Square")]
+        (is (true? (:deferred? shape-meta)))
+        (is (= "Shape" (get-in square-meta [:parent :nex-name])))
+        (is (= "Shape" (runtime/state-get-type (:state session) "s")))
+        (is (:compiled? assign-result))
+        (is (:compiled? call-result))
+        (is (= 16.0 (:result call-result))))))

@@ -69,6 +69,26 @@ feature
   end
 end")
 
+(def ^:private deferred-shape-program
+  "deferred class Shape
+feature
+  area(): Real do end
+end
+
+class Square inherit Shape
+create
+  with_side(v: Real) do
+    this.side := v
+  end
+feature
+  side: Real
+
+  area(): Real
+  do
+    result := side * side
+  end
+end")
+
 (deftest compiled-class-batch-smoke-test
   (testing "compiled helper can define a simple class, create an instance, mutate it through methods, and read a field"
     (let [session (compiled-repl/make-session)
@@ -160,3 +180,19 @@ end")
       (is (= ["\"hello\"" "450"] (:output define-result)))
       (is (= 460 (:result define-result)))
       (is (= 450 (:result const-result))))))
+
+(deftest compiled-deferred-parent-virtual-dispatch-test
+  (testing "compiled helper dispatches virtually through a deferred parent-typed reference"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str deferred-shape-program
+                                                                     "\n\n"
+                                                                     "let s: Shape := create Square.with_side(4.0)\n"
+                                                                     "s.area()")))
+          cross-cell-result (compiled-repl/compile-and-eval! session
+                                                             (p/ast "s.area()"))]
+      (is (:compiled? define-result))
+      (is (:compiled? cross-cell-result))
+      (is (= 16.0 (:result define-result)))
+      (is (= 16.0 (:result cross-cell-result)))
+      (is (= "Shape" (runtime/state-get-type (:state session) "s"))))))

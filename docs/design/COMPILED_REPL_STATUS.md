@@ -23,6 +23,48 @@ The experimental compiled backend is wired into the REPL only.
 
 This avoids split-brain REPL state while the compiler subset is still incomplete.
 
+## Important REPL Boundary
+
+There are currently two distinct layers:
+
+- the internal compiled helper in `nex.compiler.jvm.repl`
+- the user-facing REPL entry path in `nex.repl`
+
+That distinction matters.
+
+The internal compiled helper can already compile top-level program batches that contain:
+
+- `let`
+- assignment
+- expressions
+- function declarations and definitions
+- supported class work in the current compiler subset
+
+The user-facing REPL still has an older wrapping rule for inputs that look like statements.
+
+In particular, inputs beginning with forms such as:
+
+- `let`
+- `if`
+- `from`
+- `repeat`
+- `across`
+- `do`
+
+are still wrapped into a temporary `__ReplTemp__.__eval__()` method before evaluation.
+
+That means:
+
+- the user-facing REPL does not currently route those top-level statement-shaped inputs through the compiled fast path, even when the internal compiled helper could support them
+- those wrapped inputs execute through the interpreter path and then sync back into compiled-session state
+
+So the practical rule today is:
+
+- expression-shaped top-level inputs can use the compiled REPL path
+- many statement-shaped top-level inputs in the user-facing REPL still use the wrapped/interpreter path
+
+This is why some internal compiler tests can prove compiled support for top-level `let`, while the interactive REPL still treats `let ...` as a wrapped statement.
+
 ## What "Supported" Means
 
 There are two kinds of support in the compiled path.
@@ -146,6 +188,12 @@ These still fall outside the compiled subset and therefore deopt to the interpre
 - general user-object feature calls
 - specialized direct codegen for each builtin
 
+In addition, some inputs still deopt in the user-facing REPL because of the wrapping rule above, even though the internal compiled helper supports them.
+
+The main example today is:
+
+- top-level `let` entered directly at the REPL prompt
+
 ## Practical Boundary Today
 
 Good candidates for the compiled path today:
@@ -154,6 +202,7 @@ Good candidates for the compiled path today:
 - top-level function definition and redefinition
 - mutually recursive top-level functions with forward declarations
 - builtin-heavy expression batches that do not introduce classes, imports, or interns
+- parent-typed virtual calls through compiled deferred/concrete class hierarchies once the value is already present in compiled-session state
 
 Likely deopt triggers today:
 
@@ -164,6 +213,7 @@ Likely deopt triggers today:
 - contracts
 - general object-oriented behavior beyond top-level function handling
 - concurrency features beyond runtime-bridged builtin methods
+- statement-shaped REPL inputs that are still pre-wrapped in `nex.repl`
 
 ## Examples That Stay Compiled
 
@@ -191,6 +241,34 @@ type_of(numbers.reverse)
 
 A legacy `:calls`-only shape is normalized into the same path when the calls are otherwise supported.
 
+A compiled helper batch with class/object work:
+
+```nex
+deferred class Shape
+feature
+  area(): Real do end
+end
+
+class Square inherit Shape
+create
+  with_side(v: Real) do
+    this.side := v
+  end
+feature
+  side: Real
+
+  area(): Real
+  do
+    result := side * side
+  end
+end
+
+let s: Shape := create Square.with_side(4.0)
+s.area()
+```
+
+This is supported by the internal compiled helper and is covered by compiler/runtime smoke tests.
+
 ## Examples That Still Deopt
 
 These are not yet compiled end-to-end:
@@ -201,6 +279,14 @@ feature
   x: Integer
 end
 ```
+
+In the user-facing REPL, this still includes wrapped statement inputs such as:
+
+```nex
+let x: Integer := 40
+```
+
+The internal compiled helper supports top-level `let`, but the interactive REPL still wraps it and sends it through the interpreter path.
 
 ```nex
 from

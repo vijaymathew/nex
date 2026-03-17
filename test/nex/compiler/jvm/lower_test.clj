@@ -118,3 +118,70 @@
     (is (= :call-runtime (:op ret-expr)))
     (is (= "method:length" (:helper ret-expr)))
     (is (= 1 (count (:args ret-expr))))))
+
+(deftest lower-deferred-class-metadata-test
+  (testing "class lowering carries deferred and parent metadata for later compiler phases"
+    (let [program (p/ast "deferred class Shape
+feature
+  area(): Real do end
+end
+
+class Square inherit Shape
+feature
+  side: Real
+
+  area(): Real
+  do
+    result := side * side
+  end
+end")
+          [shape square] (:classes program)
+          compiled-classes {"Shape" {:name "Shape"
+                                     :internal-name "nex/repl/Shape_0001"
+                                     :jvm-name "nex/repl/Shape_0001"
+                                     :binary-name "nex.repl.Shape_0001"}
+                            "Square" {:name "Square"
+                                      :internal-name "nex/repl/Square_0002"
+                                      :jvm-name "nex/repl/Square_0002"
+                                      :binary-name "nex.repl.Square_0002"}}
+          shape-ir (lower/lower-class-def shape {:compiled-classes compiled-classes
+                                                 :classes (:classes program)
+                                                 :functions []
+                                                 :imports []})
+          square-ir (lower/lower-class-def square {:compiled-classes compiled-classes
+                                                   :classes (:classes program)
+                                                   :functions []
+                                                   :imports []})
+          shape-area (first (:methods shape-ir))
+          square-area (first (:methods square-ir))]
+      (is (true? (:deferred? shape-ir)))
+      (is (nil? (:parent shape-ir)))
+      (is (true? (:deferred? shape-area)))
+      (is (false? (:override? shape-area)))
+      (is (= [] (:body shape-area)))
+      (is (false? (:deferred? square-ir)))
+      (is (= {:nex-name "Shape"
+              :jvm-name "nex/repl/Shape_0001"
+              :internal-name "nex/repl/Shape_0001"
+              :binary-name "nex.repl.Shape_0001"}
+             (:parent square-ir)))
+      (is (false? (:deferred? square-area)))
+      (is (true? (:override? square-area))))))
+
+(deftest lower-create-deferred-class-disallowed-test
+  (testing "compiled lowering rejects direct instantiation of deferred classes"
+    (let [program (p/ast "deferred class Shape
+feature
+  area(): Real do end
+end
+
+create Shape")
+          shape (first (:classes program))
+          env (lower/make-lowering-env {:classes (:classes program)
+                                        :compiled-classes {"Shape" {:name "Shape"
+                                                                    :internal-name "nex/repl/Shape_0001"
+                                                                    :jvm-name "nex/repl/Shape_0001"
+                                                                    :binary-name "nex.repl.Shape_0001"}}})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unsupported create of deferred class"
+                            (lower/lower-expression env (first (:statements program))))))))

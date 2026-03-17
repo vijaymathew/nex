@@ -143,6 +143,10 @@
            %)
         (class-constructors-in-ctx ctx class-name)))
 
+(defn- class-def-in-ctx
+  [ctx class-name]
+  (some #(when (= (:name %) class-name) %) (:classes ctx)))
+
 (defn normalize-program-ast
   "Normalize legacy program shapes so the compiled REPL path can reason about
    one top-level statement stream. Older ASTs may carry top-level calls only in
@@ -182,12 +186,15 @@
     :char true
     :boolean true
     :nil true
-    :create (and (empty? (:generic-args expr))
-                 (contains? (:compiled-class-names ctx) (:class-name expr))
-                 (every? #(supported-expr-in-ctx? ctx %) (:args expr))
-                 (if-let [ctor (:constructor expr)]
-                   (known-constructor-in-ctx? ctx (:class-name expr) ctor (count (:args expr)))
-                   (empty? (:args expr))))
+    :create (let [class-def (class-def-in-ctx ctx (:class-name expr))]
+              (and (empty? (:generic-args expr))
+                   (contains? (:compiled-class-names ctx) (:class-name expr))
+                   class-def
+                   (not (:deferred? class-def))
+                   (every? #(supported-expr-in-ctx? ctx %) (:args expr))
+                   (if-let [ctor (:constructor expr)]
+                     (known-constructor-in-ctx? ctx (:class-name expr) ctor (count (:args expr)))
+                     (empty? (:args expr)))))
     :identifier (contains? (:known-vars ctx) (:name expr))
     :call (if (nil? (:target expr))
             (and (every? #(supported-expr-in-ctx? ctx %) (:args expr))
@@ -275,6 +282,19 @@
           {}
           class-defs))
 
+(defn- canonical-compiled-class-meta
+  [lowered-class]
+  {:name (:name lowered-class)
+   :jvm-name (:jvm-name lowered-class)
+   :internal-name (:internal-name lowered-class)
+   :binary-name (desc/binary-class-name (:jvm-name lowered-class))
+   :deferred? (boolean (:deferred? lowered-class))
+   :parent (:parent lowered-class)
+   :fields (:fields lowered-class)
+   :constants (:constants lowered-class)
+   :constructors (:constructors lowered-class)
+   :methods (:methods lowered-class)})
+
 (defn- compile-and-register-classes!
   [session ast]
   (let [actual-classes (vec (user-class-defs ast))]
@@ -285,17 +305,26 @@
           visible-classes (vec (concat (vals @(:class-asts session))
                                        actual-classes
                                        (keep :class-def visible-functions)))
-          visible-imports @(:import-asts session)]
+          visible-imports @(:import-asts session)
+          lowered-classes
+          (mapv (fn [class-def]
+                  (lower/lower-class-def class-def {:compiled-classes compiled-map
+                                                    :classes visible-classes
+                                                    :functions visible-functions
+                                                    :imports visible-imports}))
+                actual-classes)]
         (doseq [class-def actual-classes]
-          (let [lowered (lower/lower-class-def class-def {:compiled-classes compiled-map
-                                                          :classes visible-classes
-                                                          :functions visible-functions
-                                                          :imports visible-imports})
+          (let [lowered (some #(when (= (:name %) (:name class-def)) %) lowered-classes)
                 bytecode (emit/compile-user-class->bytes lowered)]
             (loader/define-class! (:loader session)
                                   (desc/binary-class-name (:jvm-name lowered))
                                   bytecode)))
-        (swap! (:compiled-classes session) merge new-class-map))))
+        (swap! (:compiled-classes session)
+               merge
+               (into {}
+                     (map (fn [lowered]
+                            [(:name lowered) (canonical-compiled-class-meta lowered)]))
+                     lowered-classes)))))
   session)
 
 (defn- replace-metadata-atoms!
