@@ -34,14 +34,51 @@
 (def ^:private relational-ops
   #{"=" "/=" "<" "<=" ">" ">="})
 
+(def ^:private builtin-function-names
+  (set (keys interp/builtins)))
+
 (declare supported-expr-in-ctx?)
 (declare supported-stmt-in-ctx?)
 (declare session-var-types)
+(declare builtin-target-call-in-ctx?)
+
+(def ^:private builtin-runtime-receiver-types
+  #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
+    "Array" "Map" "Set" "Task" "Channel" "Console" "Process"})
+
+(defn- base-type-name
+  [t]
+  (cond
+    (string? t) t
+    (map? t) (:base-type t)
+    :else nil))
+
+(defn- normalize-call-target
+  [target]
+  (if (string? target)
+    {:type :identifier :name target}
+    target))
 
 (defn- supported-if-branches?
   [ctx branch]
   (and (= 1 (count branch))
        (supported-expr-in-ctx? ctx (first branch))))
+
+(defn- infer-type-in-ctx
+  [ctx expr]
+  (tc/infer-expression-type expr {:classes (:classes ctx)
+                                  :functions (:functions ctx)
+                                  :imports (:imports ctx)
+                                  :var-types (:var-types ctx)}))
+
+(defn- builtin-target-call-in-ctx?
+  [ctx expr]
+  (let [target-expr (normalize-call-target (:target expr))]
+    (and target-expr
+       (supported-expr-in-ctx? ctx target-expr)
+       (every? #(supported-expr-in-ctx? ctx %) (:args expr))
+       (contains? builtin-runtime-receiver-types
+                  (base-type-name (infer-type-in-ctx ctx target-expr))))))
 
 (defn normalize-program-ast
   "Normalize legacy program shapes so the compiled REPL path can reason about
@@ -58,8 +95,17 @@
   [session ast]
   {:known-vars (set (concat (keys (session-var-types session))
                             (keys @(:values (:state session)))))
-   :known-fns (set (concat (keys @(:function-asts session))
-                           (map :name (:functions ast))))})
+   :known-fns (set (concat builtin-function-names
+                           (keys @(:function-asts session))
+                           (map :name (:functions ast))))
+   :var-types (merge (session-var-types session)
+                     (into {}
+                           (map (fn [fn-def]
+                                  [(:name fn-def) (:class-name fn-def)]))
+                           (concat (vals @(:function-asts session)) (:functions ast))))
+   :functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
+   :classes (vec (vals @(:class-asts session)))
+   :imports @(:import-asts session)})
 
 (defn supported-expr-in-ctx?
   [ctx expr]
@@ -71,11 +117,12 @@
     :boolean true
     :nil true
     :identifier (contains? (:known-vars ctx) (:name expr))
-    :call (and (nil? (:target expr))
-               (every? #(supported-expr-in-ctx? ctx %) (:args expr))
-               (or (and (empty? (:args expr))
-                        (not (:has-parens expr)))
-                   (contains? (:known-fns ctx) (:method expr))))
+    :call (if (nil? (:target expr))
+             (and (every? #(supported-expr-in-ctx? ctx %) (:args expr))
+                  (or (and (empty? (:args expr))
+                           (not (:has-parens expr)))
+                      (contains? (:known-fns ctx) (:method expr))))
+             (builtin-target-call-in-ctx? ctx expr))
     :binary (and (contains? (into #{"+" "-" "*" "/"} relational-ops) (:operator expr))
                  (supported-expr-in-ctx? ctx (:left expr))
                  (supported-expr-in-ctx? ctx (:right expr)))
@@ -98,7 +145,11 @@
 (defn- advance-eligibility-ctx
   [ctx stmt]
   (case (:type stmt)
-    :let (update ctx :known-vars conj (:name stmt))
+    :let (let [nex-type (or (:var-type stmt)
+                            (infer-type-in-ctx ctx (:value stmt)))]
+           (-> ctx
+               (update :known-vars conj (:name stmt))
+               (assoc-in [:var-types (:name stmt)] nex-type)))
     ctx))
 
 (defn eligible-ast?
@@ -129,6 +180,7 @@
   (reset! (:values state) (HashMap.))
   (reset! (:types state) (HashMap.))
   (reset! (:functions state) (HashMap.))
+  (rt/clear-output! state)
   state)
 
 (defn- session-function-name-set
@@ -205,6 +257,8 @@
                    (:classes ast))))
   (swap! (:import-asts session) merge-import-like-nodes (:imports ast))
   (swap! (:intern-asts session) merge-import-like-nodes (:interns ast))
+  (rt/state-set-classes! (:state session) @(:class-asts session))
+  (rt/state-set-imports! (:state session) @(:import-asts session))
   session)
 
 (defn- compile-and-register-functions!
@@ -292,12 +346,14 @@
             binary-name (desc/binary-class-name class-name)
             cls (loader/define-class! (:loader session) binary-name bytecode)
             state (:state session)
+            _ (rt/clear-output! state)
             method (.getMethod cls "eval" (into-array Class [(class state)]))
             result (.invoke method nil (object-array [state]))]
         (remember-top-level-ast! session ast')
         (sync-var-types-from-ast! session ast')
         {:compiled? true
          :session session
+         :output (rt/state-output state)
          :result result})
       (catch clojure.lang.ExceptionInfo e
         (let [msg (.getMessage e)]

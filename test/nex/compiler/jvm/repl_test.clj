@@ -185,6 +185,29 @@ x"))
       (is (:compiled? result))
       (is (= 41 (:result result))))))
 
+(deftest repl-compiled-backend-builtin-print-test
+  (testing "compiled backend lowers builtin print through call-runtime and preserves REPL output"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "print(1)"))]
+        (is (str/includes? output "1"))))))
+
+(deftest repl-compiled-backend-builtin-type-of-test
+  (testing "compiled backend lowers builtin type_of through call-runtime"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "type_of(1)"))]
+        (is (str/includes? output "String"))
+        (is (str/includes? output "\"Integer\""))))))
+
 (deftest repl-compiled-backend-direct-assignment-test
   (testing "compiled backend can update canonical top-level state via assignment"
     (binding [repl/*type-checking-enabled* (atom false)

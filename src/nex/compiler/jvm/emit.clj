@@ -15,6 +15,8 @@
 (def ^:private repl-state-internal-name "nex/compiler/jvm/runtime/NexReplState")
 (def ^:private atom-internal-name "clojure/lang/Atom")
 (def ^:private hashmap-internal-name "java/util/HashMap")
+(def ^:private rt-internal-name "clojure/lang/RT")
+(def ^:private var-internal-name "clojure/lang/Var")
 
 (defn eval-method-descriptor
   []
@@ -78,6 +80,9 @@
 (defn- emit-unbox-or-cast!
   [^MethodVisitor mv jvm-type]
   (cond
+    (= :void jvm-type)
+    nil
+
     (contains? ir/primitive-jvm-types jvm-type)
     (let [{:keys [owner name descriptor]} (desc/unboxing-method jvm-type)]
       (.visitTypeInsn mv Opcodes/CHECKCAST owner)
@@ -365,6 +370,28 @@
                         "java/lang/reflect/Method"
                         "invoke"
                         "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;"
+                        false)
+      (emit-unbox-or-cast! mv (:jvm-type expr))
+      (:jvm-type expr))
+
+    :call-runtime
+    (do
+      (.visitLdcInsn mv "nex.compiler.jvm.runtime")
+      (.visitLdcInsn mv "invoke-builtin")
+      (.visitMethodInsn mv
+                        Opcodes/INVOKESTATIC
+                        rt-internal-name
+                        "var"
+                        "(Ljava/lang/String;Ljava/lang/String;)Lclojure/lang/Var;"
+                        false)
+      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (.visitLdcInsn mv ^String (:helper expr))
+      (emit-boxed-arg-array! mv (:args expr))
+      (.visitMethodInsn mv
+                        Opcodes/INVOKEVIRTUAL
+                        var-internal-name
+                        "invoke"
+                        "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
                         false)
       (emit-unbox-or-cast! mv (:jvm-type expr))
       (:jvm-type expr))

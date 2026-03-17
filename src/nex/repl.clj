@@ -1123,12 +1123,16 @@
              (not was-wrapped?)
              (not (dbg/enabled?))
              (= :compiled @*repl-backend*))
-        (if-let [{:keys [session result]} (compiled-repl/compile-and-eval! @*compiled-repl-session*
+        (if-let [{:keys [session result output]} (compiled-repl/compile-and-eval! @*compiled-repl-session*
                                                                             ast)]
           (do
             (reset! *compiled-repl-session* session)
+            (when (seq output)
+              (doseq [line output]
+                (println line)))
             (when (some? result)
-              (if-let [type-str (infer-result-type exec-ctx (first (:statements ast)))]
+              (if-let [type-str (and (empty? output)
+                                     (infer-result-type exec-ctx (first (:statements ast))))]
                 (println (str type-str " " (format-value result)))
                 (println (format-value result))))
             exec-ctx)

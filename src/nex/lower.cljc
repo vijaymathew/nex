@@ -12,6 +12,7 @@
 
   Unsupported nodes fail fast with ex-info."
   (:require [nex.compiler.jvm.descriptor :as desc]
+            [nex.interpreter :as interp]
             [nex.ir :as ir]
             [nex.typechecker :as tc]))
 
@@ -20,6 +21,30 @@
 
 (def ^:private expression-node-types
   #{:integer :real :string :char :boolean :nil :identifier :binary :call :if})
+
+(def ^:private builtin-function-names
+  (set (keys interp/builtins)))
+
+(def ^:private builtin-runtime-receiver-types
+  #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
+    "Array" "Map" "Set" "Task" "Channel" "Console" "Process"})
+
+(defn- base-type-name
+  [t]
+  (cond
+    (string? t) t
+    (map? t) (:base-type t)
+    :else nil))
+
+(defn- builtin-runtime-receiver-type?
+  [t]
+  (contains? builtin-runtime-receiver-types (base-type-name t)))
+
+(defn- normalize-call-target
+  [target]
+  (if (string? target)
+    {:type :identifier :name target}
+    target))
 
 (defn make-lowering-env
   "Create the first lowering environment.
@@ -181,13 +206,24 @@
              (not (:has-parens expr)))
       (lower-expression env {:type :identifier
                              :name (:method expr)})
-      (if (nil? (:target expr))
-        (let [arg-irs (mapv #(lower-expression env %) (:args expr))
-              nex-type (infer-type env expr)
-              jvm-type (desc/nex-type->jvm-type nex-type)]
-          (ir/call-repl-fn-node (:method expr) arg-irs nex-type jvm-type))
-        (throw (ex-info "Unsupported call expression for lowering"
-                        {:expr expr}))))
+      (let [target-expr (normalize-call-target (:target expr))
+            arg-irs (mapv #(lower-expression env %) (:args expr))
+            nex-type (infer-type env expr)
+            jvm-type (desc/nex-type->jvm-type nex-type)]
+        (if (nil? target-expr)
+          (if (contains? builtin-function-names (:method expr))
+            (ir/call-runtime-node (:method expr) arg-irs nex-type jvm-type)
+            (ir/call-repl-fn-node (:method expr) arg-irs nex-type jvm-type))
+          (let [target-type (infer-type env target-expr)]
+            (if (builtin-runtime-receiver-type? target-type)
+              (let [target-ir (lower-expression env target-expr)]
+                (ir/call-runtime-node (str "method:" (:method expr))
+                                      (into [target-ir] arg-irs)
+                                      nex-type
+                                      jvm-type))
+              (throw (ex-info "Unsupported target call expression for lowering"
+                              {:expr expr
+                               :target-type target-type})))))))
 
     (throw (ex-info "Unsupported expression node for lowering"
                     {:expr expr :node-type (:type expr)}))))
@@ -345,11 +381,19 @@
                         (into lowered-body tail-stmts)
                         lowered-body)
         lowered-body'' (if final-expr-ir
-                         (conj lowered-body'
-                               (ir/return-node
-                                final-expr-ir
-                                (:nex-type final-expr-ir)
-                                (ir/object-jvm-type "java/lang/Object")))
+                         (if (= "Void" (:nex-type final-expr-ir))
+                           (conj lowered-body'
+                                 (ir/pop-node final-expr-ir)
+                                 (ir/return-node
+                                  (ir/const-node nil "Any"
+                                                 (ir/object-jvm-type "java/lang/Object"))
+                                  "Any"
+                                  (ir/object-jvm-type "java/lang/Object")))
+                           (conj lowered-body'
+                                 (ir/return-node
+                                  final-expr-ir
+                                  (:nex-type final-expr-ir)
+                                  (ir/object-jvm-type "java/lang/Object"))))
                          (conj lowered-body'
                                (ir/return-node
                                 (ir/const-node nil "Any"

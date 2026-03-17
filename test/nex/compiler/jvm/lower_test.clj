@@ -98,3 +98,23 @@
       (is (= "inc" (-> stmt :expr :name)))
       (is (= 1 (count (-> stmt :expr :args))))
       (is (= 4 (-> stmt :expr :args first :value))))))
+
+
+(deftest lower-builtin-target-call-to-call-runtime-test
+  (let [program {:type :program
+                 :imports []
+                 :interns []
+                 :classes []
+                 :functions []
+                 :statements [{:type :call
+                               :target {:type :identifier :name "numbers"}
+                               :method "length"
+                               :args []
+                               :has-parens false}]
+                 :calls []}
+        {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/TestBuiltinTarget"
+                                                       :var-types {"numbers" {:base-type "Array" :type-params ["Integer"]}}})
+        ret-expr (-> unit :body last :expr)]
+    (is (= :call-runtime (:op ret-expr)))
+    (is (= "method:length" (:helper ret-expr)))
+    (is (= 1 (count (:args ret-expr))))))
