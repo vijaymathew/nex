@@ -19,7 +19,7 @@
 (declare lower-statement)
 
 (def ^:private expression-node-types
-  #{:integer :real :string :char :boolean :nil :identifier :binary :call})
+  #{:integer :real :string :char :boolean :nil :identifier :binary :call :if})
 
 (defn make-lowering-env
   "Create the first lowering environment.
@@ -126,6 +126,24 @@
                                "/=" :neq}
                               op)
                          left-ir right-ir nex-type jvm-type)))
+
+    :if
+    (let [elseif (:elseif expr)
+          then-branch (:then expr)
+          else-branch (:else expr)]
+      (when (seq elseif)
+        (throw (ex-info "Elseif is not yet supported in lowering"
+                        {:expr expr})))
+      (when (or (not= 1 (count then-branch))
+                (not= 1 (count else-branch)))
+        (throw (ex-info "Only expression-shaped if branches are supported in lowering"
+                        {:expr expr})))
+      (let [test-ir (lower-expression env (:condition expr))
+            then-ir (lower-expression env (first then-branch))
+            else-ir (lower-expression env (first else-branch))
+            nex-type (infer-type env expr)
+            jvm-type (desc/nex-type->jvm-type nex-type)]
+        (ir/if-node test-ir [then-ir] [else-ir] nex-type jvm-type)))
 
     :call
     (if (and (nil? (:target expr))

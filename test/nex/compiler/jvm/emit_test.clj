@@ -164,3 +164,26 @@
       (.invoke eval-a nil (object-array [state]))
       (is (= 40 (runtime/state-get-value state "x")))
       (is (= 42 (.invoke eval-b nil (object-array [state])))))))
+
+(deftest compile-top-level-state-with-if-smoke-test
+  (testing "compiled cells support compare and if over shared top-level state"
+    (let [state-loader (loader/make-loader)
+          state (runtime/make-repl-state state-loader)
+          unit-a (-> (p/ast "x := 40")
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0054"
+                                             :var-types {"x" "Integer"}})
+                     :unit)
+          unit-b (-> (p/ast "if x > 0 then x + 2 else 0 end")
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0055"
+                                             :var-types {"x" "Integer"}})
+                     :unit)
+          class-a (loader/define-class! state-loader
+                                        "nex.repl.Cell_0054"
+                                        (emit/compile-unit->bytes unit-a))
+          class-b (loader/define-class! state-loader
+                                        "nex.repl.Cell_0055"
+                                        (emit/compile-unit->bytes unit-b))
+          eval-a (.getMethod class-a "eval" (into-array Class [(class state)]))
+          eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))]
+      (.invoke eval-a nil (object-array [state]))
+      (is (= 42 (.invoke eval-b nil (object-array [state])))))))

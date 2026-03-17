@@ -45,6 +45,21 @@
       (is (= :int (-> stmt :expr :jvm-type)))
       (is (= (ir/object-jvm-type "java/lang/Object") (:jvm-type stmt))))))
 
+(deftest lower-if-expression-to-return-test
+  (testing "final if expressions lower to a return of an ir if node"
+    (let [program (p/ast "if x > 0 then 1 else 2 end")
+          {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0045"
+                                                         :var-types {"x" "Integer"}})
+          stmt (first (:body unit))]
+      (is (= 1 (count (:body unit))))
+      (is (= :return (:op stmt)))
+      (is (= :if (-> stmt :expr :op)))
+      (is (= :compare (-> stmt :expr :test :op)))
+      (is (= :gt (-> stmt :expr :test :operator)))
+      (is (= :const (-> stmt :expr :then first :op)))
+      (is (= 1 (-> stmt :expr :then first :value)))
+      (is (= 2 (-> stmt :expr :else first :value))))))
+
 (deftest lower-top-level-identifier-and-assign-test
   (testing "top-level identifiers and assignments lower through REPL state ops"
     (let [program (p/ast "x := x + 1")

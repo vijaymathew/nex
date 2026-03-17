@@ -9,7 +9,7 @@
   The initial `eval` body ignores the IR and returns `null`."
   (:require [nex.compiler.jvm.descriptor :as desc]
             [nex.ir :as ir])
-  (:import [org.objectweb.asm ClassWriter MethodVisitor Opcodes]))
+  (:import [org.objectweb.asm ClassWriter Label MethodVisitor Opcodes]))
 
 (def ^:private class-version Opcodes/V17)
 (def ^:private repl-state-internal-name "nex/compiler/jvm/runtime/NexReplState")
@@ -144,6 +144,80 @@
     (throw (ex-info "Unsupported binary opcode emission"
                     {:operator operator :jvm-type jvm-type}))))
 
+(defn- compare-branch-opcode
+  [operator jvm-type]
+  (case [operator jvm-type]
+    [:gt :int] Opcodes/IF_ICMPGT
+    [:gte :int] Opcodes/IF_ICMPGE
+    [:lt :int] Opcodes/IF_ICMPLT
+    [:lte :int] Opcodes/IF_ICMPLE
+    [:eq :int] Opcodes/IF_ICMPEQ
+    [:neq :int] Opcodes/IF_ICMPNE
+
+    [:gt :boolean] Opcodes/IF_ICMPGT
+    [:gte :boolean] Opcodes/IF_ICMPGE
+    [:lt :boolean] Opcodes/IF_ICMPLT
+    [:lte :boolean] Opcodes/IF_ICMPLE
+    [:eq :boolean] Opcodes/IF_ICMPEQ
+    [:neq :boolean] Opcodes/IF_ICMPNE
+
+    [:gt :char] Opcodes/IF_ICMPGT
+    [:gte :char] Opcodes/IF_ICMPGE
+    [:lt :char] Opcodes/IF_ICMPLT
+    [:lte :char] Opcodes/IF_ICMPLE
+    [:eq :char] Opcodes/IF_ICMPEQ
+    [:neq :char] Opcodes/IF_ICMPNE
+
+    [:eq [:object "java/lang/Object"]] Opcodes/IF_ACMPEQ
+    [:neq [:object "java/lang/Object"]] Opcodes/IF_ACMPNE
+
+    nil))
+
+(defn- emit-numeric-compare!
+  [^MethodVisitor mv operator jvm-type]
+  (let [true-label (Label.)
+        end-label (Label.)
+        branch-op (compare-branch-opcode operator jvm-type)]
+    (.visitJumpInsn mv branch-op true-label)
+    (.visitInsn mv Opcodes/ICONST_0)
+    (.visitJumpInsn mv Opcodes/GOTO end-label)
+    (.visitLabel mv true-label)
+    (.visitInsn mv Opcodes/ICONST_1)
+    (.visitLabel mv end-label)))
+
+(defn- emit-long-or-double-compare!
+  [^MethodVisitor mv operator jvm-type]
+  (let [true-label (Label.)
+        end-label (Label.)
+        branch-op (case operator
+                    :gt Opcodes/IFGT
+                    :gte Opcodes/IFGE
+                    :lt Opcodes/IFLT
+                    :lte Opcodes/IFLE
+                    :eq Opcodes/IFEQ
+                    :neq Opcodes/IFNE
+                    (throw (ex-info "Unsupported compare operator"
+                                    {:operator operator :jvm-type jvm-type})))]
+    (.visitInsn mv (if (= :long jvm-type) Opcodes/LCMP Opcodes/DCMPL))
+    (.visitJumpInsn mv branch-op true-label)
+    (.visitInsn mv Opcodes/ICONST_0)
+    (.visitJumpInsn mv Opcodes/GOTO end-label)
+    (.visitLabel mv true-label)
+    (.visitInsn mv Opcodes/ICONST_1)
+    (.visitLabel mv end-label)))
+
+(defn- emit-object-compare!
+  [^MethodVisitor mv operator]
+  (let [true-label (Label.)
+        end-label (Label.)
+        branch-op (compare-branch-opcode operator (ir/object-jvm-type "java/lang/Object"))]
+    (.visitJumpInsn mv branch-op true-label)
+    (.visitInsn mv Opcodes/ICONST_0)
+    (.visitJumpInsn mv Opcodes/GOTO end-label)
+    (.visitLabel mv true-label)
+    (.visitInsn mv Opcodes/ICONST_1)
+    (.visitLabel mv end-label)))
+
 (defn- emit-load-values-map!
   [^MethodVisitor mv]
   (.visitVarInsn mv Opcodes/ALOAD 0)
@@ -200,6 +274,60 @@
                          :right-jvm-type right-type})))
       (.visitInsn mv (binary-opcode (:operator expr) (:jvm-type expr)))
       (:jvm-type expr))
+
+    :compare
+    (let [left-type (emit-expr! mv (:left expr))
+          right-type (emit-expr! mv (:right expr))]
+      (when (not= left-type right-type)
+        (throw (ex-info "Compare operands lowered to different JVM types"
+                        {:expr expr
+                         :left-jvm-type left-type
+                         :right-jvm-type right-type})))
+      (cond
+        (#{:int :boolean :char} left-type)
+        (emit-numeric-compare! mv (:operator expr) left-type)
+
+        (#{:long :double} left-type)
+        (emit-long-or-double-compare! mv (:operator expr) left-type)
+
+        (ir/object-jvm-type? left-type)
+        (do
+          (when-not (#{:eq :neq} (:operator expr))
+            (throw (ex-info "Only eq/neq object comparisons are supported"
+                            {:expr expr :jvm-type left-type})))
+          (emit-object-compare! mv (:operator expr)))
+
+        :else
+        (throw (ex-info "Unsupported compare emission type"
+                        {:expr expr :jvm-type left-type})))
+      (:jvm-type expr))
+
+    :if
+    (let [else-label (Label.)
+          end-label (Label.)
+          test-type (emit-expr! mv (:test expr))
+          then-exprs (:then expr)
+          else-exprs (:else expr)]
+      (when-not (= :boolean test-type)
+        (throw (ex-info "If test did not lower to boolean"
+                        {:expr expr :test-jvm-type test-type})))
+      (when (or (not= 1 (count then-exprs))
+                (not= 1 (count else-exprs)))
+        (throw (ex-info "If emission expects one expression per branch"
+                        {:expr expr})))
+      (.visitJumpInsn mv Opcodes/IFEQ else-label)
+      (let [then-type (emit-expr! mv (first then-exprs))
+            else-type (do
+                        (.visitJumpInsn mv Opcodes/GOTO end-label)
+                        (.visitLabel mv else-label)
+                        (emit-expr! mv (first else-exprs)))]
+        (when (not= then-type else-type)
+          (throw (ex-info "If branches lowered to different JVM types"
+                          {:expr expr
+                           :then-jvm-type then-type
+                           :else-jvm-type else-type})))
+        (.visitLabel mv end-label)
+        then-type))
 
     (throw (ex-info "Unsupported IR expression emission"
                     {:expr expr :op (:op expr)}))))
