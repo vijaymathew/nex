@@ -19,7 +19,7 @@
 (declare lower-statement)
 
 (def ^:private expression-node-types
-  #{:integer :real :string :char :boolean :nil :identifier :binary})
+  #{:integer :real :string :char :boolean :nil :identifier :binary :call})
 
 (defn make-lowering-env
   "Create the first lowering environment.
@@ -127,6 +127,15 @@
                               op)
                          left-ir right-ir nex-type jvm-type)))
 
+    :call
+    (if (and (nil? (:target expr))
+             (empty? (:args expr))
+             (not (:has-parens expr)))
+      (lower-expression env {:type :identifier
+                             :name (:method expr)})
+      (throw (ex-info "Unsupported call expression for lowering"
+                      {:expr expr})))
+
     (throw (ex-info "Unsupported expression node for lowering"
                     {:expr expr :node-type (:type expr)}))))
 
@@ -184,11 +193,13 @@
         expr-tail? (contains? expression-node-types (:type (last statements)))
         leading-statements (if expr-tail? (pop statements) statements)
         [env' lowered-body] (lower-statements env leading-statements)
+        final-expr-ir (when expr-tail?
+                        (lower-expression env' (last statements)))
         lowered-body' (if expr-tail?
                         (conj lowered-body
                               (ir/return-node
-                               (lower-expression env' (last statements))
-                               (infer-type env' (last statements))
+                               final-expr-ir
+                               (:nex-type final-expr-ir)
                                (ir/object-jvm-type "java/lang/Object")))
                         (conj lowered-body
                               (ir/return-node

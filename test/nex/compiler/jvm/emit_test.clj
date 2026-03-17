@@ -92,3 +92,15 @@
           method (.getMethod cls "eval" (into-array Class [(class state)]))
           result (.invoke method nil (object-array [state]))]
       (is (= 42 result)))))
+
+(deftest lower-and-compile-let-expression-smoke-test
+  (testing "compiled repl cells support local let bindings end-to-end"
+    (let [program (p/ast "let x := 40\nx")
+          {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0043"})
+          bytecode (emit/compile-unit->bytes unit)
+          l (loader/make-loader)
+          cls (loader/define-class! l "nex.repl.Cell_0043" bytecode)
+          state (runtime/make-repl-state l)
+          method (.getMethod cls "eval" (into-array Class [(class state)]))
+          result (.invoke method nil (object-array [state]))]
+      (is (= 40 result)))))

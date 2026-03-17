@@ -85,6 +85,26 @@
     (throw (ex-info "Unsupported constant emission"
                     {:value value :jvm-type jvm-type}))))
 
+(defn- local-load-op
+  [jvm-type]
+  (cond
+    (#{:int :boolean :char} jvm-type) Opcodes/ILOAD
+    (= :long jvm-type) Opcodes/LLOAD
+    (= :double jvm-type) Opcodes/DLOAD
+    (ir/object-jvm-type? jvm-type) Opcodes/ALOAD
+    :else (throw (ex-info "Unsupported local load type"
+                          {:jvm-type jvm-type}))))
+
+(defn- local-store-op
+  [jvm-type]
+  (cond
+    (#{:int :boolean :char} jvm-type) Opcodes/ISTORE
+    (= :long jvm-type) Opcodes/LSTORE
+    (= :double jvm-type) Opcodes/DSTORE
+    (ir/object-jvm-type? jvm-type) Opcodes/ASTORE
+    :else (throw (ex-info "Unsupported local store type"
+                          {:jvm-type jvm-type}))))
+
 (declare emit-expr!)
 (declare emit-stmt!)
 
@@ -94,6 +114,11 @@
     :const
     (do
       (emit-const! mv expr)
+      (:jvm-type expr))
+
+    :local
+    (do
+      (.visitVarInsn mv (local-load-op (:jvm-type expr)) (:slot expr))
       (:jvm-type expr))
 
     (throw (ex-info "Unsupported IR expression emission"
@@ -122,6 +147,11 @@
 
     :pop
     (emit-pop! mv (emit-expr! mv (:expr stmt)))
+
+    :set-local
+    (let [expr-jvm-type (emit-expr! mv (:expr stmt))]
+      (.visitVarInsn mv (local-store-op (:jvm-type stmt)) (:slot stmt))
+      expr-jvm-type)
 
     (throw (ex-info "Unsupported IR statement emission"
                     {:stmt stmt :op (:op stmt)}))))
