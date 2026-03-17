@@ -26,6 +26,8 @@
 (declare visible-class-map)
 (declare normalize-call-target)
 (declare function-return-type)
+(declare lookup-class-constant)
+(declare constant-nex-type)
 
 (def ^:private expression-node-types
   #{:integer :real :string :char :boolean :nil :identifier :binary :call :if :this})
@@ -113,6 +115,9 @@
               (some-> (current-class-def env)
                       (class-field-def (:name expr))
                       :field-type)
+              (some-> (and (:current-class env)
+                           (lookup-class-constant env (:current-class env) (:name expr)))
+                      (#(constant-nex-type env %)))
               (get (:var-types env) (:name expr)))
 
           :create
@@ -233,6 +238,20 @@
   [class-def]
   (filter #(= :field (:type %)) (class-members class-def)))
 
+(defn- feature-members
+  [class-def]
+  (mapcat (fn [section]
+            (when (= (:type section) :feature-section)
+              (map #(if (:visibility %)
+                      %
+                      (assoc % :visibility (:visibility section)))
+                   (:members section))))
+          (:body class-def)))
+
+(defn- public-member?
+  [member]
+  (not= :private (-> member :visibility :type)))
+
 (defn- class-methods
   [class-def]
   (filter #(= :method (:type %)) (class-members class-def)))
@@ -244,6 +263,29 @@
 (defn- class-field-def
   [class-def field-name]
   (some #(when (= (:name %) field-name) %) (class-fields class-def)))
+
+(defn- lookup-class-constant
+  [env class-name constant-name]
+  (let [class-map (visible-class-map env)]
+    (letfn [(lookup-constant [cn visited inherited?]
+              (when (and cn (not (contains? visited cn)))
+                (let [class-def (get class-map cn)
+                      visited' (conj visited cn)
+                      own-constant (when class-def
+                                     (some (fn [member]
+                                             (when (and (= (:type member) :field)
+                                                        (:constant? member)
+                                                        (= (:name member) constant-name)
+                                                        (or (not inherited?)
+                                                            (public-member? member)))
+                                               (assoc member :declaring-class cn)))
+                                           (feature-members class-def)))]
+                  (or own-constant
+                      (when class-def
+                        (some (fn [{:keys [parent]}]
+                                (lookup-constant parent visited' true))
+                              (:parents class-def)))))))]
+      (lookup-constant class-name #{} false))))
 
 (defn- class-method-def
   [class-def method-name arity]
@@ -259,6 +301,12 @@
            %)
         (class-constructors class-def)))
 
+(defn- constant-nex-type
+  [env constant]
+  (or (:field-type constant)
+      (when-let [value-expr (:value constant)]
+        (infer-type env value-expr))))
+
 (defn- field-info-map
   [env class-def]
   (into {}
@@ -268,14 +316,14 @@
                  :field (:name field)
                  :nex-type (:field-type field)
                  :jvm-type (resolve-jvm-type env (:field-type field))}]))
-        (class-fields class-def)))
+        (remove :constant? (class-fields class-def))))
 
 (defn- field-type-map
   [class-def]
   (into {}
         (map (fn [field]
                [(:name field) (:field-type field)]))
-        (class-fields class-def)))
+        (remove :constant? (class-fields class-def))))
 
 (defn- class-jvm-meta
   [env class-name]
@@ -349,13 +397,22 @@
                                          (resolve-jvm-type env (:this-type env)))
                            nex-type
                            jvm-type)
-        (let [nex-type (or (get (:var-types env) (:name expr))
-                           (infer-type env expr))
-              jvm-type (resolve-jvm-type env nex-type)]
-          (if (:top-level? env)
-            (ir/top-get-node (:name expr) nex-type jvm-type)
-            (throw (ex-info "Unknown local in non-top-level lowering"
-                            {:name (:name expr)}))))))
+        (if-let [constant (and (:current-class env)
+                               (lookup-class-constant env (:current-class env) (:name expr)))]
+          (let [owner (:declaring-class constant)
+                nex-type (constant-nex-type env constant)
+                jvm-type (resolve-jvm-type env nex-type)]
+            (ir/static-field-get-node (:internal-name (class-jvm-meta env owner))
+                                      (:name constant)
+                                      nex-type
+                                      jvm-type))
+          (let [nex-type (or (get (:var-types env) (:name expr))
+                             (infer-type env expr))
+                jvm-type (resolve-jvm-type env nex-type)]
+            (if (:top-level? env)
+              (ir/top-get-node (:name expr) nex-type jvm-type)
+              (throw (ex-info "Unknown local in non-top-level lowering"
+                              {:name (:name expr)})))))))
 
     :this
     (if (:this-type env)
@@ -451,7 +508,12 @@
              (not (:has-parens expr)))
       (lower-expression env {:type :identifier
                              :name (:method expr)})
-      (let [target-expr (normalize-call-target (:target expr))
+      (let [raw-target (:target expr)
+            class-target-name (when (string? raw-target)
+                                (some #(when (= (:name %) raw-target)
+                                         (:name %))
+                                      (:classes env)))
+            target-expr (normalize-call-target raw-target)
             arg-irs (mapv #(lower-expression env %) (:args expr))]
         (if (nil? target-expr)
           (cond
@@ -478,19 +540,34 @@
             (let [nex-type (infer-type env expr)
                   jvm-type (resolve-jvm-type env nex-type)]
               (ir/call-repl-fn-node (:method expr) arg-irs nex-type jvm-type)))
-          (let [target-type (infer-type env target-expr)]
-            (if (builtin-runtime-receiver-type? target-type)
-              (let [target-ir (lower-expression env target-expr)
-                    nex-type (infer-type env expr)
+          (cond
+            (and class-target-name (false? (:has-parens expr)))
+            (if-let [constant (lookup-class-constant env class-target-name (:method expr))]
+              (let [owner (:declaring-class constant)
+                    nex-type (constant-nex-type env constant)
                     jvm-type (resolve-jvm-type env nex-type)]
-                (ir/call-runtime-node (str "method:" (:method expr))
-                                      (into [target-ir] arg-irs)
-                                      nex-type
-                                      jvm-type))
-              (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
-                  (throw (ex-info "Unsupported target call expression for lowering"
-                                  {:expr expr
-                                   :target-type target-type}))))))))
+                (ir/static-field-get-node (:internal-name (class-jvm-meta env owner))
+                                          (:name constant)
+                                          nex-type
+                                          jvm-type))
+              (throw (ex-info "Unsupported class-target access during lowering"
+                              {:expr expr
+                               :target-class class-target-name})))
+
+            :else
+            (let [target-type (infer-type env target-expr)]
+              (if (builtin-runtime-receiver-type? target-type)
+                (let [target-ir (lower-expression env target-expr)
+                      nex-type (infer-type env expr)
+                      jvm-type (resolve-jvm-type env nex-type)]
+                  (ir/call-runtime-node (str "method:" (:method expr))
+                                        (into [target-ir] arg-irs)
+                                        nex-type
+                                        jvm-type))
+                (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
+                    (throw (ex-info "Unsupported target call expression for lowering"
+                                    {:expr expr
+                                     :target-type target-type})))))))))
 
     (throw (ex-info "Unsupported expression node for lowering"
                     {:expr expr :node-type (:type expr)}))))
@@ -717,11 +794,28 @@
                        {:name (:name field)
                         :nex-type (:field-type field)
                         :jvm-type (resolve-jvm-type {:compiled-classes compiled-classes} (:field-type field))})
-                     (class-fields class-def))]
+                     (remove :constant? (class-fields class-def)))
+        constants (mapv (fn [field]
+                          (let [constant-env (make-lowering-env {:classes (:classes opts)
+                                                                 :functions visible-functions
+                                                                 :imports visible-imports
+                                                                 :compiled-classes compiled-classes
+                                                                 :current-class class-name
+                                                                 :this-type class-name
+                                                                 :top-level? false
+                                                                 :repl? true})
+                                nex-type (or (:field-type field)
+                                             (infer-type constant-env (:value field)))]
+                            {:name (:name field)
+                             :nex-type nex-type
+                             :jvm-type (resolve-jvm-type {:compiled-classes compiled-classes} nex-type)
+                             :value (lower-expression constant-env (:value field))}))
+                        (filter :constant? (class-fields class-def)))]
     {:name class-name
      :jvm-name (:jvm-name class-meta)
      :internal-name (:internal-name class-meta)
      :fields fields
+     :constants constants
      :constructors constructors
      :methods methods}))
 
@@ -781,6 +875,7 @@
      :unit (ir/unit {:name (or (:name opts) "nex/repl/Cell_0001")
                      :kind :repl-cell
                      :classes (mapv #(lower-class-def % {:compiled-classes (:compiled-classes opts)
+                                                         :classes visible-classes
                                                          :functions visible-functions
                                                          :imports (:imports program)})
                                     actual-classes)

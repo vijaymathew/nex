@@ -169,6 +169,13 @@
    :nex-type nex-type
    :jvm-type jvm-type})
 
+(defn static-field-get-node [owner field nex-type jvm-type]
+  {:op :static-field-get
+   :owner owner
+   :field field
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
 (defn field-set-node [owner field target expr nex-type jvm-type]
   {:op :field-set
    :owner owner

@@ -82,6 +82,12 @@
                     :flags Opcodes/ACC_PUBLIC
                     :jvm-type jvm-type})
                  (:fields class-spec))
+   :static-fields (mapv (fn [{:keys [name jvm-type]}]
+                          {:name name
+                           :descriptor (desc/jvm-type->descriptor jvm-type)
+                           :flags (+ Opcodes/ACC_PUBLIC Opcodes/ACC_STATIC Opcodes/ACC_FINAL)
+                           :jvm-type jvm-type})
+                        (:constants class-spec))
    :methods (vec
              (concat
               [{:name "<init>"
@@ -89,7 +95,13 @@
                 :flags Opcodes/ACC_PUBLIC
                 :kind :user-default-constructor
                 :owner (:internal-name class-spec)
-                :fields (:fields class-spec)}]
+                :fields (:fields class-spec)}
+               {:name "<clinit>"
+                :descriptor "()V"
+                :flags (+ Opcodes/ACC_STATIC)
+                :kind :class-initializer
+                :owner (:internal-name class-spec)
+                :constants (:constants class-spec)}]
               (map (fn [fn-node]
                      {:name (:emitted-name fn-node)
                       :descriptor (repl-fn-method-descriptor)
@@ -431,6 +443,15 @@
                        (desc/jvm-type->descriptor (:jvm-type expr)))
       (:jvm-type expr))
 
+    :static-field-get
+    (do
+      (.visitFieldInsn mv
+                       Opcodes/GETSTATIC
+                       (:owner expr)
+                       (:field expr)
+                       (desc/jvm-type->descriptor (:jvm-type expr)))
+      (:jvm-type expr))
+
     :call-repl-fn
     (do
       (emit-state-load-functions-map! mv state-slot)
@@ -674,11 +695,27 @@
   (let [fv (.visitField cw flags name descriptor nil nil)]
     (.visitEnd fv)))
 
+(defn- emit-class-initializer!
+  [^ClassWriter cw {:keys [name descriptor flags owner constants]}]
+  (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
+    (.visitCode mv)
+    (doseq [{:keys [name jvm-type value]} constants]
+      (emit-expr! mv value 0)
+      (.visitFieldInsn mv
+                       Opcodes/PUTSTATIC
+                       owner
+                       name
+                       (desc/jvm-type->descriptor jvm-type)))
+    (.visitInsn mv Opcodes/RETURN)
+    (.visitMaxs mv 0 0)
+    (.visitEnd mv)))
+
 (defn emit-method!
   [^ClassWriter cw method-spec]
   (case (:kind method-spec)
     :default-constructor (emit-default-constructor! cw method-spec)
     :user-default-constructor (emit-user-default-constructor! cw method-spec)
+    :class-initializer (emit-class-initializer! cw method-spec)
     :eval-from-ir (emit-eval-method! cw method-spec)
     :repl-fn (emit-repl-fn-method! cw method-spec)
     :instance-ctor-fn (emit-instance-fn-method! cw method-spec)
@@ -688,7 +725,7 @@
 
 (defn emit-class
   "Emit one minimal JVM class from a class spec and return bytecode."
-  [{:keys [internal-name super-name interfaces flags methods fields]}]
+  [{:keys [internal-name super-name interfaces flags methods fields static-fields]}]
   (let [cw (ClassWriter. (+ ClassWriter/COMPUTE_FRAMES
                             ClassWriter/COMPUTE_MAXS))]
     (.visit cw
@@ -699,6 +736,8 @@
             super-name
             (when (seq interfaces) (into-array String interfaces)))
     (doseq [field fields]
+      (emit-field! cw field))
+    (doseq [field static-fields]
       (emit-field! cw field))
     (doseq [method methods]
       (emit-method! cw method))

@@ -95,14 +95,21 @@
 
 (defn- user-target-call-in-ctx?
   [ctx expr]
-  (let [target-expr (normalize-call-target (:target expr))
-        target-type (when target-expr
+  (let [raw-target (:target expr)
+        class-target-def (when (string? raw-target)
+                           (some #(when (= (:name %) raw-target) %) (:classes ctx)))
+        target-expr (normalize-call-target raw-target)
+        target-type (when (and target-expr (not class-target-def))
                       (infer-type-in-ctx ctx target-expr))
-        base (base-type-name target-type)
-        class-def (some #(when (= (:name %) base) %) (:classes ctx))
+        base (or (:name class-target-def) (base-type-name target-type))
+        class-def (or class-target-def
+                      (some #(when (= (:name %) base) %) (:classes ctx)))
         field-name (:method expr)
         field-def (when (and class-def (false? (:has-parens expr)))
                     (some #(when (and (= :field (:type %))
+                                      (if class-target-def
+                                        (:constant? %)
+                                        true)
                                       (= field-name (:name %)))
                              %)
                           (mapcat :members
@@ -117,8 +124,8 @@
                            (mapcat :members
                                    (filter #(= :feature-section (:type %))
                                            (:body class-def)))))]
-    (and target-expr
-         (supported-expr-in-ctx? ctx target-expr)
+    (and (or class-target-def target-expr)
+         (or class-target-def (supported-expr-in-ctx? ctx target-expr))
          (contains? (:compiled-class-names ctx) base)
          (or field-def method-def))))
 
@@ -275,9 +282,13 @@
       (let [new-class-map (allocate-compiled-class-metadata session actual-classes)
           compiled-map (merge @(:compiled-classes session) new-class-map)
           visible-functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
+          visible-classes (vec (concat (vals @(:class-asts session))
+                                       actual-classes
+                                       (keep :class-def visible-functions)))
           visible-imports @(:import-asts session)]
         (doseq [class-def actual-classes]
           (let [lowered (lower/lower-class-def class-def {:compiled-classes compiled-map
+                                                          :classes visible-classes
                                                           :functions visible-functions
                                                           :imports visible-imports})
                 bytecode (emit/compile-user-class->bytes lowered)]

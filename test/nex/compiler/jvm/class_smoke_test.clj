@@ -55,6 +55,20 @@ feature
   end
 end")
 
+(def ^:private frame-constants-program
+  "class Frame
+feature
+  HELLO: String = \"hello\"
+  MAX_WIDTH = 450
+
+  demo(): Integer
+  do
+    print(HELLO)
+    print(Frame.MAX_WIDTH)
+    result := MAX_WIDTH + 10
+  end
+end")
+
 (deftest compiled-class-batch-smoke-test
   (testing "compiled helper can define a simple class, create an instance, mutate it through methods, and read a field"
     (let [session (compiled-repl/make-session)
@@ -130,3 +144,19 @@ end")
         (is (= "Counter" (runtime/state-get-type (:state session) "c")))
         (is (str/includes? call-output "8"))
         (is (str/includes? field-output "8"))))))
+
+(deftest compiled-class-constants-test
+  (testing "compiled helper supports class constants as static fields"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str frame-constants-program
+                                                                     "\n\n"
+                                                                     "let f: Frame := create Frame\n"
+                                                                     "f.demo()")))
+          const-result (compiled-repl/compile-and-eval! session
+                                                        (p/ast "Frame.MAX_WIDTH"))]
+      (is (:compiled? define-result))
+      (is (:compiled? const-result))
+      (is (= ["\"hello\"" "450"] (:output define-result)))
+      (is (= 460 (:result define-result)))
+      (is (= 450 (:result const-result))))))
