@@ -9,9 +9,12 @@
   The initial `eval` body ignores the IR and returns `null`."
   (:require [nex.compiler.jvm.descriptor :as desc]
             [nex.ir :as ir])
-  (:import [org.objectweb.asm ClassWriter Label MethodVisitor Opcodes]))
+  (:import [org.objectweb.asm ClassWriter MethodVisitor Opcodes]))
 
 (def ^:private class-version Opcodes/V17)
+(def ^:private repl-state-internal-name "nex/compiler/jvm/runtime/NexReplState")
+(def ^:private atom-internal-name "clojure/lang/Atom")
+(def ^:private hashmap-internal-name "java/util/HashMap")
 
 (defn eval-method-descriptor
   []
@@ -56,6 +59,21 @@
                       "valueOf"
                       (desc/boxing-descriptor jvm-type)
                       false)))
+
+(defn- emit-unbox-or-cast!
+  [^MethodVisitor mv jvm-type]
+  (cond
+    (contains? ir/primitive-jvm-types jvm-type)
+    (let [{:keys [owner name descriptor]} (desc/unboxing-method jvm-type)]
+      (.visitTypeInsn mv Opcodes/CHECKCAST owner)
+      (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL owner name descriptor false))
+
+    (and (ir/object-jvm-type? jvm-type)
+         (not= (ir/object-jvm-type "java/lang/Object") jvm-type))
+    (.visitTypeInsn mv Opcodes/CHECKCAST (second jvm-type))
+
+    :else
+    nil))
 
 (defn- emit-const!
   [^MethodVisitor mv {:keys [value jvm-type]}]
@@ -105,6 +123,44 @@
     :else (throw (ex-info "Unsupported local store type"
                           {:jvm-type jvm-type}))))
 
+(defn- binary-opcode
+  [operator jvm-type]
+  (case [operator jvm-type]
+    [:add :int] Opcodes/IADD
+    [:sub :int] Opcodes/ISUB
+    [:mul :int] Opcodes/IMUL
+    [:div :int] Opcodes/IDIV
+
+    [:add :long] Opcodes/LADD
+    [:sub :long] Opcodes/LSUB
+    [:mul :long] Opcodes/LMUL
+    [:div :long] Opcodes/LDIV
+
+    [:add :double] Opcodes/DADD
+    [:sub :double] Opcodes/DSUB
+    [:mul :double] Opcodes/DMUL
+    [:div :double] Opcodes/DDIV
+
+    (throw (ex-info "Unsupported binary opcode emission"
+                    {:operator operator :jvm-type jvm-type}))))
+
+(defn- emit-load-values-map!
+  [^MethodVisitor mv]
+  (.visitVarInsn mv Opcodes/ALOAD 0)
+  (.visitFieldInsn mv
+                   Opcodes/GETFIELD
+                   repl-state-internal-name
+                   "values"
+                   "Ljava/lang/Object;")
+  (.visitTypeInsn mv Opcodes/CHECKCAST atom-internal-name)
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    atom-internal-name
+                    "deref"
+                    "()Ljava/lang/Object;"
+                    false)
+  (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name))
+
 (declare emit-expr!)
 (declare emit-stmt!)
 
@@ -119,6 +175,30 @@
     :local
     (do
       (.visitVarInsn mv (local-load-op (:jvm-type expr)) (:slot expr))
+      (:jvm-type expr))
+
+    :top-get
+    (do
+      (emit-load-values-map! mv)
+      (.visitLdcInsn mv ^String (:name expr))
+      (.visitMethodInsn mv
+                        Opcodes/INVOKEVIRTUAL
+                        hashmap-internal-name
+                        "get"
+                        "(Ljava/lang/Object;)Ljava/lang/Object;"
+                        false)
+      (emit-unbox-or-cast! mv (:jvm-type expr))
+      (:jvm-type expr))
+
+    :binary
+    (let [left-type (emit-expr! mv (:left expr))
+          right-type (emit-expr! mv (:right expr))]
+      (when (not= left-type right-type)
+        (throw (ex-info "Binary operands lowered to different JVM types"
+                        {:expr expr
+                         :left-jvm-type left-type
+                         :right-jvm-type right-type})))
+      (.visitInsn mv (binary-opcode (:operator expr) (:jvm-type expr)))
       (:jvm-type expr))
 
     (throw (ex-info "Unsupported IR expression emission"
@@ -152,6 +232,21 @@
     (let [expr-jvm-type (emit-expr! mv (:expr stmt))]
       (.visitVarInsn mv (local-store-op (:jvm-type stmt)) (:slot stmt))
       expr-jvm-type)
+
+    :top-set
+    (do
+      (emit-load-values-map! mv)
+      (.visitLdcInsn mv ^String (:name stmt))
+      (let [expr-jvm-type (emit-expr! mv (:expr stmt))]
+        (when (contains? ir/primitive-jvm-types expr-jvm-type)
+          (emit-box! mv expr-jvm-type)))
+      (.visitMethodInsn mv
+                        Opcodes/INVOKEVIRTUAL
+                        hashmap-internal-name
+                        "put"
+                        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                        false)
+      (.visitInsn mv Opcodes/POP))
 
     (throw (ex-info "Unsupported IR statement emission"
                     {:stmt stmt :op (:op stmt)}))))

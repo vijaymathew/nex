@@ -104,3 +104,63 @@
           method (.getMethod cls "eval" (into-array Class [(class state)]))
           result (.invoke method nil (object-array [state]))]
       (is (= 40 result)))))
+
+(deftest lower-and-compile-let-plus-expression-smoke-test
+  (testing "compiled repl cells support arithmetic over local lets end-to-end"
+    (let [program (p/ast "let x := 40\nx + 2")
+          {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0044"})
+          bytecode (emit/compile-unit->bytes unit)
+          l (loader/make-loader)
+          cls (loader/define-class! l "nex.repl.Cell_0044" bytecode)
+          state (runtime/make-repl-state l)
+          method (.getMethod cls "eval" (into-array Class [(class state)]))
+          result (.invoke method nil (object-array [state]))]
+      (is (= 42 result)))))
+
+(deftest compile-top-set-and-top-get-smoke-test
+  (testing "compiled repl cells can persist top-level values through NexReplState"
+    (let [state-loader (loader/make-loader)
+          state (runtime/make-repl-state state-loader)
+          unit-a (-> (p/ast "score := 40")
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0050"
+                                             :var-types {"score" "Integer"}})
+                     :unit)
+          unit-b (-> (p/ast "score")
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0051"
+                                             :var-types {"score" "Integer"}})
+                     :unit)
+          class-a (loader/define-class! state-loader
+                                        "nex.repl.Cell_0050"
+                                        (emit/compile-unit->bytes unit-a))
+          class-b (loader/define-class! state-loader
+                                        "nex.repl.Cell_0051"
+                                        (emit/compile-unit->bytes unit-b))
+          eval-a (.getMethod class-a "eval" (into-array Class [(class state)]))
+          eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))]
+      (.invoke eval-a nil (object-array [state]))
+      (is (= 40 (runtime/state-get-value state "score")))
+      (is (= 40 (.invoke eval-b nil (object-array [state])))))))
+
+(deftest compile-multi-cell-repl-state-smoke-test
+  (testing "compiled cells share top-level state across multiple evaluations"
+    (let [state-loader (loader/make-loader)
+          state (runtime/make-repl-state state-loader)
+          unit-a (-> (p/ast "x := 40")
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0052"
+                                             :var-types {"x" "Integer"}})
+                     :unit)
+          unit-b (-> (p/ast "x + 2")
+                     (lower/lower-repl-cell {:name "nex/repl/Cell_0053"
+                                             :var-types {"x" "Integer"}})
+                     :unit)
+          class-a (loader/define-class! state-loader
+                                        "nex.repl.Cell_0052"
+                                        (emit/compile-unit->bytes unit-a))
+          class-b (loader/define-class! state-loader
+                                        "nex.repl.Cell_0053"
+                                        (emit/compile-unit->bytes unit-b))
+          eval-a (.getMethod class-a "eval" (into-array Class [(class state)]))
+          eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))]
+      (.invoke eval-a nil (object-array [state]))
+      (is (= 40 (runtime/state-get-value state "x")))
+      (is (= 42 (.invoke eval-b nil (object-array [state])))))))
