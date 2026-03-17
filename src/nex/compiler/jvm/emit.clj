@@ -547,8 +547,10 @@
                         "invoke"
                         "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
                         false)
-      (emit-unbox-or-cast! mv (:jvm-type expr))
-      (:jvm-type expr))
+      (if (= :void (:jvm-type expr))
+        (do (.visitInsn mv Opcodes/POP) :void)
+        (do (emit-unbox-or-cast! mv (:jvm-type expr))
+            (:jvm-type expr))))
 
     :binary
     (let [left-type (emit-expr! mv (:left expr) state-slot)
@@ -675,6 +677,19 @@
 
     :call-runtime
     (emit-pop! mv (emit-expr! mv stmt state-slot))
+
+    :loop
+    (let [loop-label (Label.)
+          end-label (Label.)]
+      (doseq [init-stmt (:init stmt)]
+        (emit-stmt! mv init-stmt state-slot))
+      (.visitLabel mv loop-label)
+      (let [test-type (emit-expr! mv (:test stmt) state-slot)]
+        (.visitJumpInsn mv Opcodes/IFNE end-label))
+      (doseq [body-stmt (:body stmt)]
+        (emit-stmt! mv body-stmt state-slot))
+      (.visitJumpInsn mv Opcodes/GOTO loop-label)
+      (.visitLabel mv end-label))
 
     (throw (ex-info "Unsupported IR statement emission"
                     {:stmt stmt :op (:op stmt)}))))

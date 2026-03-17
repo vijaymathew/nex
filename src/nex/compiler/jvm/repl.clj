@@ -44,6 +44,7 @@
 (declare session-var-types)
 (declare builtin-target-call-in-ctx?)
 (declare user-target-call-in-ctx?)
+(declare advance-eligibility-ctx)
 
 (def ^:private builtin-runtime-receiver-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
@@ -242,6 +243,18 @@
     :member-assign (and (supported-expr-in-ctx? ctx (or (:object stmt) {:type :this}))
                         (supported-expr-in-ctx? ctx (:value stmt)))
     :call (supported-expr-in-ctx? ctx stmt)
+    :loop (let [[init-ok? ctx-after-init]
+                (reduce (fn [[ok? c] init-stmt]
+                          (if (and ok? (supported-stmt-in-ctx? c init-stmt))
+                            [true (advance-eligibility-ctx c init-stmt)]
+                            (reduced [false c])))
+                        [true ctx]
+                        (:init stmt))]
+            (and init-ok?
+                 (nil? (:invariant stmt))
+                 (nil? (:variant stmt))
+                 (supported-expr-in-ctx? ctx-after-init (:until stmt))
+                 (every? #(supported-stmt-in-ctx? ctx-after-init %) (:body stmt))))
     (supported-expr-in-ctx? ctx stmt)))
 
 (defn- advance-eligibility-ctx

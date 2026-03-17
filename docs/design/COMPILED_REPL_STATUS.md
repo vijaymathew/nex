@@ -133,6 +133,10 @@ The compiled REPL path currently supports:
 - builtin lowering through `:call-runtime`
   - unqualified builtins
   - builtin-style feature calls on runtime-backed builtin receiver types
+- loops
+  - `from/until/do`
+  - `repeat` (desugared to `from/until/do`)
+  - no invariant or variant checking yet
 
 ## Runtime-Backed Receiver Types
 
@@ -164,9 +168,8 @@ These still fall outside the compiled subset and therefore deopt to the interpre
 - constructor/object allocation codegen in the compiled REPL path
 - inheritance-aware compiled execution
 - loops
-  - `from/until/do`
-  - `repeat`
   - `across`
+  - loop invariant and variant checking
 - `case`
 - `select`
 - exceptions
@@ -206,9 +209,7 @@ Good candidates for the compiled path today:
 
 Likely deopt triggers today:
 
-- class work
 - imports and interns
-- loops
 - exceptions
 - contracts
 - general object-oriented behavior beyond top-level function handling
@@ -287,16 +288,6 @@ let x: Integer := 40
 ```
 
 The internal compiled helper supports top-level `let`, but the interactive REPL still wraps it and sends it through the interpreter path.
-
-```nex
-from
-  let i := 0
-until
-  i = 10
-do
-  i := i + 1
-end
-```
 
 ```nex
 select

@@ -192,3 +192,23 @@ create Shape")
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Unsupported create of deferred class"
                             (lower/lower-expression env (first (:statements program))))))))
+
+(deftest lower-loop-basic-test
+  (testing "compiled lowering lowers a simple from/until/do loop to :loop IR"
+    (let [program (p/ast "from
+  let i := 0
+until
+  i = 10
+do
+  i := i + 1
+end")
+          env (lower/make-lowering-env {:top-level? true})
+          loop-stmt (first (:statements program))
+          [env' loop-ir] (lower/lower-statement env loop-stmt)]
+      (is (= :loop (:op loop-ir)))
+      (is (= 1 (count (:init loop-ir))))
+      (is (= :top-set (:op (first (:init loop-ir)))))
+      (is (some? (:test loop-ir)))
+      (is (= :compare (:op (:test loop-ir))))
+      (is (= 1 (count (:body loop-ir))))
+      (is (= :top-set (:op (first (:body loop-ir))))))))

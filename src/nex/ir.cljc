@@ -217,6 +217,14 @@
    :nex-type nex-type
    :jvm-type jvm-type})
 
+(defn loop-node [init test body]
+  {:op :loop
+   :init (vec init)
+   :test test
+   :body (vec body)
+   :nex-type "Void"
+   :jvm-type :void})
+
 (defn pop-node [expr]
   {:op :pop
    :expr expr})

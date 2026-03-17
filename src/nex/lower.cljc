@@ -18,6 +18,7 @@
 
 (declare lower-expression)
 (declare lower-statement)
+(declare lower-statements)
 (declare lower-class-def)
 (declare if-branch-expression)
 (declare current-class-def)
@@ -915,6 +916,12 @@
                                           (resolve-jvm-type env parent-name))]
         [env (ir/pop-node call-ir)])
       [env (ir/pop-node (lower-expression env stmt))])
+
+    (= :loop (:type stmt))
+    (let [[env-after-init lowered-init] (lower-statements env (:init stmt))
+          test-ir (lower-expression env-after-init (:until stmt))
+          [_ lowered-body] (lower-statements env-after-init (:body stmt))]
+      [env (ir/loop-node lowered-init test-ir lowered-body)])
 
     (contains? expression-node-types (:type stmt))
     [env (ir/pop-node (lower-expression env stmt))]

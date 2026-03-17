@@ -266,3 +266,67 @@ end")
       (is (= 10 (:result inherited-a)))
       (is (= 20 (:result inherited-b)))
       (is (= 30 (:result parent-sum))))))
+
+;; ---- Loop support ----
+
+(deftest compiled-loop-basic-sum-test
+  (testing "compiled helper can execute a simple from/until/do loop that sums integers"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval! session
+                   (p/ast "let sum := 0
+from
+  let i := 0
+until
+  i = 10
+do
+  sum := sum + i
+  i := i + 1
+end
+sum"))]
+      (is (:compiled? result))
+      (is (= 45 (:result result))))))
+
+(deftest compiled-loop-repeat-style-test
+  (testing "compiled helper can execute a repeat-style loop (desugared to from/until)"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval! session
+                   (p/ast "let count := 0
+repeat 5 do
+  count := count + 1
+end
+count"))]
+      (is (:compiled? result))
+      (is (= 5 (:result result))))))
+
+(deftest compiled-loop-with-print-test
+  (testing "compiled helper can execute a loop with print calls"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval! session
+                   (p/ast "from
+  let i := 0
+until
+  i = 3
+do
+  println(i)
+  i := i + 1
+end"))]
+      (is (:compiled? result))
+      (is (= ["0" "1" "2"] (:output result))))))
+
+(deftest compiled-loop-cross-cell-test
+  (testing "compiled loop can modify top-level variables across cells"
+    (let [session (compiled-repl/make-session)
+          _ (compiled-repl/compile-and-eval! session
+              (p/ast "let total := 0"))
+          result (compiled-repl/compile-and-eval! session
+                   (p/ast "from
+  let i := 1
+until
+  i > 5
+do
+  total := total + i
+  i := i + 1
+end
+total"))]
+      (is (:compiled? result))
+      (is (= 15 (:result result))))))
