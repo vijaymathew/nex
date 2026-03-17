@@ -43,6 +43,17 @@
   (and (= 1 (count branch))
        (supported-expr-in-ctx? ctx (first branch))))
 
+(defn normalize-program-ast
+  "Normalize legacy program shapes so the compiled REPL path can reason about
+   one top-level statement stream. Older ASTs may carry top-level calls only in
+   :calls; newer parser output mirrors them into :statements as well."
+  [ast]
+  (if (and (= :program (:type ast))
+           (empty? (:statements ast))
+           (seq (:calls ast)))
+    (assoc ast :statements (vec (:calls ast)))
+    ast))
+
 (defn- initial-eligibility-ctx
   [session ast]
   {:known-vars (set (concat (keys (session-var-types session))
@@ -92,21 +103,22 @@
 
 (defn eligible-ast?
   [session ast]
-  (let [generated-class-names (set (keep (comp :name :class-def) (:functions ast)))
-        actual-class-names (set (map :name (:classes ast)))
-        initial-ctx (initial-eligibility-ctx session ast)]
-    (and (= :program (:type ast))
+  (let [ast' (normalize-program-ast ast)
+        generated-class-names (set (keep (comp :name :class-def) (:functions ast')))
+        actual-class-names (set (map :name (:classes ast')))
+        initial-ctx (initial-eligibility-ctx session ast')]
+    (and (= :program (:type ast'))
          (empty? (:imports ast))
          (empty? (:interns ast))
          (or (empty? actual-class-names)
              (= actual-class-names generated-class-names))
-         (or (seq (:functions ast))
-             (seq (:statements ast)))
+         (or (seq (:functions ast'))
+             (seq (:statements ast')))
          (reduce (fn [ctx stmt]
                    (when (and ctx (supported-stmt-in-ctx? ctx stmt))
                      (advance-eligibility-ctx ctx stmt)))
                  initial-ctx
-                 (:statements ast)))))
+                 (:statements ast')))))
 
 (defn- next-class-name!
   [session]
@@ -144,7 +156,7 @@
 
 (defn- sync-var-types-from-ast!
   [session ast]
-  (doseq [stmt (:statements ast)]
+  (doseq [stmt (:statements (normalize-program-ast ast))]
     (case (:type stmt)
       :let (let [nex-type (or (:var-type stmt)
                               (tc/infer-expression-type
@@ -269,20 +281,21 @@
    Returns {:compiled? true :session .. :result ..} on success, nil when the
    input is outside the supported subset or lowering/emission declines it."
   [session ast]
-  (when (eligible-ast? session ast)
+  (let [ast' (normalize-program-ast ast)]
+    (when (eligible-ast? session ast')
     (try
       (let [class-name (next-class-name! session)
-            {:keys [unit]} (lower/lower-repl-cell ast {:name class-name
-                                                       :functions (vals @(:function-asts session))
-                                                       :var-types (session-var-types session)})
+            {:keys [unit]} (lower/lower-repl-cell ast' {:name class-name
+                                                        :functions (vals @(:function-asts session))
+                                                        :var-types (session-var-types session)})
             bytecode (emit/compile-unit->bytes unit)
             binary-name (desc/binary-class-name class-name)
             cls (loader/define-class! (:loader session) binary-name bytecode)
             state (:state session)
             method (.getMethod cls "eval" (into-array Class [(class state)]))
             result (.invoke method nil (object-array [state]))]
-        (remember-top-level-ast! session ast)
-        (sync-var-types-from-ast! session ast)
+        (remember-top-level-ast! session ast')
+        (sync-var-types-from-ast! session ast')
         {:compiled? true
          :session session
          :result result})
@@ -291,4 +304,4 @@
           (when-not (or (.contains msg "Unsupported")
                         (.contains msg "Unable to infer expression type during lowering"))
             (throw e))
-          nil)))))
+          nil))))))

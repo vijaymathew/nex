@@ -135,6 +135,56 @@ x + 1"))
         (is (not (str/includes? output "Type checking failed")))
         (is (str/includes? output "42"))))))
 
+(deftest repl-compiled-backend-direct-cooperating-functions-batch-test
+  (testing "compiled backend can handle batches with cooperating function definitions and multiple assignments"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "function add1(n: Integer): Integer
+do
+  result := n + 1
+end
+
+function add2(n: Integer): Integer
+do
+  result := add1(n) + 1
+end
+
+let x: Integer := add2(1)
+x := x + 1
+x"))
+            session @repl/*compiled-repl-session*]
+        (is (contains? @(:function-asts session) "add1"))
+        (is (contains? @(:function-asts session) "add2"))
+        (is (some? (runtime/state-get-fn (:state session) "add1")))
+        (is (some? (runtime/state-get-fn (:state session) "add2")))
+        (is (= 4 (runtime/state-get-value (:state session) "x")))
+        (is (= "Integer" (runtime/state-get-type (:state session) "x")))
+        (is (str/includes? output "4"))))))
+
+(deftest compiled-repl-normalizes-calls-only-programs-test
+  (testing "compiled helper normalizes legacy :calls-only programs into the same path"
+    (let [session (compiled-repl/make-session)
+          _ (runtime/state-set-value! (:state session) "x" (int 41))
+          _ (runtime/state-set-type! (:state session) "x" "Integer")
+          ast {:type :program
+               :imports []
+               :interns []
+               :classes []
+               :functions []
+               :statements []
+               :calls [{:type :call
+                        :target nil
+                        :method "x"
+                        :args []
+                        :has-parens false}]}
+          result (compiled-repl/compile-and-eval! session ast)]
+      (is (:compiled? result))
+      (is (= 41 (:result result))))))
+
 (deftest repl-compiled-backend-direct-assignment-test
   (testing "compiled backend can update canonical top-level state via assignment"
     (binding [repl/*type-checking-enabled* (atom false)
