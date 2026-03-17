@@ -311,6 +311,7 @@
             (println (str "  • " var-name " = " value-str))))))))
 
 (declare eval-code)
+(declare sync-compiled-session-into-interpreter!)
 
 (defn normalize-load-path [raw]
   (let [trimmed (str/trim raw)]
@@ -408,6 +409,7 @@
 
       (= input-lower ":backend interpreter")
       (do
+        (sync-compiled-session-into-interpreter! ctx)
         (reset! *repl-backend* :interpreter)
         (println "REPL backend set to INTERPRETER.")
         ctx)
@@ -415,6 +417,18 @@
       (= input-lower ":backend compiled")
       (do
         (reset! *repl-backend* :compiled)
+        (let [session (compiled-repl/make-session)]
+          (compiled-repl/sync-interpreter->session! session
+                                                    ctx
+                                                    @*repl-var-types*
+                                                    {:type :program
+                                                     :imports []
+                                                     :interns []
+                                                     :classes []
+                                                     :functions []
+                                                     :statements []
+                                                     :calls []})
+          (reset! *compiled-repl-session* session))
         (println "REPL backend set to COMPILED (experimental). Unsupported inputs will fall back to the interpreter.")
         ctx)
 
@@ -945,6 +959,24 @@
                     :var-types @*repl-var-types*})]
       (format-type t))))
 
+(defn- sync-compiled-session-into-interpreter!
+  [ctx]
+  (when (= :compiled @*repl-backend*)
+    (let [{:keys [var-types]} (compiled-repl/sync-session->interpreter!
+                               @*compiled-repl-session*
+                               ctx)]
+      (reset! *repl-var-types* var-types))))
+
+(defn- sync-interpreter-back-into-compiled-session!
+  [ctx ast]
+  (when (= :compiled @*repl-backend*)
+    (reset! *compiled-repl-session*
+            (compiled-repl/sync-interpreter->session!
+             @*compiled-repl-session*
+             ctx
+             @*repl-var-types*
+             ast))))
+
 (defn looks-like-class?
   "Check if input looks like a top-level declaration"
   [input]
@@ -1035,6 +1067,7 @@
                                                           ;; so line numbers reference the user's actual code
                                                           (throw e)))))
                                                   (throw e))))]
+        (sync-compiled-session-into-interpreter! exec-ctx)
         ;; Type check if enabled
         (when (and @*type-checking-enabled*
                  (= (:type ast) :program)
@@ -1091,9 +1124,7 @@
              (not (dbg/enabled?))
              (= :compiled @*repl-backend*))
         (if-let [{:keys [session result]} (compiled-repl/compile-and-eval! @*compiled-repl-session*
-                                                                            exec-ctx
-                                                                            ast
-                                                                            @*repl-var-types*)]
+                                                                            ast)]
           (do
             (reset! *compiled-repl-session* session)
             (when (some? result)
@@ -1127,6 +1158,7 @@
                                     (infer-result-type exec-ctx (last calls)))]
                   (println (str type-str " " (format-value result)))
                   (println (format-value result)))))
+            (sync-interpreter-back-into-compiled-session! exec-ctx ast)
             exec-ctx))
 
         ;; If we wrapped the code, execute the temp method in GLOBAL context
@@ -1163,6 +1195,15 @@
               (if type-str
                 (println (str type-str " " (format-value result)))
                 (println (format-value result)))))
+          (sync-interpreter-back-into-compiled-session!
+           exec-ctx
+           {:type :program
+            :imports []
+            :interns []
+            :classes []
+            :functions []
+            :statements (:body method-def)
+            :calls []})
           exec-ctx)
 
         ;; If it's a program, handle it based on content
@@ -1200,6 +1241,7 @@
                                   (infer-result-type exec-ctx (last calls)))]
                 (println (str type-str " " (format-value result)))
                 (println (format-value result)))))
+          (sync-interpreter-back-into-compiled-session! exec-ctx ast)
           exec-ctx)
 
         ;; Single expression or statement
@@ -1216,6 +1258,15 @@
             (if-let [type-str (infer-result-type exec-ctx ast)]
               (println (str type-str " " (format-value result)))
               (println (format-value result))))
+          (sync-interpreter-back-into-compiled-session!
+           exec-ctx
+           {:type :program
+            :imports []
+            :interns []
+            :classes []
+            :functions []
+            :statements [ast]
+            :calls []})
           exec-ctx))))
 
     (catch ParseError e

@@ -197,9 +197,12 @@
   (cond
     (= :let (:type stmt))
     (let [value-ir (lower-expression env (:value stmt))
-          nex-type (or (:var-type stmt) (infer-type env (:value stmt)))
-          [env' local] (env-add-local env (:name stmt) nex-type)]
-      [env' (ir/set-local-node (:slot local) value-ir (:nex-type local) (:jvm-type local))])
+          nex-type (or (:var-type stmt) (infer-type env (:value stmt)))]
+      (if (:top-level? env)
+        [(update env :var-types assoc (:name stmt) nex-type)
+         (ir/top-set-node (:name stmt) value-ir nex-type (desc/nex-type->jvm-type nex-type))]
+        (let [[env' local] (env-add-local env (:name stmt) nex-type)]
+          [env' (ir/set-local-node (:slot local) value-ir (:nex-type local) (:jvm-type local))])))
 
     (= :assign (:type stmt))
     (let [value-ir (lower-expression env (:value stmt))
@@ -210,7 +213,8 @@
                            (infer-type env {:type :identifier :name target-name}))
               jvm-type (desc/nex-type->jvm-type nex-type)]
           (if (:top-level? env)
-            [env (ir/top-set-node target-name value-ir nex-type jvm-type)]
+            [(update env :var-types assoc target-name nex-type)
+             (ir/top-set-node target-name value-ir nex-type jvm-type)]
             (throw (ex-info "Assignment target is not a known local"
                             {:target target-name}))))))
 
@@ -231,6 +235,38 @@
               [next-env (conj out lowered)]))
           [env []]
           statements))
+
+(defn- lower-repl-tail
+  [env stmt]
+  (cond
+    (contains? expression-node-types (:type stmt))
+    [env [] (lower-expression env stmt)]
+
+    (= :call (:type stmt))
+    [env [] (lower-expression env stmt)]
+
+    (= :let (:type stmt))
+    (let [[env' lowered] (lower-statement env stmt)
+          nex-type (or (:var-type stmt) (infer-type env (:value stmt)))
+          jvm-type (desc/nex-type->jvm-type nex-type)]
+      [env' [lowered] (if (:top-level? env')
+                        (ir/top-get-node (:name stmt) nex-type jvm-type)
+                        (ir/local-node (:name stmt)
+                                       (:slot (get (:locals env') (:name stmt)))
+                                       nex-type
+                                       jvm-type))])
+
+    (= :assign (:type stmt))
+    (let [[env' lowered] (lower-statement env stmt)
+          nex-type (or (get (:var-types env') (:target stmt))
+                       (infer-type env' {:type :identifier :name (:target stmt)}))
+          jvm-type (desc/nex-type->jvm-type nex-type)]
+      [env' [lowered] (if-let [{:keys [slot]} (get (:locals env') (:target stmt))]
+                        (ir/local-node (:target stmt) slot nex-type jvm-type)
+                        (ir/top-get-node (:target stmt) nex-type jvm-type))])
+
+    :else
+    [env [] nil]))
 
 (defn lower-function
   [unit-name visible-functions visible-imports fn-def]
@@ -295,27 +331,35 @@
                                 :state-slot 0
                                 :next-slot 1})
         statements (vec (:statements program))
-        expr-tail? (contains? expression-node-types (:type (last statements)))
-        leading-statements (if expr-tail? (pop statements) statements)
+        tail-stmt (last statements)
+        return-tail? (or (contains? expression-node-types (:type tail-stmt))
+                         (= :call (:type tail-stmt))
+                         (= :let (:type tail-stmt))
+                         (= :assign (:type tail-stmt)))
+        leading-statements (if return-tail? (pop statements) statements)
         [env' lowered-body] (lower-statements env leading-statements)
-        final-expr-ir (when expr-tail?
-                        (lower-expression env' (last statements)))
-        lowered-body' (if expr-tail?
-                        (conj lowered-body
-                              (ir/return-node
-                               final-expr-ir
-                               (:nex-type final-expr-ir)
-                               (ir/object-jvm-type "java/lang/Object")))
-                        (conj lowered-body
-                              (ir/return-node
-                               (ir/const-node nil "Any"
-                                              (ir/object-jvm-type "java/lang/Object"))
-                               "Any"
-                               (ir/object-jvm-type "java/lang/Object"))))]
-    {:env env'
+        [env'' tail-stmts final-expr-ir] (if return-tail?
+                                          (lower-repl-tail env' tail-stmt)
+                                          [env' [] nil])
+        lowered-body' (if return-tail?
+                        (into lowered-body tail-stmts)
+                        lowered-body)
+        lowered-body'' (if final-expr-ir
+                         (conj lowered-body'
+                               (ir/return-node
+                                final-expr-ir
+                                (:nex-type final-expr-ir)
+                                (ir/object-jvm-type "java/lang/Object")))
+                         (conj lowered-body'
+                               (ir/return-node
+                                (ir/const-node nil "Any"
+                                               (ir/object-jvm-type "java/lang/Object"))
+                                "Any"
+                                (ir/object-jvm-type "java/lang/Object"))))]
+    {:env env''
      :unit (ir/unit {:name (or (:name opts) "nex/repl/Cell_0001")
                      :kind :repl-cell
                      :functions (mapv #(lower-function unit-name visible-functions (:imports program) %)
                                       (remove :declaration-only? (:functions program)))
-                     :body lowered-body'
+                     :body lowered-body''
                      :result-jvm-type (ir/object-jvm-type "java/lang/Object")})}))

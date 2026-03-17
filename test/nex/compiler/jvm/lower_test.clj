@@ -20,9 +20,10 @@
   (testing "binary arithmetic lowers to typed IR"
     (let [program (p/ast "let x := 1 + 2")
           {:keys [unit env]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0001"})
-          stmt (first (:body unit))]
-      (is (= :set-local (:op stmt)))
-      (is (= 1 (:slot stmt)))
+          stmt (first (:body unit))
+          ret (second (:body unit))]
+      (is (= :top-set (:op stmt)))
+      (is (= "x" (:name stmt)))
       (is (= "Integer" (:nex-type stmt)))
       (is (= :int (:jvm-type stmt)))
       (is (= :binary (-> stmt :expr :op)))
@@ -30,8 +31,11 @@
       (is (= :const (-> stmt :expr :left :op)))
       (is (= 1 (-> stmt :expr :left :value)))
       (is (= 2 (-> stmt :expr :right :value)))
+      (is (= :return (:op ret)))
+      (is (= :top-get (-> ret :expr :op)))
+      (is (= "x" (-> ret :expr :name)))
       (is (= "Integer" (get-in env [:var-types "x"])))
-      (is (= 2 (:next-slot env))))))
+      (is (= 1 (:next-slot env))))))
 
 (deftest lower-final-expression-to-return-test
   (testing "final repl expression lowers to a return"
