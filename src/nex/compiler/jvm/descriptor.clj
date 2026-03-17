@@ -10,6 +10,13 @@
       (str/replace "." "/")
       (str/replace #"^/+" "")))
 
+(defn binary-class-name
+  "Convert dotted or path-like class names to JVM binary form."
+  [name]
+  (-> name
+      internal-class-name
+      (str/replace "/" ".")))
+
 (defn nex-type->jvm-type
   "Map a Nex type to a simple JVM type shape.
 
