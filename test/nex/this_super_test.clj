@@ -26,11 +26,11 @@ end"
                    first :constructors first)
           stmt (first (:body ctor))]
       (is (= :member-assign (:type stmt)))
-      (is (= :this (:object-type stmt)))
+      (is (= :this (-> stmt :object :type)))
       (is (= "x" (:field stmt))))))
 
 (deftest parse-super-field-assignment
-  (testing "super.field assignment is currently not supported by parser"
+  (testing "super.field assignment now parses as a member assignment target"
     (let [code "class B
   inherit A
   create
@@ -45,8 +45,15 @@ class A
   feature
     x: Integer
 end"
-          parsed? (try (p/ast code) true (catch Exception _ false))]
-      (is (false? parsed?)))))
+          ast (p/ast code)
+          ctor (-> ast :classes first :body
+                   (->> (filter #(= (:type %) :constructors)))
+                   first :constructors first)
+          stmt (first (:body ctor))]
+      (is (= :member-assign (:type stmt)))
+      (is (= :identifier (-> stmt :object :type)))
+      (is (= "super" (-> stmt :object :name)))
+      (is (= "x" (:field stmt))))))
 
 (deftest parse-this-in-expression
   (testing "this parses to {:type :this} in primary position"

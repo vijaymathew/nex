@@ -1,6 +1,7 @@
 (ns nex.compiler.jvm.repl
   "Experimental compiled REPL execution path for a narrow expression subset."
-  (:require [nex.compiler.jvm.classloader :as loader]
+  (:require [clojure.set :as set]
+            [nex.compiler.jvm.classloader :as loader]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.compiler.jvm.emit :as emit]
             [nex.compiler.jvm.runtime :as rt]
@@ -22,6 +23,7 @@
     {:loader ldr
      :state (rt/make-repl-state ldr)
      :counter (atom 0)
+     :compiled-classes (atom {})
      :function-asts (atom {})
      :class-asts (atom {})
      :import-asts (atom [])
@@ -41,6 +43,7 @@
 (declare supported-stmt-in-ctx?)
 (declare session-var-types)
 (declare builtin-target-call-in-ctx?)
+(declare user-target-call-in-ctx?)
 
 (def ^:private builtin-runtime-receiver-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
@@ -59,6 +62,16 @@
     {:type :identifier :name target}
     target))
 
+(defn- compiled-class-names
+  [session]
+  (set (keys @(:compiled-classes session))))
+
+(defn- user-class-defs
+  [ast]
+  (let [synthetic-class-names (set (keep :class-name (:functions ast)))]
+    (remove #(contains? synthetic-class-names (:name %))
+            (:classes ast))))
+
 (defn- supported-if-branches?
   [ctx branch]
   (and (= 1 (count branch))
@@ -75,10 +88,53 @@
   [ctx expr]
   (let [target-expr (normalize-call-target (:target expr))]
     (and target-expr
-       (supported-expr-in-ctx? ctx target-expr)
-       (every? #(supported-expr-in-ctx? ctx %) (:args expr))
-       (contains? builtin-runtime-receiver-types
-                  (base-type-name (infer-type-in-ctx ctx target-expr))))))
+         (supported-expr-in-ctx? ctx target-expr)
+         (every? #(supported-expr-in-ctx? ctx %) (:args expr))
+         (contains? builtin-runtime-receiver-types
+                    (base-type-name (infer-type-in-ctx ctx target-expr))))))
+
+(defn- user-target-call-in-ctx?
+  [ctx expr]
+  (let [target-expr (normalize-call-target (:target expr))
+        target-type (when target-expr
+                      (infer-type-in-ctx ctx target-expr))
+        base (base-type-name target-type)
+        class-def (some #(when (= (:name %) base) %) (:classes ctx))
+        field-name (:method expr)
+        field-def (when (and class-def (false? (:has-parens expr)))
+                    (some #(when (and (= :field (:type %))
+                                      (= field-name (:name %)))
+                             %)
+                          (mapcat :members
+                                  (filter #(= :feature-section (:type %))
+                                          (:body class-def)))))
+        method-def (when class-def
+                     (some #(when (and (= :method (:type %))
+                                       (= (:method expr) (:name %))
+                                       (= (count (:args expr))
+                                          (count (or (:params %) []))))
+                              %)
+                           (mapcat :members
+                                   (filter #(= :feature-section (:type %))
+                                           (:body class-def)))))]
+    (and target-expr
+         (supported-expr-in-ctx? ctx target-expr)
+         (contains? (:compiled-class-names ctx) base)
+         (or field-def method-def))))
+
+(defn- class-constructors-in-ctx
+  [ctx class-name]
+  (mapcat (fn [section]
+            (when (= :constructors (:type section))
+              (:constructors section)))
+          (:body (some #(when (= (:name %) class-name) %) (:classes ctx)))))
+
+(defn- known-constructor-in-ctx?
+  [ctx class-name constructor-name arity]
+  (some #(when (and (= (:name %) constructor-name)
+                    (= (count (or (:params %) [])) arity))
+           %)
+        (class-constructors-in-ctx ctx class-name)))
 
 (defn normalize-program-ast
   "Normalize legacy program shapes so the compiled REPL path can reason about
@@ -93,19 +149,22 @@
 
 (defn- initial-eligibility-ctx
   [session ast]
-  {:known-vars (set (concat (keys (session-var-types session))
+  (let [actual-classes (vec (user-class-defs ast))]
+    {:known-vars (set (concat (keys (session-var-types session))
                             (keys @(:values (:state session)))))
-   :known-fns (set (concat builtin-function-names
+     :known-fns (set (concat builtin-function-names
                            (keys @(:function-asts session))
                            (map :name (:functions ast))))
-   :var-types (merge (session-var-types session)
+     :var-types (merge (session-var-types session)
                      (into {}
                            (map (fn [fn-def]
                                   [(:name fn-def) (:class-name fn-def)]))
                            (concat (vals @(:function-asts session)) (:functions ast))))
-   :functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
-   :classes (vec (vals @(:class-asts session)))
-   :imports @(:import-asts session)})
+     :functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
+     :classes (vec (concat (vals @(:class-asts session)) actual-classes))
+     :compiled-class-names (set (concat (compiled-class-names session)
+                                        (map :name actual-classes)))
+     :imports @(:import-asts session)}))
 
 (defn supported-expr-in-ctx?
   [ctx expr]
@@ -116,13 +175,20 @@
     :char true
     :boolean true
     :nil true
+    :create (and (empty? (:generic-args expr))
+                 (contains? (:compiled-class-names ctx) (:class-name expr))
+                 (every? #(supported-expr-in-ctx? ctx %) (:args expr))
+                 (if-let [ctor (:constructor expr)]
+                   (known-constructor-in-ctx? ctx (:class-name expr) ctor (count (:args expr)))
+                   (empty? (:args expr))))
     :identifier (contains? (:known-vars ctx) (:name expr))
     :call (if (nil? (:target expr))
-             (and (every? #(supported-expr-in-ctx? ctx %) (:args expr))
-                  (or (and (empty? (:args expr))
-                           (not (:has-parens expr)))
-                      (contains? (:known-fns ctx) (:method expr))))
-             (builtin-target-call-in-ctx? ctx expr))
+            (and (every? #(supported-expr-in-ctx? ctx %) (:args expr))
+                 (or (and (empty? (:args expr))
+                          (not (:has-parens expr)))
+                     (contains? (:known-fns ctx) (:method expr))))
+            (or (builtin-target-call-in-ctx? ctx expr)
+                (user-target-call-in-ctx? ctx expr)))
     :binary (and (contains? (into #{"+" "-" "*" "/"} relational-ops) (:operator expr))
                  (supported-expr-in-ctx? ctx (:left expr))
                  (supported-expr-in-ctx? ctx (:right expr)))
@@ -139,6 +205,8 @@
     :assign (and (string? (:target stmt))
                  (contains? (:known-vars ctx) (:target stmt))
                  (supported-expr-in-ctx? ctx (:value stmt)))
+    :member-assign (and (supported-expr-in-ctx? ctx (or (:object stmt) {:type :this}))
+                        (supported-expr-in-ctx? ctx (:value stmt)))
     :call (supported-expr-in-ctx? ctx stmt)
     (supported-expr-in-ctx? ctx stmt)))
 
@@ -155,16 +223,15 @@
 (defn eligible-ast?
   [session ast]
   (let [ast' (normalize-program-ast ast)
-        generated-class-names (set (keep (comp :name :class-def) (:functions ast')))
-        actual-class-names (set (map :name (:classes ast')))
+        actual-class-names (set (map :name (user-class-defs ast')))
         initial-ctx (initial-eligibility-ctx session ast')]
     (and (= :program (:type ast'))
          (empty? (:imports ast))
          (empty? (:interns ast))
-         (or (empty? actual-class-names)
-             (= actual-class-names generated-class-names))
+         (empty? (set/intersection (compiled-class-names session) actual-class-names))
          (or (seq (:functions ast'))
-             (seq (:statements ast')))
+             (seq (:statements ast'))
+             (seq (:classes ast')))
          (reduce (fn [ctx stmt]
                    (when (and ctx (supported-stmt-in-ctx? ctx stmt))
                      (advance-eligibility-ctx ctx stmt)))
@@ -186,6 +253,39 @@
 (defn- session-function-name-set
   [session]
   (set (keys @(:function-asts session))))
+
+(defn- allocate-compiled-class-metadata
+  [session class-defs]
+  (reduce (fn [acc class-def]
+            (let [internal-name (format "nex/repl/%s_%04d"
+                                        (:name class-def)
+                                        (swap! (:counter session) inc))]
+              (assoc acc (:name class-def)
+                     {:name (:name class-def)
+                      :internal-name internal-name
+                      :jvm-name internal-name
+                      :binary-name (desc/binary-class-name internal-name)})))
+          {}
+          class-defs))
+
+(defn- compile-and-register-classes!
+  [session ast]
+  (let [actual-classes (vec (user-class-defs ast))]
+    (when (seq actual-classes)
+      (let [new-class-map (allocate-compiled-class-metadata session actual-classes)
+          compiled-map (merge @(:compiled-classes session) new-class-map)
+          visible-functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
+          visible-imports @(:import-asts session)]
+        (doseq [class-def actual-classes]
+          (let [lowered (lower/lower-class-def class-def {:compiled-classes compiled-map
+                                                          :functions visible-functions
+                                                          :imports visible-imports})
+                bytecode (emit/compile-user-class->bytes lowered)]
+            (loader/define-class! (:loader session)
+                                  (desc/binary-class-name (:jvm-name lowered))
+                                  bytecode)))
+        (swap! (:compiled-classes session) merge new-class-map))))
+  session)
 
 (defn- replace-metadata-atoms!
   [session metadata]
@@ -254,7 +354,7 @@
            (reduce (fn [acc class-def]
                      (assoc acc (:name class-def) class-def))
                    m
-                   (:classes ast))))
+                   (user-class-defs ast))))
   (swap! (:import-asts session) merge-import-like-nodes (:imports ast))
   (swap! (:intern-asts session) merge-import-like-nodes (:interns ast))
   (rt/state-set-classes! (:state session) @(:class-asts session))
@@ -279,6 +379,7 @@
                        :calls []}
           {:keys [unit]} (lower/lower-repl-cell compile-ast
                                                 {:name class-name
+                                                 :compiled-classes @(:compiled-classes session)
                                                  :functions other-functions
                                                  :var-types (session-var-types session)})
           bytecode (emit/compile-unit->bytes unit)
@@ -339,7 +440,10 @@
     (when (eligible-ast? session ast')
     (try
       (let [class-name (next-class-name! session)
+            _ (compile-and-register-classes! session ast')
             {:keys [unit]} (lower/lower-repl-cell ast' {:name class-name
+                                                        :compiled-classes @(:compiled-classes session)
+                                                        :classes (vals @(:class-asts session))
                                                         :functions (vals @(:function-asts session))
                                                         :var-types (session-var-types session)})
             bytecode (emit/compile-unit->bytes unit)

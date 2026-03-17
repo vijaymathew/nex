@@ -77,6 +77,10 @@
   [arg-types]
   (method-descriptor arg-types :void))
 
+(defn repl-instance-method-descriptor
+  []
+  "(Lnex/compiler/jvm/runtime/NexReplState;[Ljava/lang/Object;)Ljava/lang/Object;")
+
 (defn boxing-owner
   [jvm-type]
   (case jvm-type

@@ -18,6 +18,8 @@
 (def ^:private rt-internal-name "clojure/lang/RT")
 (def ^:private var-internal-name "clojure/lang/Var")
 
+(declare emit-const!)
+
 (defn eval-method-descriptor
   []
   (desc/method-descriptor
@@ -27,6 +29,16 @@
 (defn repl-fn-method-descriptor
   []
   "(Lnex/compiler/jvm/runtime/NexReplState;[Ljava/lang/Object;)Ljava/lang/Object;")
+
+(defn- class-default-value
+  [jvm-type]
+  (cond
+    (= :int jvm-type) 0
+    (= :long jvm-type) 0
+    (= :double jvm-type) 0.0
+    (= :boolean jvm-type) false
+    (= :char jvm-type) 0
+    :else nil))
 
 (defn minimal-class-spec
   "Create a minimal class spec for a compiled REPL cell."
@@ -57,12 +69,66 @@
                       :fn-node fn-node})
                    (:functions unit))))})
 
+(defn user-class-spec
+  [class-spec]
+  {:internal-name (:internal-name class-spec)
+   :binary-name (desc/binary-class-name (:jvm-name class-spec))
+   :super-name "java/lang/Object"
+   :interfaces []
+   :flags Opcodes/ACC_PUBLIC
+   :fields (mapv (fn [{:keys [name jvm-type]}]
+                   {:name name
+                    :descriptor (desc/jvm-type->descriptor jvm-type)
+                    :flags Opcodes/ACC_PUBLIC
+                    :jvm-type jvm-type})
+                 (:fields class-spec))
+   :methods (vec
+             (concat
+              [{:name "<init>"
+                :descriptor "()V"
+                :flags Opcodes/ACC_PUBLIC
+                :kind :user-default-constructor
+                :owner (:internal-name class-spec)
+                :fields (:fields class-spec)}]
+              (map (fn [fn-node]
+                     {:name (:emitted-name fn-node)
+                      :descriptor (repl-fn-method-descriptor)
+                      :flags (+ Opcodes/ACC_PUBLIC)
+                      :kind :instance-ctor-fn
+                      :fn-node fn-node})
+                   (:constructors class-spec))
+              (map (fn [fn-node]
+                     {:name (:emitted-name fn-node)
+                      :descriptor (repl-fn-method-descriptor)
+                      :flags Opcodes/ACC_PUBLIC
+                      :kind :instance-fn
+                      :fn-node fn-node})
+                   (:methods class-spec))))})
+
 (defn- emit-default-constructor!
   [^ClassWriter cw {:keys [name descriptor flags]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
     (.visitVarInsn mv Opcodes/ALOAD 0)
     (.visitMethodInsn mv Opcodes/INVOKESPECIAL "java/lang/Object" "<init>" "()V" false)
+    (.visitInsn mv Opcodes/RETURN)
+    (.visitMaxs mv 0 0)
+    (.visitEnd mv)))
+
+(defn- emit-user-default-constructor!
+  [^ClassWriter cw {:keys [name descriptor flags fields owner]}]
+  (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
+    (.visitCode mv)
+    (.visitVarInsn mv Opcodes/ALOAD 0)
+    (.visitMethodInsn mv Opcodes/INVOKESPECIAL "java/lang/Object" "<init>" "()V" false)
+    (doseq [{:keys [name jvm-type]} fields]
+      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (emit-const! mv {:value (class-default-value jvm-type) :jvm-type jvm-type})
+      (.visitFieldInsn mv
+                       Opcodes/PUTFIELD
+                       owner
+                       name
+                       (desc/jvm-type->descriptor jvm-type)))
     (.visitInsn mv Opcodes/RETURN)
     (.visitMaxs mv 0 0)
     (.visitEnd mv)))
@@ -239,8 +305,8 @@
     (.visitLabel mv end-label)))
 
 (defn- emit-load-values-map!
-  [^MethodVisitor mv]
-  (.visitVarInsn mv Opcodes/ALOAD 0)
+  [^MethodVisitor mv state-slot]
+  (.visitVarInsn mv Opcodes/ALOAD state-slot)
   (.visitFieldInsn mv
                    Opcodes/GETFIELD
                    repl-state-internal-name
@@ -259,8 +325,8 @@
 (declare emit-stmt!)
 
 (defn- emit-state-load-functions-map!
-  [^MethodVisitor mv]
-  (.visitVarInsn mv Opcodes/ALOAD 0)
+  [^MethodVisitor mv state-slot]
+  (.visitVarInsn mv Opcodes/ALOAD state-slot)
   (.visitFieldInsn mv
                    Opcodes/GETFIELD
                    repl-state-internal-name
@@ -276,20 +342,20 @@
   (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name))
 
 (defn- emit-boxed-arg-array!
-  [^MethodVisitor mv args]
+  [^MethodVisitor mv args state-slot]
   (.visitLdcInsn mv (int (count args)))
   (.visitTypeInsn mv Opcodes/ANEWARRAY "java/lang/Object")
   (doseq [[idx arg] (map-indexed vector args)]
     (.visitInsn mv Opcodes/DUP)
     (.visitLdcInsn mv (int idx))
-    (let [arg-type (emit-expr! mv arg)]
+    (let [arg-type (emit-expr! mv arg state-slot)]
       (when (contains? ir/primitive-jvm-types arg-type)
         (emit-box! mv arg-type)))
     (.visitInsn mv Opcodes/AASTORE)))
 
 (defn- emit-register-repl-fn!
-  [^MethodVisitor mv owner-internal-name fn-node]
-  (emit-state-load-functions-map! mv)
+  [^MethodVisitor mv state-slot owner-internal-name fn-node]
+  (emit-state-load-functions-map! mv state-slot)
   (.visitLdcInsn mv ^String (:name fn-node))
   (.visitLdcInsn mv (Type/getObjectType owner-internal-name))
   (.visitLdcInsn mv ^String (:emitted-name fn-node))
@@ -318,7 +384,7 @@
   (.visitInsn mv Opcodes/POP))
 
 (defn- emit-expr!
-  [^MethodVisitor mv expr]
+  [^MethodVisitor mv expr state-slot]
   (case (:op expr)
     :const
     (do
@@ -330,9 +396,21 @@
       (.visitVarInsn mv (local-load-op (:jvm-type expr)) (:slot expr))
       (:jvm-type expr))
 
+    :this
+    (do
+      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (:jvm-type expr))
+
+    :new
+    (do
+      (.visitTypeInsn mv Opcodes/NEW (:class expr))
+      (.visitInsn mv Opcodes/DUP)
+      (.visitMethodInsn mv Opcodes/INVOKESPECIAL (:class expr) "<init>" "()V" false)
+      (:jvm-type expr))
+
     :top-get
     (do
-      (emit-load-values-map! mv)
+      (emit-load-values-map! mv state-slot)
       (.visitLdcInsn mv ^String (:name expr))
       (.visitMethodInsn mv
                         Opcodes/INVOKEVIRTUAL
@@ -343,9 +421,19 @@
       (emit-unbox-or-cast! mv (:jvm-type expr))
       (:jvm-type expr))
 
+    :field-get
+    (do
+      (emit-expr! mv (:target expr) state-slot)
+      (.visitFieldInsn mv
+                       Opcodes/GETFIELD
+                       (:owner expr)
+                       (:field expr)
+                       (desc/jvm-type->descriptor (:jvm-type expr)))
+      (:jvm-type expr))
+
     :call-repl-fn
     (do
-      (emit-state-load-functions-map! mv)
+      (emit-state-load-functions-map! mv state-slot)
       (.visitLdcInsn mv ^String (:name expr))
       (.visitMethodInsn mv
                         Opcodes/INVOKEVIRTUAL
@@ -359,17 +447,31 @@
       (.visitTypeInsn mv Opcodes/ANEWARRAY "java/lang/Object")
       (.visitInsn mv Opcodes/DUP)
       (.visitInsn mv Opcodes/ICONST_0)
-      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (.visitVarInsn mv Opcodes/ALOAD state-slot)
       (.visitInsn mv Opcodes/AASTORE)
       (.visitInsn mv Opcodes/DUP)
       (.visitInsn mv Opcodes/ICONST_1)
-      (emit-boxed-arg-array! mv (:args expr))
+      (emit-boxed-arg-array! mv (:args expr) state-slot)
       (.visitInsn mv Opcodes/AASTORE)
       (.visitMethodInsn mv
                         Opcodes/INVOKEVIRTUAL
                         "java/lang/reflect/Method"
                         "invoke"
                         "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;"
+                        false)
+      (emit-unbox-or-cast! mv (:jvm-type expr))
+      (:jvm-type expr))
+
+    :call-virtual
+    (do
+      (emit-expr! mv (:target expr) state-slot)
+      (.visitVarInsn mv Opcodes/ALOAD state-slot)
+      (emit-boxed-arg-array! mv (:args expr) state-slot)
+      (.visitMethodInsn mv
+                        Opcodes/INVOKEVIRTUAL
+                        (:owner expr)
+                        (:method expr)
+                        (:descriptor expr)
                         false)
       (emit-unbox-or-cast! mv (:jvm-type expr))
       (:jvm-type expr))
@@ -384,9 +486,9 @@
                         "var"
                         "(Ljava/lang/String;Ljava/lang/String;)Lclojure/lang/Var;"
                         false)
-      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (.visitVarInsn mv Opcodes/ALOAD state-slot)
       (.visitLdcInsn mv ^String (:helper expr))
-      (emit-boxed-arg-array! mv (:args expr))
+      (emit-boxed-arg-array! mv (:args expr) state-slot)
       (.visitMethodInsn mv
                         Opcodes/INVOKEVIRTUAL
                         var-internal-name
@@ -397,8 +499,8 @@
       (:jvm-type expr))
 
     :binary
-    (let [left-type (emit-expr! mv (:left expr))
-          right-type (emit-expr! mv (:right expr))]
+    (let [left-type (emit-expr! mv (:left expr) state-slot)
+          right-type (emit-expr! mv (:right expr) state-slot)]
       (when (not= left-type right-type)
         (throw (ex-info "Binary operands lowered to different JVM types"
                         {:expr expr
@@ -408,8 +510,8 @@
       (:jvm-type expr))
 
     :compare
-    (let [left-type (emit-expr! mv (:left expr))
-          right-type (emit-expr! mv (:right expr))]
+    (let [left-type (emit-expr! mv (:left expr) state-slot)
+          right-type (emit-expr! mv (:right expr) state-slot)]
       (when (not= left-type right-type)
         (throw (ex-info "Compare operands lowered to different JVM types"
                         {:expr expr
@@ -437,7 +539,7 @@
     :if
     (let [else-label (Label.)
           end-label (Label.)
-          test-type (emit-expr! mv (:test expr))
+          test-type (emit-expr! mv (:test expr) state-slot)
           then-exprs (:then expr)
           else-exprs (:else expr)]
       (when-not (= :boolean test-type)
@@ -448,11 +550,11 @@
         (throw (ex-info "If emission expects one expression per branch"
                         {:expr expr})))
       (.visitJumpInsn mv Opcodes/IFEQ else-label)
-      (let [then-type (emit-expr! mv (first then-exprs))
+      (let [then-type (emit-expr! mv (first then-exprs) state-slot)
             else-type (do
                         (.visitJumpInsn mv Opcodes/GOTO end-label)
                         (.visitLabel mv else-label)
-                        (emit-expr! mv (first else-exprs)))]
+                        (emit-expr! mv (first else-exprs) state-slot))]
         (when (not= then-type else-type)
           (throw (ex-info "If branches lowered to different JVM types"
                           {:expr expr
@@ -473,31 +575,31 @@
                   Opcodes/POP))))
 
 (defn- emit-return!
-  [^MethodVisitor mv expr]
-  (let [jvm-type (emit-expr! mv expr)]
+  [^MethodVisitor mv expr state-slot]
+  (let [jvm-type (emit-expr! mv expr state-slot)]
     (when (contains? ir/primitive-jvm-types jvm-type)
       (emit-box! mv jvm-type))
     (.visitInsn mv Opcodes/ARETURN)))
 
 (defn- emit-stmt!
-  [^MethodVisitor mv stmt]
+  [^MethodVisitor mv stmt state-slot]
   (case (:op stmt)
     :return
-    (emit-return! mv (:expr stmt))
+    (emit-return! mv (:expr stmt) state-slot)
 
     :pop
-    (emit-pop! mv (emit-expr! mv (:expr stmt)))
+    (emit-pop! mv (emit-expr! mv (:expr stmt) state-slot))
 
     :set-local
-    (let [expr-jvm-type (emit-expr! mv (:expr stmt))]
+    (let [expr-jvm-type (emit-expr! mv (:expr stmt) state-slot)]
       (.visitVarInsn mv (local-store-op (:jvm-type stmt)) (:slot stmt))
       expr-jvm-type)
 
     :top-set
     (do
-      (emit-load-values-map! mv)
+      (emit-load-values-map! mv state-slot)
       (.visitLdcInsn mv ^String (:name stmt))
-      (let [expr-jvm-type (emit-expr! mv (:expr stmt))]
+      (let [expr-jvm-type (emit-expr! mv (:expr stmt) state-slot)]
         (when (contains? ir/primitive-jvm-types expr-jvm-type)
           (emit-box! mv expr-jvm-type)))
       (.visitMethodInsn mv
@@ -508,13 +610,23 @@
                         false)
       (.visitInsn mv Opcodes/POP))
 
+    :field-set
+    (do
+      (emit-expr! mv (:target stmt) state-slot)
+      (emit-expr! mv (:expr stmt) state-slot)
+      (.visitFieldInsn mv
+                       Opcodes/PUTFIELD
+                       (:owner stmt)
+                       (:field stmt)
+                       (desc/jvm-type->descriptor (:jvm-type stmt))))
+
     (throw (ex-info "Unsupported IR statement emission"
                     {:stmt stmt :op (:op stmt)}))))
 
 (defn- emit-function-arg-prologue!
-  [^MethodVisitor mv fn-node]
+  [^MethodVisitor mv fn-node arg-array-slot]
   (doseq [{:keys [arg-index slot jvm-type]} (:params fn-node)]
-    (.visitVarInsn mv Opcodes/ALOAD 1)
+    (.visitVarInsn mv Opcodes/ALOAD arg-array-slot)
     (.visitLdcInsn mv (int arg-index))
     (.visitInsn mv Opcodes/AALOAD)
     (emit-unbox-or-cast! mv jvm-type)
@@ -525,9 +637,9 @@
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
     (doseq [fn-node functions]
-      (emit-register-repl-fn! mv owner fn-node))
+      (emit-register-repl-fn! mv 0 owner fn-node))
     (doseq [stmt body]
-      (emit-stmt! mv stmt))
+      (emit-stmt! mv stmt 0))
     (.visitInsn mv Opcodes/ACONST_NULL)
     (.visitInsn mv Opcodes/ARETURN)
     (.visitMaxs mv 0 0)
@@ -537,26 +649,46 @@
   [^ClassWriter cw {:keys [name descriptor flags fn-node]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
-    (emit-function-arg-prologue! mv fn-node)
+    (emit-function-arg-prologue! mv fn-node 1)
     (doseq [stmt (:body fn-node)]
-      (emit-stmt! mv stmt))
+      (emit-stmt! mv stmt 0))
     (.visitInsn mv Opcodes/ACONST_NULL)
     (.visitInsn mv Opcodes/ARETURN)
     (.visitMaxs mv 0 0)
     (.visitEnd mv)))
 
+(defn- emit-instance-fn-method!
+  [^ClassWriter cw {:keys [name descriptor flags fn-node]}]
+  (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
+    (.visitCode mv)
+    (emit-function-arg-prologue! mv fn-node 2)
+    (doseq [stmt (:body fn-node)]
+      (emit-stmt! mv stmt 1))
+    (.visitInsn mv Opcodes/ACONST_NULL)
+    (.visitInsn mv Opcodes/ARETURN)
+    (.visitMaxs mv 0 0)
+    (.visitEnd mv)))
+
+(defn- emit-field!
+  [^ClassWriter cw {:keys [name descriptor flags]}]
+  (let [fv (.visitField cw flags name descriptor nil nil)]
+    (.visitEnd fv)))
+
 (defn emit-method!
   [^ClassWriter cw method-spec]
   (case (:kind method-spec)
     :default-constructor (emit-default-constructor! cw method-spec)
+    :user-default-constructor (emit-user-default-constructor! cw method-spec)
     :eval-from-ir (emit-eval-method! cw method-spec)
     :repl-fn (emit-repl-fn-method! cw method-spec)
+    :instance-ctor-fn (emit-instance-fn-method! cw method-spec)
+    :instance-fn (emit-instance-fn-method! cw method-spec)
     (throw (ex-info "Unsupported method emission kind"
                     {:method-spec method-spec}))))
 
 (defn emit-class
   "Emit one minimal JVM class from a class spec and return bytecode."
-  [{:keys [internal-name super-name interfaces flags methods]}]
+  [{:keys [internal-name super-name interfaces flags methods fields]}]
   (let [cw (ClassWriter. (+ ClassWriter/COMPUTE_FRAMES
                             ClassWriter/COMPUTE_MAXS))]
     (.visit cw
@@ -566,6 +698,8 @@
             nil
             super-name
             (when (seq interfaces) (into-array String interfaces)))
+    (doseq [field fields]
+      (emit-field! cw field))
     (doseq [method methods]
       (emit-method! cw method))
     (.visitEnd cw)
@@ -575,3 +709,7 @@
   "Compile the first minimal IR unit to JVM bytecode."
   [unit]
   (emit-class (minimal-class-spec unit)))
+
+(defn compile-user-class->bytes
+  [class-spec]
+  (emit-class (user-class-spec class-spec)))

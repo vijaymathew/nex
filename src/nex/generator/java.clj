@@ -1629,14 +1629,17 @@
      :raise (indent level (str "throw new RuntimeException(String.valueOf("
                                 (generate-expression (:value stmt)) "));"))
      :retry (indent level "continue;")
-     :member-assign (let [field (:field stmt)]
-                      (if (contains? *parent-field-map* field)
+     :member-assign (let [field (:field stmt)
+                          target-expr (or (:object stmt) {:type :this})
+                          target-code (generate-expression target-expr)]
+                      (if (and (= :this (:type target-expr))
+                               (contains? *parent-field-map* field))
                         ;; Route through parent composition object
                         (let [parent-prefix (get *parent-field-map* field)]
                           (indent level
-                            (str *this-name* "." parent-prefix "." field " = " (generate-expression (:value stmt)) ";")))
+                                  (str *this-name* "." parent-prefix "." field " = " (generate-expression (:value stmt)) ";")))
                         (indent level
-                          (str *this-name* "." field " = " (generate-expression (:value stmt)) ";"))))
+                                (str target-code "." field " = " (generate-expression (:value stmt)) ";"))))
      (indent level (str "/* Unknown statement: " (:type stmt) " */")))))
 
 ;;

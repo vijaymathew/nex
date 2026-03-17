@@ -148,6 +148,46 @@
    :nex-type nex-type
    :jvm-type jvm-type})
 
+(defn this-node [nex-type jvm-type]
+  {:op :this
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
+(defn new-node [class class-name nex-type jvm-type]
+  {:op :new
+   :class class
+   :class-name class-name
+   :args []
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
+(defn field-get-node [owner field target nex-type jvm-type]
+  {:op :field-get
+   :owner owner
+   :field field
+   :target target
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
+(defn field-set-node [owner field target expr nex-type jvm-type]
+  {:op :field-set
+   :owner owner
+   :field field
+   :target target
+   :expr expr
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
+(defn call-virtual-node [owner method descriptor target args nex-type jvm-type]
+  {:op :call-virtual
+   :owner owner
+   :method method
+   :descriptor descriptor
+   :target target
+   :args (vec args)
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
 (defn box-node [from to expr nex-type]
   {:op :box
    :from from

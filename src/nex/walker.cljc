@@ -782,18 +782,23 @@
 
    :assignment
    (fn [[_ first-token & rest]]
-     (if (= first-token "this")
-       ;; Member assignment: this.field := expr
-       ;; Tokens: THIS "." IDENTIFIER ":=" expression
-       (let [[_dot field-name _assign expr] rest]
-         {:type :member-assign
-          :object-type :this
-          :field (token-text field-name)
-          :value (transform-node expr)})
+     (if (= ":=" (first rest))
        ;; Simple assignment: IDENTIFIER := expression
        (let [[_assign expr] rest]
          {:type :assign
           :target (token-text first-token)
+          :value (transform-node expr)})
+       ;; Member assignment: target.field := expr
+       ;; Tokens: primary "." IDENTIFIER ":=" expression
+       (let [[_dot field-name _assign expr] rest
+             object-expr (if (and (string? first-token)
+                                  (not= first-token "this"))
+                           {:type :identifier
+                            :name (token-text first-token)}
+                           (transform-node first-token))]
+         {:type :member-assign
+          :object object-expr
+          :field (token-text field-name)
           :value (transform-node expr)})))
 
    :localVarDecl

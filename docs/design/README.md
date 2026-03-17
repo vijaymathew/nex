@@ -17,3 +17,6 @@ Run commands from `docs/design`.
 - `styles.css` - HTML styling
 - `index.md` - title page
 - `introduction.md` and `chapter_*.md` - book content
+- `COMPILED_REPL_STATUS.md` - current boundary of the experimental JVM compiled REPL backend
+- `JVM_BYTECODE_COMPILER_PLAN.md` - implementation plan for the JVM bytecode compiler
+- `USER_DEFINED_CLASSES_COMPILER_PLAN.md` - implementation checklist for compiled support of simple user-defined classes

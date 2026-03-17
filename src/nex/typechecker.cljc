@@ -2461,18 +2461,28 @@
       :retry nil
       :member-assign
       (let [field-name (:field stmt)
-            _ (when-let [current-class (env-lookup-var env "__current_class__")]
-                (when (lookup-class-constant env current-class field-name)
-                  (throw (ex-info (str "Cannot assign to constant: " field-name)
-                                  {:error (type-error (str "Cannot assign to constant: " field-name))}))))
-            field-type (env-lookup-var env field-name)
+            target-expr (or (:object stmt) {:type :this})
+            target-type (check-expression env target-expr)
+            base-target-type (attachable-type target-type)
+            class-name (if (map? base-target-type)
+                         (:base-type base-target-type)
+                         base-target-type)
+            _ (when-not class-name
+                (throw (ex-info "Field assignment target must be an object"
+                                {:error (type-error "Field assignment target must be an object")})))
+            _ (when (lookup-class-constant env class-name field-name)
+                (throw (ex-info (str "Cannot assign to constant: " field-name)
+                                {:error (type-error (str "Cannot assign to constant: " field-name))})))
+            field-type (lookup-class-field env class-name field-name)
             val-type (check-expression env (:value stmt))]
-        (when (and field-type val-type)
-          (when-not (types-compatible? env val-type field-type)
-            (throw (ex-info (str "Type mismatch in assignment to " field-name)
-                            {:error (type-error
-                                     (str "Cannot assign " (display-type val-type)
-                                          " to field of type " (display-type field-type)))})))))
+        (when-not field-type
+          (throw (ex-info (str "Undefined field: " field-name)
+                          {:error (type-error (str "Undefined field: " field-name))})))
+        (when-not (types-compatible? env val-type field-type)
+          (throw (ex-info (str "Type mismatch in assignment to " field-name)
+                          {:error (type-error
+                                   (str "Cannot assign " (display-type val-type)
+                                        " to field of type " (display-type field-type)))}))))
       nil)))
 
 ;;

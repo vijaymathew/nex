@@ -219,7 +219,7 @@ variantClause
 
 assignment
     : IDENTIFIER ASSIGN expression
-    | THIS '.' IDENTIFIER ASSIGN expression
+    | primary '.' IDENTIFIER ASSIGN expression
     ;
 
 localVarDecl

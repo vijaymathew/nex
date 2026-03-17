@@ -18,9 +18,17 @@
 
 (declare lower-expression)
 (declare lower-statement)
+(declare lower-class-def)
+(declare if-branch-expression)
+(declare current-class-def)
+(declare class-method-def)
+(declare class-field-def)
+(declare visible-class-map)
+(declare normalize-call-target)
+(declare function-return-type)
 
 (def ^:private expression-node-types
-  #{:integer :real :string :char :boolean :nil :identifier :binary :call :if})
+  #{:integer :real :string :char :boolean :nil :identifier :binary :call :if :this})
 
 (def ^:private builtin-function-names
   (set (keys interp/builtins)))
@@ -58,9 +66,14 @@
   - `:classes`    visible class defs for type inference
   - `:functions`  visible top-level function defs for type inference/lowering
   - `:imports`    visible imports for type inference
-  - `:var-types`  visible variable types"
+  - `:var-types`  visible variable types
+  - `:compiled-classes` map of Nex class-name -> emitted JVM class metadata
+  - `:current-class` current Nex class name when lowering instance methods
+  - `:fields` map of field-name -> {:owner .. :nex-type .. :jvm-type ..}
+  - `:this-type` current receiver type when lowering instance methods"
   ([] (make-lowering-env {}))
-  ([{:keys [locals top-level? repl? state-slot next-slot classes functions imports var-types] :as opts}]
+  ([{:keys [locals top-level? repl? state-slot next-slot classes functions imports var-types
+            compiled-classes current-class fields this-type] :as opts}]
    {:locals (or locals {})
     :top-level? (if (contains? opts :top-level?) top-level? true)
     :repl? (if (contains? opts :repl?) repl? true)
@@ -69,7 +82,18 @@
     :classes (vec (or classes []))
     :functions (vec (or functions []))
     :imports (vec (or imports []))
-    :var-types (or var-types {})}))
+    :var-types (or var-types {})
+    :compiled-classes (or compiled-classes {})
+    :current-class current-class
+    :fields (or fields {})
+    :this-type this-type}))
+
+(defn- resolve-jvm-type
+  [env nex-type]
+  (let [base (base-type-name nex-type)]
+    (if-let [compiled (get (:compiled-classes env) base)]
+      (ir/object-jvm-type (:internal-name compiled))
+      (desc/nex-type->jvm-type nex-type))))
 
 (defn- env-visible-var-types
   [env]
@@ -81,20 +105,67 @@
 
 (defn- infer-type
   [env expr]
-  (or (tc/infer-expression-type expr {:classes (:classes env)
-                                      :functions (:functions env)
-                                      :imports (:imports env)
-                                      :var-types (env-visible-var-types env)})
-      (throw (ex-info "Unable to infer expression type during lowering"
-                      {:expr expr}))))
+  (let [direct-type
+        (case (:type expr)
+          :identifier
+          (or (get-in (:locals env) [(:name expr) :nex-type])
+              (get-in (:fields env) [(:name expr) :nex-type])
+              (some-> (current-class-def env)
+                      (class-field-def (:name expr))
+                      :field-type)
+              (get (:var-types env) (:name expr)))
+
+          :create
+          (:class-name expr)
+
+          :this
+          (:this-type env)
+
+          :binary
+          (let [op (:operator expr)]
+            (cond
+              (#{"+" "-" "*" "/"} op) (infer-type env (:left expr))
+              (#{"and" "or" "=" "/=" "<" "<=" ">" ">="} op) "Boolean"
+              :else nil))
+
+          :if
+          (or (some-> (:then expr) if-branch-expression (infer-type env))
+              (some-> (:else expr) if-branch-expression (infer-type env)))
+
+          :call
+          (let [target-expr (normalize-call-target (:target expr))]
+            (if (nil? target-expr)
+              (when (:this-type env)
+                (some-> (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+                        function-return-type))
+              (let [target-type (infer-type env target-expr)
+                    base-type (base-type-name target-type)
+                    class-def (get (visible-class-map env) base-type)]
+                (when class-def
+                  (if (false? (:has-parens expr))
+                    (or (some-> (class-field-def class-def (:method expr))
+                                :field-type)
+                        (some-> (class-method-def class-def (:method expr) (count (:args expr)))
+                                function-return-type))
+                    (some-> (class-method-def class-def (:method expr) (count (:args expr)))
+                            function-return-type))))))
+
+          nil)]
+    (or direct-type
+        (tc/infer-expression-type expr {:classes (:classes env)
+                                        :functions (:functions env)
+                                        :imports (:imports env)
+                                        :var-types (env-visible-var-types env)})
+        (throw (ex-info "Unable to infer expression type during lowering"
+                        {:expr expr})))))
 
 (defn- expr-jvm-type
   [env expr]
-  (desc/nex-type->jvm-type (infer-type env expr)))
+  (resolve-jvm-type env (infer-type env expr)))
 
 (defn- env-add-local
   [env name nex-type]
-  (let [jvm-type (desc/nex-type->jvm-type nex-type)
+  (let [jvm-type (resolve-jvm-type env nex-type)
         slot (:next-slot env)]
     [(assoc env
             :locals (assoc (:locals env)
@@ -113,6 +184,14 @@
 (defn- lowered-function-method-name
   [fn-def]
   (str "__repl_fn_" (:name fn-def) "$arity" (count (:params fn-def))))
+
+(defn- lowered-instance-method-name
+  [method-def]
+  (str "__method_" (:name method-def) "$arity" (count (:params method-def))))
+
+(defn- lowered-constructor-method-name
+  [ctor-def]
+  (str "__ctor_" (:name ctor-def) "$arity" (count (:params ctor-def))))
 
 (defn- function-return-type
   [fn-def]
@@ -133,6 +212,121 @@
         :else
         nil))))
 
+(defn- visible-class-map
+  [env]
+  (into {} (map (juxt :name identity) (:classes env))))
+
+(defn- current-class-def
+  [env]
+  (get (visible-class-map env) (:current-class env)))
+
+(defn- class-members
+  [class-def]
+  (mapcat (fn [section]
+            (case (:type section)
+              :feature-section (:members section)
+              :constructors (:constructors section)
+              []))
+          (:body class-def)))
+
+(defn- class-fields
+  [class-def]
+  (filter #(= :field (:type %)) (class-members class-def)))
+
+(defn- class-methods
+  [class-def]
+  (filter #(= :method (:type %)) (class-members class-def)))
+
+(defn- class-constructors
+  [class-def]
+  (filter #(= :constructor (:type %)) (class-members class-def)))
+
+(defn- class-field-def
+  [class-def field-name]
+  (some #(when (= (:name %) field-name) %) (class-fields class-def)))
+
+(defn- class-method-def
+  [class-def method-name arity]
+  (some #(when (and (= (:name %) method-name)
+                    (= (count (or (:params %) [])) arity))
+           %)
+        (class-methods class-def)))
+
+(defn- class-constructor-def
+  [class-def constructor-name arity]
+  (some #(when (and (= (:name %) constructor-name)
+                    (= (count (or (:params %) [])) arity))
+           %)
+        (class-constructors class-def)))
+
+(defn- field-info-map
+  [env class-def]
+  (into {}
+        (map (fn [field]
+               [(:name field)
+                {:owner (:name class-def)
+                 :field (:name field)
+                 :nex-type (:field-type field)
+                 :jvm-type (resolve-jvm-type env (:field-type field))}]))
+        (class-fields class-def)))
+
+(defn- field-type-map
+  [class-def]
+  (into {}
+        (map (fn [field]
+               [(:name field) (:field-type field)]))
+        (class-fields class-def)))
+
+(defn- class-jvm-meta
+  [env class-name]
+  (or (get (:compiled-classes env) class-name)
+      (throw (ex-info "Missing compiled class metadata during lowering"
+                      {:class-name class-name}))))
+
+(defn- user-class-defs
+  [program]
+  (let [synthetic-class-names (set (keep :class-name (:functions program)))]
+    (remove #(contains? synthetic-class-names (:name %))
+            (:classes program))))
+
+(defn- lower-instance-dispatch
+  [env target-expr method args has-parens]
+  (let [target-type (infer-type env target-expr)
+        base-type (base-type-name target-type)
+        target-ir (lower-expression env target-expr)
+        class-def (get (visible-class-map env) base-type)
+        field-def (when (and class-def (false? has-parens))
+                    (class-field-def class-def method))
+        method-def (when class-def
+                     (class-method-def class-def method (count args)))]
+    (cond
+      field-def
+      (let [nex-type (:field-type field-def)
+            jvm-type (resolve-jvm-type env nex-type)]
+        (ir/field-get-node (:internal-name (class-jvm-meta env base-type))
+                           method
+                           target-ir
+                           nex-type
+                           jvm-type))
+
+      method-def
+      (let [nex-type (function-return-type method-def)
+            jvm-type (resolve-jvm-type env nex-type)]
+        (ir/call-virtual-node (:internal-name (class-jvm-meta env base-type))
+                              (lowered-instance-method-name method-def)
+                              (desc/repl-instance-method-descriptor)
+                              target-ir
+                              (mapv #(lower-expression env %) args)
+                              nex-type
+                              jvm-type))
+
+      class-def
+      (throw (ex-info "Unsupported user-defined target access during lowering"
+                      {:target-type target-type :method method :has-parens has-parens}))
+
+      :else
+      nil)))
+
 (declare lower-function)
 
 (defn lower-expression
@@ -148,13 +342,27 @@
     :identifier
     (if-let [{:keys [slot nex-type jvm-type]} (get (:locals env) (:name expr))]
       (ir/local-node (:name expr) slot nex-type jvm-type)
-      (let [nex-type (or (get (:var-types env) (:name expr))
-                         (infer-type env expr))
-            jvm-type (desc/nex-type->jvm-type nex-type)]
-        (if (:top-level? env)
-          (ir/top-get-node (:name expr) nex-type jvm-type)
-          (throw (ex-info "Unknown local in non-top-level lowering"
-                          {:name (:name expr)})))))
+      (if-let [{:keys [owner field nex-type jvm-type]} (get (:fields env) (:name expr))]
+        (ir/field-get-node (:internal-name (class-jvm-meta env owner))
+                           field
+                           (ir/this-node (:this-type env)
+                                         (resolve-jvm-type env (:this-type env)))
+                           nex-type
+                           jvm-type)
+        (let [nex-type (or (get (:var-types env) (:name expr))
+                           (infer-type env expr))
+              jvm-type (resolve-jvm-type env nex-type)]
+          (if (:top-level? env)
+            (ir/top-get-node (:name expr) nex-type jvm-type)
+            (throw (ex-info "Unknown local in non-top-level lowering"
+                            {:name (:name expr)}))))))
+
+    :this
+    (if (:this-type env)
+      (ir/this-node (:this-type env)
+                    (resolve-jvm-type env (:this-type env)))
+      (throw (ex-info "this is only valid in instance-method lowering"
+                      {:expr expr})))
 
     :binary
     (let [left-ir (lower-expression env (:left expr))
@@ -197,8 +405,45 @@
             then-ir (lower-expression env then-expr)
             else-ir (lower-expression env else-expr)
             nex-type (infer-type env expr)
-            jvm-type (desc/nex-type->jvm-type nex-type)]
+            jvm-type (resolve-jvm-type env nex-type)]
         (ir/if-node test-ir [then-ir] [else-ir] nex-type jvm-type)))
+
+    :create
+    (let [class-name (:class-name expr)
+          compiled (get (:compiled-classes env) class-name)
+          class-def (get (visible-class-map env) class-name)]
+      (when (seq (:generic-args expr))
+        (throw (ex-info "Generic create is not yet supported in compiled lowering"
+                        {:expr expr})))
+      (when-not compiled
+        (throw (ex-info "Create of non-compiled class is not supported in lowering"
+                        {:expr expr :class-name class-name})))
+      (if-let [constructor-name (:constructor expr)]
+        (let [ctor-def (class-constructor-def class-def constructor-name (count (:args expr)))]
+          (when-not ctor-def
+            (throw (ex-info "Constructor not found during lowering"
+                            {:expr expr
+                             :class-name class-name
+                             :constructor constructor-name
+                             :arity (count (:args expr))})))
+          (ir/call-virtual-node (:internal-name compiled)
+                                (lowered-constructor-method-name ctor-def)
+                                (desc/repl-instance-method-descriptor)
+                                (ir/new-node (:internal-name compiled)
+                                             class-name
+                                             class-name
+                                             (ir/object-jvm-type (:internal-name compiled)))
+                                (mapv #(lower-expression env %) (:args expr))
+                                class-name
+                                (ir/object-jvm-type (:internal-name compiled))))
+        (do
+          (when (seq (:args expr))
+            (throw (ex-info "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
+                            {:expr expr})))
+          (ir/new-node (:internal-name compiled)
+                       class-name
+                       class-name
+                       (ir/object-jvm-type (:internal-name compiled))))))
 
     :call
     (if (and (nil? (:target expr))
@@ -207,23 +452,45 @@
       (lower-expression env {:type :identifier
                              :name (:method expr)})
       (let [target-expr (normalize-call-target (:target expr))
-            arg-irs (mapv #(lower-expression env %) (:args expr))
-            nex-type (infer-type env expr)
-            jvm-type (desc/nex-type->jvm-type nex-type)]
+            arg-irs (mapv #(lower-expression env %) (:args expr))]
         (if (nil? target-expr)
-          (if (contains? builtin-function-names (:method expr))
-            (ir/call-runtime-node (:method expr) arg-irs nex-type jvm-type)
-            (ir/call-repl-fn-node (:method expr) arg-irs nex-type jvm-type))
+          (cond
+            (and (:this-type env)
+                 (class-method-def (current-class-def env) (:method expr) (count (:args expr))))
+            (let [method-def (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+                  nex-type (function-return-type method-def)
+                  jvm-type (resolve-jvm-type env nex-type)]
+              (ir/call-virtual-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                    (lowered-instance-method-name method-def)
+                                    (desc/repl-instance-method-descriptor)
+                                    (ir/this-node (:this-type env)
+                                                  (resolve-jvm-type env (:this-type env)))
+                                    arg-irs
+                                    nex-type
+                                    jvm-type))
+
+            (contains? builtin-function-names (:method expr))
+            (let [nex-type (infer-type env expr)
+                  jvm-type (resolve-jvm-type env nex-type)]
+              (ir/call-runtime-node (:method expr) arg-irs nex-type jvm-type))
+
+            :else
+            (let [nex-type (infer-type env expr)
+                  jvm-type (resolve-jvm-type env nex-type)]
+              (ir/call-repl-fn-node (:method expr) arg-irs nex-type jvm-type)))
           (let [target-type (infer-type env target-expr)]
             (if (builtin-runtime-receiver-type? target-type)
-              (let [target-ir (lower-expression env target-expr)]
+              (let [target-ir (lower-expression env target-expr)
+                    nex-type (infer-type env expr)
+                    jvm-type (resolve-jvm-type env nex-type)]
                 (ir/call-runtime-node (str "method:" (:method expr))
                                       (into [target-ir] arg-irs)
                                       nex-type
                                       jvm-type))
-              (throw (ex-info "Unsupported target call expression for lowering"
-                              {:expr expr
-                               :target-type target-type})))))))
+              (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
+                  (throw (ex-info "Unsupported target call expression for lowering"
+                                  {:expr expr
+                                   :target-type target-type}))))))))
 
     (throw (ex-info "Unsupported expression node for lowering"
                     {:expr expr :node-type (:type expr)}))))
@@ -245,14 +512,42 @@
           target-name (:target stmt)]
       (if-let [{:keys [slot nex-type jvm-type]} (get (:locals env) target-name)]
         [env (ir/set-local-node slot value-ir nex-type jvm-type)]
-        (let [nex-type (or (get (:var-types env) target-name)
-                           (infer-type env {:type :identifier :name target-name}))
-              jvm-type (desc/nex-type->jvm-type nex-type)]
-          (if (:top-level? env)
-            [(update env :var-types assoc target-name nex-type)
-             (ir/top-set-node target-name value-ir nex-type jvm-type)]
-            (throw (ex-info "Assignment target is not a known local"
-                            {:target target-name}))))))
+        (if-let [{:keys [owner field nex-type jvm-type]} (get (:fields env) target-name)]
+          [env (ir/field-set-node (:internal-name (class-jvm-meta env owner))
+                                  field
+                                  (ir/this-node (:this-type env)
+                                                (resolve-jvm-type env (:this-type env)))
+                                  value-ir
+                                  nex-type
+                                  jvm-type)]
+          (let [nex-type (or (get (:var-types env) target-name)
+                             (infer-type env {:type :identifier :name target-name}))
+                jvm-type (resolve-jvm-type env nex-type)]
+            (if (:top-level? env)
+              [(update env :var-types assoc target-name nex-type)
+               (ir/top-set-node target-name value-ir nex-type jvm-type)]
+              (throw (ex-info "Assignment target is not a known local"
+                              {:target target-name})))))))
+
+    (= :member-assign (:type stmt))
+    (let [field-name (:field stmt)
+          target-expr (or (:object stmt) {:type :this})
+          target-type (infer-type env target-expr)
+          owner (base-type-name target-type)
+          class-def (get (visible-class-map env) owner)
+          field-def (when class-def (class-field-def class-def field-name))
+          value-ir (lower-expression env (:value stmt))]
+      (when-not field-def
+        (throw (ex-info "Unknown field in member assignment during lowering"
+                        {:field field-name
+                         :target target-expr
+                         :target-type target-type})))
+      [env (ir/field-set-node (:internal-name (class-jvm-meta env owner))
+                              field-name
+                              (lower-expression env target-expr)
+                              value-ir
+                              (:field-type field-def)
+                              (resolve-jvm-type env (:field-type field-def)))])
 
     (= :call (:type stmt))
     [env (ir/pop-node (lower-expression env stmt))]
@@ -309,14 +604,19 @@
   (let [return-type (function-return-type fn-def)
         visible-classes (vec (concat [(:class-def fn-def)]
                                      (keep :class-def visible-functions)))
+        current-class (:class-name fn-def)
         env0 (make-lowering-env {:classes visible-classes
                                  :functions visible-functions
                                  :imports visible-imports
-                                 :var-types {}
-                                 :top-level? true
+                                 :var-types (field-type-map (:class-def fn-def))
+                                 :compiled-classes (:compiled-classes fn-def)
+                                 :current-class current-class
+                                 :fields (field-info-map {:compiled-classes (:compiled-classes fn-def)} (:class-def fn-def))
+                                 :this-type current-class
+                                 :top-level? false
                                  :repl? true
-                                 :state-slot 0
-                                 :next-slot 2})
+                                 :state-slot 1
+                                 :next-slot 3})
         [env-with-params params]
         (reduce (fn [[env acc] {:keys [name type]}]
                   (let [[env' local] (env-add-local env name type)]
@@ -341,7 +641,9 @@
                                        :stmt final-stmt})))]
     (ir/fn-node {:name (:name fn-def)
                  :owner unit-name
-                 :emitted-name (lowered-function-method-name fn-def)
+                 :emitted-name (if (:class-name fn-def)
+                                 (lowered-instance-method-name fn-def)
+                                 (lowered-function-method-name fn-def))
                  :params params
                  :return-type return-type
                  :return-jvm-type (ir/object-jvm-type "java/lang/Object")
@@ -351,16 +653,91 @@
                                              return-type
                                              (ir/object-jvm-type "java/lang/Object")))})))
 
+(defn- lower-constructor
+  [unit-name visible-functions visible-imports class-def ctor-def compiled-classes]
+  (let [class-name (:name class-def)
+        env0 (make-lowering-env {:classes [class-def]
+                                 :functions visible-functions
+                                 :imports visible-imports
+                                 :var-types (field-type-map class-def)
+                                 :compiled-classes compiled-classes
+                                 :current-class class-name
+                                 :fields (field-info-map {:compiled-classes compiled-classes} class-def)
+                                 :this-type class-name
+                                 :top-level? false
+                                 :repl? true
+                                 :state-slot 1
+                                 :next-slot 3})
+        [env-with-params params]
+        (reduce (fn [[env acc] {:keys [name type]}]
+                  (let [[env' local] (env-add-local env name type)]
+                    [env' (conj acc (assoc local :arg-index (count acc)))]))
+                [env0 []]
+                (:params ctor-def))
+        [env' lowered-body] (lower-statements env-with-params (vec (:body ctor-def)))]
+    (ir/fn-node {:name (:name ctor-def)
+                 :owner unit-name
+                 :emitted-name (lowered-constructor-method-name ctor-def)
+                 :params params
+                 :return-type class-name
+                 :return-jvm-type (ir/object-jvm-type "java/lang/Object")
+                 :locals (vec (vals (:locals env')))
+                 :body (conj lowered-body
+                             (ir/return-node
+                              (ir/this-node class-name
+                                            (resolve-jvm-type {:compiled-classes compiled-classes} class-name))
+                              class-name
+                              (ir/object-jvm-type "java/lang/Object")))})))
+
+(defn lower-class-def
+  [class-def opts]
+  (let [compiled-classes (:compiled-classes opts)
+        class-name (:name class-def)
+        class-meta (class-jvm-meta {:compiled-classes compiled-classes} class-name)
+        visible-functions (vec (:functions opts))
+        visible-imports (vec (:imports opts))
+        constructors (->> (class-constructors class-def)
+                          (mapv (fn [ctor-def]
+                                  (lower-constructor (:jvm-name class-meta)
+                                                     visible-functions
+                                                     visible-imports
+                                                     class-def
+                                                     ctor-def
+                                                     compiled-classes))))
+        methods (->> (class-methods class-def)
+                     (mapv (fn [method-def]
+                             (lower-function (:jvm-name class-meta)
+                                             visible-functions
+                                             visible-imports
+                                             (assoc method-def
+                                                    :class-name class-name
+                                                    :class-def class-def
+                                                    :compiled-classes compiled-classes)))))
+        fields (mapv (fn [field]
+                       {:name (:name field)
+                        :nex-type (:field-type field)
+                        :jvm-type (resolve-jvm-type {:compiled-classes compiled-classes} (:field-type field))})
+                     (class-fields class-def))]
+    {:name class-name
+     :jvm-name (:jvm-name class-meta)
+     :internal-name (:internal-name class-meta)
+     :fields fields
+     :constructors constructors
+     :methods methods}))
+
 (defn lower-repl-cell
   "Lower a narrow REPL/program body to a first compiler unit."
   [program opts]
   (let [unit-name (or (:name opts) "nex/repl/Cell_0001")
+        actual-classes (vec (user-class-defs program))
         visible-functions (vec (concat (:functions program) (:functions opts)))
-        visible-classes (vec (concat (:classes program)
+        visible-classes (vec (concat actual-classes
+                                     (:classes opts)
                                      (keep :class-def visible-functions)))
         env (make-lowering-env {:classes visible-classes
                                 :functions visible-functions
                                 :imports (:imports program)
+                                :compiled-classes (:compiled-classes opts)
                                 :var-types (:var-types opts)
                                 :top-level? true
                                 :repl? true
@@ -403,6 +780,10 @@
     {:env env''
      :unit (ir/unit {:name (or (:name opts) "nex/repl/Cell_0001")
                      :kind :repl-cell
+                     :classes (mapv #(lower-class-def % {:compiled-classes (:compiled-classes opts)
+                                                         :functions visible-functions
+                                                         :imports (:imports program)})
+                                    actual-classes)
                      :functions (mapv #(lower-function unit-name visible-functions (:imports program) %)
                                       (remove :declaration-only? (:functions program)))
                      :body lowered-body''

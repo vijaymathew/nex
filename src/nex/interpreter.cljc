@@ -3313,21 +3313,41 @@
   (:current-object ctx))
 
 (defmethod eval-node :member-assign
-  [ctx {:keys [object-type field value]}]
-  (maybe-debug-pause ctx {:type :member-assign :object-type object-type :field field :value value})
-  (when-let [current-class-name (:current-class-name ctx)]
-    (when-let [class-def (lookup-class-if-exists ctx current-class-name)]
-      (when (lookup-class-constant ctx class-def field)
-        (throw (ex-info (str "Cannot assign to constant: " field)
-                        {:field field :constant? true})))))
-  (let [val (eval-node ctx value)]
-    ;; Track that this field was explicitly modified via this.field :=
-    (when-let [mf (:modified-fields ctx)]
-      (swap! mf conj field))
-    ;; this.field sets the env variable
-    ;; (fields are tracked as env vars, extracted back to object after body)
-    (env-set! (:current-env ctx) field val)
-    val))
+  [ctx {:keys [object object-type field value]}]
+  (maybe-debug-pause ctx {:type :member-assign :object object :object-type object-type :field field :value value})
+  (let [target-expr (or object (when (= object-type :this) {:type :this}))
+        target-obj (eval-node ctx target-expr)
+        class-name (or (:class-name target-obj) (:current-class-name ctx))
+        class-def (when class-name (lookup-class-if-exists ctx class-name))]
+    (when-not (nex-object? target-obj)
+      (throw (ex-info "Field assignment target must be an object"
+                      {:target target-expr :value target-obj})))
+    (when (and class-def (lookup-class-constant ctx class-def field))
+      (throw (ex-info (str "Cannot assign to constant: " field)
+                      {:field field :constant? true})))
+    (when-not (contains? (:fields target-obj) (keyword field))
+      (throw (ex-info (str "Undefined field: " field)
+                      {:field field :class-name class-name})))
+    (let [val (eval-node ctx value)]
+      (if (and (= (:type target-expr) :this) (:current-object ctx))
+        (do
+          ;; Track that this field was explicitly modified via this.field :=
+          (when-let [mf (:modified-fields ctx)]
+            (swap! mf conj field))
+          ;; this.field sets the env variable
+          ;; (fields are tracked as env vars, extracted back to object after body)
+          (env-set! (:current-env ctx) field val)
+          val)
+        (let [updated-obj (make-object (:class-name target-obj)
+                                       (assoc (:fields target-obj) (keyword field) val)
+                                       (:closure-env target-obj))
+              write-back-target (if (= :identifier (:type target-expr))
+                                  (:name target-expr)
+                                  target-expr)]
+          (when-not (write-back-target! ctx write-back-target updated-obj target-obj)
+            (throw (ex-info "Field assignment target is not writable"
+                            {:target target-expr :field field})))
+          val)))))
 
 (defmethod eval-node :assign
   [ctx {:keys [target value]}]
@@ -4372,12 +4392,34 @@
          (js/Promise.resolve (:current-object ctx))
 
          (= node-type :member-assign)
-         (.then (->promise (eval-node-async ctx (:value node)))
-                (fn [val]
-                  (when-let [mf (:modified-fields ctx)]
-                    (swap! mf conj (:field node)))
-                  (env-set! (:current-env ctx) (:field node) val)
-                  val))
+         (.then (->promise (eval-node-async ctx (or (:object node) {:type :this})))
+                (fn [target-obj]
+                  (when-not (nex-object? target-obj)
+                    (throw (ex-info "Field assignment target must be an object"
+                                    {:target (or (:object node) {:type :this})
+                                     :value target-obj})))
+                  (.then (->promise (eval-node-async ctx (:value node)))
+                         (fn [val]
+                           (if (and (or (= (:object-type node) :this)
+                                        (= :this (:type (:object node))))
+                                    (:current-object ctx))
+                             (do
+                               (when-let [mf (:modified-fields ctx)]
+                                 (swap! mf conj (:field node)))
+                               (env-set! (:current-env ctx) (:field node) val)
+                               val)
+                             (let [updated-obj (make-object (:class-name target-obj)
+                                                            (assoc (:fields target-obj) (keyword (:field node)) val)
+                                                            (:closure-env target-obj))
+                                   write-back-target (let [target-expr (or (:object node) {:type :this})]
+                                                       (if (= :identifier (:type target-expr))
+                                                         (:name target-expr)
+                                                         target-expr))]
+                               (when-not (write-back-target! ctx write-back-target updated-obj target-obj)
+                                 (throw (ex-info "Field assignment target is not writable"
+                                                 {:target (or (:object node) {:type :this})
+                                                  :field (:field node)})))
+                               val))))))
 
          (= node-type :assign)
          (do

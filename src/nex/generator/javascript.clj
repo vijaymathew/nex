@@ -1510,8 +1510,10 @@
              (str/join "\n" (map #(generate-statement level % var-names) (:body stmt))))
      :raise (indent level (str "throw " (generate-expression (:value stmt)) ";"))
      :retry (indent level "continue;")
-     :member-assign (indent level
-                      (str *this-name* "." (:field stmt) " = " (generate-expression (:value stmt)) ";"))
+     :member-assign (let [target-expr (or (:object stmt) {:type :this})]
+                      (indent level
+                              (str (generate-expression target-expr) "." (:field stmt)
+                                   " = " (generate-expression (:value stmt)) ";")))
      (indent level (str "/* Unknown statement: " (:type stmt) " */")))))
 
 ;;
