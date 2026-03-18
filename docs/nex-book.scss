@@ -21,8 +21,6 @@ $body-font-family: $font-family-serif !default;
 
 // Theme Variables
 :root {
-  --nex-bg: #f8f7f4;
-  --nex-text: #1a2b34;
   --nex-primary: #33d1b0;
   --nex-secondary: #ffd166;
   --nex-heading-color: #07161e;
@@ -31,23 +29,35 @@ $body-font-family: $font-family-serif !default;
   --nex-callout-border: #d9dee5;
   --nex-sidebar-bg: #fcfcfc;
   --nex-code-bg: #f8f9fa;
-  --nex-code-color: #d63384;
+  --nex-code-color: #4a6785;
+  --nex-bg: #f8f7f4;
+  --nex-text: #1a2b34;
 }
 
 // Dark Mode Overrides
 .quarto-dark {
-  --nex-bg: #07161e;
-  --nex-text: #e8f4ff;
-  --nex-muted: #9fb9c8;
   --nex-heading-color: #ffd166;
   --nex-callout-bg: #0d2230;
   --nex-callout-border: #2f5263;
   --nex-sidebar-bg: #07161e;
   --nex-code-bg: #041018;
-  --nex-code-color: #e8f4ff;
-  
-  body { background-color: var(--nex-bg) !important; color: var(--nex-text) !important; }
-  #quarto-content, #quarto-sidebar, .quarto-secondary-nav { background-color: var(--nex-bg) !important; }
+  --nex-code-color: #8cb4d4;
+  --nex-bg: #07161e;
+  --nex-text: #e8f4ff;
+
+  // Force body background and color in dark mode
+  background-color: var(--nex-bg) !important;
+  color: var(--nex-text) !important;
+
+  body {
+    background-color: var(--nex-bg) !important;
+    color: var(--nex-text) !important;
+  }
+
+  #quarto-content, #quarto-sidebar, .quarto-secondary-nav {
+    background-color: var(--nex-bg) !important;
+    color: var(--nex-text) !important;
+  }
 
   // Link adjustment for dark mode
   a {
@@ -60,7 +70,15 @@ $body-font-family: $font-family-serif !default;
 
 body {
   font-size: var(--nex-body-size);
-  line-height: 1.75;
+  line-height: 1.7;
+  background-color: var(--nex-bg);
+  color: var(--nex-text);
+  // Activate OpenType features: common ligatures, old-style figures,
+  // contextual alternates — the same features the PDF gets via fontspec.
+  font-feature-settings: "liga" 1, "clig" 1, "onum" 1, "calt" 1;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -107,6 +125,30 @@ h1, h2, h3, h4, h5, h6 {
   box-shadow: 0 8px 20px rgba(0,0,0,0.08);
 }
 
+// Measure control: cap the content column to ~65–75 characters in Lora.
+#quarto-content .page-columns .content {
+  max-width: 38em;
+}
+
+// Paragraph rhythm: subtle first-line indent for consecutive paragraphs,
+// matching the typographic tradition the book advocates.
+.content p + p {
+  text-indent: 1.5em;
+}
+// No indent after headings, lists, code, or blockquotes (first para rule).
+.content h1 + p,
+.content h2 + p,
+.content h3 + p,
+.content h4 + p,
+.content ul + p,
+.content ol + p,
+.content pre + p,
+.content blockquote + p,
+.content .sourceCode + p,
+.content table + p {
+  text-indent: 0;
+}
+
 // Code block styling
 pre.sourceCode {
   background-color: var(--nex-code-bg) !important;
@@ -115,12 +157,51 @@ pre.sourceCode {
   padding: 1.2rem;
 }
 
+// Inline code: muted blue-grey so it sits in prose without shouting
 code {
   color: var(--nex-code-color);
+  font-size: 0.92em;
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+  background-color: var(--nex-code-bg);
 }
 
 .sourceCode code {
   color: inherit;
+  font-size: inherit;
+  padding: 0;
+  border-radius: 0;
+  background-color: transparent;
+}
+
+// Table styling: booktabs-inspired hairlines
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.95rem;
+
+  thead {
+    border-top: 2px solid var(--nex-text);
+    border-bottom: 1px solid var(--nex-text);
+  }
+  tbody {
+    border-bottom: 2px solid var(--nex-text);
+  }
+  th, td {
+    padding: 0.55rem 0.75rem;
+    text-align: left;
+    border: none;
+  }
+  th {
+    font-family: $font-family-sans-serif;
+    font-weight: 600;
+    font-size: 0.9rem;
+    letter-spacing: 0.02em;
+  }
+  tbody tr:nth-child(even) {
+    background-color: rgba(0,0,0,0.02);
+  }
 }
 
 // Navbar styling for both modes
