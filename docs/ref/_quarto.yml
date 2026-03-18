@@ -21,7 +21,9 @@ book:
 
 format:
   html:
-    theme: [cosmo, ../nex-book.scss]
+    theme:
+      light: [cosmo, ../nex-book.scss]
+      dark: [darkly, ../nex-book.scss]
     css: styles.css
     toc: true
     toc-depth: 3

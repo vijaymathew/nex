@@ -1,155 +1,125 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap');
-
 :root {
-  --bg-0: #07161e;
-  --bg-1: #0f2b3a;
-  --card: #0d2230;
-  --line: #2f5263;
-  --text: #e8f4ff;
-  --muted: #9fb9c8;
-  --accent: #33d1b0;
-  --accent-2: #ffd166;
-  --code-bg: #041018;
-  --code-line: #234150;
+  --muted: #5b6673;
+  --accent: #1f5f8b;
+  --rule: #d9dee5;
+  --code-bg: #f2f4f7;
+  --callout-bg: #eef4f9;
+  --callout-border: #bfd2e3;
 }
 
-html,
 body {
-  background:
-    radial-gradient(1200px 500px at 10% -10%, #1d5169 0%, transparent 60%),
-    radial-gradient(900px 450px at 100% 0%, #174f44 0%, transparent 58%),
-    linear-gradient(160deg, var(--bg-0), var(--bg-1));
-  color: var(--text);
-  font-family: 'Space Grotesk', sans-serif;
-}
-
-#quarto-content,
-#quarto-content main,
-.page-layout-article,
-.page-layout-full,
-.sidebar nav[role="doc-toc"] {
-  font-family: 'Space Grotesk', sans-serif;
-}
-
-a,
-a:visited {
-  color: #9ddcfb;
-}
-
-a:hover {
-  color: #d3efff;
+  background: var(--nex-bg);
+  color: var(--nex-text);
+  line-height: 1.72;
+  font-size: 1.06rem;
 }
 
 h1,
 h2,
 h3,
 h4 {
-  color: var(--text);
-  line-height: 1.2;
+  color: var(--nex-heading-color);
+  letter-spacing: 0.01em;
 }
 
-h1 {
-  color: var(--accent-2);
-  letter-spacing: 0.01em;
+.quarto-dark h1,
+.quarto-dark h2,
+.quarto-dark h3,
+.quarto-dark h4 {
+  color: var(--nex-heading-color) !important;
+}
+
+.quarto-dark h1 code,
+.quarto-dark h2 code,
+.quarto-dark h3 code,
+.quarto-dark h4 code {
+  color: var(--nex-heading-color) !important;
+}
+
+.quarto-dark code {
+  color: var(--nex-code-color) !important;
+}
+
+.quarto-dark p,
+.quarto-dark li,
+.quarto-dark td {
+  color: var(--nex-text);
+}
+
+h1.title {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.quarto-title-meta,
+.subtitle,
+.date {
+  color: var(--muted);
+}
+
+.quarto-dark .subtitle,
+.quarto-dark .date {
+  color: var(--nex-muted);
+}
+
+#quarto-content main {
+  max-width: 860px;
 }
 
 p,
 li {
-  color: var(--muted);
+  max-width: 72ch;
 }
 
-.sidebar,
-#quarto-sidebar,
-#quarto-margin-sidebar,
-nav[role="doc-toc"] {
-  background: color-mix(in srgb, var(--card) 86%, transparent);
-  border-right: 1px solid var(--line);
-}
-
-.sidebar nav a,
-#quarto-sidebar a,
-#quarto-margin-sidebar a,
-nav[role="doc-toc"] a {
-  color: var(--muted);
-}
-
-.sidebar nav a.active,
-#quarto-sidebar a.active,
-nav[role="doc-toc"] a.active {
+a {
   color: var(--accent);
-  font-weight: 700;
+  text-decoration-thickness: 0.08em;
 }
 
-.quarto-title-banner,
-#title-block-header,
-#title-block-header.quarto-title-block {
-  background: color-mix(in srgb, var(--card) 80%, transparent);
-  border-bottom: 1px solid var(--line);
+.quarto-dark a {
+  color: #9ddcfb;
 }
 
-.table {
-  --bs-table-bg: color-mix(in srgb, var(--card) 86%, transparent);
-  --bs-table-color: var(--text);
-  --bs-table-border-color: var(--line);
+a:hover {
+  text-decoration-thickness: 0.13em;
 }
 
-table,
-th,
-td {
-  border-color: var(--line) !important;
-}
-
-th {
-  color: var(--accent-2);
-  font-weight: 700;
-}
-
-td {
-  color: var(--muted);
-}
-
-pre,
-code,
-kbd,
-samp {
-  font-family: 'JetBrains Mono', monospace;
+hr {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  margin: 2rem 0;
 }
 
 pre {
-  background: var(--code-bg);
-  border: 1px solid var(--code-line);
+  background: var(--nex-code-bg);
+  border: 1px solid var(--nex-callout-border);
   border-radius: 10px;
-  color: #d4efff;
-  padding: 0.9rem;
-}
-
-code {
-  background: transparent !important;
-  border: none !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-}
-
-:not(pre) > code {
-  color: #d9ecf8 !important;
-  padding: 0 !important;
-}
-
-pre code {
-  background: transparent !important;
-  border: none !important;
-  padding: 0 !important;
+  padding: 0.95rem 1rem;
+  font-size: 1rem !important;
+  line-height: 1.45;
 }
 
 blockquote {
-  border-left: 3px solid var(--accent);
-  background: color-mix(in srgb, var(--card) 84%, transparent);
+  border-left: 4px solid var(--nex-primary);
+  padding-left: 1rem;
   color: var(--muted);
 }
 
-@media (max-width: 991px) {
-  #quarto-sidebar {
-    border-right: none;
-    border-bottom: 1px solid var(--line);
+.quarto-dark blockquote {
+  color: var(--nex-muted);
+}
+
+.sidebar nav[role="doc-toc"] {
+  border-left: 1px solid var(--rule);
+  padding-left: 0.9rem;
+}
+
+@media (max-width: 900px) {
+  body {
+    font-size: 1rem;
+  }
+
+  #quarto-content main {
+    max-width: 100%;
   }
 }
