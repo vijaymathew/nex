@@ -1,6 +1,4 @@
 :root {
-  --book-bg: #f8f7f4;
-  --ink: #1d232b;
   --muted: #5b6673;
   --accent: #1f5f8b;
   --rule: #d9dee5;
@@ -10,8 +8,8 @@
 }
 
 body {
-  background: var(--book-bg);
-  color: var(--ink);
+  background: var(--nex-bg);
+  color: var(--nex-text);
   line-height: 1.72;
   font-size: 1.06rem;
 }
@@ -20,8 +18,32 @@ h1,
 h2,
 h3,
 h4 {
-  color: var(--ink);
+  color: var(--nex-heading-color);
   letter-spacing: 0.01em;
+}
+
+.quarto-dark h1,
+.quarto-dark h2,
+.quarto-dark h3,
+.quarto-dark h4 {
+  color: var(--nex-heading-color) !important;
+}
+
+.quarto-dark h1 code,
+.quarto-dark h2 code,
+.quarto-dark h3 code,
+.quarto-dark h4 code {
+  color: var(--nex-heading-color) !important;
+}
+
+.quarto-dark code {
+  color: var(--nex-code-color) !important;
+}
+
+.quarto-dark p,
+.quarto-dark li,
+.quarto-dark td {
+  color: var(--nex-text);
 }
 
 h1.title {
@@ -33,6 +55,11 @@ h1.title {
 .subtitle,
 .date {
   color: var(--muted);
+}
+
+.quarto-dark .subtitle,
+.quarto-dark .date {
+  color: var(--nex-muted);
 }
 
 #quarto-content main {
@@ -49,6 +76,10 @@ a {
   text-decoration-thickness: 0.08em;
 }
 
+.quarto-dark a {
+  color: #9ddcfb;
+}
+
 a:hover {
   text-decoration-thickness: 0.13em;
 }
@@ -60,33 +91,22 @@ hr {
 }
 
 pre {
-  background: var(--code-bg);
-  border: 1px solid var(--rule);
+  background: var(--nex-code-bg);
+  border: 1px solid var(--nex-callout-border);
   border-radius: 10px;
   padding: 0.95rem 1rem;
   font-size: 1rem !important;
   line-height: 1.45;
 }
 
-pre code,
-code.sourceCode,
-div.sourceCode pre,
-div.sourceCode code {
-  font-size: 1rem !important;
-  line-height: 1.45;
-}
-
-p code,
-li code,
-td code,
-th code {
-  font-size: 0.92em;
-}
-
 blockquote {
-  border-left: 4px solid var(--accent);
+  border-left: 4px solid var(--nex-primary);
   padding-left: 1rem;
   color: var(--muted);
+}
+
+.quarto-dark blockquote {
+  color: var(--nex-muted);
 }
 
 .sidebar nav[role="doc-toc"] {
