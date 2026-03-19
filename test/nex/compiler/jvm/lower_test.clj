@@ -251,10 +251,11 @@ do
 end")
           env (lower/make-lowering-env {:top-level? true})
           loop-stmt (first (:statements program))
-          [env' loop-ir] (lower/lower-statement env loop-stmt)]
+          [env' block-ir] (lower/lower-statement env loop-stmt)
+          loop-ir (-> block-ir :body last)]
+      (is (= :block (:op block-ir)))
       (is (= :loop (:op loop-ir)))
-      (is (= 1 (count (:init loop-ir))))
-      (is (= :set-local (:op (first (:init loop-ir)))))
+      (is (= :set-local (-> block-ir :body first :op)))
       (is (some? (:test loop-ir)))
       (is (= :compare (:op (:test loop-ir))))
       (is (= 1 (count (:body loop-ir))))
@@ -275,6 +276,28 @@ end")
       (is (= :local (-> block-ir :body second :expr :args first :op)))
       (is (= {} (:var-types env'))))))
 
+(deftest lower-scoped-block-with-rescue-test
+  (testing "compiled lowering lowers scoped do/rescue/end blocks to try ir with exception binding"
+    (let [program (p/ast "do
+  raise \"boom\"
+rescue
+  print(exception)
+  retry
+end")
+          env (lower/make-lowering-env {:top-level? true})
+          scoped-stmt (first (:statements program))
+          [env' try-ir] (lower/lower-statement env scoped-stmt)]
+      (is (= :try (:op try-ir)))
+      (is (= 1 (count (:body try-ir))))
+      (is (= :raise (-> try-ir :body first :op)))
+      (is (= 2 (count (:rescue try-ir))))
+      (is (= :pop (-> try-ir :rescue first :op)))
+      (is (= :retry (-> try-ir :rescue second :op)))
+      (is (integer? (:throwable-slot try-ir)))
+      (is (integer? (:rescue-throwable-slot try-ir)))
+      (is (integer? (:exception-slot try-ir)))
+      (is (= {} (:var-types env'))))))
+
 (deftest lower-case-statement-test
   (testing "compiled lowering lowers case statements to block plus nested if-stmt ir"
     (let [program (p/ast "case x of
@@ -290,3 +313,71 @@ end")
       (is (= :set-local (-> block-ir :body first :op)))
       (is (= :if-stmt (-> block-ir :body second :op)))
       (is (= :if (-> block-ir :body second :test :op))))))
+
+(deftest lower-method-require-ensure-old-test
+  (testing "instance-method lowering snapshots old fields and lowers require/ensure to asserts"
+    (let [program (p/ast "class Counter
+feature
+  value: Integer
+
+  bump(): Integer
+    require
+      non_negative: value >= 0
+    do
+      value := value + 1
+      result := value
+    ensure
+      advanced: value = old value + 1
+      result_matches: result = value
+    end
+end")
+          compiled-classes {"Counter" {:name "Counter"
+                                       :internal-name "nex/repl/Counter_0001"
+                                       :jvm-name "nex/repl/Counter_0001"
+                                       :binary-name "nex.repl.Counter_0001"}}
+          class-ir (lower/lower-class-def (first (:classes program))
+                                          {:compiled-classes compiled-classes
+                                           :classes (:classes program)
+                                           :functions []
+                                           :imports []})
+          method-ir (first (:methods class-ir))
+          ops (mapv :op (:body method-ir))]
+      (is (= :set-local (first ops)))
+      (is (= :assert (second ops)))
+      (is (= :field-set (nth ops 2)))
+      (is (= :set-local (nth ops 3)))
+      (is (= :assert (nth ops 4)))
+      (is (= :assert (nth ops 5)))
+      (is (= :return (last ops)))
+      (is (= :require (-> method-ir :body second :kind)))
+      (is (= :ensure (-> method-ir :body (nth 4) :kind)))
+      (is (= :ensure (-> method-ir :body (nth 5) :kind))))))
+
+(deftest lower-loop-contracts-test
+  (testing "compiled lowering lowers loop invariants and variants through block/assert IR"
+    (let [program (p/ast "from
+  let i := 3
+invariant
+  non_negative: i >= 0
+variant
+  i
+until
+  i = 0
+do
+  i := i - 1
+end")
+          env (lower/make-lowering-env {:top-level? true})
+          loop-stmt (first (:statements program))
+          [_ block-ir] (lower/lower-statement env loop-stmt)
+          loop-ir (-> block-ir :body last)]
+      (is (= :block (:op block-ir)))
+      (is (= :assert (-> block-ir :body second :op)))
+      (is (= :set-local (-> block-ir :body (nth 2) :op)))
+      (is (= :set-local (-> block-ir :body (nth 3) :op)))
+      (is (= :loop (:op loop-ir)))
+      (is (= :set-local (-> loop-ir :body first :op)))
+      (is (= :if-stmt (-> loop-ir :body second :op)))
+      (is (= :assert (-> loop-ir :body second :then first :op)))
+      (is (= :set-local (-> loop-ir :body (nth 2) :op)))
+      (is (= :set-local (-> loop-ir :body (nth 3) :op)))
+      (is (= :assert (:op (last (:body loop-ir))))))))

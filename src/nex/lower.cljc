@@ -92,10 +92,12 @@
   - `:current-class` current Nex class name when lowering instance methods
   - `:fields` map of field-name -> {:owner .. :nex-type .. :jvm-type ..}
   - `:this-type` current receiver type when lowering instance methods
-  - `:scoped-locals?` force `let` bindings to lower to JVM locals even in top-level code"
+  - `:scoped-locals?` force `let` bindings to lower to JVM locals even in top-level code
+  - `:retry-allowed?` whether `retry` is legal in the current lowering scope
+  - `:old-field-locals` snapshot locals for `old` in postconditions"
   ([] (make-lowering-env {}))
   ([{:keys [locals top-level? repl? state-slot next-slot classes functions imports var-types
-            compiled-classes current-class fields this-type] :as opts}]
+            compiled-classes current-class fields this-type old-field-locals] :as opts}]
    {:locals (or locals {})
     :top-level? (if (contains? opts :top-level?) top-level? true)
     :repl? (if (contains? opts :repl?) repl? true)
@@ -109,7 +111,9 @@
     :current-class current-class
     :fields (or fields {})
     :this-type this-type
-    :scoped-locals? false}))
+    :scoped-locals? false
+    :retry-allowed? false
+    :old-field-locals (or old-field-locals {})}))
 
 (defn- resolve-jvm-type
   [env nex-type]
@@ -275,6 +279,124 @@
 (defn- scoped-child-env
   [env]
   (assoc env :scoped-locals? true))
+
+(defn- alloc-temp-slot
+  [env]
+  (let [slot (:next-slot env)]
+    [(update env :next-slot inc) slot]))
+
+(defn- env-add-local-alias
+  [env alias {:keys [slot nex-type jvm-type]}]
+  (-> env
+      (assoc-in [:locals alias] {:name alias
+                                 :slot slot
+                                 :nex-type nex-type
+                                 :jvm-type jvm-type})
+      (assoc-in [:var-types alias] nex-type)))
+
+(defn- references-old?
+  [node]
+  (cond
+    (nil? node) false
+    (sequential? node) (boolean (some references-old? node))
+    (map? node) (or (= :old (:type node))
+                    (boolean (some references-old? (vals node))))
+    :else false))
+
+(defn- snapshot-source-ir
+  [env {:keys [owner field carrier-owner carrier-field carrier-jvm-type nex-type jvm-type]}]
+  (let [this-ir (ir/this-node (:this-type env)
+                              (exact-class-jvm-type env (:this-type env)))
+        target-ir (if carrier-field
+                    (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
+                                       carrier-field
+                                       this-ir
+                                       owner
+                                       carrier-jvm-type)
+                    this-ir)]
+    (ir/field-get-node (:internal-name (class-jvm-meta env owner))
+                       field
+                       target-ir
+                       nex-type
+                       jvm-type)))
+
+(defn- assertion-ir
+  [env kind {:keys [label condition]}]
+  (ir/assert-node kind label (lower-expression env condition)))
+
+(defn- default-const-node
+  [nex-type jvm-type]
+  (case jvm-type
+    :int (ir/const-node 0 nex-type :int)
+    :long (ir/const-node 0 nex-type :long)
+    :double (ir/const-node 0.0 nex-type :double)
+    :boolean (ir/const-node false "Boolean" :boolean)
+    :char (ir/const-node (char 0) "Char" :char)
+    (ir/const-node nil "Any" (ir/object-jvm-type "java/lang/Object"))))
+
+(defn- add-old-field-snapshots
+  [env assertions]
+  (if (some #(references-old? (:condition %)) assertions)
+    (do
+      (when-not (and (:this-type env) (seq (:fields env)))
+        (throw (ex-info "'old' is only supported for compiled instance-field postconditions"
+                        {:assertions assertions
+                         :current-class (:current-class env)})))
+      (reduce (fn [[env' stmts snapshots] field-name]
+                (let [field-info (get (:fields env') field-name)
+                      snapshot-name (str "__old_" field-name)
+                      [env'' local] (env-add-local env' snapshot-name (:nex-type field-info))
+                      stmt (ir/set-local-node (:slot local)
+                                              (snapshot-source-ir env' field-info)
+                                              (:nex-type local)
+                                              (:jvm-type local))]
+                  [env''
+                   (conj stmts stmt)
+                   (assoc snapshots field-name local)]))
+              [env [] {}]
+              (sort (keys (:fields env)))))
+    [env [] (:old-field-locals env)]))
+
+(defn- old-env
+  [env]
+  (if (seq (:old-field-locals env))
+    (let [shadowed (into {}
+                         (map (fn [[field-name {:keys [slot nex-type jvm-type]}]]
+                                [field-name {:name field-name
+                                             :slot slot
+                                             :nex-type nex-type
+                                             :jvm-type jvm-type}]))
+                         (:old-field-locals env))]
+      (-> env
+          (update :locals merge shadowed)
+          (update :var-types merge (into {}
+                                         (map (fn [[field-name {:keys [nex-type]}]]
+                                                [field-name nex-type]))
+                                         (:old-field-locals env)))))
+    (throw (ex-info "'old' can only be used in compiled postconditions with field snapshots"
+                    {:env-keys (keys env)}))))
+
+(defn- lower-body-with-rescue
+  [env body rescue]
+  (let [[body-env lowered-body]
+        (if (every? ir/ir-node? body)
+          [env (vec body)]
+          (lower-statements env body))]
+    (if rescue
+      (let [[env1 throwable-slot] (alloc-temp-slot body-env)
+            [env2 rescue-throwable-slot] (alloc-temp-slot env1)
+          env-after-body body-env
+          rescue-env0 (assoc (scoped-child-env env-after-body) :retry-allowed? true)
+          [rescue-env1 exception-local] (env-add-local rescue-env0 "exception" "Any")
+          [rescue-env2 lowered-rescue] (lower-statements rescue-env1 rescue)
+          final-env (scoped-env env-after-body rescue-env2)]
+        [final-env
+         [(ir/try-node lowered-body
+                       lowered-rescue
+                       throwable-slot
+                       rescue-throwable-slot
+                       (:slot exception-local))]])
+      [body-env lowered-body])))
 
 (defn- lower-scoped-statements
   [env statements]
@@ -770,6 +892,9 @@
           jvm-type (resolve-jvm-type env nex-type)]
       (ir/if-node test-ir [then-ir] [else-ir] nex-type jvm-type))
 
+    :old
+    (lower-expression (old-env env) (:expr expr))
+
     :create
     (let [class-name (:class-name expr)
           compiled (get (:compiled-classes env) class-name)
@@ -1065,11 +1190,23 @@
 
     (= :scoped-block (:type stmt))
     (do
-      (when (:rescue stmt)
-        (throw (ex-info "Scoped block rescue is not yet supported in compiled lowering"
-                        {:stmt stmt})))
-      (let [[env' lowered] (lower-scoped-statements env (:body stmt))]
-        [env' (ir/block-node lowered)]))
+      (if-let [rescue (:rescue stmt)]
+        (let [[env1 throwable-slot] (alloc-temp-slot env)
+              [env2 rescue-throwable-slot] (alloc-temp-slot env1)
+              [body-env lowered-body] (lower-statements (scoped-child-env env2) (:body stmt))
+              env-after-body (scoped-env env2 body-env)
+              rescue-env0 (assoc (scoped-child-env env-after-body) :retry-allowed? true)
+              [rescue-env1 exception-local] (env-add-local rescue-env0 "exception" "Any")
+              [rescue-env2 lowered-rescue] (lower-statements rescue-env1 rescue)
+              final-env (scoped-env env-after-body rescue-env2)]
+          [final-env
+           (ir/try-node lowered-body
+                        lowered-rescue
+                        throwable-slot
+                        rescue-throwable-slot
+                        (:slot exception-local))])
+        (let [[env' lowered] (lower-scoped-statements env (:body stmt))]
+          [env' (ir/block-node lowered)])))
 
     (= :case (:type stmt))
     (let [case-env (scoped-child-env env)
@@ -1089,9 +1226,74 @@
     (= :loop (:type stmt))
     (let [loop-env (scoped-child-env env)
           [env-after-init lowered-init] (lower-statements loop-env (:init stmt))
-          test-ir (lower-expression env-after-init (:until stmt))
-          [_ lowered-body] (lower-statements env-after-init (:body stmt))]
-      [(scoped-env env env-after-init) (ir/loop-node lowered-init test-ir lowered-body)])
+          invariant-start-stmts (mapv #(assertion-ir env-after-init :invariant %) (:invariant stmt))
+          [env-with-variant variant-init-stmts variant-prefix]
+          (if-let [variant-expr (:variant stmt)]
+            (let [variant-type (infer-type env-after-init variant-expr)
+                  hidden-id (:next-slot env-after-init)
+                  prev-name (str "__loop_variant_prev_" hidden-id)
+                  curr-name (str "__loop_variant_curr_" hidden-id)
+                  seen-name (str "__loop_variant_seen_" hidden-id)
+                  [env1 prev-local] (env-add-local env-after-init prev-name variant-type)
+                  [env2 curr-local] (env-add-local env1 curr-name variant-type)
+                  [env3 seen-local] (env-add-local env2 seen-name "Boolean")
+                  curr-node (ir/local-node curr-name
+                                           (:slot curr-local)
+                                           (:nex-type curr-local)
+                                           (:jvm-type curr-local))
+                  prev-node (ir/local-node prev-name
+                                           (:slot prev-local)
+                                           (:nex-type prev-local)
+                                           (:jvm-type prev-local))
+                  seen-node (ir/local-node seen-name
+                                           (:slot seen-local)
+                                           (:nex-type seen-local)
+                                           (:jvm-type seen-local))
+                  compare-node (ir/compare-node :lt curr-node prev-node "Boolean" :boolean)]
+              [env3
+               [(ir/set-local-node (:slot prev-local)
+                                   (default-const-node (:nex-type prev-local) (:jvm-type prev-local))
+                                   (:nex-type prev-local)
+                                   (:jvm-type prev-local))
+                (ir/set-local-node (:slot seen-local)
+                                   (ir/const-node false "Boolean" :boolean)
+                                   "Boolean"
+                                   :boolean)]
+               [(ir/set-local-node (:slot curr-local)
+                                        (lower-expression env3 variant-expr)
+                                        (:nex-type curr-local)
+                                        (:jvm-type curr-local))
+                (ir/if-stmt-node seen-node
+                                 [(ir/assert-node :variant "must decrease" compare-node)]
+                                 [])
+                (ir/set-local-node (:slot prev-local)
+                                   curr-node
+                                   (:nex-type prev-local)
+                                   (:jvm-type prev-local))
+                (ir/set-local-node (:slot seen-local)
+                                   (ir/const-node true "Boolean" :boolean)
+                                   "Boolean"
+                                   :boolean)]])
+            [env-after-init [] []])
+          test-ir (lower-expression env-with-variant (:until stmt))
+          [env-after-body lowered-body] (lower-statements env-with-variant (:body stmt))
+          invariant-end-stmts (mapv #(assertion-ir env-after-body :invariant %) (:invariant stmt))
+          loop-body (vec (concat variant-prefix lowered-body invariant-end-stmts))]
+      [(scoped-env env env-after-body)
+       (ir/block-node
+        (vec (concat lowered-init
+                     invariant-start-stmts
+                     variant-init-stmts
+                     [(ir/loop-node [] test-ir loop-body)])))])
+
+    (= :raise (:type stmt))
+    [env (ir/raise-node (lower-expression env (:value stmt)))]
+
+    (= :retry (:type stmt))
+    (if (:retry-allowed? env)
+      [env (ir/retry-node)]
+      (throw (ex-info "retry is only supported in compiled rescue blocks"
+                      {:stmt stmt})))
 
     (contains? expression-node-types (:type stmt))
     [env (ir/pop-node (lower-expression env stmt))]
@@ -1167,6 +1369,14 @@
                     [env' (conj acc (assoc local :arg-index (count acc)))]))
                 [env0 []]
                 (:params fn-def))
+        [env-with-result result-local]
+        (if (:return-type fn-def)
+          (let [[env' local] (env-add-local env-with-params "result" return-type)]
+            [(env-add-local-alias env' "Result" local) local])
+          [env-with-params nil])
+        [env-with-old old-snapshot-stmts old-field-locals]
+        (add-old-field-snapshots env-with-result (:ensure fn-def))
+        env-with-old (assoc env-with-old :old-field-locals old-field-locals)
         body (vec (:body fn-def))]
     (if (or (:declaration-only? fn-def)
             (:deferred? fn-def))
@@ -1182,21 +1392,48 @@
                    :body []
                    :deferred? true
                    :override? (boolean (:override? fn-def))})
-      (let [leading-statements (butlast body)
-            final-stmt (last body)
-            [env' lowered-leading] (lower-statements env-with-params leading-statements)
-            return-expr (cond
-                          (and (= :assign (:type final-stmt))
-                               (= "result" (:target final-stmt)))
-                          (lower-expression env' (:value final-stmt))
+      (let [body-stmts
+            (if (:return-type fn-def)
+              (let [leading-statements (butlast body)
+                    final-stmt (last body)
+                    [env' lowered-leading] (lower-statements env-with-old leading-statements)
+                    [env'' lowered-tail]
+                    (cond
+                      (and (= :assign (:type final-stmt))
+                           (= "result" (:target final-stmt)))
+                      (lower-statement env' final-stmt)
 
-                          (contains? expression-node-types (:type final-stmt))
-                          (lower-expression env' final-stmt)
+                      (contains? expression-node-types (:type final-stmt))
+                      [env' (ir/set-local-node (:slot result-local)
+                                               (lower-expression env' final-stmt)
+                                               (:nex-type result-local)
+                                               (:jvm-type result-local))]
 
-                          :else
-                          (throw (ex-info "Unsupported function tail for lowering"
-                                          {:function (:name fn-def)
-                                           :stmt final-stmt})))]
+                      (= :call (:type final-stmt))
+                      [env' (ir/set-local-node (:slot result-local)
+                                               (lower-expression env' final-stmt)
+                                               (:nex-type result-local)
+                                               (:jvm-type result-local))]
+
+                      :else
+                      (throw (ex-info "Unsupported function tail for lowering"
+                                      {:function (:name fn-def)
+                                       :stmt final-stmt})))]
+                [env'' (conj lowered-leading lowered-tail)])
+              (lower-statements env-with-old body))
+            [env-after-body raw-body-stmts] body-stmts
+            [env-after-rescue lowered-body] (lower-body-with-rescue env-after-body raw-body-stmts (:rescue fn-def))
+            require-stmts (mapv #(assertion-ir env-with-old :require %) (:require fn-def))
+            ensure-env (assoc env-after-rescue :old-field-locals old-field-locals)
+            ensure-stmts (mapv #(assertion-ir ensure-env :ensure %) (:ensure fn-def))
+            return-stmt (if (:return-type fn-def)
+                          (ir/return-node (ir/local-node "result"
+                                                         (:slot result-local)
+                                                         (:nex-type result-local)
+                                                         (:jvm-type result-local))
+                                          return-type
+                                          (ir/object-jvm-type "java/lang/Object"))
+                          nil)]
         (ir/fn-node {:name (:name fn-def)
                      :owner unit-name
                      :emitted-name (if (:class-name fn-def)
@@ -1205,11 +1442,14 @@
                      :params params
                      :return-type return-type
                      :return-jvm-type (ir/object-jvm-type "java/lang/Object")
-                     :locals (vec (vals (:locals env')))
-                     :body (conj lowered-leading
-                                 (ir/return-node return-expr
-                                                 return-type
-                                                 (ir/object-jvm-type "java/lang/Object")))
+                     :locals (vec (vals (:locals env-after-rescue)))
+                     :body (cond-> (into []
+                                         (concat old-snapshot-stmts
+                                                 require-stmts
+                                                 lowered-body
+                                                 ensure-stmts))
+                             return-stmt
+                             (conj return-stmt))
                      :deferred? (boolean (:deferred? fn-def))
                      :override? (boolean (:override? fn-def))})))))
 
@@ -1235,7 +1475,10 @@
                   (let [[env' local] (env-add-local env name type)]
                     [env' (conj acc (assoc local :arg-index (count acc)))]))
                 [env0 []]
-                (:params ctor-def))]
+                (:params ctor-def))
+        [env-with-old old-snapshot-stmts old-field-locals]
+        (add-old-field-snapshots env-with-params (:ensure ctor-def))
+        env-with-old (assoc env-with-old :old-field-locals old-field-locals)]
     (if-let [shim-parent (:shim-parent ctor-def)]
       (let [parent-meta (class-jvm-meta {:compiled-classes compiled-classes} shim-parent)
             target-ir (ir/field-get-node (:internal-name (class-jvm-meta {:compiled-classes compiled-classes} class-name))
@@ -1258,30 +1501,39 @@
         (ir/fn-node {:name (:name ctor-def)
                      :owner unit-name
                      :emitted-name (lowered-constructor-method-name ctor-def)
-                     :params params
+                    :params params
                      :return-type class-name
                      :return-jvm-type (ir/object-jvm-type "java/lang/Object")
-                     :locals (vec (vals (:locals env-with-params)))
-                     :body [(ir/pop-node call-ir)
-                            (ir/return-node
-                             (ir/this-node class-name
-                                           (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
-                             class-name
-                             (ir/object-jvm-type "java/lang/Object"))]}))
-      (let [[env' lowered-body] (lower-statements env-with-params (vec (:body ctor-def)))]
+                     :locals (vec (vals (:locals env-with-old)))
+                     :body (vec (concat old-snapshot-stmts
+                                        (map #(assertion-ir env-with-old :require %) (:require ctor-def))
+                                        [(ir/pop-node call-ir)]
+                                        (map #(assertion-ir env-with-old :ensure %) (:ensure ctor-def))
+                                        [(ir/return-node
+                                          (ir/this-node class-name
+                                                        (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                          class-name
+                                          (ir/object-jvm-type "java/lang/Object"))]))}))
+      (let [[env-after-body raw-body] (lower-statements env-with-old (vec (:body ctor-def)))
+            [env-after-rescue lowered-body] (lower-body-with-rescue env-after-body raw-body (:rescue ctor-def))]
         (ir/fn-node {:name (:name ctor-def)
                      :owner unit-name
                      :emitted-name (lowered-constructor-method-name ctor-def)
                      :params params
                      :return-type class-name
                      :return-jvm-type (ir/object-jvm-type "java/lang/Object")
-                     :locals (vec (vals (:locals env')))
-                     :body (conj lowered-body
-                                 (ir/return-node
-                                  (ir/this-node class-name
-                                                (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
-                                  class-name
-                                  (ir/object-jvm-type "java/lang/Object")))})))))
+                     :locals (vec (vals (:locals env-after-rescue)))
+                     :body (vec (concat old-snapshot-stmts
+                                        (map #(assertion-ir env-with-old :require %) (:require ctor-def))
+                                        lowered-body
+                                        (map #(assertion-ir (assoc env-after-rescue :old-field-locals old-field-locals)
+                                                            :ensure %)
+                                             (:ensure ctor-def))
+                                        [(ir/return-node
+                                          (ir/this-node class-name
+                                                        (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                          class-name
+                                          (ir/object-jvm-type "java/lang/Object"))]))})))))
 
 (defn- make-delegation-method-node
   [env class-meta class-name compiled-classes {:keys [source-class carrier-owner carrier-field owner-internal-name method-def carrier-jvm-type]}]

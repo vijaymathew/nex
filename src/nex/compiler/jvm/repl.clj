@@ -45,6 +45,7 @@
 (declare builtin-target-call-in-ctx?)
 (declare user-target-call-in-ctx?)
 (declare advance-eligibility-ctx)
+(declare supported-stmt-block-with-ctx?)
 
 (def ^:private builtin-runtime-receiver-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
@@ -86,6 +87,10 @@
       (when (supported-stmt-in-ctx? ctx' stmt)
         (recur (advance-eligibility-ctx ctx' stmt) (rest remaining)))
       ctx')))
+
+(defn- supported-stmt-block-with-ctx?
+  [ctx statements]
+  (supported-stmt-block? ctx statements))
 
 (defn- infer-type-in-ctx
   [ctx expr]
@@ -205,7 +210,8 @@
      :classes (vec (concat (vals @(:class-asts session)) actual-classes))
      :compiled-class-names (set (concat (compiled-class-names session)
                                         (map :name actual-classes)))
-     :imports @(:import-asts session)}))
+     :imports @(:import-asts session)
+     :retry-allowed? false}))
 
 (defn supported-expr-in-ctx?
   [ctx expr]
@@ -237,6 +243,7 @@
                  (supported-expr-in-ctx? ctx (:left expr))
                  (supported-expr-in-ctx? ctx (:right expr)))
     :unary (supported-expr-in-ctx? ctx (:expr expr))
+    :old (supported-expr-in-ctx? ctx (:expr expr))
     :if (and (supported-expr-in-ctx? ctx (:condition expr))
              (supported-if-branches? ctx (:then expr))
              (if-let [clause (first (:elseif expr))]
@@ -274,14 +281,14 @@
                  :elseif (vec (rest (:elseif stmt)))
                  :else (:else stmt)})
                (supported-stmt-block? ctx (or (:else stmt) []))))
-    :scoped-block (and (nil? (:rescue stmt))
-                       (supported-stmt-block? ctx (:body stmt)))
     :case (and (supported-expr-in-ctx? ctx (:expr stmt))
                (every? #(every? (partial supported-expr-in-ctx? ctx) (:values %))
                        (:clauses stmt))
                (every? #(supported-stmt-in-ctx? ctx (:body %)) (:clauses stmt))
                (or (nil? (:else stmt))
                    (supported-stmt-in-ctx? ctx (:else stmt))))
+    :raise (supported-expr-in-ctx? ctx (:value stmt))
+    :retry (:retry-allowed? ctx)
     :loop (let [[init-ok? ctx-after-init]
                 (reduce (fn [[ok? c] init-stmt]
                           (if (and ok? (supported-stmt-in-ctx? c init-stmt))
@@ -290,10 +297,21 @@
                         [true ctx]
                         (:init stmt))]
             (and init-ok?
-                 (nil? (:invariant stmt))
-                 (nil? (:variant stmt))
+                 (every? #(supported-expr-in-ctx? ctx-after-init (:condition %))
+                         (:invariant stmt))
+                 (or (nil? (:variant stmt))
+                     (supported-expr-in-ctx? ctx-after-init (:variant stmt)))
                  (supported-expr-in-ctx? ctx-after-init (:until stmt))
                  (boolean (supported-stmt-block? ctx-after-init (:body stmt)))))
+    :scoped-block (if (:rescue stmt)
+                    (and (supported-stmt-block? ctx (:body stmt))
+                         (supported-stmt-block-with-ctx? (-> ctx
+                                                             (assoc :retry-allowed? true)
+                                                             (update :known-vars conj "exception")
+                                                             (assoc-in [:var-types "exception"] "Any"))
+                                                         (:rescue stmt)))
+                    (and (nil? (:rescue stmt))
+                         (supported-stmt-block? ctx (:body stmt))))
     (supported-expr-in-ctx? ctx stmt)))
 
 (defn- advance-eligibility-ctx

@@ -21,3 +21,4 @@ Run commands from `docs/design`.
 - `JVM_BYTECODE_COMPILER_PLAN.md` - implementation plan for the JVM bytecode compiler
 - `USER_DEFINED_CLASSES_COMPILER_PLAN.md` - implementation checklist for compiled support of simple user-defined classes
 - `DEFERRED_CLASSES_COMPILER_PLAN.md` - implementation checklist for compiled support of deferred classes and parent-typed virtual dispatch
+- `EXCEPTIONS_AND_CONTRACTS_COMPILER_PLAN.md` - implementation checklist for compiled exception handling and design-by-contract support

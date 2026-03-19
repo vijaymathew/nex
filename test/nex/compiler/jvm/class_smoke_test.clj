@@ -136,6 +136,38 @@ feature
   end
 end")
 
+(def ^:private contract-counter-program
+  "class Counter
+feature
+  value: Integer
+
+  bump(): Integer
+    require
+      non_negative: value >= 0
+    do
+      this.value := this.value + 1
+      result := this.value
+    ensure
+      advanced: value = old value + 1
+      result_matches: result = value
+    end
+
+  break_bump(): Integer
+    do
+      this.value := this.value + 2
+      result := this.value
+    ensure
+      advanced: value = old value + 1
+    end
+end")
+
+(defn- root-cause
+  [t]
+  (loop [x t]
+    (if-let [cause (.getCause ^Throwable x)]
+      (recur cause)
+      x)))
+
 (deftest compiled-class-batch-smoke-test
   (testing "compiled helper can define a simple class, create an instance, mutate it through methods, and read a field"
     (let [session (compiled-repl/make-session)
@@ -228,6 +260,75 @@ end")
       (is (= 460 (:result define-result)))
       (is (= 450 (:result const-result))))))
 
+(deftest compiled-method-contracts-and-old-smoke-test
+  (testing "compiled helper enforces require/ensure and supports old in method postconditions"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str contract-counter-program
+                                                                     "\n\n"
+                                                                     "let c: Counter := create Counter\n"
+                                                                     "c.bump()")))
+          fail-ex (try
+                    (compiled-repl/compile-and-eval! session (p/ast "c.break_bump()"))
+                    nil
+                    (catch Throwable t
+                      (root-cause t)))]
+      (is (:compiled? define-result))
+      (is (= 1 (:result define-result)))
+      (is (some? fail-ex))
+      (is (re-find #"Postcondition violation: advanced" (str fail-ex))))))
+
+(deftest compiled-loop-contracts-smoke-test
+  (testing "compiled helper enforces loop invariants and variants"
+    (let [session (compiled-repl/make-session)
+          ok-result (compiled-repl/compile-and-eval! session
+                                                     (p/ast "let total: Integer := 0
+from
+  let i := 3
+invariant
+  non_negative: i >= 0
+variant
+  i
+until
+  i = 0
+do
+  total := total + i
+  i := i - 1
+end
+total"))
+          invariant-ex (try
+                         (compiled-repl/compile-and-eval! session
+                                                          (p/ast "from
+  let i := 2
+invariant
+  large: i > 5
+until
+  i = 0
+do
+  i := i - 1
+end"))
+                         nil
+                         (catch Throwable t
+                           (root-cause t)))
+          variant-ex (try
+                       (compiled-repl/compile-and-eval! session
+                                                        (p/ast "from
+  let i := 0
+variant
+  5
+until
+  i > 2
+do
+  i := i + 1
+end"))
+                       nil
+                       (catch Throwable t
+                         (root-cause t)))]
+      (is (:compiled? ok-result))
+      (is (= 6 (:result ok-result)))
+      (is (re-find #"Loop invariant violation: non_negative|Loop invariant violation: large" (str invariant-ex)))
+      (is (re-find #"Loop variant must decrease" (str variant-ex))))))
+
 (deftest compiled-deferred-parent-virtual-dispatch-test
   (testing "compiled helper dispatches virtually through a deferred parent-typed reference"
     (let [session (compiled-repl/make-session)
@@ -292,6 +393,45 @@ end")
       (is (:compiled? result))
       (is (= ["2"] (:output result)))
       (is (= 1 (:result result))))))
+
+(deftest compiled-scoped-block-rescue-retry-smoke-test
+  (testing "compiled helper supports scoped rescue blocks with retry"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (p/ast (str "let count: Integer := 0\n"
+                              "do\n"
+                              "  count := count + 1\n"
+                              "  if count < 3 then\n"
+                              "    raise \"retry me\"\n"
+                              "  end\n"
+                              "rescue\n"
+                              "  retry\n"
+                              "end\n"
+                              "count")))]
+      (is (:compiled? result))
+      (is (= 3 (:result result))))))
+
+(deftest compiled-scoped-block-rescue-rethrow-smoke-test
+  (testing "compiled helper rethrows the original exception after rescue when no retry occurs"
+    (let [session (compiled-repl/make-session)]
+      (let [thrown (try
+                     (compiled-repl/compile-and-eval!
+                      session
+                      (p/ast (str "do\n"
+                                  "  raise \"boom\"\n"
+                                  "rescue\n"
+                                  "  print(exception)\n"
+                                  "end")))
+                     nil
+                     (catch Throwable e
+                       (if (instance? java.lang.reflect.InvocationTargetException e)
+                         (.getCause ^java.lang.reflect.InvocationTargetException e)
+                         e)))]
+        (is (some? thrown))
+        (is (instance? clojure.lang.ExceptionInfo thrown))
+        (is (re-find #"boom" (.getMessage ^clojure.lang.ExceptionInfo thrown))))
+      (is (= ["\"boom\""] (runtime/state-output (:state session)))))))
 
 (deftest compiled-case-smoke-test
   (testing "compiled helper supports case statements with multiple literals per clause"

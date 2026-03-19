@@ -17,6 +17,7 @@
 (def ^:private hashmap-internal-name "java/util/HashMap")
 (def ^:private rt-internal-name "clojure/lang/RT")
 (def ^:private var-internal-name "clojure/lang/Var")
+ (def ^:private throwable-internal-name "java/lang/Throwable")
 
 (declare emit-const!)
 
@@ -365,6 +366,50 @@
 
 (declare emit-expr!)
 (declare emit-stmt!)
+
+(defn- emit-runtime-var!
+  [^MethodVisitor mv fn-name]
+  (.visitLdcInsn mv "nex.compiler.jvm.runtime")
+  (.visitLdcInsn mv ^String fn-name)
+  (.visitMethodInsn mv
+                    Opcodes/INVOKESTATIC
+                    rt-internal-name
+                    "var"
+                    "(Ljava/lang/String;Ljava/lang/String;)Lclojure/lang/Var;"
+                    false))
+
+(defn- emit-runtime-invoke-0!
+  [^MethodVisitor mv fn-name]
+  (emit-runtime-var! mv fn-name)
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    var-internal-name
+                    "invoke"
+                    "()Ljava/lang/Object;"
+                    false))
+
+(defn- emit-runtime-invoke-1!
+  [^MethodVisitor mv fn-name]
+  (emit-runtime-var! mv fn-name)
+  (.visitInsn mv Opcodes/SWAP)
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    var-internal-name
+                    "invoke"
+                    "(Ljava/lang/Object;)Ljava/lang/Object;"
+                    false))
+
+(defn- emit-runtime-invoke-2!
+  [^MethodVisitor mv fn-name]
+  (emit-runtime-var! mv fn-name)
+  (.visitInsn mv Opcodes/DUP_X2)
+  (.visitInsn mv Opcodes/POP)
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    var-internal-name
+                    "invoke"
+                    "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                    false))
 
 (defn- emit-boolean-short-circuit!
   [^MethodVisitor mv operator left-expr right-expr state-slot]
@@ -802,6 +847,110 @@
       (emit-box! mv jvm-type))
     (.visitInsn mv Opcodes/ARETURN)))
 
+(defn- emit-raise!
+  [^MethodVisitor mv expr state-slot]
+  (let [jvm-type (emit-expr! mv expr state-slot)]
+    (when (contains? ir/primitive-jvm-types jvm-type)
+      (emit-box! mv jvm-type))
+    (emit-runtime-invoke-1! mv "make-raised-exception")
+    (.visitTypeInsn mv Opcodes/CHECKCAST throwable-internal-name)
+    (.visitInsn mv Opcodes/ATHROW)))
+
+(defn- emit-retry!
+  [^MethodVisitor mv]
+  (emit-runtime-invoke-0! mv "make-retry-signal")
+  (.visitTypeInsn mv Opcodes/CHECKCAST throwable-internal-name)
+  (.visitInsn mv Opcodes/ATHROW))
+
+(defn- emit-assert!
+  [^MethodVisitor mv {:keys [kind label expr]} state-slot]
+  (let [ok-label (Label.)
+        expr-type (emit-expr! mv expr state-slot)
+        kind-label (case kind
+                     :require "Precondition"
+                     :ensure "Postcondition"
+                     :invariant "Loop invariant"
+                     :variant "Loop variant"
+                     :class-invariant "Class invariant"
+                     (name kind))]
+    (when-not (= :boolean expr-type)
+      (throw (ex-info "Assert emission requires boolean expression"
+                      {:stmt {:kind kind :label label}
+                       :jvm-type expr-type})))
+    (.visitJumpInsn mv Opcodes/IFNE ok-label)
+    (.visitLdcInsn mv ^String kind-label)
+    (.visitLdcInsn mv ^String label)
+    (emit-runtime-invoke-2! mv "make-contract-violation")
+    (.visitTypeInsn mv Opcodes/CHECKCAST throwable-internal-name)
+    (.visitInsn mv Opcodes/ATHROW)
+    (.visitLabel mv ok-label)))
+
+(defn- emit-try!
+  [^MethodVisitor mv {:keys [body rescue throwable-slot rescue-throwable-slot exception-slot]} state-slot]
+  (let [loop-start (Label.)
+        body-start (Label.)
+        body-end (Label.)
+        body-handler (Label.)
+        rescue-start (Label.)
+        rescue-end (Label.)
+        rescue-handler (Label.)
+        not-retry-label (Label.)
+        rescue-not-retry-label (Label.)
+        end-label (Label.)]
+    (.visitTryCatchBlock mv body-start body-end body-handler throwable-internal-name)
+    (.visitTryCatchBlock mv rescue-start rescue-end rescue-handler throwable-internal-name)
+    (.visitLabel mv loop-start)
+    (.visitLabel mv body-start)
+    (doseq [stmt body]
+      (emit-stmt! mv stmt state-slot))
+    (.visitLabel mv body-end)
+    (.visitJumpInsn mv Opcodes/GOTO end-label)
+
+    (.visitLabel mv body-handler)
+    (.visitVarInsn mv Opcodes/ASTORE throwable-slot)
+    (.visitVarInsn mv Opcodes/ALOAD throwable-slot)
+    (emit-runtime-invoke-1! mv "retry-signal?")
+    (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+    (.visitMethodInsn mv
+                      Opcodes/INVOKEVIRTUAL
+                      "java/lang/Boolean"
+                      "booleanValue"
+                      "()Z"
+                      false)
+    (.visitJumpInsn mv Opcodes/IFEQ not-retry-label)
+    (.visitVarInsn mv Opcodes/ALOAD throwable-slot)
+    (.visitInsn mv Opcodes/ATHROW)
+
+    (.visitLabel mv not-retry-label)
+    (.visitVarInsn mv Opcodes/ALOAD throwable-slot)
+    (emit-runtime-invoke-1! mv "exception-value")
+    (.visitVarInsn mv Opcodes/ASTORE exception-slot)
+    (.visitLabel mv rescue-start)
+    (doseq [stmt rescue]
+      (emit-stmt! mv stmt state-slot))
+    (.visitLabel mv rescue-end)
+    (.visitVarInsn mv Opcodes/ALOAD throwable-slot)
+    (.visitInsn mv Opcodes/ATHROW)
+
+    (.visitLabel mv rescue-handler)
+    (.visitVarInsn mv Opcodes/ASTORE rescue-throwable-slot)
+    (.visitVarInsn mv Opcodes/ALOAD rescue-throwable-slot)
+    (emit-runtime-invoke-1! mv "retry-signal?")
+    (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+    (.visitMethodInsn mv
+                      Opcodes/INVOKEVIRTUAL
+                      "java/lang/Boolean"
+                      "booleanValue"
+                      "()Z"
+                      false)
+    (.visitJumpInsn mv Opcodes/IFEQ rescue-not-retry-label)
+    (.visitJumpInsn mv Opcodes/GOTO loop-start)
+
+    (.visitLabel mv rescue-not-retry-label)
+    (.visitVarInsn mv Opcodes/ALOAD rescue-throwable-slot)
+    (.visitInsn mv Opcodes/ATHROW)
+    (.visitLabel mv end-label)))
+
 (defn- emit-stmt!
   [^MethodVisitor mv stmt state-slot]
   (case (:op stmt)
@@ -844,6 +993,18 @@
 
     :call-runtime
     (emit-pop! mv (emit-expr! mv stmt state-slot))
+
+    :raise
+    (emit-raise! mv (:expr stmt) state-slot)
+
+    :retry
+    (emit-retry! mv)
+
+    :assert
+    (emit-assert! mv stmt state-slot)
+
+    :try
+    (emit-try! mv stmt state-slot)
 
     :block
     (doseq [nested (:body stmt)]

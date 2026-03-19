@@ -192,6 +192,35 @@
     (.set field owner value)
     nil))
 
+(defn make-raised-exception
+  [value]
+  (ex-info (str value) {:type :nex-exception :value value}))
+
+(defn make-retry-signal
+  []
+  (ex-info "retry" {:type :nex-retry}))
+
+(defn retry-signal?
+  [throwable]
+  (and (instance? clojure.lang.ExceptionInfo throwable)
+       (= :nex-retry (:type (ex-data throwable)))))
+
+(defn exception-value
+  [throwable]
+  (if (and (instance? clojure.lang.ExceptionInfo throwable)
+           (= :nex-exception (:type (ex-data throwable))))
+    (:value (ex-data throwable))
+    (.getMessage ^Throwable throwable)))
+
+(defn make-contract-violation
+  [kind label]
+  (ex-info (if (= kind "Loop variant")
+             "Loop variant must decrease"
+             (str kind " violation: " label))
+           {:type :nex-contract-violation
+            :kind kind
+            :label label}))
+
 (defn- concat-string-value
   [state value]
   (cond

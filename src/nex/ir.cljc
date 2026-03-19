@@ -246,6 +246,35 @@
    :nex-type "Void"
    :jvm-type :void})
 
+(defn raise-node [expr]
+  {:op :raise
+   :expr expr
+   :nex-type "Void"
+   :jvm-type :void})
+
+(defn retry-node []
+  {:op :retry
+   :nex-type "Void"
+   :jvm-type :void})
+
+(defn assert-node [kind label expr]
+  {:op :assert
+   :kind kind
+   :label label
+   :expr expr
+   :nex-type "Void"
+   :jvm-type :void})
+
+(defn try-node [body rescue throwable-slot rescue-throwable-slot exception-slot]
+  {:op :try
+   :body (vec body)
+   :rescue (vec rescue)
+   :throwable-slot throwable-slot
+   :rescue-throwable-slot rescue-throwable-slot
+   :exception-slot exception-slot
+   :nex-type "Void"
+   :jvm-type :void})
+
 (defn pop-node [expr]
   {:op :pop
    :expr expr})

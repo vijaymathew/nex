@@ -83,7 +83,7 @@ Last updated: 2026-03-19
 - Nil-safety (`?Type` detachable types, nil checks)
 - Graphics/Turtle built-ins (JVM-only drawing API)
 - HTTP/JSON built-ins as direct codegen
-- User-facing REPL wrapping — statement-shaped inputs (`let`, `if`, `from`, `do`) still bypass the compiled path even when the internal helper supports them
+- User-facing REPL wrapping — larger statement-shaped inputs (`if`, `from`, `do`, scoped rescue blocks) still bypass the compiled path even when the internal helper supports them
 
 ### Meta / Infrastructure
 
@@ -95,8 +95,8 @@ Last updated: 2026-03-19
 
 Based on complexity and impact, these are natural next steps:
 
-1. `elseif` branches
-2. Logical operators (`and`, `or`, `not`)
-3. String concatenation
-4. `across` loops
-5. Exception handling (`raise`/`rescue`/`retry`)
+1. Exception handling (`raise` / `rescue` / `retry`)
+2. Design by contract (`require` / `ensure`)
+3. `old` capture
+4. Loop invariants / variants
+5. Scoped `do ... rescue ... end`
