@@ -123,6 +123,51 @@
       (is (= 1 (count (-> stmt :expr :args))))
       (is (= 4 (-> stmt :expr :args first :value))))))
 
+(deftest lower-anonymous-function-and-function-object-call-test
+  (testing "anonymous functions lower to synthetic classes and later calls lower to call-function"
+    (let [program (p/ast "let inc := fn (n: Integer): Integer do
+  result := n + 1
+end
+
+inc(4)")
+          anon-class (first (lower/collect-anonymous-class-defs program))
+          anon-name (:name anon-class)
+          compiled-classes {anon-name {:name anon-name
+                                       :internal-name "nex/repl/AnonymousFunction_0001"
+                                       :jvm-name "nex/repl/AnonymousFunction_0001"
+                                       :binary-name "nex.repl.AnonymousFunction_0001"}}
+          {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0061"
+                                                         :compiled-classes compiled-classes})]
+      (is (= 1 (count (:classes unit))))
+      (is (= anon-name (-> unit :classes first :name)))
+      (is (= :top-set (-> unit :body first :op)))
+      (is (= :new (-> unit :body first :expr :op)))
+      (is (= anon-name (-> unit :body first :expr :class-name)))
+      (is (= :call-function (-> unit :body last :expr :op)))
+      (is (= :top-get (-> unit :body last :expr :target :op)))
+      (is (= "inc" (-> unit :body last :expr :target :name)))
+      (is (= 4 (-> unit :body last :expr :args first :value))))))
+
+(deftest prepare-program-for-captured-closures-test
+  (testing "closure preparation marks captured anonymous functions as runtime-backed and keeps metadata in sync"
+    (let [program (p/ast "function cf(): Function
+do
+  let x := 30
+  result := fn(i: Integer): Integer do
+    result := i + x
+  end
+end")
+          prepared (lower/prepare-program-for-closures program
+                                                       {:classes []
+                                                        :functions []
+                                                        :imports []
+                                                        :var-types {}})
+          anon-class (first (lower/collect-anonymous-class-defs prepared))
+          anon-expr (-> prepared :functions first :body second :value)]
+      (is (= [{:name "x" :type "Integer"}] (:captures anon-expr)))
+      (is (true? (:closure-runtime-object? (:class-def anon-expr))))
+      (is (true? (:closure-runtime-object? anon-class)))))) 
+
 
 (deftest lower-collection-literals-test
   (testing "collection literals lower to explicit IR nodes"

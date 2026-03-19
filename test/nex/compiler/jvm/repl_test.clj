@@ -77,6 +77,94 @@
         (is (str/blank? def-output))
         (is (str/includes? call-output "41"))))))
 
+(deftest repl-compiled-backend-anonymous-function-test
+  (testing "compiled backend can evaluate a top-level anonymous function without capture"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            let-output (with-out-str
+                         (repl/eval-code ctx0 "let inc := fn (n: Integer): Integer do
+  result := n + 1
+end"))
+            call-output (with-out-str
+                          (repl/eval-code ctx0 "inc(41)"))
+            session @repl/*compiled-repl-session*]
+        (is (str/includes? let-output "AnonymousFunction_"))
+        (is (some? (runtime/state-get-value (:state session) "inc")))
+        (is (str/includes? call-output "42"))))))
+
+(deftest repl-compiled-backend-higher-order-function-object-test
+  (testing "compiled backend supports passing and returning no-capture function objects"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            apply-output (with-out-str
+                           (repl/eval-code ctx0 "function apply(f: Function, n: Integer): Any
+do
+  result := f(n)
+end
+
+let inc := fn (n: Integer): Integer do
+  result := n + 1
+end
+
+apply(inc, 41)"))
+            mk-output (with-out-str
+                        (repl/eval-code ctx0 "function mk(): Function
+do
+  result := fn (n: Integer): Integer do
+    result := n + 1
+  end
+end
+
+let inc2: Function := mk()
+inc2(41)"))]
+        (is (str/includes? apply-output "42"))
+        (is (str/includes? mk-output "42"))))))
+
+(deftest compiled-repl-captured-anonymous-function-test
+  (testing "compiled helper keeps captured closures on the compiled path via runtime-backed closure objects"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval! session
+                                                  (p/ast "let x := 30
+let f := fn (n: Integer): Integer do
+  result := n + x
+end
+
+f(12)"))]
+      (is (:compiled? result))
+      (is (= 42 (:result result)))
+      (is (some? (runtime/state-get-value (:state session) "f"))))))
+
+(deftest repl-compiled-backend-captured-function-object-test
+  (testing "compiled backend supports captured closures across repeated calls"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            setup-output (with-out-str
+                           (repl/eval-code ctx0 "function cf(): Function
+do
+  let x := 30
+  result := fn(i: Integer): Integer do
+    result := i + x
+  end
+end
+
+let f1: Function := cf()"))
+            call1-output (with-out-str
+                           (repl/eval-code ctx0 "f1(10)"))
+            call2-output (with-out-str
+                           (repl/eval-code ctx0 "f1(20)"))]
+        (is (not (str/includes? setup-output "Type checking failed")))
+        (is (str/includes? call1-output "40"))
+        (is (str/includes? call2-output "50"))))))
+
 (deftest repl-compiled-backend-direct-function-declarations-test
   (testing "compiled backend can register forward declarations so mutual-recursion setup does not deopt"
     (binding [repl/*type-checking-enabled* (atom true)

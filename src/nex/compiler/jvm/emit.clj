@@ -193,6 +193,21 @@
     (= :void jvm-type)
     nil
 
+    (= :int jvm-type)
+    (do
+      (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Number")
+      (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Number" "intValue" "()I" false))
+
+    (= :long jvm-type)
+    (do
+      (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Number")
+      (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Number" "longValue" "()J" false))
+
+    (= :double jvm-type)
+    (do
+      (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Number")
+      (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Number" "doubleValue" "()D" false))
+
     (contains? ir/primitive-jvm-types jvm-type)
     (let [{:keys [owner name descriptor]} (desc/unboxing-method jvm-type)]
       (.visitTypeInsn mv Opcodes/CHECKCAST owner)
@@ -1187,6 +1202,24 @@
                         false)
       (emit-unbox-or-cast! mv (:jvm-type expr))
       (:jvm-type expr))
+
+    :call-function
+    (do
+      (emit-runtime-var! mv "invoke-function-object")
+      (.visitVarInsn mv Opcodes/ALOAD state-slot)
+      (emit-boxed-expr! mv (:target expr) state-slot)
+      (emit-boxed-arg-array! mv (:args expr) state-slot)
+      (.visitMethodInsn mv
+                        Opcodes/INVOKEVIRTUAL
+                        var-internal-name
+                        "invoke"
+                        "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                        false)
+      (if (= :void (:jvm-type expr))
+        (do (.visitInsn mv Opcodes/POP) :void)
+        (do
+          (emit-unbox-or-cast! mv (:jvm-type expr))
+          (:jvm-type expr))))
 
     :call-virtual
     (do

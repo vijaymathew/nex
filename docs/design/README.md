@@ -22,3 +22,4 @@ Run commands from `docs/design`.
 - `USER_DEFINED_CLASSES_COMPILER_PLAN.md` - implementation checklist for compiled support of simple user-defined classes
 - `DEFERRED_CLASSES_COMPILER_PLAN.md` - implementation checklist for compiled support of deferred classes and parent-typed virtual dispatch
 - `EXCEPTIONS_AND_CONTRACTS_COMPILER_PLAN.md` - implementation checklist for compiled exception handling and design-by-contract support
+- `CLOSURES_AND_HIGHER_ORDER_COMPILER_PLAN.md` - implementation checklist for compiled anonymous functions and higher-order function-object support

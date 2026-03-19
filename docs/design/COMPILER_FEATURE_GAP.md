@@ -28,6 +28,7 @@ Last updated: 2026-03-19
 | Exceptions | `raise`, `rescue`, `retry` |
 | Contracts | `require`, `ensure`, and the current interpreter-style field-based `old` model in compiled method/constructor postconditions |
 | Collections | Literal construction plus direct compiled lowering for Array / Map / Set methods |
+| Closures / higher-order | Anonymous functions, captured closures, and passing/returning/invoking function objects |
 | Builtins via runtime bridge | `print`, `println`, `type_of`, `sleep`, task/channel methods, etc. |
 
 
@@ -50,12 +51,6 @@ Last updated: 2026-03-19
 - `Channel` — `send`, `receive`, `try_send`, `try_receive`, `close`
 - `select` (multiplex over channels/tasks with timeout)
 - `await_all`/`await_any` as direct codegen (currently runtime-bridged)
-
-### Closures & Higher-Order
-
-- Anonymous functions (`fn (x) do...end`)
-- Closures capturing enclosing scope
-- Higher-order functions (passing/returning function objects)
 
 ### Modules
 
@@ -81,7 +76,6 @@ Last updated: 2026-03-19
 Based on complexity and impact, these are natural next steps:
 
 1. `select` and direct concurrency lowering
-2. Closures / anonymous functions
-3. File compilation (`.nex` -> JVM bytecode/classes/jar) beyond the REPL-only compiler path
-4. Broader module support (`import`, `intern`) on the compiled path
-5. Source line numbers and better debug metadata in emitted bytecode
+2. File compilation (`.nex` -> JVM bytecode/classes/jar) beyond the REPL-only compiler path
+3. Broader module support (`import`, `intern`) on the compiled path
+4. Source line numbers and better debug metadata in emitted bytecode

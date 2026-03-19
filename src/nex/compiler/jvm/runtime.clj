@@ -2,12 +2,16 @@
   "Small runtime support for the future JVM bytecode compiler."
   (:require [clojure.string :as str]
             [nex.interpreter :as interp]
+            [nex.types.bootstrap :as bootstrap]
             [nex.types.runtime :as rt]
             [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo])
   (:import [clojure.lang DynamicClassLoader]
            [java.lang.reflect Field Method]
            [java.util HashMap]))
+
+(declare rebuild-interpreter-ctx)
+(declare lowered-instance-method-name)
 
 (defrecord NexReplState [^clojure.lang.Atom values
                          ^clojure.lang.Atom types
@@ -90,6 +94,40 @@
                                                                        (class (object-array 0))]))]
       (.invoke target-method nil (object-array [state (object-array args)])))))
 
+(defn invoke-function-object
+  [state target args]
+  (when-not target
+    (throw (ex-info "Cannot invoke Void as a function"
+                    {:target target
+                     :args args})))
+  (if (interp/nex-object? target)
+    (let [ctx (rebuild-interpreter-ctx state)
+          call-method (str "call" (count args))
+          literal-args (mapv (fn [v] {:type :literal :value v}) args)]
+      (interp/eval-node ctx {:type :call
+                             :target {:type :literal :value target}
+                             :method call-method
+                             :args literal-args}))
+    (let [^Class cls (.getClass target)
+          lowered-name (lowered-instance-method-name (str "call" (count args)) (count args))
+          ^Method method (.getDeclaredMethod cls
+                                             lowered-name
+                                             (into-array Class [nex.compiler.jvm.runtime.NexReplState
+                                                                (class (object-array 0))]))]
+      (.invoke method target (object-array [state (object-array args)])))))
+
+(defn make-captured-function-object
+  [state class-name capture-args]
+  (when-not (even? (count capture-args))
+    (throw (ex-info "Captured closure args must be name/value pairs"
+                    {:class-name class-name
+                     :capture-args capture-args})))
+  (let [ctx (rebuild-interpreter-ctx state)
+        closure-env (interp/make-env (:current-env ctx))]
+    (doseq [[name value] (partition 2 capture-args)]
+      (interp/env-define closure-env name value))
+    (interp/make-object class-name {} closure-env)))
+
 (defn next-class-name!
   ([state prefix]
    (next-class-name! state "nex/repl" prefix))
@@ -128,6 +166,7 @@
     (reset! (:imports ctx) (vec @(:imports state)))
     (reset! (:classes ctx)
             (let [copy (HashMap.)]
+              (.put copy "Function" (bootstrap/build-function-base-class))
               (doseq [[k v] @(:classes state)]
                 (.put copy k v))
               copy))
@@ -294,11 +333,12 @@
           runtime-name (runtime-type-name state value)
           compatible? (and (string? class-name)
                            (string? runtime-name)
-                           (typeinfo/convert-compatible-runtime?
-                            interp/is-parent?
-                            ctx
-                            runtime-name
-                            class-name))]
+                           (or (= runtime-name class-name)
+                               (typeinfo/convert-compatible-runtime?
+                                interp/is-parent?
+                                ctx
+                                runtime-name
+                                class-name)))]
       (when-not compatible?
         (throw (ex-info "Compiled object model mismatch"
                         {:expected class-name
@@ -428,6 +468,9 @@
   (cond
     (= name "validate-object-state")
     (validate-object-state state (first args) (second args))
+
+    (= name "make-captured-function-object")
+    (make-captured-function-object state (first args) (vec (rest args)))
 
     (= name "op:string-concat")
     (apply str (map #(concat-string-value state %) args))

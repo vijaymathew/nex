@@ -1099,8 +1099,7 @@
                      (seq (:statements ast)) (seq (:calls ast))))
         ;; Create an augmented AST that includes previously defined classes
         ;; so the type checker knows about them
-        (let [prev-classes (remove #(or (= "__ReplTemp__" (:name %))
-                                       (.startsWith (:name %) "AnonymousFunction_"))
+        (let [prev-classes (remove #(= "__ReplTemp__" (:name %))
                                   (vals @(:classes ctx)))
               intern-classes (interp/resolve-interned-classes source-id ast)
               prev-imports @(:imports ctx)

@@ -36,10 +36,14 @@
 (declare inherited-method-def)
 (declare single-super-parent-name)
 (declare infer-call-type)
+(declare collect-anonymous-class-defs)
+(declare function-object-call?)
+(declare function-object-binding-type)
 
 (def ^:private expression-node-types
   #{:integer :real :string :char :boolean :nil :identifier :binary :unary
-    :call :if :when :this :array-literal :map-literal :set-literal})
+    :call :if :when :this :array-literal :map-literal :set-literal
+    :anonymous-function})
 
 (def ^:private builtin-function-names
   (set (keys interp/builtins)))
@@ -208,6 +212,10 @@
 
       (if-let [compiled (get (:compiled-classes env) base)] true false)
       (ir/object-jvm-type "java/lang/Object")
+
+      (true? (:closure-runtime-object? (get (visible-class-map env) base)))
+      (ir/object-jvm-type "java/lang/Object")
+
       :else
       (desc/nex-type->jvm-type nex-type))))
 
@@ -316,10 +324,20 @@
                                   (:classes env)))
         target-expr (normalize-call-target raw-target)]
     (if (nil? target-expr)
-      (when (:this-type env)
-        (some-> (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
-                    (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr))))
-                function-return-type))
+      (or
+       (when (function-object-call? env (:method expr) (count (:args expr)))
+         (let [binding-type (function-object-binding-type env (:method expr))
+               base-type (base-type-name binding-type)
+               call-name (str "call" (count (:args expr)))]
+           (if (= "Function" base-type)
+             "Any"
+             (some-> (get (visible-class-map env) base-type)
+                     (class-method-def call-name (count (:args expr)))
+                     function-return-type))))
+       (when (:this-type env)
+         (some-> (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+                     (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr))))
+                 function-return-type)))
       (if (and (= :identifier (:type target-expr))
                (= "super" (:name target-expr)))
         (let [parent-name (single-super-parent-name env)
@@ -461,15 +479,25 @@
   [env kind {:keys [label condition]}]
   (ir/assert-node kind label (lower-expression env condition)))
 
+(defn- function-root-class?
+  [env class-name]
+  (let [class-def (get (visible-class-map env) class-name)]
+    (boolean
+     (and class-def
+          (seq (:parents class-def))
+          (every? #(= "Function" (:parent %)) (:parents class-def))))))
+
 (defn- validate-object-state-ir
   [env class-name object-ir nex-type]
-  (ir/call-runtime-node "validate-object-state"
-                        [(ir/const-node class-name
-                                        "String"
-                                        (ir/object-jvm-type "java/lang/String"))
-                         object-ir]
-                        nex-type
-                        (resolve-jvm-type env nex-type)))
+  (if (function-root-class? env class-name)
+    object-ir
+    (ir/call-runtime-node "validate-object-state"
+                          [(ir/const-node class-name
+                                          "String"
+                                          (ir/object-jvm-type "java/lang/String"))
+                           object-ir]
+                          nex-type
+                          (resolve-jvm-type env nex-type))))
 
 (defn- default-const-node
   [nex-type jvm-type]
@@ -686,7 +714,7 @@
 (defn- resolve-parent-metas
   [env class-def]
   (->> (:parents class-def)
-       (remove #(= "Any" (:parent %)))
+       (remove #(contains? #{"Any" "Function"} (:parent %)))
        (mapv (fn [{:keys [parent]}]
                (let [compiled (class-jvm-meta env parent)]
                  {:nex-name parent
@@ -717,7 +745,7 @@
                       m
                       (class-fields parent-def))))
           {}
-          (remove #(= "Any" (:parent %)) (:parents class-def))))
+          (remove #(contains? #{"Any" "Function"} (:parent %)) (:parents class-def))))
 
 (defn- inherited-method-def
   [env class-def method-name arity]
@@ -815,11 +843,26 @@
                       m
                       (class-methods parent-def))))
           {}
-          (remove #(= "Any" (:parent %)) (:parents class-def))))
+          (remove #(contains? #{"Any" "Function"} (:parent %)) (:parents class-def))))
 
 (defn- direct-parent-names
   [class-def]
-  (mapv :parent (remove #(= "Any" (:parent %)) (:parents class-def))))
+  (mapv :parent (remove #(contains? #{"Any" "Function"} (:parent %)) (:parents class-def))))
+
+(defn- function-object-binding-type
+  [env name]
+  (or (get-in (:locals env) [name :nex-type])
+      (get (:var-types env) name)))
+
+(defn- function-object-call?
+  [env name arity]
+  (when-let [binding-type (function-object-binding-type env name)]
+    (let [base-type (base-type-name binding-type)
+          call-name (str "call" arity)]
+      (or (= "Function" base-type)
+          (boolean
+           (some-> (get (visible-class-map env) base-type)
+                   (class-method-def call-name arity)))))))
 
 (defn- single-super-parent-name
   [env]
@@ -897,6 +940,362 @@
   (let [synthetic-class-names (set (keep :class-name (:functions program)))]
     (remove #(contains? synthetic-class-names (:name %))
             (:classes program))))
+
+(defn- infer-prepass-type
+  [ctx local-types expr]
+  (or (tc/infer-expression-type expr {:classes (:classes ctx)
+                                      :functions (:functions ctx)
+                                      :imports (:imports ctx)
+                                      :var-types (merge (:var-types ctx) local-types)})
+      "Any"))
+
+(defn- synthetic-capture-field
+  [{:keys [name type]}]
+  {:type :field
+   :name name
+   :field-type type
+   :note nil
+   :constant? false
+   :synthetic? true})
+
+(defn- attach-capture-fields
+  [class-def captures runtime-object?]
+  (let [capture-members (mapv synthetic-capture-field captures)
+        feature-sections (filter #(= :feature-section (:type %)) (:body class-def))
+        first-section (first feature-sections)]
+    (cond-> class-def
+      true
+      (assoc :closure-runtime-object? (boolean runtime-object?))
+
+      (seq captures)
+      (assoc :body
+             (if first-section
+               (mapv (fn [section]
+                       (if (identical? section first-section)
+                         (update section :members #(vec (concat capture-members %)))
+                         section))
+                     (:body class-def))
+               (vec (cons {:type :feature-section
+                           :visibility {:type :public}
+                           :members capture-members}
+                          (:body class-def))))))))
+
+(declare rewrite-expression-for-closures)
+(declare rewrite-statement-for-closures)
+(declare rewrite-statements-for-closures)
+(declare rewrite-statements-for-closures*)
+
+(defn- capture-reference!
+  [captures local-types outer-var-types name]
+  (when (and (not (contains? local-types name))
+             (contains? outer-var-types name))
+    (swap! captures assoc name (get outer-var-types name))))
+
+(defn- rewrite-expression-for-closures
+  [ctx local-types captures expr]
+  (cond
+    (not (map? expr)) expr
+
+    (= :identifier (:type expr))
+    (do
+      (capture-reference! captures local-types (:var-types ctx) (:name expr))
+      expr)
+
+    (= :anonymous-function (:type expr))
+    (let [params (or (:params expr) [])
+          fn-locals (into {"result" (or (:return-type expr) "Any")}
+                          (map (fn [{:keys [name type]}] [name type]))
+                          params)
+          nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types))
+          [rewritten-body _ nested-captures]
+          (rewrite-statements-for-closures nested-ctx fn-locals (:body expr))
+          capture-vec (->> nested-captures
+                           (map (fn [[name type]] {:name name :type type}))
+                           (sort-by :name)
+                           vec)
+          runtime-object? (seq capture-vec)]
+      (assoc expr
+             :body rewritten-body
+             :captures capture-vec
+             :class-def (attach-capture-fields (:class-def expr) capture-vec runtime-object?)))
+
+    (= :call (:type expr))
+    (let [target (:target expr)
+          method (:method expr)
+          args (mapv #(rewrite-expression-for-closures ctx local-types captures %)
+                     (:args expr))
+          expr' (assoc expr
+                       :target (when target
+                                 (rewrite-expression-for-closures ctx local-types captures target))
+                       :args args)]
+      (when (and (nil? target)
+                 (contains? (:var-types ctx) method)
+                 (not (contains? local-types method)))
+        (swap! captures assoc method (get (:var-types ctx) method)))
+      expr')
+
+    (= :binary (:type expr))
+    (assoc expr
+           :left (rewrite-expression-for-closures ctx local-types captures (:left expr))
+           :right (rewrite-expression-for-closures ctx local-types captures (:right expr)))
+
+    (= :unary (:type expr))
+    (assoc expr :expr (rewrite-expression-for-closures ctx local-types captures (:expr expr)))
+
+    (= :array-literal (:type expr))
+    (assoc expr :elements (mapv #(rewrite-expression-for-closures ctx local-types captures %)
+                                (:elements expr)))
+
+    (= :set-literal (:type expr))
+    (assoc expr :elements (mapv #(rewrite-expression-for-closures ctx local-types captures %)
+                                (:elements expr)))
+
+    (= :map-literal (:type expr))
+    (assoc expr :entries (mapv (fn [{:keys [key value]}]
+                                 {:key (rewrite-expression-for-closures ctx local-types captures key)
+                                  :value (rewrite-expression-for-closures ctx local-types captures value)})
+                               (:entries expr)))
+
+    (= :if (:type expr))
+    (assoc expr
+           :condition (rewrite-expression-for-closures ctx local-types captures (:condition expr))
+           :then (first (rewrite-statements-for-closures* ctx local-types captures (:then expr)))
+           :elseif (mapv (fn [clause]
+                           (assoc clause
+                                  :condition (rewrite-expression-for-closures ctx local-types captures (:condition clause))
+                                  :then (first (rewrite-statements-for-closures* ctx local-types captures (:then clause)))))
+                         (:elseif expr))
+           :else (first (rewrite-statements-for-closures* ctx local-types captures (:else expr))))
+
+    (= :when (:type expr))
+    (assoc expr
+           :condition (rewrite-expression-for-closures ctx local-types captures (:condition expr))
+           :consequent (rewrite-expression-for-closures ctx local-types captures (:consequent expr))
+           :alternative (rewrite-expression-for-closures ctx local-types captures (:alternative expr)))
+
+    (= :old (:type expr))
+    (assoc expr :expr (rewrite-expression-for-closures ctx local-types captures (:expr expr)))
+
+    (= :convert (:type expr))
+    (assoc expr :value (rewrite-expression-for-closures ctx local-types captures (:value expr)))
+
+    (= :create (:type expr))
+    (assoc expr :args (mapv #(rewrite-expression-for-closures ctx local-types captures %) (:args expr)))
+
+    :else expr))
+
+(defn- rewrite-statement-for-closures
+  [ctx local-types captures stmt]
+  (case (:type stmt)
+    :let
+    (let [value' (rewrite-expression-for-closures ctx local-types captures (:value stmt))
+          stmt' (assoc stmt :value value')
+          var-type (or (:var-type stmt)
+                       (infer-prepass-type ctx local-types value'))]
+      [stmt' (assoc local-types (:name stmt) var-type)])
+
+    :assign
+    [(assoc stmt :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
+     local-types]
+
+    :member-assign
+    [(assoc stmt
+            :object (when (:object stmt)
+                      (rewrite-expression-for-closures ctx local-types captures (:object stmt)))
+            :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
+     local-types]
+
+    :call
+    [(rewrite-expression-for-closures ctx local-types captures stmt)
+     local-types]
+
+    :convert
+    (let [value' (rewrite-expression-for-closures ctx local-types captures (:value stmt))
+          stmt' (assoc stmt :value value')]
+      [stmt' (assoc local-types
+                    (:var-name stmt)
+                    (tc/detachable-version (:target-type stmt)))])
+
+    :if
+    [(assoc stmt
+            :condition (rewrite-expression-for-closures ctx local-types captures (:condition stmt))
+            :then (first (rewrite-statements-for-closures* ctx local-types captures (:then stmt)))
+            :elseif (mapv (fn [clause]
+                            (assoc clause
+                                   :condition (rewrite-expression-for-closures ctx local-types captures (:condition clause))
+                                   :then (first (rewrite-statements-for-closures* ctx local-types captures (:then clause)))))
+                          (:elseif stmt))
+            :else (first (rewrite-statements-for-closures* ctx local-types captures (:else stmt))))
+     local-types]
+
+    :case
+    [(assoc stmt
+            :expr (rewrite-expression-for-closures ctx local-types captures (:expr stmt))
+            :clauses (mapv (fn [clause]
+                             (assoc clause
+                                    :values (mapv #(rewrite-expression-for-closures ctx local-types captures %)
+                                                  (:values clause))
+                                    :body (first (rewrite-statement-for-closures ctx local-types captures (:body clause)))))
+                           (:clauses stmt))
+            :else (when (:else stmt)
+                    (first (rewrite-statement-for-closures ctx local-types captures (:else stmt)))))
+     local-types]
+
+    :loop
+    [(assoc stmt
+            :init (first (rewrite-statements-for-closures* ctx local-types captures (:init stmt)))
+            :until (rewrite-expression-for-closures ctx local-types captures (:until stmt))
+            :variant (when (:variant stmt)
+                       (rewrite-expression-for-closures ctx local-types captures (:variant stmt)))
+            :invariant (mapv (fn [inv]
+                               (assoc inv :condition (rewrite-expression-for-closures ctx local-types captures (:condition inv))))
+                             (:invariant stmt))
+            :body (first (rewrite-statements-for-closures* ctx local-types captures (:body stmt))))
+     local-types]
+
+    :scoped-block
+    [(assoc stmt
+            :body (first (rewrite-statements-for-closures* ctx local-types captures (:body stmt)))
+            :rescue (when (:rescue stmt)
+                      (first (rewrite-statements-for-closures* ctx (assoc local-types "exception" "Any") captures (:rescue stmt)))))
+     local-types]
+
+    :raise
+    [(assoc stmt :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
+     local-types]
+
+    [stmt local-types]))
+
+(defn- rewrite-statements-for-closures*
+  [ctx local-types captures statements]
+  (loop [remaining (vec statements)
+         current-local-types local-types
+         rewritten []]
+    (if-let [stmt (first remaining)]
+      (let [[stmt' next-local-types] (rewrite-statement-for-closures ctx current-local-types captures stmt)]
+        (recur (subvec remaining 1) next-local-types (conj rewritten stmt')))
+      [rewritten current-local-types @captures])))
+
+(defn- rewrite-statements-for-closures
+  [ctx local-types statements]
+  (rewrite-statements-for-closures* ctx local-types (atom {}) statements))
+
+(defn- sync-callable-into-class-def
+  [class-def callable]
+  (let [callable-name (:name callable)
+        callable-arity (count (or (:params callable) []))]
+    (update class-def :body
+            (fn [sections]
+              (mapv (fn [section]
+                      (if (= :feature-section (:type section))
+                        (update section :members
+                                (fn [members]
+                                  (mapv (fn [member]
+                                          (if (and (= :method (:type member))
+                                                   (= callable-name (:name member))
+                                                   (= callable-arity (count (or (:params member) []))))
+                                            callable
+                                            member))
+                                        members)))
+                        section))
+                    sections)))))
+
+(defn- rewrite-callable-for-closures
+  [ctx callable initial-var-types]
+  (let [params (or (:params callable) [])
+        local-types (into {"result" (or (:return-type callable) "Any")}
+                          (map (fn [{:keys [name type]}] [name type]))
+                          params)
+        [body _ _] (rewrite-statements-for-closures (assoc ctx :var-types initial-var-types)
+                                                    local-types
+                                                    (:body callable))
+        rewritten-callable (cond-> (assoc callable :body body)
+                             (:rescue callable)
+                             (assoc :rescue (first (rewrite-statements-for-closures (assoc ctx :var-types initial-var-types)
+                                                                                    (assoc local-types "exception" "Any")
+                                                                                    (:rescue callable)))))]
+    (cond-> rewritten-callable
+      (:class-def callable)
+      (assoc :class-def (sync-callable-into-class-def (:class-def callable) rewritten-callable)))))
+
+(defn- rewrite-class-for-closures
+  [ctx class-def]
+  (let [field-types (field-type-map class-def)]
+    (update class-def :body
+            (fn [sections]
+              (mapv (fn [section]
+                      (case (:type section)
+                        :feature-section
+                        (update section :members
+                                (fn [members]
+                                  (mapv (fn [member]
+                                          (if (= :method (:type member))
+                                            (rewrite-callable-for-closures ctx member field-types)
+                                            member))
+                                        members)))
+
+                        :constructors
+                        (update section :constructors
+                                (fn [ctors]
+                                  (mapv #(rewrite-callable-for-closures ctx % field-types) ctors)))
+
+                        section))
+                    sections)))))
+
+(defn prepare-program-for-closures
+  [program opts]
+  (let [visible-functions (vec (concat (:functions program) (:functions opts)))
+        visible-classes (vec (concat (:classes program)
+                                     (:classes opts)
+                                     (keep :class-def visible-functions)))
+        ctx {:classes visible-classes
+             :functions visible-functions
+             :imports (:imports program)
+             :var-types (:var-types opts)}
+        rewritten-functions (mapv #(rewrite-callable-for-closures ctx % (:var-types opts))
+                                  (:functions program))
+        [rewritten-statements _ _] (rewrite-statements-for-closures (assoc ctx :functions (vec (concat rewritten-functions (:functions opts))))
+                                                                    (:var-types opts)
+                                                                    (:statements program))
+        rewritten-classes (mapv #(rewrite-class-for-closures ctx %) (:classes program))]
+    (assoc program
+           :functions rewritten-functions
+           :statements rewritten-statements
+           :classes rewritten-classes)))
+
+(defn collect-anonymous-class-defs
+  [node]
+  (let [seen-order (atom [])
+        found (atom {})]
+    (letfn [(walk [x]
+              (cond
+                (map? x)
+                (do
+                  (when (= :anonymous-function (:type x))
+                    (let [class-def (:class-def x)
+                          class-name (:name class-def)]
+                      (when-not (contains? @found class-name)
+                        (swap! seen-order conj class-name))
+                      (swap! found
+                             (fn [m]
+                               (let [existing (get m class-name)]
+                                 (assoc m
+                                        class-name
+                                        (if (and existing
+                                                 (not (:closure-runtime-object? class-def))
+                                                 (:closure-runtime-object? existing))
+                                          existing
+                                          class-def)))))))
+                  (doseq [v (vals x)]
+                    (walk v)))
+
+                (sequential? x)
+                (doseq [v x]
+                  (walk v))
+
+                :else nil))]
+      (walk node)
+      (mapv @found @seen-order))))
 
 (defn- lower-instance-dispatch
   [env target-expr method args has-parens]
@@ -1205,6 +1604,35 @@
                                                    (resolve-jvm-type env nex-type))
                                       nex-type)))))
 
+    :anonymous-function
+    (let [class-name (:class-name expr)
+          compiled (get (:compiled-classes env) class-name)
+          nex-type (infer-type env expr)
+          captures (:captures expr)]
+      (if (seq captures)
+        (ir/call-runtime-node "make-captured-function-object"
+                              (into [(ir/const-node class-name
+                                                    "String"
+                                                    (ir/object-jvm-type "java/lang/String"))]
+                                    (mapcat (fn [{:keys [name]}]
+                                              [(ir/const-node name
+                                                              "String"
+                                                              (ir/object-jvm-type "java/lang/String"))
+                                               (lower-expression env {:type :identifier
+                                                                      :name name})])
+                                            captures))
+                              nex-type
+                              (ir/object-jvm-type "java/lang/Object"))
+        (do
+          (when-not compiled
+            (throw (ex-info "Anonymous function class has not been compiled during lowering"
+                            {:expr expr
+                             :class-name class-name})))
+          (ir/new-node (:internal-name compiled)
+                       class-name
+                       nex-type
+                       (exact-class-jvm-type env class-name)))))
+
     :call
     (if (and (nil? (:target expr))
              (empty? (:args expr))
@@ -1252,6 +1680,15 @@
                                         arg-irs
                                         nex-type
                                         jvm-type))))
+
+            (function-object-call? env (:method expr) (count (:args expr)))
+            (let [nex-type (infer-type env expr)
+                  jvm-type (resolve-jvm-type env nex-type)]
+              (ir/call-function-node (lower-expression env {:type :identifier
+                                                            :name (:method expr)})
+                                     arg-irs
+                                     nex-type
+                                     jvm-type))
 
             (contains? builtin-function-names (:method expr))
             (let [nex-type (infer-type env expr)
@@ -2103,8 +2540,11 @@
   [program opts]
   (let [unit-name (or (:name opts) "nex/repl/Cell_0001")
         actual-classes (vec (user-class-defs program))
+        anonymous-classes (vec (collect-anonymous-class-defs program))
+        emitted-anonymous-classes (vec (remove :closure-runtime-object? anonymous-classes))
         visible-functions (vec (concat (:functions program) (:functions opts)))
         visible-classes (vec (concat actual-classes
+                                     anonymous-classes
                                      (:classes opts)
                                      (keep :class-def visible-functions)))
         env (make-lowering-env {:classes visible-classes
@@ -2158,8 +2598,13 @@
                                                          :classes visible-classes
                                                          :functions visible-functions
                                                          :imports (:imports program)})
-                                    actual-classes)
-                     :functions (mapv #(lower-function unit-name visible-functions (:imports program) %)
+                                    (concat actual-classes emitted-anonymous-classes))
+                     :functions (mapv #(lower-function unit-name
+                                                       visible-functions
+                                                       (:imports program)
+                                                       (assoc %
+                                                              :visible-classes visible-classes
+                                                              :compiled-classes (:compiled-classes opts)))
                                       (remove :declaration-only? (:functions program)))
                      :body lowered-body''
                      :result-jvm-type (ir/object-jvm-type "java/lang/Object")})}))

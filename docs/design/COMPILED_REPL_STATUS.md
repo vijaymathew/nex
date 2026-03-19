@@ -93,6 +93,7 @@ These are lowered into IR and emitted as JVM bytecode directly:
 - loop invariant / variant checks
 - top-level function declarations and definitions
 - top-level function calls through compiled REPL state
+- anonymous functions without captures
 - user-defined classes
   - fields
   - methods
@@ -116,6 +117,9 @@ These are still compiled, but the emitted bytecode calls back into the shared Ne
 - builtin-style feature calls on runtime-backed receiver types such as:
   - `task.await`
   - `ch.receive`
+- captured closures
+  - closure allocation uses a runtime helper that builds a Nex closure object with a captured environment snapshot
+  - later invocation still stays on the compiled path through function-object dispatch
 
 This is intentional. It keeps semantics correct while avoiding duplicated builtin implementations in the compiler.
 
@@ -160,6 +164,12 @@ The compiled REPL path currently supports:
   - calls through compiled REPL state
   - functions calling other top-level functions
   - mutual recursion across REPL cells
+- closures / higher-order
+  - anonymous functions
+  - captured closures
+  - function-object invocation
+  - passing function objects through `Function`-typed parameters
+  - returning function objects from compiled functions
 - imports/intern-free top-level batches containing:
   - function declarations
   - function definitions
@@ -234,7 +244,6 @@ These still fall outside the compiled subset and therefore deopt to the interpre
   - `Task`
   - `Channel`
   - timeouts/cancellation/select lowering
-- closures / lambdas / higher-order compiled function objects
 - specialized direct codegen for each builtin
 
 In addition, some inputs still deopt in the user-facing REPL because of the wrapping rule above, even though the internal compiled helper supports them.

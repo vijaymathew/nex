@@ -44,9 +44,11 @@
 (declare session-var-types)
 (declare builtin-target-call-in-ctx?)
 (declare user-target-call-in-ctx?)
+(declare function-object-call-in-ctx?)
 (declare advance-eligibility-ctx)
 (declare supported-stmt-block-with-ctx?)
 (declare supported-convert-in-ctx?)
+(declare supported-anonymous-function-in-ctx?)
 
 (def ^:private builtin-runtime-receiver-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
@@ -74,6 +76,10 @@
   (let [synthetic-class-names (set (keep :class-name (:functions ast)))]
     (remove #(contains? synthetic-class-names (:name %))
             (:classes ast))))
+
+(defn- anonymous-class-defs
+  [ast]
+  (lower/collect-anonymous-class-defs ast))
 
 (defn- supported-if-branches?
   [ctx branch]
@@ -183,6 +189,29 @@
   [ctx class-name]
   (some #(when (= (:name %) class-name) %) (:classes ctx)))
 
+(defn- function-object-call-in-ctx?
+  [ctx expr]
+  (when (nil? (:target expr))
+    (let [binding-type (get (:var-types ctx) (:method expr))
+          base-type (base-type-name binding-type)
+          class-def (class-def-in-ctx ctx base-type)]
+      (and binding-type
+           (every? #(supported-expr-in-ctx? ctx %) (:args expr))
+           (or (= "Function" base-type)
+               (and class-def
+                    (class-method-in-ctx ctx base-type (str "call" (count (:args expr))) (count (:args expr)))))))))
+
+(defn- supported-anonymous-function-in-ctx?
+  [ctx expr]
+  (let [params (or (:params expr) [])
+        child-ctx (-> ctx
+                      (update :known-vars into (concat (map :name params) ["result"]))
+                      (update :var-types merge (into {}
+                                                     (concat
+                                                      (map (fn [{:keys [name type]}] [name type]) params)
+                                                      [["result" (or (:return-type expr) "Any")]]))))]
+    (boolean (supported-stmt-block? child-ctx (:body expr)))))
+
 (defn normalize-program-ast
   "Normalize legacy program shapes so the compiled REPL path can reason about
    one top-level statement stream. Older ASTs may carry top-level calls only in
@@ -196,7 +225,8 @@
 
 (defn- initial-eligibility-ctx
   [session ast]
-  (let [actual-classes (vec (user-class-defs ast))]
+  (let [actual-classes (vec (concat (user-class-defs ast)
+                                    (anonymous-class-defs ast)))]
     {:known-vars (set (concat (keys (session-var-types session))
                             (keys @(:values (:state session)))))
      :known-fns (set (concat builtin-function-names
@@ -229,6 +259,7 @@
                                 (supported-expr-in-ctx? ctx value)))
                          (:entries expr))
     :set-literal (every? #(supported-expr-in-ctx? ctx %) (:elements expr))
+    :anonymous-function (supported-anonymous-function-in-ctx? ctx expr)
     :create (let [class-def (class-def-in-ctx ctx (:class-name expr))]
               (and (contains? (:compiled-class-names ctx) (:class-name expr))
                    class-def
@@ -242,7 +273,8 @@
             (and (every? #(supported-expr-in-ctx? ctx %) (:args expr))
                  (or (and (empty? (:args expr))
                           (not (:has-parens expr)))
-                     (contains? (:known-fns ctx) (:method expr))))
+                     (contains? (:known-fns ctx) (:method expr))
+                     (function-object-call-in-ctx? ctx expr)))
             (or (builtin-target-call-in-ctx? ctx expr)
                 (user-target-call-in-ctx? ctx expr)))
     :binary (and (contains? (into #{"+" "-" "*" "/" "%" "^" "and" "or"} relational-ops) (:operator expr))
@@ -435,9 +467,11 @@
 
 (defn- compile-and-register-classes!
   [session ast]
-  (let [actual-classes (vec (user-class-defs ast))]
+  (let [actual-classes (vec (concat (user-class-defs ast)
+                                    (anonymous-class-defs ast)))]
     (when (seq actual-classes)
-      (let [new-class-map (allocate-compiled-class-metadata session actual-classes)
+      (let [compiled-class-defs (vec (remove :closure-runtime-object? actual-classes))
+            new-class-map (allocate-compiled-class-metadata session compiled-class-defs)
           compiled-map (merge @(:compiled-classes session) new-class-map)
           visible-functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
           visible-classes (vec (concat (vals @(:class-asts session))
@@ -450,8 +484,8 @@
                                                     :classes visible-classes
                                                     :functions visible-functions
                                                     :imports visible-imports}))
-                actual-classes)]
-        (doseq [class-def actual-classes]
+                compiled-class-defs)]
+        (doseq [class-def compiled-class-defs]
           (let [lowered (some #(when (= (:name %) (:name class-def)) %) lowered-classes)
                 bytecode (emit/compile-user-class->bytes lowered)]
             (loader/define-class! (:loader session)
@@ -540,7 +574,8 @@
            (reduce (fn [acc class-def]
                      (assoc acc (:name class-def) class-def))
                    m
-                   (user-class-defs ast))))
+                   (concat (user-class-defs ast)
+                           (anonymous-class-defs ast)))))
   (swap! (:import-asts session) merge-import-like-nodes (:imports ast))
   (swap! (:intern-asts session) merge-import-like-nodes (:interns ast))
   (rt/state-set-classes! (:state session) @(:class-asts session))
@@ -563,6 +598,7 @@
                        :functions (:functions ast)
                        :statements []
                        :calls []}
+          _ (compile-and-register-classes! session compile-ast)
           {:keys [unit]} (lower/lower-repl-cell compile-ast
                                                 {:name class-name
                                                  :compiled-classes @(:compiled-classes session)
@@ -580,7 +616,13 @@
   "Copy top-level interpreter state into the compiled session and remember
    top-level AST metadata so later compiled cells can type/lower against it."
   [session ctx var-types ast]
-  (remember-top-level-ast! session ast)
+  (let [prepared-ast (lower/prepare-program-for-closures
+                      ast
+                      {:classes (vals @(:class-asts session))
+                       :functions (vals @(:function-asts session))
+                       :imports @(:import-asts session)
+                       :var-types var-types})]
+  (remember-top-level-ast! session prepared-ast)
   (let [state (:state session)
         function-names (session-function-name-set session)]
     (reset-runtime-state! state)
@@ -591,8 +633,8 @@
     (doseq [[k t] var-types
             :when (not (contains? function-names k))]
       (rt/state-set-type! state k t))
-    (compile-and-register-functions! session ast)
-    session))
+    (compile-and-register-functions! session prepared-ast)
+    session)))
 
 (defn sync-session->interpreter!
   "Materialize compiled-session top-level state into the interpreter context.
@@ -622,13 +664,19 @@
    Returns {:compiled? true :session .. :result ..} on success, nil when the
    input is outside the supported subset or lowering/emission declines it."
   [session ast]
-  (let [ast' (normalize-program-ast ast)]
-    (when (eligible-ast? session ast')
+  (let [ast' (normalize-program-ast ast)
+        prepared-ast (lower/prepare-program-for-closures
+                      ast'
+                      {:classes (vals @(:class-asts session))
+                       :functions (vals @(:function-asts session))
+                       :imports @(:import-asts session)
+                       :var-types (session-var-types session)})]
+    (when (eligible-ast? session prepared-ast)
     (try
       (let [class-name (next-class-name! session)
-            _ (compile-and-register-classes! session ast')
-            _ (remember-top-level-ast! session ast')
-            {:keys [unit]} (lower/lower-repl-cell ast' {:name class-name
+            _ (compile-and-register-classes! session prepared-ast)
+            _ (remember-top-level-ast! session prepared-ast)
+            {:keys [unit]} (lower/lower-repl-cell prepared-ast {:name class-name
                                                         :compiled-classes @(:compiled-classes session)
                                                         :classes (vals @(:class-asts session))
                                                         :functions (vals @(:function-asts session))
@@ -640,7 +688,7 @@
             _ (rt/clear-output! state)
             method (.getMethod cls "eval" (into-array Class [(class state)]))
             result (.invoke method nil (object-array [state]))]
-        (sync-var-types-from-ast! session ast')
+        (sync-var-types-from-ast! session prepared-ast)
         {:compiled? true
          :session session
          :output (rt/state-output state)

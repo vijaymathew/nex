@@ -148,6 +148,13 @@
    :nex-type nex-type
    :jvm-type jvm-type})
 
+(defn call-function-node [target args nex-type jvm-type]
+  {:op :call-function
+   :target target
+   :args (vec args)
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
 (defn call-repl-fn-node [name args nex-type jvm-type]
   {:op :call-repl-fn
    :name name
