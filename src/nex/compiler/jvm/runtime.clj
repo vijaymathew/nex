@@ -2,7 +2,8 @@
   "Small runtime support for the future JVM bytecode compiler."
   (:require [clojure.string :as str]
             [nex.interpreter :as interp]
-            [nex.types.runtime :as rt])
+            [nex.types.runtime :as rt]
+            [nex.types.typeinfo :as typeinfo])
   (:import [clojure.lang DynamicClassLoader]
            [java.lang.reflect Field Method]
            [java.util HashMap]))
@@ -211,6 +212,29 @@
            (= :nex-exception (:type (ex-data throwable))))
     (:value (ex-data throwable))
     (.getMessage ^Throwable throwable)))
+
+(defn- compiled-runtime-class-name
+  [state value]
+  (when value
+    (let [binary-name (.getName (.getClass value))
+          simple-name (last (str/split binary-name #"\."))]
+      (when-let [[_ candidate] (re-matches #"(.+)_\d{4}" simple-name)]
+        (when (contains? @(:classes state) candidate)
+          candidate)))))
+
+(defn- runtime-type-name
+  [state value]
+  (or (compiled-runtime-class-name state value)
+      (typeinfo/runtime-type-name interp/nex-object? typeinfo/get-type-name value)))
+
+(defn convert-value
+  [state value target-type-name]
+  (let [ctx (rebuild-interpreter-ctx state)
+        runtime-name (runtime-type-name state value)
+        ok? (and (some? value)
+                 (string? target-type-name)
+                 (typeinfo/convert-compatible-runtime? interp/is-parent? ctx runtime-name target-type-name))]
+    (object-array [(boolean ok?) (if ok? value nil)])))
 
 (defn make-contract-violation
   [kind label]

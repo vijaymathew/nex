@@ -46,6 +46,7 @@
 (declare user-target-call-in-ctx?)
 (declare advance-eligibility-ctx)
 (declare supported-stmt-block-with-ctx?)
+(declare supported-convert-in-ctx?)
 
 (def ^:private builtin-runtime-receiver-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
@@ -223,8 +224,7 @@
     :boolean true
     :nil true
     :create (let [class-def (class-def-in-ctx ctx (:class-name expr))]
-              (and (empty? (:generic-args expr))
-                   (contains? (:compiled-class-names ctx) (:class-name expr))
+              (and (contains? (:compiled-class-names ctx) (:class-name expr))
                    class-def
                    (not (:deferred? class-def))
                    (every? #(supported-expr-in-ctx? ctx %) (:args expr))
@@ -244,7 +244,11 @@
                  (supported-expr-in-ctx? ctx (:right expr)))
     :unary (supported-expr-in-ctx? ctx (:expr expr))
     :old (supported-expr-in-ctx? ctx (:expr expr))
-    :if (and (supported-expr-in-ctx? ctx (:condition expr))
+    :if (and ((if (= :convert (:type (:condition expr)))
+                supported-convert-in-ctx?
+                supported-expr-in-ctx?)
+              ctx
+              (:condition expr))
              (supported-if-branches? ctx (:then expr))
              (if-let [clause (first (:elseif expr))]
                (supported-expr-in-ctx?
@@ -255,23 +259,50 @@
                  :elseif (vec (rest (:elseif expr)))
                  :else (:else expr)})
                (supported-if-branches? ctx (:else expr))))
-    :when (and (supported-expr-in-ctx? ctx (:condition expr))
+    :when (and ((if (= :convert (:type (:condition expr)))
+                  supported-convert-in-ctx?
+                  supported-expr-in-ctx?)
+                ctx
+                (:condition expr))
                (supported-expr-in-ctx? ctx (:consequent expr))
                (supported-expr-in-ctx? ctx (:alternative expr)))
     false))
 
+(defn supported-convert-in-ctx?
+  [ctx expr]
+  (and (= :convert (:type expr))
+       (supported-expr-in-ctx? ctx (:value expr))
+       (let [target-type (:target-type expr)
+             base (if (map? target-type) (:base-type target-type) target-type)]
+         (and (string? base)
+              (not (contains? #{"T" "U" "V" "K" "KEY" "VALUE"} base))
+              true))))
+
 (defn supported-stmt-in-ctx?
   [ctx stmt]
   (case (:type stmt)
-    :let (supported-expr-in-ctx? ctx (:value stmt))
+    :let (if (= :convert (:type (:value stmt)))
+           (supported-convert-in-ctx? ctx (:value stmt))
+           (supported-expr-in-ctx? ctx (:value stmt)))
     :assign (and (string? (:target stmt))
                  (contains? (:known-vars ctx) (:target stmt))
                  (supported-expr-in-ctx? ctx (:value stmt)))
     :member-assign (and (supported-expr-in-ctx? ctx (or (:object stmt) {:type :this}))
                         (supported-expr-in-ctx? ctx (:value stmt)))
     :call (supported-expr-in-ctx? ctx stmt)
-    :if (and (supported-expr-in-ctx? ctx (:condition stmt))
-             (supported-stmt-block? ctx (:then stmt))
+    :convert (supported-convert-in-ctx? ctx stmt)
+    :if (let [cond-ctx (if (= :convert (:type (:condition stmt)))
+                         (-> ctx
+                             (update :known-vars conj (:var-name (:condition stmt)))
+                             (assoc-in [:var-types (:var-name (:condition stmt))]
+                                       (tc/detachable-version (:target-type (:condition stmt)))))
+                         ctx)]
+          (and ((if (= :convert (:type (:condition stmt)))
+                  supported-convert-in-ctx?
+                  supported-expr-in-ctx?)
+                ctx
+                (:condition stmt))
+               (supported-stmt-block? cond-ctx (:then stmt))
              (if-let [clause (first (:elseif stmt))]
                (supported-stmt-in-ctx?
                 ctx
@@ -280,7 +311,7 @@
                  :then (:then clause)
                  :elseif (vec (rest (:elseif stmt)))
                  :else (:else stmt)})
-               (supported-stmt-block? ctx (or (:else stmt) []))))
+               (supported-stmt-block? ctx (or (:else stmt) [])))))
     :case (and (supported-expr-in-ctx? ctx (:expr stmt))
                (every? #(every? (partial supported-expr-in-ctx? ctx) (:values %))
                        (:clauses stmt))
@@ -317,11 +348,21 @@
 (defn- advance-eligibility-ctx
   [ctx stmt]
   (case (:type stmt)
-    :let (let [nex-type (or (:var-type stmt)
-                            (infer-type-in-ctx ctx (:value stmt)))]
-           (-> ctx
+    :let (let [ctx' (if (= :convert (:type (:value stmt)))
+                      (-> ctx
+                          (update :known-vars conj (:var-name (:value stmt)))
+                          (assoc-in [:var-types (:var-name (:value stmt))]
+                                    (tc/detachable-version (:target-type (:value stmt)))))
+                      ctx)
+               nex-type (or (:var-type stmt)
+                            (infer-type-in-ctx ctx' (:value stmt)))]
+           (-> ctx'
                (update :known-vars conj (:name stmt))
                (assoc-in [:var-types (:name stmt)] nex-type)))
+    :convert (-> ctx
+                 (update :known-vars conj (:var-name stmt))
+                 (assoc-in [:var-types (:var-name stmt)]
+                           (tc/detachable-version (:target-type stmt))))
     ctx))
 
 (defn eligible-ast?
@@ -441,14 +482,19 @@
   [session ast]
   (doseq [stmt (:statements (normalize-program-ast ast))]
     (case (:type stmt)
-      :let (let [nex-type (or (:var-type stmt)
-                              (tc/infer-expression-type
-                               (:value stmt)
-                               {:classes (vals @(:class-asts session))
-                                :imports @(:import-asts session)
-                                :var-types (session-var-types session)}))]
+      :let (do
+             (when (= :convert (:type (:value stmt)))
+               (rt/state-set-type! (:state session)
+                                   (:var-name (:value stmt))
+                                   (tc/detachable-version (:target-type (:value stmt)))))
+             (let [nex-type (or (:var-type stmt)
+                                (tc/infer-expression-type
+                                 (:value stmt)
+                                 {:classes (vals @(:class-asts session))
+                                  :imports @(:import-asts session)
+                                  :var-types (session-var-types session)}))]
              (when nex-type
-               (rt/state-set-type! (:state session) (:name stmt) nex-type)))
+               (rt/state-set-type! (:state session) (:name stmt) nex-type))))
       :assign (when-let [nex-type (or (get (session-var-types session) (:target stmt))
                                       (tc/infer-expression-type
                                        (:value stmt)
@@ -456,6 +502,9 @@
                                         :imports @(:import-asts session)
                                         :var-types (session-var-types session)}))]
                 (rt/state-set-type! (:state session) (:target stmt) nex-type))
+      :convert (rt/state-set-type! (:state session)
+                                   (:var-name stmt)
+                                   (tc/detachable-version (:target-type stmt)))
       nil))
   session)
 
@@ -572,6 +621,7 @@
     (try
       (let [class-name (next-class-name! session)
             _ (compile-and-register-classes! session ast')
+            _ (remember-top-level-ast! session ast')
             {:keys [unit]} (lower/lower-repl-cell ast' {:name class-name
                                                         :compiled-classes @(:compiled-classes session)
                                                         :classes (vals @(:class-asts session))
@@ -584,7 +634,6 @@
             _ (rt/clear-output! state)
             method (.getMethod cls "eval" (into-array Class [(class state)]))
             result (.invoke method nil (object-array [state]))]
-        (remember-top-level-ast! session ast')
         (sync-var-types-from-ast! session ast')
         {:compiled? true
          :session session

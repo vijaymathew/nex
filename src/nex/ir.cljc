@@ -183,6 +183,16 @@
    :nex-type nex-type
    :jvm-type jvm-type})
 
+(defn convert-node
+  [value binding target-type nex-type jvm-type temp-slot]
+  {:op :convert
+   :value value
+   :binding binding
+   :target-type target-type
+   :temp-slot temp-slot
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
 (defn field-set-node [owner field target expr nex-type jvm-type]
   {:op :field-set
    :owner owner

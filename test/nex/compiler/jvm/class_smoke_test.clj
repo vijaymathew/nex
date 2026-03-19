@@ -89,6 +89,68 @@ feature
   end
 end")
 
+(def ^:private super-program
+  "class A
+create
+  make(v: Integer) do
+    this.x := v
+  end
+feature
+  x: Integer
+
+  show(): String
+  do
+    result := \"A=\" + x
+  end
+end
+
+class B inherit A
+create
+  make(v: Integer, extra: Integer) do
+    super.make(v)
+    this.y := extra
+  end
+feature
+  y: Integer
+
+  show(): String
+  do
+    result := super.show + \",B=\" + y
+  end
+end")
+
+(def ^:private box-program
+  "class Box[T]
+create
+  with_value(v: T) do
+    this.value := v
+  end
+feature
+  value: T
+
+  get: T
+  do
+    result := value
+  end
+end")
+
+(def ^:private convert-program
+  "class Vehicle
+feature
+  label(): String
+  do
+    result := \"vehicle\"
+  end
+end
+
+class Car inherit Vehicle
+feature
+  label(): String
+  do
+    result := \"car\"
+  end
+end")
+
 (def ^:private multi-parent-program
   "class A
 create
@@ -259,6 +321,55 @@ end")
       (is (= ["\"hello\"" "450"] (:output define-result)))
       (is (= 460 (:result define-result)))
       (is (= 450 (:result const-result))))))
+
+(deftest compiled-super-call-smoke-test
+  (testing "compiled helper supports super constructor and method calls on the composition model"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str super-program
+                                                                     "\n\n"
+                                                                     "let b: B := create B.make(10, 3)\n"
+                                                                     "b.show()")))
+          cross-cell-result (compiled-repl/compile-and-eval! session
+                                                             (p/ast "b.show()"))]
+      (is (:compiled? define-result))
+      (is (:compiled? cross-cell-result))
+      (is (= "A=10,B=3" (:result define-result)))
+      (is (= "A=10,B=3" (:result cross-cell-result))))))
+
+(deftest compiled-generic-class-create-smoke-test
+  (testing "compiled helper supports erased generic class creation and method calls"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str box-program
+                                                                     "\n\n"
+                                                                     "let b: Box[String] := create Box[String].with_value(\"hello\")\n"
+                                                                     "b.get")))
+          field-result (compiled-repl/compile-and-eval! session
+                                                        (p/ast "b.value"))]
+      (is (:compiled? define-result))
+      (is (:compiled? field-result))
+      (is (= "hello" (:result define-result)))
+      (is (= "hello" (:result field-result))))))
+
+(deftest compiled-convert-smoke-test
+  (testing "compiled helper supports convert in guard and standalone statement forms"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str convert-program
+                                                                     "\n\n"
+                                                                     "let v: Vehicle := create Car\n"
+                                                                     "if convert v to my_car:Car then\n"
+                                                                     "  my_car.label()\n"
+                                                                     "else\n"
+                                                                     "  \"fail\"\n"
+                                                                     "end")))
+          stmt-result (compiled-repl/compile-and-eval! session
+                                                       (p/ast "convert v to again:Car\nagain.label()"))]
+      (is (:compiled? define-result))
+      (is (:compiled? stmt-result))
+      (is (= "car" (:result define-result)))
+      (is (= "car" (:result stmt-result))))))
 
 (deftest compiled-method-contracts-and-old-smoke-test
   (testing "compiled helper enforces require/ensure and supports old in method postconditions"

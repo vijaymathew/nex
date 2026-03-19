@@ -93,6 +93,18 @@ These are lowered into IR and emitted as JVM bytecode directly:
 - loop invariant / variant checks
 - top-level function declarations and definitions
 - top-level function calls through compiled REPL state
+- user-defined classes
+  - fields
+  - methods
+  - constructors
+  - constants
+  - deferred classes
+  - single and multiple inheritance via composition/delegation
+  - `super` calls on the composition model
+  - erased generic/parameterized class support
+- `convert ... to`
+  - standalone form
+  - guard form inside control flow
 
 ### 2. Compiled runtime-bridge semantics
 
@@ -172,6 +184,16 @@ The compiled REPL path currently supports:
   - `require`
   - `ensure`
   - `old` for compiled method/constructor postconditions
+- user-defined classes
+  - fields
+  - methods
+  - constructors
+  - constants
+  - deferred classes
+  - single and multi-parent inheritance
+  - `super` calls in overriding methods
+  - generic/parameterized user classes with JVM erasure
+  - `convert ... to`
 
 ## Runtime-Backed Receiver Types
 
@@ -203,6 +225,7 @@ These still fall outside the compiled subset and therefore deopt to the interpre
 - contracts
   - class invariants
   - broader `old` support beyond the current compiled field-snapshot model
+- file/module compilation for the newer object-oriented compiled subset
 - imports and `intern` on the compiled path
 - concurrency constructs as direct compiled semantics
   - `spawn`
@@ -229,13 +252,17 @@ Good candidates for the compiled path today:
 - mutually recursive top-level functions with forward declarations
 - builtin-heavy expression batches that do not introduce classes, imports, or interns
 - parent-typed virtual calls through compiled deferred/concrete class hierarchies once the value is already present in compiled-session state
+- compiled user-class batches using:
+  - `super`
+  - `Box[T]`-style parameterized classes
+  - `convert ... to`
 
 Likely deopt triggers today:
 
 - imports and interns
 - class invariants
 - broader `old` use outside the current compiled postcondition model
-- general object-oriented behavior beyond top-level function handling
+- object-oriented file/module compilation beyond the current compiled REPL/helper path
 - concurrency features beyond runtime-bridged builtin methods
 - statement-shaped REPL inputs that are still pre-wrapped in `nex.repl`
 

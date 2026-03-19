@@ -17,7 +17,9 @@ Last updated: 2026-03-19
 | Functions | Declare, define, redefine, mutual recursion |
 | Classes | Fields, methods, constructors, constants |
 | Deferred classes | Abstract methods, concrete children |
-| Inheritance | Single and multi-parent, virtual dispatch |
+| Inheritance | Single and multi-parent, virtual dispatch, `super` on the composition model |
+| Generic classes | Erased compiled support for parameterized user classes such as `Box[T]` |
+| `convert ... to` | Guard and standalone-statement lowering on compiled path |
 | Loops | `from/until/do`, `repeat`, `across`, including invariant/variant checking |
 | `case` | Statement-form lowering to compiled branches |
 | Scoped blocks | `do...end` lexical scope, including `rescue` / `retry` |
@@ -33,10 +35,8 @@ Last updated: 2026-03-19
 - `select`
 
 ### Object-Oriented
-
-- `super` calls in overriding methods
-- Generic/parameterized classes (`Box[T]`, `Array[String]`)
-- `convert ... to` (type casting)
+- Class invariants
+- Broader object-model validation beyond the current compiled REPL path
 
 ### Design by Contract
 
@@ -92,7 +92,7 @@ Last updated: 2026-03-19
 Based on complexity and impact, these are natural next steps:
 
 1. Class invariants
-2. `super` on the multiple-inheritance composition model
-3. `select` and direct concurrency lowering
-4. Closures / anonymous functions
-5. File compilation (`.nex` -> JVM classes/jar) beyond the REPL-only compiler path
+2. `select` and direct concurrency lowering
+3. Closures / anonymous functions
+4. File compilation (`.nex` -> JVM classes/jar) beyond the REPL-only compiler path
+5. Broader module support (`import`, `intern`) on the compiled path

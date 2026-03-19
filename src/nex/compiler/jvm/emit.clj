@@ -562,6 +562,62 @@
                     false)
   (.visitInsn mv Opcodes/POP))
 
+(defn- emit-convert!
+  [^MethodVisitor mv {:keys [value binding target-type temp-slot]} state-slot]
+  (emit-runtime-var! mv "convert-value")
+  (.visitVarInsn mv Opcodes/ALOAD state-slot)
+  (let [value-type (emit-expr! mv value state-slot)]
+    (when (contains? ir/primitive-jvm-types value-type)
+      (emit-box! mv value-type)))
+  (.visitLdcInsn mv ^String (if (map? target-type) (:base-type target-type) target-type))
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    var-internal-name
+                    "invoke"
+                    "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                    false)
+  (.visitTypeInsn mv Opcodes/CHECKCAST "[Ljava/lang/Object;")
+  (.visitVarInsn mv Opcodes/ASTORE temp-slot)
+
+  (.visitVarInsn mv Opcodes/ALOAD temp-slot)
+  (.visitInsn mv Opcodes/ICONST_1)
+  (.visitInsn mv Opcodes/AALOAD)
+  (case (:kind binding)
+    :local
+    (do
+      (emit-unbox-or-cast! mv (:jvm-type binding))
+      (.visitVarInsn mv (local-store-op (:jvm-type binding)) (:slot binding)))
+
+    :top
+    (do
+      (emit-load-values-map! mv state-slot)
+      (.visitLdcInsn mv ^String (:name binding))
+      (.visitVarInsn mv Opcodes/ALOAD temp-slot)
+      (.visitInsn mv Opcodes/ICONST_1)
+      (.visitInsn mv Opcodes/AALOAD)
+      (.visitMethodInsn mv
+                        Opcodes/INVOKEVIRTUAL
+                        hashmap-internal-name
+                        "put"
+                        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                        false)
+      (.visitInsn mv Opcodes/POP))
+
+    (throw (ex-info "Unsupported convert binding kind"
+                    {:binding binding})))
+
+  (.visitVarInsn mv Opcodes/ALOAD temp-slot)
+  (.visitInsn mv Opcodes/ICONST_0)
+  (.visitInsn mv Opcodes/AALOAD)
+  (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    "java/lang/Boolean"
+                    "booleanValue"
+                    "()Z"
+                    false)
+  :boolean)
+
 (defn- emit-expr!
   [^MethodVisitor mv expr state-slot]
   (case (:op expr)
@@ -689,6 +745,9 @@
         (do (.visitInsn mv Opcodes/POP) :void)
         (do (emit-unbox-or-cast! mv (:jvm-type expr))
             (:jvm-type expr))))
+
+    :convert
+    (emit-convert! mv expr state-slot)
 
     :unary
     (let [operand-type (emit-expr! mv (:expr expr) state-slot)]
