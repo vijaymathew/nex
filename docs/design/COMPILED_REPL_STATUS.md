@@ -39,6 +39,7 @@ The internal compiled helper can already compile top-level program batches that 
 - expressions
 - function declarations and definitions
 - supported class work in the current compiler subset
+- supported contracts and exception constructs in the current compiler subset
 
 The user-facing REPL still has an older wrapping rule for inputs that look like statements.
 
@@ -84,6 +85,12 @@ These are lowered into IR and emitted as JVM bytecode directly:
 - `when` expressions
 - `case` statements
 - scoped `do...end` blocks
+- scoped `do...rescue...end` blocks
+- `raise`
+- `retry`
+- `require` / `ensure`
+- `old` in compiled method and constructor postconditions
+- loop invariant / variant checks
 - top-level function declarations and definitions
 - top-level function calls through compiled REPL state
 
@@ -132,7 +139,8 @@ The compiled REPL path currently supports:
   - `elseif` chains included
 - `when` expressions
 - `case` statements
-- scoped `do...end` blocks without `rescue`
+- scoped `do...end` blocks
+- scoped `do...rescue...end` blocks
 - top-level function support
   - declarations
   - definitions
@@ -154,7 +162,16 @@ The compiled REPL path currently supports:
   - `from/until/do`
   - `repeat` (desugared to `from/until/do`)
   - `across` (desugared to `from/until/do`)
-  - no invariant or variant checking yet
+  - loop invariant checking
+  - loop variant checking
+- exceptions
+  - `raise`
+  - `rescue`
+  - `retry`
+- contracts
+  - `require`
+  - `ensure`
+  - `old` for compiled method/constructor postconditions
 
 ## Runtime-Backed Receiver Types
 
@@ -182,19 +199,10 @@ These calls are compiled, but their semantics are provided by the runtime bridge
 
 These still fall outside the compiled subset and therefore deopt to the interpreter:
 
-- loops
-  - loop invariant and variant checking
-- scoped blocks with `rescue`
 - `select`
-- exceptions
-  - `raise`
-  - `rescue`
-  - `retry`
 - contracts
-  - `require`
-  - `ensure`
   - class invariants
-  - loop invariants and variants
+  - broader `old` support beyond the current compiled field-snapshot model
 - imports and `intern` on the compiled path
 - concurrency constructs as direct compiled semantics
   - `spawn`
@@ -210,7 +218,7 @@ The main examples today are:
 
 - top-level `if` entered directly at the REPL prompt
 - `from` / `repeat` / `across`
-- scoped `do...end` blocks entered directly at the prompt
+- scoped `do...end` and `do...rescue...end` blocks entered directly at the prompt
 
 ## Practical Boundary Today
 
@@ -225,8 +233,8 @@ Good candidates for the compiled path today:
 Likely deopt triggers today:
 
 - imports and interns
-- exceptions
-- contracts
+- class invariants
+- broader `old` use outside the current compiled postcondition model
 - general object-oriented behavior beyond top-level function handling
 - concurrency features beyond runtime-bridged builtin methods
 - statement-shaped REPL inputs that are still pre-wrapped in `nex.repl`

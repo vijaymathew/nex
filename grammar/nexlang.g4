@@ -57,7 +57,6 @@ featureSection
 
 visibilityModifier
     : PRIVATE
-    | ARROW IDENTIFIER (',' IDENTIFIER)*
     ;
 
 constructorSection

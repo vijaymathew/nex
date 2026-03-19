@@ -332,15 +332,8 @@
                                 (= :visibilityModifier (first first-elem)))
            visibility (when has-visibility?
                        (let [modifier first-elem]
-                         (if (= "private" (token-text (second modifier)))
-                           {:type :private}
-                           ;; Selective visibility: extract class names from (:visibilityModifier "->" "Friend" "," "Helper")
-                           ;; Filter out arrow and commas, keep only identifiers
-                           (let [class-names (filter #(and (string? %)
-                                                          (not (#{"->" ","} %)))
-                                                    (rest modifier))]
-                             {:type :selective
-                              :classes (vec class-names)}))))
+                         (when (= "private" (token-text (second modifier)))
+                           {:type :private})))
            ;; If has visibility: remaining = ("feature" member1 member2...)
            ;; If no visibility: remaining = (member1 member2...), first-elem = "feature"
            ;; In either case, we need to skip the "feature" keyword

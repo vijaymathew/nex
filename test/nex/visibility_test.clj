@@ -35,24 +35,16 @@ end"
       (is (= :feature-section (:type feature-section)))
       (is (= :private (-> feature-section :visibility :type))))))
 
-(deftest selective-feature-parsing-test
-  (testing "Parse selective visibility feature"
-    (let [code "class Test
+(deftest selective-feature-syntax-rejected-test
+  (testing "Selective visibility syntax is no longer part of the grammar"
+    (is (thrown? Exception
+                 (p/ast "class Test
   -> Friend, Helper feature
     x: Integer
-    restricted() do
-      print(x)
-    end
-end"
-          ast (p/ast code)
-          class-def (first (:classes ast))
-          feature-section (first (:body class-def))]
-      (is (= :feature-section (:type feature-section)))
-      (is (= :selective (-> feature-section :visibility :type)))
-      (is (= ["Friend" "Helper"] (-> feature-section :visibility :classes))))))
+end")))))
 
 (deftest mixed-visibility-parsing-test
-  (testing "Parse class with mixed visibility sections"
+  (testing "Parse class with mixed public/private sections"
     (let [code "class Account
   feature
     balance: Integer
@@ -62,21 +54,13 @@ end"
     calculate_fee() do
       print(internal_balance)
     end
-
-  -> Bank, Auditor feature
-    audit_log: String
-    get_audit() do
-      print(audit_log)
-    end
 end"
           ast (p/ast code)
           class-def (first (:classes ast))
           sections (:body class-def)]
-      (is (= 3 (count sections)))
+      (is (= 2 (count sections)))
       (is (= :public (-> sections (nth 0) :visibility :type)))
-      (is (= :private (-> sections (nth 1) :visibility :type)))
-      (is (= :selective (-> sections (nth 2) :visibility :type)))
-      (is (= ["Bank" "Auditor"] (-> sections (nth 2) :visibility :classes))))))
+      (is (= :private (-> sections (nth 1) :visibility :type))))))
 
 (deftest public-java-generation-test
   (testing "Generate Java code with public features"
@@ -104,21 +88,8 @@ end"
       (is (str/includes? java-code "private int x = 0;"))
       (is (str/includes? java-code "private void helper()")))))
 
-(deftest selective-java-generation-test
-  (testing "Generate Java code with selective visibility"
-    (let [code "class Test
-  -> Friend, Helper feature
-    x: Integer
-    restricted() do
-      print(x)
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "public int x = 0;"))
-      (is (str/includes? java-code "/* Visible to: Friend, Helper */ void restricted()")))))
-
 (deftest mixed-visibility-java-generation-test
-  (testing "Generate Java code with mixed visibility"
+  (testing "Generate Java code with mixed public/private visibility"
     (let [code "class Account
   feature
     balance: Integer
@@ -131,39 +102,12 @@ end"
     generate_id() do
       print(internal_id)
     end
-
-  -> Bank, Auditor feature
-    audit_log: String
-    log_transaction() do
-      print(audit_log)
-    end
 end"
           java-code (java/translate code)]
-      ;; Public members
       (is (str/includes? java-code "public int balance = 0;"))
       (is (str/includes? java-code "public void deposit(int amount)"))
-      ;; Private members
       (is (str/includes? java-code "private String internal_id = \"\";"))
-      (is (str/includes? java-code "private void generate_id()"))
-      ;; Selective visibility
-      (is (str/includes? java-code "public String audit_log = \"\";"))
-      (is (str/includes? java-code "/* Visible to: Bank, Auditor */ void log_transaction()")))))
-
-(deftest multiple-selective-sections-test
-  (testing "Multiple selective visibility sections with different classes"
-    (let [code "class System
-  -> Admin feature
-    admin_only: Integer
-
-  -> User, Guest feature
-    user_visible: String
-end"
-          ast (p/ast code)
-          class-def (first (:classes ast))
-          sections (:body class-def)]
-      (is (= 2 (count sections)))
-      (is (= ["Admin"] (-> sections (nth 0) :visibility :classes)))
-      (is (= ["User" "Guest"] (-> sections (nth 1) :visibility :classes))))))
+      (is (str/includes? java-code "private void generate_id()")))))
 
 (deftest visibility-with-contracts-test
   (testing "Visibility modifiers work with contracts"
@@ -185,23 +129,8 @@ end"
       (is (str/includes? java-code "assert (x > 0)"))
       (is (str/includes? java-code "assert (secret >= 0)")))))
 
-(deftest single-class-selective-test
-  (testing "Selective visibility with single class"
-    (let [code "class Test
-  -> Friend feature
-    helper() do
-      print(42)
-    end
-end"
-          ast (p/ast code)
-          class-def (first (:classes ast))
-          feature-section (first (:body class-def))]
-      (is (= :selective (-> feature-section :visibility :type)))
-      (is (= ["Friend"] (-> feature-section :visibility :classes))))))
-
 (deftest empty-feature-section-test
   (testing "Feature section visibility without members should parse"
-    ;; This tests grammar correctness even if semantically unusual
     (let [code "class Test
   feature
     x: Integer

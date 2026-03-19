@@ -235,7 +235,7 @@ end"
     (let [code "class Test
   private feature
     secret: Integer
-  -> Friend feature
+  feature
     shared: Decimal
 end"
           java-code (java/translate code)]

@@ -18,9 +18,11 @@ Last updated: 2026-03-19
 | Classes | Fields, methods, constructors, constants |
 | Deferred classes | Abstract methods, concrete children |
 | Inheritance | Single and multi-parent, virtual dispatch |
-| Loops | `from/until/do`, `repeat`, `across` (no invariant/variant) |
+| Loops | `from/until/do`, `repeat`, `across`, including invariant/variant checking |
 | `case` | Statement-form lowering to compiled branches |
-| Scoped blocks | `do...end` lexical scope without `rescue` |
+| Scoped blocks | `do...end` lexical scope, including `rescue` / `retry` |
+| Exceptions | `raise`, `rescue`, `retry` |
+| Contracts | `require`, `ensure`, `old` in compiled method/constructor postconditions |
 | Builtins via runtime bridge | `print`, `println`, `type_of`, `sleep`, collection methods, etc. |
 
 
@@ -28,28 +30,22 @@ Last updated: 2026-03-19
 
 ### Control Flow
 
-- Loop invariants and variants (contract checking in loops)
-- Scoped blocks with `rescue`
+- `select`
 
 ### Object-Oriented
 
 - `super` calls in overriding methods
 - Generic/parameterized classes (`Box[T]`, `Array[String]`)
-- Selective visibility (`private`, `-> Friend`)
 - `convert ... to` (type casting)
 
 ### Design by Contract
 
-- `require` (preconditions)
-- `ensure` (postconditions)
-- `old` expressions (capture pre-state for postconditions)
 - Class invariants
+- Broader `old` support beyond the current compiled field-snapshot model used for method/constructor postconditions
 
 ### Exception Handling
 
-- `raise` (throw)
-- `rescue` (catch, within `do...rescue...end`)
-- `retry` (restart enclosing block)
+- File/module compilation path for exceptions and contracts beyond the REPL/compiler helper path
 
 ### Concurrency
 
@@ -83,7 +79,7 @@ Last updated: 2026-03-19
 - Nil-safety (`?Type` detachable types, nil checks)
 - Graphics/Turtle built-ins (JVM-only drawing API)
 - HTTP/JSON built-ins as direct codegen
-- User-facing REPL wrapping — larger statement-shaped inputs (`if`, `from`, `do`, scoped rescue blocks) still bypass the compiled path even when the internal helper supports them
+- User-facing REPL wrapping — some larger statement-shaped inputs still bypass the compiled path even when the internal helper supports them
 
 ### Meta / Infrastructure
 
@@ -95,8 +91,8 @@ Last updated: 2026-03-19
 
 Based on complexity and impact, these are natural next steps:
 
-1. Exception handling (`raise` / `rescue` / `retry`)
-2. Design by contract (`require` / `ensure`)
-3. `old` capture
-4. Loop invariants / variants
-5. Scoped `do ... rescue ... end`
+1. Class invariants
+2. `super` on the multiple-inheritance composition model
+3. `select` and direct concurrency lowering
+4. Closures / anonymous functions
+5. File compilation (`.nex` -> JVM classes/jar) beyond the REPL-only compiler path
