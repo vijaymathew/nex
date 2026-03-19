@@ -59,22 +59,21 @@ For example, rather than calling platform I/O throughout a program, define a sma
 
 ## Translation Targets
 
-The repository supports translation from Nex to Java and JavaScript.
+The repository supports JVM bytecode compilation and JavaScript translation. The older Java-source generator still exists, but it is deprecated.
 
 From Clojure:
 
 ```clojure
-(require '[nex.generator.java :as java])
+(require '[nex.compiler.jvm.file :as jvm])
 (require '[nex.generator.javascript :as js])
 
-(println (java/translate nex-code))
 (println (js/translate nex-code))
 ```
 
 And for files:
 
 ```clojure
-(java/translate-file "input.nex" "Output.java")
+(jvm/compile-jar "input.nex" "build/")
 (js/translate-file "input.nex" "output.js")
 ```
 
@@ -83,17 +82,15 @@ This matters for design because the same Nex source may be aimed at different ho
 
 ## Development Builds and Production Builds
 
-Contracts are included in normal translated output. For production translation, the generators support `skip-contracts`:
+Contracts are included in normal translated output. For production translation, the JavaScript generator and the deprecated Java-source generator support `skip-contracts`:
 
 ```clojure
-(java/translate nex-code {:skip-contracts true})
 (js/translate nex-code {:skip-contracts true})
 ```
 
-Likewise for files:
+Likewise for JavaScript file translation:
 
 ```clojure
-(java/translate-file "input.nex" "Output.java" {:skip-contracts true})
 (js/translate-file "input.nex" "output.js" {:skip-contracts true})
 ```
 

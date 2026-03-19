@@ -337,21 +337,16 @@ end")
 (interp/register-class ctx (first (:classes ast)))
 ```
 
-### Translating to Java
+### JVM Compilation
 
 ```clojure
-(require '[nex.generator.java :as java])
+(require '[nex.compiler.jvm.file :as jvm])
 
-;; Development build — contracts included
-(println (java/translate nex-code))
-
-;; Production build — contracts removed
-(println (java/translate nex-code {:skip-contracts true}))
-
-;; File translation
-(java/translate-file "input.nex" "Output.java")
-(java/translate-file "input.nex" "Output.java" {:skip-contracts true})
+;; Compile a Nex file to a standalone JVM jar
+(jvm/compile-jar "input.nex" "build/")
 ```
+
+The older Java-source generator in `nex.generator.java` still exists, but it is deprecated. Prefer the JVM bytecode backend.
 
 ### Translating to JavaScript
 

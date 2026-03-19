@@ -31,15 +31,15 @@ COMMANDS:
     help                      Show this help message
 
 COMPILE TARGETS:
-    java        Compile to a runnable JAR (uses javac)
+    java        Deprecated: compile via generated Java/javac
     jvm         Compile to a standalone JVM JAR (bytecode backend)
     javascript  Generate JavaScript source files
     js          Alias for javascript
 
 EXAMPLES:
     nex                                      # Start REPL
-    nex compile java app.nex                 # Compile to app.jar in current dir
-    nex compile java app.nex build/          # Compile to build/app.jar
+    nex compile java app.nex                 # Deprecated legacy Java-source pipeline
+    nex compile java app.nex build/          # Deprecated legacy Java-source pipeline
     nex compile jvm app.nex                  # Compile to a standalone app.jar in current dir
     nex compile jvm app.nex build/           # Compile to a standalone app.jar in build/
     nex compile js app.nex                   # Print JavaScript to stdout
@@ -94,6 +94,10 @@ cmd_compile() {
     if [[ ! -f "$file" ]]; then
         echo "Error: File not found: $file"
         exit 1
+    fi
+
+    if [[ "$target" == "java" ]]; then
+        echo "Warning: 'nex compile java' is deprecated. Prefer 'nex compile jvm'." >&2
     fi
 
     # Use absolute path for file

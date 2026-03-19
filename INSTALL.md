@@ -199,11 +199,11 @@ You should see the Nex REPL prompt.
 ### Compile a Test File
 
 ```bash
-# Compile to Java
-nex compile java examples/create_example.nex
-
-# Compile to a standalone JVM jar
+# Preferred JVM backend
 nex compile jvm examples/create_example.nex
+
+# Deprecated legacy Java-source pipeline
+nex compile java examples/create_example.nex
 
 # Compile to JavaScript
 nex compile js examples/create_example.nex
@@ -334,7 +334,7 @@ After installation:
 | Feature | JVM | Node.js |
 |---------|-----|---------|
 | REPL | ✅ | ❌ |
-| Compile to Java | ✅ | ❌ |
+| Compile to Java (deprecated) | ✅ | ❌ |
 | Compile to JavaScript | ✅ | ❌ |
 | Format files | ✅ | ❌ |
 | Generate docs | ✅ | ❌ |
