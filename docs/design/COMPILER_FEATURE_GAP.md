@@ -31,6 +31,8 @@ Last updated: 2026-03-19
 | Collections | Literal construction plus direct compiled lowering for Array / Map / Set methods |
 | Closures / higher-order | Anonymous functions, captured closures, and passing/returning/invoking function objects |
 | Modules | `import` metadata, imported Java class creation/calls on the compiled path, and `intern` resolution for local `.nex` files |
+| Note annotations | Parsed and preserved as documentation metadata; ignored by lowering/emission as intended |
+| Nil-safety | Detachable types (`?Type`), nil checks, `convert` guards, and branch refinement on compiled path |
 | Builtins via runtime bridge | `print`, `println`, `type_of`, `sleep`, and other remaining runtime-backed builtins |
 
 
@@ -44,8 +46,6 @@ Last updated: 2026-03-19
 
 ### Misc
 
-- `note` annotations (documentation metadata)
-- Nil-safety (`?Type` detachable types, nil checks)
 - HTTP/JSON built-ins as direct codegen
 - User-facing REPL wrapping — some larger statement-shaped inputs still bypass the compiled path even when the internal helper supports them
 

@@ -55,6 +55,18 @@ feature
   end
 end")
 
+(def ^:private noted-counter-program
+  "class Counter
+note \"counter docs\"
+feature
+  value: Integer note \"value field\"
+
+  current(): Integer note \"current value\"
+  do
+    result := this.value
+  end
+end")
+
 (def ^:private frame-constants-program
   "class Frame
 feature
@@ -449,6 +461,28 @@ end")
       (is (:compiled? stmt-result))
       (is (= "car" (:result define-result)))
       (is (= "car" (:result stmt-result))))))
+
+(deftest compiled-note-annotation-smoke-test
+  (testing "compiled helper ignores note annotations as metadata and still compiles classes"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (p/ast (str noted-counter-program
+                              "\nlet c := create Counter\n"
+                              "c.current()")))]
+      (is (:compiled? result))
+      (is (= 0 (:result result))))))
+
+(deftest compiled-detachable-when-smoke-test
+  (testing "compiled helper supports detachable references with nil-checked when branches"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (p/ast (str counter-with-constructor-program
+                              "\nlet c: ?Counter := create Counter.with_value(7)\n"
+                              "when c = nil 0 else c.current() end")))]
+      (is (:compiled? result))
+      (is (= 7 (:result result))))))
 
 (deftest compiled-method-contracts-and-old-smoke-test
   (testing "compiled helper enforces require/ensure and supports old in method postconditions"

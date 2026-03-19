@@ -878,6 +878,31 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-detachable-feature-access-with-else-nil-guard-succeeds
+  (testing "Calling a feature on detachable object inside the else branch of `if a = nil` should pass"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+
+class B
+  feature
+    a: ?A
+    demo() do
+      if a = nil then
+        print(\"nil\")
+      else
+        a.show()
+      end
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-default-create-disallowed-when-constructors-exist
   (testing "create B without constructor should fail if class B defines constructors"
     (let [code "class A

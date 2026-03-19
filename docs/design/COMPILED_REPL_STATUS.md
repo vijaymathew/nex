@@ -206,6 +206,13 @@ The compiled REPL path currently supports:
   - `require`
   - `ensure`
   - `old` for compiled method/constructor postconditions using the current field-based model
+- note metadata
+  - `note` annotations are parsed and preserved in class/function/member AST metadata
+  - compiled lowering/emission intentionally ignores them semantically
+- nil-safety
+  - detachable types like `?Counter`
+  - nil-aware branch refinement for guards such as `if x /= nil then ...` and `if x = nil then ... else ...`
+  - `convert ... to` bindings on the compiled path
 - concurrency
   - `spawn do...end`
   - `Task.await`, `Task.cancel`, `Task.is_done`

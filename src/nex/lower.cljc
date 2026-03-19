@@ -1162,6 +1162,51 @@
                       :boolean
                       temp-slot)]))
 
+(defn- refine-var-non-nil
+  [env var-name]
+  (let [current-type (or (get-in env [:locals var-name :nex-type])
+                         (get (:var-types env) var-name))]
+    (if current-type
+      (let [refined-type (tc/attachable-type current-type)]
+        (cond-> env
+          (get-in env [:locals var-name])
+          (-> (assoc-in [:locals var-name :nex-type] refined-type)
+              (assoc-in [:locals var-name :jvm-type] (resolve-jvm-type env refined-type)))
+          true
+          (assoc-in [:var-types var-name] refined-type)))
+      env)))
+
+(defn- refine-condition-branch-env
+  [env condition branch]
+  (case branch
+    :then
+    (let [env' (if-let [var-name (tc/guarded-non-nil-var condition)]
+                 (refine-var-non-nil env var-name)
+                 env)]
+      (if-let [{:keys [name type]} (tc/convert-guard-binding condition)]
+        (refine-var-non-nil
+         (cond
+           (get-in env' [:locals name])
+           (let [refined-type (tc/attachable-type type)]
+             (-> env'
+                 (assoc-in [:locals name :nex-type] refined-type)
+                 (assoc-in [:locals name :jvm-type] (resolve-jvm-type env' refined-type))
+                 (assoc-in [:var-types name] refined-type)))
+
+           (:top-level? env')
+           (assoc-in env' [:var-types name] (tc/attachable-type type))
+
+           :else env')
+         name)
+        env'))
+
+    :else
+    (if-let [var-name (tc/guarded-else-non-nil-var condition)]
+      (refine-var-non-nil env var-name)
+      env)
+
+    env))
+
 (defn- class-jvm-meta
   [env class-name]
   (or (get (:compiled-classes env) class-name)
@@ -1832,8 +1877,8 @@
                                        [cond-env' convert-ir] (lower-convert-expression cond-env (:condition expr))]
                                    [cond-env' convert-ir])
                                  [env (lower-expression env (:condition expr))])
-            then-ir (lower-expression cond-env then-expr)
-            else-ir (lower-expression env else-expr)
+            then-ir (lower-expression (refine-condition-branch-env cond-env (:condition expr) :then) then-expr)
+            else-ir (lower-expression (refine-condition-branch-env env (:condition expr) :else) else-expr)
             nex-type (infer-type env expr)
             jvm-type (resolve-jvm-type env nex-type)]
         (ir/if-node test-ir [then-ir] [else-ir] nex-type jvm-type)))
@@ -1844,8 +1889,8 @@
                                      [cond-env' convert-ir] (lower-convert-expression cond-env (:condition expr))]
                                  [cond-env' convert-ir])
                                [env (lower-expression env (:condition expr))])
-          then-ir (lower-expression cond-env (:consequent expr))
-          else-ir (lower-expression env (:alternative expr))
+          then-ir (lower-expression (refine-condition-branch-env cond-env (:condition expr) :then) (:consequent expr))
+          else-ir (lower-expression (refine-condition-branch-env env (:condition expr) :else) (:alternative expr))
           nex-type (infer-type env expr)
           jvm-type (resolve-jvm-type env nex-type)]
       (ir/if-node test-ir [then-ir] [else-ir] nex-type jvm-type))
@@ -2401,7 +2446,8 @@
                                      [cond-env' convert-ir] (lower-convert-expression cond-env (:condition stmt))]
                                  [cond-env' convert-ir])
                                [env (lower-expression env (:condition stmt))])
-          [then-env then-body] (lower-scoped-statements cond-env (:then stmt))
+          [then-env then-body] (lower-scoped-statements (refine-condition-branch-env cond-env (:condition stmt) :then)
+                                                        (:then stmt))
           [else-env else-body]
           (if-let [clause (first (:elseif stmt))]
             (lower-scoped-statements
@@ -2411,7 +2457,10 @@
                :then (:then clause)
                :elseif (vec (rest (:elseif stmt)))
                :else (:else stmt)}])
-            (lower-scoped-statements (scoped-env env then-env) (or (:else stmt) [])))]
+            (lower-scoped-statements (refine-condition-branch-env (scoped-env env then-env)
+                                                                  (:condition stmt)
+                                                                  :else)
+                                     (or (:else stmt) [])))]
       [(scoped-env env else-env)
        (ir/if-stmt-node test-ir then-body else-body)])
 

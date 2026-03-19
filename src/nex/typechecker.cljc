@@ -380,6 +380,7 @@
 (declare check-expression)
 (declare collect-class-info)
 (declare check-class)
+(declare convert-guard-binding)
 
 (defn check-literal
   "Check the type of a literal expression"
@@ -667,6 +668,42 @@
         (and left-id (nil-literal? right)) left-id
         (and right-id (nil-literal? left)) right-id
         :else nil))))
+
+(defn guarded-else-non-nil-var
+  "Extract variable name from condition of the form `x = nil` or `nil = x`,
+   where the variable is proven non-nil in the else branch."
+  [condition]
+  (when (and (map? condition)
+             (= :binary (:type condition))
+             (= "=" (:operator condition)))
+    (let [left (:left condition)
+          right (:right condition)
+          left-id (identifier-name left)
+          right-id (identifier-name right)]
+      (cond
+        (and left-id (nil-literal? right)) left-id
+        (and right-id (nil-literal? left)) right-id
+        :else nil))))
+
+(defn- apply-condition-branch-refinement!
+  [env condition branch]
+  (case branch
+    :then
+    (do
+      (when-let [non-nil-var (guarded-non-nil-var condition)]
+        (env-mark-non-nil env non-nil-var))
+      (when-let [{:keys [name type]} (convert-guard-binding condition)]
+        (env-add-var env name type)
+        (env-mark-non-nil env name))
+      env)
+
+    :else
+    (do
+      (when-let [non-nil-var (guarded-else-non-nil-var condition)]
+        (env-mark-non-nil env non-nil-var))
+      env)
+
+    env))
 
 (defn convert-guard-binding
   "Extract convert-bound variable info from condition of form:
@@ -2209,8 +2246,12 @@
                             ;; Since it inherits from Function, it will support callN methods.
                             class-name)
       :when (let [cond-type (check-expression env (:condition expr))
-                   cons-type (check-expression env (:consequent expr))
-                   alt-type (check-expression env (:alternative expr))]
+                   cons-env (doto (make-type-env env)
+                              (apply-condition-branch-refinement! (:condition expr) :then))
+                   alt-env (doto (make-type-env env)
+                             (apply-condition-branch-refinement! (:condition expr) :else))
+                   cons-type (check-expression cons-env (:consequent expr))
+                   alt-type (check-expression alt-env (:alternative expr))]
                (when-not (types-compatible? env cond-type "Boolean")
                  (throw (ex-info "when condition must be Boolean"
                                  {:error (type-error
@@ -2280,11 +2321,7 @@
                       {:error (type-error
                                (str "If condition must be Boolean, got " cond-type))}))))
   (let [then-env (make-type-env env)]
-    (when-let [non-nil-var (guarded-non-nil-var condition)]
-      (env-mark-non-nil then-env non-nil-var))
-    (when-let [{:keys [name type]} (convert-guard-binding condition)]
-      (env-add-var then-env name type)
-      (env-mark-non-nil then-env name))
+    (apply-condition-branch-refinement! then-env condition :then)
     (doseq [stmt then]
       (check-statement then-env stmt)))
   (doseq [clause elseif]
@@ -2294,15 +2331,12 @@
                         {:error (type-error
                                  (str "Elseif condition must be Boolean, got " ei-cond-type))}))))
     (let [elseif-env (make-type-env env)]
-      (when-let [non-nil-var (guarded-non-nil-var (:condition clause))]
-        (env-mark-non-nil elseif-env non-nil-var))
-      (when-let [{:keys [name type]} (convert-guard-binding (:condition clause))]
-        (env-add-var elseif-env name type)
-        (env-mark-non-nil elseif-env name))
+      (apply-condition-branch-refinement! elseif-env (:condition clause) :then)
       (doseq [stmt (:then clause)]
         (check-statement elseif-env stmt))))
   (when else
     (let [else-env (make-type-env env)]
+      (apply-condition-branch-refinement! else-env condition :else)
       (doseq [stmt else] (check-statement else-env stmt)))))
 
 (defn check-loop
