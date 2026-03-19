@@ -1,6 +1,6 @@
 # Interoperability
 
-No practical language lives entirely by itself. Sooner or later a program needs a file system, a library, a graphical surface, or an external service. Nex is designed for that reality. It can import host-platform symbols and it can be translated to Java or JavaScript.
+No practical language lives entirely by itself. Sooner or later a program needs a file system, a library, a host API, or an external service. Nex is designed for that reality. It can import host-platform symbols and it can target the JVM or JavaScript.
 
 The important question is not whether interop exists, but where it should live in the design. This chapter is about that boundary.
 
@@ -21,7 +21,7 @@ For JavaScript modules:
 import Math from './math.js'
 ```
 
-These imports are primarily meaningful when translating Nex programs to the target platform. They tell the generated Java or JavaScript code which host symbols it should import.
+These imports are primarily meaningful when compiling or translating Nex programs to the target platform. They tell the JVM compiler or JavaScript generator which host symbols the program expects to use.
 
 
 ## `import` Versus `intern`
@@ -59,7 +59,7 @@ For example, rather than calling platform I/O throughout a program, define a sma
 
 ## Translation Targets
 
-The repository supports JVM bytecode compilation and JavaScript translation. The older Java-source generator still exists, but it is deprecated.
+The repository supports JVM bytecode compilation and JavaScript translation.
 
 From Clojure:
 
@@ -82,7 +82,7 @@ This matters for design because the same Nex source may be aimed at different ho
 
 ## Development Builds and Production Builds
 
-Contracts are included in normal translated output. For production translation, the JavaScript generator and the deprecated Java-source generator support `skip-contracts`:
+Contracts are included in normal translated output. For production translation, the JavaScript generator supports `skip-contracts`:
 
 ```clojure
 (js/translate nex-code {:skip-contracts true})
@@ -163,7 +163,7 @@ This is usually the right architectural split:
 
 - `import` brings in host-platform symbols; `intern` brings in Nex classes
 - Keep interop code near system boundaries rather than scattering it through core logic
-- Nex can be translated to Java and JavaScript
+- Nex can target JVM bytecode and JavaScript
 - Production translation can omit runtime contract checks with `skip-contracts`
 - Contracts are especially valuable around interop boundaries
 - Portable core logic is easier to test, reason about, and reuse

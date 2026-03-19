@@ -34,7 +34,7 @@ Useful examples live under [`lib/io`](https://github.com/vijaymathew/nex/tree/ma
 
 Nex supports host interoperation with Java through `import`. The design is intentionally modest: Nex is not implementing the full Java name-resolution model. It is giving the programmer a clear and explicit bridge to imported host classes.
 
-In the AST, Java imports are represented as import nodes with a qualified name and no `source` field. The interpreter stores these nodes in the runtime context. When Nex needs to resolve a host class, it searches the stored imports and matches the simple class name against the imported qualified names. The Java generator uses the same information to emit Java `import` statements in generated code.
+In the AST, Java imports are represented as import nodes with a qualified name and no `source` field. The interpreter stores these nodes in the runtime context. When Nex needs to resolve a host class, it searches the stored imports and matches the simple class name against the imported qualified names. The JVM compiler and the JavaScript generator both use the same distinction when deciding how an import should be interpreted for their target.
 
 The implementation path is worth tracing. The walker records imports as AST nodes. The interpreter stores those nodes. Later resolution is a straightforward lookup against that stored information. There is no hidden class-path scanning or implicit resolution — the programmer's explicit `import` is the entire record of what host classes are available.
 
@@ -51,7 +51,7 @@ The key distinction is captured in the AST:
 - `import X` — qualified name only, no `source` — is a Java import
 - `import X from "module"` — qualified name plus `source` — is a JavaScript import
 
-The Java generator ignores imports that have a `source`. The JavaScript generator emits only imports that do. This simple AST distinction keeps the front end shared while allowing the backends to behave differently with no ambiguity. It is a clean example of the general pattern: one representation, multiple interpretations at generation time.
+The JVM backend ignores imports that have a `source`. The JavaScript generator emits only imports that do. This simple AST distinction keeps the front end shared while allowing the backends to behave differently with no ambiguity. It is a clean example of the general pattern: one representation, multiple interpretations at generation time.
 
 
 
@@ -59,7 +59,7 @@ The Java generator ignores imports that have a `source`. The JavaScript generato
 
 Java and JavaScript APIs differ in ways that cannot always be abstracted away. Rather than hiding that fact, Nex allows explicit target-specific sections with `with "java"` and `with "javascript"` blocks. This is a pragmatic choice, and an honest one: the portability boundary is made visible rather than papered over.
 
-The implementation is consistent across all three execution paths. The interpreter evaluates the branch that matches its host and ignores the others. The Java generator emits `with "java"` blocks and omits the rest. The JavaScript generator does the reverse. In each case the decision is made at the same point in the pipeline — statement evaluation — not as a preprocessing step.
+The implementation is consistent across all three execution paths. The interpreter evaluates the branch that matches its host and ignores the others. The JVM backend compiles `with "java"` blocks and omits the rest. The JavaScript generator does the reverse. In each case the decision is made at the same point in the pipeline — statement evaluation — not as a preprocessing step.
 
 This means `with` is not a textual macro trick. It is a real target-discrimination construct that survives the full implementation stack. A programmer who writes `with "javascript"` can reason about exactly where that code will and will not run.
 
@@ -97,12 +97,12 @@ To trace the concurrency path end to end, start at the interpreter's `:spawn` ev
 
 JavaScript cannot offer the blocking-thread model the JVM provides, so the JavaScript backend uses async control flow and promise-based mechanisms to represent tasks and channel coordination. The surface language does not change. The implementation strategy does.
 
-This becomes especially visible in `select`. Both generators lower `select` into explicit coordination loops, but in target-appropriate ways:
+This becomes especially visible in `select`. Both backends lower `select` into explicit coordination loops, but in target-appropriate ways:
 
-- the Java generator uses a loop with small sleeps and direct runtime calls
+- the JVM backend uses bytecode-emitted loops and direct runtime helpers
 - the JavaScript generator uses async loops, immediate probes such as `try_receive`, and promise-friendly suspension
 
-The structure is similar enough that comparing `generate-select` in both generators is one of the fastest ways to understand what `select` means in Nex independent of either host. Where the generators agree, the behaviour is language-level. Where they diverge, the divergence is a host accommodation, not a semantic difference.
+The structure is similar enough that comparing the select lowering in both backends is one of the fastest ways to understand what `select` means in Nex independent of either host. Where the backends agree, the behaviour is language-level. Where they diverge, the divergence is a host accommodation, not a semantic difference.
 
 For the async boundary specifically, `generate-spawn-expr`, `generate-select`, and `generate-select-clause-js` are the functions to read. They make explicit how Nex's synchronous-looking concurrency model is lowered into JavaScript's explicitly asynchronous one.
 
