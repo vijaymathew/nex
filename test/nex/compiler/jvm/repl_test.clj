@@ -318,6 +318,100 @@ x"))
         (is (str/includes? read-output "42"))
         (is (= 42 (runtime/state-get-value (:state session) "x")))))))
 
+(deftest repl-compiled-backend-spawn-and-await-test
+  (testing "compiled backend can create tasks with spawn and await them without deopting"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            spawn-output (with-out-str
+                           (repl/eval-code ctx0 "let t: Task[Integer] := spawn do result := 1 + 2 end"))
+            await-output (with-out-str
+                           (repl/eval-code ctx0 "t.await"))
+            session @repl/*compiled-repl-session*]
+        (is (str/includes? spawn-output "#<Task>"))
+        (is (some? (runtime/state-get-value (:state session) "t")))
+        (is (str/includes? await-output "3"))))))
+
+(deftest repl-compiled-backend-channel-lifecycle-test
+  (testing "compiled backend can create channels and use basic lifecycle methods"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+ch.try_send(7)
+print(ch.try_receive)
+ch.close
+ch.is_closed"))]
+        (is (str/includes? output "true"))
+        (is (str/includes? output "7"))))))
+
+(deftest repl-compiled-backend-task-and-channel-state-methods-test
+  (testing "compiled backend specializes task/channel state methods too"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "let t: Task := spawn do
+  sleep(20)
+  result := nil
+end
+print(t.cancel)
+print(t.is_cancelled)
+let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
+print(ch.capacity)
+print(ch.size)"))]
+        (is (str/includes? output "true"))
+        (is (str/includes? output "2"))
+        (is (str/includes? output "0"))))))
+
+(deftest repl-compiled-backend-await-any-all-test
+  (testing "compiled backend can evaluate await_any and await_all on task arrays"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "let slow: Task[Integer] := spawn do
+  sleep(5)
+  result := 10
+end
+let fast: Task[Integer] := spawn do
+  result := 20
+end
+print(await_any([slow, fast]))
+print(await_all([slow, fast]))"))]
+        (is (str/includes? output "20"))
+        (is (str/includes? output "[10, 20]"))))))
+
+(deftest repl-compiled-backend-select-test
+  (testing "compiled backend can run top-level select without wrapper fallback"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "ch.send(9)"))
+            output (with-out-str
+                     (repl/eval-code ctx0 "select
+  when ch.receive as value then
+    print(value)
+  timeout 5 then
+    print(\"timeout\")
+end"))]
+        (is (str/includes? output "9"))
+        (is (not (str/includes? output "timeout")))))))
+
 (deftest repl-compiled-backend-status-command-test
   (testing "backend status command reports the current backend"
     (binding [repl/*repl-backend* (atom :compiled)]

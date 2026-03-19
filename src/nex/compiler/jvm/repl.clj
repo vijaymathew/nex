@@ -49,6 +49,7 @@
 (declare supported-stmt-block-with-ctx?)
 (declare supported-convert-in-ctx?)
 (declare supported-anonymous-function-in-ctx?)
+(declare supported-select-clause-in-ctx?)
 
 (def ^:private builtin-runtime-receiver-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
@@ -260,15 +261,25 @@
                          (:entries expr))
     :set-literal (every? #(supported-expr-in-ctx? ctx %) (:elements expr))
     :anonymous-function (supported-anonymous-function-in-ctx? ctx expr)
-    :create (let [class-def (class-def-in-ctx ctx (:class-name expr))]
-              (and (contains? (:compiled-class-names ctx) (:class-name expr))
-                   class-def
-                   (not (:deferred? class-def))
-                   (every? #(supported-expr-in-ctx? ctx %) (:args expr))
-                   (if-let [ctor (:constructor expr)]
-                     (known-constructor-in-ctx? ctx (:class-name expr) ctor (count (:args expr)))
-                     (empty? (:args expr)))))
+    :create (if (= "Channel" (:class-name expr))
+              (and (every? #(supported-expr-in-ctx? ctx %) (:args expr))
+                   (case (:constructor expr)
+                     nil (empty? (:args expr))
+                     "with_capacity" (= 1 (count (:args expr)))
+                     false))
+              (let [class-def (class-def-in-ctx ctx (:class-name expr))]
+                (and (contains? (:compiled-class-names ctx) (:class-name expr))
+                     class-def
+                     (not (:deferred? class-def))
+                     (every? #(supported-expr-in-ctx? ctx %) (:args expr))
+                     (if-let [ctor (:constructor expr)]
+                       (known-constructor-in-ctx? ctx (:class-name expr) ctor (count (:args expr)))
+                       (empty? (:args expr))))))
     :identifier (contains? (:known-vars ctx) (:name expr))
+    :spawn (boolean (supported-stmt-block? (-> ctx
+                                               (update :known-vars conj "result")
+                                               (assoc-in [:var-types "result"] "Any"))
+                                           (:body expr)))
     :call (if (nil? (:target expr))
             (and (every? #(supported-expr-in-ctx? ctx %) (:args expr))
                  (or (and (empty? (:args expr))
@@ -358,6 +369,12 @@
                    (supported-stmt-in-ctx? ctx (:else stmt))))
     :raise (supported-expr-in-ctx? ctx (:value stmt))
     :retry (:retry-allowed? ctx)
+    :select (and (every? #(supported-select-clause-in-ctx? ctx %) (:clauses stmt))
+                 (or (nil? (:timeout stmt))
+                     (and (supported-expr-in-ctx? ctx (get-in stmt [:timeout :duration]))
+                          (supported-stmt-block? ctx (get-in stmt [:timeout :body]))))
+                 (or (nil? (:else stmt))
+                     (supported-stmt-block? ctx (:else stmt))))
     :loop (let [[init-ok? ctx-after-init]
                 (reduce (fn [[ok? c] init-stmt]
                           (if (and ok? (supported-stmt-in-ctx? c init-stmt))
@@ -382,6 +399,26 @@
                     (and (nil? (:rescue stmt))
                          (supported-stmt-block? ctx (:body stmt))))
     (supported-expr-in-ctx? ctx stmt)))
+
+(defn- supported-select-clause-in-ctx?
+  [ctx {:keys [expr alias body]}]
+  (and (= :call (:type expr))
+       (supported-expr-in-ctx? ctx expr)
+       (let [body-ctx (if alias
+                        (let [target-type (infer-type-in-ctx ctx (normalize-call-target (:target expr)))
+                              alias-type (case (base-type-name target-type)
+                                           "Task" (or (first (:type-args target-type))
+                                                      (first (:type-params target-type))
+                                                      "Any")
+                                           "Channel" (or (first (:type-args target-type))
+                                                         (first (:type-params target-type))
+                                                         "Any")
+                                           "Any")]
+                          (-> ctx
+                              (update :known-vars conj alias)
+                              (assoc-in [:var-types alias] alias-type)))
+                        ctx)]
+         (supported-stmt-block? body-ctx body))))
 
 (defn- advance-eligibility-ctx
   [ctx stmt]

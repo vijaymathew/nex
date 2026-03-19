@@ -111,12 +111,16 @@ These are lowered into IR and emitted as JVM bytecode directly:
 
 ### 2. Compiled runtime-bridge semantics
 
-These are still compiled, but the emitted bytecode calls back into the shared Nex runtime through `:call-runtime`:
+These are still compiled, but the emitted bytecode calls back into the shared Nex runtime through helper/runtime calls:
 
-- unqualified builtins such as `print`, `println`, `type_of`, `sleep`, `await_any`, `await_all`
-- builtin-style feature calls on runtime-backed receiver types such as:
-  - `task.await`
-  - `ch.receive`
+- unqualified builtins such as `print`, `println`, `type_of`, `sleep`
+- compiled concurrency helpers such as:
+  - `spawn`
+  - `create Channel`
+  - `create Channel.with_capacity(...)`
+  - `await_all`
+  - `await_any`
+  - `select` timeout/probing helpers
 - captured closures
   - closure allocation uses a runtime helper that builds a Nex closure object with a captured environment snapshot
   - later invocation still stays on the compiled path through function-object dispatch
@@ -177,7 +181,7 @@ The compiled REPL path currently supports:
   - assignment
   - final expressions and calls
 - legacy `:calls`-only program AST normalization
-- builtin lowering through `:call-runtime`
+- builtin lowering through runtime/helper calls
   - unqualified builtins
   - runtime-backed feature calls on non-collection builtin receiver types
 - collections
@@ -200,6 +204,12 @@ The compiled REPL path currently supports:
   - `require`
   - `ensure`
   - `old` for compiled method/constructor postconditions using the current field-based model
+- concurrency
+  - `spawn do...end`
+  - `Task.await`, `Task.cancel`, `Task.is_done`
+  - `Channel.send`, `Channel.receive`, `Channel.try_send`, `Channel.try_receive`, `Channel.close`
+  - `select`
+  - `await_all`, `await_any`
 - user-defined classes
   - fields
   - methods
@@ -225,26 +235,20 @@ Target feature calls currently stay on the compiled path only when the receiver 
 - `Boolean`
 - `String`
 - `Cursor`
-- `Task`
-- `Channel`
 - `Console`
 - `Process`
 
 Array / Map / Set no longer belong in this bucket for their ordinary collection methods. Those now lower through dedicated collection IR and emit direct collection bytecode or collection-specific helpers.
 
+`Task` and `Channel` receiver methods also no longer belong in this bucket. They now lower through dedicated concurrency IR and emit specialized runtime helper calls rather than the generic receiver-call bridge.
+
 ## What Is Not Supported Yet
 
 These still fall outside the compiled subset and therefore deopt to the interpreter:
 
-- `select`
 - file/module compilation for the JVM bytecode backend beyond the current REPL/helper path
 - imports and `intern` on the compiled path
-- concurrency constructs as direct compiled semantics
-  - `spawn`
-  - `Task`
-  - `Channel`
-  - timeouts/cancellation/select lowering
-- specialized direct codegen for each builtin
+- specialized direct codegen for each builtin beyond the current helper/receiver-call paths
 
 In addition, some inputs still deopt in the user-facing REPL because of the wrapping rule above, even though the internal compiled helper supports them.
 
@@ -262,6 +266,11 @@ Good candidates for the compiled path today:
 - top-level function definition and redefinition
 - mutually recursive top-level functions with forward declarations
 - builtin-heavy expression batches that do not introduce classes, imports, or interns
+- concurrency-heavy REPL batches such as:
+  - `let t := spawn do ... end`
+  - channel creation and send/receive work
+  - top-level `select`
+  - `await_all([..])` / `await_any([..])`
 - parent-typed virtual calls through compiled deferred/concrete class hierarchies once the value is already present in compiled-session state
 - compiled user-class batches using:
   - `super`
@@ -272,7 +281,6 @@ Likely deopt triggers today:
 
 - imports and interns
 - JVM bytecode file/module compilation beyond the current compiled REPL/helper path
-- concurrency features beyond runtime-bridged builtin methods
 - statement-shaped REPL inputs that are still pre-wrapped in `nex.repl`
 
 ## Examples That Stay Compiled
@@ -302,6 +310,23 @@ print(numbers.length)
 print(m.contains_key("a"))
 print(s.contains(2))
 type_of(numbers.slice(0, 2).reverse)
+```
+
+A concurrency batch:
+
+```nex
+let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+let t: Task[Integer] := spawn do
+  result := 40 + 2
+end
+
+print(await_any([t]))
+select
+  when ch.try_send(7) then
+    print(ch.receive)
+  timeout 5 then
+    print("timeout")
+end
 ```
 
 A legacy `:calls`-only shape is normalized into the same path when the calls are otherwise supported.

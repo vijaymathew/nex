@@ -8,7 +8,8 @@
             [nex.types.typeinfo :as typeinfo])
   (:import [clojure.lang DynamicClassLoader]
            [java.lang.reflect Field Method]
-           [java.util HashMap]))
+           [java.util HashMap]
+           [java.util.concurrent CompletableFuture TimeUnit TimeoutException ExecutionException CancellationException]))
 
 (declare rebuild-interpreter-ctx)
 (declare lowered-instance-method-name)
@@ -115,6 +116,144 @@
                                              (into-array Class [nex.compiler.jvm.runtime.NexReplState
                                                                 (class (object-array 0))]))]
       (.invoke method target (object-array [state (object-array args)])))))
+
+(defn- make-task
+  [future]
+  {:nex-builtin-type :Task
+   :future future})
+
+(defn- task-await
+  ([task]
+   (task-await task nil))
+  ([task timeout]
+   (try
+     (if (nil? timeout)
+       (.get ^CompletableFuture (:future task))
+       (.get ^CompletableFuture (:future task) (long timeout) TimeUnit/MILLISECONDS))
+     (catch TimeoutException _
+       nil)
+     (catch CancellationException _
+       (throw (ex-info "Task cancelled" {:task task})))
+     (catch ExecutionException e
+       (throw (or (.getCause e) e)))
+     (catch InterruptedException e
+       (.interrupt (Thread/currentThread))
+       (throw e)))))
+
+(defn- task-done?
+  [task]
+  (.isDone ^CompletableFuture (:future task)))
+
+(defn- task-cancel
+  [task]
+  (.cancel ^CompletableFuture (:future task) true))
+
+(defn create-channel
+  ([] (create-channel 0))
+  ([capacity]
+   (let [ctx (interp/make-context)
+         create-node {:type :create
+                      :class-name "Channel"
+                      :generic-args nil
+                      :constructor (when (pos? capacity) "with_capacity")
+                      :args (if (pos? capacity)
+                              [{:type :literal :value capacity}]
+                              [])}]
+     (interp/eval-node ctx create-node))))
+
+(defn spawn-function-object
+  [state fn-obj]
+  (make-task
+   (CompletableFuture/supplyAsync
+    (reify java.util.function.Supplier
+      (get [_]
+        (invoke-function-object state fn-obj []))))))
+
+(defn task-await-all
+  [tasks]
+  (rt/nex-array-from (map task-await tasks)))
+
+(defn task-await-any
+  [tasks]
+  (when (empty? tasks)
+    (throw (ex-info "await_any requires at least one task" {})))
+  (loop []
+    (if-let [ready-task (some #(when (task-done? %) %) tasks)]
+      (task-await ready-task)
+      (do
+        (Thread/sleep 1)
+        (recur)))))
+
+(defn task-await-method
+  ([task]
+   (task-await task))
+  ([task timeout]
+   (task-await task timeout)))
+
+(defn task-cancel-method
+  [task]
+  (task-cancel task))
+
+(defn task-is-done-method
+  [task]
+  (task-done? task))
+
+(defn task-is-cancelled-method
+  [task]
+  (.isCancelled ^CompletableFuture (:future task)))
+
+(defn channel-send-method
+  ([ch value]
+   (interp/call-builtin-method nil ch ch "send" [value]))
+  ([ch value timeout]
+   (interp/call-builtin-method nil ch ch "send" [value timeout])))
+
+(defn channel-try-send-method
+  [ch value]
+  (interp/call-builtin-method nil ch ch "try_send" [value]))
+
+(defn channel-receive-method
+  ([ch]
+   (interp/call-builtin-method nil ch ch "receive" []))
+  ([ch timeout]
+   (interp/call-builtin-method nil ch ch "receive" [timeout])))
+
+(defn channel-try-receive-method
+  [ch]
+  (interp/call-builtin-method nil ch ch "try_receive" []))
+
+(defn channel-close-method
+  [ch]
+  (interp/call-builtin-method nil ch ch "close" []))
+
+(defn channel-is-closed-method
+  [ch]
+  (interp/call-builtin-method nil ch ch "is_closed" []))
+
+(defn channel-capacity-method
+  [ch]
+  (interp/call-builtin-method nil ch ch "capacity" []))
+
+(defn channel-size-method
+  [ch]
+  (interp/call-builtin-method nil ch ch "size" []))
+
+(defn current-time-ms
+  []
+  (System/currentTimeMillis))
+
+(defn select-deadline
+  [timeout-ms]
+  (+ (current-time-ms) (long timeout-ms)))
+
+(defn deadline-expired?
+  [deadline]
+  (>= (current-time-ms) deadline))
+
+(defn select-sleep-step!
+  []
+  (Thread/sleep 1)
+  nil)
 
 (defn make-captured-function-object
   [state class-name capture-args]
@@ -471,6 +610,29 @@
 
     (= name "make-captured-function-object")
     (make-captured-function-object state (first args) (vec (rest args)))
+
+    (= name "create-channel")
+    (if (seq args)
+      (create-channel (first args))
+      (create-channel))
+
+    (= name "spawn-function-object")
+    (spawn-function-object state (first args))
+
+    (= name "op:await-all")
+    (task-await-all (first args))
+
+    (= name "op:await-any")
+    (task-await-any (first args))
+
+    (= name "select-deadline")
+    (select-deadline (first args))
+
+    (= name "deadline-expired?")
+    (deadline-expired? (first args))
+
+    (= name "select-sleep-step")
+    (select-sleep-step!)
 
     (= name "op:string-concat")
     (apply str (map #(concat-string-value state %) args))

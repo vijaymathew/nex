@@ -39,11 +39,12 @@
 (declare collect-anonymous-class-defs)
 (declare function-object-call?)
 (declare function-object-binding-type)
+(declare lower-select)
 
 (def ^:private expression-node-types
   #{:integer :real :string :char :boolean :nil :identifier :binary :unary
     :call :if :when :this :array-literal :map-literal :set-literal
-    :anonymous-function})
+    :anonymous-function :spawn})
 
 (def ^:private builtin-function-names
   (set (keys interp/builtins)))
@@ -51,6 +52,8 @@
 (def ^:private builtin-runtime-receiver-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Cursor" "Task" "Channel" "Console" "Process"})
+
+(def ^:private next-synthetic-closure-id (atom 0))
 
 (def ^:private direct-integer-bitwise-method->op
   {"bitwise_left_shift" :bit-shl
@@ -78,6 +81,12 @@
 (def ^:private direct-set-methods
   #{"contains" "union" "difference" "intersection" "symmetric_difference"
     "size" "is_empty" "to_string" "equals" "clone" "cursor"})
+
+(def ^:private direct-task-methods
+  #{"await" "cancel" "is_done" "is_cancelled"})
+
+(def ^:private direct-channel-methods
+  #{"send" "try_send" "receive" "try_receive" "close" "is_closed" "capacity" "size"})
 
 (defn- base-type-name
   [t]
@@ -152,6 +161,13 @@
     "Array" (contains? direct-array-methods method)
     "Map" (contains? direct-map-methods method)
     "Set" (contains? direct-set-methods method)
+    false))
+
+(defn- direct-concurrency-method?
+  [target-type method]
+  (case (base-type-name target-type)
+    "Task" (contains? direct-task-methods method)
+    "Channel" (contains? direct-channel-methods method)
     false))
 
 (defn- normalize-call-target
@@ -381,7 +397,8 @@
 (defn- env-add-local
   [env name nex-type]
   (let [jvm-type (resolve-jvm-type env nex-type)
-        slot (:next-slot env)]
+        slot (:next-slot env)
+        width (if (contains? #{:long :double} jvm-type) 2 1)]
     [(assoc env
             :locals (assoc (:locals env)
                            name
@@ -390,7 +407,7 @@
                             :nex-type nex-type
                             :jvm-type jvm-type})
             :var-types (assoc (:var-types env) name nex-type)
-            :next-slot (inc slot))
+            :next-slot (+ slot width))
      {:name name
       :slot slot
       :nex-type nex-type
@@ -619,6 +636,207 @@
       [(scoped-env env else-env)
        [(ir/if-stmt-node test-expr then-body else-body)]])
     (lower-scoped-statements env else-stmts)))
+
+(defn- select-clause-value-type
+  [env {:keys [expr]}]
+  (let [{:keys [target method]} expr
+        target-type (infer-type env (normalize-call-target target))
+        base (base-type-name target-type)
+        type-args (generic-type-args target-type)]
+    (case base
+      "Task" (or (first type-args) "Any")
+      "Channel" (case method
+                  ("receive" "try_receive") (or (first type-args) "Any")
+                  nil)
+      nil)))
+
+(defn- lower-select-clause
+  [env done-local clause]
+  (let [{:keys [expr alias body]} clause
+        done-node (ir/local-node "__select_done"
+                                 (:slot done-local)
+                                 (:nex-type done-local)
+                                 (:jvm-type done-local))
+        not-done (ir/unary-node :not done-node "Boolean" :boolean)
+        {:keys [target method args]} expr
+        target-expr (normalize-call-target target)]
+    (case (base-type-name (infer-type env target-expr))
+      "Task"
+      (let [ready-expr {:type :call
+                        :target target-expr
+                        :method "is_done"
+                        :args []
+                        :has-parens false}
+            value-expr {:type :call
+                        :target target-expr
+                        :method "await"
+                        :args []
+                        :has-parens true}
+            [env1 alias-local] (if alias
+                                 (env-add-local env alias (select-clause-value-type env clause))
+                                 [env nil])
+            [env2 lowered-body] (lower-scoped-statements env1 body)
+            then-body (vec (concat
+                            (when alias-local
+                              [(ir/set-local-node (:slot alias-local)
+                                                  (lower-expression env2 value-expr)
+                                                  (:nex-type alias-local)
+                                                  (:jvm-type alias-local))])
+                            lowered-body
+                            [(ir/set-local-node (:slot done-local)
+                                                (ir/const-node true "Boolean" :boolean)
+                                                "Boolean"
+                                                :boolean)]))]
+        [env2
+         (ir/if-stmt-node (ir/binary-node :and
+                                          not-done
+                                          (lower-expression env ready-expr)
+                                          "Boolean"
+                                          :boolean)
+                          then-body
+                          [])])
+
+      "Channel"
+      (case method
+        ("receive" "try_receive")
+        (let [value-type (select-clause-value-type env clause)
+              temp-type (tc/detachable-version value-type)
+              [env1 temp-local] (env-add-local env (str "__select_value_" (:next-slot env)) temp-type)
+              [env2 alias-local] (if alias
+                                   (env-add-local env1 alias value-type)
+                                   [env1 nil])
+              [env3 lowered-body] (lower-scoped-statements env2 body)
+              receive-expr {:type :call
+                            :target target-expr
+                            :method "try_receive"
+                            :args []
+                            :has-parens true}
+              temp-node (ir/local-node "__select_value"
+                                       (:slot temp-local)
+                                       (:nex-type temp-local)
+                                       (:jvm-type temp-local))
+              then-body (vec (concat
+                              (when alias-local
+                                [(ir/set-local-node (:slot alias-local)
+                                                    temp-node
+                                                    (:nex-type alias-local)
+                                                    (:jvm-type alias-local))])
+                              lowered-body
+                              [(ir/set-local-node (:slot done-local)
+                                                  (ir/const-node true "Boolean" :boolean)
+                                                  "Boolean"
+                                                  :boolean)]))]
+          [env3
+           (ir/block-node
+            [(ir/set-local-node (:slot temp-local)
+                                (lower-expression env3 receive-expr)
+                                (:nex-type temp-local)
+                                (:jvm-type temp-local))
+             (ir/if-stmt-node (ir/binary-node :and
+                                              not-done
+                                              (ir/compare-node :neq
+                                                               temp-node
+                                                               (ir/const-node nil "Any" (ir/object-jvm-type "java/lang/Object"))
+                                                               "Boolean"
+                                                               :boolean)
+                                              "Boolean"
+                                              :boolean)
+                             then-body
+                             [])])])
+
+        ("send" "try_send")
+        (let [send-expr {:type :call
+                         :target target-expr
+                         :method "try_send"
+                         :args [(first args)]
+                         :has-parens true}
+              [env1 lowered-body] (lower-scoped-statements env body)
+              then-body (vec (concat lowered-body
+                                     [(ir/set-local-node (:slot done-local)
+                                                         (ir/const-node true "Boolean" :boolean)
+                                                         "Boolean"
+                                                         :boolean)]))]
+          [env1
+           (ir/if-stmt-node (ir/binary-node :and
+                                            not-done
+                                            (lower-expression env1 send-expr)
+                                            "Boolean"
+                                            :boolean)
+                            then-body
+                            [])])
+
+        (throw (ex-info "Unsupported select channel clause during lowering"
+                        {:clause clause})))
+
+      (throw (ex-info "Unsupported select clause target during lowering"
+                      {:clause clause})))))
+
+(defn lower-select
+  [env stmt]
+  (let [[env1 done-local] (env-add-local env "__select_done" "Boolean")
+        [env2 deadline-local] (if-let [_timeout (:timeout stmt)]
+                                (env-add-local env1 "__select_deadline" "Integer64")
+                                [env1 nil])
+        init-stmts (vec (concat
+                         [(ir/set-local-node (:slot done-local)
+                                             (ir/const-node false "Boolean" :boolean)
+                                             "Boolean"
+                                             :boolean)]
+                         (when-let [timeout (:timeout stmt)]
+                           [(ir/set-local-node (:slot deadline-local)
+                                               (ir/call-runtime-node "select-deadline"
+                                                                     [(lower-expression env2 (:duration timeout))]
+                                                                     "Integer64"
+                                                                     :long)
+                                               "Integer64"
+                                               :long)])))
+        [env3 clause-stmts] (reduce (fn [[e acc] clause]
+                                     (let [[e' stmt'] (lower-select-clause e done-local clause)]
+                                       [e' (conj acc stmt')]))
+                                   [env2 []]
+                                   (:clauses stmt))
+        [env4 else-body] (if-let [else-stmts (:else stmt)]
+                           (let [[e body] (lower-scoped-statements env3 else-stmts)]
+                             [e body])
+                           [env3 []])
+        [env5 timeout-body] (if-let [timeout (:timeout stmt)]
+                              (let [[e body] (lower-scoped-statements env4 (:body timeout))]
+                                [e body])
+                              [env4 []])
+        done-node (ir/local-node "__select_done" (:slot done-local) "Boolean" :boolean)
+        loop-body (vec (concat
+                        clause-stmts
+                        (when (seq else-body)
+                          [(ir/if-stmt-node (ir/unary-node :not done-node "Boolean" :boolean)
+                                            (vec (concat else-body
+                                                         [(ir/set-local-node (:slot done-local)
+                                                                             (ir/const-node true "Boolean" :boolean)
+                                                                             "Boolean"
+                                                                             :boolean)]))
+                                            [])])
+                        (when-let [_timeout (:timeout stmt)]
+                          [(ir/if-stmt-node (ir/binary-node :and
+                                                           (ir/unary-node :not done-node "Boolean" :boolean)
+                                                           (ir/call-runtime-node "deadline-expired?"
+                                                                                 [(ir/local-node "__select_deadline"
+                                                                                                 (:slot deadline-local)
+                                                                                                 "Integer64"
+                                                                                                 :long)]
+                                                                                 "Boolean"
+                                                                                 :boolean)
+                                                           "Boolean"
+                                                           :boolean)
+                                           (vec (concat timeout-body
+                                                        [(ir/set-local-node (:slot done-local)
+                                                                            (ir/const-node true "Boolean" :boolean)
+                                                                            "Boolean"
+                                                                            :boolean)]))
+                                           [])])
+                        [(ir/pop-node (ir/call-runtime-node "select-sleep-step" [] "Void" :void))]))]
+    [env5
+     (ir/block-node
+      (conj init-stmts
+            (ir/loop-node [] done-node loop-body)))]))
 
 (defn- visible-class-map
   [env]
@@ -958,6 +1176,38 @@
    :constant? false
    :synthetic? true})
 
+(defn- next-synthetic-closure-class-name
+  []
+  (str "AnonymousFunction_" (swap! next-synthetic-closure-id inc)))
+
+(defn- make-synthetic-anonymous-function-expr
+  [params return-type body]
+  (let [class-name (next-synthetic-closure-class-name)
+        method-name (str "call" (count (or params [])))
+        method-def {:type :method
+                    :name method-name
+                    :params params
+                    :return-type return-type
+                    :note nil
+                    :require nil
+                    :body body
+                    :ensure nil}
+        class-def {:type :class
+                   :name class-name
+                   :generic-params nil
+                   :note nil
+                   :parents [{:parent "Function"}]
+                   :body [{:type :feature-section
+                           :visibility {:type :public}
+                           :members [method-def]}]
+                   :invariant nil}]
+    {:type :anonymous-function
+     :class-name class-name
+     :params params
+     :return-type return-type
+     :body body
+     :class-def class-def}))
+
 (defn- attach-capture-fields
   [class-def captures runtime-object?]
   (let [capture-members (mapv synthetic-capture-field captures)
@@ -1082,6 +1332,15 @@
     (= :create (:type expr))
     (assoc expr :args (mapv #(rewrite-expression-for-closures ctx local-types captures %) (:args expr)))
 
+    (= :spawn (:type expr))
+    (let [nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types))
+          fn-expr (make-synthetic-anonymous-function-expr
+                   []
+                   "Any"
+                   (:body expr))
+          rewritten-fn (rewrite-expression-for-closures nested-ctx {} (atom {}) fn-expr)]
+      (assoc expr :fn-expr rewritten-fn))
+
     :else expr))
 
 (defn- rewrite-statement-for-closures
@@ -1151,6 +1410,25 @@
                                (assoc inv :condition (rewrite-expression-for-closures ctx local-types captures (:condition inv))))
                              (:invariant stmt))
             :body (first (rewrite-statements-for-closures* ctx local-types captures (:body stmt))))
+     local-types]
+
+    :select
+    [(assoc stmt
+            :clauses (mapv (fn [{:keys [expr alias body] :as clause}]
+                             (assoc clause
+                                    :expr (rewrite-expression-for-closures ctx local-types captures expr)
+                                    :body (first (rewrite-statements-for-closures* ctx
+                                                                                   (cond-> local-types
+                                                                                     alias (assoc alias "Any"))
+                                                                                   captures
+                                                                                   body))))
+                           (:clauses stmt))
+            :timeout (when-let [timeout (:timeout stmt)]
+                       (assoc timeout
+                              :duration (rewrite-expression-for-closures ctx local-types captures (:duration timeout))
+                              :body (first (rewrite-statements-for-closures* ctx local-types captures (:body timeout)))))
+            :else (when (:else stmt)
+                    (first (rewrite-statements-for-closures* ctx local-types captures (:else stmt)))))
      local-types]
 
     :scoped-block
@@ -1567,42 +1845,69 @@
     (let [class-name (:class-name expr)
           compiled (get (:compiled-classes env) class-name)
           class-def (get (visible-class-map env) class-name)]
-      (when-not compiled
-        (throw (ex-info "Create of non-compiled class is not supported in lowering"
-                        {:expr expr :class-name class-name})))
-      (when (:deferred? class-def)
-        (throw (ex-info "Unsupported create of deferred class in compiled lowering"
-                        {:expr expr :class-name class-name})))
-      (if-let [constructor-name (:constructor expr)]
-        (let [ctor-def (own-or-inherited-constructor-def env class-def constructor-name (count (:args expr)))]
-          (when-not ctor-def
-            (throw (ex-info "Constructor not found during lowering"
+      (if (= class-name "Channel")
+        (let [nex-type (infer-type env expr)]
+          (case (:constructor expr)
+            nil
+            (do
+              (when (seq (:args expr))
+                (throw (ex-info "create Channel takes no arguments in compiled lowering"
+                                {:expr expr})))
+              (ir/call-runtime-node "create-channel"
+                                    []
+                                    nex-type
+                                    (resolve-jvm-type env nex-type)))
+
+            "with_capacity"
+            (do
+              (when-not (= 1 (count (:args expr)))
+                (throw (ex-info "Channel.with_capacity expects exactly 1 argument in compiled lowering"
+                                {:expr expr})))
+              (ir/call-runtime-node "create-channel"
+                                    [(lower-expression env (first (:args expr)))]
+                                    nex-type
+                                    (resolve-jvm-type env nex-type)))
+
+            (throw (ex-info "Unsupported Channel constructor in compiled lowering"
                             {:expr expr
-                             :class-name class-name
-                             :constructor constructor-name
-                             :arity (count (:args expr))})))
-          (ir/call-virtual-node (:internal-name compiled)
-                                (lowered-constructor-method-name ctor-def)
-                                (desc/repl-instance-method-descriptor)
-                                (ir/new-node (:internal-name compiled)
-                                             class-name
-                                             (infer-type env expr)
-                                             (exact-class-jvm-type env class-name))
-                                (mapv #(lower-expression env %) (:args expr))
-                                (infer-type env expr)
-                                (resolve-jvm-type env (infer-type env expr))))
+                             :constructor (:constructor expr)}))))
         (do
-          (when (seq (:args expr))
-            (throw (ex-info "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
-                            {:expr expr})))
-          (let [nex-type (infer-type env expr)]
-            (validate-object-state-ir env
-                                      class-name
-                                      (ir/new-node (:internal-name compiled)
-                                                   class-name
-                                                   nex-type
-                                                   (resolve-jvm-type env nex-type))
-                                      nex-type)))))
+          (when-not compiled
+            (throw (ex-info "Create of non-compiled class is not supported in lowering"
+                            {:expr expr :class-name class-name})))
+          (when (:deferred? class-def)
+            (throw (ex-info "Unsupported create of deferred class in compiled lowering"
+                            {:expr expr :class-name class-name})))
+          (if-let [constructor-name (:constructor expr)]
+            (let [ctor-def (own-or-inherited-constructor-def env class-def constructor-name (count (:args expr)))]
+              (when-not ctor-def
+                (throw (ex-info "Constructor not found during lowering"
+                                {:expr expr
+                                 :class-name class-name
+                                 :constructor constructor-name
+                                 :arity (count (:args expr))})))
+              (ir/call-virtual-node (:internal-name compiled)
+                                    (lowered-constructor-method-name ctor-def)
+                                    (desc/repl-instance-method-descriptor)
+                                    (ir/new-node (:internal-name compiled)
+                                                 class-name
+                                                 (infer-type env expr)
+                                                 (exact-class-jvm-type env class-name))
+                                    (mapv #(lower-expression env %) (:args expr))
+                                    (infer-type env expr)
+                                    (resolve-jvm-type env (infer-type env expr))))
+            (do
+              (when (seq (:args expr))
+                (throw (ex-info "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
+                                {:expr expr})))
+              (let [nex-type (infer-type env expr)]
+                (validate-object-state-ir env
+                                          class-name
+                                          (ir/new-node (:internal-name compiled)
+                                                       class-name
+                                                       nex-type
+                                                       (resolve-jvm-type env nex-type))
+                                          nex-type)))))))
 
     :anonymous-function
     (let [class-name (:class-name expr)
@@ -1632,6 +1937,16 @@
                        class-name
                        nex-type
                        (exact-class-jvm-type env class-name)))))
+
+    :spawn
+    (let [fn-expr (or (:fn-expr expr)
+                      (make-synthetic-anonymous-function-expr [] "Any" (:body expr)))
+          fn-ir (lower-expression env fn-expr)
+          nex-type (infer-type env expr)]
+      (ir/call-runtime-node "spawn-function-object"
+                            [fn-ir]
+                            nex-type
+                            (resolve-jvm-type env nex-type)))
 
     :call
     (if (and (nil? (:target expr))
@@ -1689,6 +2004,16 @@
                                      arg-irs
                                      nex-type
                                      jvm-type))
+
+            (#{"await_all" "await_any"} (:method expr))
+            (let [nex-type (infer-type env expr)
+                  jvm-type (resolve-jvm-type env nex-type)]
+              (ir/call-runtime-node (if (= "await_all" (:method expr))
+                                      "op:await-all"
+                                      "op:await-any")
+                                    arg-irs
+                                    nex-type
+                                    jvm-type))
 
             (contains? builtin-function-names (:method expr))
             (let [nex-type (infer-type env expr)
@@ -1794,11 +2119,15 @@
 
             :else
             (let [target-type (infer-type env target-expr)]
-              (if-let [direct-op (and (= "Integer" (base-type-name target-type))
-                                      (get direct-integer-bitwise-method->op (:method expr)))]
+              (cond
+                (if-let [direct-op (and (= "Integer" (base-type-name target-type))
+                                        (get direct-integer-bitwise-method->op (:method expr)))]
+                  direct-op
+                  false)
                 (let [target-ir (lower-expression env target-expr)
                       nex-type (infer-type env expr)
-                      jvm-type (resolve-jvm-type env nex-type)]
+                      jvm-type (resolve-jvm-type env nex-type)
+                      direct-op (get direct-integer-bitwise-method->op (:method expr))]
                   (if (= :bit-not direct-op)
                     (ir/unary-node direct-op target-ir nex-type jvm-type)
                     (ir/binary-node direct-op
@@ -1806,29 +2135,44 @@
                                     (first arg-irs)
                                     nex-type
                                     jvm-type)))
-                (if (direct-collection-method? target-type (:method expr))
-                  (let [target-ir (lower-expression env target-expr)
-                        nex-type (or (collection-method-return-type target-type (:method expr))
-                                     (infer-type env expr))
-                        jvm-type (resolve-jvm-type env nex-type)]
-                    (ir/collection-method-node (keyword (.toLowerCase ^String (base-type-name target-type)))
-                                               (:method expr)
-                                               target-ir
-                                               arg-irs
-                                               nex-type
-                                               jvm-type))
-                (if (builtin-runtime-receiver-type? target-type)
-                  (let [target-ir (lower-expression env target-expr)
-                        nex-type (infer-type env expr)
-                        jvm-type (resolve-jvm-type env nex-type)]
-                    (ir/call-runtime-node (str "method:" (:method expr))
-                                          (into [target-ir] arg-irs)
-                                          nex-type
-                                          jvm-type))
-                  (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
-                      (throw (ex-info "Unsupported target call expression for lowering"
-                                      {:expr expr
-                                       :target-type target-type})))))))))))
+
+                (direct-collection-method? target-type (:method expr))
+                (let [target-ir (lower-expression env target-expr)
+                      nex-type (or (collection-method-return-type target-type (:method expr))
+                                   (infer-type env expr))
+                      jvm-type (resolve-jvm-type env nex-type)]
+                  (ir/collection-method-node (keyword (.toLowerCase ^String (base-type-name target-type)))
+                                             (:method expr)
+                                             target-ir
+                                             arg-irs
+                                             nex-type
+                                             jvm-type))
+
+                (direct-concurrency-method? target-type (:method expr))
+                (let [target-ir (lower-expression env target-expr)
+                      nex-type (infer-type env expr)
+                      jvm-type (resolve-jvm-type env nex-type)]
+                  (ir/concurrency-method-node (keyword (.toLowerCase ^String (base-type-name target-type)))
+                                              (:method expr)
+                                              target-ir
+                                              arg-irs
+                                              nex-type
+                                              jvm-type))
+
+                (builtin-runtime-receiver-type? target-type)
+                (let [target-ir (lower-expression env target-expr)
+                      nex-type (infer-type env expr)
+                      jvm-type (resolve-jvm-type env nex-type)]
+                  (ir/call-runtime-node (str "method:" (:method expr))
+                                        (into [target-ir] arg-irs)
+                                        nex-type
+                                        jvm-type))
+
+                :else
+                (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
+                    (throw (ex-info "Unsupported target call expression for lowering"
+                                    {:expr expr
+                                     :target-type target-type})))))))))
 
     (throw (ex-info "Unsupported expression node for lowering"
                     {:expr expr :node-type (:type expr)}))))
@@ -2104,6 +2448,9 @@
                      invariant-start-stmts
                      variant-init-stmts
                      [(ir/loop-node [] test-ir loop-body)])))])
+
+    (= :select (:type stmt))
+    (lower-select env stmt)
 
     (= :raise (:type stmt))
     [env (ir/raise-node (lower-expression env (:value stmt)))]

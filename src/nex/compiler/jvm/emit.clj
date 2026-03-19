@@ -256,7 +256,30 @@
     (= :double jvm-type) Opcodes/DLOAD
     (ir/object-jvm-type? jvm-type) Opcodes/ALOAD
     :else (throw (ex-info "Unsupported local load type"
-                          {:jvm-type jvm-type}))))
+                    {:jvm-type jvm-type}))))
+
+(defn- emit-stack-coerce!
+  [^MethodVisitor mv from-jvm-type to-jvm-type]
+  (cond
+    (= from-jvm-type to-jvm-type)
+    nil
+
+    (and (contains? ir/primitive-jvm-types from-jvm-type)
+         (ir/object-jvm-type? to-jvm-type))
+    (emit-box! mv from-jvm-type)
+
+    (and (ir/object-jvm-type? from-jvm-type)
+         (contains? ir/primitive-jvm-types to-jvm-type))
+    (emit-unbox-or-cast! mv to-jvm-type)
+
+    (and (ir/object-jvm-type? from-jvm-type)
+         (ir/object-jvm-type? to-jvm-type))
+    (emit-unbox-or-cast! mv to-jvm-type)
+
+    :else
+    (throw (ex-info "Unsupported JVM stack coercion"
+                    {:from-jvm-type from-jvm-type
+                     :to-jvm-type to-jvm-type}))))
 
 (defn- local-store-op
   [jvm-type]
@@ -383,6 +406,7 @@
 
 (declare emit-expr!)
 (declare emit-stmt!)
+(declare emit-boxed-expr!)
 
 (defn- emit-runtime-var!
   [^MethodVisitor mv fn-name]
@@ -449,6 +473,63 @@
                     "invoke"
                     (runtime-invoke-descriptor (count arg-emitters))
                     false))
+
+(defn- emit-direct-runtime-helper-call!
+  [^MethodVisitor mv expr state-slot]
+  (let [helper (:helper expr)
+        args (:args expr)
+        emit-return (fn [jvm-type]
+                      (if (= :void jvm-type)
+                        (do (.visitInsn mv Opcodes/POP) :void)
+                        (do (emit-unbox-or-cast! mv jvm-type)
+                            jvm-type)))]
+    (case helper
+      "spawn-function-object"
+      (do
+        (emit-runtime-call! mv "spawn-function-object"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "create-channel"
+      (do
+        (emit-runtime-call! mv "create-channel"
+                            (mapv (fn [arg]
+                                    (fn [] (emit-boxed-expr! mv arg state-slot)))
+                                  args))
+        (emit-return (:jvm-type expr)))
+
+      "op:await-all"
+      (do
+        (emit-runtime-call! mv "task-await-all"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "op:await-any"
+      (do
+        (emit-runtime-call! mv "task-await-any"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "select-deadline"
+      (do
+        (emit-runtime-call! mv "select-deadline"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "deadline-expired?"
+      (do
+        (emit-runtime-call! mv "deadline-expired?"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "select-sleep-step"
+      (do
+        (emit-runtime-call! mv "select-sleep-step!"
+                            [])
+        (emit-return (:jvm-type expr)))
+
+      nil)))
 
 (defn- emit-boolean-short-circuit!
   [^MethodVisitor mv operator left-expr right-expr state-slot]
@@ -1105,6 +1186,95 @@
       (throw (ex-info "Unsupported collection method emission"
                       {:expr expr})))))
 
+(defn- emit-concurrency-method!
+  [^MethodVisitor mv expr state-slot]
+  (let [{:keys [concurrency-kind method target args jvm-type]} expr
+        emit-return (fn [jvm-type]
+                      (if (= :void jvm-type)
+                        (do (.visitInsn mv Opcodes/POP) :void)
+                        (do (emit-unbox-or-cast! mv jvm-type)
+                            jvm-type)))]
+    (case [concurrency-kind method]
+      [:task "await"]
+      (do
+        (emit-runtime-call! mv "task-await-method"
+                            (cond-> [(fn [] (emit-boxed-expr! mv target state-slot))]
+                              (seq args) (conj (fn [] (emit-boxed-expr! mv (first args) state-slot)))))
+        (emit-return jvm-type))
+
+      [:task "cancel"]
+      (do
+        (emit-runtime-call! mv "task-cancel-method"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))])
+        (emit-return jvm-type))
+
+      [:task "is_done"]
+      (do
+        (emit-runtime-call! mv "task-is-done-method"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))])
+        (emit-return jvm-type))
+
+      [:task "is_cancelled"]
+      (do
+        (emit-runtime-call! mv "task-is-cancelled-method"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))])
+        (emit-return jvm-type))
+
+      [:channel "send"]
+      (do
+        (emit-runtime-call! mv "channel-send-method"
+                            (cond-> [(fn [] (emit-boxed-expr! mv target state-slot))
+                                     (fn [] (emit-boxed-expr! mv (first args) state-slot))]
+                              (= 2 (count args)) (conj (fn [] (emit-boxed-expr! mv (second args) state-slot)))))
+        (emit-return jvm-type))
+
+      [:channel "try_send"]
+      (do
+        (emit-runtime-call! mv "channel-try-send-method"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return jvm-type))
+
+      [:channel "receive"]
+      (do
+        (emit-runtime-call! mv "channel-receive-method"
+                            (cond-> [(fn [] (emit-boxed-expr! mv target state-slot))]
+                              (seq args) (conj (fn [] (emit-boxed-expr! mv (first args) state-slot)))))
+        (emit-return jvm-type))
+
+      [:channel "try_receive"]
+      (do
+        (emit-runtime-call! mv "channel-try-receive-method"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))])
+        (emit-return jvm-type))
+
+      [:channel "close"]
+      (do
+        (emit-runtime-call! mv "channel-close-method"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))])
+        (emit-return jvm-type))
+
+      [:channel "is_closed"]
+      (do
+        (emit-runtime-call! mv "channel-is-closed-method"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))])
+        (emit-return jvm-type))
+
+      [:channel "capacity"]
+      (do
+        (emit-runtime-call! mv "channel-capacity-method"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))])
+        (emit-return jvm-type))
+
+      [:channel "size"]
+      (do
+        (emit-runtime-call! mv "channel-size-method"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))])
+        (emit-return jvm-type))
+
+      (throw (ex-info "Unsupported concurrency method emission"
+                      {:expr expr})))))
+
 (defn- emit-expr!
   [^MethodVisitor mv expr state-slot]
   (case (:op expr)
@@ -1237,31 +1407,35 @@
       (:jvm-type expr))
 
     :call-runtime
-    (do
-      (.visitLdcInsn mv "nex.compiler.jvm.runtime")
-      (.visitLdcInsn mv "invoke-builtin")
-      (.visitMethodInsn mv
-                        Opcodes/INVOKESTATIC
-                        rt-internal-name
-                        "var"
-                        "(Ljava/lang/String;Ljava/lang/String;)Lclojure/lang/Var;"
-                        false)
-      (.visitVarInsn mv Opcodes/ALOAD state-slot)
-      (.visitLdcInsn mv ^String (:helper expr))
-      (emit-boxed-arg-array! mv (:args expr) state-slot)
-      (.visitMethodInsn mv
-                        Opcodes/INVOKEVIRTUAL
-                        var-internal-name
-                        "invoke"
-                        "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
-                        false)
-      (if (= :void (:jvm-type expr))
-        (do (.visitInsn mv Opcodes/POP) :void)
-        (do (emit-unbox-or-cast! mv (:jvm-type expr))
-            (:jvm-type expr))))
+    (or (emit-direct-runtime-helper-call! mv expr state-slot)
+        (do
+          (.visitLdcInsn mv "nex.compiler.jvm.runtime")
+          (.visitLdcInsn mv "invoke-builtin")
+          (.visitMethodInsn mv
+                            Opcodes/INVOKESTATIC
+                            rt-internal-name
+                            "var"
+                            "(Ljava/lang/String;Ljava/lang/String;)Lclojure/lang/Var;"
+                            false)
+          (.visitVarInsn mv Opcodes/ALOAD state-slot)
+          (.visitLdcInsn mv ^String (:helper expr))
+          (emit-boxed-arg-array! mv (:args expr) state-slot)
+          (.visitMethodInsn mv
+                            Opcodes/INVOKEVIRTUAL
+                            var-internal-name
+                            "invoke"
+                            "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                            false)
+          (if (= :void (:jvm-type expr))
+            (do (.visitInsn mv Opcodes/POP) :void)
+            (do (emit-unbox-or-cast! mv (:jvm-type expr))
+                (:jvm-type expr)))))
 
     :collection-method
     (emit-collection-method! mv expr state-slot)
+
+    :concurrency-method
+    (emit-concurrency-method! mv expr state-slot)
 
     :convert
     (emit-convert! mv expr state-slot)
@@ -1538,6 +1712,7 @@
 
     :set-local
     (let [expr-jvm-type (emit-expr! mv (:expr stmt) state-slot)]
+      (emit-stack-coerce! mv expr-jvm-type (:jvm-type stmt))
       (.visitVarInsn mv (local-store-op (:jvm-type stmt)) (:slot stmt))
       expr-jvm-type)
 
@@ -1560,7 +1735,7 @@
     (do
       (emit-expr! mv (:target stmt) state-slot)
       (.visitTypeInsn mv Opcodes/CHECKCAST (:owner stmt))
-      (emit-expr! mv (:expr stmt) state-slot)
+      (emit-stack-coerce! mv (emit-expr! mv (:expr stmt) state-slot) (:jvm-type stmt))
       (.visitFieldInsn mv
                        Opcodes/PUTFIELD
                        (:owner stmt)

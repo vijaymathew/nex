@@ -27,30 +27,19 @@ Last updated: 2026-03-19
 | Scoped blocks | `do...end` lexical scope, including `rescue` / `retry` |
 | Exceptions | `raise`, `rescue`, `retry` |
 | Contracts | `require`, `ensure`, and the current interpreter-style field-based `old` model in compiled method/constructor postconditions |
+| Concurrency | `spawn`, channel creation, `select`, `await_all`, `await_any`, and compiled-path `Task` / `Channel` operations |
 | Collections | Literal construction plus direct compiled lowering for Array / Map / Set methods |
 | Closures / higher-order | Anonymous functions, captured closures, and passing/returning/invoking function objects |
-| Builtins via runtime bridge | `print`, `println`, `type_of`, `sleep`, task/channel methods, etc. |
+| Builtins via runtime bridge | `print`, `println`, `type_of`, `sleep`, and other remaining runtime-backed builtins |
 
 
 ## Still Needs Implementation
-
-### Control Flow
-
-- `select`
 
 ### Object-Oriented
 
 ### Design by Contract
 
 ### Exception Handling
-
-### Concurrency
-
-- `spawn do...end` (create async tasks)
-- `Task` lifecycle — `await`, `cancel`, `is_done`
-- `Channel` — `send`, `receive`, `try_send`, `try_receive`, `close`
-- `select` (multiplex over channels/tasks with timeout)
-- `await_all`/`await_any` as direct codegen (currently runtime-bridged)
 
 ### Modules
 
@@ -75,7 +64,7 @@ Last updated: 2026-03-19
 
 Based on complexity and impact, these are natural next steps:
 
-1. `select` and direct concurrency lowering
-2. File compilation (`.nex` -> JVM bytecode/classes/jar) beyond the REPL-only compiler path
-3. Broader module support (`import`, `intern`) on the compiled path
+1. File compilation (`.nex` -> JVM bytecode/classes/jar) beyond the REPL-only compiler path
+2. Broader module support (`import`, `intern`) on the compiled path
+3. Broader direct lowering for remaining runtime-backed builtins that still use the generic runtime bridge
 4. Source line numbers and better debug metadata in emitted bytecode

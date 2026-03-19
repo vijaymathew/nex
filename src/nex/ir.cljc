@@ -218,6 +218,16 @@
    :nex-type nex-type
    :jvm-type jvm-type})
 
+(defn concurrency-method-node
+  [concurrency-kind method target args nex-type jvm-type]
+  {:op :concurrency-method
+   :concurrency-kind concurrency-kind
+   :method method
+   :target target
+   :args (vec args)
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
 (defn convert-node
   [value binding target-type nex-type jvm-type temp-slot]
   {:op :convert

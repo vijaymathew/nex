@@ -224,6 +224,63 @@ end")
       (is (= :binary (:op bitwise-expr)))
       (is (= :bit-and (:operator bitwise-expr))))))
 
+(deftest lower-concurrency-nodes-test
+  (testing "spawn, channel creation, await helpers, and select lower to explicit compiler IR"
+    (let [spawn-program (lower/prepare-program-for-closures
+                         (p/ast "let t: Task[Integer] := spawn do result := 1 + 2 end")
+                         {:classes [] :functions [] :imports [] :var-types {}})
+          anon-class (first (lower/collect-anonymous-class-defs spawn-program))
+          spawn-unit (:unit (lower/lower-repl-cell spawn-program {:name "nex/repl/Spawn_0001"
+                                                                  :compiled-classes {(:name anon-class)
+                                                                                     {:name (:name anon-class)
+                                                                                      :internal-name "nex/repl/AnonymousFunction_0001"
+                                                                                      :jvm-name "nex/repl/AnonymousFunction_0001"
+                                                                                      :binary-name "nex.repl.AnonymousFunction_0001"}}}))
+          spawn-expr (-> spawn-unit :body first :expr)
+          channel-program (p/ast "let ch: Channel[Integer] := create Channel[Integer].with_capacity(4)")
+          channel-unit (:unit (lower/lower-repl-cell channel-program {:name "nex/repl/Channel_0001"}))
+          channel-expr (-> channel-unit :body first :expr)
+          await-program (p/ast "await_all(tasks)")
+          await-unit (:unit (lower/lower-repl-cell await-program {:name "nex/repl/Await_0001"
+                                                                  :var-types {"tasks" {:base-type "Array"
+                                                                                       :type-params [{:base-type "Task"
+                                                                                                      :type-params ["Integer"]}]}}}))
+          await-expr (-> await-unit :body first :expr)
+          task-method-program (p/ast "t.await")
+          task-method-unit (:unit (lower/lower-repl-cell task-method-program {:name "nex/repl/TaskMethod_0001"
+                                                                              :var-types {"t" {:base-type "Task"
+                                                                                               :type-params ["Integer"]}}}))
+          task-method-expr (-> task-method-unit :body first :expr)
+          channel-method-program (p/ast "ch.try_receive")
+          channel-method-unit (:unit (lower/lower-repl-cell channel-method-program {:name "nex/repl/ChannelMethod_0001"
+                                                                                    :var-types {"ch" {:base-type "Channel"
+                                                                                                      :type-params ["Integer"]}}}))
+          channel-method-expr (-> channel-method-unit :body first :expr)
+          select-program (p/ast "select
+  when ch.receive as value then
+    print(value)
+  timeout 5 then
+    print(\"timeout\")
+end")
+          select-unit (:unit (lower/lower-repl-cell select-program {:name "nex/repl/Select_0001"
+                                                                    :var-types {"ch" {:base-type "Channel"
+                                                                                      :type-params ["Integer"]}}}))
+          select-stmt (-> select-unit :body first)]
+      (is (= :call-runtime (:op spawn-expr)))
+      (is (= "spawn-function-object" (:helper spawn-expr)))
+      (is (= :call-runtime (:op channel-expr)))
+      (is (= "create-channel" (:helper channel-expr)))
+      (is (= :call-runtime (:op await-expr)))
+      (is (= "op:await-all" (:helper await-expr)))
+      (is (= :concurrency-method (:op task-method-expr)))
+      (is (= :task (:concurrency-kind task-method-expr)))
+      (is (= "await" (:method task-method-expr)))
+      (is (= :concurrency-method (:op channel-method-expr)))
+      (is (= :channel (:concurrency-kind channel-method-expr)))
+      (is (= "try_receive" (:method channel-method-expr)))
+      (is (= :block (:op select-stmt)))
+      (is (= :loop (-> select-stmt :body last :op))))))
+
 (deftest lower-deferred-class-metadata-test
   (testing "class lowering carries deferred and parent metadata for later compiler phases"
     (let [program (p/ast "deferred class Shape

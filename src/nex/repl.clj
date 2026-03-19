@@ -1005,6 +1005,13 @@
   (or (re-find #"^\s*let\s+" input)
       (re-find #"^\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?\s*:=" input)))
 
+(defn looks-like-raw-compiled-statement?
+  "Check if input is a top-level statement shape that should get a raw
+   compiled-path parse attempt before wrapper fallback."
+  [input]
+  (or (looks-like-top-level-mutation? input)
+      (re-find #"^\s*select\b" input)))
+
 (defn looks-like-identifier?
   "Check if input is a simple identifier (variable name)"
   [input]
@@ -1046,7 +1053,7 @@
       ;; attempt before falling back to wrapper-based execution.
       (let [compiled-raw-candidate? (and (= :compiled @*repl-backend*)
                                          (not (dbg/enabled?))
-                                         (looks-like-top-level-mutation? input))
+                                         (looks-like-raw-compiled-statement? input))
             raw-compiled-attempt (when compiled-raw-candidate?
                                    (try
                                      (let [raw-ast (p/ast input)]
