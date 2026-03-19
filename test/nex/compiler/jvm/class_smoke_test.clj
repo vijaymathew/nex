@@ -223,6 +223,28 @@ feature
     end
 end")
 
+(def ^:private old-pair-program
+  "class Pair
+create
+  make(x0, y0: Integer) do
+    this.x := x0
+    this.y := y0
+  end
+feature
+  x: Integer
+  y: Integer
+
+  move_x(dx: Integer): Integer
+  do
+    this.x := this.x + dx
+    result := this.x
+  ensure
+    x_moved: x = old x + dx
+    y_unchanged: y = old y
+    sum_consistent: x + y = old x + old y + dx
+  end
+end")
+
 (def ^:private invariant-account-program
   "class Account
 create
@@ -445,6 +467,21 @@ end")
       (is (= 1 (:result define-result)))
       (is (some? fail-ex))
       (is (re-find #"Postcondition violation: advanced" (str fail-ex))))))
+
+(deftest compiled-old-field-expression-smoke-test
+  (testing "compiled helper supports the full interpreter-style old model for field-based postconditions"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str old-pair-program
+                                                                     "\n\n"
+                                                                     "let p: Pair := create Pair.make(2, 5)\n"
+                                                                     "p.move_x(3)")))
+          y-result (compiled-repl/compile-and-eval! session
+                                                    (p/ast "p.y"))]
+      (is (:compiled? define-result))
+      (is (:compiled? y-result))
+      (is (= 5 (:result define-result)))
+      (is (= 5 (:result y-result))))))
 
 (deftest compiled-class-invariants-smoke-test
   (testing "compiled helper enforces class invariants on creation and method exit"

@@ -89,7 +89,7 @@ These are lowered into IR and emitted as JVM bytecode directly:
 - `raise`
 - `retry`
 - `require` / `ensure`
-- `old` in compiled method and constructor postconditions
+- `old` in compiled method and constructor postconditions, matching the current interpreter-style field snapshot model
 - loop invariant / variant checks
 - top-level function declarations and definitions
 - top-level function calls through compiled REPL state
@@ -185,7 +185,7 @@ The compiled REPL path currently supports:
 - contracts
   - `require`
   - `ensure`
-  - `old` for compiled method/constructor postconditions
+  - `old` for compiled method/constructor postconditions using the current field-based model
 - user-defined classes
   - fields
   - methods
@@ -226,9 +226,7 @@ These calls are compiled, but their semantics are provided by the runtime bridge
 These still fall outside the compiled subset and therefore deopt to the interpreter:
 
 - `select`
-- contracts
-  - broader `old` support beyond the current compiled field-snapshot model
-- file/module compilation for the newer object-oriented compiled subset
+- file/module compilation for the JVM bytecode backend beyond the current REPL/helper path
 - imports and `intern` on the compiled path
 - concurrency constructs as direct compiled semantics
   - `spawn`
@@ -263,8 +261,7 @@ Good candidates for the compiled path today:
 Likely deopt triggers today:
 
 - imports and interns
-- broader `old` use outside the current compiled postcondition model
-- object-oriented file/module compilation beyond the current compiled REPL/helper path
+- JVM bytecode file/module compilation beyond the current compiled REPL/helper path
 - concurrency features beyond runtime-bridged builtin methods
 - statement-shaped REPL inputs that are still pre-wrapped in `nex.repl`
 

@@ -26,7 +26,7 @@ Last updated: 2026-03-19
 | `case` | Statement-form lowering to compiled branches |
 | Scoped blocks | `do...end` lexical scope, including `rescue` / `retry` |
 | Exceptions | `raise`, `rescue`, `retry` |
-| Contracts | `require`, `ensure`, `old` in compiled method/constructor postconditions |
+| Contracts | `require`, `ensure`, and the current interpreter-style field-based `old` model in compiled method/constructor postconditions |
 | Builtins via runtime bridge | `print`, `println`, `type_of`, `sleep`, collection methods, etc. |
 
 
@@ -40,11 +40,7 @@ Last updated: 2026-03-19
 
 ### Design by Contract
 
-- Broader `old` support beyond the current compiled field-snapshot model used for method/constructor postconditions
-
 ### Exception Handling
-
-- File/module compilation path for exceptions and contracts beyond the REPL/compiler helper path
 
 ### Concurrency
 
@@ -92,6 +88,6 @@ Based on complexity and impact, these are natural next steps:
 
 1. `select` and direct concurrency lowering
 2. Closures / anonymous functions
-3. File compilation (`.nex` -> JVM classes/jar) beyond the REPL-only compiler path
+3. File compilation (`.nex` -> JVM bytecode/classes/jar) beyond the REPL-only compiler path
 4. Broader module support (`import`, `intern`) on the compiled path
-5. Broader `old` support beyond the current compiled field-snapshot model
+5. Source line numbers and better debug metadata in emitted bytecode
