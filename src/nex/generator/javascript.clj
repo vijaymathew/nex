@@ -85,9 +85,6 @@
       "Channel" "Channel"
       "Console" "Object"
       "Process" "Object"
-      "Window" "NexWindow"
-      "Turtle" "NexTurtle"
-      "Image" "NexImage"
       "Function" "Function"
       nex-type)
 
@@ -125,9 +122,6 @@
       "Channel" "null"
       "Console" "({_type: 'Console'})"
       "Process" "({_type: 'Process'})"
-      "Window" "null"
-      "Turtle" "null"
-      "Image" "null"
       "null")
 
     :else "null"))
@@ -815,10 +809,6 @@
     "capacity"    (fn [target _] (str target ".capacity()"))
     "size"        (fn [target _] (str target ".size()"))}
 
-   :Image
-   {"width"        (fn [target _] (str target ".width"))
-    "height"       (fn [target _] (str target ".height"))}
-
    :Console
    {"print"        (fn [_ args] (str "process.stdout.write(String(" args "))"))
     "print_line"   (fn [_ args] (str "console.log(" args ")"))
@@ -842,7 +832,7 @@
     (and (nil? method)
          (map? target)
          (= :create (:type target))
-        (not (#{"Console" "Process" "Set" "Window" "Turtle" "Image" "Channel"} (:class-name target))))
+        (not (#{"Console" "Process" "Set" "Channel"} (:class-name target))))
     true
 
     (nil? method) false
@@ -951,8 +941,6 @@
              (method-fn target-code args-code))
            (when-let [method-fn (get-in builtin-method-mappings [:Set method])]
              (method-fn target-code args-code))
-           (when-let [method-fn (get-in builtin-method-mappings [:Image method])]
-             (method-fn target-code args-code))
            (when-let [method-fn (get-in builtin-method-mappings [:Any method])]
              (method-fn target-code args-code))
            (maybe-await call-node (str target-code "." method "(" args-code ")")))))
@@ -1006,11 +994,6 @@
       "Set" (if (= constructor "from_array")
               (str "new Set(" args-code ")")
               "new Set()")
-      "Window" (str "new NexWindow(" args-code ")")
-      "Turtle" (str "new NexTurtle(" args-code ")")
-      "Image" (if (= constructor "from_file")
-                (str "NexImage.from_file(" args-code ")")
-                (str "new NexImage(" args-code ")"))
       (if constructor
         ;; Named constructor: static factory method call
         (str "await " class-name "." constructor "(" args-code ")")
@@ -2056,9 +2039,8 @@
     (str "class Function {\n"
          (str/join "\n" method-lines)
          "\n}")))
-
-(defn generate-graphics-runtime
-  "Generate browser graphics runtime classes for Window/Turtle/Image built-ins."
+(defn generate-runtime-helpers
+  "Generate JavaScript runtime helper functions for built-in operations."
   []
   (str "function __nexTypeOf(v) {\n"
        "  if (v === null || v === undefined) return 'Nil';\n"
@@ -2845,105 +2827,6 @@
        "}\n"
        "function __nexSetCursor(source) {\n"
        "  return {_type: 'SetCursor', source, values: Array.from(source.values()), index: 0, start() { this.values = Array.from(this.source.values()); this.index = 0; }, item() { if (this.index >= this.values.length) throw new Error('Cursor is at end'); return this.values[this.index]; }, next() { if (this.index < this.values.length) this.index += 1; }, at_end() { return this.index >= this.values.length; }};\n"
-       "}\n"
-       "const __nexHasDom = (typeof document !== 'undefined');\n"
-       "function __nexParseColor(s) {\n"
-       "  const named = {black:'#000000',white:'#ffffff',red:'#ff0000',green:'#008000',blue:'#0000ff',yellow:'#ffff00',orange:'#ffa500',purple:'#800080',cyan:'#00ffff',magenta:'#ff00ff',brown:'#8b4513',pink:'#ffc0cb',gray:'#808080',grey:'#808080'};\n"
-       "  const key = String(s).trim().toLowerCase();\n"
-       "  return named[key] || String(s);\n"
-       "}\n"
-       "function __nexSpeedDelay(spd) {\n"
-       "  if (spd <= 0) return 0;\n"
-       "  if (spd >= 10) return 5;\n"
-       "  return Math.floor(200 / spd);\n"
-       "}\n"
-       "class NexWindow {\n"
-       "  constructor(a, b, c) {\n"
-       "    if (!__nexHasDom) throw 'Window/Turtle requires a browser DOM environment';\n"
-       "    let title = 'Nex Turtle Graphics', w = 800, h = 600;\n"
-       "    if (typeof a === 'string' && b === undefined) { title = a; }\n"
-       "    else if (typeof a === 'string' && typeof b === 'number' && typeof c === 'number') { title = a; w = b; h = c; }\n"
-       "    else if (typeof a === 'number' && typeof b === 'number' && c === undefined) { w = a; h = b; }\n"
-       "    this.width = w; this.height = h; this.bgColor = '#ffffff'; this.drawColor = '#000000'; this.fontSize = 14;\n"
-       "    this.canvas = document.createElement('canvas'); this.canvas.width = w; this.canvas.height = h;\n"
-       "    this.overlay = document.createElement('canvas'); this.overlay.width = w; this.overlay.height = h;\n"
-       "    this.ctx = this.canvas.getContext('2d'); this.overlayCtx = this.overlay.getContext('2d'); this.turtles = [];\n"
-       "    this.container = document.createElement('div');\n"
-       "    this.container.style.position = 'relative'; this.container.style.width = w + 'px'; this.container.style.height = h + 'px';\n"
-       "    this.container.style.border = '1px solid #d0d0d0'; this.container.style.margin = '8px 0';\n"
-       "    this.canvas.style.position = 'absolute'; this.canvas.style.left = '0'; this.canvas.style.top = '0';\n"
-       "    this.overlay.style.position = 'absolute'; this.overlay.style.left = '0'; this.overlay.style.top = '0'; this.overlay.style.pointerEvents = 'none';\n"
-       "    this.container.appendChild(this.canvas); this.container.appendChild(this.overlay);\n"
-       "    this.ctx.fillStyle = '#ffffff'; this.ctx.fillRect(0, 0, w, h);\n"
-       "    this.title = title;\n"
-       "  }\n"
-       "  vw() { return this.width; }\n"
-       "  vh() { return this.height; }\n"
-       "  show() { if (!this.container.isConnected) document.body.appendChild(this.container); document.title = this.title; this.repaintCanvas(); return null; }\n"
-       "  close() { if (this.container.isConnected) this.container.remove(); return null; }\n"
-       "  clear() { this.ctx.fillStyle = this.bgColor; this.ctx.fillRect(0, 0, this.width, this.height); this.repaintCanvas(); return null; }\n"
-       "  bgcolor(colorStr) { this.bgColor = __nexParseColor(colorStr); return this.clear(); }\n"
-       "  refresh() { this.repaintCanvas(); return null; }\n"
-       "  set_color(color) { this.drawColor = __nexParseColor(color); return null; }\n"
-       "  set_font_size(size) { this.fontSize = size | 0; return null; }\n"
-       "  draw_line(x1, y1, x2, y2) { this.ctx.strokeStyle = this.drawColor; this.ctx.beginPath(); this.ctx.moveTo(x1, y1); this.ctx.lineTo(x2, y2); this.ctx.stroke(); return null; }\n"
-       "  draw_rect(x, y, w, h) { this.ctx.strokeStyle = this.drawColor; this.ctx.strokeRect(x, y, w, h); return null; }\n"
-       "  fill_rect(x, y, w, h) { this.ctx.fillStyle = this.drawColor; this.ctx.fillRect(x, y, w, h); return null; }\n"
-       "  draw_circle(x, y, r) { this.ctx.strokeStyle = this.drawColor; this.ctx.beginPath(); this.ctx.arc(x, y, r, 0, Math.PI * 2); this.ctx.stroke(); return null; }\n"
-       "  fill_circle(x, y, r) { this.ctx.fillStyle = this.drawColor; this.ctx.beginPath(); this.ctx.arc(x, y, r, 0, Math.PI * 2); this.ctx.fill(); return null; }\n"
-       "  draw_text(text, x, y) { this.ctx.fillStyle = this.drawColor; this.ctx.font = this.fontSize + 'px sans-serif'; this.ctx.fillText(String(text), x, y); return null; }\n"
-       "  draw_image(img, x, y) { this.ctx.drawImage(img.image, x, y); return null; }\n"
-       "  draw_image_scaled(img, x, y, w, h) { this.ctx.drawImage(img.image, x, y, w, h); return null; }\n"
-       "  draw_image_rotated(img, x, y, angle) { const iw = img.width || 0, ih = img.height || 0, cx = x + iw / 2, cy = y + ih / 2; this.ctx.save(); this.ctx.translate(cx, cy); this.ctx.rotate(angle * Math.PI / 180); this.ctx.drawImage(img.image, -iw / 2, -ih / 2); this.ctx.restore(); return null; }\n"
-       "  sleep(ms) { const end = Date.now() + ms; while (Date.now() < end) {} return null; }\n"
-       "  repaintCanvas() {\n"
-       "    const g = this.overlayCtx; g.clearRect(0, 0, this.width, this.height);\n"
-       "    for (const t of this.turtles) {\n"
-       "      if (!t.visible) continue;\n"
-       "      const cx = this.width / 2 + t.x, cy = this.height / 2 - t.y;\n"
-       "      g.save(); g.translate(cx, cy); g.rotate(-t.heading * Math.PI / 180); g.fillStyle = __nexParseColor(t.colorName);\n"
-       "      if (t.shapeName === 'circle') { g.beginPath(); g.arc(0, 0, 6, 0, Math.PI * 2); g.fill(); }\n"
-       "      else { g.beginPath(); g.moveTo(12, 0); g.lineTo(-6, -7); g.lineTo(-6, 7); g.closePath(); g.fill(); }\n"
-       "      g.restore();\n"
-       "    }\n"
-       "  }\n"
-       "}\n"
-       "class NexImage {\n"
-       "  constructor(src) {\n"
-       "    this.image = new Image(); this.width = 0; this.height = 0;\n"
-       "    this.image.onload = () => { this.width = this.image.naturalWidth; this.height = this.image.naturalHeight; };\n"
-       "    if (src !== undefined) this.image.src = String(src);\n"
-       "  }\n"
-       "  static from_file(path) { return new NexImage(path); }\n"
-       "}\n"
-       "class NexTurtle {\n"
-       "  constructor(win) {\n"
-       "    this.window = win; this.x = 0; this.y = 0; this.heading = 90; this.penDown = true; this.colorName = 'black';\n"
-       "    this.penSz = 1; this.spd = 6; this.shapeName = 'classic'; this.visible = true; this.filling = false; this.fillPoints = []; this.fillColor = 'black';\n"
-       "    win.turtles.push(this); win.repaintCanvas();\n"
-       "  }\n"
-       "  xpos() { return this.x; }\n"
-       "  ypos() { return this.y; }\n"
-       "  surface() { return this.window; }\n"
-       "  __coords(x, y) { return [this.window.vw() / 2 + x, this.window.vh() / 2 - y]; }\n"
-       "  __line(x1, y1, x2, y2) { const g = this.window.ctx; g.strokeStyle = __nexParseColor(this.colorName); g.lineWidth = this.penSz; g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); }\n"
-       "  __delay() { const d = __nexSpeedDelay(this.spd); if (d > 0) this.window.sleep(d); }\n"
-       "  forward(dist) { const r = this.heading * Math.PI / 180; const nx = this.x + dist * Math.cos(r); const ny = this.y + dist * Math.sin(r); const [sx, sy] = this.__coords(this.x, this.y); const [ex, ey] = this.__coords(nx, ny); if (this.penDown) this.__line(sx, sy, ex, ey); this.x = nx; this.y = ny; if (this.filling) this.fillPoints.push([nx, ny]); this.window.repaintCanvas(); this.__delay(); return null; }\n"
-       "  backward(dist) { return this.forward(-dist); }\n"
-       "  right(angle) { this.heading -= angle; this.window.repaintCanvas(); return null; }\n"
-       "  left(angle) { this.heading += angle; this.window.repaintCanvas(); return null; }\n"
-       "  penup() { this.penDown = false; return null; }\n"
-       "  pendown() { this.penDown = true; return null; }\n"
-       "  color(c) { this.colorName = String(c); this.fillColor = String(c); this.window.repaintCanvas(); return null; }\n"
-       "  pensize(s) { this.penSz = s; return null; }\n"
-       "  speed(s) { this.spd = s; return null; }\n"
-       "  shape(s) { this.shapeName = (String(s).toLowerCase() === 'circle') ? 'circle' : 'classic'; this.window.repaintCanvas(); return null; }\n"
-       "  goto(x, y) { const [sx, sy] = this.__coords(this.x, this.y); const [ex, ey] = this.__coords(x, y); if (this.penDown) this.__line(sx, sy, ex, ey); this.x = x; this.y = y; if (this.filling) this.fillPoints.push([x, y]); this.window.repaintCanvas(); this.__delay(); return null; }\n"
-       "  circle(r) { if (this.penDown) { const [cx, cy] = this.__coords(this.x, this.y); const g = this.window.ctx; g.strokeStyle = __nexParseColor(this.colorName); g.lineWidth = this.penSz; g.beginPath(); g.arc(cx, cy, Math.abs(r), 0, Math.PI * 2); g.stroke(); } this.window.repaintCanvas(); this.__delay(); return null; }\n"
-       "  begin_fill() { this.filling = true; this.fillPoints = [[this.x, this.y]]; this.fillColor = this.colorName; return null; }\n"
-       "  end_fill() { if (this.filling && this.fillPoints.length >= 3) { const g = this.window.ctx; g.fillStyle = __nexParseColor(this.fillColor); const [fx, fy] = this.fillPoints[0]; const [sx, sy] = this.__coords(fx, fy); g.beginPath(); g.moveTo(sx, sy); for (let i = 1; i < this.fillPoints.length; i++) { const [px, py] = this.fillPoints[i]; const [cx, cy] = this.__coords(px, py); g.lineTo(cx, cy); } g.closePath(); g.fill(); } this.filling = false; this.fillPoints = []; this.window.repaintCanvas(); return null; }\n"
-       "  hide() { this.visible = false; this.window.repaintCanvas(); return null; }\n"
-       "  show() { this.visible = true; this.window.repaintCanvas(); return null; }\n"
        "}\n"))
 
 (defn generate-function-globals
@@ -3036,7 +2919,7 @@
          function-names (set (map :name functions))
          js-imports (keep generate-import imports)
          function-base (generate-function-base-class)
-         graphics-runtime (generate-graphics-runtime)
+         runtime-helpers (generate-runtime-helpers)
          function-globals (generate-function-globals functions)]
      (binding [*function-names* function-names]
        (let [classes-by-name (into {} (map (juxt :name identity) classes))
@@ -3044,7 +2927,7 @@
              parts (concat js-imports
                            (when (seq js-imports) [""])
                            [function-base]
-                           ["" graphics-runtime]
+                           ["" runtime-helpers]
                            (when (seq js-classes) [""])
                            js-classes
                            (when function-globals [""])
@@ -3079,7 +2962,7 @@
 (defn translate-file
   "Translate a Nex file to JavaScript, writing one file per class to output-dir.
 
-  Writes: Function.js, NexWindow.js (graphics runtime), NexGlobals.js (if functions exist),
+  Writes: Function.js, NexGlobals.js (if functions exist),
           <ClassName>.js for each class, and main.js.
 
   Returns a map of {filename -> code-string}.
@@ -3101,7 +2984,7 @@
          functions (:functions ast)
          function-names (set (map :name functions))
          function-base (generate-function-base-class)
-         graphics-runtime (generate-graphics-runtime)
+         runtime-helpers (generate-runtime-helpers)
          function-globals (generate-function-globals functions)
          main-code (binding [*function-names* function-names]
                      (generate-main ast))
@@ -3109,7 +2992,7 @@
          class-codes (binding [*function-names* function-names]
                        (mapv (fn [cls] [(:name cls) (generate-class cls opts classes-by-name)]) classes))
          files (into {"Function.js" function-base
-                      "NexWindow.js" graphics-runtime}
+                      "NexRuntime.js" runtime-helpers}
                      (concat
                       (when function-globals
                         [["NexGlobals.js" function-globals]])

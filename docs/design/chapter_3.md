@@ -110,7 +110,7 @@ The generator is large but organised around a small set of recurring tasks: mapp
 - `generate-class`, `generate-method`, `generate-constructor` — class-level emission
 - `generate-expression`, `generate-statement` — local code generation
 
-The generator emits translated Nex classes, helper base classes for function values, runtime support for contracts and invariants, helpers for arrays, maps, sets, cursors, tasks, channels, and I/O, and generated support classes for graphics types such as `NexWindow`, `NexImage`, and `NexTurtle`.
+The generator emits translated Nex classes, helper base classes for function values, runtime support for contracts and invariants, helpers for arrays, maps, sets, cursors, tasks, channels, and I/O.
 
 One design decision worth noting: the Java generator embeds a substantial runtime alongside the translated user code. A translated Nex program carries the parts of the runtime it needs rather than assuming a separately installed Nex VM. This keeps deployment simple at the cost of larger output, a tradeoff that is appropriate for Nex's current use cases.
 

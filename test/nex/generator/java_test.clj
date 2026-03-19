@@ -804,8 +804,7 @@ end"
     (is (= "java.math.BigDecimal" (java/nex-type-to-java "Decimal")))
     (is (= "char" (java/nex-type-to-java "Char")))
     (is (= "boolean" (java/nex-type-to-java "Boolean")))
-    (is (= "String" (java/nex-type-to-java "String")))
-    (is (= "NexImage" (java/nex-type-to-java "Image")))))
+    (is (= "String" (java/nex-type-to-java "String")))))
 
 (deftest binary-operators-test
   (testing "Binary operator translation"
@@ -960,7 +959,6 @@ end")
           ;; Returns :files map and :jar path
           (is (contains? (:files result) "Function.java"))
           (is (contains? (:files result) "Greeter.java"))
-          (is (contains? (:files result) "NexImage.java"))
           (is (contains? (:files result) "Main.java"))
           (is (str/includes? (get (:files result) "Main.java") "Greeter.make()"))
           ;; JAR exists
@@ -1106,21 +1104,6 @@ end"
       (is (str/includes? java-code "(HashMap) NexRuntime.deepClone(m)"))
       (is (str/includes? java-code "NexRuntime.toStringValue(s)"))
       (is (str/includes? java-code "(LinkedHashSet) NexRuntime.deepClone(s)")))))
-
-(deftest image-create-and-methods-java-generation-test
-  (testing "Image create/from_file and width/height methods are supported in Java generator"
-    (let [nex-code "class ImgDemo
-  feature
-    demo() do
-      let img: Image := create Image.from_file(\"sprite.png\")
-      let w: Integer := img.width()
-      let h: Integer := img.height()
-    end
-end"
-          java-code (java/translate nex-code)]
-      (is (str/includes? java-code "NexImage.from_file(\"sprite.png\")"))
-      (is (str/includes? java-code "img.width()"))
-      (is (str/includes? java-code "img.height()")))))
 
 (deftest void-safety-enforced-in-java-generator-test
   (testing "Java generator should fail type-checking for uninitialized attachable fields"

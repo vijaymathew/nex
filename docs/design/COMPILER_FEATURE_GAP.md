@@ -50,7 +50,6 @@ Last updated: 2026-03-19
 
 - `note` annotations (documentation metadata)
 - Nil-safety (`?Type` detachable types, nil checks)
-- Graphics/Turtle built-ins (JVM-only drawing API)
 - HTTP/JSON built-ins as direct codegen
 - User-facing REPL wrapping — some larger statement-shaped inputs still bypass the compiled path even when the internal helper supports them
 
