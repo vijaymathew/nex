@@ -245,6 +245,69 @@
             :kind kind
             :label label}))
 
+(defn- class-def-by-name
+  [state class-name]
+  (.get ^HashMap @(:classes state) class-name))
+
+(defn- collect-effective-field-names
+  [state class-def]
+  (let [class-map @(:classes state)]
+    (letfn [(collect [cls seen]
+              (let [class-name (:name cls)
+                    already? (and class-name (contains? seen class-name))
+                    seen' (if class-name (conj seen class-name) seen)]
+                (if already?
+                  [[] seen]
+                  (let [[parent-fields seen'']
+                        (if-let [parents (:parents cls)]
+                          (reduce (fn [[acc seen-so-far] {:keys [parent]}]
+                                    (if-let [parent-def (.get ^HashMap class-map parent)]
+                                      (let [[fields seen-next] (collect parent-def seen-so-far)]
+                                        [(into acc fields) seen-next])
+                                      [acc seen-so-far]))
+                                  [[] seen']
+                                  parents)
+                          [[] seen'])
+                        local-fields (->> (:body cls)
+                                          (filter #(= :feature-section (:type %)))
+                                          (mapcat :members)
+                                          (filter #(and (= :field (:type %))
+                                                        (not (:constant? %))))
+                                          (map :name)
+                                          vec)]
+                    [(vec (concat parent-fields local-fields)) seen'']))))]
+      (->> (first (collect class-def #{}))
+           distinct
+           vec))))
+
+(defn validate-object-state
+  [state class-name value]
+  (when-not (some? value)
+    (throw (ex-info "Cannot validate nil object on compiled path"
+                    {:class-name class-name})))
+  (let [class-def (class-def-by-name state class-name)]
+    (when-not class-def
+      (throw (ex-info "Missing compiled class metadata for object validation"
+                      {:class-name class-name})))
+    (let [ctx (rebuild-interpreter-ctx state)
+          runtime-name (runtime-type-name state value)
+          compatible? (and (string? class-name)
+                           (string? runtime-name)
+                           (typeinfo/convert-compatible-runtime?
+                            interp/is-parent?
+                            ctx
+                            runtime-name
+                            class-name))]
+      (when-not compatible?
+        (throw (ex-info "Compiled object model mismatch"
+                        {:expected class-name
+                         :runtime runtime-name})))
+      (let [inv-env (interp/make-env (:current-env ctx))]
+        (doseq [field-name (collect-effective-field-names state class-def)]
+          (interp/env-define inv-env field-name (get-user-field value field-name)))
+        (interp/check-class-invariant (assoc ctx :current-env inv-env) class-def))
+      value)))
+
 (defn- concat-string-value
   [state value]
   (cond
@@ -268,6 +331,9 @@
 (defn invoke-builtin
   [state name args]
   (cond
+    (= name "validate-object-state")
+    (validate-object-state state (first args) (second args))
+
     (= name "op:string-concat")
     (apply str (map #(concat-string-value state %) args))
 

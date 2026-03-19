@@ -20,6 +20,8 @@ Last updated: 2026-03-19
 | Inheritance | Single and multi-parent, virtual dispatch, `super` on the composition model |
 | Generic classes | Erased compiled support for parameterized user classes such as `Box[T]` |
 | `convert ... to` | Guard and standalone-statement lowering on compiled path |
+| Class invariants | Enforced on compiled creation, instance methods, and delegated inherited methods |
+| Object-model validation | Compiled runtime validates user-object layout against stored class AST metadata |
 | Loops | `from/until/do`, `repeat`, `across`, including invariant/variant checking |
 | `case` | Statement-form lowering to compiled branches |
 | Scoped blocks | `do...end` lexical scope, including `rescue` / `retry` |
@@ -35,12 +37,9 @@ Last updated: 2026-03-19
 - `select`
 
 ### Object-Oriented
-- Class invariants
-- Broader object-model validation beyond the current compiled REPL path
 
 ### Design by Contract
 
-- Class invariants
 - Broader `old` support beyond the current compiled field-snapshot model used for method/constructor postconditions
 
 ### Exception Handling
@@ -91,8 +90,8 @@ Last updated: 2026-03-19
 
 Based on complexity and impact, these are natural next steps:
 
-1. Class invariants
-2. `select` and direct concurrency lowering
-3. Closures / anonymous functions
-4. File compilation (`.nex` -> JVM classes/jar) beyond the REPL-only compiler path
-5. Broader module support (`import`, `intern`) on the compiled path
+1. `select` and direct concurrency lowering
+2. Closures / anonymous functions
+3. File compilation (`.nex` -> JVM classes/jar) beyond the REPL-only compiler path
+4. Broader module support (`import`, `intern`) on the compiled path
+5. Broader `old` support beyond the current compiled field-snapshot model

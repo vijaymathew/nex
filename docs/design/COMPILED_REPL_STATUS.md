@@ -102,6 +102,8 @@ These are lowered into IR and emitted as JVM bytecode directly:
   - single and multiple inheritance via composition/delegation
   - `super` calls on the composition model
   - erased generic/parameterized class support
+  - class invariants
+  - runtime object-model validation against stored class AST metadata
 - `convert ... to`
   - standalone form
   - guard form inside control flow
@@ -193,6 +195,8 @@ The compiled REPL path currently supports:
   - single and multi-parent inheritance
   - `super` calls in overriding methods
   - generic/parameterized user classes with JVM erasure
+  - class invariants
+  - runtime object-model validation on compiled creation/method paths
   - `convert ... to`
 
 ## Runtime-Backed Receiver Types
@@ -223,7 +227,6 @@ These still fall outside the compiled subset and therefore deopt to the interpre
 
 - `select`
 - contracts
-  - class invariants
   - broader `old` support beyond the current compiled field-snapshot model
 - file/module compilation for the newer object-oriented compiled subset
 - imports and `intern` on the compiled path
@@ -260,7 +263,6 @@ Good candidates for the compiled path today:
 Likely deopt triggers today:
 
 - imports and interns
-- class invariants
 - broader `old` use outside the current compiled postcondition model
 - object-oriented file/module compilation beyond the current compiled REPL/helper path
 - concurrency features beyond runtime-bridged builtin methods

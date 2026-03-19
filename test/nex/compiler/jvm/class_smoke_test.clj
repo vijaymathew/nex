@@ -223,6 +223,63 @@ feature
     end
 end")
 
+(def ^:private invariant-account-program
+  "class Account
+create
+  with_balance(v: Integer) do
+    this.balance := v
+  end
+feature
+  balance: Integer
+
+  set_balance(v: Integer): Integer
+  do
+    this.balance := v
+    result := this.balance
+  end
+invariant
+  non_negative: balance >= 0
+end
+
+class PositiveOnly
+feature
+  value: Integer
+invariant
+  positive: value > 0
+end")
+
+(def ^:private inherited-invariant-program
+  "class A
+feature
+  x: Integer
+
+  set_x(v: Integer): Integer
+  do
+    this.x := v
+    result := this.x
+  end
+invariant
+  parent_positive: x > 0
+end
+
+class B inherit A
+create
+  make(x0, y0: Integer) do
+    this.x := x0
+    this.y := y0
+  end
+feature
+  y: Integer
+
+  break_parent(): Integer
+  do
+    this.x := 0
+    result := y
+  end
+invariant
+  child_positive: y > 0
+end")
+
 (defn- root-cause
   [t]
   (loop [x t]
@@ -388,6 +445,57 @@ end")
       (is (= 1 (:result define-result)))
       (is (some? fail-ex))
       (is (re-find #"Postcondition violation: advanced" (str fail-ex))))))
+
+(deftest compiled-class-invariants-smoke-test
+  (testing "compiled helper enforces class invariants on creation and method exit"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str invariant-account-program
+                                                                     "\n\n"
+                                                                     "let a: Account := create Account.with_balance(10)\n"
+                                                                     "a.balance")))
+          bad-method-ex (try
+                          (compiled-repl/compile-and-eval! session (p/ast "a.set_balance(-1)"))
+                          nil
+                          (catch Throwable t
+                            (root-cause t)))
+          bad-default-create-ex (try
+                                  (compiled-repl/compile-and-eval! session
+                                                                   (p/ast "let p: PositiveOnly := create PositiveOnly"))
+                                  nil
+                                  (catch Throwable t
+                                    (root-cause t)))]
+      (is (:compiled? define-result))
+      (is (= 10 (:result define-result)))
+      (is (some? bad-method-ex))
+      (is (re-find #"Class invariant violation: non_negative" (str bad-method-ex)))
+      (is (some? bad-default-create-ex))
+      (is (re-find #"Class invariant violation: positive" (str bad-default-create-ex))))))
+
+(deftest compiled-inherited-class-invariants-smoke-test
+  (testing "compiled helper validates inherited invariants through the composition model"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str inherited-invariant-program
+                                                                     "\n\n"
+                                                                     "let b: B := create B.make(5, 2)\n"
+                                                                     "b.y")))
+          bad-local-ex (try
+                         (compiled-repl/compile-and-eval! session (p/ast "b.break_parent()"))
+                         nil
+                         (catch Throwable t
+                           (root-cause t)))
+          bad-delegated-ex (try
+                             (compiled-repl/compile-and-eval! session (p/ast "b.set_x(0)"))
+                             nil
+                             (catch Throwable t
+                               (root-cause t)))]
+      (is (:compiled? define-result))
+      (is (= 2 (:result define-result)))
+      (is (some? bad-local-ex))
+      (is (re-find #"Class invariant violation: parent_positive" (str bad-local-ex)))
+      (is (some? bad-delegated-ex))
+      (is (re-find #"Class invariant violation: parent_positive" (str bad-delegated-ex))))))
 
 (deftest compiled-loop-contracts-smoke-test
   (testing "compiled helper enforces loop invariants and variants"

@@ -355,6 +355,16 @@
   [env kind {:keys [label condition]}]
   (ir/assert-node kind label (lower-expression env condition)))
 
+(defn- validate-object-state-ir
+  [env class-name object-ir nex-type]
+  (ir/call-runtime-node "validate-object-state"
+                        [(ir/const-node class-name
+                                        "String"
+                                        (ir/object-jvm-type "java/lang/String"))
+                         object-ir]
+                        nex-type
+                        (resolve-jvm-type env nex-type)))
+
 (defn- default-const-node
   [nex-type jvm-type]
   (case jvm-type
@@ -1046,10 +1056,14 @@
           (when (seq (:args expr))
             (throw (ex-info "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
                             {:expr expr})))
-          (ir/new-node (:internal-name compiled)
-                       class-name
-                       (infer-type env expr)
-                       (resolve-jvm-type env (infer-type env expr))))))
+          (let [nex-type (infer-type env expr)]
+            (validate-object-state-ir env
+                                      class-name
+                                      (ir/new-node (:internal-name compiled)
+                                                   class-name
+                                                   nex-type
+                                                   (resolve-jvm-type env nex-type))
+                                      nex-type)))))
 
     :call
     (if (and (nil? (:target expr))
@@ -1651,6 +1665,15 @@
             require-stmts (mapv #(assertion-ir env-with-old :require %) (:require fn-def))
             ensure-env (assoc env-after-rescue :old-field-locals old-field-locals)
             ensure-stmts (mapv #(assertion-ir ensure-env :ensure %) (:ensure fn-def))
+            class-validation-stmts (if (and (:class-def fn-def)
+                                            (get (:compiled-classes fn-def) current-class))
+                                     [(ir/pop-node
+                                       (validate-object-state-ir ensure-env
+                                                                 current-class
+                                                                 (ir/this-node current-class
+                                                                               (exact-class-jvm-type ensure-env current-class))
+                                                                 current-class))]
+                                     [])
             return-stmt (if (:return-type fn-def)
                           (ir/return-node (ir/local-node "result"
                                                          (:slot result-local)
@@ -1672,7 +1695,8 @@
                                          (concat old-snapshot-stmts
                                                  require-stmts
                                                  lowered-body
-                                                 ensure-stmts))
+                                                 ensure-stmts
+                                                 class-validation-stmts))
                              return-stmt
                              (conj return-stmt))
                      :deferred? (boolean (:deferred? fn-def))
@@ -1738,8 +1762,11 @@
                                         [(ir/pop-node call-ir)]
                                         (map #(assertion-ir env-with-old :ensure %) (:ensure ctor-def))
                                         [(ir/return-node
-                                          (ir/this-node class-name
-                                                        (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                          (validate-object-state-ir {:compiled-classes compiled-classes}
+                                                                    class-name
+                                                                    (ir/this-node class-name
+                                                                                  (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                                                    class-name)
                                           class-name
                                           (ir/object-jvm-type "java/lang/Object"))]))}))
       (let [[env-after-body raw-body] (lower-statements env-with-old (vec (:body ctor-def)))
@@ -1758,8 +1785,11 @@
                                                             :ensure %)
                                              (:ensure ctor-def))
                                         [(ir/return-node
-                                          (ir/this-node class-name
-                                                        (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                          (validate-object-state-ir {:compiled-classes compiled-classes}
+                                                                    class-name
+                                                                    (ir/this-node class-name
+                                                                                  (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                                                    class-name)
                                           class-name
                                           (ir/object-jvm-type "java/lang/Object"))]))})))))
 
@@ -1773,6 +1803,9 @@
                                :nex-type type
                                :jvm-type (resolve-jvm-type {:compiled-classes compiled-classes} type)})
                             (:params method-def))
+        result-slot (+ 2 (reduce + (map (fn [{:keys [jvm-type]}]
+                                          (if (#{:long :double} jvm-type) 2 1))
+                                        params)))
         call-args (mapv (fn [{:keys [name slot nex-type jvm-type]}]
                           (ir/local-node name slot nex-type jvm-type))
                         params)
@@ -1788,7 +1821,13 @@
                                       target-ir
                                       call-args
                                       return-type
-                                      (resolve-jvm-type {:compiled-classes compiled-classes} return-type))]
+                                      (resolve-jvm-type {:compiled-classes compiled-classes} return-type))
+        class-validation (ir/pop-node
+                          (validate-object-state-ir {:compiled-classes compiled-classes}
+                                                    class-name
+                                                    (ir/this-node class-name
+                                                                  (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                                    class-name))]
     (ir/fn-node {:name (:name method-def)
                  :owner (:jvm-name class-meta)
                  :emitted-name (lowered-instance-method-name method-def)
@@ -1796,9 +1835,20 @@
                  :return-type return-type
                  :return-jvm-type (ir/object-jvm-type "java/lang/Object")
                  :locals (vec params)
-                 :body [(ir/return-node call-ir
-                                        return-type
-                                        (ir/object-jvm-type "java/lang/Object"))]
+                 :body (if return-type
+                         [(ir/set-local-node result-slot
+                                             call-ir
+                                             return-type
+                                             (resolve-jvm-type {:compiled-classes compiled-classes} return-type))
+                          class-validation
+                          (ir/return-node (ir/local-node "__result"
+                                                         result-slot
+                                                         return-type
+                                                         (resolve-jvm-type {:compiled-classes compiled-classes} return-type))
+                                          return-type
+                                          (ir/object-jvm-type "java/lang/Object"))]
+                         [(ir/pop-node call-ir)
+                          class-validation])
                  :override? false})))
 
 (defn lower-class-def
