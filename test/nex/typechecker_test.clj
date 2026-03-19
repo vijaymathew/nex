@@ -1106,3 +1106,17 @@ end"
       (is (false? (:success bad-result)))
       (is (some #(str/includes? (tc/format-type-error %) "Array.sort requires elements of a built-in sortable type or Comparable")
                 (:errors bad-result))))))
+
+(deftest test-array-reverse-types-as-array-expression
+  (testing "Array.reverse remains an Array[T] expression so it composes with type_of"
+    (let [code "class Main
+  feature
+    demo(): String
+    do
+      let numbers: Array[Integer] := [1, 2, 3]
+      result := type_of(numbers.reverse)
+    end
+end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result))
+      (is (empty? (:errors result))))))
