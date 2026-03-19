@@ -2,7 +2,7 @@
 
 This note tracks the gap between the tree-walking interpreter and the experimental JVM bytecode compiler. It lists what is already compiled and what still deopts to the interpreter.
 
-Last updated: 2026-03-17
+Last updated: 2026-03-19
 
 
 ## Already Compiled
@@ -13,12 +13,14 @@ Last updated: 2026-03-17
 | Variables | Local load/store, top-level REPL get/set |
 | Arithmetic | `+`, `-`, `*`, `/` |
 | Comparisons | `=`, `/=`, `<`, `<=`, `>`, `>=` |
-| Simple `if` | No `elseif`, expression-shaped branches only |
+| `if` / `elseif` / `when` | Expression and statement lowering on compiled path |
 | Functions | Declare, define, redefine, mutual recursion |
 | Classes | Fields, methods, constructors, constants |
 | Deferred classes | Abstract methods, concrete children |
 | Inheritance | Single and multi-parent, virtual dispatch |
-| Loops | `from/until/do`, `repeat` (no invariant/variant) |
+| Loops | `from/until/do`, `repeat`, `across` (no invariant/variant) |
+| `case` | Statement-form lowering to compiled branches |
+| Scoped blocks | `do...end` lexical scope without `rescue` |
 | Builtins via runtime bridge | `print`, `println`, `type_of`, `sleep`, collection methods, etc. |
 
 
@@ -26,12 +28,8 @@ Last updated: 2026-03-17
 
 ### Control Flow
 
-- `elseif` branches in `if` expressions
-- `case`/`of`/`then` (pattern-matching switch)
-- `when` (inline ternary: `when cond val else val end`)
-- `across` loops (iterator-based: `across collection as item do...end`)
 - Loop invariants and variants (contract checking in loops)
-- Scoped blocks (`do...end` with lexical scope)
+- Scoped blocks with `rescue`
 
 ### Operators
 

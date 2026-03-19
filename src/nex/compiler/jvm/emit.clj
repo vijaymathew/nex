@@ -685,6 +685,26 @@
     :call-runtime
     (emit-pop! mv (emit-expr! mv stmt state-slot))
 
+    :block
+    (doseq [nested (:body stmt)]
+      (emit-stmt! mv nested state-slot))
+
+    :if-stmt
+    (let [else-label (Label.)
+          end-label (Label.)
+          test-type (emit-expr! mv (:test stmt) state-slot)]
+      (when-not (= :boolean test-type)
+        (throw (ex-info "If statement test did not lower to boolean"
+                        {:stmt stmt :test-jvm-type test-type})))
+      (.visitJumpInsn mv Opcodes/IFEQ else-label)
+      (doseq [then-stmt (:then stmt)]
+        (emit-stmt! mv then-stmt state-slot))
+      (.visitJumpInsn mv Opcodes/GOTO end-label)
+      (.visitLabel mv else-label)
+      (doseq [else-stmt (:else stmt)]
+        (emit-stmt! mv else-stmt state-slot))
+      (.visitLabel mv end-label))
+
     :loop
     (let [loop-label (Label.)
           end-label (Label.)]

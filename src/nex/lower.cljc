@@ -35,14 +35,14 @@
 (declare inherited-method-def)
 
 (def ^:private expression-node-types
-  #{:integer :real :string :char :boolean :nil :identifier :binary :call :if :this})
+  #{:integer :real :string :char :boolean :nil :identifier :binary :call :if :when :this})
 
 (def ^:private builtin-function-names
   (set (keys interp/builtins)))
 
 (def ^:private builtin-runtime-receiver-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Set" "Task" "Channel" "Console" "Process"})
+    "Array" "Map" "Set" "Cursor" "Task" "Channel" "Console" "Process"})
 
 (defn- base-type-name
   [t]
@@ -77,7 +77,8 @@
   - `:compiled-classes` map of Nex class-name -> emitted JVM class metadata
   - `:current-class` current Nex class name when lowering instance methods
   - `:fields` map of field-name -> {:owner .. :nex-type .. :jvm-type ..}
-  - `:this-type` current receiver type when lowering instance methods"
+  - `:this-type` current receiver type when lowering instance methods
+  - `:scoped-locals?` force `let` bindings to lower to JVM locals even in top-level code"
   ([] (make-lowering-env {}))
   ([{:keys [locals top-level? repl? state-slot next-slot classes functions imports var-types
             compiled-classes current-class fields this-type] :as opts}]
@@ -93,7 +94,8 @@
     :compiled-classes (or compiled-classes {})
     :current-class current-class
     :fields (or fields {})
-    :this-type this-type}))
+    :this-type this-type
+    :scoped-locals? false}))
 
 (defn- resolve-jvm-type
   [env nex-type]
@@ -237,6 +239,61 @@
 
         :else
         nil))))
+
+(defn- scoped-env
+  [env child-env]
+  (assoc env :next-slot (:next-slot child-env)))
+
+(defn- scoped-child-env
+  [env]
+  (assoc env :scoped-locals? true))
+
+(defn- lower-scoped-statements
+  [env statements]
+  (let [[child-env lowered] (lower-statements (scoped-child-env env) statements)]
+    [(scoped-env env child-env) lowered]))
+
+(defn- elseif->else-expr
+  [elseif else-branch]
+  (if-let [clause (first elseif)]
+    {:type :if
+     :condition (:condition clause)
+     :then (:then clause)
+     :elseif (vec (rest elseif))
+     :else else-branch}
+    (let [else-body (or else-branch [])]
+      (when-not (= 1 (count else-body))
+        (throw (ex-info "Only expression-shaped or result-assignment if branches are supported in lowering"
+                        {:branch else-body})))
+      (if-branch-expression else-body))))
+
+(defn- case-clause-test-expr
+  [env local literal-exprs]
+  (letfn [(eq-expr [literal-expr]
+            (ir/compare-node :eq
+                             (ir/local-node (:name local) (:slot local) (:nex-type local) (:jvm-type local))
+                             (lower-expression env literal-expr)
+                             "Boolean"
+                             :boolean))
+          (combine [exprs]
+            (if (= 1 (count exprs))
+              (eq-expr (first exprs))
+              (ir/if-node (eq-expr (first exprs))
+                          [(ir/const-node true "Boolean" :boolean)]
+                          [(combine (rest exprs))]
+                          "Boolean"
+                          :boolean)))]
+    (combine literal-exprs)))
+
+(defn- lower-case-clauses
+  [env local clauses else-stmts]
+  (if-let [clause (first clauses)]
+    (let [[then-env then-body] (lower-scoped-statements env [(:body clause)])
+          [else-env else-body] (lower-case-clauses (scoped-env env then-env) local (rest clauses) else-stmts)
+          test-expr (case-clause-test-expr env local (:values clause))]
+      [(scoped-env env else-env)
+       [(ir/if-stmt-node test-expr then-body else-body)]])
+    (lower-scoped-statements env else-stmts)))
 
 (defn- visible-class-map
   [env]
@@ -636,10 +693,7 @@
           then-branch (:then expr)
           else-branch (:else expr)
           then-expr (if-branch-expression then-branch)
-          else-expr (if-branch-expression else-branch)]
-      (when (seq elseif)
-        (throw (ex-info "Elseif is not yet supported in lowering"
-                        {:expr expr})))
+          else-expr (elseif->else-expr elseif else-branch)]
       (when (or (nil? then-expr)
                 (nil? else-expr))
         (throw (ex-info "Only expression-shaped or result-assignment if branches are supported in lowering"
@@ -650,6 +704,14 @@
             nex-type (infer-type env expr)
             jvm-type (resolve-jvm-type env nex-type)]
         (ir/if-node test-ir [then-ir] [else-ir] nex-type jvm-type)))
+
+    :when
+    (let [test-ir (lower-expression env (:condition expr))
+          then-ir (lower-expression env (:consequent expr))
+          else-ir (lower-expression env (:alternative expr))
+          nex-type (infer-type env expr)
+          jvm-type (resolve-jvm-type env nex-type)]
+      (ir/if-node test-ir [then-ir] [else-ir] nex-type jvm-type))
 
     :create
     (let [class-name (:class-name expr)
@@ -812,7 +874,7 @@
     (= :let (:type stmt))
     (let [value-ir (lower-expression env (:value stmt))
           nex-type (or (:var-type stmt) (infer-type env (:value stmt)))]
-      (if (:top-level? env)
+      (if (and (:top-level? env) (not (:scoped-locals? env)))
         [(update env :var-types assoc (:name stmt) nex-type)
          (ir/top-set-node (:name stmt) value-ir nex-type (resolve-jvm-type env nex-type))]
         (let [[env' local] (env-add-local env (:name stmt) nex-type)]
@@ -917,11 +979,50 @@
         [env (ir/pop-node call-ir)])
       [env (ir/pop-node (lower-expression env stmt))])
 
+    (= :if (:type stmt))
+    (let [[then-env then-body] (lower-scoped-statements env (:then stmt))
+          [else-env else-body]
+          (if-let [clause (first (:elseif stmt))]
+            (lower-scoped-statements
+             (scoped-env env then-env)
+             [{:type :if
+               :condition (:condition clause)
+               :then (:then clause)
+               :elseif (vec (rest (:elseif stmt)))
+               :else (:else stmt)}])
+            (lower-scoped-statements (scoped-env env then-env) (or (:else stmt) [])))]
+      [(scoped-env env else-env)
+       (ir/if-stmt-node (lower-expression env (:condition stmt)) then-body else-body)])
+
+    (= :scoped-block (:type stmt))
+    (do
+      (when (:rescue stmt)
+        (throw (ex-info "Scoped block rescue is not yet supported in compiled lowering"
+                        {:stmt stmt})))
+      (let [[env' lowered] (lower-scoped-statements env (:body stmt))]
+        [env' (ir/block-node lowered)]))
+
+    (= :case (:type stmt))
+    (let [case-env (scoped-child-env env)
+          [env' local] (env-add-local case-env (str "__case_tmp_" (:next-slot env) "__")
+                                      (infer-type env (:expr stmt)))
+          init-local (ir/set-local-node (:slot local)
+                                        (lower-expression env (:expr stmt))
+                                        (:nex-type local)
+                                        (:jvm-type local))
+          [env'' lowered-clauses] (lower-case-clauses env' local (:clauses stmt)
+                                                      (if-let [else-stmt (:else stmt)]
+                                                        [else-stmt]
+                                                        []))]
+      [(scoped-env env env'')
+       (ir/block-node (into [init-local] lowered-clauses))])
+
     (= :loop (:type stmt))
-    (let [[env-after-init lowered-init] (lower-statements env (:init stmt))
+    (let [loop-env (scoped-child-env env)
+          [env-after-init lowered-init] (lower-statements loop-env (:init stmt))
           test-ir (lower-expression env-after-init (:until stmt))
           [_ lowered-body] (lower-statements env-after-init (:body stmt))]
-      [env (ir/loop-node lowered-init test-ir lowered-body)])
+      [(scoped-env env env-after-init) (ir/loop-node lowered-init test-ir lowered-body)])
 
     (contains? expression-node-types (:type stmt))
     [env (ir/pop-node (lower-expression env stmt))]

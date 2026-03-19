@@ -64,6 +64,30 @@
       (is (= 1 (-> stmt :expr :then first :value)))
       (is (= 2 (-> stmt :expr :else first :value))))))
 
+(deftest lower-elseif-expression-to-nested-if-test
+  (testing "elseif expressions lower to nested ir if nodes"
+    (let [program (p/ast "if x > 10 then 1 elseif x > 5 then 2 else 3 end")
+          {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0046"
+                                                         :var-types {"x" "Integer"}})
+          stmt (first (:body unit))]
+      (is (= :return (:op stmt)))
+      (is (= :if (-> stmt :expr :op)))
+      (is (= 1 (-> stmt :expr :then first :value)))
+      (is (= :if (-> stmt :expr :else first :op)))
+      (is (= 2 (-> stmt :expr :else first :then first :value)))
+      (is (= 3 (-> stmt :expr :else first :else first :value))))))
+
+(deftest lower-when-expression-test
+  (testing "when expressions lower to ir if nodes"
+    (let [program (p/ast "when x > 0 1 else 2 end")
+          {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0047"
+                                                         :var-types {"x" "Integer"}})
+          stmt (first (:body unit))]
+      (is (= :return (:op stmt)))
+      (is (= :if (-> stmt :expr :op)))
+      (is (= 1 (-> stmt :expr :then first :value)))
+      (is (= 2 (-> stmt :expr :else first :value))))))
+
 (deftest lower-top-level-identifier-and-assign-test
   (testing "top-level identifiers and assignments lower through REPL state ops"
     (let [program (p/ast "x := x + 1")
@@ -207,8 +231,39 @@ end")
           [env' loop-ir] (lower/lower-statement env loop-stmt)]
       (is (= :loop (:op loop-ir)))
       (is (= 1 (count (:init loop-ir))))
-      (is (= :top-set (:op (first (:init loop-ir)))))
+      (is (= :set-local (:op (first (:init loop-ir)))))
       (is (some? (:test loop-ir)))
       (is (= :compare (:op (:test loop-ir))))
       (is (= 1 (count (:body loop-ir))))
-      (is (= :top-set (:op (first (:body loop-ir))))))))
+      (is (= :set-local (:op (first (:body loop-ir)))))
+      (is (= {} (:var-types env'))))))
+
+(deftest lower-scoped-block-test
+  (testing "compiled lowering lowers scoped do/end blocks to block ir without leaking bindings"
+    (let [program (p/ast "do
+  let y := 2
+  print(y)
+end")
+          env (lower/make-lowering-env {:top-level? true})
+          scoped-stmt (first (:statements program))
+          [env' block-ir] (lower/lower-statement env scoped-stmt)]
+      (is (= :block (:op block-ir)))
+      (is (= 2 (count (:body block-ir))))
+      (is (= :local (-> block-ir :body second :expr :args first :op)))
+      (is (= {} (:var-types env'))))))
+
+(deftest lower-case-statement-test
+  (testing "compiled lowering lowers case statements to block plus nested if-stmt ir"
+    (let [program (p/ast "case x of
+  1, 2 then print(\"a\")
+  3 then print(\"b\")
+  else print(\"c\")
+end")
+          env (lower/make-lowering-env {:top-level? true
+                                        :var-types {"x" "Integer"}})
+          case-stmt (first (:statements program))
+          [_ block-ir] (lower/lower-statement env case-stmt)]
+      (is (= :block (:op block-ir)))
+      (is (= :set-local (-> block-ir :body first :op)))
+      (is (= :if-stmt (-> block-ir :body second :op)))
+      (is (= :if (-> block-ir :body second :test :op))))))

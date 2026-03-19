@@ -267,6 +267,65 @@ end")
       (is (= 20 (:result inherited-b)))
       (is (= 30 (:result parent-sum))))))
 
+(deftest compiled-elseif-and-when-smoke-test
+  (testing "compiled helper supports elseif expressions and when expressions"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (p/ast (str "let score: Integer := 85\n"
+                              "if score >= 90 then 1 elseif score >= 80 then 2 else 3 end\n"
+                              "when true 20 else 0 end")))]
+      (is (:compiled? result))
+      (is (= 20 (:result result))))))
+
+(deftest compiled-scoped-block-smoke-test
+  (testing "compiled helper supports scoped do/end blocks without leaking local lets"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (p/ast (str "let x: Integer := 1\n"
+                              "do\n"
+                              "  let x: Integer := 2\n"
+                              "  print(x)\n"
+                              "end\n"
+                              "x")))]
+      (is (:compiled? result))
+      (is (= ["2"] (:output result)))
+      (is (= 1 (:result result))))))
+
+(deftest compiled-case-smoke-test
+  (testing "compiled helper supports case statements with multiple literals per clause"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (p/ast (str "let score: Integer := 2\n"
+                              "let tag: Integer := 0\n"
+                              "case score of\n"
+                              "  1, 2 then tag := 20\n"
+                              "  3 then tag := 30\n"
+                              "  else tag := 99\n"
+                              "end\n"
+                              "tag")))]
+      (is (:compiled? result))
+      (is (= 20 (:result result))))))
+
+(deftest compiled-across-smoke-test
+  (testing "compiled helper supports across loops via loop desugaring"
+    (let [session (compiled-repl/make-session)
+          _ (runtime/state-set-value! (:state session) "numbers" (java.util.ArrayList. [1 2 3]))
+          _ (runtime/state-set-type! (:state session) "numbers" {:base-type "Array" :type-params ["Integer"]})
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (p/ast (str "let total: Integer := 0\n"
+                              "across numbers as item do\n"
+                              "  print(item)\n"
+                              "  total := total + 1\n"
+                              "end\n"
+                              "total")))]
+      (is (:compiled? result))
+      (is (= ["1" "2" "3"] (:output result)))
+      (is (= 3 (:result result))))))
+
 ;; ---- Loop support ----
 
 (deftest compiled-loop-basic-sum-test

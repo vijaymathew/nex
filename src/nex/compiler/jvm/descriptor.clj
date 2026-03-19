@@ -47,6 +47,7 @@
       "Set" (ir/object-jvm-type "java/util/LinkedHashSet")
       "Any" (ir/object-jvm-type "java/lang/Object")
       "Function" (ir/object-jvm-type "java/lang/Object")
+      "Cursor" (ir/object-jvm-type "java/lang/Object")
       "Task" (ir/object-jvm-type "java/lang/Object")
       "Channel" (ir/object-jvm-type "java/lang/Object")
       (ir/object-jvm-type (internal-class-name nex-type)))

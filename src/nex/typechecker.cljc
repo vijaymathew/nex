@@ -792,6 +792,18 @@
         "size" (when (= argc 0) {:params [] :return-type "Integer"})
         nil))
 
+    "Cursor"
+    (case method
+      "start" (when (= argc 0)
+                {:params [] :return-type "Void"})
+      "item" (when (= argc 0)
+               {:params [] :return-type "Any"})
+      "next" (when (= argc 0)
+               {:params [] :return-type "Void"})
+      "at_end" (when (= argc 0)
+                 {:params [] :return-type "Boolean"})
+      nil)
+
     nil))
 
 (defn check-call

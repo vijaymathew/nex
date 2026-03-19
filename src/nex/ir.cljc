@@ -225,6 +225,20 @@
    :nex-type "Void"
    :jvm-type :void})
 
+(defn block-node [body]
+  {:op :block
+   :body (vec body)
+   :nex-type "Void"
+   :jvm-type :void})
+
+(defn if-stmt-node [test then else]
+  {:op :if-stmt
+   :test test
+   :then (vec then)
+   :else (vec else)
+   :nex-type "Void"
+   :jvm-type :void})
+
 (defn pop-node [expr]
   {:op :pop
    :expr expr})

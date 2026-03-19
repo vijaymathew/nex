@@ -78,7 +78,11 @@ These are lowered into IR and emitted as JVM bytecode directly:
 - top-level REPL variable load/store
 - arithmetic
 - comparisons
-- simple `if` expressions
+- `if` expressions and statements
+  - `elseif` chains included
+- `when` expressions
+- `case` statements
+- scoped `do...end` blocks
 - top-level function declarations and definitions
 - top-level function calls through compiled REPL state
 
@@ -113,9 +117,12 @@ The compiled REPL path currently supports:
 - arithmetic and comparisons
   - `+`, `-`, `*`, `/`
   - `=`, `/=`, `<`, `<=`, `>`, `>=`
-- simple `if` expressions
-  - no `elseif`
-  - expression-shaped branches only
+- `if` control flow
+  - expression and statement forms
+  - `elseif` chains included
+- `when` expressions
+- `case` statements
+- scoped `do...end` blocks without `rescue`
 - top-level function support
   - declarations
   - definitions
@@ -136,6 +143,7 @@ The compiled REPL path currently supports:
 - loops
   - `from/until/do`
   - `repeat` (desugared to `from/until/do`)
+  - `across` (desugared to `from/until/do`)
   - no invariant or variant checking yet
 
 ## Runtime-Backed Receiver Types
@@ -152,6 +160,7 @@ Target feature calls currently stay on the compiled path only when the receiver 
 - `Array`
 - `Map`
 - `Set`
+- `Cursor`
 - `Task`
 - `Channel`
 - `Console`
@@ -163,14 +172,9 @@ These calls are compiled, but their semantics are provided by the runtime bridge
 
 These still fall outside the compiled subset and therefore deopt to the interpreter:
 
-- ordinary user-defined class method dispatch
-- class definitions as compiled REPL inputs
-- constructor/object allocation codegen in the compiled REPL path
-- inheritance-aware compiled execution
 - loops
-  - `across`
   - loop invariant and variant checking
-- `case`
+- scoped blocks with `rescue`
 - `select`
 - exceptions
   - `raise`
@@ -188,7 +192,6 @@ These still fall outside the compiled subset and therefore deopt to the interpre
   - `Channel`
   - timeouts/cancellation/select lowering
 - closures / lambdas / higher-order compiled function objects
-- general user-object feature calls
 - specialized direct codegen for each builtin
 
 In addition, some inputs still deopt in the user-facing REPL because of the wrapping rule above, even though the internal compiled helper supports them.
