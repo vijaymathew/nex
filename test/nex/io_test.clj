@@ -5,7 +5,6 @@
             [nex.parser :as p]
             [nex.interpreter :as interp]
             [nex.typechecker :as tc]
-            [nex.generator.java :as java]
             [nex.generator.javascript :as js]))
 
 ;; ============================================================================
@@ -111,40 +110,6 @@ end"
       (is (:success result)))))
 
 ;; ============================================================================
-;; JAVA GENERATOR TESTS
-;; ============================================================================
-
-(deftest java-console-create-test
-  (testing "Java generation for create Console"
-    (let [code "class Main
-  feature
-    demo() do
-      let io: Console := create Console
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "new Object() /* Console */")))))
-
-(deftest java-console-methods-test
-  (testing "Java generation for Console methods"
-    (let [code "class Main
-  feature
-    demo() do
-      let io: Console := create Console
-      io.print(\"hello\")
-      io.print_line(\"world\")
-      io.error(\"oops\")
-      io.new_line()
-    end
-end"
-          java-code (java/translate code)]
-      ;; Console methods lower to direct Java stdio calls when target type is known.
-      (is (str/includes? java-code "System.out.print(\"hello\")"))
-      (is (str/includes? java-code "System.out.println(\"world\")"))
-      (is (str/includes? java-code "System.err.println(\"oops\")"))
-      (is (str/includes? java-code "System.out.println()")))))
-
-;; ============================================================================
 ;; JAVASCRIPT GENERATOR TESTS
 ;; ============================================================================
 
@@ -240,21 +205,6 @@ end"
 end"
           result (tc/type-check (p/ast code))]
       (is (:success result)))))
-
-;; ============================================================================
-;; PROCESS GENERATOR TESTS
-;; ============================================================================
-
-(deftest java-process-create-test
-  (testing "Java generation for create Process"
-    (let [code "class Main
-  feature
-    demo() do
-      let p: Process := create Process
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "new Object() /* Process */")))))
 
 (deftest js-process-create-test
   (testing "JS generation for create Process"

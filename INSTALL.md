@@ -202,9 +202,6 @@ You should see the Nex REPL prompt.
 # Preferred JVM backend
 nex compile jvm examples/create_example.nex
 
-# Deprecated legacy Java-source pipeline
-nex compile java examples/create_example.nex
-
 # Compile to JavaScript
 nex compile js examples/create_example.nex
 ```

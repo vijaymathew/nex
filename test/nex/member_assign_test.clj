@@ -1,7 +1,6 @@
 (ns nex.member-assign-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
-            [nex.generator.java :as java]
             [nex.generator.javascript :as js]
             [nex.interpreter :as interp]
             [nex.parser :as p]))
@@ -40,7 +39,7 @@ p.x := 10")]
         (is (= 10 (get (:fields p) :x)))))))
 
 (deftest member-assign-generator-test
-  (testing "Generators emit explicit target field assignment"
+  (testing "JavaScript generator emits explicit target field assignment"
     (let [code "class Point
 feature
   x: Integer
@@ -53,5 +52,4 @@ feature
     p.x := 10
   end
 end"]
-      (is (str/includes? (java/translate code) "p.x = 10;"))
       (is (str/includes? (js/translate code) "p.x = 10;")))))

@@ -5,7 +5,6 @@
             [nex.parser :as p]
             [nex.interpreter :as interp]
             [nex.typechecker :as tc]
-            [nex.generator.java :as java]
             [nex.generator.javascript :as js]))
 
 (def mixed-top-level-code
@@ -73,8 +72,8 @@ let y: Integer := double(5)")
       (is (:success result))
       (is (empty? (:errors result))))))
 
-(deftest generators-emit-top-level-statements-in-main
-  (testing "Java and JavaScript generators execute top-level statements in Main/main.js"
+(deftest javascript-generator-emits-top-level-statements-in-main
+  (testing "JavaScript generator executes top-level statements in main.js"
     (let [code "function double(n: Integer): Integer
 do
   result := n * 2
@@ -85,13 +84,10 @@ print(y)"
           tmp (java.io.File/createTempFile "nex-top-level-let-" ".nex")]
       (try
         (spit tmp code)
-        (let [java-files (java/translate-file (.getPath tmp) nil {})
-              js-files (js/translate-file (.getPath tmp) nil {})
-              main-java (get java-files "Main.java")
+        (let [js-files (js/translate-file (.getPath tmp) nil {})
               main-js (get js-files "main.js")]
-          (is (str/includes? main-java "int y ="))
-          (is (str/includes? main-java "NexGlobals.double.call1(5)"))
-      (is (str/includes? main-js "let y = await NexGlobals.double.call1(5);"))
+          (is (str/includes? main-js "let y = await NexGlobals.double.call1(5);"))
           (is (str/includes? main-js "console.log(y)")))
         (finally
           (.delete tmp))))))
+

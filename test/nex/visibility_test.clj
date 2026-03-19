@@ -1,9 +1,7 @@
 (ns nex.visibility-test
   "Tests for feature visibility modifiers"
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.string :as str]
-            [nex.parser :as p]
-            [nex.generator.java :as java]))
+            [nex.parser :as p]))
 
 (deftest public-feature-parsing-test
   (testing "Parse public feature (default)"
@@ -61,73 +59,6 @@ end"
       (is (= 2 (count sections)))
       (is (= :public (-> sections (nth 0) :visibility :type)))
       (is (= :private (-> sections (nth 1) :visibility :type))))))
-
-(deftest public-java-generation-test
-  (testing "Generate Java code with public features"
-    (let [code "class Test
-  feature
-    x: Integer
-    demo() do
-      print(x)
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "public int x = 0;"))
-      (is (str/includes? java-code "public void demo()")))))
-
-(deftest private-java-generation-test
-  (testing "Generate Java code with private features"
-    (let [code "class Test
-  private feature
-    x: Integer
-    helper() do
-      print(x)
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "private int x = 0;"))
-      (is (str/includes? java-code "private void helper()")))))
-
-(deftest mixed-visibility-java-generation-test
-  (testing "Generate Java code with mixed public/private visibility"
-    (let [code "class Account
-  feature
-    balance: Integer
-    deposit(amount: Integer) do
-      balance := balance + amount
-    end
-
-  private feature
-    internal_id: String
-    generate_id() do
-      print(internal_id)
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "public int balance = 0;"))
-      (is (str/includes? java-code "public void deposit(int amount)"))
-      (is (str/includes? java-code "private String internal_id = \"\";"))
-      (is (str/includes? java-code "private void generate_id()")))))
-
-(deftest visibility-with-contracts-test
-  (testing "Visibility modifiers work with contracts"
-    (let [code "class Secure
-  private feature
-    secret: Integer
-    validate(x: Integer)
-      require
-        positive: x > 0
-      do
-        print(x)
-      ensure
-        checked: secret >= 0
-      end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "private int secret = 0;"))
-      (is (str/includes? java-code "private void validate(int x)"))
-      (is (str/includes? java-code "assert (x > 0)"))
-      (is (str/includes? java-code "assert (secret >= 0)")))))
 
 (deftest empty-feature-section-test
   (testing "Feature section visibility without members should parse"

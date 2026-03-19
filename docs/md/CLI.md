@@ -77,17 +77,11 @@ nex compile <target> <input.nex> [output]
 - `jvm` - Compile to a standalone JVM JAR using the bytecode backend
 - `javascript` or `js` - Generate JavaScript source code
 
-Prefer `jvm` for JVM deployment. `java` remains available for now, but it is deprecated.
+Prefer `jvm` for JVM deployment. `java` remains available for legacy use only and is slated for removal.
 
 **Examples:**
 
 ```bash
-# Deprecated legacy Java-source path
-nex compile java MyClass.nex
-
-# Deprecated legacy Java-source path
-nex compile java MyClass.nex MyClass.java
-
 # Preferred JVM backend
 nex compile jvm MyClass.nex
 
