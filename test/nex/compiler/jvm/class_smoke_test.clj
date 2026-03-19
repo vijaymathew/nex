@@ -326,6 +326,50 @@ end")
       (is (= ["1" "2" "3"] (:output result)))
       (is (= 3 (:result result))))))
 
+(deftest compiled-logical-operator-short-circuit-test
+  (testing "compiled helper short-circuits and/or without evaluating the rhs"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval!
+                         session
+                         (p/ast "function boom(): Boolean
+do
+  print(\"boom\")
+  result := true
+end"))
+          and-result (compiled-repl/compile-and-eval! session (p/ast "false and boom()"))
+          or-result (compiled-repl/compile-and-eval! session (p/ast "true or boom()"))
+          not-result (compiled-repl/compile-and-eval! session (p/ast "not false"))]
+      (is (:compiled? define-result))
+      (is (:compiled? and-result))
+      (is (:compiled? or-result))
+      (is (:compiled? not-result))
+      (is (= [] (:output and-result)))
+      (is (= [] (:output or-result)))
+      (is (= false (:result and-result)))
+      (is (= true (:result or-result)))
+      (is (= true (:result not-result))))))
+
+(deftest compiled-operator-smoke-test
+  (testing "compiled helper supports unary, modulo, power, string concat, and integer bitwise operators"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (p/ast (str "print(\"n=\" + 10)\n"
+                              "let x: Integer := -5\n"
+                              "let m: Integer := 10 % 3\n"
+                              "let p: Integer := 2 ^ 8\n"
+                              "let q: Integer := (5).bitwise_left_shift(1)\n"
+                              "let r: Integer := (6).bitwise_and(3)\n"
+                              "let s: Integer := (0).bitwise_not\n"
+                              "let t: Boolean := not false\n"
+                              "when t x + m + p + q + r + s else 0 end")))
+          real-power (compiled-repl/compile-and-eval! session (p/ast "2.0 ^ 3"))]
+      (is (:compiled? result))
+      (is (:compiled? real-power))
+      (is (= ["\"n=10\""] (:output result)))
+      (is (= 263 (:result result)))
+      (is (= 8.0 (:result real-power))))))
+
 ;; ---- Loop support ----
 
 (deftest compiled-loop-basic-sum-test

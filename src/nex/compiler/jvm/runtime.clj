@@ -1,7 +1,8 @@
 (ns nex.compiler.jvm.runtime
   "Small runtime support for the future JVM bytecode compiler."
   (:require [clojure.string :as str]
-            [nex.interpreter :as interp])
+            [nex.interpreter :as interp]
+            [nex.types.runtime :as rt])
   (:import [clojure.lang DynamicClassLoader]
            [java.lang.reflect Field Method]
            [java.util HashMap]))
@@ -191,10 +192,44 @@
     (.set field owner value)
     nil))
 
+(defn- concat-string-value
+  [state value]
+  (cond
+    (string? value) value
+
+    (nil? value) "nil"
+
+    :else
+    (let [string-value
+          (try
+            (let [result (invoke-user-method state value "to_string" [])]
+              (if (string? result)
+                result
+                (interp/nex-format-value result)))
+            (catch Exception _
+              (interp/call-builtin-method nil nil value "to_string" [])))]
+      (if (string? string-value)
+        string-value
+        (interp/nex-format-value string-value)))))
+
 (defn invoke-builtin
   [state name args]
-  (let [ctx (rebuild-interpreter-ctx state)]
-    (if (str/starts-with? name "method:")
+  (cond
+    (= name "op:string-concat")
+    (apply str (map #(concat-string-value state %) args))
+
+    (= name "op:pow-int")
+    (int (rt/nex-int-pow (int (first args)) (int (second args))))
+
+    (= name "op:pow-long")
+    (long (rt/nex-int-pow (long (first args)) (long (second args))))
+
+    (= name "op:pow-double")
+    (Math/pow (double (first args)) (double (second args)))
+
+    :else
+    (let [ctx (rebuild-interpreter-ctx state)]
+      (if (str/starts-with? name "method:")
       (let [method-name (subs name (count "method:"))
             target (first args)
             method-args (rest args)
@@ -217,7 +252,7 @@
           (throw (ex-info (str "Undefined compiled builtin: " name) {:name name})))
         (let [result (apply builtin-fn ctx args)]
           (reset! (:output state) @(:output ctx))
-          result))))))
+          result)))))))
 
 (defn invoke_builtin
   [state name args]

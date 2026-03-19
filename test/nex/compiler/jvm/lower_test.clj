@@ -143,6 +143,29 @@
     (is (= "method:length" (:helper ret-expr)))
     (is (= 1 (count (:args ret-expr))))))
 
+(deftest lower-operators-to-explicit-ir-test
+  (testing "unary, concat, modulo, and bitwise operators lower to explicit operator-aware IR"
+    (let [concat-program (p/ast "let s: String := \"n=\" + 10")
+          concat-unit (:unit (lower/lower-repl-cell concat-program {:name "nex/repl/Concat_0001"}))
+          concat-expr (-> concat-unit :body first :expr)
+          unary-program (p/ast "let x: Integer := -5")
+          unary-unit (:unit (lower/lower-repl-cell unary-program {:name "nex/repl/Unary_0001"}))
+          unary-expr (-> unary-unit :body first :expr)
+          mod-program (p/ast "let m: Integer := 10 % 3")
+          mod-unit (:unit (lower/lower-repl-cell mod-program {:name "nex/repl/Mod_0001"}))
+          mod-expr (-> mod-unit :body first :expr)
+          bitwise-program (p/ast "let v: Integer := (6).bitwise_and(3)")
+          bitwise-unit (:unit (lower/lower-repl-cell bitwise-program {:name "nex/repl/Bitwise_0001"}))
+          bitwise-expr (-> bitwise-unit :body first :expr)]
+      (is (= :call-runtime (:op concat-expr)))
+      (is (= "op:string-concat" (:helper concat-expr)))
+      (is (= :unary (:op unary-expr)))
+      (is (= :neg (:operator unary-expr)))
+      (is (= :binary (:op mod-expr)))
+      (is (= :mod (:operator mod-expr)))
+      (is (= :binary (:op bitwise-expr)))
+      (is (= :bit-and (:operator bitwise-expr))))))
+
 (deftest lower-deferred-class-metadata-test
   (testing "class lowering carries deferred and parent metadata for later compiler phases"
     (let [program (p/ast "deferred class Shape

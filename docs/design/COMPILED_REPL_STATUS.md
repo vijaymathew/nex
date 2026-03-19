@@ -44,7 +44,6 @@ The user-facing REPL still has an older wrapping rule for inputs that look like 
 
 In particular, inputs beginning with forms such as:
 
-- `let`
 - `if`
 - `from`
 - `repeat`
@@ -63,7 +62,7 @@ So the practical rule today is:
 - expression-shaped top-level inputs can use the compiled REPL path
 - many statement-shaped top-level inputs in the user-facing REPL still use the wrapped/interpreter path
 
-This is why some internal compiler tests can prove compiled support for top-level `let`, while the interactive REPL still treats `let ...` as a wrapped statement.
+Top-level `let` and simple assignment now go through compiled eligibility first in the interactive REPL. The remaining mismatch is mostly larger statement/control-flow forms.
 
 ## What "Supported" Means
 
@@ -77,7 +76,9 @@ These are lowered into IR and emitted as JVM bytecode directly:
 - local variable load/store
 - top-level REPL variable load/store
 - arithmetic
+- logical operators
 - comparisons
+- unary operators
 - `if` expressions and statements
   - `elseif` chains included
 - `when` expressions
@@ -115,8 +116,17 @@ The compiled REPL path currently supports:
   - `let`
   - assignment to known bindings
 - arithmetic and comparisons
-  - `+`, `-`, `*`, `/`
+  - `+`, `-`, `*`, `/`, `%`, `^`
   - `=`, `/=`, `<`, `<=`, `>`, `>=`
+- logical operators
+  - `and`, `or`, `not`
+- string concatenation
+  - `+` when either side is a `String`
+- Integer bitwise operators
+  - shifts
+  - rotates
+  - `and` / `or` / `xor` / `not`
+  - `set` / `unset` / `is_set`
 - `if` control flow
   - expression and statement forms
   - `elseif` chains included
@@ -196,9 +206,11 @@ These still fall outside the compiled subset and therefore deopt to the interpre
 
 In addition, some inputs still deopt in the user-facing REPL because of the wrapping rule above, even though the internal compiled helper supports them.
 
-The main example today is:
+The main examples today are:
 
-- top-level `let` entered directly at the REPL prompt
+- top-level `if` entered directly at the REPL prompt
+- `from` / `repeat` / `across`
+- scoped `do...end` blocks entered directly at the prompt
 
 ## Practical Boundary Today
 

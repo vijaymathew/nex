@@ -11,7 +11,7 @@ Last updated: 2026-03-19
 |---|---|
 | Literals | Integer, Real, String, Char, Boolean, nil |
 | Variables | Local load/store, top-level REPL get/set |
-| Arithmetic | `+`, `-`, `*`, `/` |
+| Arithmetic / Operators | `+`, `-`, `*`, `/`, `%`, `^`, `and`, `or`, `not`, string `+`, Integer bitwise methods |
 | Comparisons | `=`, `/=`, `<`, `<=`, `>`, `>=` |
 | `if` / `elseif` / `when` | Expression and statement lowering on compiled path |
 | Functions | Declare, define, redefine, mutual recursion |
@@ -30,14 +30,6 @@ Last updated: 2026-03-19
 
 - Loop invariants and variants (contract checking in loops)
 - Scoped blocks with `rescue`
-
-### Operators
-
-- Logical operators as direct bytecode: `and`, `or`, `not`
-- Unary negation (`-x`)
-- Modulo (`%`), power (`^`)
-- String concatenation (`+` on strings)
-- Bitwise operators (shift, rotate, and/or/xor/not, set/unset)
 
 ### Object-Oriented
 

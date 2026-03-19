@@ -35,7 +35,7 @@
 (declare inherited-method-def)
 
 (def ^:private expression-node-types
-  #{:integer :real :string :char :boolean :nil :identifier :binary :call :if :when :this})
+  #{:integer :real :string :char :boolean :nil :identifier :binary :unary :call :if :when :this})
 
 (def ^:private builtin-function-names
   (set (keys interp/builtins)))
@@ -43,6 +43,20 @@
 (def ^:private builtin-runtime-receiver-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Cursor" "Task" "Channel" "Console" "Process"})
+
+(def ^:private direct-integer-bitwise-method->op
+  {"bitwise_left_shift" :bit-shl
+   "bitwise_right_shift" :bit-shr
+   "bitwise_logical_right_shift" :bit-ushr
+   "bitwise_rotate_left" :bit-rotl
+   "bitwise_rotate_right" :bit-rotr
+   "bitwise_is_set" :bit-test
+   "bitwise_set" :bit-set
+   "bitwise_unset" :bit-unset
+   "bitwise_and" :bit-and
+   "bitwise_or" :bit-or
+   "bitwise_xor" :bit-xor
+   "bitwise_not" :bit-not})
 
 (defn- base-type-name
   [t]
@@ -140,9 +154,23 @@
           :binary
           (let [op (:operator expr)]
             (cond
-              (#{"+" "-" "*" "/"} op) (infer-type env (:left expr))
+              (#{"-" "*" "/" "%"} op) (infer-type env (:left expr))
+              (= "+" op) (let [left-type (infer-type env (:left expr))
+                               right-type (infer-type env (:right expr))]
+                           (if (or (= "String" (base-type-name left-type))
+                                   (= "String" (base-type-name right-type)))
+                             "String"
+                             left-type))
+              (= "^" op) (tc/power-result-type (infer-type env (:left expr))
+                                               (infer-type env (:right expr)))
               (#{"and" "or" "=" "/=" "<" "<=" ">" ">="} op) "Boolean"
               :else nil))
+
+          :unary
+          (case (:operator expr)
+            "-" (infer-type env (:expr expr))
+            "not" "Boolean"
+            nil)
 
           :if
           (or (some-> (:then expr) if-branch-expression (infer-type env))
@@ -670,15 +698,33 @@
           nex-type (infer-type env expr)
           jvm-type (resolve-jvm-type env nex-type)
           op (:operator expr)]
-      (if (#{"+" "-" "*" "/" "and" "or"} op)
+      (cond
+        (and (= "+" op) (= "String" nex-type))
+        (ir/call-runtime-node "op:string-concat" [left-ir right-ir] nex-type jvm-type)
+
+        (= "^" op)
+        (ir/call-runtime-node (case jvm-type
+                                :int "op:pow-int"
+                                :long "op:pow-long"
+                                :double "op:pow-double"
+                                (throw (ex-info "Unsupported power lowering type"
+                                                {:expr expr :jvm-type jvm-type})))
+                              [left-ir right-ir]
+                              nex-type
+                              jvm-type)
+
+        (#{"+" "-" "*" "/" "%" "and" "or"} op)
         (ir/binary-node (get {"+" :add
                               "-" :sub
                               "*" :mul
                               "/" :div
+                              "%" :mod
                               "and" :and
                               "or" :or}
                              op)
                         left-ir right-ir nex-type jvm-type)
+
+        :else
         (ir/compare-node (get {">" :gt
                                ">=" :gte
                                "<" :lt
@@ -687,6 +733,17 @@
                                "/=" :neq}
                               op)
                          left-ir right-ir nex-type jvm-type)))
+
+    :unary
+    (let [operand-ir (lower-expression env (:expr expr))
+          nex-type (infer-type env expr)
+          jvm-type (resolve-jvm-type env nex-type)]
+      (ir/unary-node (get {"-" :neg
+                           "not" :not}
+                          (:operator expr))
+                     operand-ir
+                     nex-type
+                     jvm-type))
 
     :if
     (let [elseif (:elseif expr)
@@ -852,7 +909,19 @@
 
             :else
             (let [target-type (infer-type env target-expr)]
-              (if (builtin-runtime-receiver-type? target-type)
+              (if-let [direct-op (and (= "Integer" (base-type-name target-type))
+                                      (get direct-integer-bitwise-method->op (:method expr)))]
+                (let [target-ir (lower-expression env target-expr)
+                      nex-type (infer-type env expr)
+                      jvm-type (resolve-jvm-type env nex-type)]
+                  (if (= :bit-not direct-op)
+                    (ir/unary-node direct-op target-ir nex-type jvm-type)
+                    (ir/binary-node direct-op
+                                    target-ir
+                                    (first arg-irs)
+                                    nex-type
+                                    jvm-type)))
+                (if (builtin-runtime-receiver-type? target-type)
                 (let [target-ir (lower-expression env target-expr)
                       nex-type (infer-type env expr)
                       jvm-type (resolve-jvm-type env nex-type)]
@@ -863,7 +932,7 @@
                 (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
                     (throw (ex-info "Unsupported target call expression for lowering"
                                     {:expr expr
-                                     :target-type target-type})))))))))
+                                     :target-type target-type}))))))))))
 
     (throw (ex-info "Unsupported expression node for lowering"
                     {:expr expr :node-type (:type expr)}))))

@@ -108,6 +108,13 @@
    :nex-type nex-type
    :jvm-type jvm-type})
 
+(defn unary-node [operator expr nex-type jvm-type]
+  {:op :unary
+   :operator operator
+   :expr expr
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
 (defn compare-node [operator left right nex-type jvm-type]
   {:op :compare
    :operator operator

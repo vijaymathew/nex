@@ -257,19 +257,37 @@
     [:sub :int] Opcodes/ISUB
     [:mul :int] Opcodes/IMUL
     [:div :int] Opcodes/IDIV
+    [:mod :int] Opcodes/IREM
+    [:bit-shl :int] Opcodes/ISHL
+    [:bit-shr :int] Opcodes/ISHR
+    [:bit-ushr :int] Opcodes/IUSHR
+    [:bit-and :int] Opcodes/IAND
+    [:bit-or :int] Opcodes/IOR
+    [:bit-xor :int] Opcodes/IXOR
 
     [:add :long] Opcodes/LADD
     [:sub :long] Opcodes/LSUB
     [:mul :long] Opcodes/LMUL
     [:div :long] Opcodes/LDIV
+    [:mod :long] Opcodes/LREM
 
     [:add :double] Opcodes/DADD
     [:sub :double] Opcodes/DSUB
     [:mul :double] Opcodes/DMUL
     [:div :double] Opcodes/DDIV
+    [:mod :double] Opcodes/DREM
 
     (throw (ex-info "Unsupported binary opcode emission"
                     {:operator operator :jvm-type jvm-type}))))
+
+(defn- unary-opcode
+  [operator jvm-type]
+  (case [operator jvm-type]
+    [:neg :int] Opcodes/INEG
+    [:neg :long] Opcodes/LNEG
+    [:neg :double] Opcodes/DNEG
+    [:bit-not :int] Opcodes/ICONST_M1
+    nil))
 
 (defn- compare-branch-opcode
   [operator jvm-type]
@@ -345,6 +363,77 @@
     (.visitInsn mv Opcodes/ICONST_1)
     (.visitLabel mv end-label)))
 
+(declare emit-expr!)
+(declare emit-stmt!)
+
+(defn- emit-boolean-short-circuit!
+  [^MethodVisitor mv operator left-expr right-expr state-slot]
+  (let [skip-label (Label.)
+        false-label (Label.)
+        end-label (Label.)
+        left-type (emit-expr! mv left-expr state-slot)]
+    (when-not (= :boolean left-type)
+      (throw (ex-info "Logical operator requires boolean lhs"
+                      {:operator operator :jvm-type left-type})))
+    (case operator
+      :and (.visitJumpInsn mv Opcodes/IFEQ false-label)
+      :or (.visitJumpInsn mv Opcodes/IFNE skip-label)
+      (throw (ex-info "Unsupported short-circuit operator"
+                      {:operator operator})))
+    (let [right-type (emit-expr! mv right-expr state-slot)]
+      (when-not (= :boolean right-type)
+        (throw (ex-info "Logical operator requires boolean rhs"
+                        {:operator operator :jvm-type right-type}))))
+    (case operator
+      :and
+      (do
+        (.visitJumpInsn mv Opcodes/IFEQ false-label)
+        (.visitInsn mv Opcodes/ICONST_1)
+        (.visitJumpInsn mv Opcodes/GOTO end-label)
+        (.visitLabel mv false-label)
+        (.visitInsn mv Opcodes/ICONST_0)
+        (.visitLabel mv end-label))
+
+      :or
+      (do
+        (.visitJumpInsn mv Opcodes/IFNE skip-label)
+        (.visitInsn mv Opcodes/ICONST_0)
+        (.visitJumpInsn mv Opcodes/GOTO end-label)
+        (.visitLabel mv skip-label)
+        (.visitInsn mv Opcodes/ICONST_1)
+        (.visitLabel mv end-label)))))
+
+(defn- emit-bit-test!
+  [^MethodVisitor mv left-expr right-expr state-slot]
+  (let [true-label (Label.)
+        end-label (Label.)]
+    (emit-expr! mv left-expr state-slot)
+    (.visitInsn mv Opcodes/ICONST_1)
+    (emit-expr! mv right-expr state-slot)
+    (.visitInsn mv Opcodes/ISHL)
+    (.visitInsn mv Opcodes/IAND)
+    (.visitJumpInsn mv Opcodes/IFNE true-label)
+    (.visitInsn mv Opcodes/ICONST_0)
+    (.visitJumpInsn mv Opcodes/GOTO end-label)
+    (.visitLabel mv true-label)
+    (.visitInsn mv Opcodes/ICONST_1)
+    (.visitLabel mv end-label)))
+
+(defn- emit-bit-set-like!
+  [^MethodVisitor mv operator left-expr right-expr state-slot]
+  (emit-expr! mv left-expr state-slot)
+  (.visitInsn mv Opcodes/ICONST_1)
+  (emit-expr! mv right-expr state-slot)
+  (.visitInsn mv Opcodes/ISHL)
+  (case operator
+    :bit-set (.visitInsn mv Opcodes/IOR)
+    :bit-unset (do
+                 (.visitInsn mv Opcodes/ICONST_M1)
+                 (.visitInsn mv Opcodes/IXOR)
+                 (.visitInsn mv Opcodes/IAND))
+    (throw (ex-info "Unsupported bit-set-like operator"
+                    {:operator operator}))))
+
 (defn- emit-load-values-map!
   [^MethodVisitor mv state-slot]
   (.visitVarInsn mv Opcodes/ALOAD state-slot)
@@ -361,9 +450,6 @@
                     "()Ljava/lang/Object;"
                     false)
   (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name))
-
-(declare emit-expr!)
-(declare emit-stmt!)
 
 (defn- emit-state-load-functions-map!
   [^MethodVisitor mv state-slot]
@@ -559,16 +645,90 @@
         (do (emit-unbox-or-cast! mv (:jvm-type expr))
             (:jvm-type expr))))
 
+    :unary
+    (let [operand-type (emit-expr! mv (:expr expr) state-slot)]
+      (case (:operator expr)
+        :not
+        (do
+          (when-not (= :boolean operand-type)
+            (throw (ex-info "Boolean not requires boolean operand"
+                            {:expr expr :jvm-type operand-type})))
+          (.visitInsn mv Opcodes/ICONST_1)
+          (.visitInsn mv Opcodes/IXOR)
+          (:jvm-type expr))
+
+        :bit-not
+        (do
+          (when-not (= :int operand-type)
+            (throw (ex-info "Bitwise not requires int operand"
+                            {:expr expr :jvm-type operand-type})))
+          (.visitInsn mv Opcodes/ICONST_M1)
+          (.visitInsn mv Opcodes/IXOR)
+          (:jvm-type expr))
+
+        (do
+          (when-not (= operand-type (:jvm-type expr))
+            (throw (ex-info "Unary operand lowered to unexpected JVM type"
+                            {:expr expr
+                             :operand-jvm-type operand-type
+                             :expr-jvm-type (:jvm-type expr)})))
+          (.visitInsn mv (or (unary-opcode (:operator expr) (:jvm-type expr))
+                             (throw (ex-info "Unsupported unary opcode emission"
+                                             {:operator (:operator expr)
+                                              :jvm-type (:jvm-type expr)}))))
+          (:jvm-type expr))))
+
     :binary
-    (let [left-type (emit-expr! mv (:left expr) state-slot)
-          right-type (emit-expr! mv (:right expr) state-slot)]
-      (when (not= left-type right-type)
-        (throw (ex-info "Binary operands lowered to different JVM types"
-                        {:expr expr
-                         :left-jvm-type left-type
-                         :right-jvm-type right-type})))
-      (.visitInsn mv (binary-opcode (:operator expr) (:jvm-type expr)))
-      (:jvm-type expr))
+    (cond
+      (#{:and :or} (:operator expr))
+      (do
+        (emit-boolean-short-circuit! mv (:operator expr) (:left expr) (:right expr) state-slot)
+        (:jvm-type expr))
+
+      (= :bit-rotl (:operator expr))
+      (do
+        (emit-expr! mv (:left expr) state-slot)
+        (emit-expr! mv (:right expr) state-slot)
+        (.visitMethodInsn mv
+                          Opcodes/INVOKESTATIC
+                          "java/lang/Integer"
+                          "rotateLeft"
+                          "(II)I"
+                          false)
+        (:jvm-type expr))
+
+      (= :bit-rotr (:operator expr))
+      (do
+        (emit-expr! mv (:left expr) state-slot)
+        (emit-expr! mv (:right expr) state-slot)
+        (.visitMethodInsn mv
+                          Opcodes/INVOKESTATIC
+                          "java/lang/Integer"
+                          "rotateRight"
+                          "(II)I"
+                          false)
+        (:jvm-type expr))
+
+      (= :bit-test (:operator expr))
+      (do
+        (emit-bit-test! mv (:left expr) (:right expr) state-slot)
+        (:jvm-type expr))
+
+      (#{:bit-set :bit-unset} (:operator expr))
+      (do
+        (emit-bit-set-like! mv (:operator expr) (:left expr) (:right expr) state-slot)
+        (:jvm-type expr))
+
+      :else
+      (let [left-type (emit-expr! mv (:left expr) state-slot)
+            right-type (emit-expr! mv (:right expr) state-slot)]
+        (when (not= left-type right-type)
+          (throw (ex-info "Binary operands lowered to different JVM types"
+                          {:expr expr
+                           :left-jvm-type left-type
+                           :right-jvm-type right-type})))
+        (.visitInsn mv (binary-opcode (:operator expr) (:jvm-type expr)))
+        (:jvm-type expr)))
 
     :compare
     (let [left-type (emit-expr! mv (:left expr) state-slot)
