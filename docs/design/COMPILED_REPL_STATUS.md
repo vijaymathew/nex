@@ -114,11 +114,6 @@ These are still compiled, but the emitted bytecode calls back into the shared Ne
 
 - unqualified builtins such as `print`, `println`, `type_of`, `sleep`, `await_any`, `await_all`
 - builtin-style feature calls on runtime-backed receiver types such as:
-  - `numbers.length`
-  - `numbers.slice(0, 2)`
-  - `numbers.reverse`
-  - `m.contains_key("a")`
-  - `s.contains(2)`
   - `task.await`
   - `ch.receive`
 
@@ -130,6 +125,9 @@ The compiled REPL path currently supports:
 
 - constants
   - `Integer`, `Real`, `String`, `Char`, `Boolean`, `nil`
+  - Array literals like `[1, 2, 3]`
+  - Map literals like `{"a": 1, "b": 2}`
+  - Set literals like `#{1, 2, 3}`
 - variable access
   - locals
   - top-level REPL variables via `NexReplState`
@@ -171,7 +169,13 @@ The compiled REPL path currently supports:
 - legacy `:calls`-only program AST normalization
 - builtin lowering through `:call-runtime`
   - unqualified builtins
-  - builtin-style feature calls on runtime-backed builtin receiver types
+  - runtime-backed feature calls on non-collection builtin receiver types
+- collections
+  - direct compiled Array / Map / Set literals
+  - direct compiled collection methods, including:
+    - Array mutation/access like `add`, `remove`, `put`, `length`, `slice`, `reverse`
+    - Map mutation/access like `put`, `remove`, `contains_key`, `keys`, `values`
+    - Set operations like `contains`, `union`, `difference`, `intersection`
 - loops
   - `from/until/do`
   - `repeat` (desugared to `from/until/do`)
@@ -210,16 +214,13 @@ Target feature calls currently stay on the compiled path only when the receiver 
 - `Char`
 - `Boolean`
 - `String`
-- `Array`
-- `Map`
-- `Set`
 - `Cursor`
 - `Task`
 - `Channel`
 - `Console`
 - `Process`
 
-These calls are compiled, but their semantics are provided by the runtime bridge.
+Array / Map / Set no longer belong in this bucket for their ordinary collection methods. Those now lower through dedicated collection IR and emit direct collection bytecode or collection-specific helpers.
 
 ## What Is Not Supported Yet
 
@@ -283,10 +284,15 @@ x
 A builtin-heavy batch:
 
 ```nex
+let numbers: Array[Integer] := [1, 2, 3]
+let m: Map[String, Integer] := {"a": 1, "b": 2}
+let s: Set[Integer] := #{1, 2, 3}
+
+numbers.add(4)
 print(numbers.length)
 print(m.contains_key("a"))
 print(s.contains(2))
-type_of(numbers.reverse)
+type_of(numbers.slice(0, 2).reverse)
 ```
 
 A legacy `:calls`-only shape is normalized into the same path when the calls are otherwise supported.

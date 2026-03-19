@@ -183,6 +183,34 @@
    :nex-type nex-type
    :jvm-type jvm-type})
 
+(defn array-literal-node [elements nex-type jvm-type]
+  {:op :array-literal
+   :elements (vec elements)
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
+(defn map-literal-node [entries nex-type jvm-type]
+  {:op :map-literal
+   :entries (vec entries)
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
+(defn set-literal-node [elements nex-type jvm-type]
+  {:op :set-literal
+   :elements (vec elements)
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
+(defn collection-method-node
+  [collection-kind method target args nex-type jvm-type]
+  {:op :collection-method
+   :collection-kind collection-kind
+   :method method
+   :target target
+   :args (vec args)
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
 (defn convert-node
   [value binding target-type nex-type jvm-type temp-slot]
   {:op :convert

@@ -35,9 +35,11 @@
 (declare class-jvm-meta)
 (declare inherited-method-def)
 (declare single-super-parent-name)
+(declare infer-call-type)
 
 (def ^:private expression-node-types
-  #{:integer :real :string :char :boolean :nil :identifier :binary :unary :call :if :when :this})
+  #{:integer :real :string :char :boolean :nil :identifier :binary :unary
+    :call :if :when :this :array-literal :map-literal :set-literal})
 
 (def ^:private builtin-function-names
   (set (keys interp/builtins)))
@@ -60,6 +62,19 @@
    "bitwise_xor" :bit-xor
    "bitwise_not" :bit-not})
 
+(def ^:private direct-array-methods
+  #{"get" "add" "push" "add_at" "at" "put" "set" "length" "size" "is_empty"
+    "contains" "index_of" "remove" "reverse" "slice" "sort" "first" "last"
+    "to_string" "equals" "clone" "join" "cursor"})
+
+(def ^:private direct-map-methods
+  #{"get" "try_get" "put" "at" "set" "size" "is_empty" "contains_key"
+    "keys" "values" "remove" "to_string" "equals" "clone" "cursor"})
+
+(def ^:private direct-set-methods
+  #{"contains" "union" "difference" "intersection" "symmetric_difference"
+    "size" "is_empty" "to_string" "equals" "clone" "cursor"})
+
 (defn- base-type-name
   [t]
   (cond
@@ -70,6 +85,70 @@
 (defn- builtin-runtime-receiver-type?
   [t]
   (contains? builtin-runtime-receiver-types (base-type-name t)))
+
+(defn- generic-type-args
+  [t]
+  (or (:type-args t) (:type-params t) []))
+
+(defn- array-type-of
+  [elem-type]
+  {:base-type "Array" :type-params [elem-type]})
+
+(defn- map-type-of
+  [key-type value-type]
+  {:base-type "Map" :type-params [key-type value-type]})
+
+(defn- set-type-of
+  [elem-type]
+  {:base-type "Set" :type-params [elem-type]})
+
+(defn- collection-method-return-type
+  [target-type method]
+  (let [base (base-type-name target-type)
+        [a b] (generic-type-args target-type)]
+    (case base
+      "Array"
+      (case method
+        ("get" "first" "last") (or a "Any")
+        ("add" "push" "add_at" "at" "put" "set" "remove") "Void"
+        ("length" "size" "index_of") "Integer"
+        ("is_empty" "contains" "equals") "Boolean"
+        ("reverse" "slice" "sort" "clone") (or target-type (array-type-of (or a "Any")))
+        ("to_string" "join") "String"
+        "cursor" "Cursor"
+        nil)
+
+      "Map"
+      (case method
+        ("get" "try_get") (or b "Any")
+        ("put" "at" "set" "remove") "Void"
+        "size" "Integer"
+        ("is_empty" "contains_key" "equals") "Boolean"
+        "keys" (array-type-of (or a "Any"))
+        "values" (array-type-of (or b "Any"))
+        "to_string" "String"
+        "clone" (or target-type (map-type-of (or a "Any") (or b "Any")))
+        "cursor" "Cursor"
+        nil)
+
+      "Set"
+      (case method
+        ("contains" "is_empty" "equals") "Boolean"
+        "size" "Integer"
+        ("union" "difference" "intersection" "symmetric_difference" "clone")
+        (or target-type (set-type-of (or a "Any")))
+        "to_string" "String"
+        "cursor" "Cursor"
+        nil)
+      nil)))
+
+(defn- direct-collection-method?
+  [target-type method]
+  (case (base-type-name target-type)
+    "Array" (contains? direct-array-methods method)
+    "Map" (contains? direct-map-methods method)
+    "Set" (contains? direct-set-methods method)
+    false))
 
 (defn- normalize-call-target
   [target]
@@ -188,58 +267,32 @@
             "not" "Boolean"
             nil)
 
+          :array-literal
+          (let [elements (:elements expr)
+                elem-type (or (some-> elements first (infer-type env))
+                              "Any")]
+            (array-type-of elem-type))
+
+          :map-literal
+          (let [entries (:entries expr)
+                key-type (or (some-> entries first :key (infer-type env))
+                             "Any")
+                value-type (or (some-> entries first :value (infer-type env))
+                               "Any")]
+            (map-type-of key-type value-type))
+
+          :set-literal
+          (let [elements (:elements expr)
+                elem-type (or (some-> elements first (infer-type env))
+                              "Any")]
+            (set-type-of elem-type))
+
           :if
           (or (some-> (:then expr) if-branch-expression (infer-type env))
               (some-> (:else expr) if-branch-expression (infer-type env)))
 
           :call
-          (let [raw-target (:target expr)
-                class-target-name (when (string? raw-target)
-                                    (some #(when (= (:name %) raw-target)
-                                             (:name %))
-                                          (:classes env)))
-                target-expr (normalize-call-target raw-target)]
-            (if (nil? target-expr)
-              (when (:this-type env)
-                (some-> (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
-                            (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr))))
-                        function-return-type))
-              (if (and (= :identifier (:type target-expr))
-                       (= "super" (:name target-expr)))
-                (let [parent-name (single-super-parent-name env)
-                      parent-def (get (visible-class-map env) parent-name)]
-                  (if (false? (:has-parens expr))
-                    (or (some-> (class-field-def parent-def (:method expr))
-                                :field-type)
-                        (some-> (class-method-def parent-def (:method expr) 0)
-                                function-return-type)
-                        (some-> (inherited-method-def env parent-def (:method expr) 0)
-                                function-return-type))
-                    (or (some-> (class-method-def parent-def (:method expr) (count (:args expr)))
-                                function-return-type)
-                        (some-> (inherited-method-def env parent-def (:method expr) (count (:args expr)))
-                                function-return-type))))
-              (let [target-type (when-not class-target-name
-                                  (infer-type env target-expr))
-                    base-type (base-type-name target-type)
-                    type-map (generic-type-map env target-type)
-                    class-def (or (when class-target-name
-                                    (get (visible-class-map env) class-target-name))
-                                  (get (visible-class-map env) base-type))]
-                (when class-def
-                  (if (and class-target-name (false? (:has-parens expr)))
-                    (some-> (lookup-class-constant env class-target-name (:method expr))
-                            (#(constant-nex-type env %)))
-                    (if (false? (:has-parens expr))
-                    (or (some-> (class-field-def class-def (:method expr))
-                                :field-type
-                                (#(tc/resolve-generic-type % type-map)))
-                        (some-> (class-method-def class-def (:method expr) (count (:args expr)))
-                                function-return-type
-                                (#(tc/resolve-generic-type % type-map))))
-                    (some-> (class-method-def class-def (:method expr) (count (:args expr)))
-                            function-return-type
-                            (#(tc/resolve-generic-type % type-map))))))))))
+          (infer-call-type env expr)
 
           nil)]
     (or direct-type
@@ -253,6 +306,59 @@
 (defn- expr-jvm-type
   [env expr]
   (resolve-jvm-type env (infer-type env expr)))
+
+(defn- infer-call-type
+  [env expr]
+  (let [raw-target (:target expr)
+        class-target-name (when (string? raw-target)
+                            (some #(when (= (:name %) raw-target)
+                                     (:name %))
+                                  (:classes env)))
+        target-expr (normalize-call-target raw-target)]
+    (if (nil? target-expr)
+      (when (:this-type env)
+        (some-> (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+                    (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr))))
+                function-return-type))
+      (if (and (= :identifier (:type target-expr))
+               (= "super" (:name target-expr)))
+        (let [parent-name (single-super-parent-name env)
+              parent-def (get (visible-class-map env) parent-name)]
+          (if (false? (:has-parens expr))
+            (or (some-> (class-field-def parent-def (:method expr))
+                        :field-type)
+                (some-> (class-method-def parent-def (:method expr) 0)
+                        function-return-type)
+                (some-> (inherited-method-def env parent-def (:method expr) 0)
+                        function-return-type))
+            (or (some-> (class-method-def parent-def (:method expr) (count (:args expr)))
+                        function-return-type)
+                (some-> (inherited-method-def env parent-def (:method expr) (count (:args expr)))
+                        function-return-type))))
+        (let [target-type (when-not class-target-name
+                            (infer-type env target-expr))
+              base-type (base-type-name target-type)
+              type-map (generic-type-map env target-type)
+              class-def (or (when class-target-name
+                              (get (visible-class-map env) class-target-name))
+                            (get (visible-class-map env) base-type))]
+          (or
+           (when class-def
+             (if (and class-target-name (false? (:has-parens expr)))
+               (some-> (lookup-class-constant env class-target-name (:method expr))
+                       (#(constant-nex-type env %)))
+               (if (false? (:has-parens expr))
+                 (or (some-> (class-field-def class-def (:method expr))
+                             :field-type
+                             (#(tc/resolve-generic-type % type-map)))
+                     (some-> (class-method-def class-def (:method expr) (count (:args expr)))
+                             function-return-type
+                             (#(tc/resolve-generic-type % type-map))))
+                 (some-> (class-method-def class-def (:method expr) (count (:args expr)))
+                         function-return-type
+                         (#(tc/resolve-generic-type % type-map)))))
+           (when (direct-collection-method? target-type (:method expr))
+             (collection-method-return-type target-type (:method expr))))))))))
 
 (defn- env-add-local
   [env name nex-type]
@@ -898,6 +1004,30 @@
     :boolean (ir/const-node (:value expr) "Boolean" :boolean)
     :nil (ir/const-node nil "Nil" (ir/object-jvm-type "java/lang/Object"))
 
+    :array-literal
+    (let [nex-type (infer-type env expr)
+          jvm-type (resolve-jvm-type env nex-type)]
+      (ir/array-literal-node (mapv #(lower-expression env %) (:elements expr))
+                             nex-type
+                             jvm-type))
+
+    :map-literal
+    (let [nex-type (infer-type env expr)
+          jvm-type (resolve-jvm-type env nex-type)]
+      (ir/map-literal-node (mapv (fn [{:keys [key value]}]
+                                   {:key (lower-expression env key)
+                                    :value (lower-expression env value)})
+                                 (:entries expr))
+                           nex-type
+                           jvm-type))
+
+    :set-literal
+    (let [nex-type (infer-type env expr)
+          jvm-type (resolve-jvm-type env nex-type)]
+      (ir/set-literal-node (mapv #(lower-expression env %) (:elements expr))
+                           nex-type
+                           jvm-type))
+
     :identifier
     (if-let [{:keys [slot nex-type jvm-type]} (get (:locals env) (:name expr))]
       (ir/local-node (:name expr) slot nex-type jvm-type)
@@ -935,7 +1065,17 @@
     :binary
     (let [left-ir (lower-expression env (:left expr))
           right-ir (lower-expression env (:right expr))
-          nex-type (infer-type env expr)
+          inferred-type (infer-type env expr)
+          nex-type (if (= "Any" inferred-type)
+                     (cond
+                       (#{"+" "-" "*" "/" "%"} (:operator expr))
+                       (:nex-type left-ir)
+
+                       (#{"and" "or" "=" "/=" "<" "<=" ">" ">="} (:operator expr))
+                       "Boolean"
+
+                       :else inferred-type)
+                     inferred-type)
           jvm-type (resolve-jvm-type env nex-type)
           op (:operator expr)]
       (cond
@@ -1229,18 +1369,29 @@
                                     (first arg-irs)
                                     nex-type
                                     jvm-type)))
+                (if (direct-collection-method? target-type (:method expr))
+                  (let [target-ir (lower-expression env target-expr)
+                        nex-type (or (collection-method-return-type target-type (:method expr))
+                                     (infer-type env expr))
+                        jvm-type (resolve-jvm-type env nex-type)]
+                    (ir/collection-method-node (keyword (.toLowerCase ^String (base-type-name target-type)))
+                                               (:method expr)
+                                               target-ir
+                                               arg-irs
+                                               nex-type
+                                               jvm-type))
                 (if (builtin-runtime-receiver-type? target-type)
-                (let [target-ir (lower-expression env target-expr)
-                      nex-type (infer-type env expr)
-                      jvm-type (resolve-jvm-type env nex-type)]
-                  (ir/call-runtime-node (str "method:" (:method expr))
-                                        (into [target-ir] arg-irs)
-                                        nex-type
-                                        jvm-type))
-                (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
-                    (throw (ex-info "Unsupported target call expression for lowering"
-                                    {:expr expr
-                                     :target-type target-type}))))))))))
+                  (let [target-ir (lower-expression env target-expr)
+                        nex-type (infer-type env expr)
+                        jvm-type (resolve-jvm-type env nex-type)]
+                    (ir/call-runtime-node (str "method:" (:method expr))
+                                          (into [target-ir] arg-irs)
+                                          nex-type
+                                          jvm-type))
+                  (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
+                      (throw (ex-info "Unsupported target call expression for lowering"
+                                      {:expr expr
+                                       :target-type target-type})))))))))))
 
     (throw (ex-info "Unsupported expression node for lowering"
                     {:expr expr :node-type (:type expr)}))))

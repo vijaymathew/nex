@@ -24,6 +24,25 @@
       (is (= ["4" "true" "true"] (:output result)))
       (is (= "Array" (:result result))))))
 
+(deftest compiled-collection-literal-and-method-smoke-test
+  (testing "compiled helper supports collection literals and direct collection methods"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (parser/ast
+                   (str "let numbers: Array[Integer] := [1, 2, 3]\n"
+                        "let m: Map[String, Integer] := {\"a\": 1, \"b\": 2}\n"
+                        "let s: Set[Integer] := #{1, 2, 3}\n"
+                        "numbers.add(4)\n"
+                        "numbers.put(0, 9)\n"
+                        "print(numbers.length)\n"
+                        "print(m.contains_key(\"a\"))\n"
+                        "print(s.contains(2))\n"
+                        "type_of(numbers.slice(0, 2).reverse)")))]
+      (is (:compiled? result))
+      (is (= ["4" "true" "true"] (:output result)))
+      (is (= "Array" (:result result))))))
+
 (deftest compiled-legacy-calls-only-builtins-smoke-test
   (testing "legacy calls-only programs can include builtin and builtin-style calls on the compiled path"
     (let [session (compiled-repl/make-session)

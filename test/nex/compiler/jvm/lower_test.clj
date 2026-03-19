@@ -124,7 +124,19 @@
       (is (= 4 (-> stmt :expr :args first :value))))))
 
 
-(deftest lower-builtin-target-call-to-call-runtime-test
+(deftest lower-collection-literals-test
+  (testing "collection literals lower to explicit IR nodes"
+    (let [array-unit (:unit (lower/lower-repl-cell (p/ast "[1, 2, 3]") {:name "nex/repl/ArrayLit_0001"}))
+          map-unit (:unit (lower/lower-repl-cell (p/ast "{\"a\": 1, \"b\": 2}") {:name "nex/repl/MapLit_0001"}))
+          set-unit (:unit (lower/lower-repl-cell (p/ast "#{1, 2, 3}") {:name "nex/repl/SetLit_0001"}))]
+      (is (= :array-literal (-> array-unit :body first :expr :op)))
+      (is (= 3 (count (-> array-unit :body first :expr :elements))))
+      (is (= :map-literal (-> map-unit :body first :expr :op)))
+      (is (= 2 (count (-> map-unit :body first :expr :entries))))
+      (is (= :set-literal (-> set-unit :body first :expr :op)))
+      (is (= 3 (count (-> set-unit :body first :expr :elements)))))))
+
+(deftest lower-collection-target-call-to-collection-method-test
   (let [program {:type :program
                  :imports []
                  :interns []
@@ -139,9 +151,10 @@
         {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/TestBuiltinTarget"
                                                        :var-types {"numbers" {:base-type "Array" :type-params ["Integer"]}}})
         ret-expr (-> unit :body last :expr)]
-    (is (= :call-runtime (:op ret-expr)))
-    (is (= "method:length" (:helper ret-expr)))
-    (is (= 1 (count (:args ret-expr))))))
+    (is (= :collection-method (:op ret-expr)))
+    (is (= :array (:collection-kind ret-expr)))
+    (is (= "length" (:method ret-expr)))
+    (is (= 0 (count (:args ret-expr))))))
 
 (deftest lower-operators-to-explicit-ir-test
   (testing "unary, concat, modulo, and bitwise operators lower to explicit operator-aware IR"

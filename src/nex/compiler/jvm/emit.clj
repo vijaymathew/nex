@@ -14,7 +14,9 @@
 (def ^:private class-version Opcodes/V17)
 (def ^:private repl-state-internal-name "nex/compiler/jvm/runtime/NexReplState")
 (def ^:private atom-internal-name "clojure/lang/Atom")
+(def ^:private arraylist-internal-name "java/util/ArrayList")
 (def ^:private hashmap-internal-name "java/util/HashMap")
+(def ^:private linkedhashset-internal-name "java/util/LinkedHashSet")
 (def ^:private rt-internal-name "clojure/lang/RT")
 (def ^:private var-internal-name "clojure/lang/Var")
  (def ^:private throwable-internal-name "java/lang/Throwable")
@@ -411,6 +413,28 @@
                     "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
                     false))
 
+(defn- runtime-invoke-descriptor
+  [arity]
+  (case arity
+    0 "()Ljava/lang/Object;"
+    1 "(Ljava/lang/Object;)Ljava/lang/Object;"
+    2 "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+    3 "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+    4 "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+    (throw (ex-info "Unsupported runtime invoke arity" {:arity arity}))))
+
+(defn- emit-runtime-call!
+  [^MethodVisitor mv fn-name arg-emitters]
+  (emit-runtime-var! mv fn-name)
+  (doseq [emit! arg-emitters]
+    (emit!))
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    var-internal-name
+                    "invoke"
+                    (runtime-invoke-descriptor (count arg-emitters))
+                    false))
+
 (defn- emit-boolean-short-circuit!
   [^MethodVisitor mv operator left-expr right-expr state-slot]
   (let [skip-label (Label.)
@@ -532,6 +556,65 @@
         (emit-box! mv declared-type)))
     (.visitInsn mv Opcodes/AASTORE)))
 
+(defn- emit-boxed-expr!
+  [^MethodVisitor mv expr state-slot]
+  (let [jvm-type (emit-expr! mv expr state-slot)]
+    (when (contains? ir/primitive-jvm-types jvm-type)
+      (emit-box! mv jvm-type))
+    (ir/object-jvm-type "java/lang/Object")))
+
+(defn- emit-array-literal!
+  [^MethodVisitor mv expr state-slot]
+  (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
+  (.visitInsn mv Opcodes/DUP)
+  (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "()V" false)
+  (doseq [element (:elements expr)]
+    (.visitInsn mv Opcodes/DUP)
+    (emit-boxed-expr! mv element state-slot)
+    (.visitMethodInsn mv
+                      Opcodes/INVOKEVIRTUAL
+                      arraylist-internal-name
+                      "add"
+                      "(Ljava/lang/Object;)Z"
+                      false)
+    (.visitInsn mv Opcodes/POP))
+  (:jvm-type expr))
+
+(defn- emit-map-literal!
+  [^MethodVisitor mv expr state-slot]
+  (.visitTypeInsn mv Opcodes/NEW hashmap-internal-name)
+  (.visitInsn mv Opcodes/DUP)
+  (.visitMethodInsn mv Opcodes/INVOKESPECIAL hashmap-internal-name "<init>" "()V" false)
+  (doseq [{:keys [key value]} (:entries expr)]
+    (.visitInsn mv Opcodes/DUP)
+    (emit-boxed-expr! mv key state-slot)
+    (emit-boxed-expr! mv value state-slot)
+    (.visitMethodInsn mv
+                      Opcodes/INVOKEVIRTUAL
+                      hashmap-internal-name
+                      "put"
+                      "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                      false)
+    (.visitInsn mv Opcodes/POP))
+  (:jvm-type expr))
+
+(defn- emit-set-literal!
+  [^MethodVisitor mv expr state-slot]
+  (.visitTypeInsn mv Opcodes/NEW linkedhashset-internal-name)
+  (.visitInsn mv Opcodes/DUP)
+  (.visitMethodInsn mv Opcodes/INVOKESPECIAL linkedhashset-internal-name "<init>" "()V" false)
+  (doseq [element (:elements expr)]
+    (.visitInsn mv Opcodes/DUP)
+    (emit-boxed-expr! mv element state-slot)
+    (.visitMethodInsn mv
+                      Opcodes/INVOKEVIRTUAL
+                      linkedhashset-internal-name
+                      "add"
+                      "(Ljava/lang/Object;)Z"
+                      false)
+    (.visitInsn mv Opcodes/POP))
+  (:jvm-type expr))
+
 (defn- emit-register-repl-fn!
   [^MethodVisitor mv state-slot owner-internal-name fn-node]
   (emit-state-load-functions-map! mv state-slot)
@@ -618,6 +701,395 @@
                     false)
   :boolean)
 
+(defn- emit-collection-method!
+  [^MethodVisitor mv expr state-slot]
+  (let [{:keys [collection-kind method target args jvm-type]} expr]
+    (case [collection-kind method]
+      [:array "get"]
+      (do
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+        (emit-expr! mv (first args) state-slot)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "get" "(I)Ljava/lang/Object;" false)
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:array "add"]
+      (do
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+        (emit-boxed-expr! mv (first args) state-slot)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "add" "(Ljava/lang/Object;)Z" false)
+        (.visitInsn mv Opcodes/POP)
+        :void)
+
+      [:array "push"]
+      (emit-collection-method! mv (assoc expr :method "add") state-slot)
+
+      [:array "add_at"]
+      (do
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+        (emit-expr! mv (first args) state-slot)
+        (emit-boxed-expr! mv (second args) state-slot)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "add" "(ILjava/lang/Object;)V" false)
+        :void)
+
+      [:array "at"]
+      (emit-collection-method! mv (assoc expr :method "add_at") state-slot)
+
+      [:array "put"]
+      (do
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+        (emit-expr! mv (first args) state-slot)
+        (emit-boxed-expr! mv (second args) state-slot)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "set" "(ILjava/lang/Object;)Ljava/lang/Object;" false)
+        (.visitInsn mv Opcodes/POP)
+        :void)
+
+      [:array "set"]
+      (emit-collection-method! mv (assoc expr :method "put") state-slot)
+
+      [:array "length"]
+      (do
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "size" "()I" false)
+        :int)
+
+      [:array "size"]
+      (emit-collection-method! mv (assoc expr :method "length") state-slot)
+
+      [:array "is_empty"]
+      (do
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "isEmpty" "()Z" false)
+        :boolean)
+
+      [:array "contains"]
+      (do
+        (emit-runtime-call! mv "array-contains"
+                            [(fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
+        :boolean)
+
+      [:array "index_of"]
+      (do
+        (emit-runtime-call! mv "array-index-of"
+                            [(fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Integer")
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Integer" "intValue" "()I" false)
+        :int)
+
+      [:array "remove"]
+      (do
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+        (emit-expr! mv (first args) state-slot)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "remove" "(I)Ljava/lang/Object;" false)
+        (.visitInsn mv Opcodes/POP)
+        :void)
+
+      [:array "reverse"]
+      (do
+        (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
+        (.visitInsn mv Opcodes/DUP)
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "reversed" "()Ljava/util/List;" false)
+        (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
+        jvm-type)
+
+      [:array "slice"]
+      (do
+        (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
+        (.visitInsn mv Opcodes/DUP)
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+        (emit-expr! mv (first args) state-slot)
+        (emit-expr! mv (second args) state-slot)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "subList" "(II)Ljava/util/List;" false)
+        (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
+        jvm-type)
+
+      [:array "first"]
+      (emit-collection-method! mv (assoc expr :method "get" :args [(ir/const-node 0 "Integer" :int)]) state-slot)
+
+      [:array "last"]
+      (do
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+        (.visitInsn mv Opcodes/DUP)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "size" "()I" false)
+        (.visitInsn mv Opcodes/ICONST_1)
+        (.visitInsn mv Opcodes/ISUB)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "get" "(I)Ljava/lang/Object;" false)
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:array "sort"]
+      (do
+        (emit-runtime-call! mv "array-sort"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-expr! mv target state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:array "join"]
+      (do
+        (emit-runtime-call! mv "array-join"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-expr! mv (first args) state-slot))])
+        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
+        jvm-type)
+
+      [:array "to_string"]
+      (do
+        (emit-runtime-call! mv "array-to-string"
+                            [(fn [] (emit-expr! mv target state-slot))])
+        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
+        jvm-type)
+
+      [:array "equals"]
+      (do
+        (emit-runtime-call! mv "deep-equals"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
+        :boolean)
+
+      [:array "clone"]
+      (do
+        (emit-runtime-call! mv "clone-value"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:array "cursor"]
+      (do
+        (emit-runtime-call! mv "collection-cursor"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (.visitLdcInsn mv "Array"))
+                             (fn [] (emit-boxed-expr! mv target state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:map "get"]
+      (do
+        (emit-runtime-call! mv "map-get"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:map "try_get"]
+      (do
+        (emit-runtime-call! mv "map-try-get"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:map "put"]
+      (do
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
+        (emit-boxed-expr! mv (first args) state-slot)
+        (emit-boxed-expr! mv (second args) state-slot)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "put" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;" false)
+        (.visitInsn mv Opcodes/POP)
+        :void)
+
+      [:map "at"]
+      (emit-collection-method! mv (assoc expr :method "put") state-slot)
+
+      [:map "set"]
+      (emit-collection-method! mv (assoc expr :method "put") state-slot)
+
+      [:map "size"]
+      (do
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "size" "()I" false)
+        :int)
+
+      [:map "is_empty"]
+      (do
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "isEmpty" "()Z" false)
+        :boolean)
+
+      [:map "contains_key"]
+      (do
+        (emit-runtime-call! mv "map-contains-key"
+                            [(fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
+        :boolean)
+
+      [:map "keys"]
+      (do
+        (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
+        (.visitInsn mv Opcodes/DUP)
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "keySet" "()Ljava/util/Set;" false)
+        (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
+        jvm-type)
+
+      [:map "values"]
+      (do
+        (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
+        (.visitInsn mv Opcodes/DUP)
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "values" "()Ljava/util/Collection;" false)
+        (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
+        jvm-type)
+
+      [:map "remove"]
+      (do
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
+        (emit-boxed-expr! mv (first args) state-slot)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "remove" "(Ljava/lang/Object;)Ljava/lang/Object;" false)
+        (.visitInsn mv Opcodes/POP)
+        :void)
+
+      [:map "to_string"]
+      (do
+        (emit-runtime-call! mv "map-to-string"
+                            [(fn [] (emit-expr! mv target state-slot))])
+        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
+        jvm-type)
+
+      [:map "equals"]
+      (do
+        (emit-runtime-call! mv "deep-equals"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
+        :boolean)
+
+      [:map "clone"]
+      (do
+        (emit-runtime-call! mv "clone-value"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:map "cursor"]
+      (do
+        (emit-runtime-call! mv "collection-cursor"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (.visitLdcInsn mv "Map"))
+                             (fn [] (emit-boxed-expr! mv target state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:set "contains"]
+      (do
+        (emit-runtime-call! mv "set-contains"
+                            [(fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
+        :boolean)
+
+      [:set "union"]
+      (do
+        (emit-runtime-call! mv "set-union"
+                            [(fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-expr! mv (first args) state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:set "difference"]
+      (do
+        (emit-runtime-call! mv "set-difference"
+                            [(fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-expr! mv (first args) state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:set "intersection"]
+      (do
+        (emit-runtime-call! mv "set-intersection"
+                            [(fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-expr! mv (first args) state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:set "symmetric_difference"]
+      (do
+        (emit-runtime-call! mv "set-symmetric-difference"
+                            [(fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-expr! mv (first args) state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:set "size"]
+      (do
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST linkedhashset-internal-name)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL linkedhashset-internal-name "size" "()I" false)
+        :int)
+
+      [:set "is_empty"]
+      (do
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST linkedhashset-internal-name)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL linkedhashset-internal-name "isEmpty" "()Z" false)
+        :boolean)
+
+      [:set "to_string"]
+      (do
+        (emit-runtime-call! mv "set-to-string"
+                            [(fn [] (emit-expr! mv target state-slot))])
+        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
+        jvm-type)
+
+      [:set "equals"]
+      (do
+        (emit-runtime-call! mv "deep-equals"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
+        :boolean)
+
+      [:set "clone"]
+      (do
+        (emit-runtime-call! mv "clone-value"
+                            [(fn [] (emit-boxed-expr! mv target state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:set "cursor"]
+      (do
+        (emit-runtime-call! mv "collection-cursor"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (.visitLdcInsn mv "Set"))
+                             (fn [] (emit-boxed-expr! mv target state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      (throw (ex-info "Unsupported collection method emission"
+                      {:expr expr})))))
+
 (defn- emit-expr!
   [^MethodVisitor mv expr state-slot]
   (case (:op expr)
@@ -625,6 +1097,15 @@
     (do
       (emit-const! mv expr)
       (:jvm-type expr))
+
+    :array-literal
+    (emit-array-literal! mv expr state-slot)
+
+    :map-literal
+    (emit-map-literal! mv expr state-slot)
+
+    :set-literal
+    (emit-set-literal! mv expr state-slot)
 
     :local
     (do
@@ -745,6 +1226,9 @@
         (do (.visitInsn mv Opcodes/POP) :void)
         (do (emit-unbox-or-cast! mv (:jvm-type expr))
             (:jvm-type expr))))
+
+    :collection-method
+    (emit-collection-method! mv expr state-slot)
 
     :convert
     (emit-convert! mv expr state-slot)

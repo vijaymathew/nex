@@ -223,6 +223,12 @@
     :char true
     :boolean true
     :nil true
+    :array-literal (every? #(supported-expr-in-ctx? ctx %) (:elements expr))
+    :map-literal (every? (fn [{:keys [key value]}]
+                           (and (supported-expr-in-ctx? ctx key)
+                                (supported-expr-in-ctx? ctx value)))
+                         (:entries expr))
+    :set-literal (every? #(supported-expr-in-ctx? ctx %) (:elements expr))
     :create (let [class-def (class-def-in-ctx ctx (:class-name expr))]
               (and (contains? (:compiled-class-names ctx) (:class-name expr))
                    class-def

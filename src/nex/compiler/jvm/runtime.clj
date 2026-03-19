@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]
             [nex.interpreter :as interp]
             [nex.types.runtime :as rt]
+            [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo])
   (:import [clojure.lang DynamicClassLoader]
            [java.lang.reflect Field Method]
@@ -327,6 +328,100 @@
       (if (string? string-value)
         string-value
         (interp/nex-format-value string-value)))))
+
+(defn format-value
+  [value]
+  (interp/nex-format-value value))
+
+(defn deep-equals
+  [a b]
+  (value/nex-deep-equals? interp/nex-object? a b))
+
+(defn clone-value
+  [value]
+  (value/nex-clone-value interp/nex-object? interp/make-object value))
+
+(defn array-contains
+  [values needle]
+  (boolean (some #(deep-equals % needle) values)))
+
+(defn array-index-of
+  [values needle]
+  (loop [idx 0
+         remaining (seq values)]
+    (cond
+      (nil? remaining) -1
+      (deep-equals (first remaining) needle) idx
+      :else (recur (inc idx) (next remaining)))))
+
+(defn map-contains-key
+  [values needle]
+  (boolean
+   (some #(deep-equals (.getKey ^java.util.Map$Entry %) needle)
+         (.entrySet ^java.util.Map values))))
+
+(defn set-contains
+  [values needle]
+  (boolean (some #(deep-equals % needle) values)))
+
+(defn map-get
+  [state m key]
+  (let [ctx (rebuild-interpreter-ctx state)]
+    (interp/call-builtin-method ctx m m "get" [key])))
+
+(defn map-try-get
+  [state m key default]
+  (let [ctx (rebuild-interpreter-ctx state)]
+    (interp/call-builtin-method ctx m m "try_get" [key default])))
+
+(defn array-sort
+  [state values]
+  (let [ctx (rebuild-interpreter-ctx state)
+        result (interp/call-builtin-method ctx values values "sort" [])]
+    (reset! (:output state) @(:output ctx))
+    result))
+
+(defn array-join
+  [state values sep]
+  (let [ctx (rebuild-interpreter-ctx state)
+        result (interp/call-builtin-method ctx values values "join" [sep])]
+    (reset! (:output state) @(:output ctx))
+    result))
+
+(defn collection-cursor
+  [state kind value]
+  (let [ctx (rebuild-interpreter-ctx state)
+        result (interp/call-builtin-method ctx value value "cursor" [])]
+    (reset! (:output state) @(:output ctx))
+    result))
+
+(defn array-to-string
+  [values]
+  (rt/nex-array-str format-value values))
+
+(defn map-to-string
+  [values]
+  (rt/nex-map-str format-value values))
+
+(defn set-to-string
+  [values]
+  (rt/nex-set-str format-value values))
+
+(defn set-union
+  [a b]
+  (rt/nex-set-union a b))
+
+(defn set-difference
+  [a b]
+  (rt/nex-set-difference a b))
+
+(defn set-intersection
+  [a b]
+  (rt/nex-set-intersection a b))
+
+(defn set-symmetric-difference
+  [a b]
+  (rt/nex-set-symmetric-difference a b))
 
 (defn invoke-builtin
   [state name args]

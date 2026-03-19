@@ -9,7 +9,7 @@ Last updated: 2026-03-19
 
 | Feature | Notes |
 |---|---|
-| Literals | Integer, Real, String, Char, Boolean, nil |
+| Literals | Integer, Real, String, Char, Boolean, nil, Array, Map, Set |
 | Variables | Local load/store, top-level REPL get/set |
 | Arithmetic / Operators | `+`, `-`, `*`, `/`, `%`, `^`, `and`, `or`, `not`, string `+`, Integer bitwise methods |
 | Comparisons | `=`, `/=`, `<`, `<=`, `>`, `>=` |
@@ -27,7 +27,8 @@ Last updated: 2026-03-19
 | Scoped blocks | `do...end` lexical scope, including `rescue` / `retry` |
 | Exceptions | `raise`, `rescue`, `retry` |
 | Contracts | `require`, `ensure`, and the current interpreter-style field-based `old` model in compiled method/constructor postconditions |
-| Builtins via runtime bridge | `print`, `println`, `type_of`, `sleep`, collection methods, etc. |
+| Collections | Literal construction plus direct compiled lowering for Array / Map / Set methods |
+| Builtins via runtime bridge | `print`, `println`, `type_of`, `sleep`, task/channel methods, etc. |
 
 
 ## Still Needs Implementation
@@ -55,13 +56,6 @@ Last updated: 2026-03-19
 - Anonymous functions (`fn (x) do...end`)
 - Closures capturing enclosing scope
 - Higher-order functions (passing/returning function objects)
-
-### Collections
-
-- Array literals (`[1, 2, 3]`)
-- Map literals (`{"a": 1, "b": 2}`)
-- Set literals (`{1, 2, 3}`)
-- Direct codegen for collection methods (currently all go through runtime bridge)
 
 ### Modules
 
