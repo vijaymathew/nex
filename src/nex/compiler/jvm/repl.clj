@@ -544,7 +544,7 @@
    :methods (:methods lowered-class)})
 
 (defn- compile-and-register-classes!
-  [session ast]
+  [session ast source-id]
   (let [actual-classes (vec (concat (user-class-defs ast)
                                     (anonymous-class-defs ast)))]
     (when (seq actual-classes)
@@ -562,7 +562,8 @@
                   (lower/lower-class-def class-def {:compiled-classes compiled-map
                                                     :classes visible-classes
                                                     :functions visible-functions
-                                                    :imports visible-imports}))
+                                                    :imports visible-imports
+                                                    :source-file source-id}))
                 compiled-class-defs)]
         (doseq [class-def compiled-class-defs]
           (let [lowered (some #(when (= (:name %) (:name class-def)) %) lowered-classes)
@@ -662,7 +663,7 @@
   session)
 
 (defn- compile-and-register-functions!
-  [session ast]
+  [session ast source-id]
   (when (seq (remove :declaration-only? (:functions ast)))
     (let [current-functions (vals @(:function-asts session))
           current-classes (vals @(:class-asts session))
@@ -677,9 +678,10 @@
                        :functions (:functions ast)
                        :statements []
                        :calls []}
-          _ (compile-and-register-classes! session compile-ast)
+          _ (compile-and-register-classes! session compile-ast source-id)
           {:keys [unit]} (lower/lower-repl-cell compile-ast
                                                 {:name class-name
+                                                 :source-file source-id
                                                  :compiled-classes @(:compiled-classes session)
                                                  :functions other-functions
                                                  :var-types (session-var-types session)})
@@ -715,7 +717,7 @@
        (doseq [[k t] var-types
                :when (not (contains? function-names k))]
          (rt/state-set-type! state k t))
-       (compile-and-register-functions! session prepared-ast)
+       (compile-and-register-functions! session prepared-ast source-id)
        session))))
 
 (defn sync-session->interpreter!
@@ -758,13 +760,14 @@
      (when (eligible-ast? session prepared-ast)
        (try
          (let [class-name (next-class-name! session)
-               _ (compile-and-register-classes! session prepared-ast)
+               _ (compile-and-register-classes! session prepared-ast source-id)
                _ (remember-top-level-ast! session prepared-ast)
                {:keys [unit]} (lower/lower-repl-cell prepared-ast {:name class-name
                                                                    :compiled-classes @(:compiled-classes session)
                                                                    :classes (vals @(:class-asts session))
                                                                    :functions (vals @(:function-asts session))
                                                                    :imports (:imports prepared-ast)
+                                                                   :source-file source-id
                                                                    :var-types (session-var-types session)})
                bytecode (emit/compile-unit->bytes unit)
                binary-name (desc/binary-class-name class-name)

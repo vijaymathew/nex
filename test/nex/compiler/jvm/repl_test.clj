@@ -6,7 +6,31 @@
             [nex.parser :as p]
             [nex.compiler.jvm.repl :as compiled-repl]
             [nex.compiler.jvm.runtime :as runtime]
-            [nex.repl :as repl]))
+            [nex.repl :as repl])
+  (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
+           [java.net InetSocketAddress]
+           [java.nio.charset StandardCharsets]))
+
+(defn- start-test-http-server []
+  (let [server (HttpServer/create (InetSocketAddress. "127.0.0.1" 0) 0)]
+    (.createContext
+     server
+     "/hello"
+     (proxy [HttpHandler] []
+       (handle [^HttpExchange exchange]
+         (let [method (.getRequestMethod exchange)
+               body (slurp (.getRequestBody exchange))
+               text (if (= method "POST")
+                      (str "posted:" body)
+                      "hello")
+               bytes (.getBytes text StandardCharsets/UTF_8)
+               headers (.getResponseHeaders exchange)]
+           (.add headers "X-Nex" "ok")
+           (.sendResponseHeaders exchange 200 (long (alength bytes)))
+           (with-open [os (.getResponseBody exchange)]
+             (.write os bytes))))))
+    (.start server)
+    server))
 
 (deftest repl-compiled-backend-command-and-direct-let-test
   (testing "experimental compiled backend can directly execute top-level let cells"
@@ -60,10 +84,13 @@
                                             (orig-wrap input))]
           (let [if-output (with-out-str
                             (repl/eval-code ctx0 "if true then 42 else 0 end"))
+                case-output (with-out-str
+                              (repl/eval-code ctx0 "case 2 of\n  1 then print(10)\n  2 then print(42)\nelse\n  print(0)\nend"))
                 do-output (with-out-str
                             (repl/eval-code ctx0 "do\n  print(42)\nend"))]
             (is (empty? @wrapped-inputs))
             (is (str/includes? if-output "42"))
+            (is (str/includes? case-output "42"))
             (is (str/includes? do-output "42"))))))))
 
 (deftest repl-compiled-backend-deopt-sync-function-definition-test
@@ -302,27 +329,111 @@ x"))
       (is (= 41 (:result result))))))
 
 (deftest repl-compiled-backend-builtin-print-test
-  (testing "compiled backend lowers builtin print through call-runtime and preserves REPL output"
+  (testing "compiled backend lowers builtin print through a direct helper path and preserves REPL output"
     (binding [repl/*type-checking-enabled* (atom false)
               repl/*repl-var-types* (atom {})
               repl/*repl-backend* (atom :compiled)
               repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
       (let [ctx0 (repl/init-repl-context)
-            output (with-out-str
-                     (repl/eval-code ctx0 "print(1)"))]
+            output (with-redefs [runtime/invoke-builtin
+                                 (fn [& _]
+                                   (throw (ex-info "invoke-builtin should not be used for print" {})))]
+                     (with-out-str
+                       (repl/eval-code ctx0 "print(1)")))]
         (is (str/includes? output "1"))))))
 
 (deftest repl-compiled-backend-builtin-type-of-test
-  (testing "compiled backend lowers builtin type_of through call-runtime"
+  (testing "compiled backend lowers builtin type_of through a direct helper path"
     (binding [repl/*type-checking-enabled* (atom true)
               repl/*repl-var-types* (atom {})
               repl/*repl-backend* (atom :compiled)
               repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
       (let [ctx0 (repl/init-repl-context)
-            output (with-out-str
-                     (repl/eval-code ctx0 "type_of(1)"))]
+            output (with-redefs [runtime/invoke-builtin
+                                 (fn [& _]
+                                   (throw (ex-info "invoke-builtin should not be used for type_of" {})))]
+                     (with-out-str
+                       (repl/eval-code ctx0 "type_of(1)")))]
         (is (str/includes? output "String"))
         (is (str/includes? output "\"Integer\""))))))
+
+(deftest repl-compiled-backend-direct-operator-helper-test
+  (testing "compiled backend does not need invoke-builtin for string concat or power helpers"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-redefs [runtime/invoke-builtin
+                                 (fn [& _]
+                                   (throw (ex-info "invoke-builtin should not be used for direct operator helpers" {})))]
+                     (with-out-str
+                       (repl/eval-code ctx0 "\"n=\" + 10")
+                       (repl/eval-code ctx0 "2 ^ 3")))]
+        (is (str/includes? output "\"n=10\""))
+        (is (str/includes? output "8"))))))
+
+(deftest compiled-repl-json-builtins-direct-helper-test
+  (testing "compiled helper evaluates JSON builtins without the generic builtin trampoline"
+    (let [session (compiled-repl/make-session)
+          result (with-redefs [runtime/invoke-builtin
+                               (fn [& _]
+                                 (throw (ex-info "invoke-builtin should not be used for JSON builtins" {})))]
+                   (compiled-repl/compile-and-eval!
+                    session
+                    (p/ast (str "let q: Char := #34\n"
+                                "json_stringify(json_parse(\"{\" + q + \"name\" + q + \":\" + q + \"nex\" + q + \",\" + q + \"count\" + q + \":3}\"))"))))]
+      (is (:compiled? result))
+      (is (= "{\"name\":\"nex\",\"count\":3}" (:result result))))))
+
+(deftest compiled-repl-http-client-builtins-direct-helper-test
+  (testing "compiled helper evaluates HTTP client builtins without the generic builtin trampoline"
+    (let [server (start-test-http-server)
+          port (.getPort (.getAddress server))
+          base-url (str "http://127.0.0.1:" port "/hello")]
+      (try
+        (let [session (compiled-repl/make-session)
+              result (with-redefs [runtime/invoke-builtin
+                                   (fn [& _]
+                                     (throw (ex-info "invoke-builtin should not be used for HTTP client builtins" {})))]
+                       (compiled-repl/compile-and-eval!
+                        session
+                        (p/ast (str "intern net/Http_Client\n"
+                                    "print(type_of(http_get(\"" base-url "\", 500)))\n"
+                                    "type_of(http_post(\"" base-url "\", \"payload\", 500))"))))]
+          (is (:compiled? result))
+          (is (= ["\"Http_Response\""] (:output result)))
+          (is (= "Http_Response" (:result result))))
+        (finally
+          (.stop server 0))))))
+
+(deftest compiled-repl-http-server-builtins-direct-helper-test
+  (testing "compiled helper evaluates HTTP server builtins without the generic builtin trampoline"
+    (let [session (compiled-repl/make-session)
+          result (with-redefs [runtime/invoke-builtin
+                               (fn [& _]
+                                 (throw (ex-info "invoke-builtin should not be used for HTTP server builtins" {})))]
+                   (compiled-repl/compile-and-eval!
+                    session
+                    (p/ast
+                     (str "let handle := http_server_create(0)\n"
+                          "let port: Integer := http_server_start(handle)\n"
+                          "print(http_server_is_running(handle))\n"
+                          "port"))))]
+      (is (:compiled? result))
+      (is (= ["true"] (:output result)))
+      (let [port (:result result)
+            client (java.net.http.HttpClient/newHttpClient)
+            request (-> (java.net.http.HttpRequest/newBuilder
+                         (java.net.URI/create (str "http://127.0.0.1:" port "/hello")))
+                        (.GET)
+                        (.build))
+            response (.send client request (java.net.http.HttpResponse$BodyHandlers/ofString))]
+        (try
+          (is (= 404 (.statusCode response)))
+          (is (= "Not Found" (.body response)))
+          (finally
+            (compiled-repl/compile-and-eval! session (p/ast "http_server_stop(handle)"))))))))
 
 (deftest repl-compiled-backend-direct-assignment-test
   (testing "compiled backend can update canonical top-level state via assignment"

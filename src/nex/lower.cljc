@@ -2993,6 +2993,7 @@
     {:name class-name
      :jvm-name (:jvm-name class-meta)
      :internal-name (:internal-name class-meta)
+     :source-file (:source-file opts)
      :deferred? (boolean (:deferred? class-def))
      :parents (resolve-parent-metas env class-def)
      :composition-fields (mapv (fn [{:keys [nex-name internal-name composition-field deferred?]}]
@@ -3083,10 +3084,13 @@
     {:env env''
      :unit (ir/unit {:name (or (:name opts) "nex/repl/Cell_0001")
                      :kind :repl-cell
+                     :source-file (:source-file opts)
+                     :locals (vec (vals (:locals env'')))
                      :classes (mapv #(lower-class-def % {:compiled-classes (:compiled-classes opts)
                                                          :classes visible-classes
                                                          :functions visible-functions
-                                                         :imports visible-imports})
+                                                         :imports visible-imports
+                                                         :source-file (:source-file opts)})
                                     (concat actual-classes emitted-anonymous-classes))
                      :functions (mapv #(lower-function unit-name
                                                        visible-functions

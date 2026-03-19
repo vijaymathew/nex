@@ -34,7 +34,7 @@ Last updated: 2026-03-19
 | File compilation | `.nex` file compilation to a standalone shaded JVM jar, including launcher emission and source-relative `intern` handling |
 | Note annotations | Parsed and preserved as documentation metadata; ignored by lowering/emission as intended |
 | Nil-safety | Detachable types (`?Type`), nil checks, `convert` guards, and branch refinement on compiled path |
-| Builtins via runtime bridge | `print`, `println`, `type_of`, `sleep`, and other remaining runtime-backed builtins |
+| Builtins via runtime bridge | Remaining runtime-backed builtins beyond the directly lowered helper set, mainly less common host-facing operations |
 
 
 ## Still Needs Implementation
@@ -45,19 +45,17 @@ Last updated: 2026-03-19
 
 ### Exception Handling
 
-### Misc
-
-- HTTP/JSON built-ins as direct codegen
-
 ### Meta / Infrastructure
 
-- richer local-variable/source-debug metadata beyond the current emitted line numbers
+- richer debug metadata beyond the current emitted:
+  - source file names
+  - statement line tables
+  - local-variable tables with first-use/last-use live ranges
 
 
 ## Suggested Next Candidates
 
 Based on complexity and impact, these are natural next steps:
 
-1. Broader direct lowering for remaining runtime-backed builtins that still use the generic runtime bridge
-2. Richer bytecode debug metadata beyond the current line tables
-3. HTTP/JSON built-ins as direct codegen
+1. Broader direct lowering for the remaining runtime-backed builtins that still use the generic runtime bridge
+2. Further debug-info tightening such as more precise block-scoped local live ranges where the current first-use/last-use tables are still conservative

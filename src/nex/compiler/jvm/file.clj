@@ -116,6 +116,7 @@
          compiled-classes (file-class-metadata source-id prepared-ast)
          {:keys [unit]} (lower/lower-repl-cell prepared-ast
                                                {:name program-internal-name
+                                                :source-file source-id
                                                 :compiled-classes compiled-classes
                                                 :classes []
                                                 :functions []
@@ -129,6 +130,7 @@
                             (emit/compile-launcher->bytes
                              {:internal-name launcher-internal-name
                               :binary-name (desc/binary-class-name launcher-internal-name)
+                              :source-file source-id
                               :program-internal-name program-internal-name
                               :classes-edn (pr-str class-asts)
                               :imports-edn (pr-str (:imports prepared-ast))})}

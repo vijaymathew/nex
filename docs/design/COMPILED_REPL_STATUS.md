@@ -55,7 +55,18 @@ So the practical rule today is:
 - supported top-level expressions and supported statement-shaped inputs can use the compiled REPL path directly
 - wrapper fallback now mainly exists for genuinely unsupported inputs, not for `if` / loop / scoped-block syntax by itself
 
-In addition, emitted JVM methods now carry statement-level source line numbers.
+The raw compiled-first path now also covers other supported top-level statement keywords such as:
+
+- `case`
+- `raise`
+- `retry`
+- top-level `convert ... to`
+
+In addition, emitted JVM classes now carry:
+
+- source file names
+- statement-level source line numbers
+- local-variable tables with first-use/last-use live ranges
 
 ## What "Supported" Means
 
@@ -105,7 +116,27 @@ These are lowered into IR and emitted as JVM bytecode directly:
 
 These are still compiled, but the emitted bytecode calls back into the shared Nex runtime through helper/runtime calls:
 
-- unqualified builtins such as `print`, `println`, `type_of`, `sleep`
+- directly helper-lowered builtins and operator helpers such as:
+  - `print`
+  - `println`
+  - `type_of`
+  - `type_is`
+  - `sleep`
+  - string concatenation
+  - power
+  - HTTP/JSON client and server builtins such as:
+    - `http_get`
+    - `http_post`
+    - `json_parse`
+    - `json_stringify`
+    - `http_server_create`
+    - `http_server_get`
+    - `http_server_post`
+    - `http_server_put`
+    - `http_server_delete`
+    - `http_server_start`
+    - `http_server_stop`
+    - `http_server_is_running`
 - compiled concurrency helpers such as:
   - `spawn`
   - `create Channel`
@@ -117,7 +148,7 @@ These are still compiled, but the emitted bytecode calls back into the shared Ne
   - closure allocation uses a runtime helper that builds a Nex closure object with a captured environment snapshot
   - later invocation still stays on the compiled path through function-object dispatch
 
-This is intentional. It keeps semantics correct while avoiding duplicated builtin implementations in the compiler.
+This is intentional. It keeps semantics correct while avoiding duplicated builtin implementations in the compiler, while still bypassing the older generic `invoke-builtin` trampoline for the common builtin/helper subset above.
 
 ## Supported Now
 
@@ -250,11 +281,28 @@ Array / Map / Set no longer belong in this bucket for their ordinary collection 
 
 ## What Is Not Supported Yet
 
-These still fall outside the compiled subset and therefore deopt to the interpreter:
+The remaining deopts are no longer broad feature areas like "classes" or "exceptions".
+They are now mostly one of these:
 
-- specialized direct codegen for each builtin beyond the current helper/receiver-call paths
+- `with "java" do ... end` / `with "javascript" do ... end`
+  - the walker emits these as `:with`
+  - there is currently no compiled eligibility or lowering path for `:with`
+- inputs that fail the semantic eligibility gate in `nex.compiler.jvm.repl`
+  - assignment to an unknown top-level binding
+  - `create` of a deferred class
+  - calls whose target cannot be resolved to:
+    - a known top-level function
+    - a function object
+    - a compiled user class
+    - an imported Java class/object
+    - a supported runtime-backed builtin receiver family
+- user-facing REPL inputs that still remain outside the compiled subset after raw parse + eligibility checking
 
-In addition, some inputs still deopt in the user-facing REPL when they remain outside the compiled subset after the raw parse + eligibility check.
+One important distinction:
+
+- some builtins still use helper/runtime dispatch rather than bespoke bytecode
+- that does **not** necessarily mean they deopt
+- many of them still stay on the compiled path through helper calls
 
 ## Practical Boundary Today
 
@@ -278,7 +326,10 @@ Good candidates for the compiled path today:
 
 Likely deopt triggers today:
 
-- inputs that remain outside the compiled subset after raw parse + eligibility checking
+- `with "java"` / `with "javascript"` blocks
+- unresolved names or calls rejected by the compiled eligibility gate
+- explicit attempts to instantiate deferred classes
+- any future AST node that reaches the compiled REPL path without a case in `supported-expr-in-ctx?` or `supported-stmt-in-ctx?`
 
 ## File Compilation
 
@@ -380,9 +431,8 @@ This is supported by the internal compiled helper and is covered by compiler/run
 This still deopts today:
 
 ```nex
-class Point
-feature
-  x: Integer
+with "java" do
+  System.out.println("hello")
 end
 ```
 

@@ -4,6 +4,8 @@
             [clojure.string :as str]
             [nex.interpreter :as interp]
             [nex.types.bootstrap :as bootstrap]
+            [nex.types.http :as http]
+            [nex.types.json :as json-types]
             [nex.types.runtime :as rt]
             [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo])
@@ -295,6 +297,28 @@
       (interp/env-define closure-env name value))
     (interp/make-object class-name {} closure-env)))
 
+(defn- compiled-class-binary-name
+  [state class-name]
+  (some-> (.get ^HashMap @(:classes state) class-name)
+          :binary-name))
+
+(defn- instantiate-compiled-object
+  [state class-name field-values]
+  (let [binary-name (compiled-class-binary-name state class-name)]
+    (when binary-name
+      (let [^Class cls (resolve-owner-class state binary-name)
+            ctor (.getDeclaredConstructor cls (into-array Class []))
+            instance (.newInstance ctor (object-array 0))]
+        (doseq [[field-name field-value] field-values]
+          (when-let [^Field field (reflected-field cls (name field-name))]
+            (.set field instance field-value)))
+        instance))))
+
+(defn- make-runtime-object
+  [state class-name field-values]
+  (or (instantiate-compiled-object state class-name field-values)
+      (interp/make-object class-name field-values)))
+
 (defn next-class-name!
   ([state prefix]
    (next-class-name! state "nex/repl" prefix))
@@ -337,6 +361,11 @@
   [state]
   (doseq [line (state-output state)]
     (println line))
+  nil)
+
+(defn- add-output!
+  [state line]
+  (swap! (:output state) conj line)
   nil)
 
 (defn- rebuild-interpreter-ctx
@@ -558,6 +587,195 @@
 (defn format-value
   [value]
   (interp/nex-format-value value))
+
+(defn- object-field-value
+  [value field-name]
+  (cond
+    (interp/nex-object? value)
+    (let [fields (:fields value)]
+      (or (get fields field-name)
+          (get fields (keyword field-name))))
+
+    :else
+    (get-user-field value field-name)))
+
+(defn- http-response-status
+  [response]
+  (or (object-field-value response "status_code")
+      200))
+
+(defn- http-response-body
+  [response]
+  (str (or (object-field-value response "body_text") "")))
+
+(defn- http-response-headers
+  [response]
+  (or (object-field-value response "header_map")
+      (rt/nex-map)))
+
+(defn string-concat
+  [state args]
+  (apply str (map #(concat-string-value state %) args)))
+
+(defn pow-int
+  [a b]
+  (int (rt/nex-int-pow (int a) (int b))))
+
+(defn pow-long
+  [a b]
+  (long (rt/nex-int-pow (long a) (long b))))
+
+(defn pow-double
+  [a b]
+  (Math/pow (double a) (double b)))
+
+(defn builtin-print!
+  [state args]
+  (add-output! state (str/join " " (map format-value args))))
+
+(defn builtin-println!
+  [state args]
+  (add-output! state (str/join " " (map format-value args))))
+
+(defn builtin-type-of
+  [state value]
+  (runtime-type-name state value))
+
+(defn- runtime-type-is
+  [state target-type value]
+  (let [ctx (rebuild-interpreter-ctx state)]
+    (typeinfo/runtime-type-is? #(runtime-type-name state %) interp/is-parent? ctx target-type value)))
+
+(defn builtin-type-is
+  [state target-type value]
+  (runtime-type-is state target-type value))
+
+(defn builtin-sleep!
+  [millis]
+  (Thread/sleep (long millis))
+  nil)
+
+(defn builtin-http-get
+  ([state url]
+   (builtin-http-get state url nil))
+  ([state url timeout-ms]
+   (http/java-http-request (fn [class-name field-values]
+                             (make-runtime-object state class-name field-values))
+                           "GET"
+                           (str url)
+                           nil
+                           timeout-ms)))
+
+(defn builtin-http-post
+  ([state url body]
+   (builtin-http-post state url body nil))
+  ([state url body timeout-ms]
+   (http/java-http-request (fn [class-name field-values]
+                             (make-runtime-object state class-name field-values))
+                           "POST"
+                           (str url)
+                           (str body)
+                           timeout-ms)))
+
+(defn builtin-json-parse
+  [_state text]
+  (json-types/nex-json-parse text))
+
+(defn builtin-json-stringify
+  [_state value]
+  (json-types/nex-json-stringify value))
+
+(defn builtin-http-server-create
+  [port]
+  (http/make-http-server-handle (int port)))
+
+(defn- http-server-register-route!
+  [handle method path handler]
+  (swap! (get-in handle [:routes method]) conj {:path-pattern (str path)
+                                                :handler handler})
+  nil)
+
+(defn builtin-http-server-get!
+  [handle path handler]
+  (http-server-register-route! handle "GET" path handler))
+
+(defn builtin-http-server-post!
+  [handle path handler]
+  (http-server-register-route! handle "POST" path handler))
+
+(defn builtin-http-server-put!
+  [handle path handler]
+  (http-server-register-route! handle "PUT" path handler))
+
+(defn builtin-http-server-delete!
+  [handle path handler]
+  (http-server-register-route! handle "DELETE" path handler))
+
+(defn builtin-http-server-start!
+  [state handle]
+  (let [server (com.sun.net.httpserver.HttpServer/create
+                (java.net.InetSocketAddress. "127.0.0.1" (int @(:port handle))) 0)
+        dispatch
+        (proxy [com.sun.net.httpserver.HttpHandler] []
+          (handle [exchange]
+            (try
+              (let [method (.getRequestMethod exchange)
+                    uri (.getRequestURI exchange)
+                    path (.getPath uri)
+                    query (.getRawQuery uri)
+                    body (slurp (.getRequestBody exchange))
+                    route (http/find-route handle method path)
+                    request-obj (make-runtime-object
+                                 state
+                                 "Http_Request"
+                                 {"method_name" method
+                                  "path_value" path
+                                  "body_text" body
+                                  "header_map" (http/http-exchange-headers->nex-map (.getRequestHeaders exchange))
+                                  "route_params" (or (:params route) (rt/nex-map))
+                                  "query_map" (http/parse-query-map query)})
+                    response-obj (if route
+                                   (invoke-function-object state (:handler route) [request-obj])
+                                   (make-runtime-object
+                                    state
+                                    "Http_Server_Response"
+                                    {"status_code" 404
+                                     "body_text" "Not Found"
+                                     "header_map" (rt/nex-map)}))
+                    status (int (http-response-status response-obj))
+                    response-body (http-response-body response-obj)
+                    response-bytes (.getBytes response-body java.nio.charset.StandardCharsets/UTF_8)
+                    response-headers (http-response-headers response-obj)]
+                (doseq [[k v] response-headers]
+                  (.add (.getResponseHeaders exchange) (str k) (str v)))
+                (.sendResponseHeaders exchange status (long (alength response-bytes)))
+                (with-open [os (.getResponseBody exchange)]
+                  (.write os response-bytes))
+                nil)
+              (catch Exception ex
+                (let [bytes (.getBytes (str "Server error: " (or (.getMessage ex) "unknown"))
+                                       java.nio.charset.StandardCharsets/UTF_8)]
+                  (.sendResponseHeaders exchange 500 (long (alength bytes)))
+                  (with-open [os (.getResponseBody exchange)]
+                    (.write os bytes)))
+                nil))))]
+    (.createContext server "/" dispatch)
+    (.start server)
+    (reset! (:server handle) server)
+    (reset! (:port handle) (.getPort (.getAddress server)))
+    @(:port handle)))
+
+(defn builtin-http-server-stop!
+  [handle]
+  (let [server @(:server handle)]
+    (when server
+      (.stop ^com.sun.net.httpserver.HttpServer server 0)
+      (reset! (:server handle) nil))
+    nil))
+
+(defn builtin-http-server-is-running
+  [handle]
+  (some? @(:server handle)))
 
 (defn deep-equals
   [a b]

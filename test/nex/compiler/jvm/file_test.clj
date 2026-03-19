@@ -21,6 +21,10 @@
           (.invoke main-method nil (object-array [(into-array String [])]))
           (str *out*))))))
 
+(defn- free-port []
+  (with-open [socket (java.net.ServerSocket. 0)]
+    (.getLocalPort socket)))
+
 (deftest compile-file-writes-class-files-and-launcher-runs
   (testing "compile-file emits .class files and the generated launcher runs the program"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-compile-test")
@@ -100,6 +104,47 @@ print(app.greet())")
                 error-output (slurp (.getErrorStream proc))]
             (is (= 0 (.exitValue proc)) error-output)
             (is (= "\"hello standalone\"" (str/trim output)))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-file-http-server-launcher-runs
+  (testing "compile-file emits class files whose launcher can start and stop an HTTP server"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-http-server-file-test")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (let [port (free-port)]
+          (spit nex-file (str "let handle := http_server_create(" port ")\n"
+                              "let actual_port: Integer := http_server_start(handle)\n"
+                              "print(actual_port)\n"
+                              "sleep(1000)\n"
+                              "http_server_stop(handle)"))
+          (let [result (file/compile-file (.getPath nex-file) (.getPath out-dir) {})
+                run-future (future (invoke-main! out-dir (:main-class result)))
+                client (java.net.http.HttpClient/newHttpClient)
+                request (-> (java.net.http.HttpRequest/newBuilder
+                             (java.net.URI/create (str "http://127.0.0.1:" port "/hello")))
+                            (.GET)
+                            (.build))
+                response (loop [attempts 20]
+                           (let [result (try
+                                          (.send client request (java.net.http.HttpResponse$BodyHandlers/ofString))
+                                          (catch Exception e
+                                            e))]
+                             (if (instance? Exception result)
+                               (if (pos? attempts)
+                                 (do
+                                   (Thread/sleep 50)
+                                   (recur (dec attempts)))
+                                 (throw result))
+                               result)))
+                output (deref run-future 5000 :timeout)]
+            (is (= 404 (.statusCode response)))
+            (is (= "Not Found" (.body response)))
+            (is (not= :timeout output))
+            (is (= (str port) (str/trim output)))))
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))

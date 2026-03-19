@@ -22,6 +22,52 @@
              0)
     @lines))
 
+(defn- class-source-file
+  [bytecode]
+  (let [source (atom nil)]
+    (.accept (ClassReader. bytecode)
+             (proxy [ClassVisitor] [Opcodes/ASM9]
+               (visitSource [source-file _debug]
+                 (reset! source source-file)))
+             0)
+    @source))
+
+(defn- method-local-variable-names
+  [bytecode method-name]
+  (let [locals (atom [])]
+    (.accept (ClassReader. bytecode)
+             (proxy [ClassVisitor] [Opcodes/ASM9]
+               (visitMethod [_access name _descriptor _signature _exceptions]
+                 (proxy [MethodVisitor] [Opcodes/ASM9]
+                   (visitLocalVariable [local-name _descriptor _signature _start _end _index]
+                     (when (= method-name name)
+                       (swap! locals conj local-name))))))
+             0)
+    @locals))
+
+(defn- method-local-variable-ranges
+  [bytecode method-name]
+  (let [label-order (atom {})
+        next-order (atom 0)
+        locals (atom [])]
+    (.accept (ClassReader. bytecode)
+             (proxy [ClassVisitor] [Opcodes/ASM9]
+               (visitMethod [_access name _descriptor _signature _exceptions]
+                 (proxy [MethodVisitor] [Opcodes/ASM9]
+                   (visitLabel [label]
+                     (let [id (System/identityHashCode label)]
+                       (when-not (contains? @label-order id)
+                         (swap! label-order assoc id @next-order)
+                         (swap! next-order inc))))
+                   (visitLocalVariable [local-name _descriptor _signature start end index]
+                     (when (= method-name name)
+                       (swap! locals conj {:name local-name
+                                           :index index
+                                           :start-order (get @label-order (System/identityHashCode start))
+                                           :end-order (get @label-order (System/identityHashCode end))})))))) 
+             0)
+    @locals))
+
 (deftest minimal-class-spec-test
   (testing "minimal class spec for a repl cell is stable"
     (let [unit (ir/unit {:name "nex/repl/Cell_0001"
@@ -135,12 +181,36 @@
 (deftest emitted-line-number-table-smoke-test
   (testing "compiled eval methods carry source line metadata"
     (let [program (p/ast "let x := 40\nx + 2")
-          {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0045"})
+          {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0045"
+                                                         :source-file "debug_lines.nex"})
           bytecode (emit/compile-unit->bytes unit)
           lines (method-line-numbers bytecode "eval")]
       (is (seq lines))
       (is (some #{1} lines))
-      (is (some #{2} lines)))))
+      (is (some #{2} lines))
+      (is (= "debug_lines.nex" (class-source-file bytecode)))
+      (is (some #{"state"} (method-local-variable-names bytecode "eval")))))
+  (testing "compiled function methods carry local-variable debug metadata"
+    (let [program (p/ast "function inc(n: Integer): Integer\ndo\n  let x := n + 1\n  result := x\nend")
+          {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0046"
+                                                         :source-file "debug_fn.nex"})
+          fn-node (first (:functions unit))
+          bytecode (emit/compile-unit->bytes unit)
+          locals (method-local-variable-names bytecode (:emitted-name fn-node))
+          ranges (method-local-variable-ranges bytecode (:emitted-name fn-node))
+          state-range (first (filter #(= "state" (:name %)) ranges))
+          n-range (first (filter #(= "n" (:name %)) ranges))
+          x-range (first (filter #(= "x" (:name %)) ranges))
+          result-range (first (filter #(= "result" (:name %)) ranges))]
+      (is (some #{"state"} locals))
+      (is (some #{"__args"} locals))
+      (is (some #{"n"} locals))
+      (is (some #{"x"} locals))
+      (is (some #{"result"} locals))
+      (is (< (:start-order state-range) (:start-order x-range)))
+      (is (<= (:start-order n-range) (:start-order x-range)))
+      (is (<= (:start-order x-range) (:start-order result-range)))
+      (is (< (:end-order x-range) (:end-order state-range))))))
 
 (deftest compile-top-set-and-top-get-smoke-test
   (testing "compiled repl cells can persist top-level values through NexReplState"

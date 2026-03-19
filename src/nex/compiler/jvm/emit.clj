@@ -7,7 +7,8 @@
   - public static Object eval(NexReplState state)
 
   The initial `eval` body ignores the IR and returns `null`."
-  (:require [nex.compiler.jvm.descriptor :as desc]
+  (:require [clojure.string :as str]
+            [nex.compiler.jvm.descriptor :as desc]
             [nex.ir :as ir])
   (:import [org.objectweb.asm ClassWriter Label MethodVisitor Opcodes Type]))
 
@@ -20,6 +21,7 @@
 (def ^:private rt-internal-name "clojure/lang/RT")
 (def ^:private var-internal-name "clojure/lang/Var")
  (def ^:private throwable-internal-name "java/lang/Throwable")
+(def ^:dynamic *local-debug-ranges* nil)
 
 (declare emit-const!)
 (declare emit-runtime-call!)
@@ -48,11 +50,17 @@
     (= :char jvm-type) 0
     :else nil))
 
+(defn- source-file-name
+  [source-file]
+  (when source-file
+    (last (str/split (str source-file) #"[\\/]"))))
+
 (defn minimal-class-spec
   "Create a minimal class spec for a compiled REPL cell."
   [unit]
   {:internal-name (desc/internal-class-name (:name unit))
    :binary-name (desc/binary-class-name (:name unit))
+   :source-file (:source-file unit)
    :super-name "java/lang/Object"
    :interfaces []
    :flags Opcodes/ACC_PUBLIC
@@ -68,6 +76,7 @@
                 :kind :eval-from-ir
                 :owner (:name unit)
                 :functions (:functions unit)
+                :locals (:locals unit)
                 :body (:body unit)}]
               (map (fn [fn-node]
                      {:name (:emitted-name fn-node)
@@ -81,6 +90,7 @@
   [class-spec]
   {:internal-name (:internal-name class-spec)
    :binary-name (desc/binary-class-name (:jvm-name class-spec))
+   :source-file (:source-file class-spec)
    :super-name "java/lang/Object"
    :interfaces []
    :flags (if (:deferred? class-spec)
@@ -142,9 +152,10 @@
                    (:methods class-spec))))})
 
 (defn launcher-class-spec
-  [{:keys [internal-name binary-name program-internal-name classes-edn imports-edn]}]
+  [{:keys [internal-name binary-name source-file program-internal-name classes-edn imports-edn]}]
   {:internal-name internal-name
    :binary-name binary-name
+   :source-file source-file
    :super-name "java/lang/Object"
    :interfaces []
    :flags Opcodes/ACC_PUBLIC
@@ -170,58 +181,99 @@
     (.visitMaxs mv 0 0)
     (.visitEnd mv)))
 
+(defn- emit-local-variable-table!
+  [^MethodVisitor mv start-label end-label locals local-ranges]
+  (doseq [{:keys [name slot jvm-type descriptor]} locals
+          :when (and name (some? slot) (or descriptor jvm-type))]
+    (.visitLocalVariable mv
+                         ^String (str name)
+                         ^String (or descriptor
+                                      (desc/jvm-type->descriptor jvm-type))
+                         nil
+                         (or (get-in local-ranges [slot :start]) start-label)
+                         (or (get-in local-ranges [slot :end]) end-label)
+                         (int slot))))
+
+(defn- mark-local-debug-before!
+  [^MethodVisitor mv slot]
+  (when *local-debug-ranges*
+    (when-not (get @*local-debug-ranges* slot)
+      (let [label (Label.)]
+        (.visitLabel mv label)
+        (swap! *local-debug-ranges* assoc slot {:start label :end label})))))
+
+(defn- mark-local-debug-after!
+  [^MethodVisitor mv slot]
+  (when *local-debug-ranges*
+    (when (get @*local-debug-ranges* slot)
+      (let [label (Label.)]
+        (.visitLabel mv label)
+        (swap! *local-debug-ranges* assoc-in [slot :end] label)))))
+
 (defn- emit-launcher-main!
   [^ClassWriter cw {:keys [name descriptor flags program-internal-name classes-edn imports-edn]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
-    (.visitLdcInsn mv "clojure.core")
-    (.visitLdcInsn mv "require")
-    (.visitMethodInsn mv
-                      Opcodes/INVOKESTATIC
-                      rt-internal-name
-                      "var"
-                      "(Ljava/lang/String;Ljava/lang/String;)Lclojure/lang/Var;"
-                      false)
-    (.visitLdcInsn mv "nex.compiler.jvm.runtime")
-    (.visitMethodInsn mv
-                      Opcodes/INVOKESTATIC
-                      "clojure/lang/Symbol"
-                      "intern"
-                      "(Ljava/lang/String;)Lclojure/lang/Symbol;"
-                      false)
-    (.visitMethodInsn mv
-                      Opcodes/INVOKEVIRTUAL
-                      var-internal-name
-                      "invoke"
-                      "(Ljava/lang/Object;)Ljava/lang/Object;"
-                      false)
-    (.visitInsn mv Opcodes/POP)
+    (let [start-label (Label.)
+          end-label (Label.)]
+      (.visitLabel mv start-label)
+      (.visitLdcInsn mv "clojure.core")
+      (.visitLdcInsn mv "require")
+      (.visitMethodInsn mv
+                        Opcodes/INVOKESTATIC
+                        rt-internal-name
+                        "var"
+                        "(Ljava/lang/String;Ljava/lang/String;)Lclojure/lang/Var;"
+                        false)
+      (.visitLdcInsn mv "nex.compiler.jvm.runtime")
+      (.visitMethodInsn mv
+                        Opcodes/INVOKESTATIC
+                        "clojure/lang/Symbol"
+                        "intern"
+                        "(Ljava/lang/String;)Lclojure/lang/Symbol;"
+                        false)
+      (.visitMethodInsn mv
+                        Opcodes/INVOKEVIRTUAL
+                        var-internal-name
+                        "invoke"
+                        "(Ljava/lang/Object;)Ljava/lang/Object;"
+                        false)
+      (.visitInsn mv Opcodes/POP)
 
-    (emit-runtime-call! mv "make-repl-state" [])
-    (.visitTypeInsn mv Opcodes/CHECKCAST repl-state-internal-name)
-    (.visitVarInsn mv Opcodes/ASTORE 1)
+      (emit-runtime-call! mv "make-repl-state" [])
+      (.visitTypeInsn mv Opcodes/CHECKCAST repl-state-internal-name)
+      (.visitVarInsn mv Opcodes/ASTORE 1)
 
-    (emit-runtime-call! mv "bootstrap-compiled-state!"
-                        [(fn [] (.visitVarInsn mv Opcodes/ALOAD 1))
-                         (fn [] (.visitLdcInsn mv ^String classes-edn))
-                         (fn [] (.visitLdcInsn mv ^String imports-edn))])
-    (.visitInsn mv Opcodes/POP)
+      (emit-runtime-call! mv "bootstrap-compiled-state!"
+                          [(fn [] (.visitVarInsn mv Opcodes/ALOAD 1))
+                           (fn [] (.visitLdcInsn mv ^String classes-edn))
+                           (fn [] (.visitLdcInsn mv ^String imports-edn))])
+      (.visitInsn mv Opcodes/POP)
 
-    (.visitVarInsn mv Opcodes/ALOAD 1)
-    (.visitMethodInsn mv
-                      Opcodes/INVOKESTATIC
-                      program-internal-name
-                      "eval"
-                      (eval-method-descriptor)
-                      false)
-    (.visitInsn mv Opcodes/POP)
+      (.visitVarInsn mv Opcodes/ALOAD 1)
+      (.visitMethodInsn mv
+                        Opcodes/INVOKESTATIC
+                        program-internal-name
+                        "eval"
+                        (eval-method-descriptor)
+                        false)
+      (.visitInsn mv Opcodes/POP)
 
-    (emit-runtime-call! mv "print-state-output!"
-                        [(fn [] (.visitVarInsn mv Opcodes/ALOAD 1))])
-    (.visitInsn mv Opcodes/POP)
-    (.visitInsn mv Opcodes/RETURN)
-    (.visitMaxs mv 0 0)
-    (.visitEnd mv)))
+      (emit-runtime-call! mv "print-state-output!"
+                          [(fn [] (.visitVarInsn mv Opcodes/ALOAD 1))])
+      (.visitInsn mv Opcodes/POP)
+      (.visitLabel mv end-label)
+      (emit-local-variable-table! mv start-label end-label
+                                  [{:name "args"
+                                    :slot 0
+                                    :descriptor "[Ljava/lang/String;"}
+                                   {:name "state"
+                                    :slot 1
+                                    :jvm-type (ir/object-jvm-type repl-state-internal-name)}]
+                                  {})
+      (.visitInsn mv Opcodes/RETURN)
+      (.visitMaxs mv 0 0)
+      (.visitEnd mv))))
 
 (defn- emit-user-default-constructor!
   [^ClassWriter cw {:keys [name descriptor flags fields composition-fields owner super-name]}]
@@ -484,6 +536,7 @@
 (declare emit-expr!)
 (declare emit-stmt!)
 (declare emit-boxed-expr!)
+(declare emit-boxed-arg-array!)
 
 (defn- emit-runtime-var!
   [^MethodVisitor mv fn-name]
@@ -561,6 +614,166 @@
                         (do (emit-unbox-or-cast! mv jvm-type)
                             jvm-type)))]
     (case helper
+      "print"
+      (do
+        (emit-runtime-call! mv "builtin-print!"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-arg-array! mv args state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "println"
+      (do
+        (emit-runtime-call! mv "builtin-println!"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-arg-array! mv args state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "type_of"
+      (do
+        (emit-runtime-call! mv "builtin-type-of"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "type_is"
+      (do
+        (emit-runtime-call! mv "builtin-type-is"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "sleep"
+      (do
+        (emit-runtime-call! mv "builtin-sleep!"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "http_get"
+      (do
+        (emit-runtime-call! mv "builtin-http-get"
+                            (into [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))]
+                                  (mapv (fn [arg]
+                                          (fn [] (emit-boxed-expr! mv arg state-slot)))
+                                        args)))
+        (emit-return (:jvm-type expr)))
+
+      "http_post"
+      (do
+        (emit-runtime-call! mv "builtin-http-post"
+                            (into [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))]
+                                  (mapv (fn [arg]
+                                          (fn [] (emit-boxed-expr! mv arg state-slot)))
+                                        args)))
+        (emit-return (:jvm-type expr)))
+
+      "json_parse"
+      (do
+        (emit-runtime-call! mv "builtin-json-parse"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "json_stringify"
+      (do
+        (emit-runtime-call! mv "builtin-json-stringify"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "http_server_create"
+      (do
+        (emit-runtime-call! mv "builtin-http-server-create"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "http_server_get"
+      (do
+        (emit-runtime-call! mv "builtin-http-server-get!"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (nth args 2) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "http_server_post"
+      (do
+        (emit-runtime-call! mv "builtin-http-server-post!"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (nth args 2) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "http_server_put"
+      (do
+        (emit-runtime-call! mv "builtin-http-server-put!"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (nth args 2) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "http_server_delete"
+      (do
+        (emit-runtime-call! mv "builtin-http-server-delete!"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (nth args 2) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "http_server_start"
+      (do
+        (emit-runtime-call! mv "builtin-http-server-start!"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "http_server_stop"
+      (do
+        (emit-runtime-call! mv "builtin-http-server-stop!"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "http_server_is_running"
+      (do
+        (emit-runtime-call! mv "builtin-http-server-is-running"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "validate-object-state"
+      (do
+        (emit-runtime-call! mv "validate-object-state"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "op:string-concat"
+      (do
+        (emit-runtime-call! mv "string-concat"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-arg-array! mv args state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "op:pow-int"
+      (do
+        (emit-runtime-call! mv "pow-int"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "op:pow-long"
+      (do
+        (emit-runtime-call! mv "pow-long"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "op:pow-double"
+      (do
+        (emit-runtime-call! mv "pow-double"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
       "spawn-function-object"
       (do
         (emit-runtime-call! mv "spawn-function-object"
@@ -1371,7 +1584,9 @@
 
     :local
     (do
+      (mark-local-debug-before! mv (:slot expr))
       (.visitVarInsn mv (local-load-op (:jvm-type expr)) (:slot expr))
+      (mark-local-debug-after! mv (:slot expr))
       (:jvm-type expr))
 
     :this
@@ -1798,7 +2013,9 @@
     :set-local
     (let [expr-jvm-type (emit-expr! mv (:expr stmt) state-slot)]
       (emit-stack-coerce! mv expr-jvm-type (:jvm-type stmt))
+      (mark-local-debug-before! mv (:slot stmt))
       (.visitVarInsn mv (local-store-op (:jvm-type stmt)) (:slot stmt))
+      (mark-local-debug-after! mv (:slot stmt))
       expr-jvm-type)
 
     :top-set
@@ -1885,44 +2102,91 @@
     (.visitLdcInsn mv (int arg-index))
     (.visitInsn mv Opcodes/AALOAD)
     (emit-unbox-or-cast! mv jvm-type)
-    (.visitVarInsn mv (local-store-op jvm-type) slot)))
+    (mark-local-debug-before! mv slot)
+    (.visitVarInsn mv (local-store-op jvm-type) slot)
+    (mark-local-debug-after! mv slot)))
 
 (defn- emit-eval-method!
-  [^ClassWriter cw {:keys [name descriptor flags body owner functions]}]
+  [^ClassWriter cw {:keys [name descriptor flags body owner functions locals]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
-    (doseq [fn-node functions]
-      (emit-register-repl-fn! mv 0 owner fn-node))
-    (doseq [stmt body]
-      (emit-stmt! mv stmt 0))
-    (.visitInsn mv Opcodes/ACONST_NULL)
-    (.visitInsn mv Opcodes/ARETURN)
-    (.visitMaxs mv 0 0)
-    (.visitEnd mv)))
+    (let [start-label (Label.)
+          end-label (Label.)
+          local-ranges (atom {})]
+      (binding [*local-debug-ranges* local-ranges]
+        (.visitLabel mv start-label)
+        (doseq [fn-node functions]
+          (emit-register-repl-fn! mv 0 owner fn-node))
+        (doseq [stmt body]
+          (emit-stmt! mv stmt 0))
+        (.visitInsn mv Opcodes/ACONST_NULL)
+        (.visitLabel mv end-label)
+        (emit-local-variable-table! mv start-label end-label
+                                    (concat [{:name "state"
+                                              :slot 0
+                                              :jvm-type (ir/object-jvm-type repl-state-internal-name)}]
+                                            locals)
+                                    @local-ranges)
+        (.visitInsn mv Opcodes/ARETURN)
+        (.visitMaxs mv 0 0)
+        (.visitEnd mv)))))
 
 (defn- emit-repl-fn-method!
   [^ClassWriter cw {:keys [name descriptor flags fn-node]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
-    (emit-function-arg-prologue! mv fn-node 1)
-    (doseq [stmt (:body fn-node)]
-      (emit-stmt! mv stmt 0))
-    (.visitInsn mv Opcodes/ACONST_NULL)
-    (.visitInsn mv Opcodes/ARETURN)
-    (.visitMaxs mv 0 0)
-    (.visitEnd mv)))
+    (let [start-label (Label.)
+          end-label (Label.)
+          local-ranges (atom {})]
+      (binding [*local-debug-ranges* local-ranges]
+        (.visitLabel mv start-label)
+        (emit-function-arg-prologue! mv fn-node 1)
+        (doseq [stmt (:body fn-node)]
+          (emit-stmt! mv stmt 0))
+        (.visitInsn mv Opcodes/ACONST_NULL)
+        (.visitLabel mv end-label)
+        (emit-local-variable-table! mv start-label end-label
+                                    (concat [{:name "state"
+                                              :slot 0
+                                              :jvm-type (ir/object-jvm-type repl-state-internal-name)}
+                                             {:name "__args"
+                                              :slot 1
+                                              :descriptor "[Ljava/lang/Object;"}]
+                                            (:locals fn-node))
+                                    @local-ranges)
+        (.visitInsn mv Opcodes/ARETURN)
+        (.visitMaxs mv 0 0)
+        (.visitEnd mv)))))
 
 (defn- emit-instance-fn-method!
   [^ClassWriter cw {:keys [name descriptor flags fn-node]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
-    (emit-function-arg-prologue! mv fn-node 2)
-    (doseq [stmt (:body fn-node)]
-      (emit-stmt! mv stmt 1))
-    (.visitInsn mv Opcodes/ACONST_NULL)
-    (.visitInsn mv Opcodes/ARETURN)
-    (.visitMaxs mv 0 0)
-    (.visitEnd mv)))
+    (let [start-label (Label.)
+          end-label (Label.)
+          local-ranges (atom {})]
+      (binding [*local-debug-ranges* local-ranges]
+        (.visitLabel mv start-label)
+        (emit-function-arg-prologue! mv fn-node 2)
+        (doseq [stmt (:body fn-node)]
+          (emit-stmt! mv stmt 1))
+        (.visitInsn mv Opcodes/ACONST_NULL)
+        (.visitLabel mv end-label)
+        (emit-local-variable-table! mv start-label end-label
+                                    (concat [{:name "this"
+                                              :slot 0
+                                              :jvm-type (ir/object-jvm-type (:owner fn-node))}
+                                             {:name "state"
+                                              :slot 1
+                                              :jvm-type (ir/object-jvm-type repl-state-internal-name)}
+                                             {:name "__args"
+                                              :slot 2
+                                              :descriptor "[Ljava/lang/Object;"}]
+                                            (:locals fn-node))
+                                    @local-ranges)
+        (.visitInsn mv Opcodes/ARETURN)
+        (.visitMaxs mv 0 0)
+        (.visitEnd mv)))))
 
 (defn- emit-abstract-instance-fn-method!
   [^ClassWriter cw {:keys [name descriptor flags]}]
@@ -1966,7 +2230,7 @@
 
 (defn emit-class
   "Emit one minimal JVM class from a class spec and return bytecode."
-  [{:keys [internal-name super-name interfaces flags methods fields static-fields]}]
+  [{:keys [internal-name super-name interfaces flags methods fields static-fields source-file]}]
   (let [cw (ClassWriter. (+ ClassWriter/COMPUTE_FRAMES
                             ClassWriter/COMPUTE_MAXS))]
     (.visit cw
@@ -1976,6 +2240,8 @@
             nil
             super-name
             (when (seq interfaces) (into-array String interfaces)))
+    (when-let [sf (source-file-name source-file)]
+      (.visitSource cw sf nil))
     (doseq [field fields]
       (emit-field! cw field))
     (doseq [field static-fields]
