@@ -80,6 +80,10 @@
   [session]
   (set (keys @(:compiled-classes session))))
 
+(defn- builtin-class-defs
+  []
+  (vals @(:classes (interp/make-context))))
+
 (defn- import-placeholder-classes
   [imports]
   (->> imports
@@ -271,7 +275,7 @@
                                     (anonymous-class-defs ast)))
         imported-classes (import-placeholder-classes (:imports ast))]
     {:known-vars (set (concat (keys (session-var-types session))
-                            (keys @(:values (:state session)))))
+                              (keys @(:values (:state session)))))
      :known-fns (set (concat builtin-function-names
                            (keys @(:function-asts session))
                            (map :name (:functions ast))))
@@ -281,7 +285,8 @@
                                   [(:name fn-def) (:class-name fn-def)]))
                            (concat (vals @(:function-asts session)) (:functions ast))))
      :functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
-     :classes (vec (concat imported-classes
+     :classes (vec (concat (builtin-class-defs)
+                           imported-classes
                            (vals @(:class-asts session))
                            actual-classes))
      :compiled-class-names (set (concat (compiled-class-names session)
@@ -567,7 +572,8 @@
             new-class-map (allocate-compiled-class-metadata session compiled-class-defs)
           compiled-map (merge @(:compiled-classes session) new-class-map)
           visible-functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
-          visible-classes (vec (concat (import-placeholder-classes (:imports ast))
+          visible-classes (vec (concat (builtin-class-defs)
+                                       (import-placeholder-classes (:imports ast))
                                        (vals @(:class-asts session))
                                        actual-classes
                                        (keep :class-def visible-functions)))
@@ -741,7 +747,8 @@
   [session ctx]
   (reset! (:bindings (:globals ctx)) {})
   (reset! (:imports ctx) [])
-  (reset! (:classes ctx) {})
+  (let [builtin-classes @(:classes (interp/make-context))]
+    (reset! (:classes ctx) builtin-classes))
   (doseq [import-node @(:import-asts session)]
     (interp/eval-node ctx import-node))
   (doseq [class-def (vals @(:class-asts session))]

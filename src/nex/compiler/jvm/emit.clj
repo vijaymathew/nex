@@ -25,6 +25,7 @@
 
 (declare emit-const!)
 (declare emit-runtime-call!)
+(declare emit-expression!)
 
 (defn eval-method-descriptor
   []
@@ -635,6 +636,34 @@
                         (do (emit-unbox-or-cast! mv jvm-type)
                             jvm-type)))]
     (case helper
+      "builtin-method:Cursor:start"
+      (do
+        (emit-runtime-call! mv "builtin-cursor-start"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Cursor:item"
+      (do
+        (emit-runtime-call! mv "builtin-cursor-item"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Cursor:next"
+      (do
+        (emit-runtime-call! mv "builtin-cursor-next"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Cursor:at_end"
+      (do
+        (emit-runtime-call! mv "builtin-cursor-at-end"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
       "print"
       (do
         (emit-runtime-call! mv "builtin-print!"

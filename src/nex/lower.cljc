@@ -51,6 +51,22 @@
             qualified-name))
         (:imports env)))
 
+(defn- builtin-class-defs
+  []
+  (vals @(:classes (interp/make-context))))
+
+(defn- merge-visible-classes
+  [& class-groups]
+  (->> class-groups
+       (apply concat)
+       (reduce (fn [acc class-def]
+                 (if (and (map? class-def) (:name class-def))
+                   (assoc acc (:name class-def) class-def)
+                   acc))
+               {})
+       vals
+       vec))
+
 (def ^:private expression-node-types
   #{:integer :real :string :char :boolean :nil :identifier :binary :unary
     :call :if :when :this :array-literal :map-literal :set-literal
@@ -971,7 +987,7 @@
        (remove #(contains? #{"Any" "Function"} (:parent %)))
        (mapv (fn [{:keys [parent]}]
                (when-let [parent-def (get (visible-class-map env) parent)]
-                 (let [compiled (class-jvm-meta env parent)]
+                 (when-let [compiled (get (:compiled-classes env) parent)]
                    {:nex-name parent
                     :jvm-name (:jvm-name compiled)
                     :internal-name (:internal-name compiled)
@@ -984,23 +1000,25 @@
 (defn- direct-parent-field-map
   [env class-def]
   (reduce (fn [m {:keys [parent]}]
-            (let [parent-def (get (visible-class-map env) parent)
-                  composition-field (str "_parent_" parent)]
-              (reduce (fn [m2 field]
-                        (if (or (:constant? field)
-                                (contains? m2 (:name field)))
-                          m2
-                          (assoc m2
-                                 (:name field)
-                                 {:owner parent
-                                  :field (:name field)
-                                  :carrier-owner (:name class-def)
-                                  :carrier-field composition-field
-                                  :nex-type (:field-type field)
-                                  :jvm-type (resolve-jvm-type env (:field-type field))
-                                  :carrier-jvm-type (exact-class-jvm-type env parent)})))
-                      m
-                      (class-fields parent-def))))
+            (if-let [parent-def (and (get (:compiled-classes env) parent)
+                                     (get (visible-class-map env) parent))]
+              (let [composition-field (str "_parent_" parent)]
+                (reduce (fn [m2 field]
+                          (if (or (:constant? field)
+                                  (contains? m2 (:name field)))
+                            m2
+                            (assoc m2
+                                   (:name field)
+                                   {:owner parent
+                                    :field (:name field)
+                                    :carrier-owner (:name class-def)
+                                    :carrier-field composition-field
+                                    :nex-type (:field-type field)
+                                    :jvm-type (resolve-jvm-type env (:field-type field))
+                                    :carrier-jvm-type (exact-class-jvm-type env parent)})))
+                        m
+                        (class-fields parent-def)))
+              m))
           {}
           (remove #(contains? #{"Any" "Function"} (:parent %)) (:parents class-def))))
 
@@ -1083,7 +1101,8 @@
 (defn- direct-parent-method-map
   [env class-def]
   (reduce (fn [m {:keys [parent]}]
-            (if-let [parent-def (get (visible-class-map env) parent)]
+            (if-let [parent-def (and (get (:compiled-classes env) parent)
+                                     (get (visible-class-map env) parent))]
               (let [parent-meta (class-jvm-meta env parent)
                     composition-field (str "_parent_" parent)]
                 (reduce (fn [m2 method-def]
@@ -1608,9 +1627,10 @@
 (defn prepare-program-for-closures
   [program opts]
   (let [visible-functions (vec (concat (:functions program) (:functions opts)))
-        visible-classes (vec (concat (:classes program)
-                                     (:classes opts)
-                                     (keep :class-def visible-functions)))
+        visible-classes (merge-visible-classes (builtin-class-defs)
+                                               (:classes program)
+                                               (:classes opts)
+                                               (keep :class-def visible-functions))
         ctx {:classes visible-classes
              :functions visible-functions
              :imports (:imports program)
@@ -3112,11 +3132,12 @@
                                          :import qualified-name})))
                               vec)
         visible-functions (vec (concat (:functions program) (:functions opts)))
-        visible-classes (vec (concat imported-classes
-                                     actual-classes
-                                     anonymous-classes
-                                     (:classes opts)
-                                     (keep :class-def visible-functions)))
+        visible-classes (merge-visible-classes (builtin-class-defs)
+                                               imported-classes
+                                               actual-classes
+                                               anonymous-classes
+                                               (:classes opts)
+                                               (keep :class-def visible-functions))
         env (make-lowering-env {:classes visible-classes
                                 :functions visible-functions
                                 :imports visible-imports

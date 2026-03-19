@@ -37,6 +37,12 @@
            :visibility {:type :public}
            :members [{:type :method :name "start" :params nil :return-type nil
                       :note nil :require nil :body [] :ensure nil}
+                     {:type :method :name "cursor" :params nil :return-type "Cursor"
+                      :note nil :require nil
+                      :body [{:type :assign
+                              :target "result"
+                              :value {:type :this}}]
+                      :ensure nil}
                      {:type :method :name "item" :params nil :return-type "Any"
                       :note nil :require nil :body [] :ensure nil}
                      {:type :method :name "next" :params nil :return-type nil

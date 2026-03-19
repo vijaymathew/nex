@@ -19,6 +19,9 @@
 (declare rebuild-interpreter-ctx)
 (declare lowered-instance-method-name)
 (declare reflected-field)
+(declare runtime-type-name)
+(declare runtime-compatible-with?)
+(declare invoke-user-method)
 
 (defmacro ^:private def-builtin-method-wrapper
   [fn-name method-name]
@@ -304,6 +307,41 @@
   [ch]
   (interp/call-builtin-method nil ch ch "size" []))
 
+(defn- invoke-interpreter-object-method
+  [state target method-name args]
+  (let [ctx (rebuild-interpreter-ctx state)]
+    (interp/eval-node ctx {:type :call
+                           :target {:type :literal :value target}
+                           :method method-name
+                           :args (mapv (fn [v] {:type :literal :value v}) args)
+                           :has-parens true})))
+
+(defn- dispatch-cursor-method
+  [state target method-name args]
+  (let [runtime-name (runtime-type-name state target)]
+    (if (and (string? runtime-name)
+             (runtime-compatible-with? state runtime-name "Cursor"))
+      (if (interp/nex-object? target)
+        (invoke-interpreter-object-method state target method-name args)
+        (invoke-user-method state target method-name args))
+      (interp/call-builtin-method nil target target method-name args))))
+
+(defn builtin-cursor-start
+  [state target]
+  (dispatch-cursor-method state target "start" []))
+
+(defn builtin-cursor-item
+  [state target]
+  (dispatch-cursor-method state target "item" []))
+
+(defn builtin-cursor-next
+  [state target]
+  (dispatch-cursor-method state target "next" []))
+
+(defn builtin-cursor-at-end
+  [state target]
+  (dispatch-cursor-method state target "at_end" []))
+
 (defn current-time-ms
   []
   (System/currentTimeMillis))
@@ -457,12 +495,28 @@
 (defn- invoke-user-method
   [state target method-name args]
   (let [^Class cls (.getClass target)
-        lowered-name (lowered-instance-method-name method-name (count args))
-        ^Method method (.getDeclaredMethod cls
-                                          lowered-name
-                                          (into-array Class [nex.compiler.jvm.runtime.NexReplState
-                                                             (class (object-array 0))]))]
-    (.invoke method target (object-array [state (object-array args)]))))
+        lowered-name (lowered-instance-method-name method-name (count args))]
+    (try
+      (let [^Method method (.getDeclaredMethod cls
+                                               lowered-name
+                                               (into-array Class [nex.compiler.jvm.runtime.NexReplState
+                                                                  (class (object-array 0))]))]
+        (.invoke method target (object-array [state (object-array args)])))
+      (catch NoSuchMethodException e
+        (let [runtime-name (runtime-type-name state target)]
+          (if (and (= method-name "cursor")
+                   (empty? args)
+                   (string? runtime-name)
+                   (runtime-compatible-with? state runtime-name "Cursor"))
+            target
+            (throw (ex-info (format "No matching method %s found taking %d args for class %s"
+                                    method-name
+                                    (count args)
+                                    (.getName cls))
+                            {:method method-name
+                             :arity (count args)
+                             :class (.getName cls)}
+                            e))))))))
 
 (defn- get-user-field
   [target field-name]
@@ -522,11 +576,10 @@
 
 (defn convert-value
   [state value target-type-name]
-  (let [ctx (rebuild-interpreter-ctx state)
-        runtime-name (runtime-type-name state value)
+  (let [runtime-name (runtime-type-name state value)
         ok? (and (some? value)
                  (string? target-type-name)
-                 (typeinfo/convert-compatible-runtime? interp/is-parent? ctx runtime-name target-type-name))]
+                 (runtime-compatible-with? state runtime-name target-type-name))]
     (object-array [(boolean ok?) (if ok? value nil)])))
 
 (defn make-contract-violation
@@ -541,6 +594,24 @@
 (defn- class-def-by-name
   [state class-name]
   (.get ^HashMap @(:classes state) class-name))
+
+(defn- compiled-is-parent?
+  [state class-name parent-name]
+  (letfn [(walk [current seen]
+            (when (and current (not (contains? seen current)))
+              (when-let [class-def (class-def-by-name state current)]
+                (let [seen' (conj seen current)
+                      parents (:parents class-def)]
+                  (or (some #(= (:parent %) parent-name) parents)
+                      (some #(walk (:parent %) seen') parents))))))]
+    (walk class-name #{})))
+
+(defn- runtime-compatible-with?
+  [state runtime-name target-name]
+  (let [ctx (rebuild-interpreter-ctx state)]
+    (or (= runtime-name target-name)
+        (compiled-is-parent? state runtime-name target-name)
+        (typeinfo/convert-compatible-runtime? interp/is-parent? ctx runtime-name target-name))))
 
 (defn- collect-effective-field-names
   [state class-def]
@@ -586,12 +657,7 @@
           runtime-name (runtime-type-name state value)
           compatible? (and (string? class-name)
                            (string? runtime-name)
-                           (or (= runtime-name class-name)
-                               (typeinfo/convert-compatible-runtime?
-                                interp/is-parent?
-                                ctx
-                                runtime-name
-                                class-name)))]
+                           (runtime-compatible-with? state runtime-name class-name))]
       (when-not compatible?
         (throw (ex-info "Compiled object model mismatch"
                         {:expected class-name

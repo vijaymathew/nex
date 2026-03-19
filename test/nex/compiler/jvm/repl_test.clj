@@ -806,11 +806,16 @@ end")
                 _ (with-out-str (repl/eval-code ctx0 "c.start"))
                 item-output (with-out-str
                               (repl/eval-code ctx0 "c.item"))
+                across-output (with-out-str
+                                (repl/eval-code ctx0 "across c as i do print(i) end"))
                 session @repl/*compiled-repl-session*]
             (is (not (str/includes? load-output "Error:")))
             (is (contains? @(:class-asts session) "C"))
             (is (not (str/includes? create-output "Error:")))
-            (is (str/includes? item-output "0")))
+            (is (str/includes? item-output "0"))
+            (is (not (str/includes? across-output "Error:")))
+            (is (= ["0" "1" "2"]
+                   (remove str/blank? (str/split-lines across-output)))))
           (finally
             (when (.exists source-file)
               (.delete source-file))

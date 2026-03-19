@@ -833,6 +833,8 @@
     (case method
       "start" (when (= argc 0)
                 {:params [] :return-type "Void"})
+      "cursor" (when (= argc 0)
+                 {:params [] :return-type "Cursor"})
       "item" (when (= argc 0)
                {:params [] :return-type "Any"})
       "next" (when (= argc 0)
