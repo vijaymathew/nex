@@ -30,6 +30,7 @@ Last updated: 2026-03-19
 | Concurrency | `spawn`, channel creation, `select`, `await_all`, `await_any`, and compiled-path `Task` / `Channel` operations |
 | Collections | Literal construction plus direct compiled lowering for Array / Map / Set methods |
 | Closures / higher-order | Anonymous functions, captured closures, and passing/returning/invoking function objects |
+| Modules | `import` metadata, imported Java class creation/calls on the compiled path, and `intern` resolution for local `.nex` files |
 | Builtins via runtime bridge | `print`, `println`, `type_of`, `sleep`, and other remaining runtime-backed builtins |
 
 
@@ -40,11 +41,6 @@ Last updated: 2026-03-19
 ### Design by Contract
 
 ### Exception Handling
-
-### Modules
-
-- `import` (load external/Java classes)
-- `intern` (load local `.nex` files)
 
 ### Misc
 
@@ -64,6 +60,5 @@ Last updated: 2026-03-19
 Based on complexity and impact, these are natural next steps:
 
 1. File compilation (`.nex` -> JVM bytecode/classes/jar) beyond the REPL-only compiler path
-2. Broader module support (`import`, `intern`) on the compiled path
-3. Broader direct lowering for remaining runtime-backed builtins that still use the generic runtime bridge
-4. Source line numbers and better debug metadata in emitted bytecode
+2. Broader direct lowering for remaining runtime-backed builtins that still use the generic runtime bridge
+3. Source line numbers and better debug metadata in emitted bytecode

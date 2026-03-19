@@ -11,7 +11,8 @@
   - top-level variable access
 
   Unsupported nodes fail fast with ex-info."
-  (:require [nex.compiler.jvm.descriptor :as desc]
+  (:require [clojure.string :as str]
+            [nex.compiler.jvm.descriptor :as desc]
             [nex.interpreter :as interp]
             [nex.ir :as ir]
             [nex.typechecker :as tc]))
@@ -40,6 +41,15 @@
 (declare function-object-call?)
 (declare function-object-binding-type)
 (declare lower-select)
+
+(defn- imported-java-qualified-name
+  [env class-name]
+  (some (fn [{:keys [qualified-name source]}]
+          (when (and (nil? source)
+                     qualified-name
+                     (= class-name (last (str/split qualified-name #"\."))))
+            qualified-name))
+        (:imports env)))
 
 (def ^:private expression-node-types
   #{:integer :real :string :char :boolean :nil :identifier :binary :unary
@@ -232,6 +242,9 @@
       (true? (:closure-runtime-object? (get (visible-class-map env) base)))
       (ir/object-jvm-type "java/lang/Object")
 
+      (imported-java-qualified-name env base)
+      (ir/object-jvm-type (desc/internal-class-name (imported-java-qualified-name env base)))
+
       :else
       (desc/nex-type->jvm-type nex-type))))
 
@@ -381,6 +394,8 @@
              (if (and class-target-name (false? (:has-parens expr)))
                (some-> (lookup-class-constant env class-target-name (:method expr))
                        (#(constant-nex-type env %)))
+               (if (:import class-def)
+                 "Any"
                (if (false? (:has-parens expr))
                  (or (some-> (class-field-def class-def (:method expr))
                              :field-type
@@ -390,7 +405,7 @@
                              (#(tc/resolve-generic-type % type-map))))
                  (some-> (class-method-def class-def (:method expr) (count (:args expr)))
                          function-return-type
-                         (#(tc/resolve-generic-type % type-map)))))
+                         (#(tc/resolve-generic-type % type-map))))))
            (when (direct-collection-method? target-type (:method expr))
              (collection-method-return-type target-type (:method expr))))))))))
 
@@ -1871,43 +1886,61 @@
             (throw (ex-info "Unsupported Channel constructor in compiled lowering"
                             {:expr expr
                              :constructor (:constructor expr)}))))
-        (do
-          (when-not compiled
-            (throw (ex-info "Create of non-compiled class is not supported in lowering"
-                            {:expr expr :class-name class-name})))
-          (when (:deferred? class-def)
-            (throw (ex-info "Unsupported create of deferred class in compiled lowering"
-                            {:expr expr :class-name class-name})))
-          (if-let [constructor-name (:constructor expr)]
-            (let [ctor-def (own-or-inherited-constructor-def env class-def constructor-name (count (:args expr)))]
-              (when-not ctor-def
-                (throw (ex-info "Constructor not found during lowering"
-                                {:expr expr
-                                 :class-name class-name
-                                 :constructor constructor-name
-                                 :arity (count (:args expr))})))
-              (ir/call-virtual-node (:internal-name compiled)
-                                    (lowered-constructor-method-name ctor-def)
-                                    (desc/repl-instance-method-descriptor)
-                                    (ir/new-node (:internal-name compiled)
-                                                 class-name
-                                                 (infer-type env expr)
-                                                 (exact-class-jvm-type env class-name))
-                                    (mapv #(lower-expression env %) (:args expr))
-                                    (infer-type env expr)
-                                    (resolve-jvm-type env (infer-type env expr))))
-            (do
-              (when (seq (:args expr))
-                (throw (ex-info "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
-                                {:expr expr})))
-              (let [nex-type (infer-type env expr)]
-                (validate-object-state-ir env
-                                          class-name
-                                          (ir/new-node (:internal-name compiled)
-                                                       class-name
-                                                       nex-type
-                                                       (resolve-jvm-type env nex-type))
-                                          nex-type)))))))
+        (cond
+          (and class-def (:import class-def))
+          (do
+            (when (:constructor expr)
+              (throw (ex-info "Imported Java classes do not support named constructors on the compiled path"
+                              {:expr expr
+                               :class-name class-name
+                               :constructor (:constructor expr)})))
+            (let [nex-type (infer-type env expr)]
+              (ir/call-runtime-node "java-create-object"
+                                    (into [(ir/const-node class-name
+                                                          "String"
+                                                          (ir/object-jvm-type "java/lang/String"))]
+                                          (mapv #(lower-expression env %) (:args expr)))
+                                    nex-type
+                                    (resolve-jvm-type env nex-type))))
+
+          :else
+          (do
+            (when-not compiled
+              (throw (ex-info "Create of non-compiled class is not supported in lowering"
+                              {:expr expr :class-name class-name})))
+            (when (:deferred? class-def)
+              (throw (ex-info "Unsupported create of deferred class in compiled lowering"
+                              {:expr expr :class-name class-name})))
+            (if-let [constructor-name (:constructor expr)]
+              (let [ctor-def (own-or-inherited-constructor-def env class-def constructor-name (count (:args expr)))]
+                (when-not ctor-def
+                  (throw (ex-info "Constructor not found during lowering"
+                                  {:expr expr
+                                   :class-name class-name
+                                   :constructor constructor-name
+                                   :arity (count (:args expr))})))
+                (ir/call-virtual-node (:internal-name compiled)
+                                      (lowered-constructor-method-name ctor-def)
+                                      (desc/repl-instance-method-descriptor)
+                                      (ir/new-node (:internal-name compiled)
+                                                   class-name
+                                                   (infer-type env expr)
+                                                   (exact-class-jvm-type env class-name))
+                                      (mapv #(lower-expression env %) (:args expr))
+                                      (infer-type env expr)
+                                      (resolve-jvm-type env (infer-type env expr))))
+              (do
+                (when (seq (:args expr))
+                  (throw (ex-info "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
+                                  {:expr expr})))
+                (let [nex-type (infer-type env expr)]
+                  (validate-object-state-ir env
+                                            class-name
+                                            (ir/new-node (:internal-name compiled)
+                                                         class-name
+                                                         nex-type
+                                                         (resolve-jvm-type env nex-type))
+                                            nex-type))))))))
 
     :anonymous-function
     (let [class-name (:class-name expr)
@@ -2159,6 +2192,27 @@
                                               nex-type
                                               jvm-type))
 
+                (imported-java-qualified-name env (base-type-name target-type))
+                (let [target-ir (lower-expression env target-expr)
+                      nex-type (or (infer-call-type env expr) "Any")
+                      jvm-type (resolve-jvm-type env nex-type)]
+                  (if (:has-parens expr)
+                    (ir/call-runtime-node "java-call-method"
+                                          (into [(ir/const-node (:method expr)
+                                                                "String"
+                                                                (ir/object-jvm-type "java/lang/String"))
+                                                 target-ir]
+                                                arg-irs)
+                                          nex-type
+                                          jvm-type)
+                    (ir/call-runtime-node "java-get-field"
+                                          [(ir/const-node (:method expr)
+                                                          "String"
+                                                          (ir/object-jvm-type "java/lang/String"))
+                                           target-ir]
+                                          nex-type
+                                          jvm-type)))
+
                 (builtin-runtime-receiver-type? target-type)
                 (let [target-ir (lower-expression env target-expr)
                       nex-type (infer-type env expr)
@@ -2270,6 +2324,16 @@
         field-def
         [env (ir/call-runtime-node (str "user-field-set:" field-name)
                                    [(lower-expression env target-expr) value-ir]
+                                   "Void"
+                                   :void)]
+
+        (imported-java-qualified-name env owner)
+        [env (ir/call-runtime-node "java-set-field"
+                                   [(ir/const-node field-name
+                                                   "String"
+                                                   (ir/object-jvm-type "java/lang/String"))
+                                    (lower-expression env target-expr)
+                                    value-ir]
                                    "Void"
                                    :void)]
 
@@ -2889,14 +2953,23 @@
         actual-classes (vec (user-class-defs program))
         anonymous-classes (vec (collect-anonymous-class-defs program))
         emitted-anonymous-classes (vec (remove :closure-runtime-object? anonymous-classes))
+        visible-imports (vec (or (:imports opts) (:imports program)))
+        imported-classes (->> visible-imports
+                              (keep (fn [{:keys [qualified-name source]}]
+                                      (when (and (nil? source) qualified-name)
+                                        {:name (last (str/split qualified-name #"\."))
+                                         :body []
+                                         :import qualified-name})))
+                              vec)
         visible-functions (vec (concat (:functions program) (:functions opts)))
-        visible-classes (vec (concat actual-classes
+        visible-classes (vec (concat imported-classes
+                                     actual-classes
                                      anonymous-classes
                                      (:classes opts)
                                      (keep :class-def visible-functions)))
         env (make-lowering-env {:classes visible-classes
                                 :functions visible-functions
-                                :imports (:imports program)
+                                :imports visible-imports
                                 :compiled-classes (:compiled-classes opts)
                                 :var-types (:var-types opts)
                                 :top-level? true
@@ -2944,11 +3017,11 @@
                      :classes (mapv #(lower-class-def % {:compiled-classes (:compiled-classes opts)
                                                          :classes visible-classes
                                                          :functions visible-functions
-                                                         :imports (:imports program)})
+                                                         :imports visible-imports})
                                     (concat actual-classes emitted-anonymous-classes))
                      :functions (mapv #(lower-function unit-name
                                                        visible-functions
-                                                       (:imports program)
+                                                       visible-imports
                                                        (assoc %
                                                               :visible-classes visible-classes
                                                               :compiled-classes (:compiled-classes opts)))

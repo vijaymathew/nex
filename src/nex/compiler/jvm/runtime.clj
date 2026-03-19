@@ -13,6 +13,7 @@
 
 (declare rebuild-interpreter-ctx)
 (declare lowered-instance-method-name)
+(declare reflected-field)
 
 (defrecord NexReplState [^clojure.lang.Atom values
                          ^clojure.lang.Atom types
@@ -160,6 +161,32 @@
                               [{:type :literal :value capacity}]
                               [])}]
      (interp/eval-node ctx create-node))))
+
+(defn java-create-object
+  [state class-name args]
+  (let [ctx (rebuild-interpreter-ctx state)]
+    (interp/java-create-object ctx class-name args)))
+
+(defn java-call-method
+  [state method-name target args]
+  (interp/java-call-method target method-name args))
+
+(defn java-get-field
+  [field-name target]
+  (let [^Field field (or (reflected-field (.getClass target) field-name)
+                         (throw (ex-info (str "Undefined Java field: " field-name)
+                                         {:field field-name
+                                          :class (.getName (.getClass target))})))]
+    (.get field target)))
+
+(defn java-set-field!
+  [field-name target value]
+  (let [^Field field (or (reflected-field (.getClass target) field-name)
+                         (throw (ex-info (str "Undefined Java field: " field-name)
+                                         {:field field-name
+                                          :class (.getName (.getClass target))})))]
+    (.set field target value)
+    nil))
 
 (defn spawn-function-object
   [state fn-obj]
@@ -615,6 +642,18 @@
     (if (seq args)
       (create-channel (first args))
       (create-channel))
+
+    (= name "java-create-object")
+    (java-create-object state (first args) (vec (rest args)))
+
+    (= name "java-call-method")
+    (java-call-method state (first args) (second args) (vec (drop 2 args)))
+
+    (= name "java-get-field")
+    (java-get-field (first args) (second args))
+
+    (= name "java-set-field")
+    (java-set-field! (first args) (second args) (nth args 2))
 
     (= name "spawn-function-object")
     (spawn-function-object state (first args))

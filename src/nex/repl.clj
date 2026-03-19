@@ -971,14 +971,15 @@
       (reset! *repl-var-types* var-types))))
 
 (defn- sync-interpreter-back-into-compiled-session!
-  [ctx ast]
+  [ctx ast source-id]
   (when (= :compiled @*repl-backend*)
     (reset! *compiled-repl-session*
             (compiled-repl/sync-interpreter->session!
              @*compiled-repl-session*
              ctx
              @*repl-var-types*
-             ast))))
+             ast
+             source-id))))
 
 (defn looks-like-class?
   "Check if input looks like a top-level declaration"
@@ -1154,7 +1155,8 @@
              (not (dbg/enabled?))
              (= :compiled @*repl-backend*))
         (if-let [{:keys [session result output]} (compiled-repl/compile-and-eval! @*compiled-repl-session*
-                                                                            ast)]
+                                                                                  ast
+                                                                                  source-id)]
           (do
             (reset! *compiled-repl-session* session)
             (when (seq output)
@@ -1192,7 +1194,7 @@
                                     (infer-result-type exec-ctx (last calls)))]
                   (println (str type-str " " (format-value result)))
                   (println (format-value result)))))
-            (sync-interpreter-back-into-compiled-session! exec-ctx ast)
+            (sync-interpreter-back-into-compiled-session! exec-ctx ast source-id)
             exec-ctx))
 
         ;; If we wrapped the code, execute the temp method in GLOBAL context
@@ -1237,7 +1239,8 @@
             :classes []
             :functions []
             :statements (:body method-def)
-            :calls []})
+            :calls []}
+           source-id)
           exec-ctx)
 
         ;; If it's a program, handle it based on content
@@ -1275,7 +1278,7 @@
                                   (infer-result-type exec-ctx (last calls)))]
                 (println (str type-str " " (format-value result)))
                 (println (format-value result)))))
-          (sync-interpreter-back-into-compiled-session! exec-ctx ast)
+          (sync-interpreter-back-into-compiled-session! exec-ctx ast source-id)
           exec-ctx)
 
         ;; Single expression or statement
@@ -1300,7 +1303,8 @@
             :classes []
             :functions []
             :statements [ast]
-            :calls []})
+            :calls []}
+           source-id)
           exec-ctx))))
 
     (catch ParseError e

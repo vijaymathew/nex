@@ -1,5 +1,6 @@
 (ns nex.compiler.jvm.repl-test
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [nex.interpreter :as interp]
             [nex.parser :as p]
@@ -513,3 +514,52 @@ end")
         (is (:compiled? assign-result))
         (is (:compiled? call-result))
         (is (= 16.0 (:result call-result))))))
+
+(deftest compiled-repl-import-support-test
+  (testing "compiled helper can keep Java imports on the compiled path"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (p/ast "import java.util.ArrayList
+
+let xs: ArrayList := create ArrayList
+xs.add(\"a\")
+xs.size()"))]
+      (is (:compiled? result))
+      (is (= 1 (:result result)))
+      (is (= "ArrayList" (runtime/state-get-type (:state session) "xs")))
+      (is (= "java.util.ArrayList"
+             (:qualified-name (first @(:import-asts session))))))))
+
+(deftest compiled-repl-intern-support-test
+  (testing "compiled helper resolves interned classes relative to source-id and keeps them on the compiled path"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-compiled-intern-" (System/nanoTime)))
+          a-file (io/file tmp-dir "A.nex")
+          main-file (io/file tmp-dir "main.nex")
+          session (compiled-repl/make-session)]
+      (.mkdirs tmp-dir)
+      (spit a-file "class A
+feature
+  answer(): Integer
+  do
+    result := 41
+  end
+end")
+      (spit main-file "intern A
+
+let a := create A
+a.answer()")
+      (try
+        (let [result (compiled-repl/compile-and-eval!
+                      session
+                      (p/ast (slurp main-file))
+                      (.getPath main-file))]
+          (is (:compiled? result))
+          (is (= 41 (:result result)))
+          (is (contains? @(:class-asts session) "A"))
+          (is (= "A" (:class-name (first @(:intern-asts session))))))
+        (finally
+          (.delete a-file)
+          (.delete main-file)
+          (.delete tmp-dir))))))

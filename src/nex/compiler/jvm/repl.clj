@@ -50,6 +50,7 @@
 (declare supported-convert-in-ctx?)
 (declare supported-anonymous-function-in-ctx?)
 (declare supported-select-clause-in-ctx?)
+(declare merge-import-like-nodes)
 
 (def ^:private builtin-runtime-receiver-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
@@ -71,6 +72,15 @@
 (defn- compiled-class-names
   [session]
   (set (keys @(:compiled-classes session))))
+
+(defn- import-placeholder-classes
+  [imports]
+  (->> imports
+       (keep (fn [{:keys [qualified-name source]}]
+               (when (and (nil? source) qualified-name)
+                 (let [simple-name (last (clojure.string/split qualified-name #"\."))]
+                   {:name simple-name :body [] :import qualified-name}))))
+       vec))
 
 (defn- user-class-defs
   [ast]
@@ -164,6 +174,21 @@
          (contains? (:compiled-class-names ctx) base)
          (or field-def method-def))))
 
+(defn- imported-java-target-call-in-ctx?
+  [ctx expr]
+  (let [class-target-def (when (string? (:target expr))
+                           (some #(when (= (:name %) (:target expr)) %) (:classes ctx)))
+        target-expr (normalize-call-target (:target expr))
+        target-type (when target-expr
+                      (infer-type-in-ctx ctx target-expr))
+        base (base-type-name target-type)
+        class-def (some #(when (= (:name %) base) %) (:classes ctx))]
+    (and target-expr
+         (nil? class-target-def)
+         (supported-expr-in-ctx? ctx target-expr)
+         (every? #(supported-expr-in-ctx? ctx %) (:args expr))
+         (:import class-def))))
+
 (defn- class-constructors-in-ctx
   [ctx class-name]
   (mapcat (fn [section]
@@ -224,10 +249,20 @@
     (assoc ast :statements (vec (:calls ast)))
     ast))
 
+(defn- augment-ast-with-modules
+  [session source-id ast]
+  (let [ast' (normalize-program-ast ast)
+        intern-classes (interp/resolve-interned-classes source-id ast')
+        merged-imports (merge-import-like-nodes @(:import-asts session) (:imports ast'))]
+    (assoc ast'
+           :imports merged-imports
+           :classes (vec (concat intern-classes (:classes ast'))))))
+
 (defn- initial-eligibility-ctx
   [session ast]
   (let [actual-classes (vec (concat (user-class-defs ast)
-                                    (anonymous-class-defs ast)))]
+                                    (anonymous-class-defs ast)))
+        imported-classes (import-placeholder-classes (:imports ast))]
     {:known-vars (set (concat (keys (session-var-types session))
                             (keys @(:values (:state session)))))
      :known-fns (set (concat builtin-function-names
@@ -239,10 +274,12 @@
                                   [(:name fn-def) (:class-name fn-def)]))
                            (concat (vals @(:function-asts session)) (:functions ast))))
      :functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
-     :classes (vec (concat (vals @(:class-asts session)) actual-classes))
+     :classes (vec (concat imported-classes
+                           (vals @(:class-asts session))
+                           actual-classes))
      :compiled-class-names (set (concat (compiled-class-names session)
                                         (map :name actual-classes)))
-     :imports @(:import-asts session)
+     :imports (:imports ast)
      :retry-allowed? false}))
 
 (defn supported-expr-in-ctx?
@@ -268,13 +305,16 @@
                      "with_capacity" (= 1 (count (:args expr)))
                      false))
               (let [class-def (class-def-in-ctx ctx (:class-name expr))]
-                (and (contains? (:compiled-class-names ctx) (:class-name expr))
-                     class-def
-                     (not (:deferred? class-def))
-                     (every? #(supported-expr-in-ctx? ctx %) (:args expr))
-                     (if-let [ctor (:constructor expr)]
-                       (known-constructor-in-ctx? ctx (:class-name expr) ctor (count (:args expr)))
-                       (empty? (:args expr))))))
+                (if (:import class-def)
+                  (and (nil? (:constructor expr))
+                       (every? #(supported-expr-in-ctx? ctx %) (:args expr)))
+                  (and (contains? (:compiled-class-names ctx) (:class-name expr))
+                       class-def
+                       (not (:deferred? class-def))
+                       (every? #(supported-expr-in-ctx? ctx %) (:args expr))
+                       (if-let [ctor (:constructor expr)]
+                         (known-constructor-in-ctx? ctx (:class-name expr) ctor (count (:args expr)))
+                         (empty? (:args expr)))))))
     :identifier (contains? (:known-vars ctx) (:name expr))
     :spawn (boolean (supported-stmt-block? (-> ctx
                                                (update :known-vars conj "result")
@@ -287,7 +327,8 @@
                      (contains? (:known-fns ctx) (:method expr))
                      (function-object-call-in-ctx? ctx expr)))
             (or (builtin-target-call-in-ctx? ctx expr)
-                (user-target-call-in-ctx? ctx expr)))
+                (user-target-call-in-ctx? ctx expr)
+                (imported-java-target-call-in-ctx? ctx expr)))
     :binary (and (contains? (into #{"+" "-" "*" "/" "%" "^" "and" "or"} relational-ops) (:operator expr))
                  (supported-expr-in-ctx? ctx (:left expr))
                  (supported-expr-in-ctx? ctx (:right expr)))
@@ -446,12 +487,12 @@
         actual-class-names (set (map :name (user-class-defs ast')))
         initial-ctx (initial-eligibility-ctx session ast')]
     (and (= :program (:type ast'))
-         (empty? (:imports ast))
-         (empty? (:interns ast))
          (empty? (set/intersection (compiled-class-names session) actual-class-names))
          (or (seq (:functions ast'))
              (seq (:statements ast'))
-             (seq (:classes ast')))
+             (seq (:classes ast'))
+             (seq (:imports ast'))
+             (seq (:interns ast')))
          (reduce (fn [ctx stmt]
                    (when (and ctx (supported-stmt-in-ctx? ctx stmt))
                      (advance-eligibility-ctx ctx stmt)))
@@ -511,10 +552,11 @@
             new-class-map (allocate-compiled-class-metadata session compiled-class-defs)
           compiled-map (merge @(:compiled-classes session) new-class-map)
           visible-functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
-          visible-classes (vec (concat (vals @(:class-asts session))
+          visible-classes (vec (concat (import-placeholder-classes (:imports ast))
+                                       (vals @(:class-asts session))
                                        actual-classes
                                        (keep :class-def visible-functions)))
-          visible-imports @(:import-asts session)
+          visible-imports (:imports ast)
           lowered-classes
           (mapv (fn [class-def]
                   (lower/lower-class-def class-def {:compiled-classes compiled-map
@@ -652,26 +694,29 @@
 (defn sync-interpreter->session!
   "Copy top-level interpreter state into the compiled session and remember
    top-level AST metadata so later compiled cells can type/lower against it."
-  [session ctx var-types ast]
-  (let [prepared-ast (lower/prepare-program-for-closures
-                      ast
-                      {:classes (vals @(:class-asts session))
-                       :functions (vals @(:function-asts session))
-                       :imports @(:import-asts session)
-                       :var-types var-types})]
-  (remember-top-level-ast! session prepared-ast)
-  (let [state (:state session)
-        function-names (session-function-name-set session)]
-    (reset-runtime-state! state)
-    (doseq [[k v] @(:bindings (:globals ctx))
-            :let [name (if (string? k) k (name k))]
-            :when (not (contains? function-names name))]
-      (rt/state-set-value! state name v))
-    (doseq [[k t] var-types
-            :when (not (contains? function-names k))]
-      (rt/state-set-type! state k t))
-    (compile-and-register-functions! session prepared-ast)
-    session)))
+  ([session ctx var-types ast]
+   (sync-interpreter->session! session ctx var-types ast nil))
+  ([session ctx var-types ast source-id]
+   (let [module-ast (augment-ast-with-modules session source-id ast)
+         prepared-ast (lower/prepare-program-for-closures
+                       module-ast
+                       {:classes (vals @(:class-asts session))
+                        :functions (vals @(:function-asts session))
+                        :imports (:imports module-ast)
+                        :var-types var-types})]
+     (remember-top-level-ast! session prepared-ast)
+     (let [state (:state session)
+           function-names (session-function-name-set session)]
+       (reset-runtime-state! state)
+       (doseq [[k v] @(:bindings (:globals ctx))
+               :let [name (if (string? k) k (name k))]
+               :when (not (contains? function-names name))]
+         (rt/state-set-value! state name v))
+       (doseq [[k t] var-types
+               :when (not (contains? function-names k))]
+         (rt/state-set-type! state k t))
+       (compile-and-register-functions! session prepared-ast)
+       session))))
 
 (defn sync-session->interpreter!
   "Materialize compiled-session top-level state into the interpreter context.
@@ -700,39 +745,42 @@
   "Attempt compiled evaluation for a narrow REPL-safe top-level subset.
    Returns {:compiled? true :session .. :result ..} on success, nil when the
    input is outside the supported subset or lowering/emission declines it."
-  [session ast]
-  (let [ast' (normalize-program-ast ast)
-        prepared-ast (lower/prepare-program-for-closures
-                      ast'
-                      {:classes (vals @(:class-asts session))
-                       :functions (vals @(:function-asts session))
-                       :imports @(:import-asts session)
-                       :var-types (session-var-types session)})]
-    (when (eligible-ast? session prepared-ast)
-    (try
-      (let [class-name (next-class-name! session)
-            _ (compile-and-register-classes! session prepared-ast)
-            _ (remember-top-level-ast! session prepared-ast)
-            {:keys [unit]} (lower/lower-repl-cell prepared-ast {:name class-name
-                                                        :compiled-classes @(:compiled-classes session)
-                                                        :classes (vals @(:class-asts session))
-                                                        :functions (vals @(:function-asts session))
-                                                        :var-types (session-var-types session)})
-            bytecode (emit/compile-unit->bytes unit)
-            binary-name (desc/binary-class-name class-name)
-            cls (loader/define-class! (:loader session) binary-name bytecode)
-            state (:state session)
-            _ (rt/clear-output! state)
-            method (.getMethod cls "eval" (into-array Class [(class state)]))
-            result (.invoke method nil (object-array [state]))]
-        (sync-var-types-from-ast! session prepared-ast)
-        {:compiled? true
-         :session session
-         :output (rt/state-output state)
-         :result result})
-      (catch clojure.lang.ExceptionInfo e
-        (let [msg (.getMessage e)]
-          (when-not (or (.contains msg "Unsupported")
-                        (.contains msg "Unable to infer expression type during lowering"))
-            (throw e))
-          nil))))))
+  ([session ast]
+   (compile-and-eval! session ast nil))
+  ([session ast source-id]
+   (let [module-ast (augment-ast-with-modules session source-id ast)
+         prepared-ast (lower/prepare-program-for-closures
+                       module-ast
+                       {:classes (vals @(:class-asts session))
+                        :functions (vals @(:function-asts session))
+                        :imports (:imports module-ast)
+                        :var-types (session-var-types session)})]
+     (when (eligible-ast? session prepared-ast)
+       (try
+         (let [class-name (next-class-name! session)
+               _ (compile-and-register-classes! session prepared-ast)
+               _ (remember-top-level-ast! session prepared-ast)
+               {:keys [unit]} (lower/lower-repl-cell prepared-ast {:name class-name
+                                                                   :compiled-classes @(:compiled-classes session)
+                                                                   :classes (vals @(:class-asts session))
+                                                                   :functions (vals @(:function-asts session))
+                                                                   :imports (:imports prepared-ast)
+                                                                   :var-types (session-var-types session)})
+               bytecode (emit/compile-unit->bytes unit)
+               binary-name (desc/binary-class-name class-name)
+               cls (loader/define-class! (:loader session) binary-name bytecode)
+               state (:state session)
+               _ (rt/clear-output! state)
+               method (.getMethod cls "eval" (into-array Class [(class state)]))
+               result (.invoke method nil (object-array [state]))]
+           (sync-var-types-from-ast! session prepared-ast)
+           {:compiled? true
+            :session session
+            :output (rt/state-output state)
+            :result result})
+         (catch clojure.lang.ExceptionInfo e
+           (let [msg (.getMessage e)]
+             (when-not (or (.contains msg "Unsupported")
+                           (.contains msg "Unable to infer expression type during lowering"))
+               (throw e))
+             nil)))))))

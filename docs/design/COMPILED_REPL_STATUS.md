@@ -174,7 +174,9 @@ The compiled REPL path currently supports:
   - function-object invocation
   - passing function objects through `Function`-typed parameters
   - returning function objects from compiled functions
-- imports/intern-free top-level batches containing:
+- module-aware top-level batches containing:
+  - `import`
+  - `intern`
   - function declarations
   - function definitions
   - `let`
@@ -222,6 +224,11 @@ The compiled REPL path currently supports:
   - class invariants
   - runtime object-model validation on compiled creation/method paths
   - `convert ... to`
+- modules
+  - Java `import` declarations are tracked in compiled-session state
+  - imported Java classes can be instantiated on the compiled path
+  - imported Java instance methods and field access use specialized runtime helpers instead of forcing interpreter fallback
+  - `intern` declarations resolve local `.nex` files into compiled class metadata on the compiled path
 
 ## Runtime-Backed Receiver Types
 
@@ -247,7 +254,6 @@ Array / Map / Set no longer belong in this bucket for their ordinary collection 
 These still fall outside the compiled subset and therefore deopt to the interpreter:
 
 - file/module compilation for the JVM bytecode backend beyond the current REPL/helper path
-- imports and `intern` on the compiled path
 - specialized direct codegen for each builtin beyond the current helper/receiver-call paths
 
 In addition, some inputs still deopt in the user-facing REPL because of the wrapping rule above, even though the internal compiled helper supports them.
@@ -265,7 +271,7 @@ Good candidates for the compiled path today:
 - arithmetic-heavy REPL work over top-level values
 - top-level function definition and redefinition
 - mutually recursive top-level functions with forward declarations
-- builtin-heavy expression batches that do not introduce classes, imports, or interns
+- builtin-heavy or module-aware batches that do not rely on unsupported file-compilation machinery
 - concurrency-heavy REPL batches such as:
   - `let t := spawn do ... end`
   - channel creation and send/receive work
@@ -279,7 +285,7 @@ Good candidates for the compiled path today:
 
 Likely deopt triggers today:
 
-- imports and interns
+- file/module bytecode compilation beyond the current REPL/helper path
 - JVM bytecode file/module compilation beyond the current compiled REPL/helper path
 - statement-shaped REPL inputs that are still pre-wrapped in `nex.repl`
 
