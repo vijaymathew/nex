@@ -74,6 +74,7 @@ nex compile <target> <input.nex> [output]
 
 **Targets:**
 - `java` - Generate Java source code
+- `jvm` - Compile to a standalone JVM JAR using the bytecode backend
 - `javascript` or `js` - Generate JavaScript source code
 
 **Examples:**
@@ -84,6 +85,12 @@ nex compile java MyClass.nex
 
 # Compile to Java (save to file)
 nex compile java MyClass.nex MyClass.java
+
+# Compile to a standalone JVM jar
+nex compile jvm MyClass.nex
+
+# Compile to a standalone JVM jar in a target directory
+nex compile jvm MyClass.nex build/
 
 # Compile to JavaScript
 nex compile js MyClass.nex MyClass.js

@@ -300,7 +300,7 @@ The JVM bytecode compiler is no longer REPL-only.
 
 It now supports:
 
-- `.nex` file compilation to JVM `.class` files
+- `.nex` file compilation to a standalone shaded JVM jar
 - emitted launcher generation with `public static void main(String[] args)`
 - source-relative `intern` resolution before lowering/emission
 - compiled class/object metadata bootstrap for runtime helpers such as:
@@ -310,8 +310,8 @@ It now supports:
 
 Current boundary for file compilation:
 
-- the compiler emits `.class` files, not a standalone shaded runtime jar
-- running the emitted launcher still requires the Nex/Clojure runtime on the JVM classpath
+- the compiler now packages generated classes, runtime support, project sources, and resolved dependency jars into one runnable jar
+- this closes the previous classpath/runtime gap for file execution
 
 ## Examples That Stay Compiled
 

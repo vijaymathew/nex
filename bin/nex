@@ -23,7 +23,7 @@ COMMANDS:
 
 COMPILE TARGETS:
     java        Compile to a runnable JAR (uses javac)
-    jvm         Compile directly to JVM .class files
+    jvm         Compile to a standalone JVM JAR (bytecode backend)
     javascript  Generate JavaScript source files
     js          Alias for javascript
 
@@ -31,8 +31,8 @@ EXAMPLES:
     nex                                      # Start REPL
     nex compile java app.nex                 # Compile to app.jar in current dir
     nex compile java app.nex build/          # Compile to build/app.jar
-    nex compile jvm app.nex                  # Compile to .class files in current dir
-    nex compile jvm app.nex build/           # Compile to .class files in build/
+    nex compile jvm app.nex                  # Compile to a standalone app.jar in current dir
+    nex compile jvm app.nex build/           # Compile to a standalone app.jar in build/
     nex compile js app.nex                   # Print JavaScript to stdout
     nex compile js app.nex build/            # Write .js files to build/
     nex format src/                          # Format all files in directory

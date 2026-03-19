@@ -74,3 +74,32 @@ print(a.name())")
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-produces-standalone-runnable-jar
+  (testing "compile-jar builds a standalone runnable jar"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-test")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class App
+feature
+  greet(): String
+  do
+    result := \"hello standalone\"
+  end
+end
+
+let app: App := create App
+print(app.greet())")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              proc (.exec (Runtime/getRuntime)
+                          (into-array String ["java" "-jar" (:jar result)]))]
+          (.waitFor proc)
+          (let [output (slurp (.getInputStream proc))
+                error-output (slurp (.getErrorStream proc))]
+            (is (= 0 (.exitValue proc)) error-output)
+            (is (= "\"hello standalone\"" (str/trim output)))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))

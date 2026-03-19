@@ -202,6 +202,9 @@ You should see the Nex REPL prompt.
 # Compile to Java
 nex compile java examples/create_example.nex
 
+# Compile to a standalone JVM jar
+nex compile jvm examples/create_example.nex
+
 # Compile to JavaScript
 nex compile js examples/create_example.nex
 ```

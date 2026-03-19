@@ -731,7 +731,3 @@
         (let [result (apply builtin-fn ctx args)]
           (reset! (:output state) @(:output ctx))
           result)))))))
-
-(defn invoke_builtin
-  [state name args]
-  (invoke-builtin state name args))

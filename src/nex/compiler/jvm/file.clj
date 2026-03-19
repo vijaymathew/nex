@@ -11,7 +11,9 @@
             [nex.interpreter :as interp]
             [nex.lower :as lower]
             [nex.parser :as p]
-            [nex.typechecker :as tc]))
+            [nex.typechecker :as tc])
+  (:import [java.io ByteArrayInputStream File FileInputStream]
+           [java.util.jar JarEntry JarFile JarOutputStream Manifest]))
 
 (defn- sanitize-stem
   [path]
@@ -162,6 +164,116 @@
                 :class-files written))
        result))))
 
+(defn- classpath-entries
+  []
+  (->> (str/split (System/getProperty "java.class.path")
+                  (re-pattern (java.util.regex.Pattern/quote File/pathSeparator)))
+       (remove str/blank?)
+       (map io/file)))
+
+(defn- skip-jar-entry?
+  [entry-name]
+  (or (= entry-name "META-INF/MANIFEST.MF")
+      (str/ends-with? entry-name ".SF")
+      (str/ends-with? entry-name ".DSA")
+      (str/ends-with? entry-name ".RSA")
+      (= entry-name "nex/compiler/jvm/runtime.clj")
+      (= entry-name "nex/compiler/jvm/runtime.cljc")))
+
+(defn- add-entry!
+  [^JarOutputStream jar-out seen entry-name input-fn]
+  (when-not (or (skip-jar-entry? entry-name)
+                (contains? @seen entry-name))
+    (swap! seen conj entry-name)
+    (.putNextEntry jar-out (JarEntry. entry-name))
+    (input-fn jar-out)
+    (.closeEntry jar-out)))
+
+(defn- add-file-tree!
+  [^JarOutputStream jar-out seen root]
+  (let [root-file (io/file root)
+        root-path (.toPath root-file)]
+    (doseq [f (file-seq root-file)
+            :when (.isFile f)]
+      (let [entry-name (-> (.relativize root-path (.toPath f))
+                           str
+                           (str/replace File/separator "/"))]
+        (add-entry! jar-out seen entry-name
+                    (fn [out]
+                      (with-open [in (FileInputStream. f)]
+                        (io/copy in out))))))))
+
+(defn- add-jar-file!
+  [^JarOutputStream jar-out seen jar-path]
+  (with-open [jar (JarFile. (io/file jar-path))]
+    (doseq [entry (enumeration-seq (.entries jar))
+            :when (not (.isDirectory ^JarEntry entry))]
+      (let [entry-name (.getName ^JarEntry entry)]
+        (add-entry! jar-out seen entry-name
+                    (fn [out]
+                      (with-open [in (.getInputStream jar entry)]
+                        (io/copy in out))))))))
+
+(defn- delete-tree!
+  [root]
+  (doseq [f (reverse (file-seq (io/file root)))]
+    (.delete f)))
+
+(defn- compile-runtime-support!
+  [compile-dir]
+  (binding [*compile-path* (.getPath (io/file compile-dir))]
+    (compile 'nex.compiler.jvm.runtime))
+  compile-dir)
+
+(defn compile-jar
+  "Compile a Nex file to a standalone JVM jar that includes generated classes,
+  the AOT-compiled compiled-runtime support, project source resources, and
+  resolved dependency jars from the current classpath."
+  ([nex-file] (compile-jar nex-file nil {}))
+  ([nex-file output-dir] (compile-jar nex-file output-dir {}))
+  ([nex-file output-dir opts]
+   (let [jar-name (or (:jar-name opts)
+                      (sanitize-stem nex-file))
+         out-dir (io/file (or output-dir "."))
+         build-dir (io/file (System/getProperty "java.io.tmpdir")
+                            (str "nex-jvm-build-" (System/nanoTime)))
+         classes-dir (io/file build-dir "classes")
+         compile-dir (io/file build-dir "aot")
+         _ (.mkdirs classes-dir)
+         _ (.mkdirs compile-dir)]
+     (try
+       (let [compile-result (compile-file nex-file (.getPath classes-dir) opts)
+             _ (compile-runtime-support! compile-dir)
+             manifest-str (str "Manifest-Version: 1.0\n"
+                               "Main-Class: " (:main-class compile-result) "\n\n")
+             manifest (Manifest. (ByteArrayInputStream. (.getBytes manifest-str)))
+             jar-file (io/file out-dir (str jar-name ".jar"))
+             seen (atom #{})]
+         (.mkdirs out-dir)
+         (with-open [jar-out (JarOutputStream. (java.io.FileOutputStream. jar-file) manifest)]
+           (add-file-tree! jar-out seen classes-dir)
+           (add-file-tree! jar-out seen compile-dir)
+           (when (.exists (io/file "src"))
+             (add-file-tree! jar-out seen "src"))
+           (doseq [cp-entry (classpath-entries)
+                   :when (.exists cp-entry)]
+             (cond
+               (.isDirectory cp-entry)
+               (when-not (= (.getCanonicalPath cp-entry) (.getCanonicalPath (io/file "test")))
+                 (add-file-tree! jar-out seen cp-entry))
+
+               (str/ends-with? (.getName cp-entry) ".jar")
+               (add-jar-file! jar-out seen cp-entry)
+
+               :else nil)))
+         {:jar (.getPath jar-file)
+          :main-class (:main-class compile-result)
+          :program-class (:program-class compile-result)
+          :class-files (:class-files compile-result)})
+       (finally
+         (when (.exists build-dir)
+           (delete-tree! build-dir)))))))
+
 (defn -main
   [& args]
   (when (empty? args)
@@ -170,8 +282,8 @@
   (let [input-file (first args)
         output-dir (or (second args) ".")]
     (try
-      (let [result (compile-file input-file output-dir {})]
-        (println (str "Compiled " input-file " -> " (:output-dir result)))
+      (let [result (compile-jar input-file output-dir {})]
+        (println (str "Compiled " input-file " -> " (:jar result)))
         (println (str "Main class: " (:main-class result))))
       (System/exit 0)
       (catch Exception e
