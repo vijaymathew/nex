@@ -192,18 +192,23 @@
     (.closeEntry jar-out)))
 
 (defn- add-file-tree!
-  [^JarOutputStream jar-out seen root]
-  (let [root-file (io/file root)
-        root-path (.toPath root-file)]
-    (doseq [f (file-seq root-file)
-            :when (.isFile f)]
-      (let [entry-name (-> (.relativize root-path (.toPath f))
-                           str
-                           (str/replace File/separator "/"))]
-        (add-entry! jar-out seen entry-name
-                    (fn [out]
-                      (with-open [in (FileInputStream. f)]
-                        (io/copy in out))))))))
+  ([^JarOutputStream jar-out seen root]
+   (add-file-tree! jar-out seen root nil))
+  ([^JarOutputStream jar-out seen root entry-prefix]
+   (let [root-file (io/file root)
+         root-path (.toPath root-file)]
+     (doseq [f (file-seq root-file)
+             :when (.isFile f)]
+       (let [relative-name (-> (.relativize root-path (.toPath f))
+                               str
+                               (str/replace File/separator "/"))
+             entry-name (if entry-prefix
+                          (str entry-prefix "/" relative-name)
+                          relative-name)]
+         (add-entry! jar-out seen entry-name
+                     (fn [out]
+                       (with-open [in (FileInputStream. f)]
+                         (io/copy in out)))))))))
 
 (defn- add-jar-file!
   [^JarOutputStream jar-out seen jar-path]
@@ -257,6 +262,8 @@
            (add-file-tree! jar-out seen compile-dir)
            (when (.exists (io/file "src"))
              (add-file-tree! jar-out seen "src"))
+           (when (.exists (io/file "grammar"))
+             (add-file-tree! jar-out seen "grammar" "grammar"))
            (doseq [cp-entry (classpath-entries)
                    :when (.exists cp-entry)]
              (cond
@@ -290,4 +297,6 @@
       (System/exit 0)
       (catch Exception e
         (println "Error:" (.getMessage e))
+        (doseq [line (:errors (ex-data e))]
+          (println line))
         (System/exit 1)))))

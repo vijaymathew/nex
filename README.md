@@ -346,8 +346,6 @@ end")
 (jvm/compile-jar "input.nex" "build/")
 ```
 
-The older Java-source generator in `nex.generator.java` still exists, but it is deprecated. Prefer the JVM bytecode backend.
-
 ### Translating to JavaScript
 
 ```clojure
@@ -423,7 +421,6 @@ nex/
 │   ├── typechecker.cljc        # Static type checker
 │   ├── debugger.clj            # REPL debugger
 │   └── generator/
-│       ├── java.clj            # Java code generator
 │       └── javascript.clj      # JavaScript (ES6+) code generator
 ├── test/
 │   ├── nex/                    # Test suites by feature
@@ -431,7 +428,6 @@ nex/
 │   │   ├── if_conditions_test.clj
 │   │   ├── inheritance_test.clj
 │   │   └── generator/
-│   │       ├── java_test.clj
 │   │       └── javascript_test.clj
 │   └── scripts/                # Test runners
 ├── examples/                   # Annotated example programs

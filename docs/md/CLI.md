@@ -73,11 +73,10 @@ nex compile <target> <input.nex> [output]
 ```
 
 **Targets:**
-- `java` - Deprecated legacy Java-source pipeline
 - `jvm` - Compile to a standalone JVM JAR using the bytecode backend
 - `javascript` or `js` - Generate JavaScript source code
 
-Prefer `jvm` for JVM deployment. `java` remains available for legacy use only and is slated for removal.
+Prefer `jvm` for JVM deployment.
 
 **Examples:**
 

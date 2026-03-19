@@ -80,17 +80,6 @@ Tests are organized following standard Clojure conventions:
   - `text/Regex`: compile, matching, search, replacement, splitting
   - JVM interpreter coverage for shipped `lib/text` library classes
 
-### Legacy Code Generation
-
-- **generator/java_test.clj** (`nex.generator.java-test`)
-  - Legacy Java-source backend only
-  - Nex to Java translation
-  - Type mapping
-  - Class structure
-  - Inheritance translation
-  - Contract translation
-  - **10 tests, 29 assertions**
-
 ## Running Tests
 
 ### Run All Tests

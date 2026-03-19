@@ -31,15 +31,12 @@ COMMANDS:
     help                      Show this help message
 
 COMPILE TARGETS:
-    java        Deprecated: compile via generated Java/javac
     jvm         Compile to a standalone JVM JAR (bytecode backend)
     javascript  Generate JavaScript source files
     js          Alias for javascript
 
 EXAMPLES:
     nex                                      # Start REPL
-    nex compile java app.nex                 # Deprecated legacy Java-source pipeline
-    nex compile java app.nex build/          # Deprecated legacy Java-source pipeline
     nex compile jvm app.nex                  # Compile to a standalone app.jar in current dir
     nex compile jvm app.nex build/           # Compile to a standalone app.jar in build/
     nex compile js app.nex                   # Print JavaScript to stdout
@@ -61,7 +58,7 @@ show_version() {
     echo "Nex Language v$VERSION (JVM)"
 }
 
-J_OPTIONS="-J--enable-native-access=ALL-UNNAMED"
+J_OPTIONS="${J_OPTIONS:--J--enable-native-access=ALL-UNNAMED}"
 USER_DIR="$(pwd)"
 
 # Command implementations
@@ -77,7 +74,7 @@ cmd_compile() {
     if [[ -z "$target" || -z "$file" ]]; then
         echo "Error: compile requires target and file arguments"
         echo "Usage: nex compile <target> <file> [output-dir]"
-        echo "Targets: java, jvm, javascript (or js)"
+        echo "Targets: jvm, javascript (or js)"
         exit 1
     fi
 
@@ -86,8 +83,8 @@ cmd_compile() {
         target="javascript"
     fi
 
-    if [[ "$target" != "java" && "$target" != "jvm" && "$target" != "javascript" ]]; then
-        echo "Error: Invalid target '$target'. Must be 'java', 'jvm', or 'javascript'"
+    if [[ "$target" != "jvm" && "$target" != "javascript" ]]; then
+        echo "Error: Invalid target '$target'. Must be 'jvm' or 'javascript'"
         exit 1
     fi
 
@@ -96,15 +93,11 @@ cmd_compile() {
         exit 1
     fi
 
-    if [[ "$target" == "java" ]]; then
-        echo "Warning: 'nex compile java' is deprecated. Prefer 'nex compile jvm'." >&2
-    fi
-
     # Use absolute path for file
     file="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
 
     # File-producing targets default to the user's current directory
-    if [[ ( "$target" == "java" || "$target" == "jvm" ) && -z "$output" ]]; then
+    if [[ "$target" == "jvm" && -z "$output" ]]; then
         output="$USER_DIR"
     fi
 
@@ -115,13 +108,13 @@ cmd_compile() {
         if [[ "$target" == "jvm" ]]; then
             cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.compiler.jvm.file "$file" "$output"
         else
-            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.generator.$target "$file" "$output"
+            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.generator.javascript "$file" "$output"
         fi
     else
         if [[ "$target" == "jvm" ]]; then
             cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.compiler.jvm.file "$file"
         else
-            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.generator.$target "$file"
+            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.generator.javascript "$file"
         fi
     fi
 }

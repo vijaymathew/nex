@@ -80,19 +80,19 @@ This is a recurring theme across the Nex implementation: precision matters, but 
 
 
 
-## 3.4 Why Two Generators
+## 3.4 Why Two Backends
 
-Nex has two code generation targets: Java on the JVM and JavaScript for Node.js and browser environments. The relevant files are:
+Nex currently has two maintained compilation backends: JVM bytecode for JVM deployment and JavaScript for Node.js and browser environments. The relevant files are:
 
-- [`src/nex/generator/java.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/generator/java.clj)
+- [`src/nex/compiler/jvm/file.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/file.clj)
 - [`src/nex/generator/javascript.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/generator/javascript.clj)
 
-Both generators are source-to-source translators rather than optimising native compilers. Their task is to preserve Nex semantics in practical host languages. The main control flow is intentionally similar in both:
+These backends solve the same semantic problem in different host runtimes. Their top-level control flow is intentionally similar:
 
 1. parse Nex source
 2. type-check it unless explicitly disabled
-3. walk the AST and emit target-language code
-4. splice in runtime helpers needed by that target
+3. lower or translate the program into the target runtime model
+4. emit runtime artifacts needed by that target
 
 Type-checking before generation is the right default. A generator should not silently produce host code for a program that Nex itself considers ill-typed.
 
