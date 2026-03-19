@@ -505,6 +505,20 @@ x"))
       (is (integer? (:result result)))
       (is (<= 0 (:result result))))))
 
+(deftest compiled-repl-with-java-block-test
+  (testing "compiled helper executes with \"java\" blocks on the JVM path"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (p/ast
+                   (str "with \"java\" do\n"
+                        "  let version_length: Integer := System.getProperty(\"java.version\").length()\n"
+                        "end\n"
+                        "version_length")))]
+      (is (:compiled? result))
+      (is (integer? (:result result)))
+      (is (pos? (:result result))))))
+
 (deftest repl-compiled-backend-direct-assignment-test
   (testing "compiled backend can update canonical top-level state via assignment"
     (binding [repl/*type-checking-enabled* (atom false)

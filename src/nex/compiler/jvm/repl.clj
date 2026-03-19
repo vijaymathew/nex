@@ -69,6 +69,13 @@
     {:type :identifier :name target}
     target))
 
+(defn- java-host-class-root?
+  [ctx name]
+  (and (:with-java? ctx)
+       (string? name)
+       (not (contains? (:known-vars ctx) name))
+       (re-matches #"[A-Z][A-Za-z0-9_]*" name)))
+
 (defn- compiled-class-names
   [session]
   (set (keys @(:compiled-classes session))))
@@ -315,7 +322,8 @@
                        (if-let [ctor (:constructor expr)]
                          (known-constructor-in-ctx? ctx (:class-name expr) ctor (count (:args expr)))
                          (empty? (:args expr)))))))
-    :identifier (contains? (:known-vars ctx) (:name expr))
+    :identifier (or (contains? (:known-vars ctx) (:name expr))
+                    (java-host-class-root? ctx (:name expr)))
     :spawn (boolean (supported-stmt-block? (-> ctx
                                                (update :known-vars conj "result")
                                                (assoc-in [:var-types "result"] "Any"))
@@ -326,7 +334,10 @@
                           (not (:has-parens expr)))
                      (contains? (:known-fns ctx) (:method expr))
                      (function-object-call-in-ctx? ctx expr)))
-            (or (builtin-target-call-in-ctx? ctx expr)
+            (or (and (:with-java? ctx)
+                     (supported-expr-in-ctx? ctx (normalize-call-target (:target expr)))
+                     (every? #(supported-expr-in-ctx? ctx %) (:args expr)))
+                (builtin-target-call-in-ctx? ctx expr)
                 (user-target-call-in-ctx? ctx expr)
                 (imported-java-target-call-in-ctx? ctx expr)))
     :binary (and (contains? (into #{"+" "-" "*" "/" "%" "^" "and" "or"} relational-ops) (:operator expr))
@@ -416,6 +427,10 @@
                           (supported-stmt-block? ctx (get-in stmt [:timeout :body]))))
                  (or (nil? (:else stmt))
                      (supported-stmt-block? ctx (:else stmt))))
+    :with (if (= (:target stmt) "java")
+            (boolean (supported-stmt-block-with-ctx? (assoc ctx :with-java? true)
+                                                     (:body stmt)))
+            true)
     :loop (let [[init-ok? ctx-after-init]
                 (reduce (fn [[ok? c] init-stmt]
                           (if (and ok? (supported-stmt-in-ctx? c init-stmt))

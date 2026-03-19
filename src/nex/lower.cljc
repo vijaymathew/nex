@@ -206,11 +206,12 @@
   - `:scoped-locals?` force `let` bindings to lower to JVM locals even in top-level code
   - `:retry-allowed?` whether `retry` is legal in the current lowering scope
   - `:old-field-locals` snapshot locals for `old` in postconditions
-  - `:generic-param-names` visible generic parameter identifiers lowered as JVM Object"
+  - `:generic-param-names` visible generic parameter identifiers lowered as JVM Object
+  - `:with-java?` whether unresolved target calls should lower as JVM host interop"
   ([] (make-lowering-env {}))
   ([{:keys [locals top-level? repl? state-slot next-slot classes functions imports var-types
             compiled-classes current-class fields this-type old-field-locals
-            generic-param-names] :as opts}]
+            generic-param-names with-java?] :as opts}]
    {:locals (or locals {})
     :top-level? (if (contains? opts :top-level?) top-level? true)
     :repl? (if (contains? opts :repl?) repl? true)
@@ -227,7 +228,8 @@
     :scoped-locals? false
     :retry-allowed? false
     :old-field-locals (or old-field-locals {})
-    :generic-param-names (set generic-param-names)}))
+    :generic-param-names (set generic-param-names)
+    :with-java? (boolean with-java?)}))
 
 (defn- resolve-jvm-type
   [env nex-type]
@@ -251,6 +253,17 @@
 (defn- exact-class-jvm-type
   [env class-name]
   (ir/object-jvm-type (:internal-name (class-jvm-meta env class-name))))
+
+(defn- java-host-class-root-name
+  [env expr]
+  (when (and (:with-java? env)
+             (= :identifier (:type expr))
+             (not (get (:locals env) (:name expr)))
+             (not (get (:fields env) (:name expr)))
+             (not (contains? (:var-types env) (:name expr))))
+    (or (imported-java-qualified-name env (:name expr))
+        (when (re-matches #"[A-Z][A-Za-z0-9_]*" (:name expr))
+          (:name expr)))))
 
 (defn- with-stmt-debug
   [ir-node stmt]
@@ -386,7 +399,9 @@
                         function-return-type)
                 (some-> (inherited-method-def env parent-def (:method expr) (count (:args expr)))
                         function-return-type))))
-        (let [target-type (when-not class-target-name
+        (let [java-static-owner (java-host-class-root-name env target-expr)
+              target-type (when (and (not class-target-name)
+                                     (not java-static-owner))
                             (infer-type env target-expr))
               base-type (base-type-name target-type)
               type-map (generic-type-map env target-type)
@@ -394,6 +409,8 @@
                               (get (visible-class-map env) class-target-name))
                             (get (visible-class-map env) base-type))]
           (or
+           (when (or java-static-owner (:with-java? env))
+             "Any")
            (when class-def
              (if (and class-target-name (false? (:has-parens expr)))
                (some-> (lookup-class-constant env class-target-name (:method expr))
@@ -2200,8 +2217,34 @@
                                :target-class class-target-name})))
 
             :else
-            (let [target-type (infer-type env target-expr)]
+            (let [java-static-owner (java-host-class-root-name env target-expr)
+                  target-type (when-not java-static-owner
+                                (infer-type env target-expr))]
               (cond
+                java-static-owner
+                (let [nex-type (or (infer-call-type env expr) "Any")
+                      jvm-type (resolve-jvm-type env nex-type)]
+                  (if (:has-parens expr)
+                    (ir/call-runtime-node "java-call-static"
+                                          (into [(ir/const-node java-static-owner
+                                                                "String"
+                                                                (ir/object-jvm-type "java/lang/String"))
+                                                 (ir/const-node (:method expr)
+                                                                "String"
+                                                                (ir/object-jvm-type "java/lang/String"))]
+                                                arg-irs)
+                                          nex-type
+                                          jvm-type)
+                    (ir/call-runtime-node "java-get-static-field"
+                                          [(ir/const-node java-static-owner
+                                                          "String"
+                                                          (ir/object-jvm-type "java/lang/String"))
+                                           (ir/const-node (:method expr)
+                                                          "String"
+                                                          (ir/object-jvm-type "java/lang/String"))]
+                                          nex-type
+                                          jvm-type)))
+
                 (if-let [direct-op (and (= "Integer" (base-type-name target-type))
                                         (get direct-integer-bitwise-method->op (:method expr)))]
                   direct-op
@@ -2242,6 +2285,27 @@
                                               jvm-type))
 
                 (imported-java-qualified-name env (base-type-name target-type))
+                (let [target-ir (lower-expression env target-expr)
+                      nex-type (or (infer-call-type env expr) "Any")
+                      jvm-type (resolve-jvm-type env nex-type)]
+                  (if (:has-parens expr)
+                    (ir/call-runtime-node "java-call-method"
+                                          (into [(ir/const-node (:method expr)
+                                                                "String"
+                                                                (ir/object-jvm-type "java/lang/String"))
+                                                 target-ir]
+                                                arg-irs)
+                                          nex-type
+                                          jvm-type)
+                    (ir/call-runtime-node "java-get-field"
+                                          [(ir/const-node (:method expr)
+                                                          "String"
+                                                          (ir/object-jvm-type "java/lang/String"))
+                                           target-ir]
+                                          nex-type
+                                          jvm-type)))
+
+                (:with-java? env)
                 (let [target-ir (lower-expression env target-expr)
                       nex-type (or (infer-call-type env expr) "Any")
                       jvm-type (resolve-jvm-type env nex-type)]
@@ -2388,6 +2452,16 @@
                                          "Void"
                                          :void)]
 
+              (:with-java? env)
+              [env (ir/call-runtime-node "java-set-field"
+                                         [(ir/const-node field-name
+                                                         "String"
+                                                         (ir/object-jvm-type "java/lang/String"))
+                                          (lower-expression env target-expr)
+                                          value-ir]
+                                         "Void"
+                                         :void)]
+
               :else
               (throw (ex-info "Unknown field in member assignment during lowering"
                               {:field field-name
@@ -2445,6 +2519,12 @@
           (let [[env' _] (ensure-convert-binding env stmt)
                 [env'' convert-ir] (lower-convert-expression env' stmt)]
             [env'' (ir/pop-node convert-ir)])
+
+          (= :with (:type stmt))
+          (if (= "java" (:target stmt))
+            (let [[env' lowered] (lower-statements (assoc env :with-java? true) (:body stmt))]
+              [env' (with-stmt-debug (ir/block-node lowered) stmt)])
+            [env (with-stmt-debug (ir/block-node []) stmt)])
 
           (= :if (:type stmt))
           (let [[cond-env test-ir] (if (= :convert (:type (:condition stmt)))

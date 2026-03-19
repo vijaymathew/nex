@@ -94,6 +94,20 @@
     (.loadClass loader owner-binary-name)
     (Class/forName owner-binary-name)))
 
+(defn- resolve-java-host-class
+  [state class-name]
+  (let [ctx (rebuild-interpreter-ctx state)
+        imported (interp/resolve-imported-java-class ctx class-name)]
+    (or imported
+        (try
+          (Class/forName class-name)
+          (catch Exception _ nil))
+        (try
+          (Class/forName (str "java.lang." class-name))
+          (catch Exception _ nil))
+        (throw (ex-info (str "Undefined Java class: " class-name)
+                        {:class-name class-name})))))
+
 (defn invoke-repl-fn
   [state name args]
   (let [{:keys [owner method]} (state-get-fn state name)]
@@ -178,9 +192,23 @@
   (let [ctx (rebuild-interpreter-ctx state)]
     (interp/java-create-object ctx class-name args)))
 
+(defn java-call-static
+  [state class-name method-name args]
+  (let [^Class klass (resolve-java-host-class state class-name)]
+    (clojure.lang.Reflector/invokeStaticMethod klass method-name (to-array args))))
+
 (defn java-call-method
   [state method-name target args]
   (interp/java-call-method target method-name args))
+
+(defn java-get-static-field
+  [state class-name field-name]
+  (let [^Class klass (resolve-java-host-class state class-name)
+        ^Field field (or (reflected-field klass field-name)
+                         (throw (ex-info (str "Undefined Java static field: " field-name)
+                                         {:field field-name
+                                          :class (.getName klass)})))]
+    (.get field nil)))
 
 (defn java-get-field
   [field-name target]

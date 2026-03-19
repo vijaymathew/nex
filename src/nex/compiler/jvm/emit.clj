@@ -759,6 +759,23 @@
                             [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
         (emit-return (:jvm-type expr)))
 
+      "java-call-static"
+      (do
+        (emit-runtime-call! mv "java-call-static"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))
+                             (fn [] (emit-boxed-arg-array! mv (vec (drop 2 args)) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "java-get-static-field"
+      (do
+        (emit-runtime-call! mv "java-get-static-field"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
       "validate-object-state"
       (do
         (emit-runtime-call! mv "validate-object-state"

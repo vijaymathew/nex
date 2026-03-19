@@ -259,6 +259,8 @@ The compiled REPL path currently supports:
   - imported Java classes can be instantiated on the compiled path
   - imported Java instance methods and field access use specialized runtime helpers instead of forcing interpreter fallback
   - `intern` declarations resolve local `.nex` files into compiled class metadata on the compiled path
+  - `with "java" do ... end` lowers on the JVM path
+  - `with "javascript" do ... end` is ignored on the JVM path
 
 ## Runtime-Backed Receiver Types
 
@@ -284,9 +286,6 @@ Array / Map / Set no longer belong in this bucket for their ordinary collection 
 The remaining deopts are no longer broad feature areas like "classes" or "exceptions".
 They are now mostly one of these:
 
-- `with "java" do ... end` / `with "javascript" do ... end`
-  - the walker emits these as `:with`
-  - there is currently no compiled eligibility or lowering path for `:with`
 - inputs that fail the semantic eligibility gate in `nex.compiler.jvm.repl`
   - assignment to an unknown top-level binding
   - `create` of a deferred class
@@ -313,6 +312,9 @@ Good candidates for the compiled path today:
 - top-level function definition and redefinition
 - mutually recursive top-level functions with forward declarations
 - builtin-heavy or module-aware batches that do not rely on unsupported file-compilation machinery
+- target-specific JVM batches such as:
+  - `with "java" do System.out.println("hello") end`
+  - `with "javascript"` blocks that are intentionally ignored on the JVM path
 - concurrency-heavy REPL batches such as:
   - `let t := spawn do ... end`
   - channel creation and send/receive work
@@ -326,7 +328,6 @@ Good candidates for the compiled path today:
 
 Likely deopt triggers today:
 
-- `with "java"` / `with "javascript"` blocks
 - unresolved names or calls rejected by the compiled eligibility gate
 - explicit attempts to instantiate deferred classes
 - any future AST node that reaches the compiled REPL path without a case in `supported-expr-in-ctx?` or `supported-stmt-in-ctx?`

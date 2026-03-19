@@ -148,3 +148,21 @@ print(app.greet())")
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
+
+(deftest compile-file-with-java-block-runs
+  (testing "compile-file keeps with \"java\" blocks on the JVM bytecode path"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-with-java-file-test")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file (str "with \"java\" do\n"
+                            "  let version_length: Integer := System.getProperty(\"java.version\").length()\n"
+                            "end\n"
+                            "print(version_length)"))
+        (let [result (file/compile-file (.getPath nex-file) (.getPath out-dir) {})
+              output (str/trim (invoke-main! out-dir (:main-class result)))]
+          (is (re-matches #"\d+" output)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))

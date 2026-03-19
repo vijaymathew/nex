@@ -30,7 +30,7 @@ Last updated: 2026-03-19
 | Concurrency | `spawn`, channel creation, `select`, `await_all`, `await_any`, and compiled-path `Task` / `Channel` operations |
 | Collections | Literal construction plus direct compiled lowering for Array / Map / Set methods |
 | Closures / higher-order | Anonymous functions, captured closures, and passing/returning/invoking function objects |
-| Modules | `import` metadata, imported Java class creation/calls on the compiled path, and `intern` resolution for local `.nex` files |
+| Modules | `import` metadata, imported Java class creation/calls on the compiled path, `intern` resolution for local `.nex` files, and JVM-side lowering of `with "java"` blocks |
 | File compilation | `.nex` file compilation to a standalone shaded JVM jar, including launcher emission and source-relative `intern` handling |
 | Note annotations | Parsed and preserved as documentation metadata; ignored by lowering/emission as intended |
 | Nil-safety | Detachable types (`?Type`), nil checks, `convert` guards, and branch refinement on compiled path |
