@@ -346,6 +346,10 @@ end")
 (jvm/compile-jar "input.nex" "build/")
 ```
 
+The JVM compiler shades the current compiler classpath into the output jar. To
+include extra Java/Maven dependencies, launch the compiler with those deps on
+the classpath first. See [docs/md/CLI.md](/home/vijay/Projects/nex/docs/md/CLI.md) for exact CLI examples.
+
 ### Translating to JavaScript
 
 ```clojure

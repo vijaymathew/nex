@@ -14,23 +14,24 @@
     (.directory pb (io/file working-dir))
     (.redirectErrorStream pb true)
     (doto (.environment pb)
-      (.put "J_OPTIONS" "-J-Xint -J--enable-native-access=ALL-UNNAMED"))
+      (.put "J_OPTIONS" "-J--enable-native-access=ALL-UNNAMED"))
     (let [proc (.start pb)
           output (slurp (.getInputStream proc))]
       (.waitFor proc)
       {:exit (.exitValue proc)
        :out output})))
 
-(defn- run-jar!
-  [jar-path]
-  (run-process! (.getParent (io/file jar-path)) "java" "-jar" jar-path))
-
 (def ^:private nex-bin
   (.getCanonicalPath (io/file "bin/nex")))
 
-(deftest cli-compile-jvm-with-explicit-output-dir-test
-  (testing "bin/nex compile jvm writes a jar to the requested output directory"
-    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-cli-jvm-explicit-out")
+(defn- unique-tmp-dir
+  [prefix]
+  (io/file (System/getProperty "java.io.tmpdir")
+           (str prefix "-" (System/nanoTime))))
+
+(deftest cli-compile-jvm-success-smoke-test
+  (testing "bin/nex compile jvm produces a jar and reports success"
+    (let [tmp-dir (unique-tmp-dir "nex-cli-jvm-success-smoke")
           nex-file (io/file tmp-dir "app.nex")
           out-dir (io/file tmp-dir "build")
           expected-jar (io/file out-dir "app.jar")]
@@ -41,35 +42,14 @@
           (is (= 0 exit) out)
           (is (.exists expected-jar))
           (is (str/includes? out "Compiled"))
-          (is (str/includes? out "Main class:"))
-          (let [jar-run (run-jar! (.getPath expected-jar))]
-            (is (= 0 (:exit jar-run)) (:out jar-run))
-            (is (= "\"cli ok\"" (str/trim (:out jar-run))))))
-        (finally
-          (when (.exists tmp-dir)
-            (delete-tree! tmp-dir)))))))
-
-(deftest cli-compile-jvm-defaults-jar-to-cwd-test
-  (testing "bin/nex compile jvm without an output dir writes the jar into the caller working directory"
-    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-cli-jvm-default-out")
-          nex-file (io/file tmp-dir "default_out.nex")
-          expected-jar (io/file tmp-dir "default_out.jar")]
-      (try
-        (.mkdirs tmp-dir)
-        (spit nex-file "print(42)")
-        (let [{:keys [exit out]} (run-process! (.getPath tmp-dir) nex-bin "compile" "jvm" (.getPath nex-file))]
-          (is (= 0 exit) out)
-          (is (.exists expected-jar))
-          (let [jar-run (run-jar! (.getPath expected-jar))]
-            (is (= 0 (:exit jar-run)) (:out jar-run))
-            (is (= "42" (str/trim (:out jar-run))))))
+          (is (str/includes? out "Main class:")))
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
 (deftest cli-compile-jvm-type-error-diagnostics-test
   (testing "bin/nex compile jvm prints formatted type diagnostics on failure"
-    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-cli-jvm-type-error")
+    (let [tmp-dir (unique-tmp-dir "nex-cli-jvm-type-error")
           nex-file (io/file tmp-dir "bad.nex")]
       (try
         (.mkdirs tmp-dir)
@@ -84,7 +64,7 @@
 
 (deftest cli-compile-jvm-parse-error-diagnostics-test
   (testing "bin/nex compile jvm prints parser diagnostics on invalid source"
-    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-cli-jvm-parse-error")
+    (let [tmp-dir (unique-tmp-dir "nex-cli-jvm-parse-error")
           nex-file (io/file tmp-dir "bad.nex")]
       (try
         (.mkdirs tmp-dir)

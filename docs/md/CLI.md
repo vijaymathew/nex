@@ -242,6 +242,73 @@ export NEX_HOME=/path/to/nex/repo
 ./bin/nex help
 ```
 
+### Extra JVM Dependencies
+
+`bin/nex` does not fetch Java dependencies itself. It inherits whatever is already
+on the JVM classpath of the `clojure` process it launches.
+
+#### Start `bin/nex` with extra JARs
+
+If you already have dependency jars on disk, put them on `CLASSPATH` before
+starting the REPL:
+
+```bash
+export CLASSPATH="/opt/myapp/lib/postgresql-42.7.3.jar:/opt/myapp/lib/HikariCP-5.1.0.jar"
+./bin/nex
+```
+
+Then Nex `import` can resolve classes from those jars:
+
+```nex
+import java.sql.DriverManager
+import com.zaxxer.hikari.HikariDataSource
+```
+
+#### Compile a standalone JAR with extra Maven dependencies on the classpath
+
+`nex compile jvm` shades the current JVM classpath into the generated output jar.
+So if you want extra Maven dependencies packaged into the generated jar, launch
+the compiler with those deps already on the classpath:
+
+```bash
+cd /path/to/nex
+
+clojure -Sdeps '{:deps {com.h2database/h2 {:mvn/version "2.2.224"}
+                        com.zaxxer/HikariCP {:mvn/version "5.1.0"}}}' \
+  -M -m nex.compiler.jvm.file /path/to/app.nex /path/to/build
+```
+
+That produces `/path/to/build/app.jar`, and the shaded jar includes those Maven
+dependencies because they were present on the compiler classpath.
+
+For a repeatable project setup, put those dependencies in a local `deps.edn`
+alias and run the compiler through that alias:
+
+```clojure
+;; deps.edn
+{:aliases
+ {:nex-build
+  {:extra-deps {com.h2database/h2 {:mvn/version "2.2.224"}
+                com.zaxxer/HikariCP {:mvn/version "5.1.0"}}}}}
+```
+
+```bash
+cd /path/to/nex
+
+clojure -A:nex-build \
+  -M -m nex.compiler.jvm.file /path/to/app.nex /path/to/build
+```
+
+That uses the extra Maven dependencies from the local alias and includes them in
+the generated shaded jar.
+
+If you prefer to keep using `./bin/nex`, put those dependencies in a `deps.edn`
+that the launched `clojure` process will see, then run:
+
+```bash
+./bin/nex compile jvm /path/to/app.nex /path/to/build
+```
+
 ## Exit Codes
 
 The `nex` command uses standard exit codes:
