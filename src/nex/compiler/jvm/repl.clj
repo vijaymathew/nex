@@ -53,7 +53,7 @@
 (declare merge-import-like-nodes)
 
 (def ^:private builtin-runtime-receiver-types
-  #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
+  #{"Any" "Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Cursor" "Task" "Channel" "Console" "Process"})
 
 (defn- base-type-name

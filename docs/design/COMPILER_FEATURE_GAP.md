@@ -34,7 +34,7 @@ Last updated: 2026-03-19
 | File compilation | `.nex` file compilation to a standalone shaded JVM jar, including launcher emission and source-relative `intern` handling |
 | Note annotations | Parsed and preserved as documentation metadata; ignored by lowering/emission as intended |
 | Nil-safety | Detachable types (`?Type`), nil checks, `convert` guards, and branch refinement on compiled path |
-| Builtins via runtime bridge | Remaining runtime-backed builtins beyond the directly lowered helper set, mainly less common host-facing operations |
+| Builtins | The supported builtin surface now lowers through direct helpers, specialized receiver lowering, collection IR, or concurrency IR rather than the older generic builtin trampoline |
 
 
 ## Still Needs Implementation
@@ -57,5 +57,4 @@ Last updated: 2026-03-19
 
 Based on complexity and impact, these are natural next steps:
 
-1. Broader direct lowering for the remaining runtime-backed builtins that still use the generic runtime bridge
-2. Further debug-info tightening such as more precise block-scoped local live ranges where the current first-use/last-use tables are still conservative
+1. Further debug-info tightening such as more precise block-scoped local live ranges where the current first-use/last-use tables are still conservative

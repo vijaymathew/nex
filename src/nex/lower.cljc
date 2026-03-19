@@ -60,7 +60,7 @@
   (set (keys interp/builtins)))
 
 (def ^:private builtin-runtime-receiver-types
-  #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
+  #{"Any" "Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Cursor" "Task" "Channel" "Console" "Process"})
 
 (def ^:private next-synthetic-closure-id (atom 0))
@@ -2264,9 +2264,10 @@
 
                 (builtin-runtime-receiver-type? target-type)
                 (let [target-ir (lower-expression env target-expr)
+                      base-type (base-type-name target-type)
                       nex-type (infer-type env expr)
                       jvm-type (resolve-jvm-type env nex-type)]
-                  (ir/call-runtime-node (str "method:" (:method expr))
+                  (ir/call-runtime-node (str "builtin-method:" base-type ":" (:method expr))
                                         (into [target-ir] arg-irs)
                                         nex-type
                                         jvm-type))

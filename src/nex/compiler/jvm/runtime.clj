@@ -4,8 +4,10 @@
             [clojure.string :as str]
             [nex.interpreter :as interp]
             [nex.types.bootstrap :as bootstrap]
+            [nex.types.datetime :as dt]
             [nex.types.http :as http]
             [nex.types.json :as json-types]
+            [nex.types.regex :as regex-types]
             [nex.types.runtime :as rt]
             [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo])
@@ -17,6 +19,12 @@
 (declare rebuild-interpreter-ctx)
 (declare lowered-instance-method-name)
 (declare reflected-field)
+
+(defmacro ^:private def-builtin-method-wrapper
+  [fn-name method-name]
+  `(defn ~fn-name
+     [target# & args#]
+     (interp/call-builtin-method nil target# target# ~method-name (vec args#))))
 
 (defrecord NexReplState [^clojure.lang.Atom values
                          ^clojure.lang.Atom types
@@ -776,6 +784,385 @@
 (defn builtin-http-server-is-running
   [handle]
   (some? @(:server handle)))
+
+(defn builtin-regex-validate
+  [pattern flags]
+  (regex-types/regex-validate pattern flags))
+
+(defn builtin-regex-matches
+  [pattern flags text]
+  (regex-types/regex-matches? pattern flags text))
+
+(defn builtin-regex-find
+  [pattern flags text]
+  (regex-types/regex-find pattern flags text))
+
+(defn builtin-regex-find-all
+  [pattern flags text]
+  (regex-types/regex-find-all pattern flags text))
+
+(defn builtin-regex-replace
+  [pattern flags text replacement]
+  (regex-types/regex-replace pattern flags text replacement))
+
+(defn builtin-regex-split
+  [pattern flags text]
+  (regex-types/regex-split pattern flags text))
+
+(defn builtin-datetime-now
+  []
+  (dt/datetime-now))
+
+(defn builtin-datetime-from-epoch-millis
+  [ms]
+  (dt/datetime-from-epoch-millis ms))
+
+(defn builtin-datetime-parse-iso
+  [text]
+  (dt/datetime-parse-iso text))
+
+(defn builtin-datetime-make
+  [year month day hour minute second]
+  (dt/datetime-make year month day hour minute second))
+
+(defn builtin-datetime-make-from-array
+  [args]
+  (apply builtin-datetime-make args))
+
+(defn builtin-datetime-year
+  [epoch-ms]
+  (dt/datetime-year epoch-ms))
+
+(defn builtin-datetime-month
+  [epoch-ms]
+  (dt/datetime-month epoch-ms))
+
+(defn builtin-datetime-day
+  [epoch-ms]
+  (dt/datetime-day epoch-ms))
+
+(defn builtin-datetime-weekday
+  [epoch-ms]
+  (dt/datetime-weekday epoch-ms))
+
+(defn builtin-datetime-day-of-year
+  [epoch-ms]
+  (dt/datetime-day-of-year epoch-ms))
+
+(defn builtin-datetime-hour
+  [epoch-ms]
+  (dt/datetime-hour epoch-ms))
+
+(defn builtin-datetime-minute
+  [epoch-ms]
+  (dt/datetime-minute epoch-ms))
+
+(defn builtin-datetime-second
+  [epoch-ms]
+  (dt/datetime-second epoch-ms))
+
+(defn builtin-datetime-epoch-millis
+  [epoch-ms]
+  (dt/datetime-epoch-millis epoch-ms))
+
+(defn builtin-datetime-add-millis
+  [epoch-ms delta-ms]
+  (dt/datetime-add-millis epoch-ms delta-ms))
+
+(defn builtin-datetime-diff-millis
+  [left-ms right-ms]
+  (dt/datetime-diff-millis left-ms right-ms))
+
+(defn builtin-datetime-truncate-to-day
+  [epoch-ms]
+  (dt/datetime-truncate-to-day epoch-ms))
+
+(defn builtin-datetime-truncate-to-hour
+  [epoch-ms]
+  (dt/datetime-truncate-to-hour epoch-ms))
+
+(defn builtin-datetime-format-iso
+  [epoch-ms]
+  (dt/datetime-format-iso epoch-ms))
+
+(defn builtin-path-exists
+  [path]
+  (rt/path-exists? (str path)))
+
+(defn builtin-path-is-file
+  [path]
+  (rt/path-is-file? (str path)))
+
+(defn builtin-path-is-directory
+  [path]
+  (rt/path-is-directory? (str path)))
+
+(defn builtin-path-name
+  [path]
+  (rt/path-name (str path)))
+
+(defn builtin-path-extension
+  [path]
+  (rt/path-extension (str path)))
+
+(defn builtin-path-name-without-extension
+  [path]
+  (rt/path-name-without-extension (str path)))
+
+(defn builtin-path-absolute
+  [path]
+  (str (rt/path-absolute (str path))))
+
+(defn builtin-path-normalize
+  [path]
+  (str (rt/path-normalize (str path))))
+
+(defn builtin-path-size
+  [path]
+  (rt/path-size (str path)))
+
+(defn builtin-path-modified-time
+  [path]
+  (rt/path-modified-time (str path)))
+
+(defn builtin-path-parent
+  [path]
+  (rt/path-parent (str path)))
+
+(defn builtin-path-child
+  [path child-name]
+  (rt/path-child (str path) (str child-name)))
+
+(defn builtin-path-create-file
+  [path]
+  (rt/path-create-file (str path)))
+
+(defn builtin-path-create-directory
+  [path]
+  (rt/path-create-directory (str path)))
+
+(defn builtin-path-create-directories
+  [path]
+  (rt/path-create-directories (str path)))
+
+(defn builtin-path-delete
+  [path]
+  (rt/path-delete (str path)))
+
+(defn builtin-path-delete-tree
+  [path]
+  (rt/path-delete-tree (str path)))
+
+(defn builtin-path-copy
+  [source-path target-path]
+  (rt/path-copy (str source-path) (str target-path)))
+
+(defn builtin-path-move
+  [source-path target-path]
+  (rt/path-move (str source-path) (str target-path)))
+
+(defn builtin-path-read-text
+  [path]
+  (rt/path-read-text (str path)))
+
+(defn builtin-path-write-text
+  [path text]
+  (rt/path-write-text (str path) (str text)))
+
+(defn builtin-path-append-text
+  [path text]
+  (rt/path-append-text (str path) (str text)))
+
+(defn builtin-path-list
+  [path]
+  (rt/path-list (str path)))
+
+(defn builtin-text-file-open-read
+  [path]
+  (rt/text-file-open-read (str path)))
+
+(defn builtin-text-file-open-write
+  [path]
+  (rt/text-file-open-write (str path)))
+
+(defn builtin-text-file-open-append
+  [path]
+  (rt/text-file-open-append (str path)))
+
+(defn builtin-text-file-read-line
+  [handle]
+  (rt/text-file-read-line handle))
+
+(defn builtin-text-file-write
+  [handle text]
+  (rt/text-file-write handle (str text)))
+
+(defn builtin-text-file-close
+  [handle]
+  (rt/text-file-close handle))
+
+(defn builtin-binary-file-open-read
+  [path]
+  (rt/binary-file-open-read (str path)))
+
+(defn builtin-binary-file-open-write
+  [path]
+  (rt/binary-file-open-write (str path)))
+
+(defn builtin-binary-file-open-append
+  [path]
+  (rt/binary-file-open-append (str path)))
+
+(defn builtin-binary-file-read-all
+  [handle]
+  (rt/binary-file-read-all handle))
+
+(defn builtin-binary-file-read
+  [handle count]
+  (rt/binary-file-read handle count))
+
+(defn builtin-binary-file-write
+  [handle values]
+  (rt/binary-file-write handle values))
+
+(defn builtin-binary-file-close
+  [handle]
+  (rt/binary-file-close handle))
+
+(def-builtin-method-wrapper builtin-method-any-to-string "to_string")
+(def-builtin-method-wrapper builtin-method-any-equals "equals")
+(def-builtin-method-wrapper builtin-method-any-clone "clone")
+
+(def-builtin-method-wrapper builtin-method-integer-to-string "to_string")
+(def-builtin-method-wrapper builtin-method-integer-abs "abs")
+(def-builtin-method-wrapper builtin-method-integer-min "min")
+(def-builtin-method-wrapper builtin-method-integer-max "max")
+(def-builtin-method-wrapper builtin-method-integer-pick "pick")
+(def-builtin-method-wrapper builtin-method-integer-compare "compare")
+(def-builtin-method-wrapper builtin-method-integer-hash "hash")
+(def-builtin-method-wrapper builtin-method-integer-plus "plus")
+(def-builtin-method-wrapper builtin-method-integer-minus "minus")
+(def-builtin-method-wrapper builtin-method-integer-times "times")
+(def-builtin-method-wrapper builtin-method-integer-divided-by "divided_by")
+(def-builtin-method-wrapper builtin-method-integer-equals "equals")
+(def-builtin-method-wrapper builtin-method-integer-not-equals "not_equals")
+(def-builtin-method-wrapper builtin-method-integer-less-than "less_than")
+(def-builtin-method-wrapper builtin-method-integer-less-than-or-equal "less_than_or_equal")
+(def-builtin-method-wrapper builtin-method-integer-greater-than "greater_than")
+(def-builtin-method-wrapper builtin-method-integer-greater-than-or-equal "greater_than_or_equal")
+
+(def-builtin-method-wrapper builtin-method-integer64-to-string "to_string")
+(def-builtin-method-wrapper builtin-method-integer64-abs "abs")
+(def-builtin-method-wrapper builtin-method-integer64-min "min")
+(def-builtin-method-wrapper builtin-method-integer64-max "max")
+(def-builtin-method-wrapper builtin-method-integer64-compare "compare")
+(def-builtin-method-wrapper builtin-method-integer64-hash "hash")
+(def-builtin-method-wrapper builtin-method-integer64-plus "plus")
+(def-builtin-method-wrapper builtin-method-integer64-minus "minus")
+(def-builtin-method-wrapper builtin-method-integer64-times "times")
+(def-builtin-method-wrapper builtin-method-integer64-divided-by "divided_by")
+(def-builtin-method-wrapper builtin-method-integer64-equals "equals")
+(def-builtin-method-wrapper builtin-method-integer64-not-equals "not_equals")
+(def-builtin-method-wrapper builtin-method-integer64-less-than "less_than")
+(def-builtin-method-wrapper builtin-method-integer64-less-than-or-equal "less_than_or_equal")
+(def-builtin-method-wrapper builtin-method-integer64-greater-than "greater_than")
+(def-builtin-method-wrapper builtin-method-integer64-greater-than-or-equal "greater_than_or_equal")
+
+(def-builtin-method-wrapper builtin-method-real-to-string "to_string")
+(def-builtin-method-wrapper builtin-method-real-abs "abs")
+(def-builtin-method-wrapper builtin-method-real-min "min")
+(def-builtin-method-wrapper builtin-method-real-max "max")
+(def-builtin-method-wrapper builtin-method-real-round "round")
+(def-builtin-method-wrapper builtin-method-real-compare "compare")
+(def-builtin-method-wrapper builtin-method-real-hash "hash")
+(def-builtin-method-wrapper builtin-method-real-plus "plus")
+(def-builtin-method-wrapper builtin-method-real-minus "minus")
+(def-builtin-method-wrapper builtin-method-real-times "times")
+(def-builtin-method-wrapper builtin-method-real-divided-by "divided_by")
+(def-builtin-method-wrapper builtin-method-real-equals "equals")
+(def-builtin-method-wrapper builtin-method-real-not-equals "not_equals")
+(def-builtin-method-wrapper builtin-method-real-less-than "less_than")
+(def-builtin-method-wrapper builtin-method-real-less-than-or-equal "less_than_or_equal")
+(def-builtin-method-wrapper builtin-method-real-greater-than "greater_than")
+(def-builtin-method-wrapper builtin-method-real-greater-than-or-equal "greater_than_or_equal")
+
+(def-builtin-method-wrapper builtin-method-decimal-to-string "to_string")
+(def-builtin-method-wrapper builtin-method-decimal-abs "abs")
+(def-builtin-method-wrapper builtin-method-decimal-min "min")
+(def-builtin-method-wrapper builtin-method-decimal-max "max")
+(def-builtin-method-wrapper builtin-method-decimal-round "round")
+(def-builtin-method-wrapper builtin-method-decimal-compare "compare")
+(def-builtin-method-wrapper builtin-method-decimal-hash "hash")
+(def-builtin-method-wrapper builtin-method-decimal-plus "plus")
+(def-builtin-method-wrapper builtin-method-decimal-minus "minus")
+(def-builtin-method-wrapper builtin-method-decimal-times "times")
+(def-builtin-method-wrapper builtin-method-decimal-divided-by "divided_by")
+(def-builtin-method-wrapper builtin-method-decimal-equals "equals")
+(def-builtin-method-wrapper builtin-method-decimal-not-equals "not_equals")
+(def-builtin-method-wrapper builtin-method-decimal-less-than "less_than")
+(def-builtin-method-wrapper builtin-method-decimal-less-than-or-equal "less_than_or_equal")
+(def-builtin-method-wrapper builtin-method-decimal-greater-than "greater_than")
+(def-builtin-method-wrapper builtin-method-decimal-greater-than-or-equal "greater_than_or_equal")
+
+(def-builtin-method-wrapper builtin-method-char-to-string "to_string")
+(def-builtin-method-wrapper builtin-method-char-to-upper "to_upper")
+(def-builtin-method-wrapper builtin-method-char-to-lower "to_lower")
+(def-builtin-method-wrapper builtin-method-char-compare "compare")
+(def-builtin-method-wrapper builtin-method-char-hash "hash")
+
+(def-builtin-method-wrapper builtin-method-boolean-to-string "to_string")
+(def-builtin-method-wrapper builtin-method-boolean-and "and")
+(def-builtin-method-wrapper builtin-method-boolean-or "or")
+(def-builtin-method-wrapper builtin-method-boolean-not "not")
+(def-builtin-method-wrapper builtin-method-boolean-equals "equals")
+(def-builtin-method-wrapper builtin-method-boolean-not-equals "not_equals")
+(def-builtin-method-wrapper builtin-method-boolean-compare "compare")
+(def-builtin-method-wrapper builtin-method-boolean-hash "hash")
+
+(def-builtin-method-wrapper builtin-method-string-length "length")
+(def-builtin-method-wrapper builtin-method-string-index-of "index_of")
+(def-builtin-method-wrapper builtin-method-string-substring "substring")
+(def-builtin-method-wrapper builtin-method-string-to-upper "to_upper")
+(def-builtin-method-wrapper builtin-method-string-to-lower "to_lower")
+(def-builtin-method-wrapper builtin-method-string-to-integer "to_integer")
+(def-builtin-method-wrapper builtin-method-string-to-integer64 "to_integer64")
+(def-builtin-method-wrapper builtin-method-string-to-real "to_real")
+(def-builtin-method-wrapper builtin-method-string-to-decimal "to_decimal")
+(def-builtin-method-wrapper builtin-method-string-contains "contains")
+(def-builtin-method-wrapper builtin-method-string-starts-with "starts_with")
+(def-builtin-method-wrapper builtin-method-string-ends-with "ends_with")
+(def-builtin-method-wrapper builtin-method-string-trim "trim")
+(def-builtin-method-wrapper builtin-method-string-replace "replace")
+(def-builtin-method-wrapper builtin-method-string-char-at "char_at")
+(def-builtin-method-wrapper builtin-method-string-compare "compare")
+(def-builtin-method-wrapper builtin-method-string-hash "hash")
+(def-builtin-method-wrapper builtin-method-string-split "split")
+(def-builtin-method-wrapper builtin-method-string-to-string "to_string")
+(def-builtin-method-wrapper builtin-method-string-equals "equals")
+(def-builtin-method-wrapper builtin-method-string-not-equals "not_equals")
+(def-builtin-method-wrapper builtin-method-string-less-than "less_than")
+(def-builtin-method-wrapper builtin-method-string-less-than-or-equal "less_than_or_equal")
+(def-builtin-method-wrapper builtin-method-string-greater-than "greater_than")
+(def-builtin-method-wrapper builtin-method-string-greater-than-or-equal "greater_than_or_equal")
+(def-builtin-method-wrapper builtin-method-string-plus "plus")
+(def-builtin-method-wrapper builtin-method-string-cursor "cursor")
+
+(def-builtin-method-wrapper builtin-method-cursor-start "start")
+(def-builtin-method-wrapper builtin-method-cursor-item "item")
+(def-builtin-method-wrapper builtin-method-cursor-next "next")
+(def-builtin-method-wrapper builtin-method-cursor-at-end "at_end")
+
+(def-builtin-method-wrapper builtin-method-console-print "print")
+(def-builtin-method-wrapper builtin-method-console-print-line "print_line")
+(def-builtin-method-wrapper builtin-method-console-read-line "read_line")
+(def-builtin-method-wrapper builtin-method-console-error "error")
+(def-builtin-method-wrapper builtin-method-console-new-line "new_line")
+(def-builtin-method-wrapper builtin-method-console-read-integer "read_integer")
+(def-builtin-method-wrapper builtin-method-console-read-real "read_real")
+
+(def-builtin-method-wrapper builtin-method-process-getenv "getenv")
+(def-builtin-method-wrapper builtin-method-process-setenv "setenv")
+(def-builtin-method-wrapper builtin-method-process-command-line "command_line")
 
 (defn deep-equals
   [a b]

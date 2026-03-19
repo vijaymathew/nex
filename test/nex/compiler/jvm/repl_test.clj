@@ -9,7 +9,8 @@
             [nex.repl :as repl])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
            [java.net InetSocketAddress]
-           [java.nio.charset StandardCharsets]))
+           [java.nio.charset StandardCharsets]
+           [java.nio.file Files]))
 
 (defn- start-test-http-server []
   (let [server (HttpServer/create (InetSocketAddress. "127.0.0.1" 0) 0)]
@@ -434,6 +435,75 @@ x"))
           (is (= "Not Found" (.body response)))
           (finally
             (compiled-repl/compile-and-eval! session (p/ast "http_server_stop(handle)"))))))))
+
+(deftest compiled-repl-regex-and-datetime-builtins-direct-helper-test
+  (testing "compiled helper evaluates regex and datetime builtins without the generic builtin trampoline"
+    (let [session (compiled-repl/make-session)
+          result (with-redefs [runtime/invoke-builtin
+                               (fn [& _]
+                                 (throw (ex-info "invoke-builtin should not be used for regex/datetime builtins" {})))]
+                   (compiled-repl/compile-and-eval!
+                    session
+                    (p/ast
+                     (str "print(regex_validate(\"a+\", \"\"))\n"
+                          "print(regex_replace(\"a\", \"\", \"banana\", \"o\"))\n"
+                          "datetime_year(datetime_now())"))))]
+      (is (:compiled? result))
+      (is (= ["true" "\"bonono\""] (:output result)))
+      (is (integer? (:result result))))))
+
+(deftest compiled-repl-path-and-file-builtins-direct-helper-test
+  (testing "compiled helper evaluates path and file builtins without the generic builtin trampoline"
+    (let [tmp-dir (.toFile (Files/createTempDirectory "nex-compiled-builtins" (make-array java.nio.file.attribute.FileAttribute 0)))
+          file-path (.getAbsolutePath (io/file tmp-dir "sample.txt"))
+          file-path-bin (str file-path ".bin")]
+      (try
+        (let [session (compiled-repl/make-session)
+              result (with-redefs [runtime/invoke-builtin
+                                   (fn [& _]
+                                     (throw (ex-info "invoke-builtin should not be used for path/file builtins" {})))]
+                       (compiled-repl/compile-and-eval!
+                        session
+                        (p/ast
+                         (str "path_write_text(\"" file-path "\", \"hello\")\n"
+                              "print(path_exists(\"" file-path "\"))\n"
+                              "let h := text_file_open_read(\"" file-path "\")\n"
+                              "print(text_file_read_line(h))\n"
+                              "text_file_close(h)\n"
+                              "binary_file_close(binary_file_open_write(\"" file-path-bin "\"))\n"
+                              "path_read_text(\"" file-path "\")"))))]
+          (is (:compiled? result))
+          (is (= ["true" "\"hello\""] (:output result)))
+          (is (= "hello" (:result result))))
+        (finally
+          (when (.exists tmp-dir)
+            (doseq [child (.listFiles tmp-dir)]
+              (.delete child))
+            (.delete tmp-dir)))))))
+
+(deftest compiled-repl-runtime-backed-methods-direct-helper-test
+  (testing "compiled helper evaluates remaining runtime-backed receiver methods without the generic builtin trampoline"
+    (let [session (compiled-repl/make-session)
+          _ (runtime/state-set-value! (:state session) "p" {:nex-builtin-type :Process})
+          _ (runtime/state-set-type! (:state session) "p" "Process")
+          result (with-redefs [runtime/invoke-builtin
+                               (fn [& _]
+                                 (throw (ex-info "invoke-builtin should not be used for runtime-backed receiver methods" {})))]
+                   (compiled-repl/compile-and-eval!
+                    session
+                    (p/ast
+                     (str "let s: String := \"  Abc  \"\n"
+                          "print(s.trim.to_upper)\n"
+                          "let n: Integer := 8\n"
+                          "print(n.max(10))\n"
+                          "let c: Cursor := s.cursor\n"
+                          "c.start\n"
+                          "print(c.item)\n"
+                          "p.command_line.length"))))]
+      (is (:compiled? result))
+      (is (= ["\"ABC\"" "10" "#space"] (:output result)))
+      (is (integer? (:result result)))
+      (is (<= 0 (:result result))))))
 
 (deftest repl-compiled-backend-direct-assignment-test
   (testing "compiled backend can update canonical top-level state via assignment"

@@ -666,7 +666,7 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
-                  "regex_validate" "Void"
+                  "regex_validate" "Boolean"
                   "regex_matches" "Boolean"
                   "regex_find" {:base-type "String" :detachable true}
                   "regex_find_all" {:base-type "Array" :type-params ["String"]}
@@ -2488,7 +2488,7 @@
        "  private static java.util.regex.Pattern regexPattern(String pattern, String flags) {\n"
        "    return java.util.regex.Pattern.compile(pattern, regexFlags(flags));\n"
        "  }\n"
-       "  public static void regexValidate(String pattern, String flags) { regexPattern(pattern, flags); }\n"
+       "  public static boolean regexValidate(String pattern, String flags) { regexPattern(pattern, flags); return true; }\n"
        "  public static boolean regexMatches(String pattern, String flags, String text) {\n"
        "    return regexPattern(pattern, flags).matcher(text).matches();\n"
        "  }\n"

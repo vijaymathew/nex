@@ -148,7 +148,7 @@ These are still compiled, but the emitted bytecode calls back into the shared Ne
   - closure allocation uses a runtime helper that builds a Nex closure object with a captured environment snapshot
   - later invocation still stays on the compiled path through function-object dispatch
 
-This is intentional. It keeps semantics correct while avoiding duplicated builtin implementations in the compiler, while still bypassing the older generic `invoke-builtin` trampoline for the common builtin/helper subset above.
+This is intentional. Builtins still rely on runtime helpers where that is the right semantic boundary, but the supported compiled builtin surface no longer depends on the older generic `invoke-builtin` trampoline.
 
 ## Supported Now
 

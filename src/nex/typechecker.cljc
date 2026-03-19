@@ -1058,7 +1058,7 @@
                               {:error (type-error
                                        (str "regex_validate arguments must be String, got "
                                             (display-type arg-type)))})))))
-        "Void")
+        "Boolean")
 
       (= method "regex_matches")
       (do

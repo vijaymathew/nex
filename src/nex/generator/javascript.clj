@@ -280,7 +280,7 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
-                  "regex_validate" "Void"
+                  "regex_validate" "Boolean"
                   "regex_matches" "Boolean"
                   "regex_find" {:base-type "String" :detachable true}
                   "regex_find_all" {:base-type "Array" :type-params ["String"]}
@@ -2279,7 +2279,7 @@
        "function __nexRegex(pattern, flags) {\n"
        "  return new RegExp(pattern, __nexRegexFlags(flags));\n"
        "}\n"
-       "function __nexRegexValidate(pattern, flags) { __nexRegex(pattern, flags); return null; }\n"
+       "function __nexRegexValidate(pattern, flags) { __nexRegex(pattern, flags); return true; }\n"
        "function __nexRegexMatches(pattern, flags, text) {\n"
        "  const anchored = new RegExp('^(?:' + pattern + ')$', __nexRegexFlags(flags).replace('g', ''));\n"
        "  return anchored.test(String(text));\n"

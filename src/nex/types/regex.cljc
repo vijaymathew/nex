@@ -11,7 +11,7 @@
 #?(:clj
    (defn regex-validate [pattern flags]
      (regex-compile (str pattern) (str flags))
-     nil))
+     true))
 
 #?(:clj
    (defn regex-matches? [pattern flags text]

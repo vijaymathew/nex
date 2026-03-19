@@ -590,6 +590,10 @@
     2 "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
     3 "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
     4 "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+    5 "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+    6 "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+    7 "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+    8 "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
     (throw (ex-info "Unsupported runtime invoke arity" {:arity arity}))))
 
 (defn- emit-runtime-call!
@@ -603,6 +607,23 @@
                     "invoke"
                     (runtime-invoke-descriptor (count arg-emitters))
                     false))
+
+(defn- direct-derived-builtin-helper-name
+  [helper]
+  (cond
+    (re-matches #"^(regex_|datetime_|path_|text_file_|binary_file_).*$" helper)
+    (str "builtin-" (str/replace helper "_" "-"))
+
+    (str/starts-with? helper "builtin-method:")
+    (let [[_ base method] (str/split helper #":" 3)]
+      (str "builtin-method-"
+           (str/lower-case base)
+           "-"
+           (-> method
+               (str/replace "_" "-"))))
+
+    :else
+    nil))
 
 (defn- emit-direct-runtime-helper-call!
   [^MethodVisitor mv expr state-slot]
@@ -819,7 +840,19 @@
                             [])
         (emit-return (:jvm-type expr)))
 
-      nil)))
+      "datetime_make"
+      (do
+        (emit-runtime-call! mv "builtin-datetime-make-from-array"
+                            [(fn [] (emit-boxed-arg-array! mv args state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      (when-let [derived-helper (direct-derived-builtin-helper-name helper)]
+        (do
+          (emit-runtime-call! mv derived-helper
+                              (mapv (fn [arg]
+                                      (fn [] (emit-boxed-expr! mv arg state-slot)))
+                                    args))
+          (emit-return (:jvm-type expr)))))))
 
 (defn- emit-boolean-short-circuit!
   [^MethodVisitor mv operator left-expr right-expr state-slot]
