@@ -778,3 +778,41 @@ a.answer()")
           (.delete a-file)
           (.delete main-file)
           (.delete tmp-dir))))))
+
+(deftest repl-compiled-backend-loads-cursor-subclass-file-test
+  (testing "compiled backend can :load a file that defines a class inheriting Cursor"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                             (str "nex-compiled-load-cursor-" (System/nanoTime)))
+            source-file (io/file tmp-dir "c.nex")]
+        (try
+          (.mkdirs tmp-dir)
+          (spit source-file "class C inherit Cursor
+feature
+  x: Integer
+  start do x := 0 end
+  item: Integer do result := x end
+  next do x := x + 1 end
+  at_end: Boolean do result := x = 3 end
+end")
+          (let [ctx0 (repl/init-repl-context)
+                load-output (with-out-str
+                              (repl/load-file-into-repl ctx0 (.getPath source-file)))
+                create-output (with-out-str
+                                (repl/eval-code ctx0 "let c: C := create C"))
+                _ (with-out-str (repl/eval-code ctx0 "c.start"))
+                item-output (with-out-str
+                              (repl/eval-code ctx0 "c.item"))
+                session @repl/*compiled-repl-session*]
+            (is (not (str/includes? load-output "Error:")))
+            (is (contains? @(:class-asts session) "C"))
+            (is (not (str/includes? create-output "Error:")))
+            (is (str/includes? item-output "0")))
+          (finally
+            (when (.exists source-file)
+              (.delete source-file))
+            (when (.exists tmp-dir)
+              (.delete tmp-dir))))))))

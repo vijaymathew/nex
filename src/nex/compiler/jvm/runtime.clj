@@ -410,12 +410,14 @@
     (reset! (:bindings (:globals ctx)) {})
     (reset! (:output ctx) @(:output state))
     (reset! (:imports ctx) (vec @(:imports state)))
-    (reset! (:classes ctx)
-            (let [copy (HashMap.)]
-              (.put copy "Function" (bootstrap/build-function-base-class))
-              (doseq [[k v] @(:classes state)]
-                (.put copy k v))
-              copy))
+    (swap! (:classes ctx)
+           (fn [builtins]
+             (let [copy (HashMap.)]
+               (doseq [[k v] builtins]
+                 (.put copy k v))
+               (doseq [[k v] @(:classes state)]
+                 (.put copy k v))
+               copy)))
     (doseq [[k v] @(:values state)]
       (interp/env-define (:globals ctx) k v))
     ctx))

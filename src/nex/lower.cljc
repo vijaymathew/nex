@@ -970,13 +970,16 @@
   (->> (:parents class-def)
        (remove #(contains? #{"Any" "Function"} (:parent %)))
        (mapv (fn [{:keys [parent]}]
-               (let [compiled (class-jvm-meta env parent)]
-                 {:nex-name parent
-                  :jvm-name (:jvm-name compiled)
-                  :internal-name (:internal-name compiled)
-                  :binary-name (:binary-name compiled)
-                  :composition-field (str "_parent_" parent)
-                  :deferred? (boolean (:deferred? (get (visible-class-map env) parent)))})))))
+               (when-let [parent-def (get (visible-class-map env) parent)]
+                 (let [compiled (class-jvm-meta env parent)]
+                   {:nex-name parent
+                    :jvm-name (:jvm-name compiled)
+                    :internal-name (:internal-name compiled)
+                    :binary-name (:binary-name compiled)
+                    :composition-field (str "_parent_" parent)
+                    :deferred? (boolean (:deferred? parent-def))}))))
+       (remove nil?)
+       vec))
 
 (defn- direct-parent-field-map
   [env class-def]
@@ -1080,22 +1083,23 @@
 (defn- direct-parent-method-map
   [env class-def]
   (reduce (fn [m {:keys [parent]}]
-            (let [parent-def (get (visible-class-map env) parent)
-                  parent-meta (class-jvm-meta env parent)
-                  composition-field (str "_parent_" parent)]
-              (reduce (fn [m2 method-def]
-                        (if (contains? m2 [(:name method-def) (count (or (:params method-def) []))])
-                          m2
-                          (assoc m2
-                                 [(:name method-def) (count (or (:params method-def) []))]
-                                 {:source-class parent
-                                  :carrier-owner (:name class-def)
-                                  :carrier-field composition-field
-                                  :owner-internal-name (:internal-name parent-meta)
-                                  :method-def method-def
-                                  :carrier-jvm-type (exact-class-jvm-type env parent)})))
-                      m
-                      (class-methods parent-def))))
+            (if-let [parent-def (get (visible-class-map env) parent)]
+              (let [parent-meta (class-jvm-meta env parent)
+                    composition-field (str "_parent_" parent)]
+                (reduce (fn [m2 method-def]
+                          (if (contains? m2 [(:name method-def) (count (or (:params method-def) []))])
+                            m2
+                            (assoc m2
+                                   [(:name method-def) (count (or (:params method-def) []))]
+                                   {:source-class parent
+                                    :carrier-owner (:name class-def)
+                                    :carrier-field composition-field
+                                    :owner-internal-name (:internal-name parent-meta)
+                                    :method-def method-def
+                                    :carrier-jvm-type (exact-class-jvm-type env parent)})))
+                        m
+                        (class-methods parent-def)))
+              m))
           {}
           (remove #(contains? #{"Any" "Function"} (:parent %)) (:parents class-def))))
 
