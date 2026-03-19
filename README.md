@@ -337,21 +337,18 @@ end")
 (interp/register-class ctx (first (:classes ast)))
 ```
 
-### Translating to Java
+### JVM Compilation
 
 ```clojure
-(require '[nex.generator.java :as java])
+(require '[nex.compiler.jvm.file :as jvm])
 
-;; Development build — contracts included
-(println (java/translate nex-code))
-
-;; Production build — contracts removed
-(println (java/translate nex-code {:skip-contracts true}))
-
-;; File translation
-(java/translate-file "input.nex" "Output.java")
-(java/translate-file "input.nex" "Output.java" {:skip-contracts true})
+;; Compile a Nex file to a standalone JVM jar
+(jvm/compile-jar "input.nex" "build/")
 ```
+
+The JVM compiler shades the current compiler classpath into the output jar. To
+include extra Java/Maven dependencies, launch the compiler with those deps on
+the classpath first. See [docs/md/CLI.md](/home/vijay/Projects/nex/docs/md/CLI.md) for exact CLI examples.
 
 ### Translating to JavaScript
 
@@ -428,7 +425,6 @@ nex/
 │   ├── typechecker.cljc        # Static type checker
 │   ├── debugger.clj            # REPL debugger
 │   └── generator/
-│       ├── java.clj            # Java code generator
 │       └── javascript.clj      # JavaScript (ES6+) code generator
 ├── test/
 │   ├── nex/                    # Test suites by feature
@@ -436,7 +432,6 @@ nex/
 │   │   ├── if_conditions_test.clj
 │   │   ├── inheritance_test.clj
 │   │   └── generator/
-│   │       ├── java_test.clj
 │   │       └── javascript_test.clj
 │   └── scripts/                # Test runners
 ├── examples/                   # Annotated example programs
@@ -466,6 +461,7 @@ nex/
 | [Arrays and Maps](docs/md/ARRAYS_MAPS.md) | Collection operations and examples |
 | [Emacs Support](docs/md/EMACS.md) | Emacs mode setup and key bindings |
 | [Development Notes](docs/md/DEVELOPMENT.md) | Architecture and contribution notes |
+| [JVM Bytecode Compiler Plan](docs/design/JVM_BYTECODE_COMPILER_PLAN.md) | Concrete staged plan for a dynamic JVM compiler backend |
 
 ---
 

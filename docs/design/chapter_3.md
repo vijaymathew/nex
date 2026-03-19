@@ -80,47 +80,47 @@ This is a recurring theme across the Nex implementation: precision matters, but 
 
 
 
-## 3.4 Why Two Generators
+## 3.4 Why Two Backends
 
-Nex has two code generation targets: Java on the JVM and JavaScript for Node.js and browser environments. The relevant files are:
+Nex currently has two maintained compilation backends: JVM bytecode for JVM deployment and JavaScript for Node.js and browser environments. The relevant files are:
 
-- [`src/nex/generator/java.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/generator/java.clj)
+- [`src/nex/compiler/jvm/file.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/file.clj)
 - [`src/nex/generator/javascript.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/generator/javascript.clj)
 
-Both generators are source-to-source translators rather than optimising native compilers. Their task is to preserve Nex semantics in practical host languages. The main control flow is intentionally similar in both:
+These backends solve the same semantic problem in different host runtimes. Their top-level control flow is intentionally similar:
 
 1. parse Nex source
 2. type-check it unless explicitly disabled
-3. walk the AST and emit target-language code
-4. splice in runtime helpers needed by that target
+3. lower or translate the program into the target runtime model
+4. emit runtime artifacts needed by that target
 
 Type-checking before generation is the right default. A generator should not silently produce host code for a program that Nex itself considers ill-typed.
 
-Having two targets also imposes a useful discipline. Any feature added to Nex must make sense in three settings — interpreted on the JVM, translated to Java, and translated to JavaScript. That pressure discourages features that only work by accident in one execution model. If you add or change a language feature, you should expect to touch the grammar, the walker, the typechecker, the interpreter, and both generators. This is not duplication for its own sake. It is how Nex keeps semantics explicit across the whole system.
+Having two targets also imposes a useful discipline. Any feature added to Nex must make sense in three settings — interpreted on the JVM, compiled to JVM bytecode, and translated to JavaScript. That pressure discourages features that only work by accident in one execution model. If you add or change a language feature, you should expect to touch the grammar, the walker, the typechecker, the interpreter, and both backends. This is not duplication for its own sake. It is how Nex keeps semantics explicit across the whole system.
 
 
 
-## 3.5 The Java Generator
+## 3.5 The JVM Bytecode Compiler
 
-The Java generator is the richer of the two backends, which is natural: the JVM is the primary deployment target, and many Nex runtime services map comfortably onto Java facilities.
+The JVM bytecode compiler is the primary deployment backend. It emits `.class` files and standalone shaded jars rather than generating host source code.
 
-The generator is large but organised around a small set of recurring tasks: mapping Nex types to Java types; generating expressions, statements, and class members from AST nodes; and emitting runtime helper code for language features that Java does not directly provide. To read it effectively, start with these functions and follow the control flow downward:
+The compiler is organised around a small set of recurring stages: mapping Nex types to JVM descriptors, lowering AST nodes into compiler IR, emitting classes and methods with ASM, and packaging generated output into file-level artifacts. To read it effectively, start with these entry points and follow the control flow downward:
 
-- `translate` and `translate-ast` — whole-program entry points
-- `generate-class`, `generate-method`, `generate-constructor` — class-level emission
-- `generate-expression`, `generate-statement` — local code generation
+- `compile-ast`, `compile-file`, `compile-jar` — whole-program and file-level entry points
+- `lower-repl-cell`, `lower-class-def` — lowering into compiler IR
+- `compile-unit->bytes`, `compile-user-class->bytes`, `compile-launcher->bytes` — ASM-backed bytecode emission
 
-The generator emits translated Nex classes, helper base classes for function values, runtime support for contracts and invariants, helpers for arrays, maps, sets, cursors, tasks, channels, and I/O, and generated support classes for graphics types such as `NexWindow`, `NexImage`, and `NexTurtle`.
+The compiler emits Nex classes, helper classes for function values and closures, runtime support for contracts and invariants, helpers for arrays, maps, sets, cursors, tasks, channels, I/O, and launcher classes for file compilation.
 
-One design decision worth noting: the Java generator embeds a substantial runtime alongside the translated user code. A translated Nex program carries the parts of the runtime it needs rather than assuming a separately installed Nex VM. This keeps deployment simple at the cost of larger output, a tradeoff that is appropriate for Nex's current use cases.
+One design decision worth noting: the bytecode backend still carries a substantial runtime alongside the generated user code. A compiled Nex jar includes the runtime support classes and the active compiler classpath rather than assuming a separately installed Nex VM. This keeps deployment simple at the cost of larger output, a tradeoff that is appropriate for Nex's current use cases.
 
 
 
 ## 3.6 The JavaScript Generator
 
-The JavaScript generator serves a different purpose. It must preserve Nex's semantics in a host environment with a different object model, single-threaded event-loop execution, promises rather than JVM blocking primitives, and ES module import conventions. It does not simply mirror the Java emitter — it re-expresses Nex semantics in a JavaScript-native form.
+The JavaScript generator serves a different purpose. It must preserve Nex's semantics in a host environment with a different object model, single-threaded event-loop execution, promises rather than JVM blocking primitives, and ES module import conventions. It does not simply mirror the JVM backend — it re-expresses Nex semantics in a JavaScript-native form.
 
-The generator is organised around the same four concerns as the Java generator — type mapping, expression emission, statement emission, and class emission — but several target-specific areas are worth calling out.
+The generator is organised around the same four concerns as the JVM backend — type mapping, expression emission, statement emission, and class emission — but several target-specific areas are worth calling out.
 
 First, the generator must decide when operations should produce `await`-bearing code. This matters for task and channel semantics, where the event-loop model requires explicit async boundaries that the JVM does not.
 
@@ -132,11 +132,11 @@ For the concurrency side specifically, read `generate-spawn-expr`, `generate-sel
 
 
 
-## 3.7 Generators as Semantic Documents
+## 3.7 Backends as Semantic Documents
 
-A source generator is not only an output mechanism. It is also a semantic document.
+A backend is not only an output mechanism. It is also a semantic document.
 
-Reading the Java and JavaScript generators side by side is instructive precisely where they diverge. Where both generators take the same path, the feature is straightforwardly language-level. Where they diverge — concurrency being the clearest example — the divergence reveals something real about Nex: the language semantics are more fundamental than any one execution model, and the generators are two independent proofs of that claim.
+Reading the JVM and JavaScript backends side by side is instructive precisely where they diverge. Where both take the same path, the feature is straightforwardly language-level. Where they diverge — concurrency being the clearest example — the divergence reveals something real about Nex: the language semantics are more fundamental than any one execution model, and the backends are two independent proofs of that claim.
 
 The larger architectural point is that parsing and typechecking are shared while code generation diverges only where the targets genuinely differ. One syntax, one AST, one static model, multiple execution strategies. That separation is what a language implementation should aim for, and Nex largely achieves it.
   * 

@@ -17,3 +17,10 @@ Run commands from `docs/design`.
 - `styles.css` - HTML styling
 - `index.md` - title page
 - `introduction.md` and `chapter_*.md` - book content
+- `../md/COMPILED_REPL_STATUS.md` - current boundary of the experimental JVM compiled REPL backend
+- `../md/COMPILER_FEATURE_GAP.md` - current gap between the interpreter and the JVM bytecode compiler
+- `JVM_BYTECODE_COMPILER_PLAN.md` - implementation plan for the JVM bytecode compiler
+- `USER_DEFINED_CLASSES_COMPILER_PLAN.md` - implementation checklist for compiled support of simple user-defined classes
+- `DEFERRED_CLASSES_COMPILER_PLAN.md` - implementation checklist for compiled support of deferred classes and parent-typed virtual dispatch
+- `EXCEPTIONS_AND_CONTRACTS_COMPILER_PLAN.md` - implementation checklist for compiled exception handling and design-by-contract support
+- `CLOSURES_AND_HIGHER_ORDER_COMPILER_PLAN.md` - implementation checklist for compiled anonymous functions and higher-order function-object support

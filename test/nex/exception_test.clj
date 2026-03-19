@@ -4,21 +4,12 @@
             [nex.parser :as p]
             [nex.interpreter :as interp]
             [nex.typechecker :as tc]
-            [nex.generator.java :as java-gen]
             [nex.generator.javascript :as js-gen]))
 
 ;; Helper to get AST
 (defn parse [code]
   (p/ast code))
 
-(defn test-class-java
-  [java]
-  (let [start (.indexOf java "class Test {")]
-    (if (not= start -1)
-      (subs java start)
-      java)))
-
-;; Helper to execute a method body and get output
 (defn execute-method [code]
   (let [ast (p/ast code)
         ctx (interp/make-context)
@@ -243,55 +234,7 @@ end"))]
 end"))]
       (is (:success result)))))
 
-;; ===== Java Generator Tests =====
-
-(deftest java-raise-test
-  (testing "raise generates throw in Java"
-    (let [ast (parse "class Test
-  feature
-    demo() do
-      raise \"error\"
-    end
-end")
-          java (java-gen/translate-ast ast {:skip-contracts true})]
-      (is (re-find #"throw new RuntimeException" java)))))
-
-(deftest java-rescue-retry-test
-  (testing "rescue with retry generates while/try/catch in Java"
-    (let [ast (parse "class Test
-  feature
-    demo() do
-      do
-        raise \"oops\"
-      rescue
-        retry
-      end
-    end
-end")
-          java (java-gen/translate-ast ast {:skip-contracts true})]
-      (is (re-find #"while \(true\)" java))
-      (is (re-find #"try \{" java))
-      (is (re-find #"catch \(Exception _nex_e\)" java))
-      (is (re-find #"continue;" java))
-      (is (re-find #"break;" java)))))
-
-(deftest java-rescue-no-retry-test
-  (testing "rescue without retry generates try/catch with rethrow in Java"
-    (let [ast (parse "class Test
-  feature
-    demo() do
-      do
-        raise \"oops\"
-      rescue
-        print(exception)
-      end
-    end
-end")
-          java (test-class-java (java-gen/translate-ast ast {:skip-contracts true}))]
-      (is (re-find #"try \{" java))
-      (is (re-find #"catch \(Exception _nex_e\)" java))
-      (is (re-find #"throw _nex_e;" java))
-      (is (not (re-find #"continue;" java))))))
+;; ===== JavaScript Generator Tests =====
 
 ;; ===== JavaScript Generator Tests =====
 

@@ -65,4 +65,3 @@ clojure -M:test test/scripts/check_docs_examples.clj --tut
 ## 5) Notes
 
 - The docs smoke test runs fenced `nex` examples through the real Nex evaluation path.
-- Graphics examples that require `Window`, `Turtle`, or `Image` are skipped automatically in headless environments.

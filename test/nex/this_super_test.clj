@@ -4,7 +4,6 @@
             [nex.walker :as walker]
             [nex.interpreter :as interp]
             [nex.typechecker :as tc]
-            [nex.generator.java :as java-gen]
             [nex.generator.javascript :as js-gen]
             [clojure.string :as str]))
 
@@ -26,11 +25,11 @@ end"
                    first :constructors first)
           stmt (first (:body ctor))]
       (is (= :member-assign (:type stmt)))
-      (is (= :this (:object-type stmt)))
+      (is (= :this (-> stmt :object :type)))
       (is (= "x" (:field stmt))))))
 
 (deftest parse-super-field-assignment
-  (testing "super.field assignment is currently not supported by parser"
+  (testing "super.field assignment now parses as a member assignment target"
     (let [code "class B
   inherit A
   create
@@ -45,8 +44,15 @@ class A
   feature
     x: Integer
 end"
-          parsed? (try (p/ast code) true (catch Exception _ false))]
-      (is (false? parsed?)))))
+          ast (p/ast code)
+          ctor (-> ast :classes first :body
+                   (->> (filter #(= (:type %) :constructors)))
+                   first :constructors first)
+          stmt (first (:body ctor))]
+      (is (= :member-assign (:type stmt)))
+      (is (= :identifier (-> stmt :object :type)))
+      (is (= "super" (-> stmt :object :name)))
+      (is (= "x" (:field stmt))))))
 
 (deftest parse-this-in-expression
   (testing "this parses to {:type :this} in primary position"
@@ -209,40 +215,7 @@ end"
           result (tc/type-check ast)]
       (is (:success result)))))
 
-;; ─── Java Generator Tests ───
-
-(deftest java-this-super-expression
-  (testing "this and super generate correctly in Java"
-    (let [code "class A
-  feature
-    x: Integer
-    show do
-      print(x)
-    end
-end
-
-class B
-  inherit A
-  create
-    make(x: Integer, y: Integer) do
-      this.x := x
-      this.y := y
-    end
-  feature
-    y: Integer
-    show do
-      super.show()
-      print(y)
-    end
-end"
-          java-code (java-gen/translate code {:skip-type-check true})]
-      ;; In factory method, this maps to local variable name
-      (is (str/includes? java-code "b._parent_A.x = x;"))
-      (is (str/includes? java-code "b.y = y;"))
-      ;; Constructor is a static factory method
-      (is (str/includes? java-code "public static B make("))
-      (is (str/includes? java-code "B b = new B();"))
-      (is (str/includes? java-code "return b;")))))
+;; ─── JavaScript Generator Tests ───
 
 ;; ─── JavaScript Generator Tests ───
 
@@ -280,16 +253,6 @@ end"
       (is (str/includes? js-code "return b;")))))
 
 ;; ─── Create Expression Tests ───
-
-(deftest java-create-factory-method
-  (testing "create A.make(10) generates A.make(10) in Java"
-    (let [expr {:type :create :class-name "A" :generic-args nil
-                :constructor "make" :args [{:type :integer :value 10}]}]
-      (is (= "A.make(10)" (java-gen/generate-create-expr expr)))))
-  (testing "create A generates new A() in Java"
-    (let [expr {:type :create :class-name "A" :generic-args nil
-                :constructor nil :args []}]
-      (is (= "new A()" (java-gen/generate-create-expr expr))))))
 
 (deftest js-create-factory-method
   (testing "create A.make(10) generates A.make(10) in JS"

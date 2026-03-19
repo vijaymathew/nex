@@ -9,7 +9,7 @@ Bash script that provides the full Nex CLI using the JVM/Clojure runtime.
 
 **Features:**
 - REPL
-- Compile to Java/JavaScript
+- Compile to standalone JVM jar / JavaScript
 - Format Nex files
 - Generate documentation
 - Evaluate code snippets
@@ -18,7 +18,7 @@ Bash script that provides the full Nex CLI using the JVM/Clojure runtime.
 ```bash
 ./nex help
 ./nex
-./nex compile java file.nex
+./nex compile jvm file.nex
 ./nex format file.nex
 ./nex doc file.nex output.md
 ./nex eval 'print("Hello")'
@@ -64,7 +64,7 @@ You can then run:
 ```bash
 nex help
 nex
-nex compile java MyClass.nex
+nex compile jvm MyClass.nex
 ```
 
 from anywhere in your system.

@@ -80,16 +80,6 @@ Tests are organized following standard Clojure conventions:
   - `text/Regex`: compile, matching, search, replacement, splitting
   - JVM interpreter coverage for shipped `lib/text` library classes
 
-### Code Generation
-
-- **generator/java_test.clj** (`nex.generator.java-test`)
-  - Nex to Java translation
-  - Type mapping
-  - Class structure
-  - Inheritance translation
-  - Contract translation
-  - **10 tests, 29 assertions**
-
 ## Running Tests
 
 ### Run All Tests
@@ -97,6 +87,18 @@ Tests are organized following standard Clojure conventions:
 ```bash
 clojure -M:test run_tests.clj
 ```
+
+### Run Integration Tests
+
+Slow product-surface checks that shell out to external processes live in the
+integration runner:
+
+```bash
+clojure -M:test test/scripts/run_integration_tests.clj
+```
+
+Add future slow namespaces directly to
+`test/scripts/run_integration_tests.clj`.
 
 ### Run Specific Test Namespace
 

@@ -3,7 +3,6 @@
             [clojure.string :as str]
             [nex.parser :as p]
             [nex.interpreter :as interp]
-            [nex.generator.java :as java-gen]
             [nex.generator.javascript :as js-gen]))
 
 ;; Helper function to execute a method body
@@ -17,13 +16,6 @@
     (doseq [stmt method-body]
       (interp/eval-node ctx-with-env stmt))
     @(:output ctx-with-env)))
-
-(defn test-class-java
-  [java]
-  (let [start (.indexOf java "class Test {")]
-    (if (not= start -1)
-      (subs java start)
-      java)))
 
 (deftest basic-if-then-else-test
   (testing "Basic if-then-else with true condition"
@@ -302,44 +294,6 @@ end"
           output (execute-method code)]
       (is (= ["\"done\""] output)))))
 
-(deftest java-codegen-elseif-test
-  (testing "Java codegen emits else if for elseif"
-    (let [code "class Test
-  feature
-    demo() do
-      let x: Integer := 0
-      if x < 0 then
-        print(\"negative\")
-      elseif x > 100 then
-        print(\"big\")
-      else
-        print(\"normal\")
-      end
-    end
-end"
-          ast (p/ast code)
-          java-code (java-gen/translate-ast ast)]
-      (is (str/includes? java-code "} else if ("))
-      (is (str/includes? java-code "} else {")))))
-
-(deftest java-codegen-no-else-test
-  (testing "Java codegen with no else block"
-    (let [code "class Test
-  feature
-    demo() do
-          let x: Integer := 0
-          if x < 0 then
-            print(\"negative\")
-          elseif x > 100 then
-            print(\"big\")
-          end
-        end
-end"
-          ast (p/ast code)
-          java-code (test-class-java (java-gen/translate-ast ast))]
-      (is (str/includes? java-code "} else if ("))
-      (is (not (str/includes? java-code "} else {"))))))
-
 (deftest js-codegen-elseif-test
   (testing "JavaScript codegen emits else if for elseif"
     (let [code "class Test
@@ -422,19 +376,6 @@ end"
 end"
           output (execute-method code)]
       (is (= ["40"] output)))))
-
-(deftest java-codegen-when-test
-  (testing "Java codegen emits ternary for when expression"
-    (let [code "class Test
-  feature
-    demo() do
-      let x: Integer := when 1 < 5 1 else 2 end
-    end
-end"
-          ast (p/ast code)
-          java-code (java-gen/translate-ast ast)]
-      (is (str/includes? java-code "?"))
-      (is (str/includes? java-code ":")))))
 
 (deftest js-codegen-when-test
   (testing "JavaScript codegen emits ternary for when expression"

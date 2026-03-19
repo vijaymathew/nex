@@ -99,7 +99,7 @@
 (def builtin-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Task" "Channel" "Any" "Void" "Nil" "Console" "Process" "Function"
-    "Cursor" "Window" "Turtle" "Image"})
+    "Cursor"})
 
 (defn builtin-type? [type-name]
   (contains? builtin-types type-name))
@@ -380,6 +380,7 @@
 (declare check-expression)
 (declare collect-class-info)
 (declare check-class)
+(declare convert-guard-binding)
 
 (defn check-literal
   "Check the type of a literal expression"
@@ -668,6 +669,42 @@
         (and right-id (nil-literal? left)) right-id
         :else nil))))
 
+(defn guarded-else-non-nil-var
+  "Extract variable name from condition of the form `x = nil` or `nil = x`,
+   where the variable is proven non-nil in the else branch."
+  [condition]
+  (when (and (map? condition)
+             (= :binary (:type condition))
+             (= "=" (:operator condition)))
+    (let [left (:left condition)
+          right (:right condition)
+          left-id (identifier-name left)
+          right-id (identifier-name right)]
+      (cond
+        (and left-id (nil-literal? right)) left-id
+        (and right-id (nil-literal? left)) right-id
+        :else nil))))
+
+(defn- apply-condition-branch-refinement!
+  [env condition branch]
+  (case branch
+    :then
+    (do
+      (when-let [non-nil-var (guarded-non-nil-var condition)]
+        (env-mark-non-nil env non-nil-var))
+      (when-let [{:keys [name type]} (convert-guard-binding condition)]
+        (env-add-var env name type)
+        (env-mark-non-nil env name))
+      env)
+
+    :else
+    (do
+      (when-let [non-nil-var (guarded-else-non-nil-var condition)]
+        (env-mark-non-nil env non-nil-var))
+      env)
+
+    env))
+
 (defn convert-guard-binding
   "Extract convert-bound variable info from condition of form:
    convert <expr> to <var>:<Type>"
@@ -791,6 +828,20 @@
         "capacity" (when (= argc 0) {:params [] :return-type "Integer"})
         "size" (when (= argc 0) {:params [] :return-type "Integer"})
         nil))
+
+    "Cursor"
+    (case method
+      "start" (when (= argc 0)
+                {:params [] :return-type "Void"})
+      "cursor" (when (= argc 0)
+                 {:params [] :return-type "Cursor"})
+      "item" (when (= argc 0)
+               {:params [] :return-type "Any"})
+      "next" (when (= argc 0)
+               {:params [] :return-type "Void"})
+      "at_end" (when (= argc 0)
+                 {:params [] :return-type "Boolean"})
+      nil)
 
     nil))
 
@@ -1009,7 +1060,7 @@
                               {:error (type-error
                                        (str "regex_validate arguments must be String, got "
                                             (display-type arg-type)))})))))
-        "Void")
+        "Boolean")
 
       (= method "regex_matches")
       (do
@@ -2056,12 +2107,6 @@
       (if (seq generic-args)
         {:base-type "Channel" :type-args generic-args}
         "Channel"))
-    ;; Handle built-in Window type
-    (= class-name "Window") "Window"
-    ;; Handle built-in Turtle type
-    (= class-name "Turtle") "Turtle"
-    ;; Handle built-in Image type
-    (= class-name "Image") "Image"
     :else
     (do
       ;; Check if class exists
@@ -2203,8 +2248,12 @@
                             ;; Since it inherits from Function, it will support callN methods.
                             class-name)
       :when (let [cond-type (check-expression env (:condition expr))
-                   cons-type (check-expression env (:consequent expr))
-                   alt-type (check-expression env (:alternative expr))]
+                   cons-env (doto (make-type-env env)
+                              (apply-condition-branch-refinement! (:condition expr) :then))
+                   alt-env (doto (make-type-env env)
+                             (apply-condition-branch-refinement! (:condition expr) :else))
+                   cons-type (check-expression cons-env (:consequent expr))
+                   alt-type (check-expression alt-env (:alternative expr))]
                (when-not (types-compatible? env cond-type "Boolean")
                  (throw (ex-info "when condition must be Boolean"
                                  {:error (type-error
@@ -2274,11 +2323,7 @@
                       {:error (type-error
                                (str "If condition must be Boolean, got " cond-type))}))))
   (let [then-env (make-type-env env)]
-    (when-let [non-nil-var (guarded-non-nil-var condition)]
-      (env-mark-non-nil then-env non-nil-var))
-    (when-let [{:keys [name type]} (convert-guard-binding condition)]
-      (env-add-var then-env name type)
-      (env-mark-non-nil then-env name))
+    (apply-condition-branch-refinement! then-env condition :then)
     (doseq [stmt then]
       (check-statement then-env stmt)))
   (doseq [clause elseif]
@@ -2288,15 +2333,12 @@
                         {:error (type-error
                                  (str "Elseif condition must be Boolean, got " ei-cond-type))}))))
     (let [elseif-env (make-type-env env)]
-      (when-let [non-nil-var (guarded-non-nil-var (:condition clause))]
-        (env-mark-non-nil elseif-env non-nil-var))
-      (when-let [{:keys [name type]} (convert-guard-binding (:condition clause))]
-        (env-add-var elseif-env name type)
-        (env-mark-non-nil elseif-env name))
+      (apply-condition-branch-refinement! elseif-env (:condition clause) :then)
       (doseq [stmt (:then clause)]
         (check-statement elseif-env stmt))))
   (when else
     (let [else-env (make-type-env env)]
+      (apply-condition-branch-refinement! else-env condition :else)
       (doseq [stmt else] (check-statement else-env stmt)))))
 
 (defn check-loop
@@ -2461,18 +2503,28 @@
       :retry nil
       :member-assign
       (let [field-name (:field stmt)
-            _ (when-let [current-class (env-lookup-var env "__current_class__")]
-                (when (lookup-class-constant env current-class field-name)
-                  (throw (ex-info (str "Cannot assign to constant: " field-name)
-                                  {:error (type-error (str "Cannot assign to constant: " field-name))}))))
-            field-type (env-lookup-var env field-name)
+            target-expr (or (:object stmt) {:type :this})
+            target-type (check-expression env target-expr)
+            base-target-type (attachable-type target-type)
+            class-name (if (map? base-target-type)
+                         (:base-type base-target-type)
+                         base-target-type)
+            _ (when-not class-name
+                (throw (ex-info "Field assignment target must be an object"
+                                {:error (type-error "Field assignment target must be an object")})))
+            _ (when (lookup-class-constant env class-name field-name)
+                (throw (ex-info (str "Cannot assign to constant: " field-name)
+                                {:error (type-error (str "Cannot assign to constant: " field-name))})))
+            field-type (lookup-class-field env class-name field-name)
             val-type (check-expression env (:value stmt))]
-        (when (and field-type val-type)
-          (when-not (types-compatible? env val-type field-type)
-            (throw (ex-info (str "Type mismatch in assignment to " field-name)
-                            {:error (type-error
-                                     (str "Cannot assign " (display-type val-type)
-                                          " to field of type " (display-type field-type)))})))))
+        (when-not field-type
+          (throw (ex-info (str "Undefined field: " field-name)
+                          {:error (type-error (str "Undefined field: " field-name))})))
+        (when-not (types-compatible? env val-type field-type)
+          (throw (ex-info (str "Type mismatch in assignment to " field-name)
+                          {:error (type-error
+                                   (str "Cannot assign " (display-type val-type)
+                                        " to field of type " (display-type field-type)))}))))
       nil)))
 
 ;;
@@ -2875,58 +2927,6 @@
            "setenv" {:params [{:name "name" :type "String"} {:name "value" :type "String"}] :return-type "Void"}
            "command_line" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}}]
     (env-add-method env "Process" method-name sig))
-  (doseq [[method-name sig]
-          {"show"          {:params [] :return-type "Void"}
-           "close"         {:params [] :return-type "Void"}
-           "clear"         {:params [] :return-type "Void"}
-           "bgcolor"       {:params [{:name "color" :type "String"}] :return-type "Void"}
-           "refresh"       {:params [] :return-type "Void"}
-           "set_color"     {:params [{:name "color" :type "String"}] :return-type "Void"}
-           "set_font_size" {:params [{:name "size" :type "Integer"}] :return-type "Void"}
-           "draw_line"     {:params [{:name "x1" :type "Real"} {:name "y1" :type "Real"}
-                                     {:name "x2" :type "Real"} {:name "y2" :type "Real"}] :return-type "Void"}
-           "draw_rect"     {:params [{:name "x" :type "Real"} {:name "y" :type "Real"}
-                                     {:name "w" :type "Real"} {:name "h" :type "Real"}] :return-type "Void"}
-           "fill_rect"     {:params [{:name "x" :type "Real"} {:name "y" :type "Real"}
-                                     {:name "w" :type "Real"} {:name "h" :type "Real"}] :return-type "Void"}
-           "draw_circle"   {:params [{:name "x" :type "Real"} {:name "y" :type "Real"}
-                                     {:name "r" :type "Real"}] :return-type "Void"}
-           "fill_circle"   {:params [{:name "x" :type "Real"} {:name "y" :type "Real"}
-                                     {:name "r" :type "Real"}] :return-type "Void"}
-           "draw_text"     {:params [{:name "text" :type "String"} {:name "x" :type "Real"}
-                                     {:name "y" :type "Real"}] :return-type "Void"}
-           "draw_image"    {:params [{:name "img" :type "Image"} {:name "x" :type "Real"}
-                                     {:name "y" :type "Real"}] :return-type "Void"}
-           "draw_image_scaled"  {:params [{:name "img" :type "Image"} {:name "x" :type "Real"}
-                                          {:name "y" :type "Real"} {:name "w" :type "Real"}
-                                          {:name "h" :type "Real"}] :return-type "Void"}
-           "draw_image_rotated" {:params [{:name "img" :type "Image"} {:name "x" :type "Real"}
-                                          {:name "y" :type "Real"} {:name "angle" :type "Real"}] :return-type "Void"}
-           "sleep"         {:params [{:name "ms" :type "Integer"}] :return-type "Void"}}]
-    (env-add-method env "Window" method-name sig))
-  (doseq [[method-name sig]
-          {"width"  {:params [] :return-type "Integer"}
-           "height" {:params [] :return-type "Integer"}}]
-    (env-add-method env "Image" method-name sig))
-  (doseq [[method-name sig]
-          {"forward"    {:params [{:name "distance" :type "Real"}] :return-type "Void"}
-           "backward"   {:params [{:name "distance" :type "Real"}] :return-type "Void"}
-           "right"      {:params [{:name "angle" :type "Real"}] :return-type "Void"}
-           "left"       {:params [{:name "angle" :type "Real"}] :return-type "Void"}
-           "penup"      {:params [] :return-type "Void"}
-           "pendown"    {:params [] :return-type "Void"}
-           "color"      {:params [{:name "color" :type "String"}] :return-type "Void"}
-           "pensize"    {:params [{:name "size" :type "Integer"}] :return-type "Void"}
-           "speed"      {:params [{:name "speed" :type "Integer"}] :return-type "Void"}
-           "shape"      {:params [{:name "shape" :type "String"}] :return-type "Void"}
-           "goto"       {:params [{:name "x" :type "Real"} {:name "y" :type "Real"}] :return-type "Void"}
-           "circle"     {:params [{:name "radius" :type "Real"}] :return-type "Void"}
-           "begin_fill" {:params [] :return-type "Void"}
-           "end_fill"   {:params [] :return-type "Void"}
-           "hide"       {:params [] :return-type "Void"}
-           "show"       {:params [] :return-type "Void"}}]
-    (env-add-method env "Turtle" method-name sig))
-
   ;; Register Array[T] class and methods
   (env-add-class env "Array" {:name "Array"
                                :generic-params [{:name "T"}]})
@@ -2942,7 +2942,7 @@
            "contains"    {:params [{:name "elem" :type "T"}] :return-type "Boolean"}
            "index_of"    {:params [{:name "elem" :type "T"}] :return-type "Integer"}
            "remove"      {:params [{:name "index" :type "Integer"}] :return-type "Void"}
-           "reverse"     {:params [] :return-type "Void"}
+           "reverse"     {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
            "sort"        {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
            "slice"       {:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}]
                           :return-type {:base-type "Array" :type-params ["T"]}}
@@ -3086,7 +3086,8 @@
 
 (defn infer-expression-type
   "Infer the type of an expression AST node.
-   opts: :classes - seq of class defs, :var-types - {name type} map.
+   opts: :classes - seq of class defs, :functions - seq of function defs,
+   :var-types - {name type} map.
    Returns the type (string or map) or nil on failure."
   [expr opts]
   (try
@@ -3098,6 +3099,8 @@
       (doseq [class-def (:classes opts)]
         (collect-class-info env class-def))
       (register-builtin-methods env)
+      (doseq [fn-def (:functions opts)]
+        (env-add-var env (:name fn-def) (:class-name fn-def)))
       (doseq [[var-name var-type] (:var-types opts)]
         (env-add-var env var-name var-type))
       (check-expression env expr))

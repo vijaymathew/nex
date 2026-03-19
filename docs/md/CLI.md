@@ -73,17 +73,19 @@ nex compile <target> <input.nex> [output]
 ```
 
 **Targets:**
-- `java` - Generate Java source code
+- `jvm` - Compile to a standalone JVM JAR using the bytecode backend
 - `javascript` or `js` - Generate JavaScript source code
+
+Prefer `jvm` for JVM deployment.
 
 **Examples:**
 
 ```bash
-# Compile to Java (output to stdout)
-nex compile java MyClass.nex
+# Preferred JVM backend
+nex compile jvm MyClass.nex
 
-# Compile to Java (save to file)
-nex compile java MyClass.nex MyClass.java
+# Preferred JVM backend
+nex compile jvm MyClass.nex build/
 
 # Compile to JavaScript
 nex compile js MyClass.nex MyClass.js
@@ -240,6 +242,73 @@ export NEX_HOME=/path/to/nex/repo
 ./bin/nex help
 ```
 
+### Extra JVM Dependencies
+
+`bin/nex` does not fetch Java dependencies itself. It inherits whatever is already
+on the JVM classpath of the `clojure` process it launches.
+
+#### Start `bin/nex` with extra JARs
+
+If you already have dependency jars on disk, put them on `CLASSPATH` before
+starting the REPL:
+
+```bash
+export CLASSPATH="/opt/myapp/lib/postgresql-42.7.3.jar:/opt/myapp/lib/HikariCP-5.1.0.jar"
+./bin/nex
+```
+
+Then Nex `import` can resolve classes from those jars:
+
+```nex
+import java.sql.DriverManager
+import com.zaxxer.hikari.HikariDataSource
+```
+
+#### Compile a standalone JAR with extra Maven dependencies on the classpath
+
+`nex compile jvm` shades the current JVM classpath into the generated output jar.
+So if you want extra Maven dependencies packaged into the generated jar, launch
+the compiler with those deps already on the classpath:
+
+```bash
+cd /path/to/nex
+
+clojure -Sdeps '{:deps {com.h2database/h2 {:mvn/version "2.2.224"}
+                        com.zaxxer/HikariCP {:mvn/version "5.1.0"}}}' \
+  -M -m nex.compiler.jvm.file /path/to/app.nex /path/to/build
+```
+
+That produces `/path/to/build/app.jar`, and the shaded jar includes those Maven
+dependencies because they were present on the compiler classpath.
+
+For a repeatable project setup, put those dependencies in a local `deps.edn`
+alias and run the compiler through that alias:
+
+```clojure
+;; deps.edn
+{:aliases
+ {:nex-build
+  {:extra-deps {com.h2database/h2 {:mvn/version "2.2.224"}
+                com.zaxxer/HikariCP {:mvn/version "5.1.0"}}}}}
+```
+
+```bash
+cd /path/to/nex
+
+clojure -A:nex-build \
+  -M -m nex.compiler.jvm.file /path/to/app.nex /path/to/build
+```
+
+That uses the extra Maven dependencies from the local alias and includes them in
+the generated shaded jar.
+
+If you prefer to keep using `./bin/nex`, put those dependencies in a `deps.edn`
+that the launched `clojure` process will see, then run:
+
+```bash
+./bin/nex compile jvm /path/to/app.nex /path/to/build
+```
+
 ## Exit Codes
 
 The `nex` command uses standard exit codes:
@@ -250,9 +319,8 @@ The `nex` command uses standard exit codes:
 Check exit codes in scripts:
 
 ```bash
-if nex compile java MyClass.nex MyClass.java; then
+if nex compile jvm MyClass.nex build/; then
     echo "Compilation successful"
-    javac MyClass.java
 else
     echo "Compilation failed"
     exit 1
@@ -275,10 +343,10 @@ nex format src/
 echo "Generating documentation..."
 nex doc src/ docs/
 
-echo "Compiling to Java..."
+echo "Compiling to standalone JVM jars..."
 for file in src/*.nex; do
     basename=$(basename "$file" .nex)
-    nex compile java "$file" "target/${basename}.java"
+    nex compile jvm "$file" target/
 done
 
 echo "Build complete!"
@@ -294,7 +362,7 @@ DOCS_DIR = docs
 TARGET_DIR = target
 
 NEX_FILES := $(wildcard $(SRC_DIR)/*.nex)
-JAVA_FILES := $(patsubst $(SRC_DIR)/%.nex,$(TARGET_DIR)/%.java,$(NEX_FILES))
+JARS := $(patsubst $(SRC_DIR)/%.nex,$(TARGET_DIR)/%.jar,$(NEX_FILES))
 
 all: format docs compile
 
@@ -304,11 +372,11 @@ format:
 docs:
 	nex doc $(SRC_DIR) $(DOCS_DIR)
 
-compile: $(JAVA_FILES)
+compile: $(JARS)
 
-$(TARGET_DIR)/%.java: $(SRC_DIR)/%.nex
+$(TARGET_DIR)/%.jar: $(SRC_DIR)/%.nex
 	@mkdir -p $(TARGET_DIR)
-	nex compile java $< $@
+	nex compile jvm $< $(TARGET_DIR)
 
 clean:
 	rm -rf $(TARGET_DIR) $(DOCS_DIR)
@@ -342,7 +410,7 @@ jobs:
       - name: Compile
         run: |
           for file in src/*.nex; do
-            nex compile java "$file"
+            nex compile jvm "$file" build/
           done
 ```
 
@@ -353,7 +421,7 @@ jobs:
 Add to your `.bashrc` or `.zshrc`:
 
 ```bash
-alias nex-java='nex compile java'
+alias nex-jvm='nex compile jvm'
 alias nex-js='nex compile javascript'
 alias nex-fmt='nex format'
 ```
@@ -361,7 +429,7 @@ alias nex-fmt='nex format'
 Then use:
 
 ```bash
-nex-java MyClass.nex
+nex-jvm MyClass.nex
 nex-js MyClass.nex
 nex-fmt src/
 ```
@@ -378,7 +446,7 @@ ls src/*.nex | entr nex format src/_
 Auto-compile on changes:
 
 ```bash
-ls src/*.nex | entr nex compile java src/_
+ls src/*.nex | entr nex compile jvm src/_ build/
 ```
 
 ### Batch Operations

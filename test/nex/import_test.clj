@@ -2,7 +2,6 @@
   "Tests for import statement to use Java and JavaScript classes"
   (:require [clojure.test :refer [deftest is testing]]
             [nex.parser :as p]
-            [nex.generator.java :as java]
             [nex.generator.javascript :as js]))
 
 (deftest import-parsing-test
@@ -48,26 +47,6 @@
       (is (= "Lodash" (:qualified-name (second imports))))
       (is (= "'./lodash.js'" (:source (second imports)))))))
 
-(deftest java-import-generation-test
-  (testing "Generate Java import"
-    (let [code "import java.util.Scanner\n\nclass Main feature test() do print(\"x\") end end"
-          java-code (-> code p/ast java/translate-ast)]
-      (is (.contains java-code "import java.util.Scanner;"))
-      (is (.contains java-code "public class Main"))))
-
-  (testing "Generate multiple Java imports"
-    (let [code "import java.util.ArrayList\nimport java.util.HashMap\nimport java.io.File\n\nclass Main feature test() do print(\"x\") end end"
-          java-code (-> code p/ast java/translate-ast)]
-      (is (.contains java-code "import java.util.ArrayList;"))
-      (is (.contains java-code "import java.util.HashMap;"))
-      (is (.contains java-code "import java.io.File;"))))
-
-  (testing "Java generator ignores JavaScript imports"
-    (let [code "import React from './react.js'\n\nclass Main feature test() do print(\"x\") end end"
-          java-code (-> code p/ast java/translate-ast)]
-      (is (not (.contains java-code "import")))
-      (is (.contains java-code "public class Main")))))
-
 (deftest javascript-import-generation-test
   (testing "Generate JavaScript import"
     (let [code "import Math from './utils.js'\n\nclass Main feature test() do print(\"x\") end end"
@@ -87,21 +66,18 @@
       (is (not (.contains js-code "import")))
       (is (.contains js-code "class Main")))))
 
-(deftest mixed-imports-generation-test
-  (testing "Java generator filters imports correctly"
-    (let [code "import java.util.Scanner\nimport React from './react.js'\nimport java.io.File\n\nclass Main feature test() do print(\"x\") end end"
-          java-code (-> code p/ast java/translate-ast)]
-      (is (.contains java-code "import java.util.Scanner;"))
-      (is (.contains java-code "import java.io.File;"))
-      (is (not (.contains java-code "React")))
-      (is (not (.contains java-code "react.js")))))
+(deftest javascript-import-filtering-test
+  (testing "JavaScript generator filters mixed imports correctly"
+    (let [code "import java.util.Scanner
+import React from './react.js'
+import java.io.File
 
-  (testing "JavaScript generator filters imports correctly"
-    (let [code "import java.util.Scanner\nimport React from './react.js'\nimport java.io.File\n\nclass Main feature test() do print(\"x\") end end"
+class Main feature test() do print(\"x\") end end"
           js-code (-> code p/ast js/translate-ast)]
       (is (.contains js-code "import React from './react.js';"))
       (is (not (.contains js-code "java.util")))
       (is (not (.contains js-code "java.io"))))))
+
 
 (deftest import-with-intern-test
   (testing "Import and intern can coexist"

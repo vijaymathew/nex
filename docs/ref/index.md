@@ -15,7 +15,6 @@ This reference documents the interpreter-level built-ins currently defined in `s
 - [Library Index](libraries.md)
 - [Networking Libraries](networking.md)
 - [Concurrency Guide](../md/CONCURRENCY.md)
-- [Graphics Classes](graphics-classes.md)
 
 ## Conventions
 

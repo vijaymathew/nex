@@ -36,17 +36,17 @@ feature
 end"]
       (is (= expected formatted)))))
 
-(deftest format-selective-visibility-test
-  (testing "Format selective visibility"
+(deftest format-private-visibility-test
+  (testing "Format private visibility"
     (let [unformatted "class Test
--> Friend, Helper feature
+private feature
 show() do
 print(1)
 end
 end"
           formatted (fmt/format-code unformatted)
           expected "class Test
--> Friend, Helper feature
+private feature
   show() do
     print(1)
   end

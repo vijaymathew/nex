@@ -2,6 +2,7 @@
   "Interactive REPL for the Nex programming language"
   (:require [nex.parser :as p]
             [nex.interpreter :as interp]
+            [nex.compiler.jvm.repl :as compiled-repl]
             [nex.debugger :as dbg]
             [nex.typechecker :as tc]
             [clojure.string :as str]
@@ -22,6 +23,8 @@
 (defonce ^:dynamic *repl-context* nil)
 (defonce ^:dynamic *type-checking-enabled* (atom false))
 (defonce ^:dynamic *repl-var-types* (atom {}))
+(defonce ^:dynamic *repl-backend* (atom :interpreter))
+(defonce ^:dynamic *compiled-repl-session* (atom (compiled-repl/make-session)))
 
 (def nex-keywords
   ["class" "deferred" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
@@ -34,13 +37,13 @@
 
 (def nex-types
   ["Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-   "Array" "Map" "Set" "Task" "Channel" "Function" "Cursor" "Console" "Process" "Window" "Turtle" "Image"])
+   "Array" "Map" "Set" "Task" "Channel" "Function" "Cursor" "Console" "Process"])
 
 (def nex-builtins ["print" "println" "type_of" "type_is"])
 
 (def nex-repl-commands
   [":help" ":quit" ":exit" ":clear" ":reset" ":classes" ":vars"
-   ":typecheck" ":load"
+   ":typecheck" ":load" ":backend"
    ":debug" ":break" ":tbreak" ":breaks" ":clearbreak" ":breakon"
    ":enable" ":disable" ":watch" ":watches" ":clearwatch"
    ":enablewatch" ":disablewatch"
@@ -221,6 +224,9 @@
   (println "  :typecheck off    - Disable type checking (default)")
   (println "  :typecheck status - Show current type checking status")
   (println "  :load <path>      - Load and evaluate a .nex file")
+  (println "  :backend interpreter - Use the tree-walking interpreter (default)")
+  (println "  :backend compiled    - Use the experimental compiled REPL fast path")
+  (println "  :backend status      - Show current backend")
   (println "  :debug on|off     - Enable/disable debugger")
   (println "  :debug status     - Show debugger status")
   (println "  :break <spec>     - Breakpoint: n | Class.method | Class.method:line | file.nex:line | field:name | Class#field")
@@ -305,6 +311,7 @@
             (println (str "  • " var-name " = " value-str))))))))
 
 (declare eval-code)
+(declare sync-compiled-session-into-interpreter!)
 
 (defn normalize-load-path [raw]
   (let [trimmed (str/trim raw)]
@@ -369,6 +376,7 @@
       (do
         (println "Context cleared.")
         (reset! *repl-var-types* {})
+        (reset! *compiled-repl-session* (compiled-repl/reset-session))
         (dbg/reset-run-state!)
         (init-repl-context))
 
@@ -397,6 +405,36 @@
       (do
         (println (str "Type checking is currently: "
                      (if @*type-checking-enabled* "ENABLED" "DISABLED")))
+        ctx)
+
+      (= input-lower ":backend interpreter")
+      (do
+        (sync-compiled-session-into-interpreter! ctx)
+        (reset! *repl-backend* :interpreter)
+        (println "REPL backend set to INTERPRETER.")
+        ctx)
+
+      (= input-lower ":backend compiled")
+      (do
+        (reset! *repl-backend* :compiled)
+        (let [session (compiled-repl/make-session)]
+          (compiled-repl/sync-interpreter->session! session
+                                                    ctx
+                                                    @*repl-var-types*
+                                                    {:type :program
+                                                     :imports []
+                                                     :interns []
+                                                     :classes []
+                                                     :functions []
+                                                     :statements []
+                                                     :calls []})
+          (reset! *compiled-repl-session* session))
+        (println "REPL backend set to COMPILED (experimental). Unsupported inputs will fall back to the interpreter.")
+        ctx)
+
+      (or (= input-lower ":backend") (= input-lower ":backend status"))
+      (do
+        (println (str "REPL backend is currently: " (-> @*repl-backend* name str/upper-case)))
         ctx)
 
       ;; Load file command
@@ -914,12 +952,34 @@
    Returns a formatted type string, or nil if inference fails."
   [ctx expr-node]
   (when (and @*type-checking-enabled* expr-node)
-    (when-let [t (tc/infer-expression-type
-                   expr-node
-                   {:classes (vals @(:classes ctx))
-                    :imports @(:imports ctx)
-                    :var-types @*repl-var-types*})]
-      (format-type t))))
+    (try
+      (when-let [t (tc/infer-expression-type
+                     expr-node
+                     {:classes (vals @(:classes ctx))
+                      :imports @(:imports ctx)
+                      :var-types @*repl-var-types*})]
+        (format-type t))
+      (catch Exception _
+        nil))))
+
+(defn- sync-compiled-session-into-interpreter!
+  [ctx]
+  (when (= :compiled @*repl-backend*)
+    (let [{:keys [var-types]} (compiled-repl/sync-session->interpreter!
+                               @*compiled-repl-session*
+                               ctx)]
+      (reset! *repl-var-types* var-types))))
+
+(defn- sync-interpreter-back-into-compiled-session!
+  [ctx ast source-id]
+  (when (= :compiled @*repl-backend*)
+    (reset! *compiled-repl-session*
+            (compiled-repl/sync-interpreter->session!
+             @*compiled-repl-session*
+             ctx
+             @*repl-var-types*
+             ast
+             source-id))))
 
 (defn looks-like-class?
   "Check if input looks like a top-level declaration"
@@ -938,6 +998,30 @@
       (re-find #"^\s*repeat\s+" input)
       (re-find #"^\s*across\s+" input)
       (re-find #"^\s*do\s+" input)))
+
+(defn looks-like-top-level-mutation?
+  "Check if input is a top-level let/assignment shape that should get a raw
+   compiled-path parse attempt before falling back to wrapper-based execution."
+  [input]
+  (or (re-find #"^\s*let\s+" input)
+      (re-find #"^\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?\s*:=" input)))
+
+(defn looks-like-raw-compiled-statement?
+  "Check if input is a top-level statement shape that should get a raw
+   compiled-path parse attempt before wrapper fallback."
+  [input]
+  (or (looks-like-top-level-mutation? input)
+      (re-find #"^\s*if\b" input)
+      (re-find #"^\s*from\b" input)
+      (re-find #"^\s*repeat\b" input)
+      (re-find #"^\s*across\b" input)
+      (re-find #"^\s*do\b" input)
+      (re-find #"^\s*case\b" input)
+      (re-find #"^\s*raise\b" input)
+      (re-find #"^\s*retry\b" input)
+      (re-find #"^\s*convert\b" input)
+      (re-find #"^\s*with\b" input)
+      (re-find #"^\s*select\b" input)))
 
 (defn looks-like-identifier?
   "Check if input is a simple identifier (variable name)"
@@ -975,42 +1059,57 @@
                      base-ctx)]
       (reset! exec-ctx* exec-ctx)
 
-      ;; Determine if we need to wrap the input
-      (let [code-to-parse (cond
-                          ;; Class definition - parse as is
-                          (looks-like-class? input)
-                          input
+      ;; Determine if we need to wrap the input. In compiled REPL mode, give
+      ;; top-level let/assignment inputs a raw parse + compiled-eligibility
+      ;; attempt before falling back to wrapper-based execution.
+      (let [compiled-raw-candidate? (and (= :compiled @*repl-backend*)
+                                         (not (dbg/enabled?))
+                                         (looks-like-raw-compiled-statement? input))
+            raw-compiled-attempt (when compiled-raw-candidate?
+                                   (try
+                                     (let [raw-ast (p/ast input)]
+                                       (when (compiled-repl/eligible-ast?
+                                              @*compiled-repl-session*
+                                              raw-ast)
+                                         [raw-ast false false]))
+                                     (catch Exception _
+                                       nil)))
+            [ast was-wrapped? is-expression?]
+            (or raw-compiled-attempt
+                (let [code-to-parse (cond
+                                      ;; Class definition - parse as is
+                                      (looks-like-class? input)
+                                      input
 
-                          ;; Statement that needs wrapping
-                          (looks-like-statement? input)
-                          (wrap-as-method input)
+                                      ;; Statement that needs wrapping
+                                      (looks-like-statement? input)
+                                      (wrap-as-method input)
 
-                          ;; Try as a method call first, if it fails, wrap it
-                          :else
-                          input)
-
-          ;; Try to parse, track if we wrapped
-            [ast was-wrapped? is-expression?] (try
-                                              ;; Bare identifiers parse as methodCall but should
-                                              ;; evaluate as expressions (return their value)
-                                              (if (and (= code-to-parse input)
-                                                       (looks-like-identifier? input))
-                                                [(p/ast (wrap-expression input)) true true]
-                                                [(p/ast code-to-parse) (not= code-to-parse input) false])
-                                              (catch Exception e
-                                                ;; If parsing failed and we haven't wrapped yet, try wrapping
-                                                (if (= code-to-parse input)
-                                                  (try
-                                                    [(p/ast (wrap-expression input)) true true]
-                                                    (catch Exception _e2
-                                                      ;; If expression wrapping fails, try as statement
-                                                      (try
-                                                        [(p/ast (wrap-as-method input)) true false]
-                                                        (catch Exception _e3
-                                                          ;; All attempts failed - throw the ORIGINAL error
-                                                          ;; so line numbers reference the user's actual code
-                                                          (throw e)))))
-                                                  (throw e))))]
+                                      ;; Try as a method call first, if it fails, wrap it
+                                      :else
+                                      input)]
+                  (try
+                    ;; Bare identifiers parse as methodCall but should
+                    ;; evaluate as expressions (return their value)
+                    (if (and (= code-to-parse input)
+                             (looks-like-identifier? input))
+                      [(p/ast (wrap-expression input)) true true]
+                      [(p/ast code-to-parse) (not= code-to-parse input) false])
+                    (catch Exception e
+                      ;; If parsing failed and we haven't wrapped yet, try wrapping
+                      (if (= code-to-parse input)
+                        (try
+                          [(p/ast (wrap-expression input)) true true]
+                          (catch Exception _e2
+                            ;; If expression wrapping fails, try as statement
+                            (try
+                              [(p/ast (wrap-as-method input)) true false]
+                              (catch Exception _e3
+                                ;; All attempts failed - throw the ORIGINAL error
+                                ;; so line numbers reference the user's actual code
+                                (throw e)))))
+                        (throw e))))))]
+        (sync-compiled-session-into-interpreter! exec-ctx)
         ;; Type check if enabled
         (when (and @*type-checking-enabled*
                  (= (:type ast) :program)
@@ -1018,8 +1117,7 @@
                      (seq (:statements ast)) (seq (:calls ast))))
         ;; Create an augmented AST that includes previously defined classes
         ;; so the type checker knows about them
-        (let [prev-classes (remove #(or (= "__ReplTemp__" (:name %))
-                                       (.startsWith (:name %) "AnonymousFunction_"))
+        (let [prev-classes (remove #(= "__ReplTemp__" (:name %))
                                   (vals @(:classes ctx)))
               intern-classes (interp/resolve-interned-classes source-id ast)
               prev-imports @(:imports ctx)
@@ -1061,6 +1159,54 @@
 
         ;; Evaluate based on type
         (cond
+        ;; Experimental compiled path for narrow expression-shaped program inputs.
+        (and (= (:type ast) :program)
+             (not was-wrapped?)
+             (not (dbg/enabled?))
+             (= :compiled @*repl-backend*))
+        (if-let [{:keys [session result output]} (compiled-repl/compile-and-eval! @*compiled-repl-session*
+                                                                                  ast
+                                                                                  source-id)]
+          (do
+            (reset! *compiled-repl-session* session)
+            (when (seq output)
+              (doseq [line output]
+                (println line)))
+            (when (some? result)
+              (if-let [type-str (and (empty? output)
+                                     (infer-result-type exec-ctx (first (:statements ast))))]
+                (println (str type-str " " (format-value result)))
+                (println (format-value result))))
+            exec-ctx)
+          (let [classes (:classes ast)
+                functions (:functions ast)
+                interns (:interns ast)
+                imports (:imports ast)
+                statements (:statements ast)
+                calls (:calls ast)
+                real-class-names (filter #(not= % "__ReplTemp__")
+                                         (map :name (filter map? classes)))
+                function-names (map :name (filter map? functions))]
+            (when (or (seq imports) (seq interns) (seq real-class-names) (seq function-names))
+              (interp/eval-node exec-ctx ast)
+              (when @*type-checking-enabled*
+                (doseq [fn-def (filter map? functions)]
+                  (swap! *repl-var-types* assoc (:name fn-def) (:class-name fn-def)))))
+            (let [top-nodes (if (seq statements) statements calls)
+                  result (when (and (seq top-nodes) (empty? real-class-names) (empty? function-names))
+                           (last (map #(interp/eval-node exec-ctx %) top-nodes)))
+                  output @(:output exec-ctx)]
+              (when (seq output)
+                (doseq [line output]
+                  (println line)))
+              (when (and (some? result) (empty? output) (empty? real-class-names) (empty? function-names))
+                (if-let [type-str (when (seq calls)
+                                    (infer-result-type exec-ctx (last calls)))]
+                  (println (str type-str " " (format-value result)))
+                  (println (format-value result)))))
+            (sync-interpreter-back-into-compiled-session! exec-ctx ast source-id)
+            exec-ctx))
+
         ;; If we wrapped the code, execute the temp method in GLOBAL context
         was-wrapped?
         (let [class-def (first (:classes ast))
@@ -1095,6 +1241,16 @@
               (if type-str
                 (println (str type-str " " (format-value result)))
                 (println (format-value result)))))
+          (sync-interpreter-back-into-compiled-session!
+           exec-ctx
+           {:type :program
+            :imports []
+            :interns []
+            :classes []
+            :functions []
+            :statements (:body method-def)
+            :calls []}
+           source-id)
           exec-ctx)
 
         ;; If it's a program, handle it based on content
@@ -1132,6 +1288,7 @@
                                   (infer-result-type exec-ctx (last calls)))]
                 (println (str type-str " " (format-value result)))
                 (println (format-value result)))))
+          (sync-interpreter-back-into-compiled-session! exec-ctx ast source-id)
           exec-ctx)
 
         ;; Single expression or statement
@@ -1148,6 +1305,16 @@
             (if-let [type-str (infer-result-type exec-ctx ast)]
               (println (str type-str " " (format-value result)))
               (println (format-value result))))
+          (sync-interpreter-back-into-compiled-session!
+           exec-ctx
+           {:type :program
+            :imports []
+            :interns []
+            :classes []
+            :functions []
+            :statements [ast]
+            :calls []}
+           source-id)
           exec-ctx))))
 
     (catch ParseError e

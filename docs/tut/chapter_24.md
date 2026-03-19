@@ -1,6 +1,6 @@
 # Interoperability
 
-No practical language lives entirely by itself. Sooner or later a program needs a file system, a library, a graphical surface, or an external service. Nex is designed for that reality. It can import host-platform symbols and it can be translated to Java or JavaScript.
+No practical language lives entirely by itself. Sooner or later a program needs a file system, a library, a host API, or an external service. Nex is designed for that reality. It can import host-platform symbols and it can target the JVM or JavaScript.
 
 The important question is not whether interop exists, but where it should live in the design. This chapter is about that boundary.
 
@@ -21,7 +21,7 @@ For JavaScript modules:
 import Math from './math.js'
 ```
 
-These imports are primarily meaningful when translating Nex programs to the target platform. They tell the generated Java or JavaScript code which host symbols it should import.
+These imports are primarily meaningful when compiling or translating Nex programs to the target platform. They tell the JVM compiler or JavaScript generator which host symbols the program expects to use.
 
 
 ## `import` Versus `intern`
@@ -59,22 +59,21 @@ For example, rather than calling platform I/O throughout a program, define a sma
 
 ## Translation Targets
 
-The repository supports translation from Nex to Java and JavaScript.
+The repository supports JVM bytecode compilation and JavaScript translation.
 
 From Clojure:
 
 ```clojure
-(require '[nex.generator.java :as java])
+(require '[nex.compiler.jvm.file :as jvm])
 (require '[nex.generator.javascript :as js])
 
-(println (java/translate nex-code))
 (println (js/translate nex-code))
 ```
 
 And for files:
 
 ```clojure
-(java/translate-file "input.nex" "Output.java")
+(jvm/compile-jar "input.nex" "build/")
 (js/translate-file "input.nex" "output.js")
 ```
 
@@ -83,17 +82,15 @@ This matters for design because the same Nex source may be aimed at different ho
 
 ## Development Builds and Production Builds
 
-Contracts are included in normal translated output. For production translation, the generators support `skip-contracts`:
+Contracts are included in normal translated output. For production translation, the JavaScript generator supports `skip-contracts`:
 
 ```clojure
-(java/translate nex-code {:skip-contracts true})
 (js/translate nex-code {:skip-contracts true})
 ```
 
-Likewise for files:
+Likewise for JavaScript file translation:
 
 ```clojure
-(java/translate-file "input.nex" "Output.java" {:skip-contracts true})
 (js/translate-file "input.nex" "output.js" {:skip-contracts true})
 ```
 
@@ -166,7 +163,7 @@ This is usually the right architectural split:
 
 - `import` brings in host-platform symbols; `intern` brings in Nex classes
 - Keep interop code near system boundaries rather than scattering it through core logic
-- Nex can be translated to Java and JavaScript
+- Nex can target JVM bytecode and JavaScript
 - Production translation can omit runtime contract checks with `skip-contracts`
 - Contracts are especially valuable around interop boundaries
 - Portable core logic is easier to test, reason about, and reuse

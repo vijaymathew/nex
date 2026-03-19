@@ -70,9 +70,6 @@
          (re-find #"(?m)^\s*(nex>|\.{3}\s{0,2})" code))
     "contains interactive REPL prompt transcript"
 
-    (re-find #"(create\s+(Window|Turtle|Image))|(\bWindow\b.*draw_)|(\bTurtle\b.*(forward|backward|left|right))|(\.draw_(line|rect|circle|text|image)\()|(\.(forward|backward|left|right)\()" code)
-    "requires graphics runtime"
-
     :else
     nil))
 

@@ -878,6 +878,31 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-detachable-feature-access-with-else-nil-guard-succeeds
+  (testing "Calling a feature on detachable object inside the else branch of `if a = nil` should pass"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+
+class B
+  feature
+    a: ?A
+    demo() do
+      if a = nil then
+        print(\"nil\")
+      else
+        a.show()
+      end
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-default-create-disallowed-when-constructors-exist
   (testing "create B without constructor should fail if class B defines constructors"
     (let [code "class A
@@ -1106,3 +1131,32 @@ end"
       (is (false? (:success bad-result)))
       (is (some #(str/includes? (tc/format-type-error %) "Array.sort requires elements of a built-in sortable type or Comparable")
                 (:errors bad-result))))))
+
+(deftest test-array-reverse-types-as-array-expression
+  (testing "Array.reverse remains an Array[T] expression so it composes with type_of"
+    (let [code "class Main
+  feature
+    demo(): String
+    do
+      let numbers: Array[Integer] := [1, 2, 3]
+      result := type_of(numbers.reverse)
+    end
+end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-regex-validate-types-as-boolean-expression
+  (testing "regex_validate remains a Boolean expression so it composes with print and control flow"
+    (let [code "class Main
+  feature
+    demo()
+    do
+      if regex_validate(\"a+\", \"\") then
+        print(\"ok\")
+      end
+    end
+end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result))
+      (is (empty? (:errors result))))))

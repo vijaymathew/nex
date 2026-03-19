@@ -17,7 +17,6 @@ book:
     - text.md
     - time.md
     - networking.md
-    - graphics-classes.md
 
 format:
   html:

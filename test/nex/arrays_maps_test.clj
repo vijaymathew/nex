@@ -1,9 +1,7 @@
 (ns nex.arrays-maps-test
   "Tests for arrays and maps with parameterized types"
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.string :as str]
-            [nex.parser :as p]
-            [nex.generator.java :as java]))
+            [nex.parser :as p]))
 
 ;; ============================================================================
 ;; ARRAY TESTS
@@ -23,15 +21,6 @@ end"
       (is (= "Array" (-> field :field-type :base-type)))
       (is (= ["String"] (-> field :field-type :type-args))))))
 
-(deftest array-default-value-test
-  (testing "Array field gets default value []"
-    (let [code "class Container
-  feature
-    items: Array [String]
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "public ArrayList<String> items = new ArrayList<>();")))))
-
 (deftest array-literal-parsing-test
   (testing "Parse array literal"
     (let [code "class Test
@@ -48,17 +37,6 @@ end"
           array-expr (:value let-stmt)]
       (is (= :array-literal (:type array-expr)))
       (is (= 3 (count (:elements array-expr)))))))
-
-(deftest array-literal-java-generation-test
-  (testing "Generate Java code for array literal"
-    (let [code "class Test
-  feature
-    demo() do
-      let arr: Array [Integer] := [1, 2, 3]
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "new ArrayList<>(Arrays.asList(1, 2, 3))")))))
 
 (deftest array-access-parsing-test
   (testing "Parse array get access"
@@ -78,32 +56,6 @@ end"
       (is (= :call (:type call-expr)))
       (is (= "arr" (:target call-expr)))
       (is (= "get" (:method call-expr))))))
-
-(deftest array-access-java-generation-test
-  (testing "Generate Java code for array access"
-    (let [code "class Test
-  feature
-    items: Array [Integer]
-
-    demo() do
-      let x: Integer := items.get(0)
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "items.get(0)")))))
-
-(deftest array-of-different-types-test
-  (testing "Arrays with different element types"
-    (let [code "class Container
-  feature
-    strings: Array [String]
-    integers: Array [Integer]
-    reals: Array [Real]
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "ArrayList<String> strings = new ArrayList<>();"))
-      (is (str/includes? java-code "ArrayList<Integer> integers = new ArrayList<>();"))
-      (is (str/includes? java-code "ArrayList<Double> reals = new ArrayList<>();")))))
 
 (deftest nested-array-access-test
   (testing "Nested array access matrix.get(i).get(j)"
@@ -134,15 +86,6 @@ end"
       (is (map? (:field-type field)))
       (is (= "Map" (-> field :field-type :base-type)))
       (is (= ["String" "Integer"] (-> field :field-type :type-args))))))
-
-(deftest map-default-value-test
-  (testing "Map field gets default value {}"
-    (let [code "class Container
-  feature
-    data: Map [String, Integer]
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "public HashMap<String, Integer> data = new HashMap<>();")))))
 
 (deftest map-literal-parsing-test
   (testing "Parse map literal"
@@ -180,54 +123,6 @@ end"
       (is (= "m" (:target call-expr)))
       (is (= "get" (:method call-expr))))))
 
-(deftest map-access-java-generation-test
-  (testing "Generate Java code for map access"
-    (let [code "class Test
-  feature
-    data: Map [String, Integer]
-
-    demo() do
-      let x: Integer := data.get(\"key\")
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "data.get(\"key\")")))))
-
-(deftest map-with-different-types-test
-  (testing "Maps with different key/value types"
-    (let [code "class Container
-  feature
-    string_to_int: Map [String, Integer]
-    int_to_string: Map [Integer, String]
-    string_to_real: Map [String, Real]
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "HashMap<String, Integer> string_to_int"))
-      (is (str/includes? java-code "HashMap<Integer, String> int_to_string"))
-      (is (str/includes? java-code "HashMap<String, Double> string_to_real")))))
-
-;; ============================================================================
-;; COMBINED TESTS
-;; ============================================================================
-
-(deftest array-and-map-together-test
-  (testing "Class with both arrays and maps"
-    (let [code "class DataStore
-  feature
-    items: Array [String]
-    lookup: Map [String, Integer]
-
-    demo() do
-      let x: String := items.get(0)
-      let y: Integer := lookup.get(\"key\")
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "ArrayList<String> items"))
-      (is (str/includes? java-code "HashMap<String, Integer> lookup"))
-      (is (str/includes? java-code "items.get(0)"))
-      (is (str/includes? java-code "lookup.get(\"key\")")))))
-
 (deftest empty-array-literal-test
   (testing "Empty array literal"
     (let [code "class Test
@@ -260,59 +155,6 @@ end"
       (is (= :map-literal (:type map-expr)))
       (is (empty? (:entries map-expr))))))
 
-(deftest array-of-arrays-test
-  (testing "Array of arrays (nested arrays)"
-    (let [code "class Matrix
-  feature
-    data: Array [Array [Integer]]
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "ArrayList<ArrayList<Integer>> data")))))
-
-(deftest map-of-arrays-test
-  (testing "Map with array values"
-    (let [code "class Store
-  feature
-    categories: Map [String, Array [String]]
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "HashMap<String, ArrayList<String>> categories")))))
-
-(deftest array-in-method-parameter-test
-  (testing "Array type in method parameter"
-    (let [code "class Test
-  feature
-    process(items: Array [Integer]) do
-      let x: Integer := items.get(0)
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "void process(ArrayList<Integer> items)"))
-      (is (str/includes? java-code "items.get(0)")))))
-
-(deftest map-in-method-parameter-test
-  (testing "Map type in method parameter"
-    (let [code "class Test
-  feature
-    process(data: Map [String, Integer]) do
-      let x: Integer := data.get(\"key\")
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "void process(HashMap<String, Integer> data)"))
-      (is (str/includes? java-code "data.get(\"key\")")))))
-
-(deftest array-literal-with-strings-test
-  (testing "Array literal with string elements"
-    (let [code "class Test
-  feature
-    demo() do
-      let names: Array [String] := [\"Alice\", \"Bob\", \"Charlie\"]
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "Arrays.asList(\"Alice\", \"Bob\", \"Charlie\")")))))
-
 (deftest map-literal-with-identifiers-test
   (testing "Map literal with identifier keys"
     (let [code "class Test
@@ -329,28 +171,3 @@ end"
       (is (= :map-literal (:type map-expr)))
       (is (= 2 (count (:entries map-expr)))))))
 
-(deftest array-with-variable-index-test
-  (testing "Array access with variable index"
-    (let [code "class Test
-  feature
-    demo() do
-      let arr: Array [Integer] := [1, 2, 3]
-      let i: Integer := 1
-      let x: Integer := arr.get(i)
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "arr.get(i)")))))
-
-(deftest map-with-variable-key-test
-  (testing "Map access with variable key"
-    (let [code "class Test
-  feature
-    demo() do
-      let m: Map [String, Integer] := {\"a\": 1, \"b\": 2}
-      let key: String := \"a\"
-      let x: Integer := m.get(key)
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "m.get(key)")))))

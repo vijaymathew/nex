@@ -20,9 +20,6 @@
     (rt/nex-process? value) :Process
     (rt/nex-task? value) :Task
     (rt/nex-channel? value) :Channel
-    (rt/nex-window? value) :Window
-    (rt/nex-turtle? value) :Turtle
-    (rt/nex-image? value) :Image
     (rt/nex-array-cursor? value) :ArrayCursor
     (rt/nex-string-cursor? value) :StringCursor
     (rt/nex-map-cursor? value) :MapCursor

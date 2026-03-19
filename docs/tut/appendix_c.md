@@ -13,9 +13,6 @@ The most commonly used built-in service classes are:
 - `Process`
 - `Task`
 - `Channel`
-- `Window`
-- `Turtle`
-- `Image`
 
 For filesystem and file I/O, use the `lib/io` library:
 
@@ -277,48 +274,6 @@ program register handlers and return structured responses. This is host-backed
 functionality, so exact behavior can differ between runtimes.
 
 
-## Graphics and Simple Visual Programs
-
-Nex includes a lightweight graphics layer through `Window`, `Turtle`, and `Image`.
-
-### `Window`
-
-Use `Window` for drawing lines, rectangles, circles, text, and images.
-
-```nex
-let w: Window := create Window.with_title("Demo", 640, 360)
-w.show()
-w.bgcolor("white")
-w.set_color("blue")
-w.draw_rect(30, 30, 120, 80)
-w.draw_text("Nex", 40, 70)
-w.refresh()
-```
-
-### `Turtle`
-
-Use `Turtle` for turtle-graphics style drawing.
-
-```nex
-let t: Turtle := create Turtle.on_window(w)
-t.color("red")
-t.forward(80)
-t.right(120)
-t.forward(80)
-t.right(120)
-t.forward(80)
-```
-
-### `Image`
-
-Use `Image` to load pictures for drawing in a window.
-
-```nex
-let img: Image := create Image.from_file("sprite.png")
-w.draw_image(img, 220, 100)
-```
-
-
 ## Collections as Library Foundations
 
 Much of the practical "standard library" feel of Nex comes from `Array`, `Map`,
@@ -372,7 +327,6 @@ At the edge:
 - console I/O
 - files
 - environment access
-- graphics
 - imported host-platform code
 
 This separation keeps the program testable and helps contracts remain meaningful.
@@ -404,6 +358,5 @@ That is why Chapter 24 matters. The standard library is enough to be productive,
 | Text processing | `text/Regex` |
 | Networking | `net/Http_Client`, `net/Http_Server` |
 | Text processing | `text/Regex` |
-| Graphics | `Window`, `Turtle`, `Image` |
 
 For exact method tables, see Appendix B and the files under `docs/ref/`.

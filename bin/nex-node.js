@@ -24,13 +24,11 @@ COMMANDS:
     help                      Show this help message
 
 COMPILE TARGETS:
-    java                      Generate Java source code (requires JVM)
     javascript                Generate JavaScript source code (requires JVM)
     js                        Alias for javascript
 
 EXAMPLES:
     nex                                      # Start REPL
-    nex compile java MyClass.nex             # Compile to Java
     nex compile js MyClass.nex               # Compile to JavaScript
     nex format src/                          # Format all files in directory
     nex format MyClass.nex                   # Format single file

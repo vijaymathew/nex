@@ -576,9 +576,6 @@
 
 (defn nex-console? [v] (and (map? v) (= (:nex-builtin-type v) :Console)))
 (defn nex-process? [v] (and (map? v) (= (:nex-builtin-type v) :Process)))
-(defn nex-window? [v] (and (map? v) (= (:nex-builtin-type v) :Window)))
-(defn nex-turtle? [v] (and (map? v) (= (:nex-builtin-type v) :Turtle)))
-(defn nex-image? [v] (and (map? v) (= (:nex-builtin-type v) :Image)))
 (defn nex-task? [v] (and (map? v) (= (:nex-builtin-type v) :Task)))
 (defn nex-channel? [v] (and (map? v) (= (:nex-builtin-type v) :Channel)))
 

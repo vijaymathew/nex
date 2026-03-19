@@ -49,11 +49,11 @@ These improvements would live in [`src/nex/repl.clj`](https://github.com/vijayma
 
 ## 5.5 Backends and Deployment
 
-The Java and JavaScript generators already demonstrate that Nex is not bound to one execution strategy. That is a structural asset. The questions that any future backend would have to answer — how values are represented, how classes and functions are lowered, how contracts are enforced, how concurrency is expressed, how host integration is handled — are already answered twice in the current codebase. A third backend could follow the same pattern.
+The JVM bytecode compiler and the JavaScript generator already demonstrate that Nex is not bound to one execution strategy. That is a structural asset. The questions that any future backend would have to answer — how values are represented, how classes and functions are lowered, how contracts are enforced, how concurrency is expressed, how host integration is handled — are already answered twice in the current codebase. A third backend could follow the same pattern.
 
 The most plausible near-term directions are a better browser-first generation story, improved Node-specific deployment support, and lighter-weight runtime packaging. A WebAssembly-oriented backend is conceivable further out. None of these should be pursued speculatively — the architecture supports them, but that is not by itself a reason to build them.
 
-The pressure points for new backends are concentrated in the generator files and in the runtime helper sections they emit: Java runtime emission in [`src/nex/generator/java.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/generator/java.clj) and JavaScript runtime emission in [`src/nex/generator/javascript.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/generator/javascript.clj). Reading both before designing a new backend is not optional — the decisions they embody are easy to reinvent badly.
+The pressure points for new backends are concentrated in the backend entry points and the runtime helper sections they rely on: JVM emission in [`src/nex/compiler/jvm/file.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/file.clj) and JavaScript runtime emission in [`src/nex/generator/javascript.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/generator/javascript.clj). Reading both before designing a new backend is not optional — the decisions they embody are easy to reinvent badly.
 
 
 

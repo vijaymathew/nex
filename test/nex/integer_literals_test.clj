@@ -1,7 +1,6 @@
 (ns nex.integer-literals-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [nex.generator.java :as java]
             [nex.generator.javascript :as js]
             [nex.interpreter :as interp]
             [nex.parser :as p]
@@ -80,20 +79,6 @@ end")
     end
 end")]
       (is (= ["11" "9" "17"] output)))))
-
-(deftest prefixed-integer-java-generation
-  (testing "Java generation emits normalized integer values"
-    (let [java-code (java/translate "class Test
-  feature
-    demo() do
-      let mask: Integer := 0b1111_0000
-      let perms: Integer := 0o644
-      let color: Integer64 := 0xFF_AA
-    end
-end")]
-      (is (str/includes? java-code "int mask = 240;"))
-      (is (str/includes? java-code "int perms = 420;"))
-      (is (str/includes? java-code "long color = 65450;")))))
 
 (deftest prefixed-integer-javascript-generation
   (testing "JavaScript generation emits normalized integer values"

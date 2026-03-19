@@ -4,7 +4,6 @@
             [clojure.string :as str]
             [nex.parser :as p]
             [nex.interpreter :as interp]
-            [nex.generator.java :as java]
             [nex.repl :as repl]))
 
 (deftest typed-let-parsing-test
@@ -83,33 +82,6 @@ end"
       (doseq [stmt (:body method-def)]
         (interp/eval-node ctx-with-env stmt))
       (is (= ["30"] @(:output ctx-with-env))))))
-
-(deftest typed-let-java-generation-test
-  (testing "Generate Java code with typed let"
-    (let [code "class Calculator
-  feature
-    add(a, b: Integer): Integer do
-      let result: Integer := a + b
-      print(result)
-    end
-end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "int result = (a + b);"))
-      ;; Verify it's a typed declaration, not just an assignment
-      (is (str/includes? java-code "int result")))))
-
-(deftest untyped-let-java-generation-test
-  (testing "Generate Java code with untyped let (backward compatibility)"
-    (let [code "class Calculator
-  feature
-    add(a, b: Integer) do
-      let result := a + b
-      print(result)
-    end
-end"
-          java-code (java/translate code {:skip-type-check true})]
-      (is (str/includes? java-code "result = (a + b);"))
-      (is (not (str/includes? java-code "int result"))))))
 
 (deftest all-types-let-test
   (testing "Test let with all supported types"

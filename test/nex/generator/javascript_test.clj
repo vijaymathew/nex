@@ -834,37 +834,6 @@ end"
           js-code (js/translate nex-code)]
       (is (str/includes? js-code "Point.make(10, 20)")))))
 
-(deftest graphics-create-expression-test
-  (testing "Window/Turtle create expressions are supported in JS generator"
-    (let [nex-code "class Draw
-  feature
-    demo() do
-      let win: Window := create Window.with_title(\"Demo\", 640, 480)
-      let t: Turtle := create Turtle.on_window(win)
-      t.forward(10.0)
-    end
-end"
-          js-code (js/translate nex-code)]
-      (is (str/includes? js-code "class NexWindow"))
-      (is (str/includes? js-code "class NexTurtle"))
-      (is (str/includes? js-code "new NexWindow(\"Demo\", 640, 480)"))
-      (is (str/includes? js-code "new NexTurtle(win)")))))
-
-(deftest image-create-and-methods-js-generation-test
-  (testing "Image create/from_file and width/height methods are supported in JS generator"
-    (let [nex-code "class ImgDemo
-  feature
-    demo() do
-      let img: Image := create Image.from_file(\"sprite.png\")
-      let w: Integer := img.width()
-      let h: Integer := img.height()
-    end
-end"
-          js-code (js/translate nex-code)]
-      (is (str/includes? js-code "NexImage.from_file(\"sprite.png\")"))
-      (is (str/includes? js-code "let w = img.width"))
-      (is (str/includes? js-code "let h = img.height")))))
-
 (deftest parameterless-call-test
   (testing "Parameterless method call"
     (let [nex-code "class Point
@@ -1018,11 +987,9 @@ end")
         (let [out-dir (io/file tmp-dir "out")
               files (js/translate-file (.getPath nex-file) (.getPath out-dir) {})]
           (is (contains? files "Function.js"))
-          (is (contains? files "NexWindow.js"))
           (is (contains? files "Greeter.js"))
           (is (contains? files "main.js"))
           (is (.exists (io/file out-dir "Function.js")))
-          (is (.exists (io/file out-dir "NexWindow.js")))
           (is (.exists (io/file out-dir "Greeter.js")))
           (is (.exists (io/file out-dir "main.js")))
           (is (str/includes? (get files "main.js") "Greeter.make()")))
@@ -1056,11 +1023,10 @@ print(f1(20))"]
                           (str/replace #"(?m)^\s*const \{ [^}]+ \} = require\([^)]+\);\n?" ""))
               bundle (str/join "\n"
                                (concat
-                                [(get files "Function.js")
-                                 (get files "NexWindow.js")]
+                                [(get files "Function.js")]
                                 (->> files
                                      keys
-                                     (remove #(#{"Function.js" "NexWindow.js" "NexGlobals.js" "main.js"} %))
+                                     (remove #(#{"Function.js" "NexGlobals.js" "main.js"} %))
                                      sort
                                      (map files))
                                 [(get files "NexGlobals.js")
