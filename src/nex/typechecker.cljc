@@ -2952,7 +2952,7 @@
            "contains"    {:params [{:name "elem" :type "T"}] :return-type "Boolean"}
            "index_of"    {:params [{:name "elem" :type "T"}] :return-type "Integer"}
            "remove"      {:params [{:name "index" :type "Integer"}] :return-type "Void"}
-           "reverse"     {:params [] :return-type "Void"}
+           "reverse"     {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
            "sort"        {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
            "slice"       {:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}]
                           :return-type {:base-type "Array" :type-params ["T"]}}

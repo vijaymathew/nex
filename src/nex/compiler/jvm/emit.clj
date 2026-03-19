@@ -389,9 +389,16 @@
   (doseq [[idx arg] (map-indexed vector args)]
     (.visitInsn mv Opcodes/DUP)
     (.visitLdcInsn mv (int idx))
-    (let [arg-type (emit-expr! mv arg state-slot)]
-      (when (contains? ir/primitive-jvm-types arg-type)
-        (emit-box! mv arg-type)))
+    (let [emitted-type (emit-expr! mv arg state-slot)
+          declared-type (:jvm-type arg)]
+      (when (and declared-type
+                 (not= emitted-type declared-type))
+        (throw (ex-info "Argument emission type did not match IR declaration"
+                        {:arg arg
+                         :emitted-type emitted-type
+                         :declared-type declared-type})))
+      (when (contains? ir/primitive-jvm-types declared-type)
+        (emit-box! mv declared-type)))
     (.visitInsn mv Opcodes/AASTORE)))
 
 (defn- emit-register-repl-fn!
