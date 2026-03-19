@@ -88,6 +88,18 @@ Tests are organized following standard Clojure conventions:
 clojure -M:test run_tests.clj
 ```
 
+### Run Integration Tests
+
+Slow product-surface checks that shell out to external processes live in the
+integration runner:
+
+```bash
+clojure -M:test test/scripts/run_integration_tests.clj
+```
+
+Add future slow namespaces directly to
+`test/scripts/run_integration_tests.clj`.
+
 ### Run Specific Test Namespace
 
 ```bash
