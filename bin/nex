@@ -2,7 +2,16 @@
 # Nex Language Command-Line Interface (JVM)
 
 VERSION="0.1.0"
-NEX_HOME="/usr/local/lib/nex"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_NEX_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [[ -n "${NEX_HOME:-}" ]]; then
+    NEX_HOME="$NEX_HOME"
+elif [[ -f "$REPO_NEX_HOME/deps.edn" && -d "$REPO_NEX_HOME/src" ]]; then
+    NEX_HOME="$REPO_NEX_HOME"
+else
+    NEX_HOME="/usr/local/lib/nex"
+fi
 
 # Helper functions
 show_help() {

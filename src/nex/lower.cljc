@@ -2060,6 +2060,10 @@
                                       (:classes env)))
             target-expr (normalize-call-target raw-target)
             arg-irs (mapv #(lower-expression env %) (:args expr))]
+        (if (and (map? target-expr)
+                 (= :create (:type target-expr))
+                 (nil? (:method expr)))
+          (lower-expression env (assoc target-expr :args (:args expr)))
         (if (nil? target-expr)
           (cond
             (and (:this-type env)
@@ -2340,7 +2344,7 @@
                 (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
                     (throw (ex-info "Unsupported target call expression for lowering"
                                     {:expr expr
-                                     :target-type target-type})))))))))
+                                     :target-type target-type}))))))))))
 
     (throw (ex-info "Unsupported expression node for lowering"
                     {:expr expr :node-type (:type expr)}))))
