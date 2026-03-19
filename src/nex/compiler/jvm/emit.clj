@@ -1778,8 +1778,16 @@
     (.visitInsn mv Opcodes/ATHROW)
     (.visitLabel mv end-label)))
 
+(defn- emit-line-number!
+  [^MethodVisitor mv stmt]
+  (when-let [line (:dbg/line stmt)]
+    (let [label (Label.)]
+      (.visitLabel mv label)
+      (.visitLineNumber mv (int line) label))))
+
 (defn- emit-stmt!
   [^MethodVisitor mv stmt state-slot]
+  (emit-line-number! mv stmt)
   (case (:op stmt)
     :return
     (emit-return! mv (:expr stmt) state-slot)

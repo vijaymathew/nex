@@ -46,6 +46,26 @@
                      (repl/eval-code ctx1 "x + 2"))]
         (is (str/includes? output "42"))))))
 
+(deftest repl-compiled-backend-raw-statement-forms-test
+  (testing "compiled backend tries raw compiled parsing for statement-shaped inputs before wrapping"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            wrapped-inputs (atom [])
+            orig-wrap repl/wrap-as-method]
+        (with-redefs [repl/wrap-as-method (fn [input]
+                                            (swap! wrapped-inputs conj input)
+                                            (orig-wrap input))]
+          (let [if-output (with-out-str
+                            (repl/eval-code ctx0 "if true then 42 else 0 end"))
+                do-output (with-out-str
+                            (repl/eval-code ctx0 "do\n  print(42)\nend"))]
+            (is (empty? @wrapped-inputs))
+            (is (str/includes? if-output "42"))
+            (is (str/includes? do-output "42"))))))))
+
 (deftest repl-compiled-backend-deopt-sync-function-definition-test
   (testing "compiled backend deopts for function definitions and syncs them back for later compiled calls"
     (binding [repl/*type-checking-enabled* (atom false)

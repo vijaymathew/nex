@@ -40,30 +40,22 @@ The internal compiled helper can already compile top-level program batches that 
 - function declarations and definitions
 - supported class work in the current compiler subset
 - supported contracts and exception constructs in the current compiler subset
+- supported statement-shaped top-level inputs, including:
+  - `if`
+  - `from`
+  - `repeat`
+  - `across`
+  - `do`
+  - `select`
 
-The user-facing REPL still has an older wrapping rule for inputs that look like statements.
-
-In particular, inputs beginning with forms such as:
-
-- `if`
-- `from`
-- `repeat`
-- `across`
-- `do`
-
-are still wrapped into a temporary `__ReplTemp__.__eval__()` method before evaluation.
-
-That means:
-
-- the user-facing REPL does not currently route those top-level statement-shaped inputs through the compiled fast path, even when the internal compiled helper could support them
-- those wrapped inputs execute through the interpreter path and then sync back into compiled-session state
+The user-facing REPL now tries a raw compiled parse for those statement-shaped inputs before falling back to the older wrapper/interpreter path.
 
 So the practical rule today is:
 
-- expression-shaped top-level inputs can use the compiled REPL path
-- many statement-shaped top-level inputs in the user-facing REPL still use the wrapped/interpreter path
+- supported top-level expressions and supported statement-shaped inputs can use the compiled REPL path directly
+- wrapper fallback now mainly exists for genuinely unsupported inputs, not for `if` / loop / scoped-block syntax by itself
 
-Top-level `let` and simple assignment now go through compiled eligibility first in the interactive REPL. The remaining mismatch is mostly larger statement/control-flow forms.
+In addition, emitted JVM methods now carry statement-level source line numbers.
 
 ## What "Supported" Means
 
@@ -262,13 +254,7 @@ These still fall outside the compiled subset and therefore deopt to the interpre
 
 - specialized direct codegen for each builtin beyond the current helper/receiver-call paths
 
-In addition, some inputs still deopt in the user-facing REPL because of the wrapping rule above, even though the internal compiled helper supports them.
-
-The main examples today are:
-
-- top-level `if` entered directly at the REPL prompt
-- `from` / `repeat` / `across`
-- scoped `do...end` and `do...rescue...end` blocks entered directly at the prompt
+In addition, some inputs still deopt in the user-facing REPL when they remain outside the compiled subset after the raw parse + eligibility check.
 
 ## Practical Boundary Today
 
@@ -292,7 +278,7 @@ Good candidates for the compiled path today:
 
 Likely deopt triggers today:
 
-- statement-shaped REPL inputs that are still pre-wrapped in `nex.repl`
+- inputs that remain outside the compiled subset after raw parse + eligibility checking
 
 ## File Compilation
 
@@ -389,9 +375,9 @@ s.area()
 
 This is supported by the internal compiled helper and is covered by compiler/runtime smoke tests.
 
-## Examples That Still Deopt
+## Boundary Examples
 
-These are not yet compiled end-to-end:
+This still deopts today:
 
 ```nex
 class Point
@@ -400,13 +386,15 @@ feature
 end
 ```
 
-In the user-facing REPL, this still includes wrapped statement inputs such as:
+These now stay on the compiled path in the user-facing REPL:
 
 ```nex
-let x: Integer := 40
+if true then
+  1
+else
+  0
+end
 ```
-
-The internal compiled helper supports top-level `let`, but the interactive REPL still wraps it and sends it through the interpreter path.
 
 ```nex
 select

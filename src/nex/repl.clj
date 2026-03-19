@@ -1011,6 +1011,11 @@
    compiled-path parse attempt before wrapper fallback."
   [input]
   (or (looks-like-top-level-mutation? input)
+      (re-find #"^\s*if\b" input)
+      (re-find #"^\s*from\b" input)
+      (re-find #"^\s*repeat\b" input)
+      (re-find #"^\s*across\b" input)
+      (re-find #"^\s*do\b" input)
       (re-find #"^\s*select\b" input)))
 
 (defn looks-like-identifier?

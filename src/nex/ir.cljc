@@ -47,6 +47,18 @@
   [x]
   (and (map? x) (keyword? (:op x))))
 
+(defn with-debug
+  "Attach source debug metadata from an AST node or metadata map to an IR node."
+  [ir-node dbg-source]
+  (if-not (map? ir-node)
+    ir-node
+    (cond-> ir-node
+      (and (map? dbg-source) (integer? (:dbg/line dbg-source)))
+      (assoc :dbg/line (:dbg/line dbg-source))
+
+      (and (map? dbg-source) (integer? (:dbg/col dbg-source)))
+      (assoc :dbg/col (:dbg/col dbg-source)))))
+
 (defn unit
   [{:keys [name kind functions body result-jvm-type] :as m}]
   (assoc m :op :unit

@@ -6,7 +6,21 @@
             [nex.ir :as ir]
             [nex.lower :as lower]
             [nex.parser :as p])
-  (:import [java.lang.reflect Modifier]))
+  (:import [java.lang.reflect Modifier]
+           [org.objectweb.asm ClassReader ClassVisitor MethodVisitor Opcodes]))
+
+(defn- method-line-numbers
+  [bytecode method-name]
+  (let [lines (atom [])]
+    (.accept (ClassReader. bytecode)
+             (proxy [ClassVisitor] [Opcodes/ASM9]
+               (visitMethod [_access name _descriptor _signature _exceptions]
+                 (proxy [MethodVisitor] [Opcodes/ASM9]
+                   (visitLineNumber [line _start]
+                     (when (= method-name name)
+                       (swap! lines conj line))))))
+             0)
+    @lines))
 
 (deftest minimal-class-spec-test
   (testing "minimal class spec for a repl cell is stable"
@@ -117,6 +131,16 @@
           method (.getMethod cls "eval" (into-array Class [(class state)]))
           result (.invoke method nil (object-array [state]))]
       (is (= 42 result)))))
+
+(deftest emitted-line-number-table-smoke-test
+  (testing "compiled eval methods carry source line metadata"
+    (let [program (p/ast "let x := 40\nx + 2")
+          {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0045"})
+          bytecode (emit/compile-unit->bytes unit)
+          lines (method-line-numbers bytecode "eval")]
+      (is (seq lines))
+      (is (some #{1} lines))
+      (is (some #{2} lines)))))
 
 (deftest compile-top-set-and-top-get-smoke-test
   (testing "compiled repl cells can persist top-level values through NexReplState"

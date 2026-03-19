@@ -48,11 +48,10 @@ Last updated: 2026-03-19
 ### Misc
 
 - HTTP/JSON built-ins as direct codegen
-- User-facing REPL wrapping — some larger statement-shaped inputs still bypass the compiled path even when the internal helper supports them
 
 ### Meta / Infrastructure
 
-- Source line numbers in emitted bytecode (debug metadata)
+- richer local-variable/source-debug metadata beyond the current emitted line numbers
 
 
 ## Suggested Next Candidates
@@ -60,5 +59,5 @@ Last updated: 2026-03-19
 Based on complexity and impact, these are natural next steps:
 
 1. Broader direct lowering for remaining runtime-backed builtins that still use the generic runtime bridge
-2. Source line numbers and better debug metadata in emitted bytecode
-3. Narrow the remaining user-facing REPL wrapping mismatch for statement-shaped inputs
+2. Richer bytecode debug metadata beyond the current line tables
+3. HTTP/JSON built-ins as direct codegen
