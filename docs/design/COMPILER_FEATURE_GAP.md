@@ -31,6 +31,7 @@ Last updated: 2026-03-19
 | Collections | Literal construction plus direct compiled lowering for Array / Map / Set methods |
 | Closures / higher-order | Anonymous functions, captured closures, and passing/returning/invoking function objects |
 | Modules | `import` metadata, imported Java class creation/calls on the compiled path, and `intern` resolution for local `.nex` files |
+| File compilation | `.nex` file compilation to JVM `.class` files, including launcher emission and source-relative `intern` handling |
 | Note annotations | Parsed and preserved as documentation metadata; ignored by lowering/emission as intended |
 | Nil-safety | Detachable types (`?Type`), nil checks, `convert` guards, and branch refinement on compiled path |
 | Builtins via runtime bridge | `print`, `println`, `type_of`, `sleep`, and other remaining runtime-backed builtins |
@@ -52,13 +53,12 @@ Last updated: 2026-03-19
 ### Meta / Infrastructure
 
 - Source line numbers in emitted bytecode (debug metadata)
-- File compilation (currently REPL-only; no `.nex` → `.class` pipeline)
 
 
 ## Suggested Next Candidates
 
 Based on complexity and impact, these are natural next steps:
 
-1. File compilation (`.nex` -> JVM bytecode/classes/jar) beyond the REPL-only compiler path
+1. Thin packaging on top of the new `.class` pipeline (`.jar`/classpath ergonomics) rather than REPL-only execution
 2. Broader direct lowering for remaining runtime-backed builtins that still use the generic runtime bridge
 3. Source line numbers and better debug metadata in emitted bytecode

@@ -260,7 +260,6 @@ Array / Map / Set no longer belong in this bucket for their ordinary collection 
 
 These still fall outside the compiled subset and therefore deopt to the interpreter:
 
-- file/module compilation for the JVM bytecode backend beyond the current REPL/helper path
 - specialized direct codegen for each builtin beyond the current helper/receiver-call paths
 
 In addition, some inputs still deopt in the user-facing REPL because of the wrapping rule above, even though the internal compiled helper supports them.
@@ -276,6 +275,7 @@ The main examples today are:
 Good candidates for the compiled path today:
 
 - arithmetic-heavy REPL work over top-level values
+- full `.nex` file compilation to JVM `.class` files through `nex.compiler.jvm.file`
 - top-level function definition and redefinition
 - mutually recursive top-level functions with forward declarations
 - builtin-heavy or module-aware batches that do not rely on unsupported file-compilation machinery
@@ -292,9 +292,26 @@ Good candidates for the compiled path today:
 
 Likely deopt triggers today:
 
-- file/module bytecode compilation beyond the current REPL/helper path
-- JVM bytecode file/module compilation beyond the current compiled REPL/helper path
 - statement-shaped REPL inputs that are still pre-wrapped in `nex.repl`
+
+## File Compilation
+
+The JVM bytecode compiler is no longer REPL-only.
+
+It now supports:
+
+- `.nex` file compilation to JVM `.class` files
+- emitted launcher generation with `public static void main(String[] args)`
+- source-relative `intern` resolution before lowering/emission
+- compiled class/object metadata bootstrap for runtime helpers such as:
+  - invariants
+  - `convert`
+  - imported Java interop
+
+Current boundary for file compilation:
+
+- the compiler emits `.class` files, not a standalone shaded runtime jar
+- running the emitted launcher still requires the Nex/Clojure runtime on the JVM classpath
 
 ## Examples That Stay Compiled
 

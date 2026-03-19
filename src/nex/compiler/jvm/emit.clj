@@ -22,6 +22,7 @@
  (def ^:private throwable-internal-name "java/lang/Throwable")
 
 (declare emit-const!)
+(declare emit-runtime-call!)
 
 (defn eval-method-descriptor
   []
@@ -32,6 +33,10 @@
 (defn repl-fn-method-descriptor
   []
   "(Lnex/compiler/jvm/runtime/NexReplState;[Ljava/lang/Object;)Ljava/lang/Object;")
+
+(defn launcher-main-method-descriptor
+  []
+  "([Ljava/lang/String;)V")
 
 (defn- class-default-value
   [jvm-type]
@@ -136,12 +141,84 @@
                       :fn-node fn-node})
                    (:methods class-spec))))})
 
+(defn launcher-class-spec
+  [{:keys [internal-name binary-name program-internal-name classes-edn imports-edn]}]
+  {:internal-name internal-name
+   :binary-name binary-name
+   :super-name "java/lang/Object"
+   :interfaces []
+   :flags Opcodes/ACC_PUBLIC
+   :methods [{:name "<init>"
+              :descriptor "()V"
+              :flags Opcodes/ACC_PUBLIC
+              :kind :default-constructor}
+             {:name "main"
+              :descriptor (launcher-main-method-descriptor)
+              :flags (+ Opcodes/ACC_PUBLIC Opcodes/ACC_STATIC)
+              :kind :launcher-main
+              :program-internal-name program-internal-name
+              :classes-edn classes-edn
+              :imports-edn imports-edn}]})
+
 (defn- emit-default-constructor!
   [^ClassWriter cw {:keys [name descriptor flags]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
     (.visitVarInsn mv Opcodes/ALOAD 0)
     (.visitMethodInsn mv Opcodes/INVOKESPECIAL "java/lang/Object" "<init>" "()V" false)
+    (.visitInsn mv Opcodes/RETURN)
+    (.visitMaxs mv 0 0)
+    (.visitEnd mv)))
+
+(defn- emit-launcher-main!
+  [^ClassWriter cw {:keys [name descriptor flags program-internal-name classes-edn imports-edn]}]
+  (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
+    (.visitCode mv)
+    (.visitLdcInsn mv "clojure.core")
+    (.visitLdcInsn mv "require")
+    (.visitMethodInsn mv
+                      Opcodes/INVOKESTATIC
+                      rt-internal-name
+                      "var"
+                      "(Ljava/lang/String;Ljava/lang/String;)Lclojure/lang/Var;"
+                      false)
+    (.visitLdcInsn mv "nex.compiler.jvm.runtime")
+    (.visitMethodInsn mv
+                      Opcodes/INVOKESTATIC
+                      "clojure/lang/Symbol"
+                      "intern"
+                      "(Ljava/lang/String;)Lclojure/lang/Symbol;"
+                      false)
+    (.visitMethodInsn mv
+                      Opcodes/INVOKEVIRTUAL
+                      var-internal-name
+                      "invoke"
+                      "(Ljava/lang/Object;)Ljava/lang/Object;"
+                      false)
+    (.visitInsn mv Opcodes/POP)
+
+    (emit-runtime-call! mv "make-repl-state" [])
+    (.visitTypeInsn mv Opcodes/CHECKCAST repl-state-internal-name)
+    (.visitVarInsn mv Opcodes/ASTORE 1)
+
+    (emit-runtime-call! mv "bootstrap-compiled-state!"
+                        [(fn [] (.visitVarInsn mv Opcodes/ALOAD 1))
+                         (fn [] (.visitLdcInsn mv ^String classes-edn))
+                         (fn [] (.visitLdcInsn mv ^String imports-edn))])
+    (.visitInsn mv Opcodes/POP)
+
+    (.visitVarInsn mv Opcodes/ALOAD 1)
+    (.visitMethodInsn mv
+                      Opcodes/INVOKESTATIC
+                      program-internal-name
+                      "eval"
+                      (eval-method-descriptor)
+                      false)
+    (.visitInsn mv Opcodes/POP)
+
+    (emit-runtime-call! mv "print-state-output!"
+                        [(fn [] (.visitVarInsn mv Opcodes/ALOAD 1))])
+    (.visitInsn mv Opcodes/POP)
     (.visitInsn mv Opcodes/RETURN)
     (.visitMaxs mv 0 0)
     (.visitEnd mv)))
@@ -1868,6 +1945,7 @@
   [^ClassWriter cw method-spec]
   (case (:kind method-spec)
     :default-constructor (emit-default-constructor! cw method-spec)
+    :launcher-main (emit-launcher-main! cw method-spec)
     :user-default-constructor (emit-user-default-constructor! cw method-spec)
     :class-initializer (emit-class-initializer! cw method-spec)
     :eval-from-ir (emit-eval-method! cw method-spec)
@@ -1907,3 +1985,7 @@
 (defn compile-user-class->bytes
   [class-spec]
   (emit-class (user-class-spec class-spec)))
+
+(defn compile-launcher->bytes
+  [launcher-spec]
+  (emit-class (launcher-class-spec launcher-spec)))

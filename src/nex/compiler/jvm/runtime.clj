@@ -1,6 +1,7 @@
 (ns nex.compiler.jvm.runtime
   "Small runtime support for the future JVM bytecode compiler."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [nex.interpreter :as interp]
             [nex.types.bootstrap :as bootstrap]
             [nex.types.runtime :as rt]
@@ -324,6 +325,20 @@
   (reset! (:imports state) (vec imports))
   state)
 
+(defn bootstrap-compiled-state!
+  [state classes-edn imports-edn]
+  (let [classes (edn/read-string classes-edn)
+        imports (edn/read-string imports-edn)]
+    (state-set-classes! state (into {} (map (juxt :name identity) classes)))
+    (state-set-imports! state imports)
+    state))
+
+(defn print-state-output!
+  [state]
+  (doseq [line (state-output state)]
+    (println line))
+  nil)
+
 (defn- rebuild-interpreter-ctx
   [state]
   (let [ctx (interp/make-context)]
@@ -424,9 +439,14 @@
   (when value
     (let [binary-name (.getName (.getClass value))
           simple-name (last (str/split binary-name #"\."))]
-      (when-let [[_ candidate] (re-matches #"(.+)_\d{4}" simple-name)]
-        (when (contains? @(:classes state) candidate)
-          candidate)))))
+      (cond
+        (contains? @(:classes state) simple-name)
+        simple-name
+
+        :else
+        (when-let [[_ candidate] (re-matches #"(.+)_\d{4}" simple-name)]
+          (when (contains? @(:classes state) candidate)
+            candidate))))))
 
 (defn- runtime-type-name
   [state value]

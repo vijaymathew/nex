@@ -23,6 +23,7 @@ COMMANDS:
 
 COMPILE TARGETS:
     java        Compile to a runnable JAR (uses javac)
+    jvm         Compile directly to JVM .class files
     javascript  Generate JavaScript source files
     js          Alias for javascript
 
@@ -30,6 +31,8 @@ EXAMPLES:
     nex                                      # Start REPL
     nex compile java app.nex                 # Compile to app.jar in current dir
     nex compile java app.nex build/          # Compile to build/app.jar
+    nex compile jvm app.nex                  # Compile to .class files in current dir
+    nex compile jvm app.nex build/           # Compile to .class files in build/
     nex compile js app.nex                   # Print JavaScript to stdout
     nex compile js app.nex build/            # Write .js files to build/
     nex format src/                          # Format all files in directory
@@ -65,7 +68,7 @@ cmd_compile() {
     if [[ -z "$target" || -z "$file" ]]; then
         echo "Error: compile requires target and file arguments"
         echo "Usage: nex compile <target> <file> [output-dir]"
-        echo "Targets: java, javascript (or js)"
+        echo "Targets: java, jvm, javascript (or js)"
         exit 1
     fi
 
@@ -74,8 +77,8 @@ cmd_compile() {
         target="javascript"
     fi
 
-    if [[ "$target" != "java" && "$target" != "javascript" ]]; then
-        echo "Error: Invalid target '$target'. Must be 'java' or 'javascript'"
+    if [[ "$target" != "java" && "$target" != "jvm" && "$target" != "javascript" ]]; then
+        echo "Error: Invalid target '$target'. Must be 'java', 'jvm', or 'javascript'"
         exit 1
     fi
 
@@ -87,8 +90,8 @@ cmd_compile() {
     # Use absolute path for file
     file="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
 
-    # For Java, default output dir to user's current directory (produces a JAR)
-    if [[ "$target" == "java" && -z "$output" ]]; then
+    # File-producing targets default to the user's current directory
+    if [[ ( "$target" == "java" || "$target" == "jvm" ) && -z "$output" ]]; then
         output="$USER_DIR"
     fi
 
@@ -96,9 +99,17 @@ cmd_compile() {
         # Make output path absolute
         mkdir -p "$output"
         output="$(cd "$output" && pwd)"
-        cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.generator.$target "$file" "$output"
+        if [[ "$target" == "jvm" ]]; then
+            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.compiler.jvm.file "$file" "$output"
+        else
+            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.generator.$target "$file" "$output"
+        fi
     else
-        cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.generator.$target "$file"
+        if [[ "$target" == "jvm" ]]; then
+            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.compiler.jvm.file "$file"
+        else
+            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.generator.$target "$file"
+        fi
     fi
 }
 
