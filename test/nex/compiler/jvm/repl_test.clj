@@ -108,6 +108,21 @@
         (is (not (str/includes? output "Error:")))
         (is (str/includes? output "30.323"))))))
 
+(deftest repl-compiled-backend-builtin-numeric-method-compare-test
+  (testing "compiled backend preserves builtin numeric receiver types for later comparisons"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str (repl/eval-code ctx0 "let n := -5"))
+            int-output (with-out-str (repl/eval-code ctx0 "n.abs = 5"))
+            real-output (with-out-str (repl/eval-code ctx0 "n.abs = 5.0"))]
+        (is (not (str/includes? int-output "Error:")))
+        (is (str/includes? int-output "true"))
+        (is (not (str/includes? real-output "Error:")))
+        (is (str/includes? real-output "true"))))))
+
 (deftest repl-compiled-backend-string-split-test
   (testing "compiled backend keeps String.split on the compiled path with the compiler's Array representation"
     (binding [repl/*type-checking-enabled* (atom true)

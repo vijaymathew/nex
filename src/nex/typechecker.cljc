@@ -2939,6 +2939,77 @@
                      :return-type "Integer"}))
 
   (doseq [[method-name sig]
+          {"to_string" {:params [] :return-type "String"}
+           "abs" {:params [] :return-type "Integer"}
+           "min" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
+           "max" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
+           "pick" {:params [] :return-type "Integer"}
+           "plus" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
+           "minus" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
+           "times" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
+           "divided_by" {:params [{:name "other" :type "Integer"}] :return-type "Real"}
+           "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "not_equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "less_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "less_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "greater_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "greater_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}}]
+    (env-add-method env "Integer" method-name sig))
+
+  (doseq [[method-name sig]
+          {"to_string" {:params [] :return-type "String"}
+           "abs" {:params [] :return-type "Integer64"}
+           "min" {:params [{:name "other" :type "Integer64"}] :return-type "Integer64"}
+           "max" {:params [{:name "other" :type "Integer64"}] :return-type "Integer64"}
+           "plus" {:params [{:name "other" :type "Integer64"}] :return-type "Integer64"}
+           "minus" {:params [{:name "other" :type "Integer64"}] :return-type "Integer64"}
+           "times" {:params [{:name "other" :type "Integer64"}] :return-type "Integer64"}
+           "divided_by" {:params [{:name "other" :type "Integer64"}] :return-type "Real"}
+           "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "not_equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "less_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "less_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "greater_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "greater_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}}]
+    (env-add-method env "Integer64" method-name sig))
+
+  (doseq [[method-name sig]
+          {"to_string" {:params [] :return-type "String"}
+           "abs" {:params [] :return-type "Real"}
+           "min" {:params [{:name "other" :type "Real"}] :return-type "Real"}
+           "max" {:params [{:name "other" :type "Real"}] :return-type "Real"}
+           "round" {:params [] :return-type "Integer"}
+           "plus" {:params [{:name "other" :type "Real"}] :return-type "Real"}
+           "minus" {:params [{:name "other" :type "Real"}] :return-type "Real"}
+           "times" {:params [{:name "other" :type "Real"}] :return-type "Real"}
+           "divided_by" {:params [{:name "other" :type "Real"}] :return-type "Real"}
+           "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "not_equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "less_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "less_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "greater_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "greater_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}}]
+    (env-add-method env "Real" method-name sig))
+
+  (doseq [[method-name sig]
+          {"to_string" {:params [] :return-type "String"}
+           "abs" {:params [] :return-type "Decimal"}
+           "min" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
+           "max" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
+           "round" {:params [] :return-type "Integer"}
+           "plus" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
+           "minus" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
+           "times" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
+           "divided_by" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
+           "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "not_equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "less_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "less_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "greater_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "greater_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}}]
+    (env-add-method env "Decimal" method-name sig))
+
+  (doseq [[method-name sig]
           {"bitwise_left_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
            "bitwise_right_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
            "bitwise_logical_right_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}

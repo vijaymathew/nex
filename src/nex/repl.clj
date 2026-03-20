@@ -1012,8 +1012,7 @@
           element-type (first type-params)]
       (and (= "Array" (:base-type target-type))
            (string? element-type)
-           (not (contains? builtin-sortable-types element-type))
-           (not (tc/types-compatible? env element-type "Comparable"))))))
+           (not (contains? builtin-sortable-types element-type))))))
 
 (defn- string-ordered-comparison?
   [ctx node]
