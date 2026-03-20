@@ -180,6 +180,51 @@ print(app.greet())")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-file-supports-generic-stack-class
+  (testing "compile-file handles a generic Stack class whose pop mutates after setting result"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-generic-stack-file-test")
+          nex-file (io/file tmp-dir "stack.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class Stack [G]
+  create
+    make() do
+      items := []
+    end
+  feature
+    items: Array[G]
+    push(value: G) do
+      items.add(value)
+    end
+    pop(): G do
+      result := items.get(items.length - 1)
+      items.remove(items.length - 1)
+    end
+    peek(): G do
+      result := items.get(items.length - 1)
+    end
+    is_empty(): Boolean do
+      result := items.is_empty
+    end
+    size(): Integer do
+      result := items.length
+    end
+end
+
+let s := create Stack[Integer].make
+s.push(10)
+s.push(20)
+print(s.pop)
+print(s.size)")
+        (let [result (file/compile-file (.getPath nex-file) (.getPath out-dir) {})
+              output (str/trim (invoke-main! out-dir (:main-class result)))]
+          (is (some #(str/ends-with? % "Stack.class") (vals (:class-files result))))
+          (is (= "20\n1" output)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-file-type-error-includes-formatted-diagnostics
   (testing "compile-file surfaces formatted type errors in ex-data for callers and CLI tooling"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-type-error-test")

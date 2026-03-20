@@ -4,6 +4,7 @@
 (require '[clojure.string :as str])
 (require '[nex.compiler.jvm.repl :as compiled-repl])
 (require '[nex.interpreter :as interpreter])
+(require '[nex.parser :as parser])
 (require '[nex.repl :as repl])
 
 (defn md-file? [^java.io.File f]
@@ -55,16 +56,66 @@
           (recur (update opts :files conj (io/file arg)) rest))))))
 
 (def code-fence-pattern
-  #"(?s)```nex\s*\r?\n(.*?)\r?\n```")
+  #"(?s)```([^\r\n`]*)\r?\n(.*?)\r?\n```")
 
 (defn extract-nex-blocks [^java.io.File f]
   (->> (re-seq code-fence-pattern (slurp f))
-       (map-indexed (fn [idx [_ code]]
+       (map-indexed (fn [idx [_ lang code]]
                       {:index (inc idx)
                        :file (.getPath f)
+                       :lang (some-> lang str/trim str/lower-case not-empty)
                        :code (str/trim code)}))
        (remove #(str/blank? (:code %)))
        vec))
+
+(defn- transcript-block?
+  [{:keys [code]}]
+  (boolean (re-find #"(?m)^\s*nex>\s*" code)))
+
+(defn- transcript-cells
+  [code]
+  (loop [lines (str/split-lines code)
+         current []
+         cells []]
+    (if-let [line (first lines)]
+      (if-let [[_ cell] (re-matches #"\s*nex>\s?(.*)" line)]
+        (recur (rest lines)
+               [(str/trimr cell)]
+               (cond-> cells
+                 (seq current) (conj (str/trim (str/join "\n" current)))))
+        (if (and (seq current)
+                 (re-matches #"\s+\S.*" line))
+          (recur (rest lines)
+                 (conj current (str/triml line))
+                 cells)
+          (recur (rest lines)
+                 []
+                 (cond-> cells
+                   (seq current) (conj (str/trim (str/join "\n" current)))))))
+      (cond-> cells
+        (seq current) (conj (str/trim (str/join "\n" current)))))))
+
+(defn- block-cells
+  [{:keys [code] :as block}]
+  (if (transcript-block? block)
+    (->> (transcript-cells code)
+         (remove str/blank?)
+         vec)
+    [(str/trim code)]))
+
+(defn- runnable-cell?
+  [code]
+  (try
+    (parser/parse code)
+    true
+    (catch Exception _
+      false)))
+
+(defn- runnable-block?
+  [block]
+  (let [cells (block-cells block)]
+    (and (seq cells)
+         (every? runnable-cell? cells))))
 
 (defn skip-block-reason [root code]
   (cond
@@ -73,10 +124,6 @@
 
     (re-find #"(?m)^\s*Suggested files:\s*$" code)
     "contains prose instead of Nex code"
-
-    (and (= root "docs/tut")
-         (re-find #"(?m)^\s*(nex>|\.{3}\s{0,2})" code))
-    "contains interactive REPL prompt transcript"
 
     :else
     nil))
@@ -145,6 +192,7 @@
   [root blocks]
   (->> blocks
        (remove #(skip-block-reason root (:code %)))
+       (filter runnable-block?)
        vec))
 
 (defn run-progressive-file! [^java.io.File f root run-app? backend]
@@ -155,15 +203,15 @@
     (binding [repl/*repl-var-types* var-types
               repl/*repl-backend* backend-atom
               repl/*compiled-repl-session* compiled-session]
-      (doseq [[position {:keys [index code]}] (map-indexed vector runnable-blocks)]
+      (doseq [[position {:keys [index] :as block}] (map-indexed vector runnable-blocks)]
         (println (format "  block %d/%d  %s#block-%d"
                          (inc position)
                          block-total
                          (.getPath f)
                          index))
         (flush)
-        (when-not (skip-block-reason root code)
-          (eval-snippet! ctx code (str (.getPath f) "#block-" index))))
+        (doseq [[cell-pos code] (map-indexed vector (block-cells block))]
+          (eval-snippet! ctx code (str (.getPath f) "#block-" index ":cell-" (inc cell-pos)))))
       (when (and run-app? (runnable-app? ctx))
         (run-app! ctx (str (.getPath f) "#App.run"))))
     {:blocks blocks}))
@@ -193,7 +241,7 @@
     (case mode
       :isolated
       (do
-        (doseq [[block-position {:keys [index code]}]
+        (doseq [[block-position {:keys [index] :as block}]
                 (map-indexed vector (active-blocks root (extract-nex-blocks f)))]
           (println (format "  block %d/%d  %s#block-%d"
                            (inc block-position)
@@ -201,8 +249,11 @@
                            (.getPath f)
                            index))
           (flush)
-          (when-not (skip-block-reason root code)
-            (eval-with-fresh-state! code (str (.getPath f) "#block-" index) run-app backend)))
+          (doseq [[cell-pos code] (map-indexed vector (block-cells block))]
+            (eval-with-fresh-state! code
+                                    (str (.getPath f) "#block-" index ":cell-" (inc cell-pos))
+                                    run-app
+                                    backend)))
         (result-ok (.getPath f) mode nil))
 
       :progressive

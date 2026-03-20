@@ -123,6 +123,29 @@
         (is (not (str/includes? real-output "Error:")))
         (is (str/includes? real-output "true"))))))
 
+(deftest repl-compiled-backend-generic-class-definition-deopts-cleanly-test
+  (testing "compiled default deopts generic class definitions that still need the interpreter path"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "class Stack [G]
+  create
+    make() do
+      items := []
+    end
+  feature
+    items: Array[G]
+    pop(): G do
+      result := items.get(items.length - 1)
+      items.remove(items.length - 1)
+    end
+end"))]
+        (is (not (str/includes? output "Error:")))
+        (is (contains? @(:classes ctx0) "Stack"))))))
+
 (deftest repl-compiled-backend-string-split-test
   (testing "compiled backend keeps String.split on the compiled path with the compiler's Array representation"
     (binding [repl/*type-checking-enabled* (atom true)

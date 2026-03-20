@@ -2861,10 +2861,10 @@
                           (= :call (:type final-stmt))
                           (= :convert (:type final-stmt)))
                     (let [[env' lowered-leading] (lower-statements env-with-old leading-statements)
-                          final-expr (if (and (= :assign (:type final-stmt))
-                                              (= "result" (:target final-stmt)))
-                                       nil
-                                       final-stmt)
+                          implicit-result-expr? (and (not (and (= :assign (:type final-stmt))
+                                                               (= "result" (:target final-stmt))))
+                                                     (not= "Void" (infer-type env' final-stmt)))
+                          final-expr (when implicit-result-expr? final-stmt)
                           [env'' lowered-tail]
                           (if final-expr
                             [env' (with-stmt-debug
