@@ -163,11 +163,11 @@ Inheritance is not appropriate when:
 
 
 
-## Abstract Methods
+## Feature Override
 
-Sometimes a superclass wants to declare the shape of an operation without providing an implementation, because there is no sensible default. Every shape has an area, but there is no general formula for "the area of a shape."
+A superclass can provide a default implementation for a method that subclasses override with specialised behaviour. This is useful when the superclass defines a general structure and the subclass fills in the details.
 
-Nex allows declaring a method as `abstract`:
+Every shape has an area, but "the area of a shape" has no general formula. The superclass provides a safe default:
 
 ```
 nex> class Shape
@@ -177,14 +177,14 @@ nex> class Shape
          end
        feature
          colour: String
-         area(): Real is abstract
+         area(): Real do result := 0.0 end
          describe(): String do
            result := "A " + colour + " shape with area " + area.to_string
          end
      end
 ```
 
-`area` is declared abstract — no body, just a signature. Any concrete subclass must implement it. The `describe` method in `Shape` calls `area` safely, knowing the concrete subclass will supply the implementation.
+`area` returns `0.0` by default. The `describe` method in `Shape` calls `area`, and subclasses override `area` with their own formula:
 
 ```
 nex> class Circle inherit Shape
@@ -202,12 +202,10 @@ nex> class Circle inherit Shape
 
 nex> let c := create Circle.make("red", 5.0)
 nex> c.describe
-A red circle with area 78.53975
+A red shape with area 78.53975
 ```
 
-`describe` in `Shape` calls `area` — which runs `Circle`'s `area` because `c` is a `Circle`. The superclass defines the structure; the subclass fills in the detail. This pattern — a concrete superclass method calling an abstract method — is called the *template method* pattern.
-
-A class with at least one abstract method cannot be instantiated directly. Only concrete subclasses that implement all abstract methods can be created.
+`describe` in `Shape` calls `area` — which runs `Circle`'s `area` because `c` is a `Circle`. The superclass defines the structure; the subclass fills in the detail. This is the *template method* pattern: a superclass method calls an overridable method whose behaviour varies by subclass.
 
 
 
@@ -411,8 +409,7 @@ Each account type inherits `deposit` and `get_balance` from `Account`. `SavingsA
 - `super.method_name(   )` calls an overridden superclass method from within an override
 - Overriding replaces a superclass method with a subclass-specific version; dynamic dispatch calls the correct version at runtime
 - Polymorphism allows objects of different subclasses to be treated through a common superclass type
-- Abstract methods (`name(): ReturnType is abstract`) declare a signature without an implementation; subclasses must implement them; classes with abstract methods cannot be instantiated
-- The template method pattern: a concrete superclass method calls an abstract method; the superclass defines structure, subclasses fill in details
+- The template method pattern: a superclass method calls an overridable method; the superclass defines structure, subclasses fill in details via override
 - Overriding methods must honour the superclass contract; preconditions should not be strengthened, postconditions should not be weakened
 - Use inheritance for genuine is-a relationships and polymorphism; use composition for has-a relationships or code reuse without a conceptual relationship
 
@@ -420,12 +417,12 @@ Each account type inherits `deposit` and `get_balance` from `Account`. `SavingsA
 
 ## Exercises
 
-**1.** Define an abstract class `Animal` with a field `name: String`, a constructor `make`, and an abstract method `sound(): String`. Define subclasses `Dog`, `Cat`, and `Cow` each implementing `sound`. Create an `Array[Animal]`, add one of each, and print each animal's name and sound.
+**1.** Define a class `Animal` with a field `name: String`, a constructor `make`, and a method `sound(): String` that returns `"..."` by default. Define subclasses `Dog`, `Cat`, and `Cow` each overriding `sound`. Create an `Array[Animal]`, add one of each, and print each animal's name and sound.
 
-**2.** Add an abstract method `perimeter(): Real` to the `Shape` class. Implement it in `Circle` (`2 * 3.14159 * radius`) and `Rectangle` (`2 * (width + height)`). Update `describe` in `Shape` to report both area and perimeter.
+**2.** Add a method `perimeter(): Real` to the `Shape` class with a default return of `0.0`. Override it in `Circle` (`2 * 3.14159 * radius`) and `Rectangle` (`2 * (width + height)`). Update `describe` in `Shape` to report both area and perimeter.
 
 **3.** The `withdraw` method in `OverdraftAccount` overrides the one in `Account`. Does the override honour the Liskov Substitution Principle? Does it accept the same inputs? Does it make the same kind of promise — returning `true` on success and `false` on failure? What does a caller of `Account` need to know about `OverdraftAccount.withdraw`?
 
-**4.** Define a class `Vehicle` with fields `make: String` and `speed: Real`, and abstract methods `fuel_type(): String` and `max_speed(): Real`. Define `ElectricCar` and `PetrolCar` implementing the abstract methods. Add `can_reach(distance, fuel: Real): Boolean` to each — `PetrolCar` uses 10 litres per 100 km; `ElectricCar` uses 20 kWh per 100 km.
+**4.** Define a class `Vehicle` with fields `make: String` and `speed: Real`, and methods `fuel_type(): String` and `max_speed(): Real` with sensible defaults. Define `ElectricCar` and `PetrolCar` overriding those methods. Add `can_reach(distance, fuel: Real): Boolean` to each — `PetrolCar` uses 10 litres per 100 km; `ElectricCar` uses 20 kWh per 100 km.
 
 **5.\*** Define a `Logger` base class with a method `log(message: String)` that prints with a prefix. Define `FileLogger` that also appends to a `log_history: String` field, and `SilentLogger` that discards all messages. Create an `Array[Logger]` with one of each and call `log("test")` on each. What does this demonstrate about polymorphism and swappable implementations?
