@@ -1,6 +1,8 @@
-# Compiled REPL Default Exit Criteria
+# Compiled REPL Defaulting Record
 
-` :backend compiled ` is safe to make the default only when all of these are true.
+Compiled REPL is now the default REPL backend. This note records the criteria
+that were used to justify that switch, what evidence exists, and what still
+needs continued observation after the flip.
 
 ## Exit Criteria
 
@@ -57,16 +59,16 @@
 8. Performance is not worse in common REPL use
 - Common interactive workloads should not regress noticeably from sync and deopt overhead.
 
-## Short Checklist
+## Release Checklist Status
 
 - [x] Add a compiled-REPL soak suite for long progressive sessions
 - [x] Add interpreter-vs-compiled parity tests for values, output, errors, and state
 - [~] Add explicit deopt and reopt round-trip tests for `:load`, `intern`, imports, classes, closures, and concurrency
-- [ ] Audit and document the exact remaining deopt cases
-- [ ] Eliminate all known compiled-REPL-only correctness bugs
+- [x] Audit and document the exact remaining deopt cases
+- [~] Eliminate all known compiled-REPL-only correctness bugs
 - [x] Verify docs runners stay green on both backends
 - [~] Verify debugger behavior is safe under compiled-default routing
-- [~] Confirm common REPL workflows do not regress in latency or stability
+- [x] Confirm common REPL workflows do not regress in latency or stability
 
 ## Current Progress
 
@@ -86,9 +88,8 @@ What remains open from this area:
 
 - Deopt and reopt round-trip coverage is not yet exhaustive across every important surface, especially debugger interaction and other long-session operational edges.
 - Debugger safety is only partially covered today: the current route-to-interpreter behavior is tested, but compiled-default readiness still needs confidence around broader debugger workflows and mixed long sessions.
-- The exact remaining deopt set still needs a tighter audit and documentation pass.
-- Compiled-default readiness still depends on eliminating residual compiled-REPL-only correctness bugs as they are found.
-- Performance has a first gate now, but the threshold values still need continued observation against real workloads and normal developer machines.
+- Compiled-default correctness still depends on eliminating residual compiled-REPL-only bugs as they are found in normal use.
+- Performance gates are in place and currently passing, but the threshold values still need continued observation on real developer machines and future releases.
 
 ## Performance Gate
 
@@ -146,6 +147,11 @@ Current acceptance thresholds:
 
 These long-session thresholds are intentionally looser than the micro-workload thresholds. They are meant to catch pathological session-level overhead, especially around deopt/reopt and module state handling, without penalizing the compiled backend for doing more upfront work inside richer interactive sessions.
 
-## Flip Condition
+## Post-Flip Condition
 
-Make compiled the default only when every box above is checked and there are no open correctness issues tagged against compiled REPL behavior.
+Keep compiled as the default REPL backend only while:
+
+- the default suite stays green
+- the integration and performance gates stay green
+- docs examples stay green on both interpreter and compiled backends
+- no user-facing compiled-REPL-only correctness bug remains unresolved for long

@@ -5,7 +5,7 @@ This guide covers setting up a development environment for the Nex language impl
 ## Prerequisites
 
 ### Required
-- **Java 11+** - For Clojure and ANTLR
+- **Java 17+** - For Clojure, ANTLR, and the JVM bytecode backend
 - **Clojure CLI** - [Installation guide](https://clojure.org/guides/install_clojure)
 - **Node.js 16+** - For ClojureScript builds
 - **npm** - Comes with Node.js
@@ -38,19 +38,28 @@ This guide covers setting up a development environment for the Nex language impl
 nex/
 ├── src/
 │   └── nex/
-│       ├── interpreter.cljc    # Runtime interpreter (JVM & JS)
-│       ├── parser.cljc          # Parser (JVM-only for now)
+│       ├── interpreter.cljc     # Runtime interpreter (JVM & JS)
+│       ├── parser.clj           # Parser entry point
 │       ├── walker.cljc          # AST transformer
-│       ├── fmt.clj             # Code formatter
-│       ├── docgen.clj          # Documentation generator
+│       ├── typechecker.cljc     # Static checking
+│       ├── lower.cljc           # Lowering to compiler IR/class specs
+│       ├── ir.cljc              # Compiler IR
+│       ├── repl.clj             # User-facing REPL
+│       ├── fmt.clj              # Code formatter
+│       ├── docgen.clj           # Documentation generator
+│       ├── compiler/jvm/        # JVM bytecode compiler backend
+│       │   ├── emit.clj         # ASM bytecode emission
+│       │   ├── repl.clj         # Compiled REPL/session backend
+│       │   ├── file.clj         # .nex -> .class/.jar pipeline
+│       │   └── runtime.clj      # Runtime helpers for compiled code
 │       └── generator/
-│           ├── java.clj        # Java code generator
-│           └── javascript.clj  # JavaScript code generator
+│           └── javascript.clj   # JavaScript code generator
 ├── grammar/
 │   └── nexlang.g4              # ANTLR grammar
 ├── test/
 │   ├── js/                     # JavaScript/ClojureScript tests
-│   └── nex/                    # Clojure JVM tests
+│   ├── nex/                    # Clojure JVM tests
+│   └── scripts/                # Test runners, docs checks, perf gates
 ├── docs/                        # Documentation
 ├── examples/                    # Example Nex programs
 └── editor/
@@ -64,7 +73,12 @@ nex/
 
 **JVM Tests:**
 ```bash
-clojure -X:run-tests
+clojure -M:test test/scripts/run_tests.clj
+```
+
+**Integration Tests:**
+```bash
+clojure -M:test test/scripts/run_integration_tests.clj
 ```
 
 **ClojureScript Tests:**
@@ -76,15 +90,24 @@ npm run test:wrapper     # JavaScript wrapper test
 
 **Single JVM Test:**
 ```bash
-clojure test/nex/test_jvm.clj
+clojure -M:test -e "(require 'nex.loops-test) (clojure.test/run-tests 'nex.loops-test)"
 ```
 
 ### REPL Development
 
-**Start Nex REPL:**
+**Start Nex REPL with the launcher:**
+```bash
+./bin/nex
+```
+
+**Start Nex REPL through Clojure directly:**
 ```bash
 clojure -M:repl
 ```
+
+The REPL now defaults to the compiled JVM backend. Unsupported inputs fall back
+to the interpreter automatically. Use `:backend interpreter` inside the REPL if
+you need the tree-walking fallback explicitly.
 
 **ClojureScript REPL:**
 ```bash
@@ -167,7 +190,7 @@ If you need a JavaScript parser:
    ```
 
 3. **Note:** The generated ES6 modules require additional integration work.
-   See `docs/CLOJURESCRIPT.md` for details.
+   See `docs/md/CLOJURESCRIPT.md` for details.
 
 ## Git Workflow
 
@@ -196,17 +219,22 @@ The following are automatically ignored (`.gitignore`):
 
 1. Update `grammar/nexlang.g4`
 2. Add walker transformation in `src/nex/walker.cljc`
-3. Implement evaluation in `src/nex/interpreter.cljc`
-4. Add code generation in `src/nex/generator/{java,javascript}.clj`
-5. Write tests in `test/nex/`
-6. Update documentation
+3. Implement or update static checking in `src/nex/typechecker.cljc`
+4. Implement interpreter behavior in `src/nex/interpreter.cljc`
+5. Add lowering support in `src/nex/lower.cljc` and `src/nex/ir.cljc`
+6. Add JVM backend support under `src/nex/compiler/jvm/` if the feature should stay on the compiled path
+7. Add JavaScript generator support in `src/nex/generator/javascript.clj` if relevant
+8. Write tests in `test/nex/` and `test/nex/compiler/jvm/` as appropriate
+9. Update documentation
 
 ### Add a New Builtin Function
 
 1. Add to `builtin-functions` map in `src/nex/interpreter.cljc`
-2. Implement the function logic
-3. Add tests
-4. Document in language reference
+2. Add or update builtin typing in `src/nex/typechecker.cljc`
+3. Implement the function logic
+4. Add specialized lowering/emission in the JVM backend if needed
+5. Add tests
+6. Document in language reference
 
 ### Fix a Bug
 
@@ -222,6 +250,8 @@ The following are automatically ignored (`.gitignore`):
 - `org.clojure/clojurescript` - ClojureScript compiler
 - `clj-antlr` - ANTLR4 parser generator
 - `clojure.java-time` - Date/time library
+- `org.ow2.asm/asm` - JVM bytecode emission
+- `org.jline/jline` - REPL line editing
 
 ### JavaScript Dependencies (managed by `package.json`)
 - `antlr4` - ANTLR4 JavaScript runtime (optional)
@@ -240,8 +270,9 @@ ANTLR is not committed to the repository. If you need it for generating parsers:
 3. Rebuild: `npx shadow-cljs compile node`
 
 ### Tests Fail After Grammar Change
-The walker and interpreter may need updates to handle new AST node types.
-Check the walker transformations first.
+The walker, typechecker, interpreter, and compiler lowering may need updates to
+handle new AST node types. Check the walker transformations first, then the
+compiled eligibility/lowering path if the feature is meant to stay compiled.
 
 ## Code Style
 

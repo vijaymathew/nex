@@ -1,8 +1,8 @@
 # Compiler Feature Gap
 
-This note tracks the gap between the tree-walking interpreter and the experimental JVM bytecode compiler. It lists what is already compiled and what still deopts to the interpreter.
+This note tracks the gap between the tree-walking interpreter and the JVM bytecode compiler. It lists what is already compiled and what still deopts to the interpreter.
 
-Last updated: 2026-03-19
+Last updated: 2026-03-20
 
 
 ## Already Compiled
@@ -39,18 +39,12 @@ Last updated: 2026-03-19
 
 ## Still Needs Implementation
 
-### Object-Oriented
+### Remaining Compiled REPL / Compiler Gaps
 
-### Design by Contract
-
-### Exception Handling
-
-### Meta / Infrastructure
-
-- richer debug metadata beyond the current emitted:
-  - source file names
-  - statement line tables
-  - local-variable tables with first-use/last-use live ranges
+- debugger interaction is safe through interpreter routing, but not a native compiled-bytecode debugger experience
+- the deopt surface is small and documented, but still intentionally mixed-mode rather than pure compiled execution
+- some remaining host/runtime cases still rely on helper/runtime calls rather than bespoke bytecode sequences
+- debug metadata is good enough for line/source navigation, but local-variable live ranges are still first-use/last-use rather than fully block-precise
 
 
 ## Suggested Next Candidates
@@ -58,3 +52,5 @@ Last updated: 2026-03-19
 Based on complexity and impact, these are natural next steps:
 
 1. Further debug-info tightening such as more precise block-scoped local live ranges where the current first-use/last-use tables are still conservative
+2. Continued reduction of runtime-helper boundaries where direct lowering would materially improve maintainability or observability
+3. Ongoing hardening of compiled-default REPL behavior through soak, parity, and debugger workflow coverage

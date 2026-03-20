@@ -1,17 +1,17 @@
 # Compiled REPL Status
 
-This note defines the current boundary of the experimental JVM bytecode compiler and the compiled REPL backend.
+This note defines the current boundary of the JVM bytecode compiler and the compiled REPL backend.
 
 It answers two questions:
 
 - what is supported on the compiled path today
 - what still deoptimizes to the tree-walking interpreter
 
-The goal is to keep this boundary explicit while compiler coverage expands.
+The goal is to keep the mixed compiled/interpreter boundary explicit while compiler coverage continues to expand.
 
 ## Current Architecture
 
-The experimental compiled backend is no longer REPL-only.
+The compiled backend is no longer REPL-only, and it is now the default REPL backend.
 
 - The compiled session is the source of truth.
 - Top-level values, types, functions, classes, and imports are tracked in compiled-session state.
@@ -21,7 +21,7 @@ The experimental compiled backend is no longer REPL-only.
   - the interpreter executes the input
   - interpreter state syncs back into the compiled session
 
-This avoids split-brain REPL state while the compiler subset is still incomplete.
+This avoids split-brain REPL state while preserving interpreter fallback for unsupported inputs and debugger-driven execution.
 
 ## Important REPL Boundary
 
