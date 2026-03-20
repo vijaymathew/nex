@@ -316,8 +316,12 @@
           (mapv transform-node)))
 
    :inheritEntry
-   (fn [[_ parent-name]]
-     {:parent (token-text parent-name)})
+   (fn [[_ parent-name & rest]]
+     (let [generic-args-node (first (filter #(and (sequential? %)
+                                                  (= :typeArgs (first %)))
+                                            rest))]
+       (cond-> {:parent (token-text parent-name)}
+         generic-args-node (assoc :generic-args (transform-node generic-args-node)))))
 
    :visibilityModifier
    (fn [node]

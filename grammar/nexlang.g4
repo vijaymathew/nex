@@ -48,7 +48,7 @@ inheritClause
     ;
 
 inheritEntry
-    : IDENTIFIER
+    : IDENTIFIER typeArgs?
     ;
 
 featureSection

@@ -741,6 +741,22 @@
         :interns []
         :classes (vec (vals @(:class-asts session)))
         :functions all-functions
+       :statements []
+       :calls []}
+       source-id)))
+  session)
+
+(defn- re-register-session-classes!
+  [session source-id]
+  (let [all-classes (vec (vals @(:class-asts session)))]
+    (when (seq all-classes)
+      (compile-and-register-classes!
+       session
+       {:type :program
+        :imports @(:import-asts session)
+        :interns []
+        :classes all-classes
+        :functions (vec (vals @(:function-asts session)))
         :statements []
         :calls []}
        source-id)))
@@ -773,6 +789,8 @@
                :when (not (contains? function-names k))]
          (rt/state-set-type! state k t))
        (try
+         (when (seq (:classes prepared-ast))
+           (re-register-session-classes! session source-id))
          (re-register-session-functions! session source-id)
          (catch clojure.lang.ExceptionInfo e
            (when-not (deopt-compiled-exception? e)

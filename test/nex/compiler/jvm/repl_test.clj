@@ -146,6 +146,215 @@ end"))]
         (is (not (str/includes? output "Error:")))
         (is (contains? @(:classes ctx0) "Stack"))))))
 
+(deftest repl-compiled-backend-redefined-class-constructor-available-after-deopt-test
+  (testing "compiled backend refreshes class metadata after interpreter-side class redefinition"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "class Point
+  create
+    make(px, py: Real) do
+      x := px
+      y := py
+    end
+  feature
+    x: Real
+    y: Real
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "let p := create Point.make(3.0, 4.0)"))
+        (let [redef-output (with-out-str
+                             (repl/eval-code ctx0 "class Point
+  create
+    origin() do
+      x := 0.0
+      y := 0.0
+    end
+    make(px, py: Real) do
+      x := px
+      y := py
+    end
+  feature
+    x: Real
+    y: Real
+end"))
+              create-output (with-out-str
+                              (repl/eval-code ctx0 "let p1 := create Point.origin"))
+              x-output (with-out-str
+                         (repl/eval-code ctx0 "p1.x"))]
+          (is (not (str/includes? redef-output "Error:")))
+          (is (not (str/includes? create-output "Error:")))
+          (is (str/includes? x-output "0.0")))))))
+
+(deftest repl-compiled-backend-redefined-class-method-available-after-deopt-test
+  (testing "compiled backend refreshes class metadata when a redefined class gains a new method"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "class Todo_Item
+  create
+    make(t: String) do
+      title := t
+      done := false
+    end
+  feature
+    title: String
+    done: Boolean
+    mark_done() do
+      done := true
+    end
+    is_done(): Boolean do
+      result := done
+    end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "class Task_List
+  create
+    make() do
+      tasks := []
+    end
+  feature
+    tasks: Array[Todo_Item]
+    add_task(title: String) do
+      tasks.add(create Todo_Item.make(title))
+    end
+    task_at(index: Integer): Todo_Item do
+      result := tasks.get(index)
+    end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "let todo := create Task_List.make"))
+        (with-out-str
+          (repl/eval-code ctx0 "todo.add_task(\"write tests\")"))
+        (let [redef-output (with-out-str
+                             (repl/eval-code ctx0 "class Task_List
+  create
+    make() do
+      tasks := []
+    end
+  feature
+    tasks: Array[Todo_Item]
+    add_task(title: String) do
+      tasks.add(create Todo_Item.make(title))
+    end
+    task_at(index: Integer): Todo_Item do
+      result := tasks.get(index)
+    end
+    completed_count(): Integer do
+      result := 0
+      across tasks as task do
+        if task.is_done() then
+          result := result + 1
+        end
+      end
+    end
+end"))
+              new-todo-output (with-out-str
+                                (repl/eval-code ctx0 "let todo := create Task_List.make"))
+              count-output (with-out-str
+                             (repl/eval-code ctx0 "todo.completed_count"))]
+          (is (not (str/includes? redef-output "Error:")))
+          (is (not (str/includes? new-todo-output "Error:")))
+          (is (not (str/includes? count-output "Error:")))
+          (is (str/includes? count-output "0")))))))
+
+(deftest repl-compiled-backend-inherited-field-read-test
+  (testing "compiled backend reads inherited fields through the composition carrier"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "class Shape
+  create
+    make(c: String) do
+      colour := c
+    end
+  feature
+    colour: String
+    describe(): String do
+      result := \"A \" + colour + \" shape\"
+    end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "class Circle inherit Shape
+  create
+    make(c: String, r: Real) do
+      super.make(c)
+      radius := r
+    end
+  feature
+    radius: Real
+    describe(): String do
+      result := \"A \" + colour + \" circle with radius \" + radius.to_string
+    end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "let c := create Circle.make(\"red\", 5.0)"))
+        (let [output (with-out-str
+                       (repl/eval-code ctx0 "c.describe"))]
+          (is (not (str/includes? output "Error:")))
+          (is (str/includes? output "A red circle with radius 5.0")))))))
+
+(deftest repl-compiled-backend-generic-parent-inheritance-test
+  (testing "compiled backend supports generic inheritance syntax like inherit Stack[G]"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "class Stack [G]
+  create
+    make() do
+      items := []
+    end
+  feature
+    items: Array[G]
+    push(value: G) do
+      items.add(value)
+    end
+    size(): Integer do
+      result := items.length
+    end
+end"))
+        (let [def-output (with-out-str
+                           (repl/eval-code ctx0 "class Bounded_Stack [G] inherit Stack[G]
+  create
+    make(max: Integer) do
+      super.make
+      max_size := max
+    end
+  feature
+    max_size: Integer
+    is_full(): Boolean do
+      result := size = max_size
+    end
+    push(value: G) do
+      if not is_full then
+        super.push(value)
+      end
+    end
+end"))
+              _ (with-out-str
+                  (repl/eval-code ctx0 "let s := create Bounded_Stack[Integer].make(3)"))
+              _ (with-out-str (repl/eval-code ctx0 "s.push(1)"))
+              _ (with-out-str (repl/eval-code ctx0 "s.push(2)"))
+              _ (with-out-str (repl/eval-code ctx0 "s.push(3)"))
+              _ (with-out-str (repl/eval-code ctx0 "s.push(4)"))
+              size-output (with-out-str
+                            (repl/eval-code ctx0 "s.size"))]
+          (is (not (str/includes? def-output "Error:")))
+          (is (not (str/includes? size-output "Error:")))
+          (is (str/includes? size-output "3")))))))
+
 (deftest repl-compiled-backend-map-across-entry-get-test
   (testing "compiled backend can iterate map entries whose static element type is Any"
     (binding [repl/*type-checking-enabled* (atom false)

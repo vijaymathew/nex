@@ -309,6 +309,11 @@
               (some-> (current-class-def env)
                       (class-field-def (:name expr))
                       :field-type)
+              (some-> (current-class-def env)
+                      ((fn [class-def]
+                         (or (class-method-def class-def (:name expr) 0)
+                             (inherited-method-def env class-def (:name expr) 0))))
+                      function-return-type)
               (some-> (and (:current-class env)
                            (lookup-class-constant env (:current-class env) (:name expr)))
                       (#(constant-nex-type env %)))
@@ -1880,13 +1885,22 @@
     :identifier
     (if-let [{:keys [slot nex-type jvm-type]} (get (:locals env) (:name expr))]
       (ir/local-node (:name expr) slot nex-type jvm-type)
-      (if-let [{:keys [owner field nex-type jvm-type]} (get (:fields env) (:name expr))]
-        (ir/field-get-node (:internal-name (class-jvm-meta env owner))
-                           field
-                           (ir/this-node (:this-type env)
-                                         (resolve-jvm-type env (:this-type env)))
-                           nex-type
-                           jvm-type)
+      (if-let [{:keys [owner field carrier-owner carrier-field nex-type jvm-type carrier-jvm-type]}
+               (get (:fields env) (:name expr))]
+        (let [target-ir (if carrier-field
+                          (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
+                                             carrier-field
+                                             (ir/this-node (:this-type env)
+                                                           (resolve-jvm-type env (:this-type env)))
+                                             owner
+                                             carrier-jvm-type)
+                          (ir/this-node (:this-type env)
+                                        (resolve-jvm-type env (:this-type env))))]
+          (ir/field-get-node (:internal-name (class-jvm-meta env owner))
+                             field
+                             target-ir
+                             nex-type
+                             jvm-type))
         (if-let [constant (and (:current-class env)
                                (lookup-class-constant env (:current-class env) (:name expr)))]
           (let [owner (:declaring-class constant)
@@ -1896,13 +1910,22 @@
                                       (:name constant)
                                       nex-type
                                       jvm-type))
-          (let [nex-type (or (get (:var-types env) (:name expr))
-                             (infer-type env expr))
-                jvm-type (resolve-jvm-type env nex-type)]
-            (if (:top-level? env)
-              (ir/top-get-node (:name expr) nex-type jvm-type)
-              (throw (ex-info "Unknown local in non-top-level lowering"
-                              {:name (:name expr)})))))))
+          (if-let [method-def (some-> (current-class-def env)
+                                      ((fn [class-def]
+                                         (or (class-method-def class-def (:name expr) 0)
+                                             (inherited-method-def env class-def (:name expr) 0)))))]
+            (lower-expression env {:type :call
+                                   :target {:type :this}
+                                   :method (:name expr)
+                                   :args []
+                                   :has-parens true})
+            (let [nex-type (or (get (:var-types env) (:name expr))
+                               (infer-type env expr))
+                  jvm-type (resolve-jvm-type env nex-type)]
+              (if (:top-level? env)
+                (ir/top-get-node (:name expr) nex-type jvm-type)
+                (throw (ex-info "Unknown local in non-top-level lowering"
+                                {:name (:name expr)}))))))))
 
     :this
     (if (:this-type env)

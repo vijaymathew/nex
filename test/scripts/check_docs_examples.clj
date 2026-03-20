@@ -122,6 +122,9 @@
     (re-find #"(?m)^\s*\.\.\.\s*$" code)
     "contains ellipsis placeholder"
 
+    (re-find #"(?s)^\s*name\s*\(params\)\s*(?::\s*ReturnType)?\s*do\s*end\s*$" code)
+    "contains a syntax template rather than runnable Nex code"
+
     (re-find #"(?m)^\s*Suggested files:\s*$" code)
     "contains prose instead of Nex code"
 
@@ -213,8 +216,14 @@
                          (.getPath f)
                          index))
         (flush)
-        (doseq [[cell-pos code] (map-indexed vector (block-cells block))]
-          (eval-snippet! ctx code (str (.getPath f) "#block-" index ":cell-" (inc cell-pos)))))
+        (if (transcript-block? block)
+          (doseq [[cell-pos code] (map-indexed vector (block-cells block))]
+            (eval-snippet! ctx code (str (.getPath f) "#block-" index ":cell-" (inc cell-pos))))
+          (doseq [[cell-pos code] (map-indexed vector (block-cells block))]
+            (eval-with-fresh-state! code
+                                    (str (.getPath f) "#block-" index ":cell-" (inc cell-pos))
+                                    run-app?
+                                    backend))))
       (when (and run-app? (runnable-app? ctx))
         (run-app! ctx (str (.getPath f) "#App.run"))))
     {:blocks blocks}))
