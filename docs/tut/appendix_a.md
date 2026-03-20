@@ -358,6 +358,10 @@ print(ch.receive)
 Select across multiple channel operations:
 
 ```nex
+let ch1: Channel[String] := create Channel.with_capacity(1)
+let ch2: Channel[String] := create Channel.with_capacity(1)
+ch1.send("ready")
+
 select
 when ch1.receive() as msg then
   print(msg)

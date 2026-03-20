@@ -2,6 +2,24 @@
   (:require [clojure.test :refer [deftest is testing]]
             [nex.repl :as repl]))
 
+(deftest time-library-typechecked-date-time-api-test
+  (testing "Date_Time API typechecks through the REPL path used by docs examples"
+    (binding [repl/*type-checking-enabled* (atom true)]
+      (let [ctx (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx "intern time/Duration")
+                     (repl/eval-code ctx "intern time/Date_Time")
+                     (repl/eval-code ctx "let started_at: Date_Time := create Date_Time.now()")
+                     (repl/eval-code ctx "let next_run: Date_Time := started_at.add(create Duration.minutes(15))")
+                     (repl/eval-code ctx "let weekly_cutoff: Date_Time := started_at.add(create Duration.weeks(1))")
+                     (repl/eval-code ctx "print(started_at.weekday())")
+                     (repl/eval-code ctx "print(started_at.day_of_year())")
+                     (repl/eval-code ctx "print(next_run.truncate_to_hour().format_iso())")
+                     (repl/eval-code ctx "print(weekly_cutoff.truncate_to_day().format_iso())"))]
+        (is (not (.contains output "Type checking failed")))
+        (is (not (.contains output "Undefined function or method: datetime_weekday")))
+        (is (not (.contains output "Undefined function or method: datetime_day_of_year")))))))
+
 (deftest time-library-runtime-test
   (testing "Date_Time and Duration libraries work through the JVM interpreter"
     (let [ctx (repl/init-repl-context)
