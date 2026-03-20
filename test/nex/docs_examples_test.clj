@@ -10,8 +10,10 @@
 
 (defn- run-process!
   [& args]
-  (let [pb (ProcessBuilder. ^java.util.List (vec args))]
-    (.directory pb (io/file "/home/vijay/Projects/nex"))
+  (let [quoted (mapv #(str "'" (str/replace % "'" "'\\''") "'") args)
+        pb     (ProcessBuilder. ^java.util.List
+                 ["bash" "-c" (str/join " " quoted)])]
+    (.directory pb (io/file (System/getProperty "user.dir")))
     (.redirectErrorStream pb true)
     (let [proc (.start pb)
           output (slurp (.getInputStream proc))]
