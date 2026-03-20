@@ -509,31 +509,39 @@
                 (deep-reflected-field parent-value field-name)))
             (composition-fields (.getClass value)))))
 
+(defn- find-user-method
+  "Find a user method on the target object, traversing composition parents if needed."
+  [target lowered-name]
+  (let [^Class cls (.getClass target)
+        param-types (into-array Class [nex.compiler.jvm.runtime.NexReplState
+                                       (class (object-array 0))])]
+    (or (try
+          [target (.getDeclaredMethod cls lowered-name param-types)]
+          (catch NoSuchMethodException _ nil))
+        (some (fn [^Field parent-field]
+                (when-let [parent-value (.get parent-field target)]
+                  (find-user-method parent-value lowered-name)))
+              (composition-fields cls)))))
+
 (defn- invoke-user-method
   [state target method-name args]
   (let [^Class cls (.getClass target)
         lowered-name (lowered-instance-method-name method-name (count args))]
-    (try
-      (let [^Method method (.getDeclaredMethod cls
-                                               lowered-name
-                                               (into-array Class [nex.compiler.jvm.runtime.NexReplState
-                                                                  (class (object-array 0))]))]
-        (invoke-reflective! method target (object-array [state (object-array args)])))
-      (catch NoSuchMethodException e
-        (let [runtime-name (runtime-type-name state target)]
-          (if (and (= method-name "cursor")
-                   (empty? args)
-                   (string? runtime-name)
-                   (runtime-compatible-with? state runtime-name "Cursor"))
-            target
-            (throw (ex-info (format "No matching method %s found taking %d args for class %s"
-                                    method-name
-                                    (count args)
-                                    (.getName cls))
-                            {:method method-name
-                             :arity (count args)
-                             :class (.getName cls)}
-                            e))))))))
+    (if-let [[effective-target ^Method method] (find-user-method target lowered-name)]
+      (invoke-reflective! method effective-target (object-array [state (object-array args)]))
+      (let [runtime-name (runtime-type-name state target)]
+        (if (and (= method-name "cursor")
+                 (empty? args)
+                 (string? runtime-name)
+                 (runtime-compatible-with? state runtime-name "Cursor"))
+          target
+          (throw (ex-info (format "No matching method %s found taking %d args for class %s"
+                                  method-name
+                                  (count args)
+                                  (.getName cls))
+                          {:method method-name
+                           :arity (count args)
+                           :class (.getName cls)})))))))
 
 (defn- get-user-field
   [target field-name]
