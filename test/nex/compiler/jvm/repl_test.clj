@@ -228,6 +228,36 @@ end"))
           (is (not (str/includes? output "Error:")))
           (is (str/includes? output "4")))))))
 
+(deftest repl-compiled-backend-across-integer-to-real-definition-test
+  (testing "compiled backend no longer loses across element types to Any during class definition"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            def-output (with-out-str
+                         (repl/eval-code ctx0 "class Student
+create
+  make() do
+    scores := []
+  end
+feature
+  scores: Array[Integer]
+  add_score(s: Integer) do
+    scores.add(s)
+  end
+  average(): Real do
+    result := 0.0
+    across scores as s do
+      result := result + s.to_real
+    end
+    result := result / scores.length.to_real
+  end
+end"))
+            type-output (with-out-str (repl/eval-code ctx0 "type_of(Student)"))]
+        (is (not (str/includes? def-output "Error:")))
+        (is (str/includes? type-output "Student"))))))
+
 (deftest repl-compiled-backend-function-with-rescue-compiles-test
   (testing "compiled backend uses distinct slots for rescue throwable state and visible exception values"
     (binding [repl/*type-checking-enabled* (atom true)
