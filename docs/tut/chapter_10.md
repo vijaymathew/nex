@@ -246,11 +246,11 @@ nex> function word_frequencies(text: String): Map[String, Integer]
 ```
 
 ```
-nex> let text := "to be or not to be that is the question to be"
+nex> let text := "to be or not to be that is the question to be to"
 
 nex> let freq := word_frequencies(text)
 nex> freq.get("to")
-3
+4
 
 nex> freq.get("be")
 3
@@ -266,10 +266,16 @@ To find the most frequent word:
 ```
 nex> function most_frequent(freq: Map[String, Integer]): String
      do
-       result := freq.keys.get(0)
-       across freq.keys as word do
-         if freq.get(word) > freq.get(result) then
-           result := word
+       result := ""
+       let started := false
+       across freq as entry do
+         if not started then
+           result := entry.get(0)
+           started := true
+         else
+           if freq.get(entry.get(0)) > freq.get(result) then
+             result := entry.get(0)
+           end
          end
        end
      end

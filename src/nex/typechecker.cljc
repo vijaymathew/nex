@@ -801,6 +801,16 @@
                  {:params [{:name "other" :type "Any"}] :return-type "Boolean"})
       "clone" (when (= argc 0)
                 {:params [] :return-type "Any"})
+      "cursor" (when (= argc 0)
+                 {:params [] :return-type "Cursor"})
+      "start" (when (= argc 0)
+                {:params [] :return-type "Void"})
+      "item" (when (= argc 0)
+               {:params [] :return-type "Any"})
+      "next" (when (= argc 0)
+               {:params [] :return-type "Void"})
+      "at_end" (when (= argc 0)
+                 {:params [] :return-type "Boolean"})
       nil)
 
     "Task"

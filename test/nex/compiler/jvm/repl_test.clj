@@ -146,6 +146,112 @@ end"))]
         (is (not (str/includes? output "Error:")))
         (is (contains? @(:classes ctx0) "Stack"))))))
 
+(deftest repl-compiled-backend-map-across-entry-get-test
+  (testing "compiled backend can iterate map entries whose static element type is Any"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "let capitals := {\"France\": \"Paris\", \"Japan\": \"Tokyo\", \"Brazil\": \"Brasília\"}"))
+            output (with-out-str
+                     (repl/eval-code ctx0 "across capitals as entry do
+  print(entry.get(0) + \" -> \" + entry.get(1))
+end"))]
+        (is (not (str/includes? output "Error:")))
+        (is (str/includes? output "France -> Paris"))
+        (is (str/includes? output "Japan -> Tokyo"))
+        (is (str/includes? output "Brazil -> Brasília"))))))
+
+(deftest repl-compiled-backend-across-array-item-length-test
+  (testing "compiled backend can use length on across-bound array items lowered as Any"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "let word_lengths: Map[String, Integer] := {}"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "let words := [\"apple\", \"fig\", \"banana\", \"kiwi\"]"))
+            output (with-out-str
+                     (repl/eval-code ctx0 "across words as w do
+  word_lengths.put(w, w.length)
+end"))
+            final-output (with-out-str (repl/eval-code ctx0 "word_lengths"))]
+        (is (not (str/includes? output "Error:")))
+        (is (str/includes? final-output "apple"))
+        (is (str/includes? final-output "5"))
+        (is (str/includes? final-output "banana"))
+        (is (str/includes? final-output "6"))))))
+
+(deftest repl-compiled-backend-across-string-test
+  (testing "compiled backend can iterate a string through dynamic cursor-style Any methods"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "across \"hello\" as ch do
+  print(ch)
+end"))]
+        (is (not (str/includes? output "Error:")))
+        (is (str/includes? output "h"))
+        (is (str/includes? output "e"))
+        (is (str/includes? output "o"))))))
+
+(deftest repl-compiled-backend-syncs-var-type-for-top-level-function-call-let-test
+  (testing "compiled backend keeps top-level let types when the value is a compiled function call"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "function word_frequencies(text: String): Map[String, Integer]
+do
+  result := {}
+  let words := text.to_lower.split(\" \")
+  across words as w do
+    let count := result.try_get(w, 0)
+    result.put(w, count + 1)
+  end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "let text := \"to be or not to be that is the question to be to\""))
+        (with-out-str
+          (repl/eval-code ctx0 "let freq := word_frequencies(text)"))
+        (is (contains? @repl/*repl-var-types* "freq"))
+        (let [output (with-out-str (repl/eval-code ctx0 "freq.get(\"to\")"))]
+          (is (not (str/includes? output "Error:")))
+          (is (str/includes? output "4")))))))
+
+(deftest repl-compiled-backend-function-with-rescue-compiles-test
+  (testing "compiled backend uses distinct slots for rescue throwable state and visible exception values"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            def-output (with-out-str
+                         (repl/eval-code ctx0 "function load_configuration(path: String): String
+require
+  path_not_empty: path.length > 0
+do
+  raise \"file missing\"
+rescue
+  print(\"using built-in defaults: \" + exception.to_string)
+                          result := \"theme=light%ntimeout=30\"
+end"))
+            call-output (with-out-str
+                          (repl/eval-code ctx0 "load_configuration(\"config.txt\")"))]
+        (is (not (str/includes? def-output "Error:")))
+        (is (str/includes? call-output "using built-in defaults: "))
+        (is (str/includes? call-output "file missing"))
+        (is (str/includes? call-output "Error: file missing"))))))
+
 (deftest repl-compiled-backend-string-split-test
   (testing "compiled backend keeps String.split on the compiled path with the compiler's Array representation"
     (binding [repl/*type-checking-enabled* (atom true)

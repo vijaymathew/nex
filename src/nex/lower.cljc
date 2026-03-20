@@ -358,8 +358,8 @@
             (set-type-of elem-type))
 
           :if
-          (or (some-> (:then expr) if-branch-expression (infer-type env))
-              (some-> (:else expr) if-branch-expression (infer-type env)))
+          (or (some-> (:then expr) (if-branch-expression env) (infer-type env))
+              (some-> (:else expr) (if-branch-expression env) (infer-type env)))
 
           :call
           (infer-call-type env expr)
@@ -501,11 +501,12 @@
     fn-def))
 
 (defn- if-branch-expression
-  [branch]
+  [env branch]
   (when (= 1 (count branch))
     (let [stmt (first branch)]
       (cond
-        (contains? expression-node-types (:type stmt))
+        (and (contains? expression-node-types (:type stmt))
+             (not= "Void" (infer-type env stmt)))
         stmt
 
         (and (= :assign (:type stmt))
@@ -649,7 +650,7 @@
       (let [[env1 throwable-slot] (alloc-temp-slot body-env)
             [env2 rescue-throwable-slot] (alloc-temp-slot env1)
           env-after-body body-env
-          rescue-env0 (assoc (scoped-child-env env-after-body) :retry-allowed? true)
+          rescue-env0 (assoc (scoped-child-env env2) :retry-allowed? true)
           [rescue-env1 exception-local] (env-add-local rescue-env0 "exception" "Any")
           [rescue-env2 lowered-rescue] (lower-statements rescue-env1 rescue)
           final-env (scoped-env env-after-body rescue-env2)]
@@ -667,7 +668,7 @@
     [(scoped-env env child-env) lowered]))
 
 (defn- elseif->else-expr
-  [elseif else-branch]
+  [env elseif else-branch]
   (if-let [clause (first elseif)]
     {:type :if
      :condition (:condition clause)
@@ -678,7 +679,7 @@
       (when-not (= 1 (count else-body))
         (throw (ex-info "Only expression-shaped or result-assignment if branches are supported in lowering"
                         {:branch else-body})))
-      (if-branch-expression else-body))))
+      (if-branch-expression env else-body))))
 
 (defn- case-clause-test-expr
   [env local literal-exprs]
@@ -1957,8 +1958,8 @@
     (let [elseif (:elseif expr)
           then-branch (:then expr)
           else-branch (:else expr)
-          then-expr (if-branch-expression then-branch)
-          else-expr (elseif->else-expr elseif else-branch)]
+          then-expr (if-branch-expression env then-branch)
+          else-expr (elseif->else-expr env elseif else-branch)]
       (when (or (nil? then-expr)
                 (nil? else-expr))
         (throw (ex-info "Only expression-shaped or result-assignment if branches are supported in lowering"
@@ -2795,6 +2796,31 @@
     :else
     [env [] nil]))
 
+(defn- repl-tail-returns-value?
+  [env stmt]
+  (cond
+    (= :if (:type stmt))
+    (and (some? (if-branch-expression env (:then stmt)))
+         (some? (elseif->else-expr env (:elseif stmt) (:else stmt))))
+
+    (contains? expression-node-types (:type stmt))
+    true
+
+    (= :call (:type stmt))
+    true
+
+    (= :let (:type stmt))
+    true
+
+    (= :assign (:type stmt))
+    true
+
+    (= :convert (:type stmt))
+    true
+
+    :else
+    false))
+
 (defn lower-function
   [unit-name visible-functions visible-imports fn-def]
   (let [fn-def (normalized-function-def fn-def)
@@ -3202,11 +3228,7 @@
                                 :next-slot 1})
         statements (vec (:statements program))
         tail-stmt (last statements)
-        return-tail? (or (contains? expression-node-types (:type tail-stmt))
-                         (= :call (:type tail-stmt))
-                         (= :let (:type tail-stmt))
-                         (= :assign (:type tail-stmt))
-                         (= :convert (:type tail-stmt)))
+        return-tail? (repl-tail-returns-value? env tail-stmt)
         leading-statements (if return-tail? (pop statements) statements)
         [env' lowered-body] (lower-statements env leading-statements)
         [env'' tail-stmts final-expr-ir] (if return-tail?

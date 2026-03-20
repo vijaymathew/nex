@@ -1145,6 +1145,13 @@
 (def-builtin-method-wrapper builtin-method-any-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-any-equals "equals")
 (def-builtin-method-wrapper builtin-method-any-clone "clone")
+(def-builtin-method-wrapper builtin-method-any-cursor "cursor")
+(def-builtin-method-wrapper builtin-method-any-start "start")
+(def-builtin-method-wrapper builtin-method-any-item "item")
+(def-builtin-method-wrapper builtin-method-any-next "next")
+(def-builtin-method-wrapper builtin-method-any-at-end "at_end")
+(def-builtin-method-wrapper builtin-method-any-get "get")
+(def-builtin-method-wrapper builtin-method-any-length "length")
 
 (def-builtin-method-wrapper builtin-method-integer-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-integer-abs "abs")

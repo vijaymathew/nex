@@ -644,16 +644,20 @@
                                 (tc/infer-expression-type
                                  (:value stmt)
                                  {:classes (vals @(:class-asts session))
+                                  :functions (vals @(:function-asts session))
                                   :imports @(:import-asts session)
-                                  :var-types (session-var-types session)}))]
+                                  :var-types (session-var-types session)})
+                                "Any")]
              (when nex-type
                (rt/state-set-type! (:state session) (:name stmt) nex-type))))
       :assign (when-let [nex-type (or (get (session-var-types session) (:target stmt))
                                       (tc/infer-expression-type
                                        (:value stmt)
                                        {:classes (vals @(:class-asts session))
+                                        :functions (vals @(:function-asts session))
                                         :imports @(:import-asts session)
-                                        :var-types (session-var-types session)}))]
+                                        :var-types (session-var-types session)})
+                                      "Any")]
                 (rt/state-set-type! (:state session) (:target stmt) nex-type))
       :convert (rt/state-set-type! (:state session)
                                    (:var-name stmt)

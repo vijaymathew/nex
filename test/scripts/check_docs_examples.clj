@@ -125,6 +125,9 @@
     (re-find #"(?m)^\s*Suggested files:\s*$" code)
     "contains prose instead of Nex code"
 
+    (re-find #"(?im)^\s*nex>\s*--\s*do not run this\s*$" code)
+    "contains an explicitly non-runnable example"
+
     :else
     nil))
 
