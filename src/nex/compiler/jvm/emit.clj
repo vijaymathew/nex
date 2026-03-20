@@ -643,6 +643,13 @@
                              (fn [] (emit-expr! mv (first args) state-slot))])
         (emit-return (:jvm-type expr)))
 
+      "builtin-method:Cursor:cursor"
+      (do
+        (emit-runtime-call! mv "builtin-cursor-cursor"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
       "builtin-method:Cursor:item"
       (do
         (emit-runtime-call! mv "builtin-cursor-item"

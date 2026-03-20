@@ -330,6 +330,10 @@
   [state target]
   (dispatch-cursor-method state target "start" []))
 
+(defn builtin-cursor-cursor
+  [state target]
+  (dispatch-cursor-method state target "cursor" []))
+
 (defn builtin-cursor-item
   [state target]
   (dispatch-cursor-method state target "item" []))

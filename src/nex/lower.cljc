@@ -894,6 +894,33 @@
   [env]
   (into {} (map (juxt :name identity) (:classes env))))
 
+(defn- lowering-type-env
+  [env]
+  (let [type-env (tc/make-type-env)]
+    (doseq [[class-name class-def] (visible-class-map env)]
+      (tc/env-add-class type-env class-name class-def))
+    type-env))
+
+(defn- cursor-compatible-type?
+  [env nex-type]
+  (let [base-type (base-type-name nex-type)]
+    (and (string? base-type)
+         (tc/class-subtype? (lowering-type-env env) base-type "Cursor"))))
+
+(defn- across-cursor-binding
+  [env stmt]
+  (when (and (:synthetic stmt)
+             (string? (:name stmt))
+             (str/starts-with? (:name stmt) "__across_c_")
+             (= :call (get-in stmt [:value :type]))
+             (= "cursor" (get-in stmt [:value :method]))
+             (empty? (get-in stmt [:value :args])))
+    (let [target-expr (normalize-call-target (get-in stmt [:value :target]))
+          target-type (and target-expr (infer-type env target-expr))]
+      (when (cursor-compatible-type? env target-type)
+        {:target-expr target-expr
+         :target-type target-type}))))
+
 (defn- generic-type-map
   [env target-type]
   (let [type-env (tc/make-type-env)]
@@ -2378,12 +2405,21 @@
   (let [[env' lowered]
         (cond
           (= :let (:type stmt))
-          (let [[env0 value-ir] (if (= :convert (:type (:value stmt)))
+          (let [across-binding (across-cursor-binding env stmt)
+                [env0 value-ir] (cond
+                                  across-binding
+                                  [env (lower-expression env (:target-expr across-binding))]
+
+                                  (= :convert (:type (:value stmt)))
                                   (let [[env' _] (ensure-convert-binding env (:value stmt))
                                         [env'' convert-ir] (lower-convert-expression env' (:value stmt))]
                                     [env'' convert-ir])
+
+                                  :else
                                   [env (lower-expression env (:value stmt))])
-                nex-type (or (:var-type stmt) (infer-type env0 (:value stmt)))]
+                nex-type (or (:var-type stmt)
+                             (:target-type across-binding)
+                             (infer-type env0 (:value stmt)))]
             (if (and (:top-level? env) (not (:scoped-locals? env)))
               [(update env0 :var-types assoc (:name stmt) nex-type)
                (ir/top-set-node (:name stmt) value-ir nex-type (resolve-jvm-type env0 nex-type))]
