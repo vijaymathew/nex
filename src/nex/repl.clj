@@ -1068,9 +1068,12 @@
 
 (defn- unwrap-user-visible-exception
   [e]
-  (if (instance? InvocationTargetException e)
-    (or (.getCause ^InvocationTargetException e) e)
-    e))
+  (loop [e e]
+    (if (instance? InvocationTargetException e)
+      (if-let [cause (.getCause ^InvocationTargetException e)]
+        (recur cause)
+        e)
+      e)))
 
 (defn- flush-compiled-output-on-error!
   []

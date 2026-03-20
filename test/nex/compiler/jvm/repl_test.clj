@@ -226,6 +226,35 @@ end"))
         (is (str/includes? output "Error: something went wrong"))
         (is (not (str/includes? output "Error: nil")))))))
 
+(deftest repl-compiled-backend-function-contract-and-rescue-messages-test
+  (testing "compiled backend preserves function-level require and rescue-raised messages"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "function parse_positive(text: String): Integer
+     require
+       not_empty: text.length > 0
+     do
+       let value := text.to_integer
+       if value <= 0 then
+         raise \"number must be positive\"
+       end
+       result := value
+     rescue
+       raise \"invalid positive integer: \" + text
+     end"))
+            empty-output (with-out-str (repl/eval-code ctx0 "parse_positive(\"\")"))
+            ok-output (with-out-str (repl/eval-code ctx0 "parse_positive(\"12\")"))
+            negative-output (with-out-str (repl/eval-code ctx0 "parse_positive(\"-12\")"))]
+        (is (str/includes? empty-output "Precondition violation: not_empty"))
+        (is (not (str/includes? empty-output "Error: nil")))
+        (is (str/includes? ok-output "12"))
+        (is (str/includes? negative-output "invalid positive integer: -12"))
+        (is (not (str/includes? negative-output "Error: nil")))))))
+
 (deftest repl-compiled-backend-raw-statement-forms-test
   (testing "compiled backend tries raw compiled parsing for statement-shaped inputs before wrapping"
     (binding [repl/*type-checking-enabled* (atom false)

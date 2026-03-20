@@ -12,7 +12,7 @@
             [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo])
   (:import [clojure.lang DynamicClassLoader]
-           [java.lang.reflect Field Method]
+           [java.lang.reflect Field Method InvocationTargetException]
            [java.util HashMap]
            [java.util.concurrent CompletableFuture TimeUnit TimeoutException ExecutionException CancellationException]))
 
@@ -117,6 +117,13 @@
         (throw (ex-info (str "Undefined Java class: " class-name)
                         {:class-name class-name})))))
 
+(defn- invoke-reflective!
+  [^Method method target args]
+  (try
+    (.invoke method target args)
+    (catch InvocationTargetException e
+      (throw (or (.getCause e) e)))))
+
 (defn invoke-repl-fn
   [state name args]
   (let [{:keys [owner method]} (state-get-fn state name)]
@@ -128,7 +135,7 @@
                                                     method
                                                     (into-array Class [nex.compiler.jvm.runtime.NexReplState
                                                                        (class (object-array 0))]))]
-      (.invoke target-method nil (object-array [state (object-array args)])))))
+      (invoke-reflective! target-method nil (object-array [state (object-array args)])))))
 
 (defn invoke-function-object
   [state target args]
@@ -150,7 +157,7 @@
                                              lowered-name
                                              (into-array Class [nex.compiler.jvm.runtime.NexReplState
                                                                 (class (object-array 0))]))]
-      (.invoke method target (object-array [state (object-array args)])))))
+      (invoke-reflective! method target (object-array [state (object-array args)])))))
 
 (defn- make-task
   [future]
@@ -511,7 +518,7 @@
                                                lowered-name
                                                (into-array Class [nex.compiler.jvm.runtime.NexReplState
                                                                   (class (object-array 0))]))]
-        (.invoke method target (object-array [state (object-array args)])))
+        (invoke-reflective! method target (object-array [state (object-array args)])))
       (catch NoSuchMethodException e
         (let [runtime-name (runtime-type-name state target)]
           (if (and (= method-name "cursor")
