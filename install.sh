@@ -4,7 +4,7 @@ set -e
 # Nex Language Installation Script
 # Usage: ./install.sh [jvm|nodejs] [--install-deps] [--prefix DIR]
 
-VERSION="0.1.0"
+VERSION="0.1.1"
 TARGET="jvm"
 INSTALL_DEPS=false
 INSTALL_PREFIX="${INSTALL_PREFIX:-/usr/local}"

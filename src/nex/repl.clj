@@ -1010,7 +1010,8 @@
           element-type (first type-params)]
       (and (= "Array" (:base-type target-type))
            (string? element-type)
-           (not (contains? builtin-sortable-types element-type))))))
+           (not (contains? builtin-sortable-types element-type))
+           (not (tc/types-compatible? env element-type "Comparable"))))))
 
 (defn- string-ordered-comparison?
   [ctx node]
@@ -1438,7 +1439,7 @@
 
 (defn show-banner []
   (println "╔════════════════════════════════════════════════════════════╗")
-  (println "║                   NEX REPL v0.1.0                          ║")
+  (println "║                   NEX REPL v0.1.1                          ║")
   (println "║     A high-level language for design and implementation    ║")
   (println "╚════════════════════════════════════════════════════════════╝")
   (println)
