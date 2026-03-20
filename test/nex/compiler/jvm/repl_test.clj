@@ -108,6 +108,475 @@
         (is (not (str/includes? output "Error:")))
         (is (str/includes? output "30.323"))))))
 
+(deftest repl-compiled-backend-builtin-numeric-method-compare-test
+  (testing "compiled backend preserves builtin numeric receiver types for later comparisons"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str (repl/eval-code ctx0 "let n := -5"))
+            int-output (with-out-str (repl/eval-code ctx0 "n.abs = 5"))
+            real-output (with-out-str (repl/eval-code ctx0 "n.abs = 5.0"))]
+        (is (not (str/includes? int-output "Error:")))
+        (is (str/includes? int-output "true"))
+        (is (not (str/includes? real-output "Error:")))
+        (is (str/includes? real-output "true"))))))
+
+(deftest repl-compiled-backend-generic-class-definition-deopts-cleanly-test
+  (testing "compiled default deopts generic class definitions that still need the interpreter path"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "class Stack [G]
+  create
+    make() do
+      items := []
+    end
+  feature
+    items: Array[G]
+    pop(): G do
+      result := items.get(items.length - 1)
+      items.remove(items.length - 1)
+    end
+end"))]
+        (is (not (str/includes? output "Error:")))
+        (is (contains? @(:classes ctx0) "Stack"))))))
+
+(deftest repl-compiled-backend-redefined-class-constructor-available-after-deopt-test
+  (testing "compiled backend refreshes class metadata after interpreter-side class redefinition"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "class Point
+  create
+    make(px, py: Real) do
+      x := px
+      y := py
+    end
+  feature
+    x: Real
+    y: Real
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "let p := create Point.make(3.0, 4.0)"))
+        (let [redef-output (with-out-str
+                             (repl/eval-code ctx0 "class Point
+  create
+    origin() do
+      x := 0.0
+      y := 0.0
+    end
+    make(px, py: Real) do
+      x := px
+      y := py
+    end
+  feature
+    x: Real
+    y: Real
+end"))
+              create-output (with-out-str
+                              (repl/eval-code ctx0 "let p1 := create Point.origin"))
+              x-output (with-out-str
+                         (repl/eval-code ctx0 "p1.x"))]
+          (is (not (str/includes? redef-output "Error:")))
+          (is (not (str/includes? create-output "Error:")))
+          (is (str/includes? x-output "0.0")))))))
+
+(deftest repl-compiled-backend-redefined-class-method-available-after-deopt-test
+  (testing "compiled backend refreshes class metadata when a redefined class gains a new method"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "class Todo_Item
+  create
+    make(t: String) do
+      title := t
+      done := false
+    end
+  feature
+    title: String
+    done: Boolean
+    mark_done() do
+      done := true
+    end
+    is_done(): Boolean do
+      result := done
+    end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "class Task_List
+  create
+    make() do
+      tasks := []
+    end
+  feature
+    tasks: Array[Todo_Item]
+    add_task(title: String) do
+      tasks.add(create Todo_Item.make(title))
+    end
+    task_at(index: Integer): Todo_Item do
+      result := tasks.get(index)
+    end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "let todo := create Task_List.make"))
+        (with-out-str
+          (repl/eval-code ctx0 "todo.add_task(\"write tests\")"))
+        (let [redef-output (with-out-str
+                             (repl/eval-code ctx0 "class Task_List
+  create
+    make() do
+      tasks := []
+    end
+  feature
+    tasks: Array[Todo_Item]
+    add_task(title: String) do
+      tasks.add(create Todo_Item.make(title))
+    end
+    task_at(index: Integer): Todo_Item do
+      result := tasks.get(index)
+    end
+    completed_count(): Integer do
+      result := 0
+      across tasks as task do
+        if task.is_done() then
+          result := result + 1
+        end
+      end
+    end
+end"))
+              new-todo-output (with-out-str
+                                (repl/eval-code ctx0 "let todo := create Task_List.make"))
+              count-output (with-out-str
+                             (repl/eval-code ctx0 "todo.completed_count"))]
+          (is (not (str/includes? redef-output "Error:")))
+          (is (not (str/includes? new-todo-output "Error:")))
+          (is (not (str/includes? count-output "Error:")))
+          (is (str/includes? count-output "0")))))))
+
+(deftest repl-compiled-backend-inherited-field-read-test
+  (testing "compiled backend reads inherited fields through the composition carrier"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "class Shape
+  create
+    make(c: String) do
+      colour := c
+    end
+  feature
+    colour: String
+    describe(): String do
+      result := \"A \" + colour + \" shape\"
+    end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "class Circle inherit Shape
+  create
+    make(c: String, r: Real) do
+      super.make(c)
+      radius := r
+    end
+  feature
+    radius: Real
+    describe(): String do
+      result := \"A \" + colour + \" circle with radius \" + radius.to_string
+    end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "let c := create Circle.make(\"red\", 5.0)"))
+        (let [output (with-out-str
+                       (repl/eval-code ctx0 "c.describe"))]
+          (is (not (str/includes? output "Error:")))
+          (is (str/includes? output "A red circle with radius 5.0")))))))
+
+(deftest repl-compiled-backend-generic-parent-inheritance-test
+  (testing "compiled backend supports generic inheritance syntax like inherit Stack[G]"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "class Stack [G]
+  create
+    make() do
+      items := []
+    end
+  feature
+    items: Array[G]
+    push(value: G) do
+      items.add(value)
+    end
+    size(): Integer do
+      result := items.length
+    end
+end"))
+        (let [def-output (with-out-str
+                           (repl/eval-code ctx0 "class Bounded_Stack [G] inherit Stack[G]
+  create
+    make(max: Integer) do
+      super.make
+      max_size := max
+    end
+  feature
+    max_size: Integer
+    is_full(): Boolean do
+      result := size = max_size
+    end
+    push(value: G) do
+      if not is_full then
+        super.push(value)
+      end
+    end
+end"))
+              _ (with-out-str
+                  (repl/eval-code ctx0 "let s := create Bounded_Stack[Integer].make(3)"))
+              _ (with-out-str (repl/eval-code ctx0 "s.push(1)"))
+              _ (with-out-str (repl/eval-code ctx0 "s.push(2)"))
+              _ (with-out-str (repl/eval-code ctx0 "s.push(3)"))
+              _ (with-out-str (repl/eval-code ctx0 "s.push(4)"))
+              size-output (with-out-str
+                            (repl/eval-code ctx0 "s.size"))]
+          (is (not (str/includes? def-output "Error:")))
+          (is (not (str/includes? size-output "Error:")))
+          (is (str/includes? size-output "3"))
+          (is (contains? @(:compiled-classes @repl/*compiled-repl-session*) "Stack"))
+          (is (contains? @(:compiled-classes @repl/*compiled-repl-session*) "Bounded_Stack")))))))
+
+(deftest repl-compiled-backend-super-constructor-transcript-test
+  (testing "compiled backend keeps account-style inheritance examples on the compiled path"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            define-output (with-out-str
+                            (repl/eval-code ctx0 "class Account
+  create
+    make(name: String, initial: Real) do
+      owner := name
+      balance := initial
+    end
+  feature
+    owner: String
+    balance: Real
+    deposit(amount: Real) do
+      balance := balance + amount
+    end
+    withdraw(amount: Real): Boolean do
+      if amount <= balance then
+        balance := balance - amount
+        result := true
+      else
+        result := false
+      end
+    end
+    get_balance(): Real do
+      result := balance
+    end
+    describe(): String do
+      result := owner + \": \" + balance.to_string
+    end
+end
+
+class SavingsAccount inherit Account
+  create
+    make(name: String, initial, rate: Real) do
+      super.make(name, initial)
+      interest_rate := rate
+    end
+  feature
+    interest_rate: Real
+    apply_interest() do
+      balance := balance + balance * interest_rate
+    end
+    describe(): String do
+      result := super.describe + \" (savings, rate: \" + interest_rate.to_string + \")\"
+    end
+end
+
+class OverdraftAccount inherit Account
+  create
+    make(name: String, initial, limit: Real) do
+      super.make(name, initial)
+      overdraft_limit := limit
+    end
+  feature
+    overdraft_limit: Real
+    withdraw(amount: Real): Boolean do
+      if balance - amount >= -overdraft_limit then
+        balance := balance - amount
+        result := true
+      else
+        result := false
+      end
+    end
+    describe(): String do
+      result := super.describe + \" (overdraft limit: \" + overdraft_limit.to_string + \")\"
+    end
+end"))
+            create-output (with-out-str
+                            (repl/eval-code ctx0 "let a := create SavingsAccount.make(\"Bob\", 1000.0, 0.02)"))
+            describe-output (with-out-str
+                              (repl/eval-code ctx0 "a.describe"))]
+        (is (not (str/includes? define-output "Error:")))
+        (is (not (str/includes? create-output "Error:")))
+        (is (not (str/includes? describe-output "Error:")))
+        (is (str/includes? describe-output "Bob: 1000.0 (savings, rate: 0.02)"))
+        (is (contains? @(:compiled-classes @repl/*compiled-repl-session*) "Account"))
+        (is (contains? @(:compiled-classes @repl/*compiled-repl-session*) "SavingsAccount"))
+        (is (contains? @(:compiled-classes @repl/*compiled-repl-session*) "OverdraftAccount"))))))
+
+(deftest repl-compiled-backend-map-across-entry-get-test
+  (testing "compiled backend can iterate map entries whose static element type is Any"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "let capitals := {\"France\": \"Paris\", \"Japan\": \"Tokyo\", \"Brazil\": \"Brasília\"}"))
+            output (with-out-str
+                     (repl/eval-code ctx0 "across capitals as entry do
+  print(entry.get(0) + \" -> \" + entry.get(1))
+end"))]
+        (is (not (str/includes? output "Error:")))
+        (is (str/includes? output "France -> Paris"))
+        (is (str/includes? output "Japan -> Tokyo"))
+        (is (str/includes? output "Brazil -> Brasília"))))))
+
+(deftest repl-compiled-backend-across-array-item-length-test
+  (testing "compiled backend can use length on across-bound array items lowered as Any"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "let word_lengths: Map[String, Integer] := {}"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "let words := [\"apple\", \"fig\", \"banana\", \"kiwi\"]"))
+            output (with-out-str
+                     (repl/eval-code ctx0 "across words as w do
+  word_lengths.put(w, w.length)
+end"))
+            final-output (with-out-str (repl/eval-code ctx0 "word_lengths"))]
+        (is (not (str/includes? output "Error:")))
+        (is (str/includes? final-output "apple"))
+        (is (str/includes? final-output "5"))
+        (is (str/includes? final-output "banana"))
+        (is (str/includes? final-output "6"))))))
+
+(deftest repl-compiled-backend-across-string-test
+  (testing "compiled backend can iterate a string through dynamic cursor-style Any methods"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "across \"hello\" as ch do
+  print(ch)
+end"))]
+        (is (not (str/includes? output "Error:")))
+        (is (str/includes? output "h"))
+        (is (str/includes? output "e"))
+        (is (str/includes? output "o"))))))
+
+(deftest repl-compiled-backend-syncs-var-type-for-top-level-function-call-let-test
+  (testing "compiled backend keeps top-level let types when the value is a compiled function call"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "function word_frequencies(text: String): Map[String, Integer]
+do
+  result := {}
+  let words := text.to_lower.split(\" \")
+  across words as w do
+    let count := result.try_get(w, 0)
+    result.put(w, count + 1)
+  end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "let text := \"to be or not to be that is the question to be to\""))
+        (with-out-str
+          (repl/eval-code ctx0 "let freq := word_frequencies(text)"))
+        (is (contains? @repl/*repl-var-types* "freq"))
+        (let [output (with-out-str (repl/eval-code ctx0 "freq.get(\"to\")"))]
+          (is (not (str/includes? output "Error:")))
+          (is (str/includes? output "4")))))))
+
+(deftest repl-compiled-backend-across-integer-to-real-definition-test
+  (testing "compiled backend no longer loses across element types to Any during class definition"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            def-output (with-out-str
+                         (repl/eval-code ctx0 "class Student
+create
+  make() do
+    scores := []
+  end
+feature
+  scores: Array[Integer]
+  add_score(s: Integer) do
+    scores.add(s)
+  end
+  average(): Real do
+    result := 0.0
+    across scores as s do
+      result := result + s.to_real
+    end
+    result := result / scores.length.to_real
+  end
+end"))
+            type-output (with-out-str (repl/eval-code ctx0 "type_of(Student)"))]
+        (is (not (str/includes? def-output "Error:")))
+        (is (str/includes? type-output "Student"))))))
+
+(deftest repl-compiled-backend-function-with-rescue-compiles-test
+  (testing "compiled backend uses distinct slots for rescue throwable state and visible exception values"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            def-output (with-out-str
+                         (repl/eval-code ctx0 "function load_configuration(path: String): String
+require
+  path_not_empty: path.length > 0
+do
+  raise \"file missing\"
+rescue
+  print(\"using built-in defaults: \" + exception.to_string)
+                          result := \"theme=light%ntimeout=30\"
+end"))
+            call-output (with-out-str
+                          (repl/eval-code ctx0 "load_configuration(\"config.txt\")"))]
+        (is (not (str/includes? def-output "Error:")))
+        (is (str/includes? call-output "using built-in defaults: "))
+        (is (str/includes? call-output "file missing"))
+        (is (str/includes? call-output "Error: file missing"))))))
+
 (deftest repl-compiled-backend-string-split-test
   (testing "compiled backend keeps String.split on the compiled path with the compiler's Array representation"
     (binding [repl/*type-checking-enabled* (atom true)
@@ -1003,5 +1472,29 @@ end")
           (finally
             (when (.exists source-file)
               (.delete source-file))
-            (when (.exists tmp-dir)
-              (.delete tmp-dir))))))))
+          (when (.exists tmp-dir)
+            (.delete tmp-dir))))))))
+
+(deftest repl-compiled-backend-convert-guard-inside-across-test
+  (testing "compiled backend handles convert-bound locals inside across loops without verifier errors"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            books-code "let books: Array[Map[String, Any]] := [
+  {\"title\": \"Dune\", \"author\": \"Frank Herbert\", \"year\": 1965},
+  {\"title\": \"Neuromancer\", \"author\": \"William Gibson\", \"year\": 1984},
+  {\"title\": \"Foundation\", \"author\": \"Isaac Asimov\", \"year\": 1951}
+]"
+            filter-code "across books as book do
+  if convert book.get(\"year\") to year: Integer then
+    if year < 1970 then
+      print(book.get(\"title\"))
+    end
+  end
+end"
+            _ (with-out-str (repl/eval-code ctx books-code))
+            out (with-out-str (repl/eval-code ctx filter-code))]
+        (is (not (str/includes? out "VerifyError")))
+        (is (not (str/includes? out "Error:")))))))

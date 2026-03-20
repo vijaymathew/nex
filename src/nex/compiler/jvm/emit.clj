@@ -1930,22 +1930,22 @@
         (:jvm-type expr)))
 
     :compare
-    (let [left-type (emit-expr! mv (:left expr) state-slot)
-          operand-type (or (numeric-promotion-jvm-type left-type (:jvm-type (:left expr)))
-                           left-type)]
-      (emit-stack-coerce! mv left-type operand-type)
-      (let [right-type (emit-expr! mv (:right expr) state-slot)
-            compare-type (or (numeric-promotion-jvm-type operand-type right-type)
-                             (when (= operand-type right-type) operand-type)
-                             (when (and (ir/object-jvm-type? operand-type)
-                                        (ir/object-jvm-type? right-type))
-                               (ir/object-jvm-type "java/lang/Object")))]
-        (when-not compare-type
-          (throw (ex-info "Compare operands lowered to incompatible JVM types"
-                          {:expr expr
-                           :left-jvm-type left-type
-                           :right-jvm-type right-type})))
-        (emit-stack-coerce! mv right-type compare-type)
+    (let [declared-left-type (:jvm-type (:left expr))
+          declared-right-type (:jvm-type (:right expr))
+          compare-type (or (numeric-promotion-jvm-type declared-left-type declared-right-type)
+                           (when (= declared-left-type declared-right-type) declared-left-type)
+                           (when (and (ir/object-jvm-type? declared-left-type)
+                                      (ir/object-jvm-type? declared-right-type))
+                             (ir/object-jvm-type "java/lang/Object")))]
+      (when-not compare-type
+        (throw (ex-info "Compare operands lowered to incompatible JVM types"
+                        {:expr expr
+                         :left-jvm-type declared-left-type
+                         :right-jvm-type declared-right-type})))
+      (let [left-type (emit-expr! mv (:left expr) state-slot)]
+        (emit-stack-coerce! mv left-type compare-type))
+      (let [right-type (emit-expr! mv (:right expr) state-slot)]
+        (emit-stack-coerce! mv right-type compare-type))
       (cond
         (#{:int :boolean :char} compare-type)
         (emit-numeric-compare! mv (:operator expr) compare-type)
@@ -1962,7 +1962,7 @@
 
         :else
         (throw (ex-info "Unsupported compare emission type"
-                        {:expr expr :jvm-type compare-type}))))
+                        {:expr expr :jvm-type compare-type})))
       (:jvm-type expr))
 
     :if

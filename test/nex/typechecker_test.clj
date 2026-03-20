@@ -1176,3 +1176,14 @@ end"
           result (tc/type-check (p/ast code))]
       (is (:success result))
       (is (empty? (:errors result))))))
+
+(deftest test-contextual-map-any-literal-typing
+  (testing "typed collection literals can widen nested heterogeneous map values to Any"
+    (let [code "let books: Array[Map[String, Any]] := [
+  {\"title\": \"Dune\", \"author\": \"Frank Herbert\", \"year\": 1965},
+  {\"title\": \"Neuromancer\", \"author\": \"William Gibson\", \"year\": 1984},
+  {\"title\": \"Foundation\", \"author\": \"Isaac Asimov\", \"year\": 1951}
+]"
+          result (tc/type-check (p/ast code))]
+      (is (:success result))
+      (is (empty? (:errors result))))))

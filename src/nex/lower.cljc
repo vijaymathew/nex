@@ -25,6 +25,7 @@
 (declare current-class-def)
 (declare class-method-def)
 (declare class-field-def)
+ (declare elseif->else-expr)
 (declare visible-class-map)
 (declare generic-type-map)
 (declare normalize-call-target)
@@ -38,6 +39,7 @@
 (declare single-super-parent-name)
 (declare infer-call-type)
 (declare collect-anonymous-class-defs)
+(declare refine-condition-branch-env)
 (declare function-object-call?)
 (declare function-object-binding-type)
 (declare lower-select)
@@ -227,7 +229,7 @@
   ([] (make-lowering-env {}))
   ([{:keys [locals top-level? repl? state-slot next-slot classes functions imports var-types
             compiled-classes current-class fields this-type old-field-locals
-            generic-param-names with-java?] :as opts}]
+            generic-param-names with-java? across-cursors] :as opts}]
    {:locals (or locals {})
     :top-level? (if (contains? opts :top-level?) top-level? true)
     :repl? (if (contains? opts :repl?) repl? true)
@@ -245,7 +247,8 @@
     :retry-allowed? false
     :old-field-locals (or old-field-locals {})
     :generic-param-names (set generic-param-names)
-    :with-java? (boolean with-java?)}))
+    :with-java? (boolean with-java?)
+    :across-cursors (or across-cursors {})}))
 
 (defn- resolve-jvm-type
   [env nex-type]
@@ -295,7 +298,11 @@
 
 (defn- infer-type
   [env expr]
-  (let [direct-type
+  (let [convert-branch-env (fn [env' condition]
+                             (if (= :convert (:type condition))
+                               (assoc-in env' [:var-types (:var-name condition)] (:target-type condition))
+                               env'))
+        direct-type
         (case (:type expr)
           :identifier
           (or (get-in (:locals env) [(:name expr) :nex-type])
@@ -303,6 +310,11 @@
               (some-> (current-class-def env)
                       (class-field-def (:name expr))
                       :field-type)
+              (some-> (current-class-def env)
+                      ((fn [class-def]
+                         (or (class-method-def class-def (:name expr) 0)
+                             (inherited-method-def env class-def (:name expr) 0))))
+                      function-return-type)
               (some-> (and (:current-class env)
                            (lookup-class-constant env (:current-class env) (:name expr)))
                       (#(constant-nex-type env %)))
@@ -358,8 +370,12 @@
             (set-type-of elem-type))
 
           :if
-          (or (some-> (:then expr) if-branch-expression (infer-type env))
-              (some-> (:else expr) if-branch-expression (infer-type env)))
+          (let [then-env (refine-condition-branch-env (convert-branch-env env (:condition expr))
+                                                      (:condition expr)
+                                                      :then)
+                else-env (refine-condition-branch-env env (:condition expr) :else)]
+            (or (some-> (:then expr) (if-branch-expression then-env) (infer-type then-env))
+                (some-> (:else expr) (if-branch-expression else-env) (infer-type else-env))))
 
           :call
           (infer-call-type env expr)
@@ -384,6 +400,8 @@
                             (some #(when (= (:name %) raw-target)
                                      (:name %))
                                   (:classes env)))
+        across-item-type (and (string? raw-target)
+                              (get (:across-cursors env) raw-target))
         target-expr (normalize-call-target raw-target)]
     (if (nil? target-expr)
       (or
@@ -425,6 +443,14 @@
                               (get (visible-class-map env) class-target-name))
                             (get (visible-class-map env) base-type))]
           (or
+           (when across-item-type
+             (case (:method expr)
+               "item" across-item-type
+               "start" "Void"
+               "next" "Void"
+               "at_end" "Boolean"
+               "cursor" "Cursor"
+               nil))
            (when (or java-static-owner (:with-java? env))
              "Any")
            (when class-def
@@ -501,11 +527,12 @@
     fn-def))
 
 (defn- if-branch-expression
-  [branch]
+  [env branch]
   (when (= 1 (count branch))
     (let [stmt (first branch)]
       (cond
-        (contains? expression-node-types (:type stmt))
+        (and (contains? expression-node-types (:type stmt))
+             (not= "Void" (infer-type env stmt)))
         stmt
 
         (and (= :assign (:type stmt))
@@ -514,6 +541,20 @@
 
         :else
         nil))))
+
+(defn- implicit-if-expression?
+  [env stmt]
+  (when (= :if (:type stmt))
+    (let [then-env (refine-condition-branch-env
+                    (if (= :convert (get-in stmt [:condition :type]))
+                      (assoc-in env [:var-types (get-in stmt [:condition :var-name])]
+                                (get-in stmt [:condition :target-type]))
+                      env)
+                    (:condition stmt)
+                    :then)
+          else-env (refine-condition-branch-env env (:condition stmt) :else)]
+      (and (some? (if-branch-expression then-env (:then stmt)))
+           (some? (elseif->else-expr else-env (:elseif stmt) (:else stmt)))))))
 
 (defn- scoped-env
   [env child-env]
@@ -649,7 +690,7 @@
       (let [[env1 throwable-slot] (alloc-temp-slot body-env)
             [env2 rescue-throwable-slot] (alloc-temp-slot env1)
           env-after-body body-env
-          rescue-env0 (assoc (scoped-child-env env-after-body) :retry-allowed? true)
+          rescue-env0 (assoc (scoped-child-env env2) :retry-allowed? true)
           [rescue-env1 exception-local] (env-add-local rescue-env0 "exception" "Any")
           [rescue-env2 lowered-rescue] (lower-statements rescue-env1 rescue)
           final-env (scoped-env env-after-body rescue-env2)]
@@ -667,7 +708,7 @@
     [(scoped-env env child-env) lowered]))
 
 (defn- elseif->else-expr
-  [elseif else-branch]
+  [env elseif else-branch]
   (if-let [clause (first elseif)]
     {:type :if
      :condition (:condition clause)
@@ -678,7 +719,7 @@
       (when-not (= 1 (count else-body))
         (throw (ex-info "Only expression-shaped or result-assignment if branches are supported in lowering"
                         {:branch else-body})))
-      (if-branch-expression else-body))))
+      (if-branch-expression env else-body))))
 
 (defn- case-clause-test-expr
   [env local literal-exprs]
@@ -1218,7 +1259,7 @@
   [env {:keys [var-name target-type]}]
   (if-let [binding (lookup-convert-binding env var-name)]
     [env binding]
-    (let [bound-type (tc/detachable-version target-type)]
+    (let [bound-type target-type]
       (if (and (:top-level? env) (not (:scoped-locals? env)))
         (let [env' (update env :var-types assoc var-name bound-type)]
           [env' {:kind :top
@@ -1859,13 +1900,22 @@
     :identifier
     (if-let [{:keys [slot nex-type jvm-type]} (get (:locals env) (:name expr))]
       (ir/local-node (:name expr) slot nex-type jvm-type)
-      (if-let [{:keys [owner field nex-type jvm-type]} (get (:fields env) (:name expr))]
-        (ir/field-get-node (:internal-name (class-jvm-meta env owner))
-                           field
-                           (ir/this-node (:this-type env)
-                                         (resolve-jvm-type env (:this-type env)))
-                           nex-type
-                           jvm-type)
+      (if-let [{:keys [owner field carrier-owner carrier-field nex-type jvm-type carrier-jvm-type]}
+               (get (:fields env) (:name expr))]
+        (let [target-ir (if carrier-field
+                          (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
+                                             carrier-field
+                                             (ir/this-node (:this-type env)
+                                                           (resolve-jvm-type env (:this-type env)))
+                                             owner
+                                             carrier-jvm-type)
+                          (ir/this-node (:this-type env)
+                                        (resolve-jvm-type env (:this-type env))))]
+          (ir/field-get-node (:internal-name (class-jvm-meta env owner))
+                             field
+                             target-ir
+                             nex-type
+                             jvm-type))
         (if-let [constant (and (:current-class env)
                                (lookup-class-constant env (:current-class env) (:name expr)))]
           (let [owner (:declaring-class constant)
@@ -1875,13 +1925,22 @@
                                       (:name constant)
                                       nex-type
                                       jvm-type))
-          (let [nex-type (or (get (:var-types env) (:name expr))
-                             (infer-type env expr))
-                jvm-type (resolve-jvm-type env nex-type)]
-            (if (:top-level? env)
-              (ir/top-get-node (:name expr) nex-type jvm-type)
-              (throw (ex-info "Unknown local in non-top-level lowering"
-                              {:name (:name expr)})))))))
+          (if-let [method-def (some-> (current-class-def env)
+                                      ((fn [class-def]
+                                         (or (class-method-def class-def (:name expr) 0)
+                                             (inherited-method-def env class-def (:name expr) 0)))))]
+            (lower-expression env {:type :call
+                                   :target {:type :this}
+                                   :method (:name expr)
+                                   :args []
+                                   :has-parens true})
+            (let [nex-type (or (get (:var-types env) (:name expr))
+                               (infer-type env expr))
+                  jvm-type (resolve-jvm-type env nex-type)]
+              (if (:top-level? env)
+                (ir/top-get-node (:name expr) nex-type jvm-type)
+                (throw (ex-info "Unknown local in non-top-level lowering"
+                                {:name (:name expr)}))))))))
 
     :this
     (if (:this-type env)
@@ -1956,23 +2015,25 @@
     :if
     (let [elseif (:elseif expr)
           then-branch (:then expr)
-          else-branch (:else expr)
-          then-expr (if-branch-expression then-branch)
-          else-expr (elseif->else-expr elseif else-branch)]
-      (when (or (nil? then-expr)
-                (nil? else-expr))
-        (throw (ex-info "Only expression-shaped or result-assignment if branches are supported in lowering"
-                        {:expr expr})))
+          else-branch (:else expr)]
       (let [[cond-env test-ir] (if (= :convert (:type (:condition expr)))
                                  (let [[cond-env _] (ensure-convert-binding (scoped-child-env env) (:condition expr))
                                        [cond-env' convert-ir] (lower-convert-expression cond-env (:condition expr))]
                                    [cond-env' convert-ir])
                                  [env (lower-expression env (:condition expr))])
-            then-ir (lower-expression (refine-condition-branch-env cond-env (:condition expr) :then) then-expr)
-            else-ir (lower-expression (refine-condition-branch-env env (:condition expr) :else) else-expr)
-            nex-type (infer-type env expr)
-            jvm-type (resolve-jvm-type env nex-type)]
-        (ir/if-node test-ir [then-ir] [else-ir] nex-type jvm-type)))
+            then-env (refine-condition-branch-env cond-env (:condition expr) :then)
+            else-env (refine-condition-branch-env env (:condition expr) :else)
+            then-expr (if-branch-expression then-env then-branch)
+            else-expr (elseif->else-expr else-env elseif else-branch)]
+        (when (or (nil? then-expr)
+                  (nil? else-expr))
+          (throw (ex-info "Only expression-shaped or result-assignment if branches are supported in lowering"
+                          {:expr expr})))
+        (let [then-ir (lower-expression then-env then-expr)
+              else-ir (lower-expression else-env else-expr)
+              nex-type (infer-type env expr)
+              jvm-type (resolve-jvm-type env nex-type)]
+          (ir/if-node test-ir [then-ir] [else-ir] nex-type jvm-type))))
 
     :when
     (let [[cond-env test-ir] (if (= :convert (:type (:condition expr)))
@@ -2438,11 +2499,21 @@
                                   [env (lower-expression env (:value stmt))])
                 nex-type (or (:var-type stmt)
                              (:target-type across-binding)
-                             (infer-type env0 (:value stmt)))]
+                             (infer-type env0 (:value stmt)))
+                env1 (if (and (:synthetic stmt)
+                              (string? (:name stmt))
+                              (str/starts-with? (:name stmt) "__across_c_")
+                              (= :call (get-in stmt [:value :type]))
+                              (= "cursor" (get-in stmt [:value :method]))
+                              (empty? (get-in stmt [:value :args])))
+                       (let [target-type (infer-type env0 (get-in stmt [:value :target]))]
+                         (assoc-in env0 [:across-cursors (:name stmt)]
+                                   (tc/cursor-item-type target-type)))
+                       env0)]
             (if (and (:top-level? env) (not (:scoped-locals? env)))
-              [(update env0 :var-types assoc (:name stmt) nex-type)
-               (ir/top-set-node (:name stmt) value-ir nex-type (resolve-jvm-type env0 nex-type))]
-              (let [[env' local] (env-add-local env0 (:name stmt) nex-type)]
+              [(update env1 :var-types assoc (:name stmt) nex-type)
+               (ir/top-set-node (:name stmt) value-ir nex-type (resolve-jvm-type env1 nex-type))]
+              (let [[env' local] (env-add-local env1 (:name stmt) nex-type)]
                 [env' (ir/set-local-node (:slot local) value-ir (:nex-type local) (:jvm-type local))])))
 
           (= :assign (:type stmt))
@@ -2761,6 +2832,9 @@
 (defn- lower-repl-tail
   [env stmt]
   (cond
+    (= :if (:type stmt))
+    [env [] (lower-expression env stmt)]
+
     (contains? expression-node-types (:type stmt))
     [env [] (lower-expression env stmt)]
 
@@ -2794,6 +2868,39 @@
 
     :else
     [env [] nil]))
+
+(defn- repl-tail-returns-value?
+  [env stmt]
+  (cond
+    (= :if (:type stmt))
+    (let [then-env (refine-condition-branch-env
+                    (if (= :convert (get-in stmt [:condition :type]))
+                      (assoc-in env [:var-types (get-in stmt [:condition :var-name])]
+                                (get-in stmt [:condition :target-type]))
+                      env)
+                    (:condition stmt)
+                    :then)
+          else-env (refine-condition-branch-env env (:condition stmt) :else)]
+      (and (some? (if-branch-expression then-env (:then stmt)))
+           (some? (elseif->else-expr else-env (:elseif stmt) (:else stmt)))))
+
+    (contains? expression-node-types (:type stmt))
+    true
+
+    (= :call (:type stmt))
+    true
+
+    (= :let (:type stmt))
+    true
+
+    (= :assign (:type stmt))
+    true
+
+    (= :convert (:type stmt))
+    true
+
+    :else
+    false))
 
 (defn lower-function
   [unit-name visible-functions visible-imports fn-def]
@@ -2857,14 +2964,16 @@
                       final-stmt (last body)]
                   (if (or (and (= :assign (:type final-stmt))
                                (= "result" (:target final-stmt)))
-                          (contains? expression-node-types (:type final-stmt))
+                          (and (contains? expression-node-types (:type final-stmt))
+                               (or (not= :if (:type final-stmt))
+                                   (implicit-if-expression? env-with-old final-stmt)))
                           (= :call (:type final-stmt))
                           (= :convert (:type final-stmt)))
                     (let [[env' lowered-leading] (lower-statements env-with-old leading-statements)
-                          final-expr (if (and (= :assign (:type final-stmt))
-                                              (= "result" (:target final-stmt)))
-                                       nil
-                                       final-stmt)
+                          implicit-result-expr? (and (not (and (= :assign (:type final-stmt))
+                                                               (= "result" (:target final-stmt))))
+                                                     (not= "Void" (infer-type env' final-stmt)))
+                          final-expr (when implicit-result-expr? final-stmt)
                           [env'' lowered-tail]
                           (if final-expr
                             [env' (with-stmt-debug
@@ -3202,11 +3311,7 @@
                                 :next-slot 1})
         statements (vec (:statements program))
         tail-stmt (last statements)
-        return-tail? (or (contains? expression-node-types (:type tail-stmt))
-                         (= :call (:type tail-stmt))
-                         (= :let (:type tail-stmt))
-                         (= :assign (:type tail-stmt))
-                         (= :convert (:type tail-stmt)))
+        return-tail? (repl-tail-returns-value? env tail-stmt)
         leading-statements (if return-tail? (pop statements) statements)
         [env' lowered-body] (lower-statements env leading-statements)
         [env'' tail-stmts final-expr-ir] (if return-tail?

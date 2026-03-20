@@ -1033,7 +1033,8 @@
 
 (defn- ast-needs-interpreter-fallback?
   [ctx ast]
-  (let [top-nodes (concat (:statements ast) (:calls ast))
+  (let [top-nodes (concat (:statements ast)
+                          (:calls ast))
         nodes (tree-seq coll? seq top-nodes)]
     (boolean
      (some (fn [node]
