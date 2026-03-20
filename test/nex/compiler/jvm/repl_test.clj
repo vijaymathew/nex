@@ -71,6 +71,19 @@
                      (repl/eval-code ctx1 "x + 2"))]
         (is (str/includes? output "42"))))))
 
+(deftest repl-compiled-backend-mixed-numeric-arithmetic-test
+  (testing "compiled backend widens mixed numeric arithmetic instead of deopting or failing"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str (repl/eval-code ctx0 "let x := 10"))
+            _ (with-out-str (repl/eval-code ctx0 "let y := 20.323"))
+            output (with-out-str (repl/eval-code ctx0 "x + y"))]
+        (is (not (str/includes? output "Error:")))
+        (is (str/includes? output "30.323"))))))
+
 (deftest repl-compiled-backend-raw-statement-forms-test
   (testing "compiled backend tries raw compiled parsing for statement-shaped inputs before wrapping"
     (binding [repl/*type-checking-enabled* (atom false)

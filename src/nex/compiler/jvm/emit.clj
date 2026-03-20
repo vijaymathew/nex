@@ -394,6 +394,15 @@
     (= from-jvm-type to-jvm-type)
     nil
 
+    (and (= :int from-jvm-type) (= :long to-jvm-type))
+    (.visitInsn mv Opcodes/I2L)
+
+    (and (= :int from-jvm-type) (= :double to-jvm-type))
+    (.visitInsn mv Opcodes/I2D)
+
+    (and (= :long from-jvm-type) (= :double to-jvm-type))
+    (.visitInsn mv Opcodes/L2D)
+
     (and (contains? ir/primitive-jvm-types from-jvm-type)
          (ir/object-jvm-type? to-jvm-type))
     (emit-box! mv from-jvm-type)
@@ -410,6 +419,15 @@
     (throw (ex-info "Unsupported JVM stack coercion"
                     {:from-jvm-type from-jvm-type
                      :to-jvm-type to-jvm-type}))))
+
+(defn- numeric-promotion-jvm-type
+  [left-jvm-type right-jvm-type]
+  (cond
+    (= left-jvm-type right-jvm-type) left-jvm-type
+    (or (= :double left-jvm-type) (= :double right-jvm-type)) :double
+    (or (= :long left-jvm-type) (= :long right-jvm-type)) :long
+    (and (= :int left-jvm-type) (= :int right-jvm-type)) :int
+    :else nil))
 
 (defn- local-store-op
   [jvm-type]
@@ -1894,40 +1912,52 @@
 
       :else
       (let [left-type (emit-expr! mv (:left expr) state-slot)
-            right-type (emit-expr! mv (:right expr) state-slot)]
-        (when (not= left-type right-type)
-          (throw (ex-info "Binary operands lowered to different JVM types"
-                          {:expr expr
-                           :left-jvm-type left-type
-                           :right-jvm-type right-type})))
-        (.visitInsn mv (binary-opcode (:operator expr) (:jvm-type expr)))
+            operand-type (or (numeric-promotion-jvm-type left-type (:jvm-type expr))
+                             (:jvm-type expr))]
+        (emit-stack-coerce! mv left-type operand-type)
+        (let [right-type (emit-expr! mv (:right expr) state-slot)]
+          (emit-stack-coerce! mv right-type operand-type)
+          (when-not (= operand-type (:jvm-type expr))
+            (throw (ex-info "Binary operand promotion disagrees with result JVM type"
+                            {:expr expr
+                             :operand-jvm-type operand-type
+                             :result-jvm-type (:jvm-type expr)
+                             :left-jvm-type left-type
+                             :right-jvm-type right-type})))
+          (.visitInsn mv (binary-opcode (:operator expr) operand-type)))
         (:jvm-type expr)))
 
     :compare
     (let [left-type (emit-expr! mv (:left expr) state-slot)
-          right-type (emit-expr! mv (:right expr) state-slot)]
-      (when (not= left-type right-type)
-        (throw (ex-info "Compare operands lowered to different JVM types"
-                        {:expr expr
-                         :left-jvm-type left-type
-                         :right-jvm-type right-type})))
+          operand-type (or (numeric-promotion-jvm-type left-type (:jvm-type (:left expr)))
+                           left-type)]
+      (emit-stack-coerce! mv left-type operand-type)
+      (let [right-type (emit-expr! mv (:right expr) state-slot)
+            compare-type (or (numeric-promotion-jvm-type operand-type right-type)
+                             (when (= operand-type right-type) operand-type))]
+        (when-not compare-type
+          (throw (ex-info "Compare operands lowered to incompatible JVM types"
+                          {:expr expr
+                           :left-jvm-type left-type
+                           :right-jvm-type right-type})))
+        (emit-stack-coerce! mv right-type compare-type)
       (cond
-        (#{:int :boolean :char} left-type)
-        (emit-numeric-compare! mv (:operator expr) left-type)
+        (#{:int :boolean :char} compare-type)
+        (emit-numeric-compare! mv (:operator expr) compare-type)
 
-        (#{:long :double} left-type)
-        (emit-long-or-double-compare! mv (:operator expr) left-type)
+        (#{:long :double} compare-type)
+        (emit-long-or-double-compare! mv (:operator expr) compare-type)
 
-        (ir/object-jvm-type? left-type)
+        (ir/object-jvm-type? compare-type)
         (do
           (when-not (#{:eq :neq} (:operator expr))
             (throw (ex-info "Only eq/neq object comparisons are supported"
-                            {:expr expr :jvm-type left-type})))
+                            {:expr expr :jvm-type compare-type})))
           (emit-object-compare! mv (:operator expr)))
 
         :else
         (throw (ex-info "Unsupported compare emission type"
-                        {:expr expr :jvm-type left-type})))
+                        {:expr expr :jvm-type compare-type}))))
       (:jvm-type expr))
 
     :if

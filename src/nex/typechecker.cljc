@@ -359,6 +359,19 @@
     :else
     "Real"))
 
+(defn numeric-result-type
+  "Infer a common numeric type for non-division arithmetic.
+   Real wins over Decimal, Decimal wins over integral types, Integer64 wins
+   over Integer."
+  [left-type right-type]
+  (let [left (normalize-type left-type)
+        right (normalize-type right-type)]
+    (cond
+      (or (= left "Real") (= right "Real")) "Real"
+      (or (= left "Decimal") (= right "Decimal")) "Decimal"
+      (or (= left "Integer64") (= right "Integer64")) "Integer64"
+      :else "Integer")))
+
 (defn power-result-type
   "Infer the result type of exponentiation.
    Integral ^ integral stays integral; any non-integral operand yields Real."
@@ -522,7 +535,7 @@
         "String"
 
         (and (is-numeric-type? left-type) (is-numeric-type? right-type))
-        left-type
+        (numeric-result-type left-type right-type)
 
         :else
         (throw (ex-info (str "Operator " operator " requires numeric or String operands")
@@ -540,7 +553,7 @@
 
       ("-" "*" "%")
       (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
-        left-type
+        (numeric-result-type left-type right-type)
         (throw (ex-info (str "Operator " operator " requires numeric operands")
                         {:error (type-error
                                  (str "Operator " operator " requires numeric operands, got "
