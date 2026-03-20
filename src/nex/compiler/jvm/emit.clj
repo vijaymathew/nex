@@ -101,6 +101,10 @@
             Opcodes/ACC_PUBLIC)
    :fields (vec
             (concat
+             [{:name "__outer__"
+               :descriptor "Ljava/lang/Object;"
+               :flags Opcodes/ACC_PUBLIC
+               :jvm-type (ir/object-jvm-type "java/lang/Object")}]
              (map (fn [{:keys [name jvm-type]}]
                     {:name name
                      :descriptor (desc/jvm-type->descriptor jvm-type)
@@ -284,6 +288,10 @@
     (.visitCode mv)
     (.visitVarInsn mv Opcodes/ALOAD 0)
     (.visitMethodInsn mv Opcodes/INVOKESPECIAL super-name "<init>" "()V" false)
+    ;; Initialize __outer__ = this (self-reference for dynamic dispatch)
+    (.visitVarInsn mv Opcodes/ALOAD 0)
+    (.visitVarInsn mv Opcodes/ALOAD 0)
+    (.visitFieldInsn mv Opcodes/PUTFIELD owner "__outer__" "Ljava/lang/Object;")
     (doseq [{:keys [name jvm-type deferred?]} composition-fields]
       (.visitVarInsn mv Opcodes/ALOAD 0)
       (if deferred?
@@ -296,7 +304,13 @@
                        Opcodes/PUTFIELD
                        owner
                        name
-                       (desc/jvm-type->descriptor jvm-type)))
+                       (desc/jvm-type->descriptor jvm-type))
+      ;; Set parent.__outer__ = this (back-pointer for dynamic dispatch)
+      (when-not deferred?
+        (.visitVarInsn mv Opcodes/ALOAD 0)
+        (.visitFieldInsn mv Opcodes/GETFIELD owner name (desc/jvm-type->descriptor jvm-type))
+        (.visitVarInsn mv Opcodes/ALOAD 0)
+        (.visitFieldInsn mv Opcodes/PUTFIELD (second jvm-type) "__outer__" "Ljava/lang/Object;")))
     (doseq [{:keys [name jvm-type]} fields]
       (.visitVarInsn mv Opcodes/ALOAD 0)
       (emit-const! mv {:value (class-default-value jvm-type) :jvm-type jvm-type})

@@ -1820,13 +1820,19 @@
       (let [nex-type (tc/resolve-generic-type (function-return-type method-def) type-map)
             jvm-type (resolve-jvm-type env nex-type)]
         (if (= (:type target-expr) :this)
-          (ir/call-virtual-node (:internal-name (class-jvm-meta env base-type))
-                                (lowered-instance-method-name method-def)
-                                (desc/repl-instance-method-descriptor)
-                                target-ir
-                                (mapv #(lower-expression env %) args)
-                                nex-type
-                                jvm-type)
+          ;; Dispatch self-calls through __outer__ for proper dynamic dispatch.
+          ;; When this object is a composition parent, __outer__ points to the
+          ;; child that contains it, so overridden methods are called correctly.
+          (let [outer-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                            "__outer__"
+                                            (ir/this-node (:this-type env)
+                                                          (exact-class-jvm-type env (:this-type env)))
+                                            "Any"
+                                            (ir/object-jvm-type "java/lang/Object"))]
+            (ir/call-runtime-node (str "user-method:" method)
+                                  (into [outer-ir] (mapv #(lower-expression env %) args))
+                                  nex-type
+                                  jvm-type))
           (ir/call-runtime-node (str "user-method:" method)
                                 (into [target-ir] (mapv #(lower-expression env %) args))
                                 nex-type

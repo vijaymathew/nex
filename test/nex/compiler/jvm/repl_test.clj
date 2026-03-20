@@ -303,6 +303,149 @@ end"))
           (is (not (str/includes? output "Error:")))
           (is (str/includes? output "A red circle with radius 5.0")))))))
 
+(deftest repl-compiled-backend-polymorphic-across-test
+  (testing "compiled backend supports polymorphic method dispatch in across loops"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "class Shape
+  create
+    make(c: String) do
+      colour := c
+    end
+  feature
+    colour: String
+    describe(): String do
+      result := \"A \" + colour + \" shape\"
+    end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "class Circle inherit Shape
+  create
+    make(c: String, r: Real) do
+      super.make(c)
+      radius := r
+    end
+  feature
+    radius: Real
+    describe(): String do
+      result := \"A \" + colour + \" circle with radius \" + radius.to_string
+    end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "class Rectangle inherit Shape
+  create
+    make(c: String, w: Real, h: Real) do
+      super.make(c)
+      width := w
+      height := h
+    end
+  feature
+    width: Real
+    height: Real
+    describe(): String do
+      result := \"A \" + colour + \" rectangle \" + width.to_string + \" x \" + height.to_string
+    end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "let shapes: Array[Shape] := []"))
+        (with-out-str
+          (repl/eval-code ctx0 "shapes.add(create Circle.make(\"red\", 5.0))"))
+        (with-out-str
+          (repl/eval-code ctx0 "shapes.add(create Rectangle.make(\"blue\", 4.0, 3.0))"))
+        (with-out-str
+          (repl/eval-code ctx0 "shapes.add(create Circle.make(\"green\", 2.0))"))
+        (let [output (with-out-str
+                       (repl/eval-code ctx0 "across shapes as s do\n  print(s.describe)\nend"))]
+          (is (not (str/includes? output "Error:")) (str "across dispatch: " output))
+          (is (str/includes? output "red circle"))
+          (is (str/includes? output "blue rectangle"))
+          (is (str/includes? output "green circle")))))))
+
+(deftest repl-compiled-backend-inherited-method-dispatch-test
+  (testing "compiled backend dispatches inherited methods through composition"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "class Shape
+  create
+    make(c: String) do
+      colour := c
+    end
+  feature
+    colour: String
+    describe(): String do
+      result := \"A \" + colour + \" shape\"
+    end
+end"))
+        ;; Circle does NOT override describe — relies on delegation
+        (with-out-str
+          (repl/eval-code ctx0 "class Circle inherit Shape
+  create
+    make(c: String, r: Real) do
+      super.make(c)
+      radius := r
+    end
+  feature
+    radius: Real
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "let shapes: Array[Shape] := []"))
+        (with-out-str
+          (repl/eval-code ctx0 "shapes.add(create Circle.make(\"red\", 5.0))"))
+        (let [output (with-out-str
+                       (repl/eval-code ctx0 "across shapes as s do\n  print(s.describe)\nend"))]
+          (is (not (str/includes? output "Error:")) (str "inherited dispatch: " output))
+          (is (str/includes? output "A red shape")))))))
+
+(deftest repl-compiled-backend-self-dispatch-through-override-test
+  (testing "inherited method dispatches self-calls to child overrides"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "class Shape
+  create
+    make(c: String) do
+      colour := c
+    end
+  feature
+    colour: String
+    area(): Real do result := 0.0 end
+    describe(): String do
+      result := \"A \" + colour + \" shape with area \" + area.to_string
+    end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "class Circle inherit Shape
+  create
+    make(c: String, r: Real) do
+      super.make(c)
+      radius := r
+    end
+  feature
+    radius: Real
+    area(): Real do
+      result := 3.14159 * radius * radius
+    end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "let c := create Circle.make(\"red\", 5.0)"))
+        ;; Shape.describe() calls this.area() — should dispatch to Circle.area()
+        (let [output (with-out-str
+                       (repl/eval-code ctx0 "c.describe"))]
+          (is (not (str/includes? output "Error:")) (str "self-dispatch: " output))
+          (is (str/includes? output "78.53975") (str "expected Circle.area(): " output))
+          (is (not (str/includes? output "area 0.0")) "should not use Shape.area()"))))))
+
 (deftest repl-compiled-backend-generic-parent-inheritance-test
   (testing "compiled backend supports generic inheritance syntax like inherit Stack[G]"
     (binding [repl/*type-checking-enabled* (atom true)
