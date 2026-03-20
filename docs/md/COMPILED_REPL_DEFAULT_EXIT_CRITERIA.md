@@ -80,6 +80,7 @@ The following exit-criteria work is already in place:
 - There is an explicit debugger-routing regression showing the current safe behavior: when the debugger is enabled, compiled-mode REPL evaluation routes to the interpreter path instead of attempting compiled execution.
 - Tutorial and book example runners are green on both the interpreter backend and the compiled backend.
 - A dedicated performance harness exists in [run_compiled_repl_perf.clj](/home/vijay/Projects/nex/test/scripts/run_compiled_repl_perf.clj). It compares interpreter versus compiled REPL performance on representative interactive workloads and exits non-zero on threshold failure.
+- A dedicated long-session performance harness exists in [run_compiled_repl_soak_perf.clj](/home/vijay/Projects/nex/test/scripts/run_compiled_repl_soak_perf.clj). It compares interpreter versus compiled REPL performance on longer progressive sessions, including module loading and deopt/reopt boundaries, and exits non-zero on threshold failure.
 
 What remains open from this area:
 
@@ -118,6 +119,32 @@ Current acceptance thresholds:
   - `p95`: compiled must stay within `max(4x interpreter, +30 ms)`
 
 These thresholds are intentionally pragmatic rather than aggressive. They are meant to catch serious regressions and unacceptable overhead, not to require compiled REPL to beat the interpreter on every microbenchmark.
+
+## Long-Session Performance Gate
+
+Run the soak-style harness with:
+
+```bash
+clojure -M:test test/scripts/run_compiled_repl_soak_perf.clj --iterations 8 --warmup 2
+```
+
+The harness measures these longer scenarios:
+
+- mixed progressive session: variables, functions, closures, classes, and one forced deopt
+- `:load` plus repeated object-method calls across later deopt/reopt
+- `import` plus `intern` across later deopt/reopt
+- `:load` plus closures, concurrency, and later deopt/reopt
+
+Current acceptance thresholds:
+
+- Progressive mixed session
+  - `p50`: compiled must stay within `max(3x interpreter, +40 ms)`
+  - `p95`: compiled must stay within `max(4x interpreter, +80 ms)`
+- Module-heavy sessions (`:load`, `intern`, `import`, closures, concurrency`)
+  - `p50`: compiled must stay within `max(4x interpreter, +75 ms)`
+  - `p95`: compiled must stay within `max(6x interpreter, +150 ms)`
+
+These long-session thresholds are intentionally looser than the micro-workload thresholds. They are meant to catch pathological session-level overhead, especially around deopt/reopt and module state handling, without penalizing the compiled backend for doing more upfront work inside richer interactive sessions.
 
 ## Flip Condition
 

@@ -111,6 +111,19 @@ clojure -M:test test/scripts/run_compiled_repl_perf.clj --iterations 25 --warmup
 
 The harness exits non-zero if the current acceptance thresholds are exceeded.
 
+### Run Compiled REPL Soak Performance Harness
+
+Use the soak-style performance harness to compare interpreter and compiled REPL
+latency on longer progressive sessions:
+
+```bash
+clojure -M:test test/scripts/run_compiled_repl_soak_perf.clj --iterations 8 --warmup 2
+```
+
+This harness covers longer sessions involving `:load`, `intern`, `import`,
+closures, concurrency, and deopt/reopt boundaries. It exits non-zero if the
+current acceptance thresholds are exceeded.
+
 ### Run Docs Example Checks
 
 Interpreter-backed docs checks:
