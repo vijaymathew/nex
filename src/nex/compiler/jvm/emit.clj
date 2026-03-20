@@ -1936,7 +1936,10 @@
       (emit-stack-coerce! mv left-type operand-type)
       (let [right-type (emit-expr! mv (:right expr) state-slot)
             compare-type (or (numeric-promotion-jvm-type operand-type right-type)
-                             (when (= operand-type right-type) operand-type))]
+                             (when (= operand-type right-type) operand-type)
+                             (when (and (ir/object-jvm-type? operand-type)
+                                        (ir/object-jvm-type? right-type))
+                               (ir/object-jvm-type "java/lang/Object")))]
         (when-not compare-type
           (throw (ex-info "Compare operands lowered to incompatible JVM types"
                           {:expr expr
@@ -1976,18 +1979,17 @@
         (throw (ex-info "If emission expects one expression per branch"
                         {:expr expr})))
       (.visitJumpInsn mv Opcodes/IFEQ else-label)
-      (let [then-type (emit-expr! mv (first then-exprs) state-slot)
+      (let [result-type (:jvm-type expr)
+            then-type (emit-expr! mv (first then-exprs) state-slot)
             else-type (do
+                        (emit-stack-coerce! mv then-type result-type)
                         (.visitJumpInsn mv Opcodes/GOTO end-label)
                         (.visitLabel mv else-label)
-                        (emit-expr! mv (first else-exprs) state-slot))]
-        (when (not= then-type else-type)
-          (throw (ex-info "If branches lowered to different JVM types"
-                          {:expr expr
-                           :then-jvm-type then-type
-                           :else-jvm-type else-type})))
+                        (let [emitted-else-type (emit-expr! mv (first else-exprs) state-slot)]
+                          (emit-stack-coerce! mv emitted-else-type result-type)
+                          emitted-else-type))]
         (.visitLabel mv end-label)
-        then-type))
+        result-type))
 
     (throw (ex-info "Unsupported IR expression emission"
                     {:expr expr :op (:op expr)}))))

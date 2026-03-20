@@ -162,9 +162,15 @@ When adding/removing major sections, update `toc.md` for consistency with the ca
 clojure -M:test test/scripts/check_docs_examples.clj --book
 ```
 
-3. Run `make book` for quick overall validation.
-4. Run `make print` for print-specific checks.
-5. If page count changed and you use printed cover assets, run `make cover`.
+3. Recheck the same examples under the compiled REPL backend:
+
+```bash
+clojure -M:test test/scripts/check_compiled_book_examples.clj
+```
+
+4. Run `make book` for quick overall validation.
+5. Run `make print` for print-specific checks.
+6. If page count changed and you use printed cover assets, run `make cover`.
 
 ## 10) Troubleshooting
 

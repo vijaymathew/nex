@@ -84,6 +84,60 @@
         (is (not (str/includes? output "Error:")))
         (is (str/includes? output "30.323"))))))
 
+(deftest repl-compiled-backend-string-split-test
+  (testing "compiled backend keeps String.split on the compiled path with the compiler's Array representation"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str (repl/eval-code ctx0 "let s: String := \"A B\""))
+            output (with-out-str (repl/eval-code ctx0 "type_of(s.split(\" \"))"))]
+        (is (not (str/includes? output "Error:")))
+        (is (str/includes? output "\"Array\""))))))
+
+(deftest repl-compiled-backend-returning-function-statement-tail-test
+  (testing "compiled backend handles returning routines whose tail is statement-shaped"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            def-output (with-out-str
+                         (repl/eval-code ctx0 "function choose(flag: Boolean): String
+do
+  if flag then
+    result := \"yes\"
+  else
+    result := \"no\"
+  end
+end"))
+            call-output (with-out-str
+                          (repl/eval-code ctx0 "choose(false)"))]
+        (is (not (str/includes? def-output "Error:")))
+        (is (str/includes? call-output "\"no\""))))))
+
+(deftest repl-compiled-backend-object-if-branch-coercion-test
+  (testing "compiled backend coerces differing object branch JVM types to the if expression result type"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            def-output (with-out-str
+                         (repl/eval-code ctx0 "function pick(flag: Boolean, x: Any): Any
+do
+  if flag then
+    result := x
+  else
+    result := \"fallback\"
+  end
+end"))
+            call-output (with-out-str
+                          (repl/eval-code ctx0 "pick(false, \"x\")"))]
+        (is (not (str/includes? def-output "Error:")))
+        (is (str/includes? call-output "\"fallback\""))))))
+
 (deftest repl-compiled-backend-raw-statement-forms-test
   (testing "compiled backend tries raw compiled parsing for statement-shaped inputs before wrapping"
     (binding [repl/*type-checking-enabled* (atom false)

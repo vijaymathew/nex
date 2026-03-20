@@ -95,7 +95,7 @@ feature
   destination: String
 
 create
-  make(current, destination: string) do
+  make(current, destination: String) do
     this.current := current
 	this.destination := destination
   end

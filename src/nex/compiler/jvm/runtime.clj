@@ -29,6 +29,12 @@
      [target# & args#]
      (interp/call-builtin-method nil target# target# ~method-name (vec args#))))
 
+(defn- ->java-array-list
+  [value]
+  (if (instance? clojure.lang.IPersistentVector value)
+    (java.util.ArrayList. ^java.util.Collection value)
+    value))
+
 (defrecord NexReplState [^clojure.lang.Atom values
                          ^clojure.lang.Atom types
                          ^clojure.lang.Atom functions
@@ -1236,7 +1242,10 @@
 (def-builtin-method-wrapper builtin-method-string-char-at "char_at")
 (def-builtin-method-wrapper builtin-method-string-compare "compare")
 (def-builtin-method-wrapper builtin-method-string-hash "hash")
-(def-builtin-method-wrapper builtin-method-string-split "split")
+(defn builtin-method-string-split
+  [target delim]
+  (->java-array-list
+   (interp/call-builtin-method nil target target "split" [delim])))
 (def-builtin-method-wrapper builtin-method-string-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-string-equals "equals")
 (def-builtin-method-wrapper builtin-method-string-not-equals "not_equals")

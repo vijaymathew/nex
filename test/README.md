@@ -100,6 +100,22 @@ clojure -M:test test/scripts/run_integration_tests.clj
 Add future slow namespaces directly to
 `test/scripts/run_integration_tests.clj`.
 
+### Run Docs Example Checks
+
+Interpreter-backed docs checks:
+
+```bash
+clojure -M:test test/scripts/check_docs_examples.clj --tut
+clojure -M:test test/scripts/check_docs_examples.clj --book
+```
+
+Compiled-REPL-backed docs checks:
+
+```bash
+clojure -M:test test/scripts/check_compiled_docs_examples.clj --tut
+clojure -M:test test/scripts/check_compiled_book_examples.clj
+```
+
 ### Run Specific Test Namespace
 
 ```bash

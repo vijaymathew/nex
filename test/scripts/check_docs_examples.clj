@@ -2,6 +2,7 @@
 
 (require '[clojure.java.io :as io])
 (require '[clojure.string :as str])
+(require '[nex.compiler.jvm.repl :as compiled-repl])
 (require '[nex.interpreter :as interpreter])
 (require '[nex.repl :as repl])
 
@@ -17,6 +18,7 @@
 
 (defn parse-args [args]
   (loop [opts {:mode :progressive
+               :backend :interpreter
                :run-app true
                :root "docs/book"
                :files []}
@@ -33,6 +35,12 @@
 
           (= arg "--no-app")
           (recur (assoc opts :run-app false) rest)
+
+          (= arg "--compiled-backend")
+          (recur (assoc opts :backend :compiled) rest)
+
+          (= arg "--interpreter-backend")
+          (recur (assoc opts :backend :interpreter) rest)
 
           (= arg "--book")
           (recur (assoc opts :root "docs/book") rest)
@@ -107,22 +115,38 @@
 (defn run-app! [ctx source-id]
   (eval-snippet! ctx "let __docs_app: App := create App\n__docs_app.run()" source-id))
 
-(defn fresh-repl-state []
-  {:ctx (repl/init-repl-context)
-   :var-types (atom {})})
+(defn fresh-repl-state [backend]
+  (let [ctx (repl/init-repl-context)
+        var-types (atom {})
+        backend-atom (atom :interpreter)
+        compiled-session (atom (compiled-repl/make-session))]
+    (binding [repl/*repl-var-types* var-types
+              repl/*repl-backend* backend-atom
+              repl/*compiled-repl-session* compiled-session]
+      (when (= :compiled backend)
+        (with-out-str
+          (repl/handle-command ctx ":backend compiled"))))
+    {:ctx ctx
+     :var-types var-types
+     :backend-atom backend-atom
+     :compiled-session compiled-session}))
 
-(defn eval-with-fresh-state! [code source-id run-app?]
-  (let [{:keys [ctx var-types]} (fresh-repl-state)]
-    (binding [repl/*repl-var-types* var-types]
+(defn eval-with-fresh-state! [code source-id run-app? backend]
+  (let [{:keys [ctx var-types backend-atom compiled-session]} (fresh-repl-state backend)]
+    (binding [repl/*repl-var-types* var-types
+              repl/*repl-backend* backend-atom
+              repl/*compiled-repl-session* compiled-session]
       (eval-snippet! ctx code source-id)
       (when (and run-app? (runnable-app? ctx))
         (run-app! ctx (str source-id ":App.run")))
       ctx)))
 
-(defn run-progressive-file! [^java.io.File f root run-app?]
-  (let [{:keys [ctx var-types]} (fresh-repl-state)
+(defn run-progressive-file! [^java.io.File f root run-app? backend]
+  (let [{:keys [ctx var-types backend-atom compiled-session]} (fresh-repl-state backend)
         blocks (extract-nex-blocks f)]
-    (binding [repl/*repl-var-types* var-types]
+    (binding [repl/*repl-var-types* var-types
+              repl/*repl-backend* backend-atom
+              repl/*compiled-repl-session* compiled-session]
       (doseq [{:keys [index code]} blocks]
         (when-not (skip-block-reason root code)
           (eval-snippet! ctx code (str (.getPath f) "#block-" index))))
@@ -140,29 +164,30 @@
    :message (or (ex-message e) (str e))
    :data (ex-data e)})
 
-(defn run-file! [^java.io.File f {:keys [mode run-app root]}]
+(defn run-file! [^java.io.File f {:keys [mode run-app root backend]}]
   (try
     (case mode
       :isolated
       (do
         (doseq [{:keys [index code]} (extract-nex-blocks f)]
           (when-not (skip-block-reason root code)
-            (eval-with-fresh-state! code (str (.getPath f) "#block-" index) run-app)))
+            (eval-with-fresh-state! code (str (.getPath f) "#block-" index) run-app backend)))
         (result-ok (.getPath f) mode nil))
 
       :progressive
       (do
-        (run-progressive-file! f root run-app)
+        (run-progressive-file! f root run-app backend)
         (result-ok (.getPath f) mode nil)))
     (catch Exception e
       (result-fail (.getPath f) mode e))))
 
-(defn print-summary [root results]
+(defn print-summary [root backend results]
   (let [passed (count (filter :ok results))
         failed (remove :ok results)
         total (count results)]
     (println "Docs example smoke test")
     (println "Root:" root)
+    (println "Backend:" (name backend))
     (println)
     (doseq [result results]
       (if (:ok result)
@@ -180,6 +205,6 @@
 (let [opts (parse-args *command-line-args*)]
   (try
     (let [results (mapv #(run-file! % opts) (:files opts))]
-      (print-summary (:root opts) results))
+      (print-summary (:root opts) (:backend opts) results))
     (finally
       (interpreter/shutdown-runtime!))))
