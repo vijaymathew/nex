@@ -765,8 +765,7 @@
   (reset! (:imports ctx) [])
   (let [builtin-classes @(:classes (interp/make-context))]
     (reset! (:classes ctx) builtin-classes))
-  (doseq [import-node @(:import-asts session)]
-    (interp/eval-node ctx import-node))
+  (reset! (:imports ctx) (vec @(:import-asts session)))
   (doseq [class-def (vals @(:class-asts session))]
     (interp/eval-node ctx class-def))
   (doseq [fn-def (vals @(:function-asts session))]

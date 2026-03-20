@@ -76,11 +76,12 @@ The following exit-criteria work is already in place:
 - The soak suite includes long progressive sessions with mixed features, repeated deopt and reopt transitions, and state assertions.
 - Explicit interpreter-versus-compiled parity assertions now exist for the same scripted sessions.
 - There is a focused `:load` scenario that exercises repeated object-method calls across later deopts and compiled recovery.
+- There is a focused `import` plus `intern` scenario that exercises Java imports and local interned classes across later deopts and compiled recovery.
 - Tutorial and book example runners are green on both the interpreter backend and the compiled backend.
 
 What remains open from this area:
 
-- Deopt and reopt round-trip coverage is not yet exhaustive across every important surface, especially `intern`, imports, and debugger interaction in long sessions.
+- Deopt and reopt round-trip coverage is not yet exhaustive across every important surface, especially debugger interaction and other long-session operational edges.
 - The exact remaining deopt set still needs a tighter audit and documentation pass.
 - Compiled-default readiness still depends on eliminating residual compiled-REPL-only correctness bugs as they are found.
 

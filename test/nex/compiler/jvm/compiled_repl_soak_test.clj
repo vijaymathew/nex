@@ -213,6 +213,80 @@ end"
     :code "c.value"
     :expect-substrings ["7"]}])
 
+(defn- import-intern-steps
+  [tmp-dir main-file]
+  [{:label "import java builder"
+    :code "import java.lang.StringBuilder"}
+   {:label "intern local counter"
+    :code "intern Counter"
+    :source-id (.getPath main-file)
+    :check (fn [{:keys [session]}]
+             (is (= "java.lang.StringBuilder"
+                    (:qualified-name (first @(:import-asts session)))))
+             (is (= "Counter" (:class-name (first @(:intern-asts session)))))
+             (is (contains? @(:class-asts session) "Counter")))}
+   {:label "instantiate imported builder"
+    :code "let sb: StringBuilder := create StringBuilder"
+    :check (fn [{:keys [session]}]
+             (is (= "StringBuilder" (runtime/state-get-type (:state session) "sb")))
+             (is (= "java.lang.StringBuilder"
+                    (:qualified-name (first @(:import-asts session))))))}
+   {:label "append initial text"
+    :code "do
+  sb.append(\"ab\")
+end"
+    :parity-ignore-output? true}
+   {:label "instantiate interned counter"
+    :code "let c: Counter := create Counter.make(1)"
+    :check (fn [{:keys [session]}]
+             (is (= "Counter" (runtime/state-get-type (:state session) "c")))
+             (is (contains? @(:class-asts session) "Counter"))
+             (is (= "Counter" (:class-name (first @(:intern-asts session))))))}
+   {:label "call interned method before deopt"
+    :code "do
+  c.add(2)
+end"
+    :parity-ignore-output? true}
+   {:label "builder length before deopt"
+    :code "sb.length()"
+    :expect-substrings ["2"]}
+   {:label "counter value before deopt"
+    :code "c.value"
+    :expect-substrings ["3"]}
+   {:label "forced deopt via io/Path"
+    :code "intern io/Path"}
+   {:label "deopted path binding"
+    :code (str "let import_root: Path := create Path.make(\"" (.getAbsolutePath tmp-dir) "\")")
+    :check (fn [{:keys [session]}]
+             (is (= "Path" (runtime/state-get-type (:state session) "import_root"))))}
+   {:label "reuse imported builder after deopt"
+    :code "do
+  sb.append(\"c\")
+end"
+    :parity-ignore-output? true}
+   {:label "reuse interned method after deopt"
+    :code "do
+  c.add(3)
+end"
+    :parity-ignore-output? true}
+   {:label "builder length after deopt"
+    :code "sb.length()"
+    :expect-substrings ["3"]}
+   {:label "counter value after deopt"
+    :code "c.value"
+    :expect-substrings ["6"]}
+   {:label "final import+intern metadata check"
+    :code "c.value + sb.length()"
+    :expect-substrings ["9"]
+    :check (fn [{:keys [session]}]
+             (is (= "StringBuilder" (runtime/state-get-type (:state session) "sb")))
+             (is (= "Counter" (runtime/state-get-type (:state session) "c")))
+             (is (= "Path" (runtime/state-get-type (:state session) "import_root")))
+             (is (contains? @(:class-asts session) "Counter"))
+             (is (= "java.lang.StringBuilder"
+                    (:qualified-name (first @(:import-asts session)))))
+             (is (= "Counter" (:class-name (first @(:intern-asts session))))))}])
+
 (deftest compiled-repl-progressive-mixed-session-soak-test
   (testing "compiled REPL survives a long mixed session with deopt/reopt cycles and state checks"
     (let [tmp-root (.getAbsolutePath (io/file (System/getProperty "java.io.tmpdir")
@@ -430,6 +504,34 @@ end")
                          (is (= "Counter" (runtime/state-get-type (:state session) "c")))
                          (is (= "Integer" (runtime/state-get-type (:state session) "delta")))
                          (is (contains? @(:class-asts session) "Counter")))}))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compiled-repl-import-and-intern-after-deopt-soak-test
+  (testing "compiled REPL reuses imported Java classes and interned local classes after a later deopt"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-compiled-soak-import-intern-" (System/nanoTime)))
+          counter-file (io/file tmp-dir "Counter.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit counter-file "class Counter
+create
+  make(v: Integer) do
+    this.value := v
+  end
+feature
+  value: Integer
+
+  add(n: Integer): Integer
+  do
+    this.value := this.value + n
+    result := this.value
+  end
+end")
+        (spit main-file "intern Counter")
+        (run-steps! (import-intern-steps tmp-dir main-file))
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
