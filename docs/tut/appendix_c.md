@@ -259,14 +259,16 @@ needs to talk over HTTP.
 
 ```nex
 intern net/Http_Client
-intern net/Http_Request
 
-let client: Http_Client := create Http_Client
-let req: Http_Request := create Http_Request.get("https://example.com")
-let res := client.send(req)
+let client: Http_Client := create Http_Client.make()
+let sample: Http_Response := create Http_Response.make(
+  200,
+  "ok",
+  {"content-type": "text/plain"}
+)
 
-print(res.status_code())
-print(res.body())
+print(sample.status())
+print(sample.body())
 ```
 
 For server-side code, `Http_Server` and related request/response classes let a

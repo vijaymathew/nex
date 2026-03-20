@@ -2836,25 +2836,26 @@
      ([source-id program]
       (resolve-interned-classes source-id program #{}))
      ([source-id program seen-files]
-      (let [ctx (assoc (make-context) :debug-source source-id)]
-        (:classes
-         (reduce
-          (fn [{:keys [classes seen]} {:keys [path class-name alias]}]
-            (let [file-path (find-intern-file ctx path class-name)
-                  canonical (.getCanonicalPath (clojure.java.io/file file-path))]
-              (if (contains? seen canonical)
-                {:classes classes :seen seen}
-                (let [file-ast (parser/ast (slurp file-path))
-                      nested (resolve-interned-classes canonical file-ast (conj seen canonical))
-                      direct-classes (:classes file-ast)
-                      all-file-classes (concat direct-classes nested)
-                      aliased-class (when alias
-                                      (when-let [class-def (some #(when (= (:name %) class-name) %) all-file-classes)]
-                                        [(assoc class-def :name alias)]))]
-                  {:classes (into classes (concat all-file-classes aliased-class))
-                   :seen (conj (:seen nested) canonical)}))))
-          {:classes [] :seen seen-files}
-          (:interns program))))))
+      (letfn [(resolve* [current-source current-program seen]
+                (let [ctx (assoc (make-context) :debug-source current-source)]
+                  (reduce
+                   (fn [{:keys [classes seen]} {:keys [path class-name alias]}]
+                     (let [file-path (find-intern-file ctx path class-name)
+                           canonical (.getCanonicalPath (clojure.java.io/file file-path))]
+                       (if (contains? seen canonical)
+                         {:classes classes :seen seen}
+                         (let [file-ast (parser/ast (slurp file-path))
+                               nested (resolve* canonical file-ast (conj seen canonical))
+                               direct-classes (:classes file-ast)
+                               all-file-classes (concat direct-classes (:classes nested))
+                               aliased-class (when alias
+                                               (when-let [class-def (some #(when (= (:name %) class-name) %) all-file-classes)]
+                                                 [(assoc class-def :name alias)]))]
+                           {:classes (into classes (concat all-file-classes aliased-class))
+                            :seen (:seen nested)}))))
+                   {:classes [] :seen seen}
+                   (:interns current-program))))]
+        (:classes (resolve* source-id program seen-files)))))
    :cljs
    (defn resolve-interned-classes
      [& _]

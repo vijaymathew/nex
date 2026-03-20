@@ -346,6 +346,22 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-mixed-numeric-arithmetic-widens
+  (testing "Mixed numeric arithmetic widens to a common numeric type"
+    (let [code "class Test
+                  feature
+                    demo() do
+                      let r1: Real := 10 + 3.5
+                      let r2: Real := 10 * 3.5
+                      let j: Integer64 := \"3\".to_integer64()
+                      let i64: Integer64 := 10 + j
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-boolean-operators
   (testing "Boolean operators should require Boolean operands"
     (let [code "class Test

@@ -50,8 +50,14 @@ make clean
 clojure -M:test test/scripts/check_docs_examples.clj --tut
 ```
 
-3. Run `make book` for overall validation.
-4. Run `make print` if you changed print-facing layout or typography.
+3. Recheck the same examples under the compiled REPL backend:
+
+```bash
+clojure -M:test test/scripts/check_compiled_docs_examples.clj --tut
+```
+
+4. Run `make book` for overall validation.
+5. Run `make print` if you changed print-facing layout or typography.
 
 ## 4) Files You Will Usually Touch
 
@@ -65,3 +71,4 @@ clojure -M:test test/scripts/check_docs_examples.clj --tut
 ## 5) Notes
 
 - The docs smoke test runs fenced `nex` examples through the real Nex evaluation path.
+- The compiled docs smoke test uses `:backend compiled`; unsupported snippets may still deopt through the interpreter, matching interactive compiled-REPL behavior.

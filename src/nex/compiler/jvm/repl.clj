@@ -33,6 +33,17 @@
   []
   (make-session))
 
+(defn- deopt-compiled-exception?
+  [^Throwable t]
+  (let [msg (.getMessage t)]
+    (boolean
+     (and msg
+          (or (.contains msg "Unsupported")
+              (.contains msg "Unable to infer expression type during lowering")
+              (.contains msg "Only expression-shaped or result-assignment if branches are supported in lowering")
+              (.contains msg "Missing compiled class metadata during lowering")
+              (.contains msg "Create of non-compiled class is not supported in lowering"))))))
+
 (def ^:private relational-ops
   #{"=" "/=" "<" "<=" ">" ">="})
 
@@ -273,12 +284,13 @@
   [session ast]
   (let [actual-classes (vec (concat (user-class-defs ast)
                                     (anonymous-class-defs ast)))
-        imported-classes (import-placeholder-classes (:imports ast))]
+        imported-classes (import-placeholder-classes (:imports ast))
+        compiled-fns (set (keys @(:functions (:state session))))]
     {:known-vars (set (concat (keys (session-var-types session))
                               (keys @(:values (:state session)))))
      :known-fns (set (concat builtin-function-names
-                           (keys @(:function-asts session))
-                           (map :name (:functions ast))))
+                             compiled-fns
+                             (map :name (:functions ast))))
      :var-types (merge (session-var-types session)
                      (into {}
                            (map (fn [fn-def]
@@ -738,7 +750,11 @@
        (doseq [[k t] var-types
                :when (not (contains? function-names k))]
          (rt/state-set-type! state k t))
-       (compile-and-register-functions! session prepared-ast source-id)
+       (try
+         (compile-and-register-functions! session prepared-ast source-id)
+         (catch clojure.lang.ExceptionInfo e
+           (when-not (deopt-compiled-exception? e)
+             (throw e))))
        session))))
 
 (defn sync-session->interpreter!
@@ -804,8 +820,10 @@
             :output (rt/state-output state)
             :result result})
          (catch clojure.lang.ExceptionInfo e
-           (let [msg (.getMessage e)]
-             (when-not (or (.contains msg "Unsupported")
-                           (.contains msg "Unable to infer expression type during lowering"))
-               (throw e))
-             nil)))))))
+           (when-not (deopt-compiled-exception? e)
+             (throw e))
+           nil)
+         (catch Throwable t
+           (when-not (deopt-compiled-exception? t)
+             (throw t))
+           nil))))))

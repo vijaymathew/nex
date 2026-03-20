@@ -359,6 +359,19 @@
     :else
     "Real"))
 
+(defn numeric-result-type
+  "Infer a common numeric type for non-division arithmetic.
+   Real wins over Decimal, Decimal wins over integral types, Integer64 wins
+   over Integer."
+  [left-type right-type]
+  (let [left (normalize-type left-type)
+        right (normalize-type right-type)]
+    (cond
+      (or (= left "Real") (= right "Real")) "Real"
+      (or (= left "Decimal") (= right "Decimal")) "Decimal"
+      (or (= left "Integer64") (= right "Integer64")) "Integer64"
+      :else "Integer")))
+
 (defn power-result-type
   "Infer the result type of exponentiation.
    Integral ^ integral stays integral; any non-integral operand yields Real."
@@ -522,7 +535,7 @@
         "String"
 
         (and (is-numeric-type? left-type) (is-numeric-type? right-type))
-        left-type
+        (numeric-result-type left-type right-type)
 
         :else
         (throw (ex-info (str "Operator " operator " requires numeric or String operands")
@@ -540,7 +553,7 @@
 
       ("-" "*" "%")
       (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
-        left-type
+        (numeric-result-type left-type right-type)
         (throw (ex-info (str "Operator " operator " requires numeric operands")
                         {:error (type-error
                                  (str "Operator " operator " requires numeric operands, got "
@@ -1222,6 +1235,34 @@
                                           (display-type arg-type)))}))))
         "Integer")
 
+      (= method "datetime_weekday")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_weekday expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_weekday expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_weekday argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_weekday argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer")
+
+      (= method "datetime_day_of_year")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_day_of_year expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_day_of_year expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_day_of_year argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_day_of_year argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer")
+
       (= method "datetime_hour")
       (do
         (when (not= (count args) 1)
@@ -1306,6 +1347,34 @@
                               {:error (type-error
                                        (str "datetime_diff_millis arguments must be Integer64, got "
                                             (display-type arg-type)))})))))
+        "Integer64")
+
+      (= method "datetime_truncate_to_day")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_truncate_to_day expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_truncate_to_day expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_truncate_to_day argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_truncate_to_day argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
+        "Integer64")
+
+      (= method "datetime_truncate_to_hour")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "datetime_truncate_to_hour expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "datetime_truncate_to_hour expects 1 argument, got " (count args)))})))
+        (let [arg-type (check-expression env (first args))]
+          (when-not (= (attachable-type arg-type) "Integer64")
+            (throw (ex-info "datetime_truncate_to_hour argument must be Integer64"
+                            {:error (type-error
+                                     (str "datetime_truncate_to_hour argument must be Integer64, got "
+                                          (display-type arg-type)))}))))
         "Integer64")
 
       (= method "datetime_format_iso")

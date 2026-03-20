@@ -2831,36 +2831,33 @@
                    :override? (boolean (:override? fn-def))})
       (let [body-stmts
             (if (:return-type fn-def)
-              (let [leading-statements (butlast body)
-                    final-stmt (last body)
-                    [env' lowered-leading] (lower-statements env-with-old leading-statements)
-                    [env'' lowered-tail]
-                    (cond
-                      (and (= :assign (:type final-stmt))
-                           (= "result" (:target final-stmt)))
-                      (lower-statement env' final-stmt)
-
-                      (contains? expression-node-types (:type final-stmt))
-                      [env' (with-stmt-debug
-                              (ir/set-local-node (:slot result-local)
-                                                 (lower-expression env' final-stmt)
-                                                 (:nex-type result-local)
-                                                 (:jvm-type result-local))
-                              final-stmt)]
-
-                      (= :call (:type final-stmt))
-                      [env' (with-stmt-debug
-                              (ir/set-local-node (:slot result-local)
-                                                 (lower-expression env' final-stmt)
-                                                 (:nex-type result-local)
-                                                 (:jvm-type result-local))
-                              final-stmt)]
-
-                      :else
-                      (throw (ex-info "Unsupported function tail for lowering"
-                                      {:function (:name fn-def)
-                                       :stmt final-stmt})))]
-                [env'' (conj lowered-leading lowered-tail)])
+              (if (empty? body)
+                [env-with-old []]
+                (let [leading-statements (butlast body)
+                      final-stmt (last body)]
+                  (if (or (and (= :assign (:type final-stmt))
+                               (= "result" (:target final-stmt)))
+                          (contains? expression-node-types (:type final-stmt))
+                          (= :call (:type final-stmt))
+                          (= :convert (:type final-stmt)))
+                    (let [[env' lowered-leading] (lower-statements env-with-old leading-statements)
+                          final-expr (if (and (= :assign (:type final-stmt))
+                                              (= "result" (:target final-stmt)))
+                                       nil
+                                       final-stmt)
+                          [env'' lowered-tail]
+                          (if final-expr
+                            [env' (with-stmt-debug
+                                    (ir/set-local-node (:slot result-local)
+                                                       (lower-expression env' final-expr)
+                                                       (:nex-type result-local)
+                                                       (:jvm-type result-local))
+                                    final-stmt)]
+                            (lower-statement env' final-stmt))]
+                      [env'' (conj lowered-leading lowered-tail)])
+                    ;; Statement-shaped tails are valid as long as they assign to `result`
+                    ;; somewhere in the lowered body.
+                    (lower-statements env-with-old body))))
               (lower-statements env-with-old body))
             [env-after-body raw-body-stmts] body-stmts
             [env-after-rescue lowered-body] (lower-body-with-rescue env-after-body raw-body-stmts (:rescue fn-def))
