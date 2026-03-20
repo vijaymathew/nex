@@ -25,6 +25,7 @@
 (declare current-class-def)
 (declare class-method-def)
 (declare class-field-def)
+ (declare elseif->else-expr)
 (declare visible-class-map)
 (declare generic-type-map)
 (declare normalize-call-target)
@@ -540,6 +541,20 @@
 
         :else
         nil))))
+
+(defn- implicit-if-expression?
+  [env stmt]
+  (when (= :if (:type stmt))
+    (let [then-env (refine-condition-branch-env
+                    (if (= :convert (get-in stmt [:condition :type]))
+                      (assoc-in env [:var-types (get-in stmt [:condition :var-name])]
+                                (get-in stmt [:condition :target-type]))
+                      env)
+                    (:condition stmt)
+                    :then)
+          else-env (refine-condition-branch-env env (:condition stmt) :else)]
+      (and (some? (if-branch-expression then-env (:then stmt)))
+           (some? (elseif->else-expr else-env (:elseif stmt) (:else stmt)))))))
 
 (defn- scoped-env
   [env child-env]
@@ -2949,7 +2964,9 @@
                       final-stmt (last body)]
                   (if (or (and (= :assign (:type final-stmt))
                                (= "result" (:target final-stmt)))
-                          (contains? expression-node-types (:type final-stmt))
+                          (and (contains? expression-node-types (:type final-stmt))
+                               (or (not= :if (:type final-stmt))
+                                   (implicit-if-expression? env-with-old final-stmt)))
                           (= :call (:type final-stmt))
                           (= :convert (:type final-stmt)))
                     (let [[env' lowered-leading] (lower-statements env-with-old leading-statements)

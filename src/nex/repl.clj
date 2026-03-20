@@ -1015,12 +1015,6 @@
            (not (contains? builtin-sortable-types element-type))
            (not (tc/types-compatible? env element-type "Comparable"))))))
 
-(defn- generic-class-definition?
-  [node]
-  (and (map? node)
-       (= :class (:type node))
-       (seq (:generic-params node))))
-
 (defn- string-ordered-comparison?
   [ctx node]
   (when (and (map? node)
@@ -1039,18 +1033,13 @@
 
 (defn- ast-needs-interpreter-fallback?
   [ctx ast]
-  (let [top-nodes (concat (:imports ast)
-                          (:interns ast)
-                          (:classes ast)
-                          (:functions ast)
-                          (:statements ast)
+  (let [top-nodes (concat (:statements ast)
                           (:calls ast))
         nodes (tree-seq coll? seq top-nodes)]
     (boolean
      (some (fn [node]
              (or (string-ordered-comparison? ctx node)
-                 (nonbuiltin-array-sort? ctx node)
-                 (generic-class-definition? node)))
+                 (nonbuiltin-array-sort? ctx node)))
            nodes))))
 
 (defn- fallback-eligible-compiled-error?

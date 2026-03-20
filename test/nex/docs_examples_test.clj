@@ -65,3 +65,68 @@ nex> s.pop
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
+
+(deftest compiled-docs-check-runs-progressive-plain-followup-blocks
+  (testing "the compiled docs checker keeps one progressive session per file for plain follow-up fences"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-docs-example-progressive-check-test")
+          md-file (io/file tmp-dir "progressive_plain_followup.md")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit md-file "```nex
+nex> class Layout
+       feature
+         MAX_WIDTH = 450
+     end
+```
+
+```nex
+print(Layout.MAX_WIDTH)
+```")
+        (let [{:keys [exit output]}
+              (run-process! "clojure" "-M:test" "test/scripts/check_compiled_tutorial_examples.clj" (.getPath md-file))]
+          (is (= 0 exit) output)
+          (is (str/includes? output (str "PASS " (.getPath md-file))) output))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compiled-docs-check-resets-progressive-session-on-redefinition-transcript
+  (testing "the compiled docs checker treats repeated transcript class definitions as fresh examples"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-docs-example-redefinition-check-test")
+          md-file (io/file tmp-dir "redefinition_transcript.md")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit md-file "```text
+nex> class Point
+       create
+         make(x: Integer) do
+           value := x
+         end
+       feature
+         value: Integer
+     end
+
+nex> let p := create Point.make(1)
+nex> p.value
+```
+
+```text
+nex> class Point
+       create
+         make(x, y: Integer) do
+           value := x + y
+         end
+       feature
+         value: Integer
+     end
+
+nex> let p := create Point.make(2, 3)
+nex> p.value
+```")
+        (let [{:keys [exit output]}
+              (run-process! "clojure" "-M:test" "test/scripts/check_compiled_tutorial_examples.clj" (.getPath md-file))]
+          (is (= 0 exit) output)
+          (is (str/includes? output (str "PASS " (.getPath md-file))) output))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))

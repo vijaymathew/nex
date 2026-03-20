@@ -353,7 +353,93 @@ end"))
                             (repl/eval-code ctx0 "s.size"))]
           (is (not (str/includes? def-output "Error:")))
           (is (not (str/includes? size-output "Error:")))
-          (is (str/includes? size-output "3")))))))
+          (is (str/includes? size-output "3"))
+          (is (contains? @(:compiled-classes @repl/*compiled-repl-session*) "Stack"))
+          (is (contains? @(:compiled-classes @repl/*compiled-repl-session*) "Bounded_Stack")))))))
+
+(deftest repl-compiled-backend-super-constructor-transcript-test
+  (testing "compiled backend keeps account-style inheritance examples on the compiled path"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            define-output (with-out-str
+                            (repl/eval-code ctx0 "class Account
+  create
+    make(name: String, initial: Real) do
+      owner := name
+      balance := initial
+    end
+  feature
+    owner: String
+    balance: Real
+    deposit(amount: Real) do
+      balance := balance + amount
+    end
+    withdraw(amount: Real): Boolean do
+      if amount <= balance then
+        balance := balance - amount
+        result := true
+      else
+        result := false
+      end
+    end
+    get_balance(): Real do
+      result := balance
+    end
+    describe(): String do
+      result := owner + \": \" + balance.to_string
+    end
+end
+
+class SavingsAccount inherit Account
+  create
+    make(name: String, initial, rate: Real) do
+      super.make(name, initial)
+      interest_rate := rate
+    end
+  feature
+    interest_rate: Real
+    apply_interest() do
+      balance := balance + balance * interest_rate
+    end
+    describe(): String do
+      result := super.describe + \" (savings, rate: \" + interest_rate.to_string + \")\"
+    end
+end
+
+class OverdraftAccount inherit Account
+  create
+    make(name: String, initial, limit: Real) do
+      super.make(name, initial)
+      overdraft_limit := limit
+    end
+  feature
+    overdraft_limit: Real
+    withdraw(amount: Real): Boolean do
+      if balance - amount >= -overdraft_limit then
+        balance := balance - amount
+        result := true
+      else
+        result := false
+      end
+    end
+    describe(): String do
+      result := super.describe + \" (overdraft limit: \" + overdraft_limit.to_string + \")\"
+    end
+end"))
+            create-output (with-out-str
+                            (repl/eval-code ctx0 "let a := create SavingsAccount.make(\"Bob\", 1000.0, 0.02)"))
+            describe-output (with-out-str
+                              (repl/eval-code ctx0 "a.describe"))]
+        (is (not (str/includes? define-output "Error:")))
+        (is (not (str/includes? create-output "Error:")))
+        (is (not (str/includes? describe-output "Error:")))
+        (is (str/includes? describe-output "Bob: 1000.0 (savings, rate: 0.02)"))
+        (is (contains? @(:compiled-classes @repl/*compiled-repl-session*) "Account"))
+        (is (contains? @(:compiled-classes @repl/*compiled-repl-session*) "SavingsAccount"))
+        (is (contains? @(:compiled-classes @repl/*compiled-repl-session*) "OverdraftAccount"))))))
 
 (deftest repl-compiled-backend-map-across-entry-get-test
   (testing "compiled backend can iterate map entries whose static element type is Any"

@@ -117,8 +117,25 @@
     (and (seq cells)
          (every? runnable-cell? cells))))
 
-(defn skip-block-reason [root code]
+(defn- purely-illustrative-transcript?
+  [code]
+  (let [lines (->> (str/split-lines code)
+                   (remove str/blank?))
+        prompt-lines (filter #(re-matches #"\s*nex>.*" %) lines)
+        continuation-lines (filter #(re-matches #"\s+\S.*" %) lines)]
+    (and (seq prompt-lines)
+         (empty? continuation-lines)
+         (every? #(re-matches #"\s*nex>.*--.*" %) prompt-lines))))
+
+(defn skip-block-reason [root {:keys [lang code] :as _block}]
   (cond
+    (and (= lang "text")
+         (not (re-find #"(?m)^\s*nex>\s*" code)))
+    "contains explanatory text examples rather than runnable REPL examples"
+
+    (purely-illustrative-transcript? code)
+    "contains illustrative transcript comments rather than a runnable session"
+
     (re-find #"(?m)^\s*\.\.\.\s*$" code)
     "contains ellipsis placeholder"
 
@@ -194,38 +211,66 @@
         (run-app! ctx (str source-id ":App.run")))
       ctx)))
 
+(defn- declaration-key
+  [code]
+  (when-let [[_ kind name]
+             (or (re-find #"(?m)^\s*(class|function)\s+([A-Za-z_][A-Za-z0-9_]*)" code)
+                 (re-find #"(?m)^\s*(type)\s+([A-Za-z_][A-Za-z0-9_]*)" code))]
+    [(keyword (str/lower-case kind)) name]))
+
+(defn- declaration-block?
+  [block]
+  (boolean (declaration-key (first (block-cells block)))))
+
 (defn- active-blocks
   [root blocks]
   (->> blocks
-       (remove #(skip-block-reason root (:code %)))
+       (remove #(skip-block-reason root %))
        (filter runnable-block?)
        vec))
 
 (defn run-progressive-file! [^java.io.File f root run-app? backend]
-  (let [{:keys [ctx var-types backend-atom compiled-session]} (fresh-repl-state backend)
+  (let [state (atom (fresh-repl-state backend))
+        seen-declarations (atom #{})
         blocks (extract-nex-blocks f)
         runnable-blocks (active-blocks root blocks)
         block-total (count runnable-blocks)]
-    (binding [repl/*repl-var-types* var-types
-              repl/*repl-backend* backend-atom
-              repl/*compiled-repl-session* compiled-session]
-      (doseq [[position {:keys [index] :as block}] (map-indexed vector runnable-blocks)]
-        (println (format "  block %d/%d  %s#block-%d"
-                         (inc position)
-                         block-total
-                         (.getPath f)
-                         index))
-        (flush)
-        (if (transcript-block? block)
-          (doseq [[cell-pos code] (map-indexed vector (block-cells block))]
-            (eval-snippet! ctx code (str (.getPath f) "#block-" index ":cell-" (inc cell-pos))))
-          (doseq [[cell-pos code] (map-indexed vector (block-cells block))]
+    (doseq [[position {:keys [index] :as block}] (map-indexed vector runnable-blocks)]
+      (println (format "  block %d/%d  %s#block-%d"
+                       (inc position)
+                       block-total
+                       (.getPath f)
+                       index))
+      (flush)
+      (let [cells (block-cells block)
+            first-cell (first cells)
+            decl (declaration-key first-cell)]
+        (cond
+          (and (transcript-block? block)
+               decl
+               (contains? @seen-declarations decl))
+          (reset! state (fresh-repl-state backend)))
+        (when decl
+          (swap! seen-declarations conj decl))
+        (if (and (not (transcript-block? block))
+                 (declaration-block? block))
+          (doseq [[cell-pos code] (map-indexed vector cells)]
             (eval-with-fresh-state! code
                                     (str (.getPath f) "#block-" index ":cell-" (inc cell-pos))
                                     run-app?
-                                    backend))))
-      (when (and run-app? (runnable-app? ctx))
-        (run-app! ctx (str (.getPath f) "#App.run"))))
+                                    backend))
+          (let [{:keys [ctx var-types backend-atom compiled-session]} @state]
+            (binding [repl/*repl-var-types* var-types
+                      repl/*repl-backend* backend-atom
+                      repl/*compiled-repl-session* compiled-session]
+              (doseq [[cell-pos code] (map-indexed vector cells)]
+                (eval-snippet! ctx code (str (.getPath f) "#block-" index ":cell-" (inc cell-pos)))))))))
+    (let [{:keys [ctx var-types backend-atom compiled-session]} @state]
+      (binding [repl/*repl-var-types* var-types
+                repl/*repl-backend* backend-atom
+                repl/*compiled-repl-session* compiled-session]
+        (when (and run-app? (runnable-app? ctx))
+          (run-app! ctx (str (.getPath f) "#App.run")))))
     {:blocks blocks}))
 
 (defn result-ok [file mode details]
