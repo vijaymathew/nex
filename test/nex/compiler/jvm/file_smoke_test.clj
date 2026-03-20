@@ -222,3 +222,31 @@ print(sb.length())")
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-cursor-subclass-across-smoke-test
+  (testing "compile-jar runs across over a value typed as Cursor when the runtime instance is a Cursor subclass"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-cursor")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class C inherit Cursor
+feature
+  x: Integer
+  start do x := 0 end
+  item: Integer do result := x end
+  next do x := x + 1 end
+  at_end: Boolean do result := x = 3 end
+  cursor: Cursor do result := this end
+end
+
+let c: Cursor := create C
+across c as i do print(i) end")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["0" "1" "2"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
