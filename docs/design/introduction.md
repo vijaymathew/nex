@@ -33,7 +33,9 @@ These commitments are in tension. Contracts add syntax. A clean core resists the
 
 **Chapter 4** covers extension and integration: how Nex programs call Java and JavaScript libraries, how the module system is organised, and how goroutine and channel concurrency is implemented on top of the JVM and JS runtimes.
 
-**Chapter 5** turns to what is not yet done. Every implementation has a gap between its aspirations and its current state. This chapter names that gap honestly — what is missing, what is intentionally conservative, and where the implementation is likely to grow.
+**Chapter 5** is a translation reference for the JVM bytecode backend: how major Nex constructs are lowered, when the backend emits direct bytecode, when it uses runtime helpers, and where the mixed compiled/deopt boundary still matters.
+
+**Chapter 6** turns to what is not yet done. Every implementation has a gap between its aspirations and its current state. This chapter names that gap honestly — what is missing, what is intentionally conservative, and where the implementation is likely to grow.
 
 
 

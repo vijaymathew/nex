@@ -1,6 +1,6 @@
 {
   "name": "nex-lang",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Nex Programming Language - ClojureScript Runtime",
   "main": "nex-wrapper.js",
   "dependencies": {

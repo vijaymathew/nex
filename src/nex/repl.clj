@@ -23,7 +23,7 @@
 (defonce ^:dynamic *repl-context* nil)
 (defonce ^:dynamic *type-checking-enabled* (atom false))
 (defonce ^:dynamic *repl-var-types* (atom {}))
-(defonce ^:dynamic *repl-backend* (atom :interpreter))
+(defonce ^:dynamic *repl-backend* (atom :compiled))
 (defonce ^:dynamic *compiled-repl-session* (atom (compiled-repl/make-session)))
 
 (def nex-keywords
@@ -89,6 +89,8 @@
 (defn init-repl-context
   "Initialize or reset the REPL context"
   []
+  (reset! *repl-var-types* {})
+  (reset! *compiled-repl-session* (compiled-repl/make-session))
   (interp/make-context))
 
 ;;
@@ -224,8 +226,8 @@
   (println "  :typecheck off    - Disable type checking (default)")
   (println "  :typecheck status - Show current type checking status")
   (println "  :load <path>      - Load and evaluate a .nex file")
-  (println "  :backend interpreter - Use the tree-walking interpreter (default)")
-  (println "  :backend compiled    - Use the experimental compiled REPL fast path")
+  (println "  :backend compiled    - Use the JVM-compiled REPL path (default)")
+  (println "  :backend interpreter - Use the tree-walking interpreter fallback/escape hatch")
   (println "  :backend status      - Show current backend")
   (println "  :debug on|off     - Enable/disable debugger")
   (println "  :debug status     - Show debugger status")
@@ -429,7 +431,7 @@
                                                      :statements []
                                                      :calls []})
           (reset! *compiled-repl-session* session))
-        (println "REPL backend set to COMPILED (experimental). Unsupported inputs will fall back to the interpreter.")
+        (println "REPL backend set to COMPILED. Unsupported inputs will fall back to the interpreter.")
         ctx)
 
       (or (= input-lower ":backend") (= input-lower ":backend status"))
@@ -932,7 +934,27 @@
        "    end\n"
        "end"))
 
-(def format-value interp/nex-format-value)
+(defn- compiled-object-class-name
+  [value]
+  (when (and value (= :compiled @*repl-backend*))
+    (let [session @*compiled-repl-session*
+          known-classes @(:classes (:state session))
+          simple-name (some-> value .getClass .getName (str/split #"\.") last)]
+      (cond
+        (contains? known-classes simple-name)
+        simple-name
+
+        :else
+        (when-let [[_ candidate] (and simple-name
+                                      (re-matches #"(.+)_\d{4}" simple-name))]
+          (when (contains? known-classes candidate)
+            candidate))))))
+
+(defn format-value
+  [value]
+  (if-let [class-name (compiled-object-class-name value)]
+    (str "#<" class-name " object>")
+    (interp/nex-format-value value)))
 
 (defn format-type
   "Format a type value for REPL display"
@@ -961,6 +983,67 @@
         (format-type t))
       (catch Exception _
         nil))))
+
+(def ordered-comparison-ops
+  #{"<" "<=" ">" ">="})
+
+(def builtin-sortable-types
+  #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"})
+
+(defn- normalized-type-params
+  [t]
+  (or (:type-params t) (:type-args t)))
+
+(defn- nonbuiltin-array-sort?
+  [ctx node]
+  (when (and (map? node)
+             (= :call (:type node))
+             (= "sort" (:method node))
+             (:target node))
+    (let [env {:classes (vals @(:classes ctx))
+               :imports @(:imports ctx)
+               :var-types @*repl-var-types*}
+          target-type (try (tc/infer-expression-type (:target node) env)
+                           (catch Exception _ nil))
+          type-params (when (map? target-type)
+                        (normalized-type-params target-type))
+          element-type (first type-params)]
+      (and (= "Array" (:base-type target-type))
+           (string? element-type)
+           (not (contains? builtin-sortable-types element-type))
+           (not (tc/types-compatible? env element-type "Comparable"))))))
+
+(defn- string-ordered-comparison?
+  [ctx node]
+  (when (and (map? node)
+             (= :binary-op (:type node))
+             (contains? ordered-comparison-ops (:operator node))
+             @*type-checking-enabled*)
+    (let [env {:classes (vals @(:classes ctx))
+               :imports @(:imports ctx)
+               :var-types @*repl-var-types*}
+          left-type (try (tc/infer-expression-type (:left node) env)
+                         (catch Exception _ nil))
+          right-type (try (tc/infer-expression-type (:right node) env)
+                          (catch Exception _ nil))]
+      (or (= "String" left-type)
+          (= "String" right-type)))))
+
+(defn- ast-needs-interpreter-fallback?
+  [ctx ast]
+  (let [top-nodes (concat (:statements ast) (:calls ast))
+        nodes (tree-seq coll? seq top-nodes)]
+    (boolean
+     (some (fn [node]
+             (or (string-ordered-comparison? ctx node)
+                 (nonbuiltin-array-sort? ctx node)))
+           nodes))))
+
+(defn- fallback-eligible-compiled-error?
+  [^clojure.lang.ExceptionInfo e]
+  (contains? #{"Only eq/neq object comparisons are supported"
+               "Array.sort requires Comparable elements"}
+             (.getMessage e)))
 
 (defn- sync-compiled-session-into-interpreter!
   [ctx]
@@ -1163,12 +1246,21 @@
         (and (= (:type ast) :program)
              (not was-wrapped?)
              (not (dbg/enabled?))
-             (= :compiled @*repl-backend*))
-        (if-let [{:keys [session result output]} (compiled-repl/compile-and-eval! @*compiled-repl-session*
-                                                                                  ast
-                                                                                  source-id)]
+             (= :compiled @*repl-backend*)
+             (not (ast-needs-interpreter-fallback? exec-ctx ast)))
+        (if-let [{:keys [session result output]}
+                 (try
+                   (compiled-repl/compile-and-eval! @*compiled-repl-session*
+                                                    ast
+                                                    source-id)
+                   (catch clojure.lang.ExceptionInfo e
+                     (if (fallback-eligible-compiled-error? e)
+                       nil
+                       (throw e))))]
           (do
             (reset! *compiled-repl-session* session)
+            (let [{:keys [var-types]} (compiled-repl/sync-session->interpreter! session exec-ctx)]
+              (reset! *repl-var-types* var-types))
             (when (seq output)
               (doseq [line output]
                 (println line)))
@@ -1347,10 +1439,12 @@
 
 (defn show-banner []
   (println "╔════════════════════════════════════════════════════════════╗")
-  (println "║                   NEX REPL v0.1.0                          ║")
+  (println "║                   NEX REPL v0.1.1                          ║")
   (println "║     A high-level language for design and implementation    ║")
   (println "╚════════════════════════════════════════════════════════════╝")
   (println)
+  (println "Default backend: COMPILED (unsupported inputs fall back to the interpreter)")
+  (println "Use :backend interpreter for the tree-walking fallback/escape hatch")
   (println "Type :help for help, :quit to exit")
   (println))
 

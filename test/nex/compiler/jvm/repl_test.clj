@@ -2,6 +2,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [nex.debugger :as dbg]
             [nex.interpreter :as interp]
             [nex.parser :as p]
             [nex.compiler.jvm.repl :as compiled-repl]
@@ -51,7 +52,7 @@
                      (repl/eval-code ctx1 "x + 2"))]
         (is (= :compiled @repl/*repl-backend*))
         (is (str/includes? let-output "40"))
-        (is (= {} globals-after-let))
+        (is (= {"x" 40} globals-after-let))
         (is (= 40 (runtime/state-get-value (:state session) "x")))
         (is (= "Integer" (runtime/state-get-type (:state session) "x")))
         (is (str/includes? output "42"))))))
@@ -70,6 +71,29 @@
             output (with-out-str
                      (repl/eval-code ctx1 "x + 2"))]
         (is (str/includes? output "42"))))))
+
+(deftest repl-compiled-backend-debugger-routes-to-interpreter-test
+  (testing "compiled backend falls back to the interpreter path when the debugger is enabled"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (try
+          (dbg/set-enabled! true)
+          (let [output (with-redefs [compiled-repl/compile-and-eval!
+                                     (fn [& _]
+                                       (throw (ex-info "compiled path should not be used while debugger is enabled" {})))]
+                         (with-out-str
+                           (repl/eval-code ctx0 "let x: Integer := 40")))
+                session @repl/*compiled-repl-session*]
+            (is (not (str/includes? output "Error:")))
+            (is (= 40 (get @(:bindings (:globals ctx0)) "x")))
+            (is (= 40 (runtime/state-get-value (:state session) "x")))
+            (is (= "Integer" (get @repl/*repl-var-types* "x"))))
+          (finally
+            (dbg/set-enabled! false)
+            (dbg/reset-run-state!)))))))
 
 (deftest repl-compiled-backend-mixed-numeric-arithmetic-test
   (testing "compiled backend widens mixed numeric arithmetic instead of deopting or failing"
@@ -116,6 +140,37 @@ end"))
                           (repl/eval-code ctx0 "choose(false)"))]
         (is (not (str/includes? def-output "Error:")))
         (is (str/includes? call-output "\"no\""))))))
+
+(deftest repl-compiled-backend-closure-survives-deopt-test
+  (testing "a function object defined in compiled mode remains callable after a later deopt/reopt cycle"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "function plus10(n: Integer): Integer
+do
+  result := n + 10
+end"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "let f: Function := fn (n: Integer): Integer do
+  result := plus10(n) + 5
+end"))
+            pre-output (with-out-str
+                         (repl/eval-code ctx0 "f(1)"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "intern io/Path"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "let root: Path := create Path.make(\"/tmp\")"))
+            post-output (with-out-str
+                          (repl/eval-code ctx0 "f(1)"))
+            session @repl/*compiled-repl-session*]
+        (is (str/includes? pre-output "16"))
+        (is (not (str/includes? post-output "Error:")))
+        (is (str/includes? post-output "16"))
+        (is (= "Function" (runtime/state-get-type (:state session) "f")))
+        (is (some? (runtime/state-get-fn (:state session) "plus10")))))))
 
 (deftest repl-compiled-backend-object-if-branch-coercion-test
   (testing "compiled backend coerces differing object branch JVM types to the if expression result type"
@@ -187,7 +242,7 @@ end"))
             call-output (with-out-str
                           (repl/eval-code ctx0 "inc(40)"))
             session @repl/*compiled-repl-session*]
-        (is (= {} globals-after-def))
+        (is (contains? globals-after-def "inc"))
         (is (contains? @(:function-asts session) "inc"))
         (is (some? (runtime/state-get-fn (:state session) "inc")))
         (is (str/blank? def-output))

@@ -1,17 +1,17 @@
 # Compiled REPL Status
 
-This note defines the current boundary of the experimental JVM bytecode compiler and the compiled REPL backend.
+This note defines the current boundary of the JVM bytecode compiler and the compiled REPL backend.
 
 It answers two questions:
 
 - what is supported on the compiled path today
 - what still deoptimizes to the tree-walking interpreter
 
-The goal is to keep this boundary explicit while compiler coverage expands.
+The goal is to keep the mixed compiled/interpreter boundary explicit while compiler coverage continues to expand.
 
 ## Current Architecture
 
-The experimental compiled backend is wired into the REPL only.
+The compiled backend is no longer REPL-only, and it is now the default REPL backend.
 
 - The compiled session is the source of truth.
 - Top-level values, types, functions, classes, and imports are tracked in compiled-session state.
@@ -21,7 +21,7 @@ The experimental compiled backend is wired into the REPL only.
   - the interpreter executes the input
   - interpreter state syncs back into the compiled session
 
-This avoids split-brain REPL state while the compiler subset is still incomplete.
+This avoids split-brain REPL state while preserving interpreter fallback for unsupported inputs and debugger-driven execution.
 
 ## Important REPL Boundary
 
@@ -286,16 +286,23 @@ Array / Map / Set no longer belong in this bucket for their ordinary collection 
 The remaining deopts are no longer broad feature areas like "classes" or "exceptions".
 They are now mostly one of these:
 
+- debugger-enabled REPL evaluation
+  - when the debugger is enabled, `nex.repl/eval-code` deliberately routes execution through the interpreter path instead of compiled evaluation
 - inputs that fail the semantic eligibility gate in `nex.compiler.jvm.repl`
   - assignment to an unknown top-level binding
   - `create` of a deferred class
+  - anonymous functions whose bodies fall outside the supported statement subset
+  - `convert ... to` forms whose target type cannot be resolved to a concrete compiled/runtime-visible type
+  - `with` blocks whose target is not one of the explicitly supported backend names
   - calls whose target cannot be resolved to:
     - a known top-level function
     - a function object
     - a compiled user class
     - an imported Java class/object
     - a supported runtime-backed builtin receiver family
+  - imported Java or user-defined target calls whose receiver/method shape cannot be resolved by the current lowering rules
 - user-facing REPL inputs that still remain outside the compiled subset after raw parse + eligibility checking
+  - any AST node that reaches the compiled REPL path without a case in `supported-expr-in-ctx?` or `supported-stmt-in-ctx?`
 
 One important distinction:
 
@@ -328,8 +335,11 @@ Good candidates for the compiled path today:
 
 Likely deopt triggers today:
 
+- running with the debugger enabled
 - unresolved names or calls rejected by the compiled eligibility gate
 - explicit attempts to instantiate deferred classes
+- unsupported anonymous-function bodies or unsupported `convert` targets
+- unsupported host-target `with` blocks
 - any future AST node that reaches the compiled REPL path without a case in `supported-expr-in-ctx?` or `supported-stmt-in-ctx?`
 
 ## File Compilation

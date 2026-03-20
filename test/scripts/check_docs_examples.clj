@@ -141,13 +141,27 @@
         (run-app! ctx (str source-id ":App.run")))
       ctx)))
 
+(defn- active-blocks
+  [root blocks]
+  (->> blocks
+       (remove #(skip-block-reason root (:code %)))
+       vec))
+
 (defn run-progressive-file! [^java.io.File f root run-app? backend]
   (let [{:keys [ctx var-types backend-atom compiled-session]} (fresh-repl-state backend)
-        blocks (extract-nex-blocks f)]
+        blocks (extract-nex-blocks f)
+        runnable-blocks (active-blocks root blocks)
+        block-total (count runnable-blocks)]
     (binding [repl/*repl-var-types* var-types
               repl/*repl-backend* backend-atom
               repl/*compiled-repl-session* compiled-session]
-      (doseq [{:keys [index code]} blocks]
+      (doseq [[position {:keys [index code]}] (map-indexed vector runnable-blocks)]
+        (println (format "  block %d/%d  %s#block-%d"
+                         (inc position)
+                         block-total
+                         (.getPath f)
+                         index))
+        (flush)
         (when-not (skip-block-reason root code)
           (eval-snippet! ctx code (str (.getPath f) "#block-" index))))
       (when (and run-app? (runnable-app? ctx))
@@ -164,12 +178,29 @@
    :message (or (ex-message e) (str e))
    :data (ex-data e)})
 
-(defn run-file! [^java.io.File f {:keys [mode run-app root backend]}]
+(defn run-file! [position total ^java.io.File f {:keys [mode run-app root backend]}]
+  (let [blocks (extract-nex-blocks f)
+        runnable-blocks (active-blocks root blocks)]
+    (println (format "RUN  %d/%d  %s  (%s, %d active block%s)"
+                     position
+                     total
+                     (.getPath f)
+                     (name backend)
+                     (count runnable-blocks)
+                     (if (= 1 (count runnable-blocks)) "" "s")))
+    (flush))
   (try
     (case mode
       :isolated
       (do
-        (doseq [{:keys [index code]} (extract-nex-blocks f)]
+        (doseq [[block-position {:keys [index code]}]
+                (map-indexed vector (active-blocks root (extract-nex-blocks f)))]
+          (println (format "  block %d/%d  %s#block-%d"
+                           (inc block-position)
+                           (count (active-blocks root (extract-nex-blocks f)))
+                           (.getPath f)
+                           index))
+          (flush)
           (when-not (skip-block-reason root code)
             (eval-with-fresh-state! code (str (.getPath f) "#block-" index) run-app backend)))
         (result-ok (.getPath f) mode nil))
@@ -191,10 +222,13 @@
     (println)
     (doseq [result results]
       (if (:ok result)
-        (println "PASS" (:file result))
+        (do
+          (println "PASS" (:file result))
+          (flush))
         (do
           (println "FAIL" (:file result))
-          (println "  " (:message result)))))
+          (println "  " (:message result))
+          (flush))))
     (println)
     (println "Files:" total)
     (println "Passed:" passed)
@@ -204,7 +238,11 @@
 
 (let [opts (parse-args *command-line-args*)]
   (try
-    (let [results (mapv #(run-file! % opts) (:files opts))]
+    (let [files (:files opts)
+          total (count files)
+          results (mapv (fn [[idx f]]
+                          (run-file! (inc idx) total f opts))
+                        (map-indexed vector files))]
       (print-summary (:root opts) (:backend opts) results))
     (finally
       (interpreter/shutdown-runtime!))))

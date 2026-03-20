@@ -99,20 +99,48 @@ clojure -M:test test/scripts/run_integration_tests.clj
 
 Add future slow namespaces directly to
 `test/scripts/run_integration_tests.clj`.
+The integration runner currently includes:
+- slow CLI product-surface checks
+- compiled REPL micro-workload performance checks
+- compiled REPL long-session soak performance checks
+
+### Run Compiled REPL Performance Harness
+
+Use the performance harness to compare interpreter and compiled REPL latency on
+representative interactive workloads:
+
+```bash
+clojure -M:test test/scripts/run_compiled_repl_perf.clj --iterations 25 --warmup 5
+```
+
+The harness exits non-zero if the current acceptance thresholds are exceeded.
+
+### Run Compiled REPL Soak Performance Harness
+
+Use the soak-style performance harness to compare interpreter and compiled REPL
+latency on longer progressive sessions:
+
+```bash
+clojure -M:test test/scripts/run_compiled_repl_soak_perf.clj --iterations 8 --warmup 2
+```
+
+This harness covers longer sessions involving `:load`, `intern`, `import`,
+closures, concurrency, and deopt/reopt boundaries. It exits non-zero if the
+current acceptance thresholds are exceeded.
 
 ### Run Docs Example Checks
 
 Interpreter-backed docs checks:
 
 ```bash
-clojure -M:test test/scripts/check_docs_examples.clj --tut
-clojure -M:test test/scripts/check_docs_examples.clj --book
+clojure -M:test test/scripts/check_tutorial_examples.clj
+clojure -M:test test/scripts/check_book_examples.clj
 ```
 
 Compiled-REPL-backed docs checks:
 
 ```bash
-clojure -M:test test/scripts/check_compiled_docs_examples.clj --tut
+clojure -M:test test/scripts/check_compiled_tutorial_examples.clj
 clojure -M:test test/scripts/check_compiled_book_examples.clj
 ```
 

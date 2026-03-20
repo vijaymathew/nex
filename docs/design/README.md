@@ -17,7 +17,9 @@ Run commands from `docs/design`.
 - `styles.css` - HTML styling
 - `index.md` - title page
 - `introduction.md` and `chapter_*.md` - book content
+- `chapter_5.md` - translation guide for the JVM bytecode backend
 - `../md/COMPILED_REPL_STATUS.md` - current boundary of the experimental JVM compiled REPL backend
+- `../md/COMPILED_REPL_DEFAULT_EXIT_CRITERIA.md` - exit criteria checklist for making the compiled REPL backend the default
 - `../md/COMPILER_FEATURE_GAP.md` - current gap between the interpreter and the JVM bytecode compiler
 - `JVM_BYTECODE_COMPILER_PLAN.md` - implementation plan for the JVM bytecode compiler
 - `USER_DEFINED_CLASSES_COMPILER_PLAN.md` - implementation checklist for compiled support of simple user-defined classes

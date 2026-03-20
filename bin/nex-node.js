@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 const NEX_HOME = process.env.NEX_HOME || path.join(__dirname, '..');
 
 // Helper functions
