@@ -726,6 +726,22 @@
       (.invoke method nil (object-array [state]))))
   session)
 
+(defn- re-register-session-functions!
+  [session source-id]
+  (let [all-functions (vec (vals @(:function-asts session)))]
+    (when (seq (remove :declaration-only? all-functions))
+      (compile-and-register-functions!
+       session
+       {:type :program
+        :imports @(:import-asts session)
+        :interns []
+        :classes (vec (vals @(:class-asts session)))
+        :functions all-functions
+        :statements []
+        :calls []}
+       source-id)))
+  session)
+
 (defn sync-interpreter->session!
   "Copy top-level interpreter state into the compiled session and remember
    top-level AST metadata so later compiled cells can type/lower against it."
@@ -741,8 +757,10 @@
                         :var-types var-types})]
      (remember-top-level-ast! session prepared-ast)
      (let [state (:state session)
-           function-names (session-function-name-set session)]
+           function-names (session-function-name-set session)
+           existing-fns (clone-hash-map @(:functions state))]
        (reset-runtime-state! state)
+       (reset! (:functions state) existing-fns)
        (doseq [[k v] @(:bindings (:globals ctx))
                :let [name (if (string? k) k (name k))]
                :when (not (contains? function-names name))]
@@ -751,7 +769,7 @@
                :when (not (contains? function-names k))]
          (rt/state-set-type! state k t))
        (try
-         (compile-and-register-functions! session prepared-ast source-id)
+         (re-register-session-functions! session source-id)
          (catch clojure.lang.ExceptionInfo e
            (when-not (deopt-compiled-exception? e)
              (throw e))))

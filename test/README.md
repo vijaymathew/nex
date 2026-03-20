@@ -100,6 +100,17 @@ clojure -M:test test/scripts/run_integration_tests.clj
 Add future slow namespaces directly to
 `test/scripts/run_integration_tests.clj`.
 
+### Run Compiled REPL Performance Harness
+
+Use the performance harness to compare interpreter and compiled REPL latency on
+representative interactive workloads:
+
+```bash
+clojure -M:test test/scripts/run_compiled_repl_perf.clj --iterations 25 --warmup 5
+```
+
+The harness exits non-zero if the current acceptance thresholds are exceeded.
+
 ### Run Docs Example Checks
 
 Interpreter-backed docs checks:

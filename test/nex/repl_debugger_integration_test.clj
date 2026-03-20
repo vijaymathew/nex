@@ -1,5 +1,7 @@
 (ns nex.repl-debugger-integration-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [nex.compiler.jvm.repl :as compiled-repl]
+            [nex.compiler.jvm.runtime :as runtime]
             [nex.repl :as repl]
             [nex.debugger :as dbg]
             [clojure.java.io :as io]))
@@ -55,6 +57,35 @@ a.f()")))]
       (is (.contains out "stack:"))
       (is (.contains out "A.f"))
       (is (.contains out "A.g")))))
+
+(deftest debugger-compiled-backend-breakpoint-and-session-sync
+  (testing "Compiled-mode REPL still supports breakpoint workflows and syncs resulting state back into the compiled session"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            _ (repl/eval-code ctx "class A
+  feature
+    f() do
+      this.g()
+    end
+    g() do
+      let z: Integer := 1
+    end
+end")
+            _ (dbg/add-breakpoint! {:kind :cm :class "A" :method "g"})
+            out (with-out-str
+                  (with-redefs [repl/read-line-safe (scripted-reader [":where" ":n" ":locals" ":c"])]
+                    (repl/eval-code ctx "let a: A := create A
+a.f()")))
+            session @repl/*compiled-repl-session*]
+        (is (.contains out "Paused at statement #"))
+        (is (.contains out "stack:"))
+        (is (.contains out "A.f"))
+        (is (.contains out "A.g"))
+        (is (= "A" (runtime/state-get-type (:state session) "a")))
+        (is (contains? @(:class-asts session) "A"))))))
 
 (deftest debugger-break-on-contract
   (testing "break-on contract pauses on contract violations"
@@ -129,6 +160,38 @@ end")
 w.run()")))]
       (is (.contains out "Watchpoint ["))
       (is (.contains out "Paused at statement #")))))
+
+(deftest debugger-compiled-backend-watchpoint-and-break-on-exception
+  (testing "Compiled-mode REPL supports watchpoints and break-on-exception while routing through the debugger path"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            _ (repl/eval-code ctx "class W
+  feature
+    run() do
+      let x: Integer := 0
+      x := x + 1
+      x := x + 1
+    end
+end")
+            _ (dbg/add-watchpoint! "x")
+            watch-out (with-out-str
+                        (with-redefs [repl/read-line-safe (scripted-reader [":locals" ":c"])]
+                          (repl/eval-code ctx "let w: W := create W
+w.run()")))
+            session @repl/*compiled-repl-session*]
+        (is (.contains watch-out "Watchpoint ["))
+        (is (.contains watch-out "locals:"))
+        (is (.contains watch-out "x = 1"))
+        (is (= "W" (runtime/state-get-type (:state session) "w")))
+        (dbg/set-break-on! :exception true)
+        (let [exception-out (with-out-str
+                              (with-redefs [repl/read-line-safe (scripted-reader [":where" ":c"])]
+                                (repl/eval-code ctx "1 / 0")))]
+          (is (.contains exception-out "Paused on exception."))
+          (is (.contains exception-out "stack:")))))))
 
 (deftest debugger-frame-selection
   (testing ":frame selects caller frame for :locals"

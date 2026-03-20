@@ -141,6 +141,37 @@ end"))
         (is (not (str/includes? def-output "Error:")))
         (is (str/includes? call-output "\"no\""))))))
 
+(deftest repl-compiled-backend-closure-survives-deopt-test
+  (testing "a function object defined in compiled mode remains callable after a later deopt/reopt cycle"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "function plus10(n: Integer): Integer
+do
+  result := n + 10
+end"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "let f: Function := fn (n: Integer): Integer do
+  result := plus10(n) + 5
+end"))
+            pre-output (with-out-str
+                         (repl/eval-code ctx0 "f(1)"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "intern io/Path"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "let root: Path := create Path.make(\"/tmp\")"))
+            post-output (with-out-str
+                          (repl/eval-code ctx0 "f(1)"))
+            session @repl/*compiled-repl-session*]
+        (is (str/includes? pre-output "16"))
+        (is (not (str/includes? post-output "Error:")))
+        (is (str/includes? post-output "16"))
+        (is (= "Function" (runtime/state-get-type (:state session) "f")))
+        (is (some? (runtime/state-get-fn (:state session) "plus10")))))))
+
 (deftest repl-compiled-backend-object-if-branch-coercion-test
   (testing "compiled backend coerces differing object branch JVM types to the if expression result type"
     (binding [repl/*type-checking-enabled* (atom true)

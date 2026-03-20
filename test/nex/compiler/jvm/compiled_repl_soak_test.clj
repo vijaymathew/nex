@@ -336,14 +336,17 @@ end"
     :code "let c: Counter := create Counter.make(1)"
     :check (fn [{:keys [session]}]
              (is (= "Counter" (runtime/state-get-type (:state session) "c"))))}
+   {:label "closure still callable after deopt"
+    :code "add_base(4)"
+    :expect-substrings ["19"]}
    {:label "method call on loaded class after deopt"
     :code "do
-  c.add(13)
+  c.add(add_base(3))
 end"
     :parity-ignore-output? true}
    {:label "state after mixed deopt recovery"
     :code "c.value"
-    :expect-substrings ["14"]}
+    :expect-substrings ["19"]}
    {:label "final mixed metadata check"
     :code "type_of(worker)"
     :expect-substrings ["\"Task\""]
