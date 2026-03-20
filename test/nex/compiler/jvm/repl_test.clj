@@ -193,6 +193,39 @@ end"))
         (is (not (str/includes? def-output "Error:")))
         (is (str/includes? call-output "\"fallback\""))))))
 
+(deftest repl-compiled-backend-raise-prints-message-test
+  (testing "compiled backend surfaces raised exception messages in the user-facing REPL"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "raise \"some error\""))]
+        (is (str/includes? output "Error: some error"))
+        (is (not (str/includes? output "Error: nil")))))))
+
+(deftest repl-compiled-backend-rescue-output-and-rethrow-message-test
+  (testing "compiled backend flushes rescue output and preserves the rethrown exception message"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+        (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 (str "do\n"
+                                               "  print(\"before\")\n"
+                                               "  raise \"something went wrong\"\n"
+                                               "  print(\"after\")\n"
+                                               "rescue\n"
+                                               "  print(\"rescued: \" + exception.to_string)\n"
+                                               "end")))]
+        (is (str/includes? output "\"before\""))
+        (is (str/includes? output "rescued: "))
+        (is (str/includes? output "something went wrong"))
+        (is (str/includes? output "Error: something went wrong"))
+        (is (not (str/includes? output "Error: nil")))))))
+
 (deftest repl-compiled-backend-raw-statement-forms-test
   (testing "compiled backend tries raw compiled parsing for statement-shaped inputs before wrapping"
     (binding [repl/*type-checking-enabled* (atom false)

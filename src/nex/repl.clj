@@ -3,6 +3,7 @@
   (:require [nex.parser :as p]
             [nex.interpreter :as interp]
             [nex.compiler.jvm.repl :as compiled-repl]
+            [nex.compiler.jvm.runtime :as compiled-runtime]
             [nex.debugger :as dbg]
             [nex.typechecker :as tc]
             [clojure.string :as str]
@@ -13,6 +14,7 @@
            [org.jline.terminal TerminalBuilder]
            [org.jline.reader.impl.history DefaultHistory]
            [java.io EOFException]
+           [java.lang.reflect InvocationTargetException]
            [clj_antlr ParseError])
   (:gen-class))
 
@@ -1064,6 +1066,22 @@
              ast
              source-id))))
 
+(defn- unwrap-user-visible-exception
+  [e]
+  (if (instance? InvocationTargetException e)
+    (or (.getCause ^InvocationTargetException e) e)
+    e))
+
+(defn- flush-compiled-output-on-error!
+  []
+  (when-let [session @*compiled-repl-session*]
+    (when-let [state (:state session)]
+      (let [output (compiled-runtime/state-output state)]
+        (when (seq output)
+          (doseq [line output]
+            (println line))
+          (compiled-runtime/clear-output! state))))))
+
 (defn looks-like-class?
   "Check if input looks like a top-level declaration"
   [input]
@@ -1419,19 +1437,23 @@
       ctx)
 
     (catch clojure.lang.ExceptionInfo e
-      (println "Error:" (.getMessage e))
-      (when-let [data (ex-data e)]
-        (when (contains? data :line)
-          (println "  at line" (:line data))))
-      (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
-                                               :wrap-expression-fn wrap-expression})
-      ctx)
+      (let [e (unwrap-user-visible-exception e)]
+        (flush-compiled-output-on-error!)
+        (println "Error:" (.getMessage e))
+        (when-let [data (ex-data e)]
+          (when (contains? data :line)
+            (println "  at line" (:line data))))
+        (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
+                                                 :wrap-expression-fn wrap-expression})
+        ctx))
 
     (catch Exception e
-      (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
-                                               :wrap-expression-fn wrap-expression})
-      (println "Error:" (.getMessage e))
-      ctx)))))
+      (let [e (unwrap-user-visible-exception e)]
+        (flush-compiled-output-on-error!)
+        (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
+                                                 :wrap-expression-fn wrap-expression})
+        (println "Error:" (.getMessage e))
+        ctx))))))
 
 ;;
 ;; Main REPL Loop
