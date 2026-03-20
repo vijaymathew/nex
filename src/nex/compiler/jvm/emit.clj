@@ -1,12 +1,14 @@
 (ns nex.compiler.jvm.emit
-  "Minimal ASM-backed JVM bytecode emission for Nex.
+  "ASM-backed JVM bytecode emission for Nex.
 
-  This first emitter milestone supports one trivial REPL cell class with:
+  Emits lowered Nex IR and class specs as JVM bytecode for:
 
-  - public default constructor
-  - public static Object eval(NexReplState state)
+  - compiled REPL cells with `eval(NexReplState)`
+  - user-defined classes, constructors, methods, and constants
+  - launcher classes with `main(String[])`
 
-  The initial `eval` body ignores the IR and returns `null`."
+  The emitter handles control flow, runtime helper calls, object-model support,
+  and debug metadata such as source files, line tables, and local variables."
   (:require [clojure.string :as str]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.ir :as ir])
