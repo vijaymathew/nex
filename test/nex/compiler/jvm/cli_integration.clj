@@ -3,6 +3,8 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
 
+(def ^:private process-timeout-ms 120000)
+
 (defn- delete-tree!
   [root]
   (doseq [f (reverse (file-seq (io/file root)))]
@@ -16,10 +18,18 @@
     (doto (.environment pb)
       (.put "J_OPTIONS" "-J-Xint -J--enable-native-access=ALL-UNNAMED"))
     (let [proc (.start pb)
-          output (slurp (.getInputStream proc))]
-      (.waitFor proc)
-      {:exit (.exitValue proc)
-       :out output})))
+          output-future (future (slurp (.getInputStream proc)))]
+      (if (.waitFor proc process-timeout-ms java.util.concurrent.TimeUnit/MILLISECONDS)
+        {:exit (.exitValue proc)
+         :out @output-future}
+        (do
+          (.destroyForcibly proc)
+          {:exit 124
+           :out (str @output-future
+                     "\nProcess timed out after "
+                     process-timeout-ms
+                     " ms: "
+                     (str/join " " args))})))))
 
 (defn- run-jar!
   [jar-path]
@@ -42,12 +52,16 @@
       (try
         (.mkdirs tmp-dir)
         (spit nex-file "print(\"cli ok\")")
+        (println "[cli-integration] explicit-output: starting compile")
         (let [{:keys [exit out]} (run-process! "." nex-bin "compile" "jvm" (.getPath nex-file) (.getPath out-dir))]
+          (println "[cli-integration] explicit-output: finished compile")
           (is (= 0 exit) out)
           (is (.exists expected-jar))
           (is (str/includes? out "Compiled"))
           (is (str/includes? out "Main class:"))
+          (println "[cli-integration] explicit-output: starting java -jar")
           (let [jar-run (run-jar! (.getPath expected-jar))]
+            (println "[cli-integration] explicit-output: finished java -jar")
             (is (= 0 (:exit jar-run)) (:out jar-run))
             (is (= "\"cli ok\"" (str/trim (:out jar-run))))))
         (finally
@@ -62,10 +76,14 @@
       (try
         (.mkdirs tmp-dir)
         (spit nex-file "print(42)")
+        (println "[cli-integration] default-output: starting compile")
         (let [{:keys [exit out]} (run-process! (.getPath tmp-dir) nex-bin "compile" "jvm" (.getPath nex-file))]
+          (println "[cli-integration] default-output: finished compile")
           (is (= 0 exit) out)
           (is (.exists expected-jar))
+          (println "[cli-integration] default-output: starting java -jar")
           (let [jar-run (run-jar! (.getPath expected-jar))]
+            (println "[cli-integration] default-output: finished java -jar")
             (is (= 0 (:exit jar-run)) (:out jar-run))
             (is (= "42" (str/trim (:out jar-run))))))
         (finally

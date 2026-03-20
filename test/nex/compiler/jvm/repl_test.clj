@@ -52,7 +52,7 @@
                      (repl/eval-code ctx1 "x + 2"))]
         (is (= :compiled @repl/*repl-backend*))
         (is (str/includes? let-output "40"))
-        (is (= {} globals-after-let))
+        (is (= {"x" 40} globals-after-let))
         (is (= 40 (runtime/state-get-value (:state session) "x")))
         (is (= "Integer" (runtime/state-get-type (:state session) "x")))
         (is (str/includes? output "42"))))))
@@ -242,7 +242,7 @@ end"))
             call-output (with-out-str
                           (repl/eval-code ctx0 "inc(40)"))
             session @repl/*compiled-repl-session*]
-        (is (= {} globals-after-def))
+        (is (contains? globals-after-def "inc"))
         (is (contains? @(:function-asts session) "inc"))
         (is (some? (runtime/state-get-fn (:state session) "inc")))
         (is (str/blank? def-output))

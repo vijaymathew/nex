@@ -99,6 +99,10 @@ clojure -M:test test/scripts/run_integration_tests.clj
 
 Add future slow namespaces directly to
 `test/scripts/run_integration_tests.clj`.
+The integration runner currently includes:
+- slow CLI product-surface checks
+- compiled REPL micro-workload performance checks
+- compiled REPL long-session soak performance checks
 
 ### Run Compiled REPL Performance Harness
 
@@ -129,14 +133,14 @@ current acceptance thresholds are exceeded.
 Interpreter-backed docs checks:
 
 ```bash
-clojure -M:test test/scripts/check_docs_examples.clj --tut
-clojure -M:test test/scripts/check_docs_examples.clj --book
+clojure -M:test test/scripts/check_tutorial_examples.clj
+clojure -M:test test/scripts/check_book_examples.clj
 ```
 
 Compiled-REPL-backed docs checks:
 
 ```bash
-clojure -M:test test/scripts/check_compiled_docs_examples.clj --tut
+clojure -M:test test/scripts/check_compiled_tutorial_examples.clj
 clojure -M:test test/scripts/check_compiled_book_examples.clj
 ```
 
