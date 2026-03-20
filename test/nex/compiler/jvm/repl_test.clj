@@ -2,6 +2,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [nex.debugger :as dbg]
             [nex.interpreter :as interp]
             [nex.parser :as p]
             [nex.compiler.jvm.repl :as compiled-repl]
@@ -70,6 +71,29 @@
             output (with-out-str
                      (repl/eval-code ctx1 "x + 2"))]
         (is (str/includes? output "42"))))))
+
+(deftest repl-compiled-backend-debugger-routes-to-interpreter-test
+  (testing "compiled backend falls back to the interpreter path when the debugger is enabled"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (try
+          (dbg/set-enabled! true)
+          (let [output (with-redefs [compiled-repl/compile-and-eval!
+                                     (fn [& _]
+                                       (throw (ex-info "compiled path should not be used while debugger is enabled" {})))]
+                         (with-out-str
+                           (repl/eval-code ctx0 "let x: Integer := 40")))
+                session @repl/*compiled-repl-session*]
+            (is (not (str/includes? output "Error:")))
+            (is (= 40 (get @(:bindings (:globals ctx0)) "x")))
+            (is (= 40 (runtime/state-get-value (:state session) "x")))
+            (is (= "Integer" (get @repl/*repl-var-types* "x"))))
+          (finally
+            (dbg/set-enabled! false)
+            (dbg/reset-run-state!)))))))
 
 (deftest repl-compiled-backend-mixed-numeric-arithmetic-test
   (testing "compiled backend widens mixed numeric arithmetic instead of deopting or failing"

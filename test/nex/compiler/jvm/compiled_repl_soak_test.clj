@@ -287,6 +287,74 @@ end"
                     (:qualified-name (first @(:import-asts session)))))
              (is (= "Counter" (:class-name (first @(:intern-asts session))))))}])
 
+(defn- load-intern-closure-concurrency-steps
+  [tmp-dir main-file]
+  [{:label "load mixed module"
+    :load-path (.getPath main-file)
+    :check (fn [{:keys [session]}]
+             (is (contains? @(:class-asts session) "Counter"))
+             (is (contains? @(:function-asts session) "loaded_add")))}
+   {:label "captured closure over loaded function"
+    :code "let add_base: Function := fn (n: Integer): Integer do
+  result := loaded_add(n) + 5
+end"}
+   {:label "captured closure call before deopt"
+    :code "add_base(1)"
+    :expect-substrings ["16"]}
+   {:label "channel setup"
+    :code "let ch: Channel[Integer] := create Channel.with_capacity(1)"
+    :check (fn [{:keys [session]}]
+             (is (= {:base-type "Channel" :type-args ["Integer"]}
+                    (runtime/state-get-type (:state session) "ch"))))}
+   {:label "send closure result"
+    :code "ch.send(add_base(2))"}
+   {:label "select closure result"
+    :code "select
+  when ch.receive() as msg then
+    print(msg)
+  timeout 100 then
+    print(0)
+end"
+    :expect-substrings ["17"]}
+   {:label "spawn task using loaded function"
+    :code "let worker: Task[Integer] := spawn do
+  result := loaded_add(8)
+end"
+    :check (fn [{:keys [session]}]
+             (is (= {:base-type "Task" :type-args ["Integer"]}
+                    (runtime/state-get-type (:state session) "worker"))))}
+   {:label "await task before deopt"
+    :code "await_any([worker])"
+    :expect-substrings ["18"]}
+   {:label "forced deopt via io/Path"
+    :code "intern io/Path"}
+   {:label "path after deopt"
+    :code (str "let mixed_root: Path := create Path.make(\"" (.getAbsolutePath tmp-dir) "\")")
+    :check (fn [{:keys [session]}]
+             (is (= "Path" (runtime/state-get-type (:state session) "mixed_root"))))}
+   {:label "loaded class after deopt"
+    :code "let c: Counter := create Counter.make(1)"
+    :check (fn [{:keys [session]}]
+             (is (= "Counter" (runtime/state-get-type (:state session) "c"))))}
+   {:label "method call on loaded class after deopt"
+    :code "do
+  c.add(13)
+end"
+    :parity-ignore-output? true}
+   {:label "state after mixed deopt recovery"
+    :code "c.value"
+    :expect-substrings ["14"]}
+   {:label "final mixed metadata check"
+    :code "type_of(worker)"
+    :expect-substrings ["\"Task\""]
+    :check (fn [{:keys [session]}]
+             (is (contains? @(:class-asts session) "Counter"))
+             (is (contains? @(:function-asts session) "loaded_add"))
+             (is (= "Counter" (runtime/state-get-type (:state session) "c")))
+             (is (= "Path" (runtime/state-get-type (:state session) "mixed_root")))
+             (is (= {:base-type "Task" :type-args ["Integer"]}
+                    (runtime/state-get-type (:state session) "worker"))))}])
+
 (deftest compiled-repl-progressive-mixed-session-soak-test
   (testing "compiled REPL survives a long mixed session with deopt/reopt cycles and state checks"
     (let [tmp-root (.getAbsolutePath (io/file (System/getProperty "java.io.tmpdir")
@@ -532,6 +600,39 @@ feature
 end")
         (spit main-file "intern Counter")
         (run-steps! (import-intern-steps tmp-dir main-file))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compiled-repl-load-intern-closure-concurrency-soak-test
+  (testing "compiled REPL keeps loaded interned definitions coherent across closures, concurrency, and a later deopt"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-compiled-soak-load-intern-closure-" (System/nanoTime)))
+          counter-file (io/file tmp-dir "Counter.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit counter-file "class Counter
+create
+  make(v: Integer) do
+    this.value := v
+  end
+feature
+  value: Integer
+
+  add(n: Integer): Integer
+  do
+    this.value := this.value + n
+    result := this.value
+  end
+end")
+        (spit main-file "intern Counter
+
+function loaded_add(n: Integer): Integer
+do
+  result := n + 10
+end")
+        (run-steps! (load-intern-closure-concurrency-steps tmp-dir main-file))
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
