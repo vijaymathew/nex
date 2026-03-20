@@ -481,6 +481,25 @@
   [fn-def]
   (or (:return-type fn-def) "Any"))
 
+(defn- top-level-function-callable
+  [fn-def]
+  (when-let [class-def (:class-def fn-def)]
+    (some (fn [member]
+            (when (and (= :method (:type member))
+                       (= (count (or (:params member) []))
+                          (count (or (:params fn-def) []))))
+              member))
+          (mapcat :members
+                  (filter #(= :feature-section (:type %))
+                          (:body class-def))))))
+
+(defn- normalized-function-def
+  [fn-def]
+  (if-let [callable (and (= :function (:type fn-def))
+                         (top-level-function-callable fn-def))]
+    (merge callable fn-def)
+    fn-def))
+
 (defn- if-branch-expression
   [branch]
   (when (= 1 (count branch))
@@ -2778,7 +2797,8 @@
 
 (defn lower-function
   [unit-name visible-functions visible-imports fn-def]
-  (let [return-type (function-return-type fn-def)
+  (let [fn-def (normalized-function-def fn-def)
+        return-type (function-return-type fn-def)
         visible-classes (vec (concat (:visible-classes fn-def)
                                      [(:class-def fn-def)]
                                      (keep :class-def visible-functions)))
