@@ -273,6 +273,7 @@ nex> class Result [V]
            ok := true
          end
          failure(msg: String) do
+           value := nil
            error := msg
            ok := false
          end
@@ -285,9 +286,15 @@ nex> class Result [V]
          end
          describe(): String do
            if ok then
-             result := "Success: " + value.to_string
-           else
+             if value /= nil then
+               result := "Success: " + value.to_string
+             else
+               result := "Error"
+             end
+           elseif error /= nil then
              result := "Error: " + error
+           else
+             result := "Error"
            end
          end
      end

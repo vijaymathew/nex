@@ -43,8 +43,10 @@ To find records matching a condition — all books published before 1970, say:
 
 ```
 nex> across books as book do
-     if book.get("year") < 1970 then
-        print(book.get("title"))
+     if convert book.get("year") to year: Integer then
+        if year < 1970 then
+           print(book.get("title"))
+        end
      end
   end
 Dune
@@ -111,17 +113,19 @@ nex> function build_gradebook(entries: Array[Map[String, Any]]): Map[String, Arr
    do
      result := {}
      across entries as entry do
-        let name := entry.get("name").to_string
-        let score := entry.get("score")
-        let current := result.try_get(name, [])
-        current.add(score)
-        result.put(name, current)
+        if convert entry.get("name") to name: String then
+           let current := result.try_get(name, [])
+           if convert entry.get("score") to score: Integer then
+              current.add(score)
+              result.put(name, current)
+           end
+        end
      end
    end
 ```
 
 ```
-nex> let entries := [
+nex> let entries: Array[Map[String, Any]] := [
      {"name": "Alice", "score": 85},
      {"name": "Bob",   "score": 72},
      {"name": "Alice", "score": 91},
@@ -168,7 +172,7 @@ Some data is genuinely hierarchical: file systems with directories containing fi
 Nex does not have a built-in tree type. Trees are represented using maps, where each node is a map with a value field and a children field that holds an array of child nodes. Here is a simple representation of a file system fragment:
 
 ```
-nex> let filesystem := {
+nex> let filesystem: Map[String, Any] := {
      "name": "root",
      "type": "dir",
      "children": [
@@ -207,10 +211,13 @@ nex> function print_tree(node: Map[String, Any], indent: Integer)
         padding := padding + "  "
         i := i + 1
      end
-     print(padding + node.get("name").to_string)
-     let children := node.get("children")
-     across children as child do
-        print_tree(child, indent + 1)
+     if convert node.get("name") to name: String then
+        print(padding + name)
+     end
+     if convert node.get("children") to children: Array[Map[String, Any]] then
+        across children as child do
+           print_tree(child, indent + 1)
+        end
      end
    end
 ```

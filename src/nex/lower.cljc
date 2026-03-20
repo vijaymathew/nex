@@ -1259,7 +1259,7 @@
   [env {:keys [var-name target-type]}]
   (if-let [binding (lookup-convert-binding env var-name)]
     [env binding]
-    (let [bound-type (tc/detachable-version target-type)]
+    (let [bound-type target-type]
       (if (and (:top-level? env) (not (:scoped-locals? env)))
         (let [env' (update env :var-types assoc var-name bound-type)]
           [env' {:kind :top

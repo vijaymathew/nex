@@ -130,3 +130,52 @@ nex> p.value
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
+
+(deftest compiled-docs-check-skips-non-nex-fenced-blocks
+  (testing "the docs checker skips bash fences and only runs actual Nex blocks"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-docs-example-skip-bash-test")
+          md-file (io/file tmp-dir "skip_bash.md")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit md-file "```bash
+make book
+```
+
+```nex
+let x := 10
+x + 5
+```")
+        (let [{:keys [exit output]}
+              (run-process! "clojure" "-M:test" "test/scripts/check_compiled_tutorial_examples.clj" (.getPath md-file))]
+          (is (= 0 exit) output)
+          (is (str/includes? output (str "RUN  1/1  " (.getPath md-file) "  (compiled, 1 active block)")) output)
+          (is (str/includes? output (str "PASS " (.getPath md-file))) output))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compiled-docs-check-handles-repl-command-transcripts
+  (testing "the docs checker routes REPL command cells through the command handler"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-docs-example-repl-command-test")
+          md-file (io/file tmp-dir "repl_commands.md")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit md-file "```text
+nex> let x := 10
+nex> :clear
+nex> let y := 5
+nex> y
+5
+```
+
+```text
+nex> :quit
+Goodbye!
+```")
+        (let [{:keys [exit output]}
+              (run-process! "clojure" "-M:test" "test/scripts/check_compiled_tutorial_examples.clj" (.getPath md-file))]
+          (is (= 0 exit) output)
+          (is (str/includes? output (str "PASS " (.getPath md-file))) output))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))

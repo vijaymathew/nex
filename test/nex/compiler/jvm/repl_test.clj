@@ -1472,5 +1472,29 @@ end")
           (finally
             (when (.exists source-file)
               (.delete source-file))
-            (when (.exists tmp-dir)
-              (.delete tmp-dir))))))))
+          (when (.exists tmp-dir)
+            (.delete tmp-dir))))))))
+
+(deftest repl-compiled-backend-convert-guard-inside-across-test
+  (testing "compiled backend handles convert-bound locals inside across loops without verifier errors"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            books-code "let books: Array[Map[String, Any]] := [
+  {\"title\": \"Dune\", \"author\": \"Frank Herbert\", \"year\": 1965},
+  {\"title\": \"Neuromancer\", \"author\": \"William Gibson\", \"year\": 1984},
+  {\"title\": \"Foundation\", \"author\": \"Isaac Asimov\", \"year\": 1951}
+]"
+            filter-code "across books as book do
+  if convert book.get(\"year\") to year: Integer then
+    if year < 1970 then
+      print(book.get(\"title\"))
+    end
+  end
+end"
+            _ (with-out-str (repl/eval-code ctx books-code))
+            out (with-out-str (repl/eval-code ctx filter-code))]
+        (is (not (str/includes? out "VerifyError")))
+        (is (not (str/includes? out "Error:")))))))

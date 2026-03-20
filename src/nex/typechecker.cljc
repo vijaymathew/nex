@@ -2307,19 +2307,24 @@
   [env {:keys [entries] :as expr}]
   (if (empty? entries)
     {:base-type "Map" :type-params ["__EmptyMapKey" "__EmptyMapValue"]}
-    (let [first-entry (first entries)
-          key-type (check-expression env (:key first-entry))
-          val-type (check-expression env (:value first-entry))]
-      ;; Check all entries have same types
-      (doseq [entry (rest entries)]
-        (let [k-type (check-expression env (:key entry))
-              v-type (check-expression env (:value entry))]
-          (when-not (and (types-equal? env key-type k-type)
-                        (types-equal? env val-type v-type))
-            (throw (ex-info "Map entries must have consistent types"
-                            {:error (type-error
-                                     "Map entries must have consistent types")})))))
-      {:base-type "Map" :type-params [key-type val-type]})))
+    (let [entry-types (mapv (fn [{:keys [key value]}]
+                              {:key-type (check-expression env key)
+                               :value-type (check-expression env value)})
+                            entries)
+          key-type (:key-type (first entry-types))
+          value-types (mapv :value-type entry-types)]
+      (doseq [{current-key-type :key-type} entry-types]
+        (when-not (types-equal? env key-type current-key-type)
+          (throw (ex-info "Map entries must have consistent key types"
+                          {:error (type-error
+                                   "Map entries must have consistent key types")}))))
+      (let [value-type (reduce (fn [acc t]
+                                 (if (types-equal? env acc t)
+                                   acc
+                                   "Any"))
+                               (first value-types)
+                               (rest value-types))]
+        {:base-type "Map" :type-params [key-type value-type]}))))
 
 (defn check-set-literal
   "Check the type of a set literal"
@@ -2395,6 +2400,67 @@
 ;;
 
 (declare check-statement)
+(declare check-expression-with-expected)
+
+(defn check-expression-with-expected
+  "Check an expression against an expected type when contextual typing matters,
+   especially for collection literals with annotated target types."
+  [env expr expected-type]
+  (let [expected-type (normalize-type expected-type)]
+    (cond
+      (and (map? expr)
+           (= :array-literal (:type expr))
+           (map? expected-type)
+           (= (:base-type expected-type) "Array")
+           (= 1 (count (:type-params expected-type))))
+      (let [elem-type (first (:type-params expected-type))]
+        (doseq [elem (:elements expr)]
+          (let [actual-elem-type (check-expression-with-expected env elem elem-type)]
+            (when-not (types-compatible? env actual-elem-type elem-type)
+              (throw (ex-info "Array elements must have same type"
+                              {:error (type-error
+                                       (str "Array elements must have same type, got "
+                                            (display-type elem-type) " and " (display-type actual-elem-type)))})))))
+        expected-type)
+
+      (and (map? expr)
+           (= :map-literal (:type expr))
+           (map? expected-type)
+           (= (:base-type expected-type) "Map")
+           (= 2 (count (:type-params expected-type))))
+      (let [[expected-key-type expected-val-type] (:type-params expected-type)]
+        (doseq [{:keys [key value]} (:entries expr)]
+          (let [actual-key-type (check-expression-with-expected env key expected-key-type)
+                actual-val-type (check-expression-with-expected env value expected-val-type)]
+            (when-not (types-compatible? env actual-key-type expected-key-type)
+              (throw (ex-info "Map keys must have consistent types"
+                              {:error (type-error
+                                       (str "Cannot assign " (display-type actual-key-type)
+                                            " to map key type " (display-type expected-key-type)))})))
+            (when-not (types-compatible? env actual-val-type expected-val-type)
+              (throw (ex-info "Map values must have consistent types"
+                              {:error (type-error
+                                       (str "Cannot assign " (display-type actual-val-type)
+                                            " to map value type " (display-type expected-val-type)))})))))
+        expected-type)
+
+      (and (map? expr)
+           (= :set-literal (:type expr))
+           (map? expected-type)
+           (= (:base-type expected-type) "Set")
+           (= 1 (count (:type-params expected-type))))
+      (let [elem-type (first (:type-params expected-type))]
+        (doseq [elem (:elements expr)]
+          (let [actual-elem-type (check-expression-with-expected env elem elem-type)]
+            (when-not (types-compatible? env actual-elem-type elem-type)
+              (throw (ex-info "Set elements must have same type"
+                              {:error (type-error
+                                       (str "Set elements must have same type, got "
+                                            (display-type elem-type) " and " (display-type actual-elem-type)))})))))
+        expected-type)
+
+      :else
+      (check-expression env expr))))
 
 (defn check-assignment
   "Check an assignment statement"
@@ -2404,7 +2470,9 @@
       (throw (ex-info (str "Cannot assign to constant: " target)
                       {:error (type-error (str "Cannot assign to constant: " target))}))))
   (let [var-type (env-lookup-var env target)
-        val-type (check-expression env value)]
+        val-type (if var-type
+                   (check-expression-with-expected env value var-type)
+                   (check-expression env value))]
     (when-not var-type
       (throw (ex-info (str "Undefined variable: " target)
                       {:error (type-error (str "Undefined variable: " target))})))
@@ -2419,7 +2487,9 @@
 (defn check-let
   "Check a let statement"
   [env {:keys [name var-type value synthetic] :as stmt}]
-  (let [val-type (check-expression env value)
+  (let [val-type (if var-type
+                   (check-expression-with-expected env value var-type)
+                   (check-expression env value))
         inferred-type (or var-type val-type)]
     (when-not inferred-type
       (throw (ex-info (str "Type annotation required for variable '" name "'")
