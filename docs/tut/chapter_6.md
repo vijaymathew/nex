@@ -22,10 +22,10 @@ Call it by name, passing an argument:
 
 ```
 nex> greet("Ada")
-Hello, Ada
+"Hello, Ada"
 
 nex> greet("Alan")
-Hello, Alan
+"Hello, Alan"
 ```
 
 The same computation — constructing and printing a greeting — runs twice, with different inputs, without duplicating any code.
@@ -129,13 +129,13 @@ nex> function describe(n: Integer): String
      end
 
 nex> describe(-3)
-negative
+"negative"
 
 nex> describe(0)
-zero
+"zero"
 
 nex> describe(42)
-positive
+"positive"
 ```
 
 The default `"other"` is never actually returned here because every integer is either negative, zero, or positive — but having a default means the function always returns something meaningful even if the conditional logic has a gap.
@@ -215,7 +215,7 @@ In the REPL, this matters when static checking is enabled:
 
 ```
 nex> :typecheck on
-Type checking enabled. Code will be validated before execution.
+"Type checking enabled. Code will be validated before execution."
 ```
 
 ```
@@ -249,8 +249,8 @@ A function defined with `function` has a name and exists for the duration of the
 
 ```
 nex> let double := fn (n: Integer): Integer do
-       result := n * 2
-     end
+       "result := n * 2"
+     "end"
 
 nex> double(5)
 10
@@ -346,14 +346,14 @@ nex> celsius_to_fahrenheit(boiling)
 212.0
 
 nex> describe_temperature(boiling)
-warm
+"warm"
 
 nex> let body_temp_f := 98.6
 
 nex> let body_temp_c := fahrenheit_to_celsius(body_temp_f)
 
 nex> describe_temperature(body_temp_c)
-warm
+"warm"
 ```
 
 Each function does one thing. The code that uses them reads like a series of clear questions: what is this in Fahrenheit, how would we describe this temperature? The answers are delegated to functions that can be developed, tested, and read independently.

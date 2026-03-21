@@ -94,7 +94,7 @@ nex> count_down(3)
 3
 2
 1
-Go!
+"Go!"
 ```
 
 Base case: when `n = 0`, print `"Go!"` and stop. Recursive case: print `n`, then count down from `n - 1`.

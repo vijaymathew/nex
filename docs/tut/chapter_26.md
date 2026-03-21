@@ -190,13 +190,13 @@ The call `task_at(i).mark_done()` now works correctly. Still, a list class can o
 
 ```
 nex> mark_task_done(index: Integer)
-       require
-         index_in_range: index >= 0 and index < tasks.length
-       do
-         task_at(index).mark_done()
-       ensure
-         selected_done: tasks.get(index).done
-       end
+       "require"
+         "index_in_range: index >= 0 and index < tasks.length"
+       "do"
+         "task_at(index).mark_done()"
+       "ensure"
+         "selected_done: tasks.get(index).done"
+       "end"
 ```
 
 Add it to `Task_List`:

@@ -281,11 +281,11 @@ nex> :vars
 Defined variables:
   • x = 20
   • y = 15
-  • name = Ada
+  • name = "Ada"
   • age = 12
   • height = 1.52
   • enrolled = true
-  • greeting = Hello, Ada
+  • greeting = "Hello, Ada"
 ```
 
 `:vars` shows every variable currently defined in your session, with its current value. This is useful when you lose track of what you have defined.

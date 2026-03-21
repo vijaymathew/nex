@@ -13,7 +13,7 @@ nex> let temperature := 35
 nex> if temperature > 30 then
        print("hot")
      end
-hot
+"hot"
 ```
 
 The condition — `temperature > 30` — is a `Boolean` expression. If it evaluates to `true`, the code between `then` and `end` runs. If it evaluates to `false`, nothing happens and execution continues after `end`.
@@ -28,7 +28,7 @@ nex> if score >= 50 then
      else
        print("fail")
      end
-fail
+"fail"
 ```
 
 Exactly one of the two branches runs — either the `then` branch or the `else` branch, never both, never neither.
@@ -49,7 +49,7 @@ nex> if score >= 90 then
     else
        print("F")
     end
-C
+"C"
 ```
 
 Nex evaluates the conditions from top to bottom and executes the first branch whose condition is `true`. Once a branch is taken, the remaining conditions are not evaluated. This matters: if `score` is `95`, the first condition `score >= 90` is `true`, and the grade is `A` — the conditions `score >= 80` and `score >= 70` are never checked, even though they are also true.
@@ -74,7 +74,7 @@ nex> let can_drive := age >= 17 and has_licence
 nex> if can_drive then
        print("You may drive")
     end
-You may drive
+"You may drive"
 ```
 
 The variable `can_drive` gives a name to what the condition means. A reader does not have to evaluate `age >= 17 and has_licence` in their head — the name explains it. This is especially valuable when the same condition appears in more than one place.
@@ -84,11 +84,11 @@ The variable `can_drive` gives a name to what the condition means. A reader does
 ```
 nex> -- prefer this
 nex> if score >= 50 then print("pass") end
-pass
+"pass"
 
 nex> -- over this
 nex> if not (score < 50) then print("pass") end
-pass
+"pass"
 ```
 
 **Keep conditions positive when possible.** An `if` with a `then` branch that does nothing exists only to reach the `else`:
@@ -100,13 +100,13 @@ nex> if score < 50 then
     else
        print("pass")
     end
-pass
+"pass"
 
 nex> -- clearer
 nex> if score >= 50 then
        print("pass")
     end
-pass
+"pass"
 ```
 
 If the positive condition does not exist — if you genuinely only care about the `false` case — an `else`-only structure is sometimes the clearest option. But reaching for it first, before considering whether the condition can be restated positively, often leads to harder-to-read code.
@@ -131,7 +131,7 @@ nex> if age >= 18 then
     else
        print("Under age")
     end
-Welcome
+"Welcome"
 ```
 
 Nesting works, but it should be used with restraint. Two levels of nesting are often the limit of what a reader can comfortably track. Beyond that, a compound condition with `and` or `or` is usually clearer:
@@ -144,7 +144,7 @@ nex> if age >= 18 and has_ticket then
     else
        print("No ticket")
     end
-Welcome
+"Welcome"
 ```
 
 Both versions produce the same results, but the flat version is easier to read because the conditions are stated directly rather than implied by the nesting structure.
@@ -161,7 +161,7 @@ nex> let age := 20
 nex> let category := when age >= 18 "adult" else "minor" end
 
 nex> category
-adult
+"adult"
 ```
 
 `when` is an expression — it produces a value, which can be assigned to a variable, passed to a function, or used anywhere else an expression is expected. The form is:
@@ -205,7 +205,7 @@ nex> if day = "Saturday" or day = "Sunday" then
     else
        print("midweek")
     end
-edge of week
+"edge of week"
 ```
 
 The `case` construct handles this more cleanly:
@@ -216,7 +216,7 @@ nex> case day of
        "Monday", "Friday" then print("edge of week")
        else print("midweek")
     end
-edge of week
+"edge of week"
 ```
 
 `case` evaluates the expression after `of` — here `day` — and compares it against each comma-separated list of values. The first list that contains a matching value determines which branch runs. The `else` branch at the end catches any value not matched by a preceding branch; it is optional, but omitting it means that unmatched values produce no output and no error, which can hide mistakes.
@@ -232,7 +232,7 @@ nex> case code of
        4, 5 then print("high")
        else print("out of range")
     end
-medium
+"medium"
 ```
 
 Each `then` branch takes a single statement. If you need to perform multiple operations in a branch, use a `do     end` block:
@@ -287,7 +287,7 @@ nex> if income <= 10000.0 then
     end
 
 nex> "Tax: " + tax.to_string
-Tax: 7000.0
+"Tax: 7000.0"
 ```
 
 Notice that the conditions are ordered from lowest to highest bracket, and each condition only needs to test the upper bound. Because Nex evaluates conditions top to bottom and stops at the first match, a value of `35000.0` falls through the first condition (`income <= 10000.0` is false) and matches the second (`income <= 50000.0` is true). We do not need to write `income > 10000.0 and income <= 50000.0` for the middle bracket — the first condition already handled everything up to `10000.0`.

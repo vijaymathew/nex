@@ -13,10 +13,10 @@ Map literals are written with curly braces, each entry as `key: value`, entries 
 nex> let capitals := {"France": "Paris", "Japan": "Tokyo", "Brazil": "Brasília"}
 
 nex> capitals.get("France")
-Paris
+"Paris"
 
 nex> capitals.get("Japan")
-Tokyo
+"Tokyo"
 ```
 
 The type of `capitals` is `Map[String, String]` — a map from string keys to string values. The key type and value type can be any types that support equality comparison. Common combinations are `Map[String, Integer]`, `Map[String, String]`, and `Map[Integer, String]`.
@@ -42,11 +42,11 @@ nex> scores.put("Alice", 92)
 nex> scores.put("Bob", 78)
 nex> scores.put("Carol", 85)
 nex> scores
-{Alice: 92, Bob: 78, Carol: 85}
+{"Alice": 92, "Bob": 78, "Carol": 85}
 
 nex> scores.put("Alice", 95)
 nex> scores
-{Alice: 95, Bob: 78, Carol: 85}
+{"Alice": 95, "Bob": 78, "Carol": 85}
 ```
 
 If the key `"Alice"` already exists, `put` replaces its value. If it does not exist, `put` creates a new entry. There is no separate "insert" and "update" — `put` handles both.
@@ -76,7 +76,7 @@ nex> if scores.contains_key("David") then
     else
        print("David not found")
     end
-David not found
+"David not found"
 ```
 
 The `try_get` method provides a more concise alternative — it returns a default value when the key is absent, avoiding the exception entirely:
@@ -101,7 +101,7 @@ The `remove` method deletes an entry by key:
 nex> scores.remove("Bob")
 
 nex> scores
-{Alice: 95, Carol: 85}
+{"Alice": 95, "Carol": 85}
 ```
 
 Like `get`, `remove` raises an exception if the key does not exist. Check with `contains_key` first if the key's presence is not guaranteed.
@@ -126,7 +126,7 @@ Note the naming difference from arrays: maps use `size` where arrays use `length
 
 ```
 nex> scores.keys
-[Alice, Carol]
+["Alice", "Carol"]
 
 nex> scores.values
 [95, 85]
@@ -139,8 +139,8 @@ nex> let sorted_keys := scores.keys.sort
 nex> across sorted_keys as k do
        print(k + ": " + scores.get(k).to_string)
     end
-Alice: 95
-Carol: 85
+"Alice: 95"
+"Carol: 85"
 ```
 
 
@@ -155,9 +155,9 @@ nex> let capitals := {"France": "Paris", "Japan": "Tokyo", "Brazil": "Brasília"
 nex> across capitals as entry do
        print(entry.get(0) + " -> " + entry.get(1))
     end
-France -> Paris
-Japan -> Tokyo
-Brazil -> Brasilia
+"France -> Paris"
+"Japan -> Tokyo"
+"Brazil -> Brasilia"
 ```
 
 When you only need the keys or only the values, iterate over `map.keys` or `map.values` instead:
@@ -166,9 +166,9 @@ When you only need the keys or only the values, iterate over `map.keys` or `map.
 nex> across capitals.keys as country do
        print(country)
     end
-France
-Japan
-Brazil
+"France"
+"Japan"
+"Brazil"
 ```
 
 
@@ -187,7 +187,7 @@ nex> across words as w do
     end
 
 nex> word_lengths
-{apple: 5, fig: 3, banana: 6, kiwi: 4}
+{"apple": 5, "fig": 3, "banana": 6, "kiwi": 4}
 ```
 
 This builds a map from each word to its length. The loop body calls `put` once per word; each call either adds a new entry or — if a word appeared before — replaces it.
@@ -210,7 +210,7 @@ nex> function invert(m: Map[String, String]): Map[String, String]
 nex> let capitals := {"France": "Paris", "Japan": "Tokyo", "Brazil": "Brasília"}
 nex> let by_capital := invert(capitals)
 nex> by_capital.get("Tokyo")
-Japan
+"Japan"
 ```
 
 `invert` builds a new map that swaps keys and values. This has an implicit precondition: the values in the original map must all be distinct, otherwise some entries will silently overwrite others in the result. A note in a comment — or, in Part V, a `require` clause — should state this assumption.
@@ -281,7 +281,7 @@ nex> function most_frequent(freq: Map[String, Integer]): String
      end
 
 nex> most_frequent(freq)
-to
+"to"
 ```
 
 `most_frequent` initialises `result` with the first key and scans all keys, updating `result` whenever a more frequent word is found. This is the same maximum-finding pattern from Chapter 9, applied to map values instead of array elements. The implicit precondition is the same: the map must not be empty.

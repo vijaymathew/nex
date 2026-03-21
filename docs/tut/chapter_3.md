@@ -220,7 +220,7 @@ nex> let first := "Hello"
 nex> let second := "Nex"
 
 nex> first + ", " + second + "!"
-Hello, Nex!
+"Hello, Nex!"
 ```
 
 The `+` operator on strings is concatenation — it produces a new string that is the two operands joined end to end. It is left-associative, so `"a" + "b" + "c"` is `("a" + "b") + "c"`, which is `"abc"`.
@@ -232,7 +232,7 @@ non-string operand is converted by calling its `to_string` method internally:
 nex> let count: Integer := 3
 
 nex> "Found " + count + " results"
-Found 3 results
+"Found 3 results"
 ```
 
 This pattern — arithmetic value incorporated into a message — appears constantly
@@ -280,7 +280,7 @@ nex> let height: Real := 1.75
 nex> let bmi: Real := weight / (height * height)
 
 nex> "BMI: " + bmi.round.to_string
-BMI: 23
+"BMI: 23"
 ```
 
 The expression `weight / (height * height)` is a single expression with three sub-expressions. The parentheses ensure the multiplication happens before the division. Without them, `/` and `*` have equal precedence and are evaluated left to right: `weight / height * height` would give `weight / height` first, then multiply by `height` again — wrong.

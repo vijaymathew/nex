@@ -108,11 +108,11 @@ When a subclass defines a feature with the same name as a superclass feature, th
 ```
 nex> let c := create Circle.make("red", 5.0)
 nex> c.describe
-A red circle with radius 5.0
+"A red circle with radius 5.0"
 
 nex> let r := create Rectangle.make("blue", 4.0, 3.0)
 nex> r.describe
-A blue rectangle (4.0 x 3.0)
+"A blue rectangle (4.0 x 3.0)"
 ```
 
 
@@ -132,9 +132,9 @@ nex> shapes.add(create Circle.make("green", 2.0))
 nex> across shapes as s do
        print(s.describe)
     end
-A red circle with radius 5.0
-A blue rectangle (4.0 x 3.0)
-A green circle with radius 2.0
+"A red circle with radius 5.0"
+"A blue rectangle (4.0 x 3.0)"
+"A green circle with radius 2.0"
 ```
 
 When `s.describe` is called, Nex dispatches to the correct `describe` for the actual runtime type of each object. This is *dynamic dispatch*: the method called is determined by the object's type at runtime, not by the declared type of the variable.
@@ -202,7 +202,7 @@ nex> class Circle inherit Shape
 
 nex> let c := create Circle.make("red", 5.0)
 nex> c.describe
-A red shape with area 78.53975
+"A red shape with area 78.53975"
 ```
 
 `describe` in `Shape` calls `area` — which runs `Circle`'s `area` because `c` is a `Circle`. The superclass defines the structure; the subclass fills in the detail. This is the *template method* pattern: a superclass method calls an overridable method whose behaviour varies by subclass.
@@ -393,9 +393,9 @@ nex> accounts.add(create OverdraftAccount.make("Carol", 200.0, 500.0))
 nex> across accounts as acc do
        print(acc.describe)
     end
-Alice: 500.0
-Bob: 1000.0 (savings, rate: 0.02)
-Carol: 200.0 (overdraft limit: 500.0)
+"Alice: 500.0"
+"Bob: 1000.0 (savings, rate: 0.02)"
+"Carol: 200.0 (overdraft limit: 500.0)"
 ```
 
 Each account type inherits `deposit` and `get_balance` from `Account`. `SavingsAccount` adds `apply_interest`. `OverdraftAccount` overrides `withdraw` to permit negative balances within the limit. Both override `describe` using `super.describe` to build on the base description. The array holds all three as `Account`; `describe` dispatches polymorphically.
