@@ -193,7 +193,7 @@ A `String` is a sequence of characters. String literals are enclosed in double q
 
 ```
 nex> let greeting := "Hello, Nex"
-Hello, Nex
+"Hello, Nex"
 
 nex> greeting.length
 10
@@ -220,20 +220,20 @@ Substrings are extracted with `substring`, which takes a start index (inclusive)
 
 ```
 nex> greeting.substring(0, 5)
-Hello
+"Hello"
 
 nex> greeting.substring(7, 10)
-Nex
+"Nex"
 ```
 
 Case conversion:
 
 ```
 nex> greeting.to_upper
-HELLO, NEX
+"HELLO, NEX"
 
 nex> greeting.to_lower
-hello, nex
+"hello, nex"
 ```
 
 Whitespace removal:
@@ -243,17 +243,17 @@ nex> let padded := "  hello  "
 "  hello  "
 
 nex> padded.trim
-hello
+"hello"
 ```
 
 Splitting a string into parts:
 
 ```
 nex> let csv := "one,two,three"
- one,two,three
+"one,two,three"
 
 nex> csv.split(",")
-[one, two, three]
+["one", "two", "three"]
 ```
 
 `split` returns an array — we will work with arrays in Chapter 9.
@@ -291,7 +291,7 @@ nex> let x: Integer := 10
 10
 
 nex> let name: String := "Ada"
-Ada
+"Ada"
 
 nex> let height: Real := 1.52
 1.52
@@ -321,10 +321,10 @@ nex> let age: Integer := 25
 25
 
 nex> let message: String := "Age: " + age
-Age: 25
+"Age: 25"
 
 nex> message
-Age: 25
+"Age: 25"
 ```
 
 Because the left operand is a string, Nex performs string concatenation and
@@ -406,7 +406,7 @@ The `read_line` method reads a line of text from the user and returns it as a st
 ```
 nex> let con := create Console
 nex> con.print_line("What is your name?")
-What is your name?
+"What is your name?"
 nex> let name := con.read_line
 ```
 
@@ -414,7 +414,7 @@ At the `read_line` call the program pauses and waits. Type your name and press E
 
 ```
 nex> con.print_line("Hello, " + name + "!")
-Hello, Ada!
+"Hello, Ada!"
 ```
 
 Notice `con.print_line` rather than the bare `print` we used in Chapter 1. Both work; `print_line` adds a newline after the output, which is usually what you want for messages. The bare `print` function is a convenient shorthand available everywhere for quick output.
@@ -424,12 +424,12 @@ Here is the complete interactive program as you would enter it at the REPL:
 ```
 nex> let con := create Console
 nex> con.print_line("Enter your age:")
-Enter your age:
+"Enter your age:"
 nex> let input := con.read_line
 nex> let age: Integer := input.to_integer
 nex> let birth_year: Integer := 2025 - age
 nex> con.print_line("You were born around " + birth_year.to_string)
-You were born around 2000
+"You were born around 2000"
 ```
 
 This small program touches everything introduced in this chapter: a typed variable, string input, explicit type conversion from string to integer and back, and arithmetic on the result.

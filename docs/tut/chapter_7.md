@@ -121,13 +121,13 @@ The second version separates the decision — which label applies to this temper
 
 ```
 nex> temperature_label(-5.0)
-Freezing
+"Freezing"
 
 nex> temperature_label(10.0)
-Cold
+"Cold"
 
 nex> temperature_label(20.0)
-Mild or warm
+"Mild or warm"
 ```
 
 The printing is left to the thin effectful wrapper, which is so simple it barely needs testing. This decomposition — pure core, effectful shell — is one of the most reliable habits in software engineering. The functions involved are often small. The benefit scales with the complexity of the system.
@@ -223,7 +223,7 @@ Now the top-level program is one line:
 
 ```
 nex> temperature_report(22.0)
-Mild: 22.0 deg C / 71.6 deg F
+"Mild: 22.0 deg C / 71.6 deg F"
 ```
 
 The reader of `temperature_report` does not need to know how Celsius-to-Fahrenheit conversion works or how temperature labels are determined. The function names carry that meaning. The body of `temperature_report` reads as a sequence of named steps rather than a block of arithmetic.

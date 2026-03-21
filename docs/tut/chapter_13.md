@@ -159,7 +159,7 @@ nex> class Card
 nex> let ace   := create Card.make(14, "Spades")
 nex> let seven := create Card.make(7, "Hearts")
 nex> ace.name
-Ace of Spades
+"Ace of Spades"
 
 nex> ace.beats(seven)
 true

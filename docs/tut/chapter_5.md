@@ -168,9 +168,9 @@ When you need to execute a block of code a fixed number of times without a count
 nex> repeat 3 do
        print("hello")
     end
-hello
-hello
-hello
+"hello"
+"hello"
+"hello"
 ```
 
 `repeat n do ... end` executes the body exactly `n` times. The count must be a non-negative integer. There is no loop variable — if you need access to the iteration number, use `from ... until ... do` with an explicit counter instead.
@@ -199,11 +199,11 @@ The variable `x` is bound to each element successively. Arrays are introduced fu
 nex> across "hello" as ch do
        print(ch)
     end
-h
-e
-l
-l
-o
+"h"
+"e"
+"l"
+"l"
+"o"
 ```
 
 And on maps, which we cover in Chapter 10.
@@ -279,15 +279,15 @@ nex> from
        end
        i := i + 1
     end
-1,1
-1,2
-1,3
-2,1
-2,2
-2,3
-3,1
-3,2
-3,3
+"1,1"
+"1,2"
+"1,3"
+"2,1"
+"2,2"
+"2,3"
+"3,1"
+"3,2"
+"3,3"
 ```
 
 The outer loop runs three times. On each run of the outer loop, the inner loop runs three times in full. Total iterations: nine. The inner loop's variables (`j`) are independent of the outer loop's variables (`i`) — each has its own counter, its own condition, its own body.

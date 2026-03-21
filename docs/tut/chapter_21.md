@@ -47,8 +47,8 @@ nex> do
      rescue
        print("rescued: " + exception.to_string)
      end
-before
-rescued: something went wrong
+"before"
+"rescued: something went wrong"
 ```
 
 The line `print("after")` never runs because `raise` aborts the protected block.
@@ -71,9 +71,9 @@ nex> do
        print("failed: " + exception.to_string)
        retry
      end
-failed: not ready yet
-failed: not ready yet
-done on attempt 3
+"failed: not ready yet"
+"failed: not ready yet"
+"done on attempt 3"
 ```
 
 `retry` jumps back to the start of the `do` block and runs it again.

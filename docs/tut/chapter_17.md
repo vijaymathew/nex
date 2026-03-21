@@ -11,24 +11,24 @@ Here is a deposit routine without a postcondition:
 
 ```
 nex> deposit(amount: Real)
-       require
-         positive_amount: amount > 0.0
-       do
-         balance := balance + amount
-       end
+       "require"
+         "positive_amount: amount > 0.0"
+       "do"
+         "balance := balance + amount"
+       "end"
 ```
 
 The body suggests the intended effect, but the routine does not state its guarantee explicitly. A postcondition adds that missing half:
 
 ```
 nex> deposit(amount: Real)
-       require
-         positive_amount: amount > 0.0
-       do
-         balance := balance + amount
-       ensure
-         increased: balance = old balance + amount
-       end
+       "require"
+         "positive_amount: amount > 0.0"
+       "do"
+         "balance := balance + amount"
+       "ensure"
+         "increased: balance = old balance + amount"
+       "end"
 ```
 
 Read `ensure` as "after this routine finishes successfully, the following must be true."

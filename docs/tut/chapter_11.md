@@ -9,19 +9,19 @@ An array of maps is useful when you have a sequence of records, each with the sa
 
 ```
 nex> let books: Array[Map[String, Any]] := [
-     {"title": "Dune", "author": "Frank Herbert", "year": 1965},
-     {"title": "Neuromancer", "author": "William Gibson", "year": 1984},
+     "{"title": "Dune", "author": "Frank Herbert", "year": 1965},"
+     "{"title": "Neuromancer", "author": "William Gibson", "year": 1984},"
      {"title": "Foundation", "author": "Isaac Asimov", "year": 1951}
-  ]
+  "]"
 
 nex> books.length
 3
 
 nex> books.get(0).get("title")
-Dune
+"Dune"
 
 nex> books.get(1).get("author")
-William Gibson
+"William Gibson"
 ```
 
 Each element of the array is a map from field name to field value. The value type is `Any` because different fields hold different types — strings for title and author, an integer for year.
@@ -34,9 +34,9 @@ Iterating over all records follows the same pattern as iterating over any array:
 nex> across books as book do
      print(book.get("title") + " (" + book.get("year").to_string + ")")
   end
-Dune (1965)
-Neuromancer (1984)
-Foundation (1951)
+"Dune (1965)"
+"Neuromancer (1984)"
+"Foundation (1951)"
 ```
 
 To find records matching a condition — all books published before 1970, say:
@@ -49,8 +49,8 @@ nex> across books as book do
         end
      end
   end
-Dune
-Foundation
+"Dune"
+"Foundation"
 ```
 
 
@@ -61,19 +61,19 @@ A map of arrays is useful when you want to group items under named categories. C
 
 ```
 nex> let timetable: Map[String, Array[String]] := {
-     "Monday":    ["Maths", "Physics", "History"],
-     "Tuesday":   ["English", "Chemistry"],
-     "Wednesday": ["Maths", "Biology", "PE"]
-  }
+     ""Monday":    ["Maths", "Physics", "History"],"
+     ""Tuesday":   ["English", "Chemistry"],"
+     ""Wednesday": ["Maths", "Biology", "PE"]"
+  "}"
 
 nex> timetable.get("Monday")
-[Maths, Physics, History]
+["Maths", "Physics", "History"]
 
 nex> timetable.get("Monday").length
 3
 
 nex> timetable.get("Tuesday").get(0)
-English
+"English"
 ```
 
 Accessing the first class on Tuesday requires two steps: retrieve the array for `"Tuesday"`, then get its first element. The chain `timetable.get("Tuesday").get(0)` reads as: *the first class on Tuesday*.
@@ -87,17 +87,17 @@ nex> across timetable.keys as day do
         print("  " + cls)
      end
   end
-Monday:
-  Maths
-  Physics
-  History
-Tuesday:
-  English
-  Chemistry
-Wednesday:
-  Maths
-  Biology
-  PE
+"Monday:"
+  "Maths"
+  "Physics"
+  "History"
+"Tuesday:"
+  "English"
+  "Chemistry"
+"Wednesday:"
+  "Maths"
+  "Biology"
+  "PE"
 ```
 
 The outer loop iterates over days; the inner loop iterates over the classes for each day. This nested `across` pattern is the natural way to traverse a map of arrays.
@@ -126,12 +126,12 @@ nex> function build_gradebook(entries: Array[Map[String, Any]]): Map[String, Arr
 
 ```
 nex> let entries: Array[Map[String, Any]] := [
-     {"name": "Alice", "score": 85},
-     {"name": "Bob",   "score": 72},
-     {"name": "Alice", "score": 91},
-     {"name": "Bob",   "score": 68},
+     "{"name": "Alice", "score": 85},"
+     "{"name": "Bob",   "score": 72},"
+     "{"name": "Alice", "score": 91},"
+     "{"name": "Bob",   "score": 68},"
      {"name": "Alice", "score": 88}
-  ]
+  "]"
 
 nex> let gradebook := build_gradebook(entries)
 nex> gradebook.get("Alice")
@@ -173,26 +173,26 @@ Nex does not have a built-in tree type. Trees are represented using maps, where 
 
 ```
 nex> let filesystem: Map[String, Any] := {
-     "name": "root",
-     "type": "dir",
-     "children": [
-        {
-           "name": "documents",
-           "type": "dir",
-           "children": [
-              {"name": "report.txt", "type": "file", "children": []},
-              {"name": "notes.txt",  "type": "file", "children": []}
-           ]
-        },
-        {
-           "name": "pictures",
-           "type": "dir",
-           "children": [
-              {"name": "photo.jpg", "type": "file", "children": []}
-           ]
-        }
-     ]
-  }
+     ""name": "root","
+     ""type": "dir","
+     ""children": ["
+        "{"
+           ""name": "documents","
+           ""type": "dir","
+           ""children": ["
+              "{"name": "report.txt", "type": "file", "children": []},"
+              {"name": "notes.txt", "type": "file", "children": "[]"}
+           "]"
+        "},"
+        "{"
+           ""name": "pictures","
+           ""type": "dir","
+           ""children": ["
+              {"name": "photo.jpg", "type": "file", "children": "[]"}
+           "]"
+        "}"
+     "]"
+  "}"
 ```
 
 Each node is a `Map[String, Any]`: a `"name"` field (string), a `"type"` field (string), and a `"children"` field (array of maps). Files have empty children arrays; directories have non-empty ones.
@@ -224,12 +224,12 @@ nex> function print_tree(node: Map[String, Any], indent: Integer)
 
 ```
 nex> print_tree(filesystem, 0)
-root
-  documents
-    report.txt
-    notes.txt
-  pictures
-    photo.jpg
+"root"
+  "documents"
+    "report.txt"
+    "notes.txt"
+  "pictures"
+    "photo.jpg"
 ```
 
 The function takes a node and an indentation level. It prints the node's name with the appropriate leading spaces, then recursively prints each child at one level deeper. The recursion terminates when `children` is empty — `across` on an empty array performs zero iterations, so no further calls are made.
@@ -264,7 +264,7 @@ nex> let found := find_node(filesystem, "notes.txt")
 nex> if found /= nil then
      print(found.get("name").to_string)
   end
-notes.txt
+"notes.txt"
 
 nex> let missing := find_node(filesystem, "missing.txt")
 nex> missing
@@ -283,27 +283,27 @@ Consider an expense tracker where expenses are grouped by category, and categori
 
 ```
 nex> let expenses := {
-     "label": "Total",
-     "amount": 0,
-     "children": [
-        {
-           "label": "Housing",
-           "amount": 1200,
-           "children": [
-              {"label": "Rent",       "amount": 900,  "children": []},
-              {"label": "Utilities",  "amount": 300,  "children": []}
-           ]
-        },
-        {
-           "label": "Food",
-           "amount": 150,
-           "children": [
-              {"label": "Groceries",  "amount": 400,  "children": []},
-              {"label": "Dining out", "amount": 200,  "children": []}
-           ]
-        }
-     ]
-  }
+     ""label": "Total","
+     ""amount": 0,"
+     ""children": ["
+        "{"
+           ""label": "Housing","
+           ""amount": 1200,"
+           ""children": ["
+              "{"label": "Rent",       "amount": 900,  "children": []},"
+              {"label": "Utilities", "amount": 300, "children": "[]"}
+           "]"
+        "},"
+        "{"
+           ""label": "Food","
+           ""amount": 150,"
+           ""children": ["
+              "{"label": "Groceries",  "amount": 400,  "children": []},"
+              {"label": "Dining out", "amount": 200, "children": "[]"}
+           "]"
+        "}"
+     "]"
+  "}"
 ```
 
 A function that computes the total amount for a node, including all descendants:

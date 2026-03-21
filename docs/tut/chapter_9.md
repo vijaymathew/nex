@@ -111,11 +111,11 @@ nex> from
        print("Score " + (i + 1).to_string + ": " + scores.get(i).to_string)
        i := i + 1
     end
-Score 1: 85
-Score 2: 92
-Score 3: 78
-Score 4: 95
-Score 5: 60
+"Score 1: 85"
+"Score 2: 92"
+"Score 3: 78"
+"Score 4: 95"
+"Score 5: 60"
 ```
 
 Note the termination condition `i >= scores.length` and the starting index `0`. The last valid index is `scores.length - 1`, so the loop runs while `i < scores.length` — equivalently, until `i >= scores.length`.
@@ -131,11 +131,11 @@ nex> let names: Array[String] := ["Alice", "Bob"]
 
 nex> names.add("Carol")
 nex> names
-[Alice, Bob, Carol]
+["Alice", "Bob", "Carol"]
 
 nex> names.add("David")
 nex> names
-[Alice, Bob, Carol, David]
+["Alice", "Bob", "Carol", "David"]
 
 nex> names.length
 4
@@ -148,11 +148,11 @@ Elements can be removed by index with `remove`:
 ```
 nex> names.remove(names.length - 1)
 nex> names
-[Alice, Bob, Carol]
+["Alice", "Bob", "Carol"]
 
 nex> names.remove(1)
 nex> names
-[Alice, Carol]
+["Alice", "Carol"]
 ```
 
 `remove(i)` removes the element at index `i` and shifts all subsequent elements one position to the left. After `remove(1)`, what was at index 2 is now at index 1.
@@ -162,7 +162,7 @@ Elements can be inserted at a specific position with `add_at`:
 ```
 nex> names.add_at(1, "Bob")
 nex> names
-[Alice, Bob, Carol]
+["Alice", "Bob", "Carol"]
 ```
 
 `add_at(i, value)` inserts `value` at index `i` and shifts all existing elements from index `i` onward one position to the right.

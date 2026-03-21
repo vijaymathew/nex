@@ -85,7 +85,7 @@ nex> function count_down(n: Integer)
        if n = 0 then
          print("Go!")
        else
-         print(n.to_string)
+         print(n)
          count_down(n - 1)
        end
      end
@@ -94,7 +94,7 @@ nex> count_down(3)
 3
 2
 1
-Go!
+"Go!"
 ```
 
 Base case: when `n = 0`, print `"Go!"` and stop. Recursive case: print `n`, then count down from `n - 1`.
@@ -252,20 +252,20 @@ The loop is shorter and more direct. Reach for a loop when the iteration pattern
 
 ```
 nex> -- this will fail for large n due to stack overflow
-nex> sum_to(100000)
+nex> sum_to(10000)
 
 nex> -- this handles any n safely
 nex> let total := 0
 nex> from
        let i := 1
     until
-       i > 100000
+       i > 10000
     do
        total := total + i
        i := i + 1
     end
 nex> total
-5000050000
+50005000
 ```
 
 **Performance matters.** The naive recursive Fibonacci from Section 8.6 is correct but slow. `fibonacci(40)` requires computing `fibonacci(39)` and `fibonacci(38)`, each of which recomputes overlapping sub-problems. The number of calls grows exponentially with `n`. A loop-based version with two accumulator variables computes the same result in linear time. When a recursive solution recomputes the same sub-problems repeatedly, a loop — or a more advanced technique called memoisation — will be significantly faster.

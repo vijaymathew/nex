@@ -211,11 +211,11 @@ nex> class Person
 
 nex> let p := create Person.make("Ada")
 nex> p.describe
-Ada (no email)
+"Ada (no email)"
 
 nex> p.set_email("ada@example.com")
 nex> p.describe
-Ada <ada@example.com>
+"Ada <ada@example.com>"
 ```
 
 `email` is declared as `?String` — a detachable string that may hold a value or `nil`. The constructor initialises it to `nil` explicitly. The `describe` method checks for `nil` before using it.
@@ -272,7 +272,7 @@ nex> let account := create BankAccount.make("Alice", 1000.0)
 nex> account.deposit(500.0)
 nex> account.withdraw(200.0)
 nex> account.describe
-Alice: 1300.0
+"Alice: 1300.0"
 ```
 
 

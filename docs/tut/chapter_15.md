@@ -60,7 +60,7 @@ nex> let str_stack := create Stack[String].make
 nex> str_stack.push("hello")
 nex> str_stack.push("world")
 nex> str_stack.peek
-world
+"world"
 ```
 
 `Stack[Integer]` is a stack whose element type is `Integer`. `Stack[String]` is a stack whose element type is `String`. Both are produced by the same class definition — only the type argument differs.
@@ -98,14 +98,14 @@ nex> class Pair [F, S]
 ```
 nex> let p1 := create Pair[String, Integer].make("age", 30)
 nex> p1.get_first
-age
+"age"
 
 nex> p1.get_second
 30
 
 nex> let p2 := create Pair[Real, Boolean].make(3.14, true)
 nex> p2.describe
-(3.14, true)
+"(3.14, true)"
 ```
 
 `Pair[F, S]` holds a value of type `F` and a value of type `S`. The two types are independent — `Pair[String, Integer]`, `Pair[Real, Boolean]`, and `Pair[String, String]` are all valid instantiations.
@@ -311,7 +311,7 @@ nex> function safe_divide(a, b: Real): Result[Real]
      end
 
 nex> safe_divide(10.0, 2.0).describe
-Success: 5.0
+"Success: 5.0"
 
 nex> safe_divide(10.0, 0.0).describe
 Error: division by zero

@@ -145,11 +145,11 @@ nex> :break Wallet.spend
 nex> :breakon contract on
 nex> :load examples/wallet.nex
 nex> run_wallet_demo()
-dbg> :where
-dbg> :locals
-dbg> :print money
-dbg> :next
-dbg> :continue
+"dbg> :where"
+"dbg> :locals"
+"dbg> :print money"
+"dbg> :next"
+"dbg> :continue"
 ```
 
 This is enough for most day-to-day debugging:
