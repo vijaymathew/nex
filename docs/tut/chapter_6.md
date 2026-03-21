@@ -249,8 +249,8 @@ A function defined with `function` has a name and exists for the duration of the
 
 ```
 nex> let double := fn (n: Integer): Integer do
-       "result := n * 2"
-     "end"
+       result := n * 2
+     end
 
 nex> double(5)
 10
