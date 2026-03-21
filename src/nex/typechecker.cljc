@@ -2387,6 +2387,13 @@
                  (throw (ex-info "when condition must be Boolean"
                                  {:error (type-error
                                           (str "when condition has type " cond-type ", expected Boolean"))})))
+               (when-not (or (types-compatible? env cons-type alt-type)
+                             (types-compatible? env alt-type cons-type))
+                 (throw (ex-info "when branches must have compatible types"
+                                 {:error (type-error
+                                          (str "when branches have incompatible types: "
+                                               (display-type cons-type) " and "
+                                               (display-type alt-type)))})))
                cons-type)
       :old (check-expression env (:expr expr))
       :convert (check-convert env expr)
