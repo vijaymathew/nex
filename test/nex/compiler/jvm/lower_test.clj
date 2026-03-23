@@ -456,17 +456,20 @@ end")
                                            :functions []
                                            :imports []})
           method-ir (first (:methods class-ir))
-          ops (mapv :op (:body method-ir))]
+          ops (mapv :op (:body method-ir))
+          locals (mapv :name (:locals method-ir))]
       (is (= :set-local (first ops)))
-      (is (= :assert (second ops)))
-      (is (= :field-set (nth ops 2)))
-      (is (= :set-local (nth ops 3)))
-      (is (= :assert (nth ops 4)))
+      (is (= :set-local (second ops)))
+      (is (= :assert (nth ops 2)))
+      (is (= :field-set (nth ops 3)))
+      (is (= :set-local (nth ops 4)))
       (is (= :assert (nth ops 5)))
+      (is (= :assert (nth ops 6)))
+      (is (some #{"__old_value"} locals))
       (is (= :return (last ops)))
-      (is (= :require (-> method-ir :body second :kind)))
-      (is (= :ensure (-> method-ir :body (nth 4) :kind)))
-      (is (= :ensure (-> method-ir :body (nth 5) :kind))))))
+      (is (= :require (-> method-ir :body (nth 2) :kind)))
+      (is (= :ensure (-> method-ir :body (nth 5) :kind)))
+      (is (= :ensure (-> method-ir :body (nth 6) :kind))))))
 
 (deftest lower-loop-contracts-test
   (testing "compiled lowering lowers loop invariants and variants through block/assert IR"

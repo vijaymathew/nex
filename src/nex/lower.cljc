@@ -2944,6 +2944,22 @@
           (let [[env' local] (env-add-local env-with-params "result" return-type)]
             [(env-add-local-alias env' "Result" local) local])
           [env-with-params nil])
+        result-init-stmt
+        (when result-local
+          (let [jvm-type (:jvm-type result-local)
+                default-val (cond
+                              (= :int jvm-type) 0
+                              (= :long jvm-type) 0
+                              (= :double jvm-type) 0.0
+                              (= :boolean jvm-type) false
+                              (= :char jvm-type) 0
+                              :else nil)]
+            (ir/set-local-node (:slot result-local)
+                               (ir/const-node default-val
+                                              (:nex-type result-local)
+                                              jvm-type)
+                               (:nex-type result-local)
+                               jvm-type)))
         [env-with-old old-snapshot-stmts old-field-locals]
         (add-old-field-snapshots env-with-result (:ensure fn-def))
         env-with-old (assoc env-with-old :old-field-locals old-field-locals)
@@ -3028,7 +3044,8 @@
                      :return-jvm-type (ir/object-jvm-type "java/lang/Object")
                      :locals (vec (vals (:locals env-after-rescue)))
                      :body (cond-> (into []
-                                         (concat old-snapshot-stmts
+                                         (concat (when result-init-stmt [result-init-stmt])
+                                                 old-snapshot-stmts
                                                  require-stmts
                                                  lowered-body
                                                  ensure-stmts

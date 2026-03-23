@@ -1352,12 +1352,42 @@
   (let [ctx (rebuild-interpreter-ctx state)]
     (interp/call-builtin-method ctx m m "try_get" [key default])))
 
+(defn- sortable-builtin-scalar-value?
+  [v]
+  (or (string? v)
+      (number? v)
+      (boolean? v)
+      (char? v)))
+
+(defn- runtime-compare-values
+  [state a b]
+  (cond
+    (and (sortable-builtin-scalar-value? a)
+         (sortable-builtin-scalar-value? b))
+    (interp/call-builtin-method nil a a "compare" [b])
+
+    :else
+    (let [runtime-name (runtime-type-name state a)]
+      (when-not (and (string? runtime-name)
+                     (runtime-compatible-with? state runtime-name "Comparable"))
+        (throw (ex-info "Array.sort requires Comparable elements"
+                        {:left a :right b})))
+      (let [result (if (interp/nex-object? a)
+                     (invoke-interpreter-object-method state a "compare" [b])
+                     (invoke-user-method state a "compare" [b]))]
+        (if (integer? result)
+          result
+          (throw (ex-info "Comparable.compare must return Integer"
+                          {:left a :right b :result result})))))))
+
 (defn array-sort
   [state values]
-  (let [ctx (rebuild-interpreter-ctx state)
-        result (interp/call-builtin-method ctx values values "sort" [])]
-    (reset! (:output state) @(:output ctx))
-    result))
+  (let [out (java.util.ArrayList. values)]
+    (.sort out
+           (reify java.util.Comparator
+             (compare [_ a b]
+               (int (runtime-compare-values state a b)))))
+    out))
 
 (defn array-join
   [state values sep]

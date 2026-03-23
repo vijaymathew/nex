@@ -1005,6 +1005,10 @@
     (let [env {:classes (vals @(:classes ctx))
                :imports @(:imports ctx)
                :var-types @*repl-var-types*}
+          tc-env (let [e (tc/make-type-env)]
+                   (doseq [class-def (vals @(:classes ctx))]
+                     (tc/env-add-class e (:name class-def) class-def))
+                   e)
           target-type (try (tc/infer-expression-type (:target node) env)
                            (catch Exception _ nil))
           type-params (when (map? target-type)
@@ -1013,7 +1017,7 @@
       (and (= "Array" (:base-type target-type))
            (string? element-type)
            (not (contains? builtin-sortable-types element-type))
-           (not (tc/types-compatible? env element-type "Comparable"))))))
+           (not (tc/types-compatible? tc-env element-type "Comparable"))))))
 
 (defn- string-ordered-comparison?
   [ctx node]
@@ -1173,10 +1177,7 @@
             raw-compiled-attempt (when compiled-raw-candidate?
                                    (try
                                      (let [raw-ast (p/ast input)]
-                                       (when (compiled-repl/eligible-ast?
-                                              @*compiled-repl-session*
-                                              raw-ast)
-                                         [raw-ast false false]))
+                                       [raw-ast false false])
                                      (catch Exception _
                                        nil)))
             [ast was-wrapped? is-expression?]

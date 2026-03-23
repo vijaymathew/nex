@@ -788,6 +788,10 @@
        (doseq [[k t] var-types
                :when (not (contains? function-names k))]
          (rt/state-set-type! state k t))
+       ;; Interpreter-originated top-level lets still need their inferred or
+       ;; annotated types persisted into compiled session state, even when the
+       ;; REPL typechecker is off and `var-types` is therefore incomplete.
+       (sync-var-types-from-ast! session prepared-ast)
        (try
          (when (seq (:classes prepared-ast))
            (re-register-session-classes! session source-id))
