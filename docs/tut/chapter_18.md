@@ -140,7 +140,7 @@ nex> class Running_Average
            require
              has_values: count > 0
            do
-             result := total / count.to_real
+             result := total / count
            end
        invariant
          count_non_negative: count >= 0

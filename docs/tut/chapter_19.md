@@ -15,9 +15,9 @@ Nex supports two kinds of loop contract:
 A `from ... until ... do ... end` loop may include `invariant` and `variant` clauses:
 
 ```
+nex> let sum := 0
 nex> from
        let i := 0
-       let sum := 0
      invariant
        index_in_range: i >= 0
        sum_non_negative: sum >= 0

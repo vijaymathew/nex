@@ -279,7 +279,7 @@ nex> class Stack [G]
 			 let old_len := items.length
              items.remove(items.length - 1)
            ensure
-             length_decreased_by_on: items.length = old_len-1
+             length_decreased_by_one: items.length = old_len-1
            end
      end
 ```

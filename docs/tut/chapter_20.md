@@ -245,12 +245,15 @@ For example:
 ```text
 class Account
 feature
+  balance: Real
   withdraw(amount: Real)
     require
       enough: amount <= balance
     do
       balance := balance - amount
     end
+  create
+    make(balance: Real) do this.balance := balance end
 end
 
 class Overdraft_Account
@@ -262,6 +265,13 @@ feature
     do
       balance := balance - amount
     end
+  overdraft_limit: Real
+  create
+    make(balance, overdraft_limit: Real)
+	  do
+	    Account.make(balance)
+		this.overdraft_limit := overdraft_limit
+	  end
 end
 ```
 
