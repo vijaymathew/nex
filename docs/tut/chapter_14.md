@@ -27,7 +27,7 @@ nex> class Shape
 nex> class Circle inherit Shape
        create
          make(c: String, r: Real) do
-           super.make(c)
+           Shape.make(c)
            radius := r
          end
        feature
@@ -43,7 +43,7 @@ nex> class Circle inherit Shape
 nex> class Rectangle inherit Shape
        create
          make(c: String, w, h: Real) do
-           super.make(c)
+           Shape.make(c)
            width := w
            height := h
          end
@@ -76,24 +76,24 @@ This is useful for shared limits, default labels, configuration values, and othe
 
 
 
-## The `super` Call
+## The `super-class` Calls
 
-When a subclass constructor runs, it must also initialise the fields inherited from the superclass. The `super.constructor_name(   )` call delegates to the superclass constructor:
+When a subclass constructor runs, it must also initialise the fields inherited from the superclass. The `SuperClass.constructor_name(   )` call delegates to the superclass constructor:
 
 ```
 make(c: String, r: Real) do
-  super.make(c)   -- initialises colour in Shape
+  Shape.make(c)   -- initialises colour in Shape
   radius := r     -- initialises radius in Circle
 end
 ```
 
-`super.make(c)` runs `Shape`'s `make` constructor, setting `colour := c`. Then the `Circle` constructor sets `radius := r`. Both fields are properly initialised.
+`Shape.make(c)` runs `Shape`'s `make` constructor, setting `colour := c`. Then the `Circle` constructor sets `radius := r`. Both fields are properly initialised.
 
 `super` can also call an overridden superclass method from within an override:
 
 ```
 describe(): String do
-  result := super.describe + ", area: " + area.to_string
+  result := Shape.describe + ", area: " + area.to_string
 end
 ```
 
@@ -190,7 +190,7 @@ nex> class Shape
 nex> class Circle inherit Shape
        create
          make(c: String, r: Real) do
-           super.make(c)
+           Shape.make(c)
            radius := r
          end
        feature
@@ -206,112 +206,6 @@ nex> c.describe
 ```
 
 `describe` in `Shape` calls `area` — which runs `Circle`'s `area` because `c` is a `Circle`. The superclass defines the structure; the subclass fills in the detail. This is the *template method* pattern: a superclass method calls an overridable method whose behaviour varies by subclass.
-
-
-
-## Inheritance and Contracts
-
-When a subclass overrides a method, the override should honour the same contract as the superclass method: it should accept at least the same inputs and guarantee at least as much. This is the *Liskov Substitution Principle*: wherever a superclass instance is expected, a subclass instance should be usable without breaking anything.
-
-In Nex, this idea is not only informal. Contract inheritance follows explicit rules.
-
-### Precondition Inheritance
-
-For an overridden feature, the effective precondition is:
-
-`<base-feature-require> or <local-feature-require>`
-
-Either side may be absent. The practical meaning is that a child class may *weaken* the precondition. It may accept everything the parent accepted, and possibly more.
-
-For example:
-
-```text
-class Account
-feature
-  withdraw(amount: Real)
-    require
-      enough: amount <= balance
-    do
-      balance := balance - amount
-    end
-end
-
-class Overdraft_Account
-inherit Account
-feature
-  withdraw(amount: Real)
-    require
-      within_limit: amount <= balance + overdraft_limit
-    do
-      balance := balance - amount
-    end
-end
-```
-
-The effective precondition of `Overdraft_Account.withdraw` is:
-
-`(amount <= balance) or (amount <= balance + overdraft_limit)`
-
-So any call valid for `Account` remains valid for `Overdraft_Account`.
-
-### Postcondition Inheritance
-
-For an overridden feature, the effective postcondition is:
-
-`<base-feature-ensure> and <local-feature-ensure>`
-
-Either side may be absent. The practical meaning is that a child class may *strengthen* the postcondition, but it may not drop promises that the parent already made.
-
-If a parent routine promises that `area >= 0.0`, then every child implementation must still guarantee `area >= 0.0`. A child may add a stronger fact, but not a weaker one.
-
-### Invariant Inheritance
-
-For a child class, the effective class invariant is:
-
-`<base-invariants> and <local-class-invariants>`
-
-`base-invariants` includes the invariants of all immediate parent classes, and those parent invariants already include their own inherited invariants recursively.
-
-For example:
-
-```text
-class Account
-invariant
-  non_negative_balance: balance >= 0.0
-end
-
-class Savings_Account
-inherit Account
-invariant
-  non_negative_rate: interest_rate >= 0.0
-end
-```
-
-The effective invariant of `Savings_Account` is:
-
-`(balance >= 0.0) and (interest_rate >= 0.0)`
-
-This means subclass objects must satisfy everything required of parent objects, plus their own additional consistency rules.
-
-### Multiple Inheritance
-
-With multiple inheritance, Nex combines:
-
-- inherited preconditions with `or`
-- inherited postconditions with `and`
-- inherited class invariants with `and`
-
-Inherited invariant contributions are collected recursively and deduped by ancestor class, so the same ancestor contract is not applied twice through different parent paths.
-
-The rule to remember is simple:
-
-- children may accept more
-- children must promise at least as much
-- child objects must satisfy all inherited validity rules
-
-If `Shape.area` promises to return a non-negative real number, then every subclass `area` must also return a non-negative real. A subclass that returns a negative area or raises an exception where the superclass would not has violated the contract that clients of `Shape` rely on.
-
-When overriding a method: read the superclass method's contract first. In Nex, the language combines inherited contracts in exactly the way behavioral subtyping requires.
 
 
 
@@ -349,7 +243,7 @@ nex> class Account
 nex> class Savings_Account inherit Account
        create
          make(name: String, initial, rate: Real) do
-           super.make(name, initial)
+           Account.make(name, initial)
            interest_rate := rate
          end
        feature
@@ -358,14 +252,14 @@ nex> class Savings_Account inherit Account
            balance := balance + balance * interest_rate
          end
          describe(): String do
-           result := super.describe + " (savings, rate: " + interest_rate.to_string + ")"
+           result := Account.describe + " (savings, rate: " + interest_rate.to_string + ")"
          end
      end
 
 nex> class Overdraft_Account inherit Account
        create
          make(name: String, initial, limit: Real) do
-           super.make(name, initial)
+           Account.make(name, initial)
            overdraft_limit := limit
          end
        feature
@@ -379,7 +273,7 @@ nex> class Overdraft_Account inherit Account
            end
          end
          describe(): String do
-           result := super.describe + " (overdraft limit: " + overdraft_limit.to_string + ")"
+           result := Account.describe + " (overdraft limit: " + overdraft_limit.to_string + ")"
          end
      end
 ```
@@ -398,15 +292,15 @@ nex> across accounts as acc do
 "Carol: 200.0 (overdraft limit: 500.0)"
 ```
 
-Each account type inherits `deposit` and `get_balance` from `Account`. `Savings_Account` adds `apply_interest`. `Overdraft_Account` overrides `withdraw` to permit negative balances within the limit. Both override `describe` using `super.describe` to build on the base description. The array holds all three as `Account`; `describe` dispatches polymorphically.
+Each account type inherits `deposit` and `get_balance` from `Account`. `Savings_Account` adds `apply_interest`. `Overdraft_Account` overrides `withdraw` to permit negative balances within the limit. Both override `describe` using `Account.describe` to build on the base description. The array holds all three as `Account`; `describe` dispatches polymorphically.
 
 
 
 ## Summary
 
 - `class SubClass inherit SuperClass` declares the relationship; the subclass inherits all fields and methods
-- `super.constructor_name(   )` calls the superclass constructor from the subclass constructor
-- `super.method_name(   )` calls an overridden superclass method from within an override
+- `SuperClass.constructor_name(   )` calls the superclass constructor from the subclass constructor
+- `SuperClass.method_name(   )` calls an overridden superclass method from within an override
 - Overriding replaces a superclass method with a subclass-specific version; dynamic dispatch calls the correct version at runtime
 - Polymorphism allows objects of different subclasses to be treated through a common superclass type
 - The template method pattern: a superclass method calls an overridable method; the superclass defines structure, subclasses fill in details via override
