@@ -72,6 +72,37 @@
         (is (not (str/includes? let-output "Any {")))
         (is (str/includes? var-output "Map[String, String]"))))))
 
+(deftest repl-compiled-backend-private-field-is-not-publicly-readable-test
+  (testing "compiled backend rejects top-level access to private fields while keeping public methods callable"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx "class Counter
+  create
+    make(start: Integer) do
+      count := start
+    end
+  feature
+    increment() do
+      count := count + 1
+    end
+    current(): Integer do
+      result := count
+    end
+  private feature
+    count: Integer
+end"))
+            _ (with-out-str (repl/eval-code ctx "let c := create Counter.make(10)"))
+            _ (with-out-str (repl/eval-code ctx "c.increment"))
+            current-output (with-out-str (repl/eval-code ctx "c.current"))
+            private-output (with-out-str (repl/eval-code ctx "c.count"))]
+        (is (str/includes? current-output "11"))
+        (is (str/includes? private-output "Error:"))
+        (is (not (str/includes? private-output "Integer 11")))))))
+
 (deftest repl-compiled-backend-syncs-existing-interpreter-state-test
   (testing "switching to compiled syncs existing interpreter state into the compiled session"
     (binding [repl/*type-checking-enabled* (atom false)

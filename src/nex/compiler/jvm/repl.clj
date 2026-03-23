@@ -631,6 +631,11 @@
   [session]
   (into {} @(:types (:state session))))
 
+(defn- inference-classes-for-session
+  [session]
+  (concat (vals @(:class-asts session))
+          (keep :class-def (vals @(:function-asts session)))))
+
 (defn- sync-var-types-from-ast!
   [session ast]
   (doseq [stmt (:statements (normalize-program-ast ast))]
@@ -643,7 +648,7 @@
              (let [nex-type (or (:var-type stmt)
                                 (tc/infer-expression-type
                                  (:value stmt)
-                                 {:classes (vals @(:class-asts session))
+                                 {:classes (inference-classes-for-session session)
                                   :functions (vals @(:function-asts session))
                                   :imports @(:import-asts session)
                                   :var-types (session-var-types session)})
@@ -653,7 +658,7 @@
       :assign (when-let [nex-type (or (get (session-var-types session) (:target stmt))
                                       (tc/infer-expression-type
                                        (:value stmt)
-                                       {:classes (vals @(:class-asts session))
+                                       {:classes (inference-classes-for-session session)
                                         :functions (vals @(:function-asts session))
                                         :imports @(:import-asts session)
                                         :var-types (session-var-types session)})

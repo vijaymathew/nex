@@ -1,6 +1,7 @@
 (ns nex.visibility-test
   "Tests for feature visibility modifiers"
   (:require [clojure.test :refer [deftest is testing]]
+            [nex.interpreter :as interp]
             [nex.parser :as p]))
 
 (deftest public-feature-parsing-test
@@ -70,3 +71,34 @@ end"
 end"
           ast (p/ast code)]
       (is (some? ast)))))
+
+(deftest private-field-is-not-readable-from-outside-test
+  (testing "Private fields are not readable from outside the defining class"
+    (let [ctx (interp/make-context)
+          ast (p/ast "class Counter
+  create
+    make(start: Integer) do
+      count := start
+    end
+  feature
+    current(): Integer do
+      result := count
+    end
+  private feature
+    count: Integer
+end
+
+let c := create Counter.make(10)")]
+      (doseq [class-def (:classes ast)]
+        (interp/register-class ctx class-def))
+      (doseq [stmt (:statements ast)]
+        (interp/eval-node ctx stmt))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Method not found: count"
+           (interp/eval-node (assoc ctx :current-env (:globals ctx))
+                             {:type :call
+                              :target "c"
+                              :method "count"
+                              :args []
+                              :has-parens false}))))))

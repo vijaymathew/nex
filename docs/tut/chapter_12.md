@@ -29,6 +29,8 @@ This defines a class `Point` with a constructor named `make`, two fields `x` and
 
 Fields are declared inside `feature` as `name: Type` — no keyword needed. Methods are declared as `name(params): ReturnType do ... end`, also inside `feature`. The distinction between fields and methods is structural: fields have no parameter list or body; methods do.
 
+A plain `feature` section introduces public features. Nex also supports `private feature` for members that should only be used inside the class itself.
+
 
 
 ## Creating Objects
@@ -104,7 +106,7 @@ nex> p2.x
 4.0
 ```
 
-Fields are read using dot notation: `obj.field_name`. Assigning to a field from outside the class is not permitted — fields are private to the class. If a field needs to change, the class provides a method:
+Fields in a public `feature` section are read using dot notation: `obj.field_name`. Assigning to a field from outside the class is not permitted. If a field needs to change, the class provides a method:
 
 ```
 nex> class Point
@@ -130,6 +132,33 @@ nex> p.move(2.0, 2.0)
 nex> p.x
 3.0
 ```
+
+If a field or helper method is an implementation detail, put it in a `private feature` section instead:
+
+```
+nex> class Counter
+       create
+         make(start: Integer) do
+           count := start
+         end
+       feature
+         increment() do
+           count := count + 1
+         end
+         current(): Integer do
+           result := count
+         end
+       private feature
+         count: Integer
+     end
+
+nex> let c := create Counter.make(10)
+nex> c.increment()
+nex> c.current
+11
+```
+
+Here `increment` and `current` are public operations, but `count` is hidden from code outside `Counter`. Private helper methods are declared the same way: place them under `private feature`.
 
 Classes can also define class-level constants directly in the `feature` block:
 
@@ -420,7 +449,8 @@ nex> s.size
 - A class has a `create` block (constructors) and a `feature` block (fields and methods)
 - Constructors are named; `create ClassName.constructor_name(args)` creates an instance
 - Fields are `name: Type` inside `feature`; class constants use `NAME: Type = value` or `NAME = value`; methods are `name(params): ReturnType do ... end`
-- Fields are private — external code reads them with `obj.field` but cannot assign; changes go through methods
+- `feature` is public by default; use `private feature` for fields and helper methods that should stay inside the class
+- Public fields may be read with `obj.field`, but external code cannot assign to them; changes go through methods
 - In strict mode, non-basic fields must be initialised in the constructor; use `?Type` for fields that may legitimately be `nil`
 - `this` refers to the current object; needed when a parameter name shadows a field, or to pass the object as an argument
 - Uniform access: field reads and method calls use identical `obj.name` syntax
