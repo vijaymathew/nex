@@ -977,11 +977,20 @@
   [ctx expr-node]
   (when (and @*type-checking-enabled* expr-node)
     (try
-      (when-let [t (tc/infer-expression-type
-                     expr-node
-                     {:classes (vals @(:classes ctx))
-                      :imports @(:imports ctx)
-                      :var-types @*repl-var-types*})]
+      (when-let [t (case (:type expr-node)
+                     :let (or (:var-type expr-node)
+                              (get @*repl-var-types* (:name expr-node))
+                              (when-let [value (:value expr-node)]
+                                (tc/infer-expression-type
+                                 value
+                                 {:classes (vals @(:classes ctx))
+                                  :imports @(:imports ctx)
+                                  :var-types @*repl-var-types*})))
+                     (tc/infer-expression-type
+                      expr-node
+                      {:classes (vals @(:classes ctx))
+                       :imports @(:imports ctx)
+                       :var-types @*repl-var-types*}))]
         (format-type t))
       (catch Exception _
         nil))))
