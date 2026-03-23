@@ -9,10 +9,10 @@ An array of maps is useful when you have a sequence of records, each with the sa
 
 ```
 nex> let books: Array[Map[String, Any]] := [
-     "{"title": "Dune", "author": "Frank Herbert", "year": 1965},"
-     "{"title": "Neuromancer", "author": "William Gibson", "year": 1984},"
+     {"title": "Dune", "author": "Frank Herbert", "year": 1965},
+     {"title": "Neuromancer", "author": "William Gibson", "year": 1984},
      {"title": "Foundation", "author": "Isaac Asimov", "year": 1951}
-  "]"
+  ]
 
 nex> books.length
 3
@@ -61,10 +61,10 @@ A map of arrays is useful when you want to group items under named categories. C
 
 ```
 nex> let timetable: Map[String, Array[String]] := {
-     ""Monday":    ["Maths", "Physics", "History"],"
-     ""Tuesday":   ["English", "Chemistry"],"
-     ""Wednesday": ["Maths", "Biology", "PE"]"
-  "}"
+     "Monday":    ["Maths", "Physics", "History"],
+     "Tuesday":   ["English", "Chemistry"],
+     "Wednesday": ["Maths", "Biology", "PE"]
+  }
 
 nex> timetable.get("Monday")
 ["Maths", "Physics", "History"]
