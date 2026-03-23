@@ -128,9 +128,8 @@ end")))))
       end
     end
 end")]
-      ;; The rescue block runs print(exception), then rethrows
       (is (= ["\"caught me\""] (:output result)))
-      (is (some? (:exception result))))))
+      (is (nil? (:exception result)))))) 
 
 (deftest rescue-with-retry-test
   (testing "rescue with retry re-executes body"
@@ -152,12 +151,9 @@ end")]
 end")]
       (is (= ["3"] output)))))
 
-(deftest rescue-without-retry-rethrows-test
-  (testing "rescue without retry rethrows after rescue block executes"
-    (is (thrown-with-msg?
-          clojure.lang.ExceptionInfo
-          #"rethrown"
-          (execute-method "class Test
+(deftest rescue-without-retry-recovers-test
+  (testing "rescue without retry handles the exception and continues"
+    (let [output (execute-method "class Test
   feature
     demo() do
       do
@@ -166,10 +162,11 @@ end")]
         print(exception)
       end
     end
-end")))))
+end")]
+      (is (= ["\"rethrown\""] output)))))
 
 (deftest method-rescue-test
-  (testing "method-level rescue catches and rethrows without retry"
+  (testing "method-level rescue catches and handles the exception without retry"
     (let [code "class Test
   feature
     demo() do
@@ -186,12 +183,12 @@ end"
           _ (interp/env-define (:current-env ctx) "t" obj)
           result (try
                    (interp/eval-node ctx {:type :call :target "t" :method "demo" :args []})
-                   {:exception nil}
+                   {:exception nil :value :ok}
                    (catch clojure.lang.ExceptionInfo e
-                     {:exception e}))]
-      ;; The rescue block runs print(exception), then rethrows
+                     {:exception e :value nil}))]
       (is (= ["\"method fail\""] @(:output ctx)))
-      (is (some? (:exception result))))))
+      (is (= :ok (:value result)))
+      (is (nil? (:exception result))))))
 
 (deftest raise-integer-value-test
   (testing "raise with non-string value"
@@ -269,7 +266,7 @@ end")
       (is (re-find #"break;" js)))))
 
 (deftest js-rescue-no-retry-test
-  (testing "rescue without retry generates try/catch with rethrow in JavaScript"
+  (testing "rescue without retry generates try/catch recovery in JavaScript"
     (let [ast (parse "class Test
   feature
     demo() do
@@ -283,5 +280,5 @@ end")
           js (js-gen/translate-ast ast {:skip-contracts true})]
       (is (re-find #"try \{" js))
       (is (re-find #"catch \(_nex_e\)" js))
-      (is (re-find #"throw _nex_e;" js))
+      (is (not (re-find #"throw _nex_e;" js)))
       (is (not (re-find #"while \(true\)" js))))))

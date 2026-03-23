@@ -189,14 +189,14 @@ The program already works. But we can still improve the interface.
 The call `task_at(i).mark_done()` now works correctly. Still, a list class can offer a better public routine. Marking a task done is an operation in the vocabulary of the problem, not just a low-level storage update. A dedicated command also gives one clear place for contracts and future changes:
 
 ```
-nex> mark_task_done(index: Integer)
-       "require"
-         "index_in_range: index >= 0 and index < tasks.length"
-       "do"
-         "task_at(index).mark_done()"
-       "ensure"
-         "selected_done: tasks.get(index).done"
-       "end"
+mark_task_done(index: Integer)
+  require
+    index_in_range: index >= 0 and index < tasks.length
+  do
+    task_at(index).mark_done()
+  ensure
+    selected_done: tasks.get(index).done
+  end
 ```
 
 Add it to `Task_List`:

@@ -3374,7 +3374,7 @@
 (defn eval-body-with-rescue
   "Execute body statements with rescue/retry support.
    If rescue contains retry, re-executes body.
-   If rescue completes without retry, rethrows the original exception."
+   If rescue completes without retry, the exception is considered handled."
   [ctx body rescue]
   (let [should-retry (atom true)]
     (while @should-retry
@@ -3396,8 +3396,6 @@
                   rescue-ctx (assoc ctx :current-env rescue-env)]
               (try
                 (doseq [stmt rescue] (eval-node rescue-ctx stmt))
-                ;; No retry hit — rethrow original exception
-                (throw e)
                 (catch #?(:clj Exception :cljs :default) re
                   (if (and (instance? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) re)
                            (= :nex-retry (:type (ex-data re))))
@@ -3985,8 +3983,7 @@
                           rescue-ctx (assoc ctx :current-env rescue-env)]
                       (.catch
                        (.then (->promise (eval-body-async rescue-ctx rescue))
-                              (fn [_]
-                                (js/Promise.reject e)))
+                              (fn [_] nil))
                        (fn [re]
                          (if (and (instance? ExceptionInfo re)
                                   (= :nex-retry (:type (ex-data re))))

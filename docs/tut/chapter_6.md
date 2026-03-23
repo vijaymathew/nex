@@ -178,7 +178,7 @@ nex> clamp(7, 0, 10)
 7
 ```
 
-`clamp` constrains a value to a range — returning the lower bound if the value is below it, the upper bound if above it, and the value itself otherwise. This is a function that appears frequently in graphics, game logic, and data processing.
+`clamp` constrains a value to a range — returning the lower bound if the value is below it, the upper bound if above it, and the value itself otherwise. This is a function that appears frequently in simulation code, game logic, and data processing.
 
 
 

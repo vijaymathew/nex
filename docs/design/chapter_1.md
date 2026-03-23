@@ -17,7 +17,7 @@ The hope is not that a language feature can replace judgment — it cannot. The 
 
 ## 3.2 Why Object-Oriented and Functional Together
 
-Nex is object-oriented because long-lived programs need stable models of things. Classes, constructors, fields, methods, invariants, and inheritance all exist to support that modelling work. When the problem is to represent a bank account, an HTTP request, or a graphics window, a class is the right unit of thought: it names the concept, bundles the data, and specifies the rules under which the data may change.
+Nex is object-oriented because long-lived programs need stable models of things. Classes, constructors, fields, methods, invariants, and inheritance all exist to support that modelling work. When the problem is to represent a bank account, an HTTP request, or a configuration object, a class is the right unit of thought: it names the concept, bundles the data, and specifies the rules under which the data may change.
 
 But classes are not the only useful unit of thought. Sometimes the important thing is not a long-lived object but a transformation — a local computation, a callback, an operation that takes values in and produces a value out without touching any persistent state. For that kind of problem, function values and expression-oriented forms are more natural and more honest. Wrapping a pure computation in a class to satisfy a stylistic rule produces noise without adding clarity.
 

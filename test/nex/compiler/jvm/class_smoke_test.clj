@@ -702,25 +702,18 @@ end"))
       (is (:compiled? result))
       (is (= 3 (:result result))))))
 
-(deftest compiled-scoped-block-rescue-rethrow-smoke-test
-  (testing "compiled helper rethrows the original exception after rescue when no retry occurs"
+(deftest compiled-scoped-block-rescue-recovers-smoke-test
+  (testing "compiled helper treats a rescue block without retry as handled recovery"
     (let [session (compiled-repl/make-session)]
-      (let [thrown (try
-                     (compiled-repl/compile-and-eval!
-                      session
-                      (p/ast (str "do\n"
-                                  "  raise \"boom\"\n"
-                                  "rescue\n"
-                                  "  print(exception)\n"
-                                  "end")))
-                     nil
-                     (catch Throwable e
-                       (if (instance? java.lang.reflect.InvocationTargetException e)
-                         (.getCause ^java.lang.reflect.InvocationTargetException e)
-                         e)))]
-        (is (some? thrown))
-        (is (instance? clojure.lang.ExceptionInfo thrown))
-        (is (re-find #"boom" (.getMessage ^clojure.lang.ExceptionInfo thrown))))
+      (let [result (compiled-repl/compile-and-eval!
+                    session
+                    (p/ast (str "do\n"
+                                "  raise \"boom\"\n"
+                                "rescue\n"
+                                "  print(exception)\n"
+                                "end")))]
+        (is (:compiled? result))
+        (is (nil? (:result result))))
       (is (= ["\"boom\""] (runtime/state-output (:state session)))))))
 
 (deftest compiled-case-smoke-test

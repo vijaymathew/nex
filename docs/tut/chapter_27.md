@@ -189,7 +189,7 @@ nex> function most_frequent_word(text: String): String
      require
        not_empty: text.length > 0
      do
-       let freq := {}
+       let freq: Map[String, Integer] := {}
        let words := text.to_lower.split(" ")
 
        across words as word do

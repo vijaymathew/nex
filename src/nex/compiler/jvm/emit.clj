@@ -2105,8 +2105,7 @@
     (doseq [stmt rescue]
       (emit-stmt! mv stmt state-slot))
     (.visitLabel mv rescue-end)
-    (.visitVarInsn mv Opcodes/ALOAD throwable-slot)
-    (.visitInsn mv Opcodes/ATHROW)
+    (.visitJumpInsn mv Opcodes/GOTO end-label)
 
     (.visitLabel mv rescue-handler)
     (.visitVarInsn mv Opcodes/ASTORE rescue-throwable-slot)
