@@ -189,6 +189,35 @@ end"
       (is (not (str/includes? output "cannot be cast")))
       (is (not (str/includes? output "Type error:"))))))
 
+(deftest repl-typecheck-rejects-top-level-when-branch-type-mismatch
+  (testing "REPL typechecking rejects top-level when expressions with incompatible branch types"
+    (let [ctx (repl/init-repl-context)
+          output (try
+                   (reset! repl/*type-checking-enabled* true)
+                   (with-out-str
+                     (repl/eval-code ctx "when 1 > 2 12 else \"hello\" end"))
+                   (finally
+                     (reset! repl/*type-checking-enabled* false)
+                     (reset! repl/*repl-var-types* {})))]
+      (is (str/includes? output "when branches have incompatible types: Integer and String"))
+      (is (str/includes? output "Error: Type checking failed")))))
+
+(deftest repl-typecheck-infers-imported-java-method-return-types
+  (testing "REPL typechecking accepts imported Java method results in typed expressions"
+    (let [ctx (repl/init-repl-context)
+          output (try
+                   (reset! repl/*type-checking-enabled* true)
+                   (with-out-str
+                     (repl/eval-code ctx "import java.lang.StringBuilder")
+                     (repl/eval-code ctx "let sb: StringBuilder := create StringBuilder")
+                     (repl/eval-code ctx "sb.append(\"abc\")")
+                     (repl/eval-code ctx "6 + sb.length()"))
+                   (finally
+                     (reset! repl/*type-checking-enabled* false)
+                     (reset! repl/*repl-var-types* {})))]
+      (is (str/includes? output "9"))
+      (is (not (str/includes? output "Type error:"))))))
+
 (deftest repl-typecheck-rejects-nil-for-attachable-bindings
   (testing "REPL typechecking rejects nil assigned to attachable references"
     (let [ctx (repl/init-repl-context)
