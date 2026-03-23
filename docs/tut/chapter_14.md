@@ -1,6 +1,6 @@
 # Inheritance and Polymorphism
 
-Chapter 13 established that a class should model one concept well. Sometimes concepts form families — a `SavingsAccount` and a `CurrentAccount` are both bank accounts; a `Circle` and a `Rectangle` are both shapes. These families share common behaviour while differing in specifics. Inheritance is the mechanism for expressing that relationship in code.
+Chapter 13 established that a class should model one concept well. Sometimes concepts form families — a `Savings_Account` and a `Current_Account` are both bank accounts; a `Circle` and a `Rectangle` are both shapes. These families share common behaviour while differing in specifics. Inheritance is the mechanism for expressing that relationship in code.
 
 
 ## What Inheritance Is
@@ -147,7 +147,7 @@ Polymorphism means code written against the superclass type works correctly with
 
 Inheritance is appropriate when:
 
-**The is-a relationship is genuine.** A `Circle` is a `Shape`. A `SavingsAccount` is a `BankAccount`. The subclass is a more specific version of the superclass concept.
+**The is-a relationship is genuine.** A `Circle` is a `Shape`. A `Savings_Account` is a `Bank_Account`. The subclass is a more specific version of the superclass concept.
 
 **The subclass shares and specialises superclass behaviour.** It uses the inherited methods and overrides some to provide specialised behaviour. It does not ignore or neutralise what it inherits.
 
@@ -346,7 +346,7 @@ nex> class Account
          end
      end
 
-nex> class SavingsAccount inherit Account
+nex> class Savings_Account inherit Account
        create
          make(name: String, initial, rate: Real) do
            super.make(name, initial)
@@ -362,7 +362,7 @@ nex> class SavingsAccount inherit Account
          end
      end
 
-nex> class OverdraftAccount inherit Account
+nex> class Overdraft_Account inherit Account
        create
          make(name: String, initial, limit: Real) do
            super.make(name, initial)
@@ -387,8 +387,8 @@ nex> class OverdraftAccount inherit Account
 ```
 nex> let accounts: Array[Account] := []
 nex> accounts.add(create Account.make("Alice", 500.0))
-nex> accounts.add(create SavingsAccount.make("Bob", 1000.0, 0.02))
-nex> accounts.add(create OverdraftAccount.make("Carol", 200.0, 500.0))
+nex> accounts.add(create Savings_Account.make("Bob", 1000.0, 0.02))
+nex> accounts.add(create Overdraft_Account.make("Carol", 200.0, 500.0))
 
 nex> across accounts as acc do
        print(acc.describe)
@@ -398,7 +398,7 @@ nex> across accounts as acc do
 "Carol: 200.0 (overdraft limit: 500.0)"
 ```
 
-Each account type inherits `deposit` and `get_balance` from `Account`. `SavingsAccount` adds `apply_interest`. `OverdraftAccount` overrides `withdraw` to permit negative balances within the limit. Both override `describe` using `super.describe` to build on the base description. The array holds all three as `Account`; `describe` dispatches polymorphically.
+Each account type inherits `deposit` and `get_balance` from `Account`. `Savings_Account` adds `apply_interest`. `Overdraft_Account` overrides `withdraw` to permit negative balances within the limit. Both override `describe` using `super.describe` to build on the base description. The array holds all three as `Account`; `describe` dispatches polymorphically.
 
 
 
@@ -421,8 +421,8 @@ Each account type inherits `deposit` and `get_balance` from `Account`. `SavingsA
 
 **2.** Add a method `perimeter(): Real` to the `Shape` class with a default return of `0.0`. Override it in `Circle` (`2 * 3.14159 * radius`) and `Rectangle` (`2 * (width + height)`). Update `describe` in `Shape` to report both area and perimeter.
 
-**3.** The `withdraw` method in `OverdraftAccount` overrides the one in `Account`. Does the override honour the Liskov Substitution Principle? Does it accept the same inputs? Does it make the same kind of promise — returning `true` on success and `false` on failure? What does a caller of `Account` need to know about `OverdraftAccount.withdraw`?
+**3.** The `withdraw` method in `Overdraft_Account` overrides the one in `Account`. Does the override honour the Liskov Substitution Principle? Does it accept the same inputs? Does it make the same kind of promise — returning `true` on success and `false` on failure? What does a caller of `Account` need to know about `Overdraft_Account.withdraw`?
 
-**4.** Define a class `Vehicle` with fields `make: String` and `speed: Real`, and methods `fuel_type(): String` and `max_speed(): Real` with sensible defaults. Define `ElectricCar` and `PetrolCar` overriding those methods. Add `can_reach(distance, fuel: Real): Boolean` to each — `PetrolCar` uses 10 litres per 100 km; `ElectricCar` uses 20 kWh per 100 km.
+**4.** Define a class `Vehicle` with fields `make: String` and `speed: Real`, and methods `fuel_type(): String` and `max_speed(): Real` with sensible defaults. Define `Electric_Car` and `Petrol_Car` overriding those methods. Add `can_reach(distance, fuel: Real): Boolean` to each — `Petrol_Car` uses 10 litres per 100 km; `Electric_Car` uses 20 kWh per 100 km.
 
-**5.\*** Define a `Logger` base class with a method `log(message: String)` that prints with a prefix. Define `FileLogger` that also appends to a `log_history: String` field, and `SilentLogger` that discards all messages. Create an `Array[Logger]` with one of each and call `log("test")` on each. What does this demonstrate about polymorphism and swappable implementations?
+**5.\*** Define a `Logger` base class with a method `log(message: String)` that prints with a prefix. Define `File_Logger` that also appends to a `log_history: String` field, and `Silent_Logger` that discards all messages. Create an `Array[Logger]` with one of each and call `log("test")` on each. What does this demonstrate about polymorphism and swappable implementations?

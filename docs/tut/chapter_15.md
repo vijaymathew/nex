@@ -1,6 +1,6 @@
 # Generic Classes
 
-Exercise 5 in Chapter 13 asked you to define `IntegerStack`, `StringStack`, and `RealStack` alongside each other. If you did it, you noticed something uncomfortable: the three classes are identical except for the element type. Every method has the same structure; only the type annotations differ. Any bug fixed in one must be fixed in all three. Any new method added to one should be added to all three.
+Exercise 5 in Chapter 13 asked you to define `Integer_Stack`, `String_Stack`, and `Real_Stack` alongside each other. If you did it, you noticed something uncomfortable: the three classes are identical except for the element type. Every method has the same structure; only the type annotations differ. Any bug fixed in one must be fixed in all three. Any new method added to one should be added to all three.
 
 This is exactly the problem that generic classes solve. A generic class is parameterised by a type: you write the class once, and the type is supplied when the class is used. `Stack[Integer]`, `Stack[String]`, and `Stack[Real]` are all the same class, instantiated with different type arguments.
 

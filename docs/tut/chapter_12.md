@@ -271,10 +271,10 @@ name(params) do
 end
 ```
 
-Methods access the object's own fields directly by name. Here is a `BankAccount` class:
+Methods access the object's own fields directly by name. Here is a `Bank_Account` class:
 
 ```
-nex> class BankAccount
+nex> class Bank_Account
        create
          make(name: String, initial: Real) do
            owner := name
@@ -297,7 +297,7 @@ nex> class BankAccount
          end
      end
 
-nex> let account := create BankAccount.make("Alice", 1000.0)
+nex> let account := create Bank_Account.make("Alice", 1000.0)
 nex> account.deposit(500.0)
 nex> account.withdraw(200.0)
 nex> account.describe
@@ -328,7 +328,7 @@ Here the constructor parameters are also named `x` and `y`. Inside the construct
 `this` is also used when an object needs to pass itself as an argument:
 
 ```
-nex> class Point2
+nex> class Point_2
        create
          make(px, py: Real) do
            x := px
@@ -337,15 +337,15 @@ nex> class Point2
        feature
          x: Real
          y: Real
-         distance_to(other: Point2): Real do
+         distance_to(other: Point_2): Real do
            let dx := this.x - other.x
            let dy := this.y - other.y
            result := ((dx * dx) + (dy * dy)) ^ 0.5
          end
      end
 
-nex> let p1 := create Point2.make(0.0, 0.0)
-nex> let p2 := create Point2.make(3.0, 4.0)
+nex> let p1 := create Point_2.make(0.0, 0.0)
+nex> let p2 := create Point_2.make(3.0, 4.0)
 nex> p1.distance_to(p2)
 5.0
 ```
@@ -463,7 +463,7 @@ nex> s.size
 
 **2.** Define a class `Temperature` with a single field `celsius: Real`. Add methods `fahrenheit(): Real` and `kelvin(): Real`. Add `describe(): String` returning `"freezing"`, `"cold"`, `"mild"`, or `"warm"`. All derived values should be computed methods, not stored fields.
 
-**3.** Define a class `StringStack` that behaves like `Stack` but holds `String` values. Use it to reverse a string by pushing each character and popping them all off.
+**3.** Define a class `String_Stack` that behaves like `Stack` but holds `String` values. Use it to reverse a string by pushing each character and popping them all off.
 
 **4.** Define a class `Accumulator` with fields `total: Real` and `count: Integer` (both initialised to `0`). Add `add(value: Real)`, `reset()`, and `average(): Real`. State the precondition for `average` as a comment.
 
