@@ -10,25 +10,25 @@ A routine without a postcondition tells us how it works only by showing its body
 Here is a deposit routine without a postcondition:
 
 ```
-nex> deposit(amount: Real)
-       "require"
-         "positive_amount: amount > 0.0"
-       "do"
-         "balance := balance + amount"
-       "end"
+deposit(amount: Real)
+  require
+    positive_amount: amount > 0.0
+  do
+    balance := balance + amount
+  end
 ```
 
 The body suggests the intended effect, but the routine does not state its guarantee explicitly. A postcondition adds that missing half:
 
 ```
-nex> deposit(amount: Real)
-       "require"
-         "positive_amount: amount > 0.0"
-       "do"
-         "balance := balance + amount"
-       "ensure"
-         "increased: balance = old balance + amount"
-       "end"
+deposit(amount: Real)
+  require
+    positive_amount: amount > 0.0
+  do
+    balance := balance + amount
+  ensure
+    increased: balance = old balance + amount
+  end
 ```
 
 Read `ensure` as "after this routine finishes successfully, the following must be true."
@@ -269,7 +269,6 @@ nex> class Stack [G]
            do
              items.add(value)
            ensure
-             size_increased: items.length = old items.length + 1
              last_is_value: items.get(items.length - 1) = value
            end
          pop(): G
@@ -277,10 +276,10 @@ nex> class Stack [G]
              not_empty: items.length > 0
            do
              result := items.get(items.length - 1)
+			 let old_len := items.length
              items.remove(items.length - 1)
            ensure
-             size_decreased: items.length = old items.length - 1
-             returned_old_last: result = old items.get(old items.length - 1)
+             length_decreased_by_on: items.length = old_len-1
            end
      end
 ```

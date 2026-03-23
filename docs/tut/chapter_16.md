@@ -94,17 +94,17 @@ When a routine has a precondition, satisfying it is the caller's job.
 That point is easy to say and easy to forget. Many beginners write routines that both require something and also try to defend themselves against the caller violating it:
 
 ```
-nex> withdraw(amount: Real): Boolean
-       "require"
-         "enough: amount <= balance"
-       "do"
-         "if amount <= balance then"
-           "balance := balance - amount"
-           "result := true"
-         "else"
-           "result := false"
-         "end"
-       "end"
+withdraw(amount: Real): Boolean
+  require
+    enough: amount <= balance
+  do
+    if amount <= balance then
+      balance := balance - amount
+        result := true
+      else
+        result := false
+    end
+   end
 ```
 
 The `if` duplicates the contract. If `amount > balance`, the call is already invalid. The body does not need to ask again. Duplicating the check weakens the design because it blurs the boundary between correct use and incorrect use.
@@ -112,13 +112,13 @@ The `if` duplicates the contract. If `amount > balance`, the call is already inv
 The cleaner version:
 
 ```
-nex> withdraw(amount: Real)
-       "require"
-         "non_negative_amount: amount >= 0.0"
-         "enough: amount <= balance"
-       "do"
-         "balance := balance - amount"
-       "end"
+withdraw(amount: Real)
+  require
+    non_negative_amount: amount >= 0.0
+    enough: amount <= balance
+   do
+     balance := balance - amount
+   end
 ```
 
 Now the routine is simpler and its interface is sharper. Either the caller meets the contract, or the call is rejected.

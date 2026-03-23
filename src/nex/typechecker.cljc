@@ -829,14 +829,20 @@
   "Build a type-map from a class's generic params and a parameterized target type.
    E.g., class Box[T] with target-type Box[Integer] => {\"T\" \"Integer\"}."
   [env target-type]
-  (when (map? target-type)
-    (let [base-name (:base-type target-type)
-          type-args (or (:type-args target-type) (:type-params target-type))
-          class-def (env-lookup-class env base-name)]
-      (when (and class-def (:generic-params class-def) type-args)
-        (into {} (map (fn [param arg]
-                        [(:name param) arg])
-                      (:generic-params class-def) type-args))))))
+  (let [base-name (cond
+                    (map? target-type) (:base-type target-type)
+                    (string? target-type) target-type
+                    :else nil)
+        type-args (when (map? target-type)
+                    (or (:type-args target-type) (:type-params target-type)))
+        class-def (when base-name
+                    (env-lookup-class env base-name))]
+    (when-let [generic-params (:generic-params class-def)]
+      (into {}
+            (map (fn [param arg]
+                   [(:name param) (or arg "Any")])
+                 generic-params
+                 (concat type-args (repeat "Any")))))))
 
 (defn nil-literal?
   "Whether an expression node is a nil literal."
