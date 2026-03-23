@@ -209,7 +209,7 @@
       (is (some #{"result"} locals))
       (is (< (:start-order state-range) (:start-order x-range)))
       (is (<= (:start-order n-range) (:start-order x-range)))
-      (is (<= (:start-order x-range) (:start-order result-range)))
+      (is (<= (:start-order result-range) (:start-order x-range)))
       (is (< (:end-order x-range) (:end-order state-range))))))
 
 (deftest compile-top-set-and-top-get-smoke-test

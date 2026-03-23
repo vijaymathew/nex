@@ -57,6 +57,21 @@
         (is (= "Integer" (runtime/state-get-type (:state session) "x")))
         (is (str/includes? output "42"))))))
 
+(deftest repl-compiled-backend-typed-map-let-displays-binding-type-test
+  (testing "compiled backend shows the declared binding type for top-level typed map lets"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            let-output (with-out-str
+                         (repl/eval-code ctx "let capitals: Map[String, String] := {\"France\": \"Paris\", \"Japan\": \"Tokyo\"}"))
+            var-output (with-out-str
+                         (repl/eval-code ctx "capitals"))]
+        (is (str/includes? let-output "Map[String, String]"))
+        (is (not (str/includes? let-output "Any {")))
+        (is (str/includes? var-output "Map[String, String]"))))))
+
 (deftest repl-compiled-backend-syncs-existing-interpreter-state-test
   (testing "switching to compiled syncs existing interpreter state into the compiled session"
     (binding [repl/*type-checking-enabled* (atom false)

@@ -423,6 +423,7 @@
 (declare collect-class-info)
 (declare check-class)
 (declare convert-guard-binding)
+(declare resolve-generic-type)
 
 (defn check-literal
   "Check the type of a literal expression"
@@ -446,6 +447,115 @@
         (some (fn [{:keys [parent]}]
                 (lookup-class-method env parent method-name arity))
               (:parents class-def))))))
+
+#?(:clj
+   (defn- resolve-imported-java-class
+     [env class-name]
+     (when (string? class-name)
+       (let [class-def (env-lookup-class env class-name)
+             qualified-name (or (:import class-def)
+                                (when (str/includes? class-name ".")
+                                  class-name))]
+         (when qualified-name
+           (try
+             (Class/forName qualified-name)
+             (catch Exception _
+               nil))))))
+   :cljs
+   (defn- resolve-imported-java-class
+     [_ _]
+     nil))
+
+(defn- known-reference-type
+  [env ^#?(:clj Class :cljs js/Object) klass]
+  (let [simple-name #?(:clj (.getSimpleName klass) :cljs nil)]
+    (cond
+      (builtin-type? simple-name) simple-name
+      (env-lookup-class env simple-name) simple-name
+      :else "Any")))
+
+#?(:clj
+   (defn- java-class->nex-type
+     [env ^Class klass]
+     (cond
+       (nil? klass) "Any"
+       (= klass Void/TYPE) "Void"
+       (= klass java.lang.Void) "Void"
+       (.isArray klass)
+       {:base-type "Array"
+        :type-params [(java-class->nex-type env (.getComponentType klass))]}
+
+       (= klass java.lang.String) "String"
+
+       (or (= klass Byte/TYPE)
+           (= klass java.lang.Byte)
+           (= klass Short/TYPE)
+           (= klass java.lang.Short)
+           (= klass Integer/TYPE)
+           (= klass java.lang.Integer))
+       "Integer"
+
+       (or (= klass Long/TYPE)
+           (= klass java.lang.Long))
+       "Integer64"
+
+       (or (= klass Float/TYPE)
+           (= klass java.lang.Float)
+           (= klass Double/TYPE)
+           (= klass java.lang.Double))
+       "Real"
+
+       (= klass java.math.BigDecimal) "Decimal"
+
+       (or (= klass Boolean/TYPE)
+           (= klass java.lang.Boolean))
+       "Boolean"
+
+       (or (= klass Character/TYPE)
+           (= klass java.lang.Character))
+       "Char"
+
+       (= klass java.lang.Object) "Any"
+
+       :else
+       (known-reference-type env klass)))
+   :cljs
+   (defn- java-class->nex-type
+     [_ _]
+     "Any"))
+
+#?(:clj
+   (defn- reflected-java-method-signatures
+     [env class-name method-name argc static?]
+     (when-let [klass (resolve-imported-java-class env class-name)]
+       (->> (.getMethods ^Class klass)
+            (filter (fn [^java.lang.reflect.Method method]
+                      (and (= (.getName method) method-name)
+                           (= (java.lang.reflect.Modifier/isStatic (.getModifiers method)) static?)
+                           (= (alength (.getParameterTypes method)) argc))))
+            (mapv (fn [^java.lang.reflect.Method method]
+                    {:params (mapv (fn [index ^Class param-type]
+                                     {:name (str "arg" index)
+                                      :type (java-class->nex-type env param-type)})
+                                   (range argc)
+                                   (.getParameterTypes method))
+                     :return-type (java-class->nex-type env (.getReturnType method))})))))
+   :cljs
+   (defn- reflected-java-method-signatures
+     [_ _ _ _ _]
+     nil))
+
+(defn- reflected-java-method-signature
+  [env class-name method-name arg-types static?]
+  (let [static? (boolean static?)]
+    (some (fn [signature]
+            (when (every? true?
+                          (map (fn [arg-type param]
+                                 (types-compatible? env arg-type (:type param)))
+                               arg-types
+                               (:params signature)))
+              signature))
+          (reflected-java-method-signatures env class-name method-name (count arg-types) static?))))
 
 (defn lookup-class-field
   "Look up a field on a class and its parent chain."
@@ -548,6 +658,25 @@
                             {:error (type-error (str "Undefined variable: " name))})))))
       (throw (ex-info (str "Undefined variable: " name)
                       {:error (type-error (str "Undefined variable: " name))})))))
+
+(defn- check-call-signature
+  [env method args method-sig type-map & {:keys [arg-types]}]
+  (let [arg-types (or arg-types (mapv #(check-expression env %) args))
+        params (:params method-sig)]
+    (when (not= (count args) (count params))
+      (throw (ex-info (str "Method " method " expects " (count params)
+                           " arguments, got " (count args))
+                      {:error (type-error
+                               (str "Method " method " expects " (count params)
+                                    " arguments, got " (count args)))})))
+    (doseq [[arg-type param] (map vector arg-types params)]
+      (let [param-type (resolve-generic-type (:type param) type-map)]
+        (when-not (types-compatible? env arg-type param-type)
+          (throw (ex-info (str "Argument type mismatch for method " method)
+                          {:error (type-error
+                                   (str "Expected " (display-type param-type)
+                                        ", got " (display-type arg-type)))})))))
+    (resolve-generic-type (:return-type method-sig) type-map)))
 
 (defn check-binary-op
   "Check the type of a binary operation"
@@ -969,30 +1098,17 @@
         (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
                                 (builtin-method-signature "Any" method (count args) type-map)
                                 (lookup-class-method env base-type method (count args)))]
-          (do
-            ;; Check argument types
-            (when (not= (count args) (count (:params method-sig)))
-              (throw (ex-info (str "Method " method " expects " (count (:params method-sig))
-                                  " arguments, got " (count args))
-                              {:error (type-error
-                                       (str "Method " method " expects " (count (:params method-sig))
-                                            " arguments, got " (count args)))})))
-            (doseq [[arg param] (map vector args (:params method-sig))]
-              (let [arg-type (check-expression env arg)
-                    ;; Resolve generic params (e.g., T -> Integer)
-                    param-type (resolve-generic-type (:type param) type-map)]
-                (when-not (types-compatible? env arg-type param-type)
-                  (throw (ex-info (str "Argument type mismatch for method " method)
-                                  {:error (type-error
-                                           (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
-            (resolve-generic-type (:return-type method-sig) type-map))
-          ;; If this is member access without parens, attempt field lookup.
-          (if (false? has-parens)
-            (if-let [field-type (lookup-class-field env base-type method)]
-              (resolve-generic-type field-type type-map)
-              "Any")
-            ;; Method not found - might be built-in method, return Any for now
-            "Any"))))
+          (check-call-signature env method args method-sig type-map)
+          (let [arg-types (mapv #(check-expression env %) args)]
+            (if-let [java-method-sig (reflected-java-method-signature env base-type method arg-types class-target)]
+              (check-call-signature env method args java-method-sig {} :arg-types arg-types)
+              ;; If this is member access without parens, attempt field lookup.
+              (if (false? has-parens)
+                (if-let [field-type (lookup-class-field env base-type method)]
+                  (resolve-generic-type field-type type-map)
+                  "Any")
+                ;; Method not found - might be built-in method, return Any for now
+                "Any"))))))
     ;; Function call (built-in like print/type_of/type_is) or function object call
     (cond
       (= method "print")
@@ -2733,7 +2849,11 @@
                           {:error (type-error
                                    (str "Cannot assign " (display-type val-type)
                                         " to field of type " (display-type field-type)))}))))
-      nil)))
+
+      ;; Top-level REPL/program expression inputs are often parsed into
+      ;; :statements, so fall back to expression checking for any remaining
+      ;; expression-shaped node.
+      (check-expression env stmt))))
 
 ;;
 ;; Method/Constructor Type Checking

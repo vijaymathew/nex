@@ -9,10 +9,10 @@ An array of maps is useful when you have a sequence of records, each with the sa
 
 ```
 nex> let books: Array[Map[String, Any]] := [
-     "{"title": "Dune", "author": "Frank Herbert", "year": 1965},"
-     "{"title": "Neuromancer", "author": "William Gibson", "year": 1984},"
+     {"title": "Dune", "author": "Frank Herbert", "year": 1965},
+     {"title": "Neuromancer", "author": "William Gibson", "year": 1984},
      {"title": "Foundation", "author": "Isaac Asimov", "year": 1951}
-  "]"
+  ]
 
 nex> books.length
 3
@@ -61,10 +61,10 @@ A map of arrays is useful when you want to group items under named categories. C
 
 ```
 nex> let timetable: Map[String, Array[String]] := {
-     ""Monday":    ["Maths", "Physics", "History"],"
-     ""Tuesday":   ["English", "Chemistry"],"
-     ""Wednesday": ["Maths", "Biology", "PE"]"
-  "}"
+     "Monday":    ["Maths", "Physics", "History"],
+     "Tuesday":   ["English", "Chemistry"],
+     "Wednesday": ["Maths", "Biology", "PE"]
+  }
 
 nex> timetable.get("Monday")
 ["Maths", "Physics", "History"]
@@ -126,12 +126,12 @@ nex> function build_gradebook(entries: Array[Map[String, Any]]): Map[String, Arr
 
 ```
 nex> let entries: Array[Map[String, Any]] := [
-     "{"name": "Alice", "score": 85},"
-     "{"name": "Bob",   "score": 72},"
-     "{"name": "Alice", "score": 91},"
-     "{"name": "Bob",   "score": 68},"
+     {"name": "Alice", "score": 85},
+     {"name": "Bob",   "score": 72},
+     {"name": "Alice", "score": 91},
+     {"name": "Bob",   "score": 68},
      {"name": "Alice", "score": 88}
-  "]"
+  ]
 
 nex> let gradebook := build_gradebook(entries)
 nex> gradebook.get("Alice")
@@ -173,26 +173,26 @@ Nex does not have a built-in tree type. Trees are represented using maps, where 
 
 ```
 nex> let filesystem: Map[String, Any] := {
-     ""name": "root","
-     ""type": "dir","
-     ""children": ["
-        "{"
-           ""name": "documents","
-           ""type": "dir","
-           ""children": ["
-              "{"name": "report.txt", "type": "file", "children": []},"
-              {"name": "notes.txt", "type": "file", "children": "[]"}
-           "]"
-        "},"
-        "{"
-           ""name": "pictures","
-           ""type": "dir","
-           ""children": ["
-              {"name": "photo.jpg", "type": "file", "children": "[]"}
-           "]"
-        "}"
-     "]"
-  "}"
+     "name": "root",
+     "type": "dir",
+     "children": [
+        {
+           "name": "documents",
+           "type": "dir",
+           "children": [
+              {"name": "report.txt", "type": "file", "children": []},
+              {"name": "notes.txt", "type": "file", "children": []}
+           ]
+        },
+        {
+           "name": "pictures",
+           "type": "dir",
+           "children": [
+              {"name": "photo.jpg", "type": "file", "children": []}
+           ]
+        }
+     ]
+  }
 ```
 
 Each node is a `Map[String, Any]`: a `"name"` field (string), a `"type"` field (string), and a `"children"` field (array of maps). Files have empty children arrays; directories have non-empty ones.
@@ -245,7 +245,7 @@ Finding a node by name requires the same recursive structure:
 ```
 nex> function find_node(node: Map[String, Any], target: String): ?Map[String, Any]
    do
-     if node.get("name").to_string = target then
+     if node.get("name") = target then
         result := node
      else
         result := nil
@@ -262,7 +262,7 @@ nex> function find_node(node: Map[String, Any], target: String): ?Map[String, An
 ```
 nex> let found := find_node(filesystem, "notes.txt")
 nex> if found /= nil then
-     print(found.get("name").to_string)
+     print(found.get("name"))
   end
 "notes.txt"
 
@@ -283,27 +283,27 @@ Consider an expense tracker where expenses are grouped by category, and categori
 
 ```
 nex> let expenses := {
-     ""label": "Total","
-     ""amount": 0,"
-     ""children": ["
-        "{"
-           ""label": "Housing","
-           ""amount": 1200,"
-           ""children": ["
-              "{"label": "Rent",       "amount": 900,  "children": []},"
-              {"label": "Utilities", "amount": 300, "children": "[]"}
-           "]"
-        "},"
-        "{"
-           ""label": "Food","
-           ""amount": 150,"
-           ""children": ["
-              "{"label": "Groceries",  "amount": 400,  "children": []},"
-              {"label": "Dining out", "amount": 200, "children": "[]"}
-           "]"
-        "}"
-     "]"
-  "}"
+     "label": "Total",
+     "amount": 0,
+     "children": [
+        {
+           "label": "Housing",
+           "amount": 1200,
+           "children": [
+              {"label": "Rent",       "amount": 900,  "children": []},
+              {"label": "Utilities", "amount": 300, "children": []}
+           ]
+        },
+        {
+           "label": "Food",
+           "amount": 150,
+           "children": [
+              {"label": "Groceries",  "amount": 400,  "children": []},
+              {"label": "Dining out", "amount": 200, "children": []}
+           ]
+        }
+     ]
+  }
 ```
 
 A function that computes the total amount for a node, including all descendants:

@@ -299,7 +299,7 @@ Here the constructor parameters are also named `x` and `y`. Inside the construct
 `this` is also used when an object needs to pass itself as an argument:
 
 ```
-nex> class Point
+nex> class Point2
        create
          make(px, py: Real) do
            x := px
@@ -308,15 +308,15 @@ nex> class Point
        feature
          x: Real
          y: Real
-         distance_to(other: Point): Real do
+         distance_to(other: Point2): Real do
            let dx := this.x - other.x
            let dy := this.y - other.y
            result := ((dx * dx) + (dy * dy)) ^ 0.5
          end
      end
 
-nex> let p1 := create Point.make(0.0, 0.0)
-nex> let p2 := create Point.make(3.0, 4.0)
+nex> let p1 := create Point2.make(0.0, 0.0)
+nex> let p2 := create Point2.make(3.0, 4.0)
 nex> p1.distance_to(p2)
 5.0
 ```
