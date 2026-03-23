@@ -1288,8 +1288,8 @@
         (emit-runtime-call! mv "array-index-of"
                             [(fn [] (emit-expr! mv target state-slot))
                              (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Integer")
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Integer" "intValue" "()I" false)
+        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Number")
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Number" "intValue" "()I" false)
         :int)
 
       [:array "remove"]
