@@ -1253,20 +1253,14 @@
             false))
         stmts))
 
-(defn ends-with-retry?
-  "Check if the last statement is a :retry"
-  [stmts]
-  (= :retry (:type (last stmts))))
-
 (defn generate-rescue
   "Generate JavaScript try/catch with optional retry loop"
   [level body rescue var-names]
   (let [body-stmts (map #(generate-statement (+ level 2) % var-names) body)
         rescue-stmts (map #(generate-statement (+ level 2) % var-names) rescue)
-        has-retry (has-retry? rescue)
-        needs-throw (not (ends-with-retry? rescue))]
+        has-retry (has-retry? rescue)]
     (if has-retry
-      ;; while(true) { try { body; break; } catch (...) { rescue; throw?; } }
+      ;; while(true) { try { body; break; } catch (...) { rescue; } }
       (str/join "\n"
         (concat
           [(indent level "while (true) {")]
@@ -1276,10 +1270,9 @@
           [(indent (+ level 1) "} catch (_nex_e) {")]
           [(indent (+ level 2) "let exception = _nex_e;")]
           rescue-stmts
-          (when needs-throw [(indent (+ level 2) "throw _nex_e;")])
           [(indent (+ level 1) "}")]
           [(indent level "}")]))
-      ;; try { body; } catch (...) { rescue; throw; }
+      ;; try { body; } catch (...) { rescue; }
       (str/join "\n"
         (concat
           [(indent level "try {")]
@@ -1287,7 +1280,6 @@
           [(indent level "} catch (_nex_e) {")]
           [(indent (+ level 1) "let exception = _nex_e;")]
           rescue-stmts
-          [(indent (+ level 1) "throw _nex_e;")]
           [(indent level "}")])))))
 
 (defn generate-scoped-block

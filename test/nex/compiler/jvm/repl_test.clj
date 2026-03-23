@@ -803,7 +803,8 @@ end"))
         (is (not (str/includes? def-output "Error:")))
         (is (str/includes? call-output "using built-in defaults: "))
         (is (str/includes? call-output "file missing"))
-        (is (str/includes? call-output "Error: file missing"))))))
+        (is (str/includes? call-output "\"theme=light%ntimeout=30\""))
+        (is (not (str/includes? call-output "Error:")))))))
 
 (deftest repl-compiled-backend-string-split-test
   (testing "compiled backend keeps String.split on the compiled path with the compiler's Array representation"
@@ -902,8 +903,8 @@ end"))
         (is (str/includes? output "Error: some error"))
         (is (not (str/includes? output "Error: nil")))))))
 
-(deftest repl-compiled-backend-rescue-output-and-rethrow-message-test
-  (testing "compiled backend flushes rescue output and preserves the rethrown exception message"
+(deftest repl-compiled-backend-rescue-output-and-recovery-test
+  (testing "compiled backend flushes rescue output and treats rescued exceptions as handled"
     (binding [repl/*type-checking-enabled* (atom false)
               repl/*repl-var-types* (atom {})
               repl/*repl-backend* (atom :compiled)
@@ -920,7 +921,7 @@ end"))
         (is (str/includes? output "\"before\""))
         (is (str/includes? output "rescued: "))
         (is (str/includes? output "something went wrong"))
-        (is (str/includes? output "Error: something went wrong"))
+        (is (not (str/includes? output "Error:")))
         (is (not (str/includes? output "Error: nil")))))))
 
 (deftest repl-compiled-backend-function-contract-and-rescue-messages-test

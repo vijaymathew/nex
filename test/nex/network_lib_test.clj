@@ -40,5 +40,5 @@
                      (repl/eval-code ctx "server.close()")
                      (repl/eval-code ctx "let client: Tcp_Socket := create Tcp_Socket.make(\"127.0.0.1\", closed_port)")
                      (repl/eval-code ctx "print(client.connect(50))"))]
-        (is (.contains output "Accept timed out"))
-        (is (.contains output "Connection refused"))))))
+        (is (.contains output "nil"))
+        (is (.contains output "false"))))))
