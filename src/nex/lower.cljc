@@ -36,6 +36,8 @@
 (declare method-override?)
 (declare class-jvm-meta)
 (declare inherited-method-def)
+(declare accessible-field-def)
+(declare accessible-method-def)
 (declare single-super-parent-name)
 (declare infer-call-type)
 (declare collect-anonymous-class-defs)
@@ -393,6 +395,71 @@
   [env expr]
   (resolve-jvm-type env (infer-type env expr)))
 
+(defn- infer-target-call-type
+  [env expr class-target-name across-item-type target-expr]
+  (if (and (= :identifier (:type target-expr))
+           (= "super" (:name target-expr)))
+    (let [parent-name (single-super-parent-name env)
+          parent-def (get (visible-class-map env) parent-name)]
+      (if (false? (:has-parens expr))
+        (or (some-> (class-field-def parent-def (:method expr))
+                    :field-type)
+            (some-> (class-method-def parent-def (:method expr) 0)
+                    function-return-type)
+            (some-> (inherited-method-def env parent-def (:method expr) 0)
+                    function-return-type))
+        (or (some-> (class-method-def parent-def (:method expr) (count (:args expr)))
+                    function-return-type)
+            (some-> (inherited-method-def env parent-def (:method expr) (count (:args expr)))
+                    function-return-type))))
+    (let [java-static-owner (java-host-class-root-name env target-expr)
+          target-type (when (and (not class-target-name)
+                                 (not java-static-owner))
+                        (infer-type env target-expr))
+          base-type (base-type-name target-type)
+          type-map (generic-type-map env target-type)
+          class-def (or (when class-target-name
+                          (get (visible-class-map env) class-target-name))
+                        (get (visible-class-map env) base-type))
+          field-def (when (and class-def (false? (:has-parens expr)))
+                      (if (= (:type target-expr) :this)
+                        (class-field-def class-def (:method expr))
+                        (accessible-field-def env class-def (:method expr))))
+          method-def (when class-def
+                       (if (= (:type target-expr) :this)
+                         (or (class-method-def class-def (:method expr) (count (:args expr)))
+                             (inherited-method-def env class-def (:method expr) (count (:args expr))))
+                         (accessible-method-def env class-def (:method expr) (count (:args expr)))))]
+      (or
+       (when across-item-type
+         (case (:method expr)
+           "item" across-item-type
+           "start" "Void"
+           "next" "Void"
+           "at_end" "Boolean"
+           "cursor" "Cursor"
+           nil))
+       (when (or java-static-owner (:with-java? env))
+         "Any")
+       (when class-def
+         (if (and class-target-name (false? (:has-parens expr)))
+           (some-> (lookup-class-constant env class-target-name (:method expr))
+                   (#(constant-nex-type env %)))
+             (if (:import class-def)
+               "Any"
+               (if (false? (:has-parens expr))
+                 (or (some-> field-def
+                             :field-type
+                             (#(tc/resolve-generic-type % type-map)))
+                     (some-> method-def
+                             function-return-type
+                             (#(tc/resolve-generic-type % type-map))))
+                 (some-> method-def
+                         function-return-type
+                         (#(tc/resolve-generic-type % type-map)))))))
+       (when (direct-collection-method? target-type (:method expr))
+         (collection-method-return-type target-type (:method expr)))))))
+
 (defn- infer-call-type
   [env expr]
   (let [raw-target (:target expr)
@@ -418,59 +485,7 @@
          (some-> (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
                      (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr))))
                  function-return-type)))
-      (if (and (= :identifier (:type target-expr))
-               (= "super" (:name target-expr)))
-        (let [parent-name (single-super-parent-name env)
-              parent-def (get (visible-class-map env) parent-name)]
-          (if (false? (:has-parens expr))
-            (or (some-> (class-field-def parent-def (:method expr))
-                        :field-type)
-                (some-> (class-method-def parent-def (:method expr) 0)
-                        function-return-type)
-                (some-> (inherited-method-def env parent-def (:method expr) 0)
-                        function-return-type))
-            (or (some-> (class-method-def parent-def (:method expr) (count (:args expr)))
-                        function-return-type)
-                (some-> (inherited-method-def env parent-def (:method expr) (count (:args expr)))
-                        function-return-type))))
-        (let [java-static-owner (java-host-class-root-name env target-expr)
-              target-type (when (and (not class-target-name)
-                                     (not java-static-owner))
-                            (infer-type env target-expr))
-              base-type (base-type-name target-type)
-              type-map (generic-type-map env target-type)
-              class-def (or (when class-target-name
-                              (get (visible-class-map env) class-target-name))
-                            (get (visible-class-map env) base-type))]
-          (or
-           (when across-item-type
-             (case (:method expr)
-               "item" across-item-type
-               "start" "Void"
-               "next" "Void"
-               "at_end" "Boolean"
-               "cursor" "Cursor"
-               nil))
-           (when (or java-static-owner (:with-java? env))
-             "Any")
-           (when class-def
-             (if (and class-target-name (false? (:has-parens expr)))
-               (some-> (lookup-class-constant env class-target-name (:method expr))
-                       (#(constant-nex-type env %)))
-               (if (:import class-def)
-                 "Any"
-               (if (false? (:has-parens expr))
-                 (or (some-> (class-field-def class-def (:method expr))
-                             :field-type
-                             (#(tc/resolve-generic-type % type-map)))
-                     (some-> (class-method-def class-def (:method expr) (count (:args expr)))
-                             function-return-type
-                             (#(tc/resolve-generic-type % type-map))))
-                 (some-> (class-method-def class-def (:method expr) (count (:args expr)))
-                         function-return-type
-                         (#(tc/resolve-generic-type % type-map))))))
-           (when (direct-collection-method? target-type (:method expr))
-             (collection-method-return-type target-type (:method expr))))))))))
+      (infer-target-call-type env expr class-target-name across-item-type target-expr))))
 
 (defn- env-add-local
   [env name nex-type]
@@ -1019,6 +1034,11 @@
   [member]
   (not= :private (-> member :visibility :type)))
 
+(defn- member-visible?
+  [env member declaring-class-name]
+  (or (= (:this-type env) declaring-class-name)
+      (public-member? member)))
+
 (defn- class-methods
   [class-def]
   (filter #(= :method (:type %)) (class-members class-def)))
@@ -1030,6 +1050,28 @@
 (defn- class-field-def
   [class-def field-name]
   (some #(when (= (:name %) field-name) %) (class-fields class-def)))
+
+(defn- accessible-field-def
+  [env class-def field-name]
+  (let [class-map (visible-class-map env)]
+    (letfn [(lookup-field [cn visited]
+              (when (and cn (not (contains? visited cn)))
+                (let [class-def (get class-map cn)
+                      visited' (conj visited cn)
+                      own-field (when class-def
+                                  (some (fn [member]
+                                          (when (and (= (:type member) :field)
+                                                     (not (:constant? member))
+                                                     (= (:name member) field-name)
+                                                     (member-visible? env member cn))
+                                            member))
+                                        (feature-members class-def)))]
+                  (or own-field
+                      (when class-def
+                        (some (fn [{:keys [parent]}]
+                                (lookup-field parent visited'))
+                              (:parents class-def)))))))]
+      (lookup-field (:name class-def) #{}))))
 
 (defn- lookup-class-constant
   [env class-name constant-name]
@@ -1060,6 +1102,28 @@
                     (= (count (or (:params %) [])) arity))
            %)
         (class-methods class-def)))
+
+(defn- accessible-method-def
+  [env class-def method-name arity]
+  (let [class-map (visible-class-map env)]
+    (letfn [(lookup-method [cn visited]
+              (when (and cn (not (contains? visited cn)))
+                (let [class-def (get class-map cn)
+                      visited' (conj visited cn)
+                      own-method (when class-def
+                                   (some (fn [member]
+                                           (when (and (= (:type member) :method)
+                                                      (= (:name member) method-name)
+                                                      (= (count (or (:params member) [])) arity)
+                                                      (member-visible? env member cn))
+                                             member))
+                                         (feature-members class-def)))]
+                  (or own-method
+                      (when class-def
+                        (some (fn [{:keys [parent]}]
+                                (lookup-method parent visited'))
+                              (:parents class-def)))))))]
+      (lookup-method (:name class-def) #{}))))
 
 (defn- class-constructor-def
   [class-def constructor-name arity]
@@ -1775,10 +1839,14 @@
         target-ir (lower-expression env target-expr)
         class-def (get (visible-class-map env) base-type)
         field-def (when (and class-def (false? has-parens))
-                    (class-field-def class-def method))
+                    (if (= (:type target-expr) :this)
+                      (class-field-def class-def method)
+                      (accessible-field-def env class-def method)))
         method-def (when class-def
-                     (or (class-method-def class-def method (count args))
-                         (inherited-method-def env class-def method (count args))))]
+                     (if (= (:type target-expr) :this)
+                       (or (class-method-def class-def method (count args))
+                           (inherited-method-def env class-def method (count args)))
+                       (accessible-method-def env class-def method (count args))))]
     (cond
       (and (= (:type target-expr) :this)
            (if-let [{:keys [owner field carrier-owner carrier-field nex-type jvm-type carrier-jvm-type]}

@@ -7,7 +7,7 @@ Chapter 12 showed the mechanics of defining a class. This chapter is about judgm
 
 The most reliable principle in class design is also the simplest to state: a class should have one responsibility. It should model one concept, manage one piece of state, and give callers one reason to use it.
 
-A class that has one responsibility is easy to name. If you find yourself reaching for a name like `UserManagerAndFormatter` or `OrderProcessorWithLogging`, the class is doing too much. A class that is hard to name is usually a class that has not yet been designed — it is a collection of code that happens to share a file.
+A class that has one responsibility is easy to name. If you find yourself reaching for a name like `User_Manager_And_Formatter` or `Order_Processor_With_Logging`, the class is doing too much. A class that is hard to name is usually a class that has not yet been designed — it is a collection of code that happens to share a file.
 
 Consider the difference between these two designs for a student record:
 
@@ -20,10 +20,11 @@ nex> class Student
            email := e
            scores := []
          end
-       feature
+       private feature
          name: String
          email: String
          scores: Array[Integer]
+	   feature
          add_score(s: Integer) do
            scores.add(s)
          end
@@ -55,10 +56,11 @@ nex> class Student
            email := e
            scores := []
          end
-       feature
+       private feature
          name: String
          email: String
          scores: Array[Integer]
+	   feature
          add_score(s: Integer) do
            scores.add(s)
          end
@@ -94,12 +96,12 @@ The last point deserves emphasis. A `Student` class that sends email must depend
 
 ## Data and Behaviour Together
 
-The insight that motivates object-oriented design is that data and the behaviour that naturally acts on it should live together. A `BankAccount` does not just hold a balance — it holds the balance and the rules for modifying it. Those rules are encoded in the methods. The data and its constraints are inseparable.
+The insight that motivates object-oriented design is that data and the behaviour that naturally acts on it should live together. A `Bank_Account` does not just hold a balance — it holds the balance and the rules for modifying it. Those rules are encoded in the methods. The data and its constraints are inseparable.
 
-This distinguishes a well-designed class from a raw map. A map `{"owner": "Alice", "balance": 1000.0}` holds the same data as a `BankAccount`, but nothing prevents external code from setting the balance to a negative number. The class enforces its rules by controlling what operations are possible:
+This distinguishes a well-designed class from a raw map. A map `{"owner": "Alice", "balance": 1000.0}` holds the same data as a `Bank_Account`, but nothing prevents external code from setting the balance to a negative number. The class enforces its rules by controlling what operations are possible:
 
 ```
-nex> class BankAccount
+nex> class Bank_Account
        create
          make(name: String, initial: Real) do
            owner := name
@@ -183,13 +185,15 @@ The diagnostic question: *what does a caller need to know to use this class corr
 
 ## Naming Classes
 
-A class name should be a noun or noun phrase that describes the concept being modelled. `BankAccount`, `Student`, `Card`, `Stack` — each names a thing.
+A class name should be a noun or noun phrase that describes the concept being modelled. `Bank_Account`, `Student`, `Card`, `Stack` — each names a thing.
 
-Avoid names that describe what the class does rather than what it is: `AccountManager`, `DataProcessor`, `Helper`. These are symptoms of a class without a clear identity. A class named `Helper` is almost always a collection of unrelated functions that have not found their proper homes.
+Nex uses underscores to separate words in class names, such as `Bank_Account` or `Stock_Record`. This choice prioritizes readability by making the boundaries between words explicit. While many languages prefer `BankAccount` (CamelCase), the use of underscores ensures that each component of the name stands out clearly, even in long or technical terms. This aligns with the Nex philosophy: code should be as easy to read as a well-written sentence.
+
+Avoid names that describe what the class does rather than what it is: `Account_Manager`, `Data_Processor`, `Helper`. These are symptoms of a class without a clear identity. A class named `Helper` is almost always a collection of unrelated functions that have not found their proper homes.
 
 Avoid generic names that could describe anything: `Manager`, `Handler`, `Controller`, `Utility`. These tell a reader nothing about the class's responsibility.
 
-A good test: read the class name aloud and ask whether a domain expert — someone who knows the problem but not the code — would immediately understand what it represents. `BankAccount` passes. `AccountDataManagerHelper` does not.
+A good test: read the class name aloud and ask whether a domain expert — someone who knows the problem but not the code — would immediately understand what it represents. `Bank_Account` passes. `Account_Data_Manager_Helper` does not.
 
 
 
@@ -238,7 +242,7 @@ nex> class Product
          end
      end
 
-nex> class StockRecord
+nex> class Stock_Record
        create
          make(pid, qty, threshold: Integer) do
            product_id := pid
@@ -255,7 +259,7 @@ nex> class StockRecord
      end
 ```
 
-Each class now has one responsibility. `Product` knows what a product is. `StockRecord` knows how much stock exists and when to reorder. The ten-field class was not wrong because it had ten fields — it was wrong because those fields belonged to different concepts.
+Each class now has one responsibility. `Product` knows what a product is. `Stock_Record` knows how much stock exists and when to reorder. The ten-field class was not wrong because it had ten fields — it was wrong because those fields belonged to different concepts.
 
 
 
@@ -276,7 +280,7 @@ Each class now has one responsibility. `Product` knows what a product is. `Stock
 **1.** The following class has more than one responsibility. Identify them and sketch a redesign that splits them into two or more classes:
 
 ```
-class LibraryBook
+class Library_Book
   feature
     isbn: String
     title: String
@@ -293,6 +297,6 @@ end
 
 **3.** A `Deck` class represents a standard 52-card deck. Using `Card` from Section 13.4, define `Deck` with a `cards: Array[Card]` field and methods `make` (constructor building all 52 cards), `size(): Integer`, `draw(): Card`, and `is_empty(): Boolean`. State the precondition for `draw` as a comment.
 
-**4.** Review the `BankAccount` in Section 13.3. Is `overdraft_limit` something all bank accounts should have, or does it belong to a subtype? Sketch two classes — a basic `Account` with no overdraft, and an `OverdraftAccount` with a limit — without worrying about inheritance syntax. Which fields and methods does each have?
+**4.** Review the `Bank_Account` in Section 13.3. Is `overdraft_limit` something all bank accounts should have, or does it belong to a subtype? Sketch two classes — a basic `Account` with no overdraft, and an `Overdraft_Account` with a limit — without worrying about inheritance syntax. Which fields and methods does each have?
 
-**5.\*** The `Stack` from Chapter 12 works only with `Integer` values. Define a `StringStack` and a `RealStack` alongside it. What do you notice? What is the only thing that differs between them? This observation motivates *generic types* — a mechanism for writing a class once and using it with any element type — which we introduce in Chapter 15.
+**5.\*** The `Stack` from Chapter 12 works only with `Integer` values. Define a `String_Stack` and a `Real_Stack` alongside it. What do you notice? What is the only thing that differs between them? This observation motivates *generic types* — a mechanism for writing a class once and using it with any element type — which we introduce in Chapter 15.

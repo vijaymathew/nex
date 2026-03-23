@@ -29,6 +29,8 @@ This defines a class `Point` with a constructor named `make`, two fields `x` and
 
 Fields are declared inside `feature` as `name: Type` — no keyword needed. Methods are declared as `name(params): ReturnType do ... end`, also inside `feature`. The distinction between fields and methods is structural: fields have no parameter list or body; methods do.
 
+A plain `feature` section introduces public features. Nex also supports `private feature` for members that should only be used inside the class itself.
+
 
 
 ## Creating Objects
@@ -104,7 +106,7 @@ nex> p2.x
 4.0
 ```
 
-Fields are read using dot notation: `obj.field_name`. Assigning to a field from outside the class is not permitted — fields are private to the class. If a field needs to change, the class provides a method:
+Fields in a public `feature` section are read using dot notation: `obj.field_name`. Assigning to a field from outside the class is not permitted. If a field needs to change, the class provides a method:
 
 ```
 nex> class Point
@@ -130,6 +132,33 @@ nex> p.move(2.0, 2.0)
 nex> p.x
 3.0
 ```
+
+If a field or helper method is an implementation detail, put it in a `private feature` section instead:
+
+```
+nex> class Counter
+       create
+         make(start: Integer) do
+           count := start
+         end
+       feature
+         increment() do
+           count := count + 1
+         end
+         current(): Integer do
+           result := count
+         end
+       private feature
+         count: Integer
+     end
+
+nex> let c := create Counter.make(10)
+nex> c.increment()
+nex> c.current
+11
+```
+
+Here `increment` and `current` are public operations, but `count` is hidden from code outside `Counter`. Private helper methods are declared the same way: place them under `private feature`.
 
 Classes can also define class-level constants directly in the `feature` block:
 
@@ -242,10 +271,10 @@ name(params) do
 end
 ```
 
-Methods access the object's own fields directly by name. Here is a `BankAccount` class:
+Methods access the object's own fields directly by name. Here is a `Bank_Account` class:
 
 ```
-nex> class BankAccount
+nex> class Bank_Account
        create
          make(name: String, initial: Real) do
            owner := name
@@ -268,7 +297,7 @@ nex> class BankAccount
          end
      end
 
-nex> let account := create BankAccount.make("Alice", 1000.0)
+nex> let account := create Bank_Account.make("Alice", 1000.0)
 nex> account.deposit(500.0)
 nex> account.withdraw(200.0)
 nex> account.describe
@@ -299,7 +328,7 @@ Here the constructor parameters are also named `x` and `y`. Inside the construct
 `this` is also used when an object needs to pass itself as an argument:
 
 ```
-nex> class Point2
+nex> class Point_2
        create
          make(px, py: Real) do
            x := px
@@ -308,15 +337,15 @@ nex> class Point2
        feature
          x: Real
          y: Real
-         distance_to(other: Point2): Real do
+         distance_to(other: Point_2): Real do
            let dx := this.x - other.x
            let dy := this.y - other.y
            result := ((dx * dx) + (dy * dy)) ^ 0.5
          end
      end
 
-nex> let p1 := create Point2.make(0.0, 0.0)
-nex> let p2 := create Point2.make(3.0, 4.0)
+nex> let p1 := create Point_2.make(0.0, 0.0)
+nex> let p2 := create Point_2.make(3.0, 4.0)
 nex> p1.distance_to(p2)
 5.0
 ```
@@ -420,7 +449,8 @@ nex> s.size
 - A class has a `create` block (constructors) and a `feature` block (fields and methods)
 - Constructors are named; `create ClassName.constructor_name(args)` creates an instance
 - Fields are `name: Type` inside `feature`; class constants use `NAME: Type = value` or `NAME = value`; methods are `name(params): ReturnType do ... end`
-- Fields are private — external code reads them with `obj.field` but cannot assign; changes go through methods
+- `feature` is public by default; use `private feature` for fields and helper methods that should stay inside the class
+- Public fields may be read with `obj.field`, but external code cannot assign to them; changes go through methods
 - In strict mode, non-basic fields must be initialised in the constructor; use `?Type` for fields that may legitimately be `nil`
 - `this` refers to the current object; needed when a parameter name shadows a field, or to pass the object as an argument
 - Uniform access: field reads and method calls use identical `obj.name` syntax
@@ -433,7 +463,7 @@ nex> s.size
 
 **2.** Define a class `Temperature` with a single field `celsius: Real`. Add methods `fahrenheit(): Real` and `kelvin(): Real`. Add `describe(): String` returning `"freezing"`, `"cold"`, `"mild"`, or `"warm"`. All derived values should be computed methods, not stored fields.
 
-**3.** Define a class `StringStack` that behaves like `Stack` but holds `String` values. Use it to reverse a string by pushing each character and popping them all off.
+**3.** Define a class `String_Stack` that behaves like `Stack` but holds `String` values. Use it to reverse a string by pushing each character and popping them all off.
 
 **4.** Define a class `Accumulator` with fields `total: Real` and `count: Integer` (both initialised to `0`). Add `add(value: Real)`, `reset()`, and `average(): Real`. State the precondition for `average` as a comment.
 

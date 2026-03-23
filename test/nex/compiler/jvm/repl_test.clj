@@ -72,6 +72,37 @@
         (is (not (str/includes? let-output "Any {")))
         (is (str/includes? var-output "Map[String, String]"))))))
 
+(deftest repl-compiled-backend-private-field-is-not-publicly-readable-test
+  (testing "compiled backend rejects top-level access to private fields while keeping public methods callable"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx "class Counter
+  create
+    make(start: Integer) do
+      count := start
+    end
+  feature
+    increment() do
+      count := count + 1
+    end
+    current(): Integer do
+      result := count
+    end
+  private feature
+    count: Integer
+end"))
+            _ (with-out-str (repl/eval-code ctx "let c := create Counter.make(10)"))
+            _ (with-out-str (repl/eval-code ctx "c.increment"))
+            current-output (with-out-str (repl/eval-code ctx "c.current"))
+            private-output (with-out-str (repl/eval-code ctx "c.count"))]
+        (is (str/includes? current-output "11"))
+        (is (str/includes? private-output "Error:"))
+        (is (not (str/includes? private-output "Integer 11")))))))
+
 (deftest repl-compiled-backend-syncs-existing-interpreter-state-test
   (testing "switching to compiled syncs existing interpreter state into the compiled session"
     (binding [repl/*type-checking-enabled* (atom false)
@@ -160,6 +191,45 @@
 end"))]
         (is (not (str/includes? output "Error:")))
         (is (contains? @(:classes ctx0) "Stack"))))))
+
+(deftest repl-compiled-backend-unspecialized-generic-method-return-degrades-to-any-test
+  (testing "compiled backend does not try to load raw generic parameter names when calling unspecialized generic methods"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "class Stack [G]
+  create
+    make() do
+      items := []
+    end
+  feature
+    items: Array[G]
+    push(value: G)
+      do
+        items.add(value)
+      ensure
+        last_is_value: items.get(items.length - 1) = value
+      end
+    pop(): G
+      require
+        not_empty: items.length > 0
+      do
+        result := items.get(items.length - 1)
+      let old_len := items.length
+        items.remove(items.length - 1)
+      ensure
+        length_decreased_by_on: items.length = old_len - 1
+      end
+end"))
+        (with-out-str (repl/eval-code ctx0 "let s := create Stack.make"))
+        (with-out-str (repl/eval-code ctx0 "s.push(1)"))
+        (with-out-str (repl/eval-code ctx0 "s.push(2)"))
+        (let [pop-output (with-out-str (repl/eval-code ctx0 "s.pop"))]
+          (is (not (str/includes? pop-output "Error:")) pop-output)
+          (is (str/includes? pop-output "2") pop-output))))))
 
 (deftest repl-compiled-backend-redefined-class-constructor-available-after-deopt-test
   (testing "compiled backend refreshes class metadata after interpreter-side class redefinition"

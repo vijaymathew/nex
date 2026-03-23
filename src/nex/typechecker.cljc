@@ -437,16 +437,40 @@
     :nil "Nil"
     (throw (ex-info "Unknown literal type" {:expr expr}))))
 
+(declare feature-members)
+(declare public-member?)
+
 (defn lookup-class-method
   "Look up a method on a class and its parent chain"
   ([env class-name method-name]
-   (lookup-class-method env class-name method-name nil))
+   (lookup-class-method env class-name method-name nil class-name))
   ([env class-name method-name arity]
-  (or (env-lookup-method env class-name method-name arity)
-      (when-let [class-def (env-lookup-class env class-name)]
-        (some (fn [{:keys [parent]}]
-                (lookup-class-method env parent method-name arity))
-              (:parents class-def))))))
+   (lookup-class-method env class-name method-name arity class-name))
+  ([env class-name method-name arity caller-class-name]
+   (letfn [(lookup-method [cn visited]
+             (when (and cn (not (contains? visited cn)))
+               (let [class-def (env-lookup-class env cn)
+                     visited' (conj visited cn)
+                     method-sig (env-lookup-method env cn method-name arity)
+                     feature-member (when class-def
+                                      (some (fn [member]
+                                              (when (and (= (:type member) :method)
+                                                         (= (:name member) method-name)
+                                                         (or (nil? arity)
+                                                             (= (count (or (:params member) [])) arity)))
+                                                member))
+                                            (feature-members class-def)))
+                     own-method (when (and method-sig
+                                           (or (nil? feature-member)
+                                               (= caller-class-name cn)
+                                               (public-member? feature-member)))
+                                  method-sig)]
+                 (or own-method
+                     (when class-def
+                       (some (fn [{:keys [parent]}]
+                               (lookup-method parent visited'))
+                             (:parents class-def)))))))]
+     (lookup-method class-name #{}))))
 
 #?(:clj
    (defn- resolve-imported-java-class
@@ -559,28 +583,29 @@
 
 (defn lookup-class-field
   "Look up a field on a class and its parent chain."
-  [env class-name field-name]
-  (letfn [(lookup-field [cn visited]
+  ([env class-name field-name]
+   (lookup-class-field env class-name field-name class-name))
+  ([env class-name field-name caller-class-name]
+   (letfn [(lookup-field [cn visited]
             (when (and cn (not (contains? visited cn)))
               (let [class-def (env-lookup-class env cn)
                     visited' (conj visited cn)
                     own-field-type
                     (when class-def
-                      (some (fn [section]
-                              (when (= (:type section) :feature-section)
-                                (some (fn [member]
-                                        (when (and (= (:type member) :field)
-                                                   (not (:constant? member))
-                                                   (= (:name member) field-name))
-                                          (:field-type member)))
-                                      (:members section))))
-                            (:body class-def)))]
+                      (some (fn [member]
+                              (when (and (= (:type member) :field)
+                                         (not (:constant? member))
+                                         (= (:name member) field-name)
+                                         (or (= caller-class-name cn)
+                                             (public-member? member)))
+                                (:field-type member)))
+                            (feature-members class-def)))]
                 (or own-field-type
                     (when class-def
                       (some (fn [{:keys [parent]}]
                               (lookup-field parent visited'))
                             (:parents class-def)))))))]
-    (lookup-field class-name #{})))
+     (lookup-field class-name #{}))))
 
 (defn feature-members
   "Return feature members with section visibility copied onto each member."
@@ -804,14 +829,20 @@
   "Build a type-map from a class's generic params and a parameterized target type.
    E.g., class Box[T] with target-type Box[Integer] => {\"T\" \"Integer\"}."
   [env target-type]
-  (when (map? target-type)
-    (let [base-name (:base-type target-type)
-          type-args (or (:type-args target-type) (:type-params target-type))
-          class-def (env-lookup-class env base-name)]
-      (when (and class-def (:generic-params class-def) type-args)
-        (into {} (map (fn [param arg]
-                        [(:name param) arg])
-                      (:generic-params class-def) type-args))))))
+  (let [base-name (cond
+                    (map? target-type) (:base-type target-type)
+                    (string? target-type) target-type
+                    :else nil)
+        type-args (when (map? target-type)
+                    (or (:type-args target-type) (:type-params target-type)))
+        class-def (when base-name
+                    (env-lookup-class env base-name))]
+    (when-let [generic-params (:generic-params class-def)]
+      (into {}
+            (map (fn [param arg]
+                   [(:name param) (or arg "Any")])
+                 generic-params
+                 (concat type-args (repeat "Any")))))))
 
 (defn nil-literal?
   "Whether an expression node is a nil literal."
@@ -1028,89 +1059,100 @@
 
     nil))
 
+(defn- check-target-call
+  [env {:keys [target method args has-parens]}]
+  (let [target-name (when (string? target) target)
+        across-item-type (and target-name
+                              (env-lookup-across-cursor env target-name))
+        with-java? (boolean (env-lookup-var env "__with_java__"))
+        class-target (when target-name (env-lookup-class env target-name))
+        current-class (env-lookup-var env "__current_class__")
+        target-type (if class-target
+                      target-name
+                      (if (string? target)
+                        (or (env-lookup-var env target)
+                            (when current-class
+                              (lookup-class-field env current-class target)))
+                        (check-expression env target)))
+        normalized-target (normalize-type target-type)
+        target-detachable? (detachable-type? normalized-target)
+        guarded? (and (string? target) (env-var-non-nil? env target))
+        base-type (if (map? target-type)
+                    (:base-type target-type)
+                    target-type)
+        type-map (build-generic-type-map env target-type)]
+    (when (and (not class-target) target-detachable? (not guarded?))
+      (throw (ex-info (str "Feature access on detachable target requires nil-check: " method)
+                      {:error (type-error
+                               (str "Cannot call feature '" method "' on detachable "
+                                    (display-type normalized-target)
+                                    ". Wrap with: if <obj> /= nil then <obj>." method "(...) end"))})))
+    (cond
+      across-item-type
+      (case method
+        "item" across-item-type
+        "start" "Void"
+        "next" "Void"
+        "at_end" "Boolean"
+        "cursor" "Cursor"
+        nil)
+
+      (and class-target (false? has-parens))
+      (if-let [constant (lookup-class-constant env base-type method)]
+        (resolve-generic-type (:field-type constant) type-map)
+        "Any")
+
+      (and (= base-type "Array") (= method "sort"))
+      (do
+        (when (not= (count args) 0)
+          (throw (ex-info "Method sort expects 0 arguments"
+                          {:error (type-error
+                                   (str "Method sort expects 0 arguments, got " (count args)))})))
+        (let [elem-type (if (map? target-type)
+                          (or (first (or (:type-params target-type) (:type-args target-type)))
+                              "Any")
+                          "Any")]
+          (when-not (sortable-array-element-type? env elem-type)
+            (throw (ex-info "Array.sort requires Comparable element type"
+                            {:error (type-error
+                                     (str "Array.sort requires elements of a built-in sortable type or Comparable, got "
+                                          (display-type elem-type)))})))
+          (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map)))
+
+      :else
+      (let [class-def (env-lookup-class env base-type)]
+        (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
+                                (builtin-method-signature "Any" method (count args) type-map)
+                                (lookup-class-method env base-type method (count args) current-class))]
+          (check-call-signature env method args method-sig type-map)
+          (let [arg-types (mapv #(check-expression env %) args)]
+            (if-let [java-method-sig (reflected-java-method-signature env base-type method arg-types class-target)]
+              (check-call-signature env method args java-method-sig {} :arg-types arg-types)
+              (if (false? has-parens)
+                (if-let [field-type (lookup-class-field env base-type method current-class)]
+                  (resolve-generic-type field-type type-map)
+                  (if with-java?
+                    "Any"
+                    (if (and class-def (not (:import class-def)))
+                    (throw (ex-info (str "Undefined field: " method)
+                                    {:error (type-error (str "Undefined field: " method))}))
+                    "Any")))
+                (if with-java?
+                  "Any"
+                  (if (and class-def (not (:import class-def)))
+                  (throw (ex-info (str "Method not found: " method)
+                                  {:error (type-error (str "Method not found: " method))}))
+                  "Any"))))))))))
+
 (defn check-call
   "Check the type of a method call"
   [env {:keys [target method args has-parens] :as expr}]
   (if (and (map? target) (= :create (:type target)) (nil? method))
     (check-create env (assoc target :args args))
     (if target
-    ;; Method call on object
-    (let [target-name (when (string? target) target)
-          across-item-type (and target-name
-                                (env-lookup-across-cursor env target-name))
-          class-target (when target-name (env-lookup-class env target-name))
-          current-class (env-lookup-var env "__current_class__")
-          target-type (if class-target
-                        target-name
-                        (if (string? target)
-                          (or (env-lookup-var env target)
-                              (when current-class
-                                (lookup-class-field env current-class target)))
-                          (check-expression env target)))
-          normalized-target (normalize-type target-type)
-          target-detachable? (detachable-type? normalized-target)
-          guarded? (and (string? target) (env-var-non-nil? env target))
-          ;; For parameterized types like Box[Integer], look up methods on the base class
-          base-type (if (map? target-type)
-                      (:base-type target-type)
-                      target-type)
-          ;; Build type-map for generic substitution
-          type-map (build-generic-type-map env target-type)]
-      (when (and (not class-target) target-detachable? (not guarded?))
-        (throw (ex-info (str "Feature access on detachable target requires nil-check: " method)
-                        {:error (type-error
-                                 (str "Cannot call feature '" method "' on detachable "
-                                      (display-type normalized-target)
-                                      ". Wrap with: if <obj> /= nil then <obj>." method "(...) end"))})))
+      (check-target-call env expr)
+      ;; Function call (built-in like print/type_of/type_is) or function object call
       (cond
-        across-item-type
-        (case method
-          "item" across-item-type
-          "start" "Void"
-          "next" "Void"
-          "at_end" "Boolean"
-          "cursor" "Cursor"
-          nil)
-
-        (and class-target (false? has-parens))
-        (if-let [constant (lookup-class-constant env base-type method)]
-          (resolve-generic-type (:field-type constant) type-map)
-          "Any")
-
-        (and (= base-type "Array") (= method "sort"))
-        (do
-          (when (not= (count args) 0)
-            (throw (ex-info "Method sort expects 0 arguments"
-                            {:error (type-error
-                                     (str "Method sort expects 0 arguments, got " (count args)))})))
-          (let [elem-type (if (map? target-type)
-                            (or (first (or (:type-params target-type) (:type-args target-type)))
-                                "Any")
-                            "Any")]
-            (when-not (sortable-array-element-type? env elem-type)
-              (throw (ex-info "Array.sort requires Comparable element type"
-                              {:error (type-error
-                                       (str "Array.sort requires elements of a built-in sortable type or Comparable, got "
-                                            (display-type elem-type)))})))
-            (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map)))
-
-        :else
-        (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
-                                (builtin-method-signature "Any" method (count args) type-map)
-                                (lookup-class-method env base-type method (count args)))]
-          (check-call-signature env method args method-sig type-map)
-          (let [arg-types (mapv #(check-expression env %) args)]
-            (if-let [java-method-sig (reflected-java-method-signature env base-type method arg-types class-target)]
-              (check-call-signature env method args java-method-sig {} :arg-types arg-types)
-              ;; If this is member access without parens, attempt field lookup.
-              (if (false? has-parens)
-                (if-let [field-type (lookup-class-field env base-type method)]
-                  (resolve-generic-type field-type type-map)
-                  "Any")
-                ;; Method not found - might be built-in method, return Any for now
-                "Any"))))))
-    ;; Function call (built-in like print/type_of/type_is) or function object call
-    (cond
       (= method "print")
       (do
         (doseq [arg args]
@@ -2288,7 +2330,7 @@
                                        (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
         (resolve-generic-type (:return-type method-sig) type-map))
         (if-let [current-class (env-lookup-var env "__current_class__")]
-          (if-let [method-sig (lookup-class-method env current-class method (count args))]
+          (if-let [method-sig (lookup-class-method env current-class method (count args) current-class)]
             (do
               (when (not= (count args) (count (:params method-sig)))
                 (throw (ex-info (str "Method " method " expects " (count (:params method-sig))
@@ -2816,7 +2858,15 @@
                         (let [rescue-env (make-type-env env)]
                           (env-add-var rescue-env "exception" "Any")
                           (doseq [s rescue] (check-statement rescue-env s)))))
-      :with (doseq [s (:body stmt)] (check-statement env s))
+      :with (if (= (:target stmt) "java")
+              (let [with-env (make-type-env env)]
+                (env-add-var with-env "__with_java__" true)
+                (doseq [s (:body stmt)]
+                  (check-statement with-env s))
+                (doseq [[name type] @(:vars with-env)]
+                  (when-not (= name "__with_java__")
+                    (env-add-var env name type))))
+              (doseq [s (:body stmt)] (check-statement env s)))
       :case (do
               (check-expression env (:expr stmt))
               (doseq [clause (:clauses stmt)]
@@ -2833,13 +2883,14 @@
             class-name (if (map? base-target-type)
                          (:base-type base-target-type)
                          base-target-type)
+            current-class (env-lookup-var env "__current_class__")
             _ (when-not class-name
                 (throw (ex-info "Field assignment target must be an object"
                                 {:error (type-error "Field assignment target must be an object")})))
             _ (when (lookup-class-constant env class-name field-name)
                 (throw (ex-info (str "Cannot assign to constant: " field-name)
                                 {:error (type-error (str "Cannot assign to constant: " field-name))})))
-            field-type (lookup-class-field env class-name field-name)
+            field-type (lookup-class-field env class-name field-name current-class)
             val-type (check-expression env (:value stmt))]
         (when-not field-type
           (throw (ex-info (str "Undefined field: " field-name)
@@ -3376,6 +3427,7 @@
   (doseq [[method-name sig]
           {"get"          {:params [{:name "key" :type "K"}] :return-type "V"}
            "try_get"      {:params [{:name "key" :type "K"} {:name "default" :type "V"}] :return-type "V"}
+           "put"          {:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}
            "at"           {:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}
            "set"          {:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}
            "size"         {:params [] :return-type "Integer"}

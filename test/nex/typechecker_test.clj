@@ -82,6 +82,45 @@
       (is (not (:success result)))
       (is (seq (:errors result))))))
 
+(deftest test-private-field-not-accessible-from-outside
+  (testing "Private fields cannot be accessed from outside the defining class"
+    (let [code "class Counter
+                  create
+                    make(start: Integer) do
+                      count := start
+                    end
+                  feature
+                    current(): Integer
+                    do
+                      result := count
+                    end
+                  private feature
+                    count: Integer
+                  end
+
+                let c := create Counter.make(10)
+                c.count"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(= "Undefined field: count" (:message %)) (:errors result))))))
+
+(deftest test-map-put-typechecks-inside-function-body
+  (testing "Map.put type-checks for typed map values inside top-level functions"
+    (let [code "function word_frequencies(text: String): Map[String, Integer]
+do
+  result := {}
+  let words := text.to_lower.split(\" \")
+  across words as w do
+    let count := result.try_get(w, 0)
+    result.put(w, count + 1)
+  end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-comparison-operators
   (testing "Comparison operators should work on compatible types"
     (let [code "class Test
