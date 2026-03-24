@@ -167,6 +167,43 @@
                             (:parents class-def))))))]
       (lookup-method class-name #{}))))
 
+(defn- class-field-in-ctx
+  [ctx class-name field-name]
+  (let [class-map (into {} (map (juxt :name identity) (:classes ctx)))]
+    (letfn [(lookup-field [cn visited inherited?]
+              (when (and cn (not (contains? visited cn)))
+                (let [class-def (get class-map cn)
+                      visited' (conj visited cn)
+                      local-field (some #(when (and (= :field (:type %))
+                                                    (= field-name (:name %))
+                                                    (or (not inherited?)
+                                                        (tc/public-member? %)))
+                                           %)
+                                        (tc/feature-members class-def))]
+                  (or local-field
+                      (some #(lookup-field (:parent %) visited' true)
+                            (:parents class-def))))))]
+      (lookup-field class-name #{} false))))
+
+(defn- class-constant-in-ctx
+  [ctx class-name constant-name]
+  (let [class-map (into {} (map (juxt :name identity) (:classes ctx)))]
+    (letfn [(lookup-constant [cn visited inherited?]
+              (when (and cn (not (contains? visited cn)))
+                (let [class-def (get class-map cn)
+                      visited' (conj visited cn)
+                      local-constant (some #(when (and (= :field (:type %))
+                                                       (:constant? %)
+                                                       (= constant-name (:name %))
+                                                       (or (not inherited?)
+                                                           (tc/public-member? %)))
+                                              %)
+                                           (tc/feature-members class-def))]
+                  (or local-constant
+                      (some #(lookup-constant (:parent %) visited' true)
+                            (:parents class-def))))))]
+      (lookup-constant class-name #{} false))))
+
 (defn- user-target-call-in-ctx?
   [ctx expr]
   (let [raw-target (:target expr)
@@ -180,15 +217,9 @@
                       (some #(when (= (:name %) base) %) (:classes ctx)))
         field-name (:method expr)
         field-def (when (and class-def (false? (:has-parens expr)))
-                    (some #(when (and (= :field (:type %))
-                                      (if class-target-def
-                                        (:constant? %)
-                                        true)
-                                      (= field-name (:name %)))
-                             %)
-                          (mapcat :members
-                                  (filter #(= :feature-section (:type %))
-                                          (:body class-def)))))
+                    (if class-target-def
+                      (class-constant-in-ctx ctx (:name class-def) field-name)
+                      (class-field-in-ctx ctx (:name class-def) field-name)))
         method-def (when class-def
                      (class-method-in-ctx ctx (:name class-def) (:method expr) (count (:args expr))))]
     (and (or class-target-def target-expr)

@@ -9,7 +9,8 @@
             [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo]
             [nex.types.bootstrap :as bootstrap])
-  #?(:clj (:import [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException])))
+  #?(:clj (:import [java.lang.reflect Field]
+                   [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException])))
 
 (declare nex-format-value)
 (declare eval-node)
@@ -380,6 +381,59 @@
      "Call a Java method via reflection."
      [target method-name arg-values]
      (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array arg-values))))
+
+#?(:clj
+   (defn- reflected-field
+     [^Class cls field-name]
+     (or (try
+           (.getField cls field-name)
+           (catch Exception _ nil))
+         (some (fn [^Field field]
+                 (when (= (.getName field) field-name)
+                   (.setAccessible field true)
+                   field))
+               (.getDeclaredFields cls)))))
+
+#?(:clj
+   (defn- composition-fields
+     [^Class cls]
+     (->> (.getDeclaredFields cls)
+          (filter (fn [^Field field] (str/starts-with? (.getName field) "_parent_")))
+          (map (fn [^Field field]
+                 (.setAccessible field true)
+                 field)))))
+
+#?(:clj
+   (defn- deep-reflected-field
+     [value field-name]
+     (or (when-let [^Field field (reflected-field (.getClass value) field-name)]
+           [value field])
+         (some (fn [^Field parent-field]
+                 (when-let [parent-value (.get parent-field value)]
+                   (deep-reflected-field parent-value field-name)))
+               (composition-fields (.getClass value))))))
+
+#?(:clj
+   (defn- compiled-object-field
+     [value field-name]
+     (when-let [[owner ^Field field] (deep-reflected-field value field-name)]
+       [true (.get field owner)])))
+
+#?(:clj
+   (defn- compiled-runtime-class-name
+     [ctx value]
+     (when value
+       (let [binary-name (.getName (.getClass value))
+             simple-name (last (str/split binary-name #"\."))
+             known-classes @(:classes ctx)]
+         (cond
+           (contains? known-classes simple-name)
+           simple-name
+
+           :else
+           (when-let [[_ candidate] (re-matches #"(.+)_\d{4}" simple-name)]
+             (when (contains? known-classes candidate)
+               candidate)))))))
 
 (defn register-specialized-class
   "Register a specialized (type-realized) class in the context."
@@ -3215,7 +3269,23 @@
           (call-builtin-method ctx (or target-name target) obj method arg-values)
 
           :else
-          #?(:clj (java-call-method obj method arg-values)
+          #?(:clj (let [compiled-class-name (compiled-runtime-class-name ctx obj)
+                        compiled-class-def (when compiled-class-name
+                                             (lookup-class-if-exists ctx compiled-class-name))]
+                    (if (and (empty? arg-values)
+                             (false? has-parens)
+                             compiled-class-def)
+                      (if-let [_ (lookup-field-with-inheritance ctx
+                                                                compiled-class-def
+                                                                method
+                                                                (:current-class-name ctx))]
+                        (if-let [[_ field-value] (compiled-object-field obj method)]
+                          field-value
+                          (throw (ex-info (str "Undefined field: " method)
+                                          {:field method
+                                           :class-name compiled-class-name})))
+                        (java-call-method obj method arg-values))
+                      (java-call-method obj method arg-values)))
              :cljs (throw (ex-info (str "Method not found on type: " method)
                                    {:target target :value obj :method method})))))
 

@@ -383,10 +383,43 @@ end"))
 end"))
         (with-out-str
           (repl/eval-code ctx0 "let c := create Circle.make(\"red\", 5.0)"))
-        (let [output (with-out-str
+        (let [field-output (with-out-str
+                             (repl/eval-code ctx0 "c.colour"))
+              output (with-out-str
                        (repl/eval-code ctx0 "c.describe"))]
+          (is (not (str/includes? field-output "Error:")))
+          (is (str/includes? field-output "red"))
           (is (not (str/includes? output "Error:")))
           (is (str/includes? output "A red circle with radius 5.0")))))))
+
+(deftest sync-session-interpreter-inherited-field-read-test
+  (testing "interpreter fallback can read inherited public fields from compiled objects"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval!
+                         session
+                         (p/ast "class Account
+feature
+  balance: Real
+end
+
+class Savings_Account
+inherit
+  Account
+create
+  make(opening_balance: Real, current_interest_rate: Real) do
+    balance := opening_balance
+    interest_rate := current_interest_rate
+  end
+feature
+  interest_rate: Real
+end
+
+let s := create Savings_Account.make(10.0, 0.2)"))
+          ctx (repl/init-repl-context)]
+      (is (:compiled? define-result))
+      (compiled-repl/sync-session->interpreter! session ctx)
+      (let [result (interp/eval-node ctx (-> (p/ast "s.balance") :statements first))]
+        (is (= 10.0 result)))))) 
 
 (deftest repl-compiled-backend-polymorphic-across-test
   (testing "compiled backend supports polymorphic method dispatch in across loops"

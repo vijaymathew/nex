@@ -38,6 +38,11 @@ This has consequences that go beyond style.
 ### Design by Contract
 
 ```nex
+class Account
+feature
+  balance: Real
+end
+
 class Savings_Account
 inherit
   Account
@@ -161,9 +166,14 @@ str_box.print_value   -- Prints: hello
 
 ## Code Generation
 
-Nex translates to Java and JavaScript. The generated output is readable and idiomatic in the target language.
+Nex currently has two implementation targets:
 
-### Java Output
+- a JVM bytecode compiler that produces standalone runnable jars
+- a JavaScript generator that emits ES module source files
+
+The repository does not currently ship a Java source-code generator.
+
+### JVM Compilation
 
 ```nex
 class Account
@@ -181,19 +191,22 @@ class Account
 end
 ```
 
-```java
-public class Account {
-    public double balance = 0.0;
-
-    public void deposit(double amount) {
-        assert (amount > 0.0) : "Precondition violation: positive";
-        balance = (balance + amount);
-        assert (balance >= 0.0) : "Postcondition violation: increased";
-    }
-}
+```bash
+nex compile jvm account.nex build/
 ```
 
-### JavaScript Output
+This produces a standalone jar plus the generated class files under `build/`.
+
+From Clojure, use the JVM backend directly:
+
+```clojure
+(require '[nex.compiler.jvm.file :as jvm])
+
+;; Compile a Nex file to a standalone JVM jar
+(jvm/compile-jar "account.nex" "build/")
+```
+
+### JavaScript Generation
 
 ```javascript
 class Account {
@@ -210,7 +223,20 @@ class Account {
 }
 ```
 
-Contract checks are included in development builds. Pass `{:skip-contracts true}` to the translator for production output with no overhead.
+From Clojure:
+
+```clojure
+(require '[nex.generator.javascript :as js])
+
+(println (js/translate nex-code))
+(println (js/translate nex-code {:skip-contracts true}))
+
+;; Writes Function.js, NexRuntime.js, per-class files, and main.js
+(js/translate-file "input.nex" "out/")
+(js/translate-file "input.nex" "out/" {:skip-contracts true})
+```
+
+`{:skip-contracts true}` is supported by the JavaScript generator and omits generated contract checks.
 
 ---
 
@@ -267,7 +293,7 @@ nex> print("Hello, Nex!")
 "Hello, Nex!"
 
 nex> let x := 10
-=> 10
+10
 
 nex> if x > 5 then print("big") else print("small") end
 "big"
@@ -277,13 +303,17 @@ nex> class Point
 ...      x: Integer
 ...      y: Integer
 ...  end
-Class(es) registered: Point
 
 nex> :help      -- available commands
 nex> :classes   -- list defined classes
 nex> :vars      -- list defined variables
+nex> :backend   -- show or change backend
+nex> :typecheck -- show or change REPL type checking
 nex> :quit      -- exit
 ```
+
+The REPL defaults to the compiled JVM backend and falls back to the interpreter
+when a cell is outside the current compiled subset.
 
 ## Usage
 
@@ -339,8 +369,9 @@ the classpath first. See [docs/md/CLI.md](/home/vijay/Projects/nex/docs/md/CLI.m
 (println (js/translate nex-code))
 (println (js/translate nex-code {:skip-contracts true}))
 
-(js/translate-file "input.nex" "output.js")
-(js/translate-file "input.nex" "output.js" {:skip-contracts true})
+;; Writes Function.js, NexRuntime.js, per-class files, and main.js
+(js/translate-file "input.nex" "out/")
+(js/translate-file "input.nex" "out/" {:skip-contracts true})
 ```
 
 ### Running Tests
@@ -355,8 +386,8 @@ clojure -M:test test/scripts/run_tests.clj
 clojure examples/demo_gcd.clj
 clojure examples/demo_complete_dbc.clj
 clojure examples/demo_complete_inheritance.clj
-clojure examples/demo_nex_to_java.clj
 clojure examples/demo_nex_to_javascript.clj
+clojure examples/demo_skip_contracts.clj
 ```
 
 ---
@@ -375,7 +406,7 @@ clojure examples/demo_nex_to_javascript.clj
 
 ### Type System
 
-- **Primitive types:** `Integer`, `Real`, `String`, `Boolean`
+- **Scalar types:** `Integer`, `Integer64`, `Real`, `Decimal`, `Char`, `String`, `Boolean`
 - **Generic types:** Parameterized classes with optional constraints — `List [G]`, `Map [K -> Hashable, V]`
 - **Nil-safety:** Types are non-nullable by default. Detachable references use `?T` and require nil-guards before feature access.
 - **Uniform access:** Fields and parameterless methods share the same call syntax — `obj.field` and `obj.method` are indistinguishable to the caller.
@@ -400,25 +431,35 @@ clojure examples/demo_nex_to_javascript.clj
 ```
 nex/
 ├── src/nex/
-│   ├── parser.clj              # ANTLR parser integration
-│   ├── walker.cljc             # AST transformation
+│   ├── parser.clj              # ANTLR parser entry point
+│   ├── walker.cljc             # Parse-tree to AST transformation
 │   ├── interpreter.cljc        # Runtime interpreter
 │   ├── typechecker.cljc        # Static type checker
+│   ├── lower.cljc              # Lowering to compiler IR/class specs
+│   ├── ir.cljc                 # Compiler IR nodes
+│   ├── repl.clj                # User-facing REPL
+│   ├── fmt.clj                 # Formatter
+│   ├── docgen.clj              # Markdown documentation generator
+│   ├── eval.clj                # `nex eval` entry point
 │   ├── debugger.clj            # REPL debugger
+│   ├── compiler/jvm/           # JVM bytecode compiler backend
+│   │   ├── emit.clj
+│   │   ├── file.clj
+│   │   ├── repl.clj
+│   │   └── runtime.clj
 │   └── generator/
 │       └── javascript.clj      # JavaScript (ES6+) code generator
+├── lib/                        # Shipped Nex libraries (`io`, `net`, `text`, `time`, ...)
 ├── test/
 │   ├── nex/                    # Test suites by feature
-│   │   ├── loops_test.clj
-│   │   ├── if_conditions_test.clj
-│   │   ├── inheritance_test.clj
-│   │   └── generator/
-│   │       └── javascript_test.clj
 │   └── scripts/                # Test runners
-├── examples/                   # Annotated example programs
+├── examples/                   # Example Nex programs and demo scripts
 ├── docs/
-│   ├── md/                     # Language documentation
-│   └── book/                   # Accompanying textbook sources
+│   ├── md/                     # Guides and developer notes
+│   ├── ref/                    # Reference manual
+│   ├── tut/                    # Tutorial/book manuscript
+│   ├── design/                 # Design and implementation notes
+│   └── book/                   # Longer book manuscript
 ├── editor/
 │   └── emacs/
 │       └── nex-mode.el         # Emacs major mode
@@ -442,7 +483,8 @@ nex/
 | [Arrays and Maps](docs/md/ARRAYS_MAPS.md) | Collection operations and examples |
 | [Emacs Support](docs/md/EMACS.md) | Emacs mode setup and key bindings |
 | [Development Notes](docs/md/DEVELOPMENT.md) | Architecture and contribution notes |
-| [JVM Bytecode Compiler Plan](docs/design/JVM_BYTECODE_COMPILER_PLAN.md) | Concrete staged plan for a dynamic JVM compiler backend |
+| [JVM Bytecode Translation Reference](docs/design/chapter_5.md) | How the current JVM backend lowers and emits Nex programs |
+| [Compiled REPL Status](docs/md/COMPILED_REPL_STATUS.md) | Current shape and limits of the compiled REPL backend |
 
 ### Library Reference
 
@@ -493,12 +535,13 @@ Support for VS Code, Vim, and other editors is planned. Contributions welcome.
 
 | Status | Item |
 |---|---|
-| Done | Java code generator |
+| Done | JVM bytecode compiler and standalone jar packaging |
 | Done | JavaScript (ES6+) code generator |
+| Done | Shipped standard libraries under `lib/` |
 | Planned | TypeScript code generator |
 | Planned | Python code generator |
 | Planned | LSP server for IDE integration |
-| Planned | Standard library |
+| Planned | Expanded standard libraries |
 | Planned | Package manager |
 | Planned | Compile-time contract checking |
 | Planned | Proof obligation generation |
