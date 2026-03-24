@@ -33,27 +33,6 @@ This has consequences that go beyond style.
 
 ---
 
-## Library Reference
-
-Shipped Nex libraries under `lib/` are documented separately from the core runtime reference.
-See [docs/ref/libraries.md](docs/ref/libraries.md) for the library index, including the portable `Http_Client` and the JVM-only networking classes under `lib/net`.
-
-Example:
-
-```nex
-intern net/Tcp_Socket
-
-let sock: Tcp_Socket := create Tcp_Socket.make("example.com", 80)
-if sock.connect(500) then
-  sock.send_line("GET / HTTP/1.0")
-  sock.send_line("")
-  print(sock.read_line())
-  sock.close()
-end
-```
-
----
-
 ## Language at a Glance
 
 ### Design by Contract
@@ -464,6 +443,24 @@ nex/
 | [Emacs Support](docs/md/EMACS.md) | Emacs mode setup and key bindings |
 | [Development Notes](docs/md/DEVELOPMENT.md) | Architecture and contribution notes |
 | [JVM Bytecode Compiler Plan](docs/design/JVM_BYTECODE_COMPILER_PLAN.md) | Concrete staged plan for a dynamic JVM compiler backend |
+
+### Library Reference
+
+Shipped Nex libraries under `lib/` are documented separately from the core runtime reference.
+See [docs/ref/libraries.md](docs/ref/libraries.md) for the library index, including the portable `Http_Client` and the JVM-only networking classes under `lib/net`.
+
+Example:
+
+```nex
+intern net/Tcp_Socket
+
+let sock: Tcp_Socket := create Tcp_Socket.make("example.com", 80)
+sock.connect
+sock.send_line("GET / HTTP/1.0")
+sock.send_line("")
+print(sock.read_line())
+sock.close()
+```
 
 ---
 
