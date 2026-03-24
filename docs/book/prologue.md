@@ -167,8 +167,7 @@ Nex is especially useful for this book because it supports:
 
 - **Functional and object-oriented styles** in the same language, so we can compare design tradeoffs directly.
 - **High-level contracts and invariants**, so correctness rules can be expressed in the code where they belong.
-- **Explorative programming**, including optional dynamic typing when rapid experimentation is useful.
-- A **web-based IDE**, so readers can start immediately with no local installation required.
+- **Explorative programming**, a REPL including optional dynamic typing when rapid experimentation is useful.
 
 In other words, Nex is a teaching language for this journey: expressive enough for real design discussions, lightweight enough to stay focused on engineering decisions.
 
