@@ -48,7 +48,6 @@ Suggested file split:
 * `world_tiny.nex`
 * `studio_1_main.nex`
 
-If you are using the web IDE, you can also place everything in one file and run `App.run`.
 
 #### Delivery Tiny (single robot, tiny map)
 
