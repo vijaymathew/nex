@@ -87,7 +87,6 @@ print(y)"
         (let [js-files (js/translate-file (.getPath tmp) nil {})
               main-js (get js-files "main.js")]
           (is (str/includes? main-js "let y = await NexGlobals.double.call1(5);"))
-          (is (str/includes? main-js "console.log(y)")))
+          (is (str/includes? main-js "console.log(__nexPrintValue(y))")))
         (finally
           (.delete tmp))))))
-

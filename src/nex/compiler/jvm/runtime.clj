@@ -717,6 +717,19 @@
   [value]
   (interp/nex-format-value value))
 
+(defn- has-user-to-string?
+  [value]
+  (boolean
+   (and value
+        (find-user-method value (lowered-instance-method-name "to_string" 0)))))
+
+(defn- print-value
+  [state value]
+  (if (or (interp/nex-object? value)
+          (has-user-to-string? value))
+    (concat-string-value state value)
+    (format-value value)))
+
 (defn- object-field-value
   [value field-name]
   (cond
@@ -760,11 +773,11 @@
 
 (defn builtin-print!
   [state args]
-  (add-output! state (str/join " " (map format-value args))))
+  (add-output! state (str/join " " (map #(print-value state %) args))))
 
 (defn builtin-println!
   [state args]
-  (add-output! state (str/join " " (map format-value args))))
+  (add-output! state (str/join " " (map #(print-value state %) args))))
 
 (defn builtin-type-of
   [state value]
