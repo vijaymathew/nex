@@ -69,6 +69,13 @@ You do not need a complex toolchain to begin. A local Nex REPL is enough for all
 
 
 
+## Note on the Code Examples
+
+The code examples in this book are provided for illustrative purposes, designed to clarify the engineering principles and patterns being discussed. They are not intended to be "production-ready" out of the box.
+
+When working on the challenges provided in the Studio chapters, you are encouraged to implement complete, robust versions of the code yourself. This process of implementation is where much of the real learning happens. To support this work, you should make use of the additional sources provided in the References section of this book. Furthermore, for a deeper dive into the language itself, you should refer to the companion book, *Programming in Nex*, which is available from [schemer.in](https://schemer.in).
+
+
 ## Before the Prologue
 
 The chapter that follows introduces three systems and three failures. Those failures are not cautionary tales included for dramatic effect. They are the opening of an argument that runs through the entire book: that the most consequential engineering decisions are made before a line of code is written, that the hardest problems in software are problems of clarity rather than cleverness, and that the skills required to get those decisions right are learnable, transferable, and more important now than they have ever been.
