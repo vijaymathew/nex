@@ -130,20 +130,24 @@ In all three cases, the list earns its place by providing order. In all three ca
 **Silent duplicate identity.** A list that accepts any element at append time, without checking whether an element with the same identifier already exists, will accumulate duplicates if the calling code ever appends the same logical entity twice. Depending on how `find_by_id` is implemented, it will find the first match, the last match, or all matches — and different callers may have different assumptions about which they will receive. The remedy is to define a uniqueness policy for each collection and to enforce it at the point of insertion.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one collection in your system — a collection of tasks, documents, objects, or any other entity type — and answer four questions about it: what are the three most frequent operations performed on it, is each operation primarily order-sensitive or key-sensitive, how often does each operation occur relative to the others, and is a list alone sufficient for the dominant operations?
 
 Then write one contract for the most frequent operation — a precondition that rejects invalid inputs and a postcondition that declares what valid output looks like. If the contract cannot be stated without reference to the implementation, the operation's interface is not yet well-defined.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - A list is an order-preserving structure. Its strength is sequential access; its weakness is keyed lookup.
 - The right data structure for a collection is determined by the operations that collection must support, not by the type of data it contains.
 - Order-sensitive operations and key-sensitive operations are different in kind. A single list often cannot satisfy both efficiently at scale.
 - The cost of a linear scan is invisible at small scale and dominant at large scale. Recognizing which operations will become bottlenecks before they do is a design skill.
 - Contracts on collection operations make later structure changes safe: when the implementation changes, the contract remains, and callers do not need to change.
+:::
+
 
 
 *Chapter 16 introduces sets and maps — the structures that make membership testing and keyed lookup efficient. Where this chapter identified the cost of what lists cannot do, Chapter 16 introduces the structures designed to do exactly those things.*

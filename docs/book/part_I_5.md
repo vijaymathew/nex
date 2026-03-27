@@ -93,7 +93,8 @@ This structure will appear throughout the rest of the book, in every design chap
 
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Take one story sentence from your system and transform it into a mini-specification with four parts: the inputs the operation receives, the output it must produce, the guarantee it makes about the output for valid inputs, and one precondition, one postcondition, and one invariant.
 
@@ -102,15 +103,17 @@ Start with the story sentence:
 > *"The system should deliver packages efficiently."*
 
 Write out what efficient means in terms of a measurable criterion. State what information the system must have to apply that criterion. State what a correct output looks like and how you would verify it. Then find one word in your specification draft that is still ambiguous — a word that could be interpreted differently by two reasonable readers — and replace it with a definition.
+:::
 
-
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Stories communicate intent; specifications define behavior. Both are necessary, and neither replaces the other — but software is built from specifications, not stories.
 - Every specification needs three elements stated precisely: the inputs the system receives, the outputs it must produce, and the guarantees it makes about the relationship between them.
 - Ambiguous terms in stories — best, relevant, efficient, realistic — become correctness failures in code. The specification's job is to replace them with definitions.
 - Contracts formalize specifications into executable agreements: preconditions state caller obligations, postconditions state routine guarantees, invariants state properties that must hold throughout. This structure appears everywhere in the chapters ahead.
+:::
+
 
 
 

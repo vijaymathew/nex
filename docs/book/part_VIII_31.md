@@ -129,20 +129,24 @@ In all three systems, the complexity problems are the same in form: a decision t
 **Cyclic dependencies.** When module A depends on module B and module B depends on module A, neither can be changed, compiled, or deployed without the other. The cycle is an architectural symptom: the two modules have not been separated at a semantically coherent boundary, and the dependency structure reflects tangled responsibilities rather than intentional design. The remedy is to extract an interface or shared abstraction that both modules depend on, breaking the cycle by introducing a dependency that points in one direction only.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one subsystem in your system and map its current module structure with four parts: the modules and their declared responsibilities, the dependencies between them and the direction each flows, one dependency that points in the wrong direction — from application toward domain is correct; from domain toward infrastructure is not — and one interface or abstraction that, if introduced, would break the incorrect dependency and correct the flow.
 
 For each module, ask: does this module's behavior need to change when domain rules change, when the orchestration workflow changes, or when the infrastructure implementation changes? A module that would need to change for all three reasons is a module whose responsibilities span more than one layer.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Complexity is the cost of reasoning about behavior, not the count of lines or modules. A large system can be low-complexity; a small system can be high-complexity. The difference is the quality of the boundaries.
 - Every system has a complexity budget. When it is exceeded, fragile changes, long onboarding, and rising incident rates follow. Managing complexity is not a deferred task — it is an ongoing structural practice.
 - Layered architecture contains change impact: domain rules change in the domain layer, orchestration changes in the application layer, infrastructure changes in the infrastructure layer. Each layer is comprehensible in isolation because it depends only on what is inward of it.
 - Dependencies must flow inward. A domain layer that imports infrastructure, or an application layer that bypasses the domain, destroys the separation that makes layering useful.
 - The three failure modes — layer bypasses, utility dumping grounds, and cyclic dependencies — all have the same root cause: responsibilities that were not assigned to a coherent layer before the code was written.
+:::
+
 
 
 *Chapter 32 examines how to design boundaries that absorb future change safely — the discipline of identifying the seams at which a system is most likely to change and structuring those seams so that changes on one side do not force changes on the other.*

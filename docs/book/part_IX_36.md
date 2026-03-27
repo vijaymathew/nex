@@ -122,7 +122,8 @@ The tools will change. The languages will evolve. The assistants will become mor
 That engineer is you. Go forth and build systems that last.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Pick one AI-assisted change you’ve made recently. Write a 3-sentence "Decision Log" for it:
 1.  What was the core decision (e.g., "Adopted the ML-based ranking algorithm")?
@@ -130,15 +131,18 @@ Pick one AI-assisted change you’ve made recently. Write a 3-sentence "Decision
 3.  Who is accountable if the decision turns out to be wrong?
 
 If you can't answer all three, your governance process needs more human judgment.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - AI accelerates implementation, but it cannot transfer accountability from the human to the machine.
 - Human judgment is required for problem framing, architecture direction, risk acceptance, and ethical governance.
 - Engineering maturity in the AI era is measured by the quality of your decisions and the evidence you use to support them.
 - Reliable AI workflows require explicit constraints, rigorous review, and traceable decision-making.
 - The core principles of this book — modeling, specification, verification, and disciplined evolution — are your most valuable assets in an AI-driven world.
+:::
+
 
 
 *This concludes **Beyond Code — Building Software Systems That Last**. May your systems be trustworthy, your complexity be managed, and your engineering judgment be sharp.*

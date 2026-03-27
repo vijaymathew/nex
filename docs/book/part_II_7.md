@@ -77,8 +77,7 @@ feature
   status: String
 
 create
-  pending(task_id, origin,
-          destination, status: String) do
+  pending(task_id, origin, destination: String) do
     this.task_id := task_id
 	this.origin := origin
 	this.destination := destination
@@ -131,7 +130,8 @@ The pathfinding logic, the ranking algorithm, the notification system — none o
 **Unchecked state transitions.** A delivered task that can become pending again through a misapplied patch is a symptom of transitions that exist only as informal agreements between developers. The recovery is to model transitions explicitly and to enforce them with contracts and tests — not because developers cannot be trusted, but because explicit enforcement scales and informal agreement does not.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one of the three running systems and produce an entity sheet with five parts:
 
@@ -144,15 +144,18 @@ Choose one of the three running systems and produce an entity sheet with five pa
 Then ask: which fields in your current implementation are being used as identity but were never explicitly designated as such? And which transitions are currently unchecked — possible to execute in any order, with no enforcement of preconditions?
 
 Those two gaps are where entity modeling work should begin.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Entities are identity-bearing things that the system must track over time. Not every value is an entity.
 - Identity and state are distinct: identity answers *which thing is this?*, state answers *what is true about it now?*
 - Responsibilities should be assigned to entities, not diffused across global helpers and service layers.
 - Transitions and invariants are part of the entity model itself, not implementation details to be added later.
 - Strong entity models reduce friction at every downstream stage: algorithm design, testing, and refactoring.
+:::
+
 
 
 *Chapter 8 moves from things to connections. Entities alone are not enough — behavior emerges from the relationships between them.*

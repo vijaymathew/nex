@@ -150,20 +150,24 @@ In every case, the set and the map are not replacements for the list that holds 
 **Treating a missing key as impossible.** An operation that assumes a key will always be present, and crashes or returns a meaningless default when it is not, has made an assumption that the domain does not guarantee. Keys are absent for legitimate reasons: a task has been completed and removed, a document has not yet been indexed, an entity has been destroyed. The correct response to a missing key is a declared behavior — an explicit miss result, an error status, an optional return type — that the caller can depend on. A crash is not a declared behavior.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Identify one place in your system where a collection is currently searched by a key-like property — a scan for an element with a particular identifier, a check for whether a particular item is already present. Redesign that operation using map or set semantics by specifying: the chosen key and a justification for its stability and uniqueness, the membership or retrieval operation and its contract, the miss behavior, and one invariant that must hold between this structure and any parallel structure that covers the same data.
 
 Then compare the asymptotic cost of the original scan with the cost of the direct access operation. If the collection is currently small, estimate the input size at which the difference would first become visible in latency measurements.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - A set answers membership questions in constant time. A map answers keyed retrieval questions in constant time. Each is organized for the operation it performs well and provides no advantage for operations it was not designed for.
 - The choice between a list, a set, and a map is determined by the dominant operations on the collection, not by the type of data it contains.
 - Key design is a correctness decision. An unstable or non-unique key produces correctness failures, not just performance ones.
 - Order and direct access are different properties that often require different structures. The hybrid of an ordered sequence with a map for keyed access is the normal pattern for collections that must support both.
 - A missing key is a legitimate outcome. Declaring a distinct miss behavior in the operation's contract is what makes the operation usable without forcing the caller to inspect its implementation.
+:::
+
 
 
 *Chapter 17 introduces trees — structures that organize data hierarchically and make ordered search efficient. Where sets and maps provide direct access by key, trees provide something different: efficient navigation through data that has natural structure, and efficient answers to range queries that neither lists nor maps can serve well.*

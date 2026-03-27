@@ -142,21 +142,25 @@ In every case, the goal is to improve the "how" while strictly preserving the "w
 **Early Deletion.** Deleting the legacy code before the new path has survived a production workload is a common source of "no-way-back" incidents. The remedy is to keep both paths alive for a short period — perhaps behind a feature flag — so that you can roll back instantly if a subtle behavioral difference is discovered.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Identify one "tangled" method in your system that performs more than one responsibility. Plan a three-step refactor to split it:
 1.  What is the baseline behavior you will verify?
 2.  What is the first small move (e.g., extracting one responsibility into its own method)?
 3.  How will you prove that the behavior is still identical after the move?
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Refactoring is the routine improvement of internal structure without changing external behavior.
 - Behavior preservation is not a guess; it is a verified state proven by contracts, tests, and parity checks.
 - The risk of a refactor is inversely proportional to its size. Small, incremental steps are the path to safety.
 - Parity testing — comparing the outputs of old and new paths — is the ultimate confidence mechanism for structural change.
 - Fear of change is a symptom of a system without safety nets. Building those nets is the first step toward a system that can grow.
+:::
+
 
 
 *Part VIII established the discipline of growth. In Part IX, we look toward the future: how these engineering principles apply in an age where AI assistants are helping us write and review the code we build.*

@@ -128,20 +128,24 @@ In all three systems, the design question is the same: who owns which state, and
 **Cross-object field mutation.** Code that modifies another object's fields directly — reaching past the object's interface to set internal state — bypasses the invariants those fields are meant to maintain. A status field set to an undeclared value by external code is a status field whose invariant has been violated. A readiness flag cleared by a coordinator without going through the robot's interface is a readiness flag whose semantics have been overridden. The discipline is to expose state changes only through defined operations with contracts, and to treat direct field mutation from outside an object as a design error.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one workflow in your system that involves two or more collaborating entities and redesign it using the three-part structure from this chapter: a state-owning object for each entity, each enforcing its own transition rules and invariants through defined operations; and a coordinator that orchestrates the workflow without owning any domain state.
 
 For each object, identify one transition it must enforce and write the precondition and postcondition for the operation that performs it. For the coordinator, write the precondition that it must check before calling each object's operations. Then identify one place in your current implementation where domain state is being modified by code outside the owning object, and describe what would be required to route that modification through the object's interface instead.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Object-oriented design is responsibility design. The right question is not how many classes to create but who owns which state and who is responsible for which invariants.
 - Behavior belongs with the object that owns the state the behavior depends on. An invariant that can only be enforced through the owning object's operations is an invariant that is always enforced.
 - Collaboration happens through contracts, not field access. An object that reaches into another's internal fields has bypassed the other's invariants and introduced a coupling that will produce failures when the other changes.
 - Coordinators orchestrate without owning. A coordinator that accumulates domain logic or domain state has violated the separation that makes both the coordinator and the domain objects independently understandable.
 - Anemic models and god objects are opposite failures of the same principle. In both cases, responsibility and the state it governs are in different places.
+:::
+
 
 
 *Chapter 26 formalizes interface design — the discipline of defining stable contracts between components that allows each side of a boundary to evolve independently. An interface is the promise a component makes to its callers, and the quality of that promise determines how much of the system must be understood before any part of it can be changed.*

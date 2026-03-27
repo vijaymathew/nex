@@ -146,20 +146,24 @@ In all three systems, sorting sits between raw data and high-value operations. T
 **Re-sorting too frequently.** A full sort of a large collection is an O(N log N) operation. Performing it in a hot loop — once per incoming event, once per request, once per tick — when the collection changes only occasionally is work that compounds quickly. The alternatives are to maintain a sorted order incrementally, inserting new elements in sorted position rather than re-sorting the full collection; to batch updates and sort once per batch; or to use a data structure that maintains order intrinsically. The choice depends on the relative frequency of insertions and reads.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one ordered output in your system and define its sort contract completely: the primary comparison key and the direction of ordering, the tie-break rule and whether it constitutes a stability requirement, the output invariant that a test could verify mechanically, and the current sort frequency relative to how often the underlying collection changes.
 
 Then write one test case using two elements with equal primary keys that verifies the tie-break behavior. If the test cannot be written without knowing the implementation, the tie-break rule is not yet explicit enough to be part of the contract.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Sorting creates structure that downstream operations exploit. Its cost is an investment in the efficiency of everything that follows.
 - A sort's contract has three parts: the comparison rule, the tie-break rule, and the output invariant. All three must be explicit.
 - Stability is a correctness requirement when the order of equal elements matters to any caller. It is not an implementation detail.
 - The right sort strategy is determined by collection size, stability requirements, memory constraints, and whether the input has known structure. Defaulting to the standard library's sort is appropriate for most cases.
 - Re-sorting a large collection more often than it changes is avoidable cost. Define the sort frequency alongside the sort strategy.
+:::
+
 
 
 *Chapter 21 turns from sorting data to traversing structures — the algorithms that systematically visit every node in a tree or graph. Traversal is the basis for search, analysis, and transformation of structured data, and the order in which nodes are visited determines what the traversal can compute.*

@@ -128,20 +128,24 @@ In all three systems, the pure core is the locus of correctness and the effectfu
 **Dogmatic purity in the wrong places.** Some operations are inherently effectful, and structuring them as pure functions requires contortions that reduce clarity without improving testability. Logging is inherently effectful. Rendering is inherently effectful. Forcing these into a pure functional style — by threading state through every function or returning effect descriptions rather than performing effects — produces code that is harder to read and harder to modify than a pragmatic effectful implementation would be. The discipline is to apply functional thinking where it provides leverage — in the domain logic, the ranking, the route computation, the state transitions — and to use straightforward effectful code where effects are unavoidable and the goal is clarity.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one feature in your system that currently mixes computation and effects — a function that both calculates a result and writes it somewhere — and decompose it into three parts: a pure decision function that takes inputs and returns a decision, a pure transformation function that takes the decision and produces a result, and an effectful output function that delivers the result.
 
 Write one contract for each part. Then run tests for the two pure functions without any external systems — no databases, no network calls, no file writes. If the tests require external systems, the boundary between pure and effectful has not been fully established.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - A pure function always produces the same output for the same inputs and has no side effects. This is not a style preference — it is the property that makes a function independently testable and unconditionally reliable.
 - The pure core, effectful shell pattern is a practical architecture: domain logic lives in the pure core and is testable without infrastructure; effects live in the shell and are thin by design.
 - Composition of pure functions is clean and reliable. Each stage in a pure pipeline can be tested and verified in isolation, and failures are localized to the stage where they occur.
 - Functional decomposition should follow semantic boundaries, not minimize function size. Stages with independent meaning — tokenization, scoring, sorting — are the right unit of decomposition.
 - Pragmatic purity beats dogmatic purity. Apply functional thinking where it provides the most leverage: in the domain logic that determines what the system does. Use straightforward effectful code where effects are unavoidable and clarity matters more than purism.
+:::
+
 
 
 *Chapter 25 turns to object-oriented thinking — the complementary approach to organizing behavior around entities that own state and expose operations through defined interfaces. Where functional thinking decomposes computation into transformations, object-oriented thinking decomposes a system into collaborating agents, each responsible for its own state and behavior.*

@@ -129,20 +129,24 @@ In all three systems, the graph is the natural representation of the domain's co
 **Weak failure semantics.** A traversal that returns an empty path when no route exists, or returns a partial path when traversal is interrupted, leaves the caller to infer what happened from an output that carries no explicit information about it. Two different failure conditions — unreachable destination, invalid input — look identical to a caller who receives an empty list in both cases. The remedy is to declare the full set of possible outcomes in the operation's contract and to return a distinct value for each.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one networked feature in your system — one where entities are connected by relationships that are not strictly hierarchical — and define its graph model with five components: the node type and identity key, the edge type and what it represents in the domain, one reachability query and its contract, one path-quality objective and the algorithm it requires, and one cycle-related risk and how the traversal will handle it.
 
 Then examine how the current implementation represents connectivity. Is there an explicit adjacency structure, or is the connectivity implied by the traversal logic? If it is implied, identify what would need to change to make it explicit.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Graphs model real-world networks that trees and lists cannot express without distortion or loss. When the domain is genuinely networked, the graph is the right representation.
 - Reachability and path quality are distinct questions that require distinct algorithms. Choosing an algorithm without first defining the objective produces a system that computes the wrong answer.
 - Traversal over any graph that may contain cycles requires a visited set. There are no exceptions to this rule.
 - The adjacency structure should be explicit and first-class in the model, not implied by traversal code. An implicit graph cannot be tested or modified independently of the algorithms over it.
 - Every graph operation needs declared failure semantics. An empty return is not a failure status.
+:::
+
 
 
 *Part IV has now built the complete data structure foundation: lists for ordered sequences, sets and maps for membership and keyed access, trees for hierarchical search, and graphs for general networks. Part V applies these structures to the core algorithm families — searching, sorting, traversal, and path-finding — that turn organized data into system behavior.*
