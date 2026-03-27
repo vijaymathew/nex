@@ -105,8 +105,9 @@
     (modify-syntax-entry ?\{ "(}" table)
     (modify-syntax-entry ?\} "){" table)
 
-    ;; Identifier characters
-    (modify-syntax-entry ?_ "_" table)
+    ;; Treat underscores as part of words so keyword regexps do not match
+    ;; prefixes inside identifiers like "from_loc".
+    (modify-syntax-entry ?_ "w" table)
 
     table)
   "Syntax table for Nex mode.")
