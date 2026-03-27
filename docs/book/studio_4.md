@@ -54,8 +54,6 @@ Suggested files:
 - `world_arch_refactor.nex`
 - `studio_4_main.nex`
 
-If using the web IDE, place all classes in one file and run `App.run`.
-
 ### Shared Ports (Interfaces By Contract)
 
 These ports abstract over concrete V3 storage/index implementations from Studio 3.

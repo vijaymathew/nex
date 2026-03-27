@@ -121,20 +121,24 @@ This is the pattern: specify the contract first, implement the interior second, 
 **Ambiguous objectives.** An algorithm chosen to optimize for one criterion will perform incorrectly by the standard of a different one. When "best route" is never defined to mean fewest hops, minimum cost, or fastest traversal, the team cannot agree on which algorithm is correct because they are not yet asking the same question. The recovery is to encode one objective explicitly in the current specification, document the alternatives that were considered and deferred, and treat a change in objective as a design decision that requires revisiting the algorithm — not a bug fix in the existing one.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one operation in your system and write a complete algorithm specification in five parts: the valid input definition, the output contract (naming each possible outcome distinctly), the objective function, a language-agnostic description of the steps, and one contract you will encode in the implementation.
 
 Then apply this test: give your specification to another engineer and ask them to implement it independently. If their implementation makes different choices about failure behavior, output representation, or what the objective optimizes for, the specification is not yet precise enough to be called an algorithm description. Find the ambiguity and resolve it before writing code.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - An algorithm is a finite, explicit procedure with declared guarantees — not any procedure that produces plausible output on familiar inputs.
 - Requirement, algorithm, and implementation are three distinct levels. Conflating them makes design conversations unresolvable and makes changes expensive.
 - Correctness means guarantees that are explicit and checkable. A procedure that usually works under normal conditions is not correct in any useful sense of the word.
 - Failure semantics are part of the algorithm's contract. Each distinguishable failure mode deserves a distinct, named output.
 - The objective an algorithm optimizes must be stated before an algorithm is chosen. Different objectives require different algorithms; changing the objective silently is a design error, not an implementation detail.
+:::
+
 
 
 *Chapter 12 examines decomposition: how to take a complex algorithmic problem and divide it into pieces that can be designed, implemented, and tested independently. The discipline of decomposition is what separates algorithms that can be reasoned about from algorithms that can only be run.*

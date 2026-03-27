@@ -1258,6 +1258,31 @@ x"))
                        (repl/eval-code ctx0 "print(1)")))]
         (is (str/includes? output "1"))))))
 
+(deftest repl-compiled-backend-print-uses-user-to-string-test
+  (testing "compiled backend print calls user-defined to_string on objects"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (repl/eval-code ctx0 "class Box
+  feature
+    value: Integer
+
+    to_string(): String do
+      result := \"Box(\" + value.to_string() + \")\"
+    end
+
+  create
+    make(v: Integer) do
+      value := v
+    end
+end")
+            _ (repl/eval-code ctx0 "let b: Box := create Box.make(7)")
+            output (with-out-str
+                     (repl/eval-code ctx0 "print(b)"))]
+        (is (str/includes? output "Box(7)"))))))
+
 (deftest repl-compiled-backend-builtin-type-of-test
   (testing "compiled backend lowers builtin type_of through a direct helper path"
     (binding [repl/*type-checking-enabled* (atom true)

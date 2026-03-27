@@ -115,20 +115,22 @@ Notice that `choose_top` does not know how tokenization works or how scoring is 
 **Missing contracts at stage boundaries.** A decomposed algorithm whose stages do not have explicit contracts has most of the costs of decomposition and few of its benefits. When an intermediate result is malformed — when `tokenize` returns an empty string for a non-empty query, or when `score` returns a negative value — the failure will propagate through subsequent stages and surface far from its origin. Contracts at stage boundaries catch these failures at the point where they occur, before they have been compounded by later processing.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Take one function in your current codebase that mixes more than one concern — a function that validates, computes, and formats, or that queries, transforms, and updates — and decompose it into three to six stages.
 
 For each stage, write: the input contract, the output contract, and the single responsibility it owns. Then identify which stage you could replace with a different implementation without changing any other stage. If no stage is independently replaceable, the decomposition still has hidden coupling that the exercise has not yet surfaced.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Decomposition is a structural discipline, not a stylistic one. Its purpose is to make algorithms locally understandable, independently testable, and safely modifiable.
 - A genuine decomposition passes three tests: each piece has a nameable input, a guaranteed output, and a single responsibility.
 - Four patterns cover most cases: pipeline, strategy boundary, guard-core-commit, and domain-infrastructure split. Recognizing the pattern makes the decomposition easier to find.
 - Composition is safe when it is based on contracts, not on knowledge of implementation details. A piece that knows only what its dependencies guarantee can be reasoned about independently of how those dependencies are implemented.
 - A stage boundary without a contract is a seam that looks like decomposition and behaves like coupling.
+:::
 
-
-h*Chapter 13 applies the decomposition principle to a specific and important class of problems: those whose structure is self-similar. Recursive algorithms are decompositions in which a problem is divided into a smaller instance of the same problem. Understanding recursion as a special case of decomposition — rather than as a separate technique — is what makes it a reliable tool rather than an occasional trick.*
+*Chapter 13 applies the decomposition principle to a specific and important class of problems: those whose structure is self-similar. Recursive algorithms are decompositions in which a problem is divided into a smaller instance of the same problem. Understanding recursion as a special case of decomposition — rather than as a separate technique — is what makes it a reliable tool rather than an occasional trick.*

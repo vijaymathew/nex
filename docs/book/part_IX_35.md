@@ -122,7 +122,8 @@ In each case, the reviewer is the guardian of the system's core principles.
 **The "Rubber Stamp" Problem.** Approving an AI-generated patch because you are in a hurry. The remedy is to acknowledge that AI code is "guilty until proven innocent." If you don't have time to review it properly, you don't have time to merge it.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Take one recent AI-generated patch (even a small one) and apply the Risk-First Hierarchy:
 1.  Check the contract (inputs/outputs).
@@ -131,15 +132,18 @@ Take one recent AI-generated patch (even a small one) and apply the Risk-First H
 4.  Check for hidden coupling.
 
 Did you find anything that a "style-only" review would have missed?
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - AI-generated code requires a more rigorous review than human code because its failure modes are often more subtle.
 - Use a Risk-First Hierarchy: contracts and invariants are the top priority.
 - Reviewing is not reading; it is validating behavior against expectations.
 - A review checklist is the best tool for maintaining consistency and catching common AI optimistic biases.
 - Review quality is the ultimate throttle on the speed of AI-assisted development.
+:::
+
 
 
 *Chapter 36 closes the book with the final piece of the puzzle: the role of human judgment and accountability in a world where AI is doing more and more of the work.*

@@ -107,20 +107,24 @@ What matters most in this sketch is that the strategy selection is explicit and 
 **No capacity narrative.** An algorithm that meets its performance targets today on a collection of one million documents may fail to meet them next year on a collection of ten million. Without a model of how costs grow and an explicit threshold at which the current design must be reconsidered, the team will discover this failure in production. A capacity narrative — a documented projection of when current performance targets will be exceeded under expected growth — converts a future crisis into a scheduled engineering decision.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one algorithm in your system and write a cost brief with seven components: the primary operation whose cost you are characterizing, the expected input size range in production, an asymptotic estimate of the cost, the dominant constant factors you would expect to observe in measurement, a benchmark design covering normal, edge, and adversarial inputs, a fallback policy for the case where cost exceeds the acceptable threshold, and a redesign trigger condition.
 
 Then apply this test: give the brief to a teammate and ask them to predict the failure mode — the condition under which the algorithm will first become unacceptable. If they cannot predict it from the brief, the brief is not yet a cost model. Find what is missing and add it.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Correctness and cost are dual constraints. An algorithm that passes only one gate is not ready for production.
 - Cost is a profile, not a number: latency, throughput, memory footprint, worst-case behavior, and tail behavior each matter in different contexts.
 - Asymptotic analysis identifies structurally bad choices. Empirical measurement validates that the remaining choices behave acceptably on real workloads. Both are required.
 - Tail behavior is often more important than average behavior. Design to the distribution, not the median.
 - A capacity narrative — a projection of when current performance targets will be exceeded — converts a future crisis into a scheduled decision.
+:::
+
 
 
 *Part III has now built the algorithmic toolkit: a precise definition of what an algorithm is, the discipline of decomposition, recursive design over self-similar structure, and the cost reasoning that determines whether a correct algorithm is also a practical one. Part IV applies these tools to data structures — the concrete representations that make algorithms efficient at scale.*

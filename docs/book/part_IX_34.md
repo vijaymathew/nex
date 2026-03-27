@@ -117,7 +117,8 @@ In each case, the engineer’s role is to define the "sandbox" and the AI’s ro
 **Asking for too much at once.** Asking an AI to "redesign the entire dispatch system" is a recipe for a high-risk, unreviewable mess. The remedy is to scope your AI tasks to small, bounded changes — the same kind of slices you would use in a manual refactor.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Pick a small feature you need to implement. Write an AI prompt that includes:
 1.  The high-level goal.
@@ -126,15 +127,18 @@ Pick a small feature you need to implement. Write an AI prompt that includes:
 4.  A requirement for a specific test case.
 
 Compare the quality of the AI's output with what you might have gotten from a one-sentence prompt.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - AI coding assistants are powerful implementation engines, but they require human-defined constraints to be effective.
 - Prompting is not an art; it is an engineering discipline of defining goals, contexts, and boundaries.
 - Contracts and interfaces are the essential "anchors" that keep AI-generated code aligned with your architecture.
 - AI is best used for bounded implementation tasks, not for high-level architectural design.
 - The faster an AI can write code, the more important your verification safety nets become.
+:::
+
 
 
 *Chapter 35 moves from generation to validation: how to rigorously review AI-generated code to ensure it meets our standards for safety and correctness.*

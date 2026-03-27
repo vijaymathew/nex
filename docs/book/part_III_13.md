@@ -107,20 +107,24 @@ The postcondition `result >= 0` is minimal but meaningful. A negative count is n
 **Recomputing identical subproblems.** Some recursive algorithms naturally decompose a problem into overlapping subproblems — the same subproblem arises from multiple different paths through the recursion. Without memoization, each instance is recomputed independently, and the total work grows exponentially in the number of overlapping subproblems. The signature of this failure is an algorithm that is correct on small inputs and runs for an unacceptable amount of time on larger ones. The remedy is to record the result of each subproblem the first time it is computed and return the recorded result on subsequent calls.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Design one recursive routine for a problem in your system and specify it completely with five components: the base case, the recursive step, the progress metric, the cycle guard (or an explicit argument that none is needed), and a worst-case bound on the depth of recursion.
 
 Then test it against three inputs: a trivial input that exercises only the base case, a normal input that exercises the recursive step, and an adversarial input that contains a cycle or approaches the depth bound. If the adversarial input produces unbounded behavior, the specification is incomplete. Revise it before writing the implementation.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Recursion is decomposition applied to self-similar structure. It is not a general-purpose technique but a natural fit for hierarchical and graph-like problems.
 - Every correct recursive algorithm has a base case and a progress metric. Both are mandatory. An algorithm missing either one is not correct.
 - Graph recursion requires cycle guards. The visited set is not an optimization — it is the mechanism that prevents the algorithm from following cycles indefinitely.
 - Overlapping subproblems require memoization. An algorithm that recomputes the same subproblem repeatedly is correct but not acceptable; recognizing the overlap is the first step toward fixing it.
 - The four elements of a safe recursive design — base case, recursive step, progress metric, cycle guard — are a complete specification. The implementation follows from them directly.
+:::
+
 
 
 *Chapter 14 shifts from the correctness of algorithms to their cost. A correct algorithm that is too slow for its inputs is not a usable algorithm. Understanding how algorithmic cost grows with input size is what makes it possible to choose between correct alternatives — and to predict, before deployment, whether an algorithm will hold up under real conditions.*

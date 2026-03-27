@@ -134,19 +134,23 @@ In all three systems, the search operation that looks trivial at small scale is 
 **Violated preconditions.** Binary search applied to an unsorted collection does not return slow results — it returns wrong ones. A keyed lookup called with an empty string does not degrade gracefully — it returns a result that was never intended. Preconditions are not optional documentation. They are the boundary conditions under which the algorithm's guarantees hold, and violating them voids the guarantee. Enforcing preconditions in the code — with require clauses, assertions, or type constraints — is what makes the contract reliable rather than advisory.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one search operation in your system and document it completely with five components: the match rule that defines what counts as a successful result, the miss rule that defines the explicit return value when no match exists, the current strategy and its asymptotic cost, the expected input size range in production, and the trigger condition at which the current strategy should be reconsidered.
 
 Then write the precondition and postcondition for that operation. If the postcondition cannot distinguish the found case from the not-found case without reading the implementation, the miss semantics are not yet explicit.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Search strategy is a design decision determined by data organization and operation frequency. Choosing by habit produces systems that work at small scale and degrade at large scale.
 - Match semantics, miss semantics, and input preconditions are part of every search algorithm's contract. An algorithm without explicit miss semantics is not complete.
 - Linear search, binary search, keyed lookup, and structural traversal are not interchangeable techniques for the same problem. Each is the right choice for a specific combination of data organization and operation profile.
 - The search operation that looks trivial at small scale is often the first bottleneck at large scale. Define the upgrade trigger before the bottleneck arrives.
+:::
+
 
 
 *Chapter 20 examines sorting — the operation that turns unordered data into a form where faster search, efficient merge, and reliable comparison become possible. Understanding sorting as a prerequisite for other algorithms, rather than as a standalone operation, is what connects it to the system design concerns of this part.*

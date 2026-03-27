@@ -266,8 +266,8 @@ end"
       (is (str/includes? js-code "let ch = new __nexChannel();"))
       (is (str/includes? js-code "await ch.send(42)"))
       (is (str/includes? js-code "result = await ch.receive()"))
-      (is (str/includes? js-code "console.log(await t.await())"))
-      (is (str/includes? js-code "console.log(t.is_done())")))))
+      (is (str/includes? js-code "console.log(__nexPrintValue(await t.await()))"))
+      (is (str/includes? js-code "console.log(__nexPrintValue(t.is_done()))")))))
 
 (deftest buffered-channel-generation-test
   (testing "buffered Channel constructors and accessors lower correctly in JavaScript"
@@ -281,8 +281,8 @@ end"
 end"
           js-code (js/translate nex-code)]
       (is (str/includes? js-code "new __nexChannel(2)"))
-      (is (str/includes? js-code "console.log(ch.capacity())"))
-      (is (str/includes? js-code "console.log(ch.size())")))))
+      (is (str/includes? js-code "console.log(__nexPrintValue(ch.capacity()))"))
+      (is (str/includes? js-code "console.log(__nexPrintValue(ch.size()))")))))
 
 (deftest array-slice-and-reverse-generation-test
   (testing "Array slice and reverse lower to JavaScript array helpers"
@@ -294,8 +294,8 @@ end"
     end
 end"
           js-code (js/translate nex-code)]
-      (is (str/includes? js-code "console.log(scores.slice(1, 4))"))
-      (is (str/includes? js-code "console.log([...scores].reverse())")))))
+      (is (str/includes? js-code "console.log(__nexPrintValue(scores.slice(1, 4)))"))
+      (is (str/includes? js-code "console.log(__nexPrintValue([...scores].reverse()))")))))
 
 (deftest array-sort-generation-test
   (testing "Array sort lowers to comparator-based helper in JavaScript"
@@ -320,8 +320,8 @@ class Test
     end
 end"
           js-code (js/translate nex-code)]
-      (is (str/includes? js-code "console.log(__nexArraySort(scores))"))
-      (is (str/includes? js-code "console.log(__nexArraySort(boxes))"))
+      (is (str/includes? js-code "console.log(__nexPrintValue(__nexArraySort(scores)))"))
+      (is (str/includes? js-code "console.log(__nexPrintValue(__nexArraySort(boxes)))"))
       (is (str/includes? js-code "function __nexCompareValues(a, b)"))
       (is (str/includes? js-code "function __nexArraySort(values)")))))
 
@@ -445,7 +445,34 @@ end"
     end
 end"
           js-code (js/translate nex-code)]
-      (is (str/includes? js-code "console.log(null)")))))
+      (is (str/includes? js-code "console.log(__nexPrintValue(null))")))))
+
+(deftest print-uses-user-to-string-js-generation-test
+  (testing "Generated JavaScript routes builtin print through the custom object formatter"
+    (let [nex-code "class Box
+  feature
+    value: Integer
+
+    to_string(): String do
+      result := \"Box(\" + value.to_string() + \")\"
+    end
+
+  create
+    make(v: Integer) do
+      value := v
+    end
+end
+
+class Test
+  feature
+    demo() do
+      let b: Box := create Box.make(7)
+      print(b)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "function __nexPrintValue(v)"))
+      (is (str/includes? js-code "console.log(__nexPrintValue(b))")))))
 
 (deftest if-then-else-test
   (testing "If-then-else statement"

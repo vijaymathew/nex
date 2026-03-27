@@ -138,22 +138,26 @@ In all three cases, the pattern is the same: identify the part that is likely to
 **The "Big Bang" Migration.** Designing for change implies that the system will evolve. If a team introduces a new version of a service but provides no compatibility for old clients, they haven't designed for change — they've designed for disruption. The remedy is to make compatibility a first-class architectural requirement, using adapters and versioned interfaces to bridge the gap.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Pick one part of your system that you expect to change in the next six months. Define the "Port" (the stable contract) that would allow that change to happen without affecting the surrounding code. 
 
 1.  What is the name of the contract?
 2.  What are its `require` and `ensure` conditions?
 3.  What information must stay *out* of the contract to keep it implementation-agnostic?
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Designing for change is about building seams where volatility can land without causing system-wide damage.
 - A seam is a boundary that allows behavior to vary while the contract remains stable.
 - Stable contracts are the prerequisite for safe evolution. Additive changes are almost always cheaper than breaking ones.
 - Over-engineering is as dangerous as under-engineering. Build seams where change is likely, not where it is merely possible.
 - Compatibility is not a release chore; it is an architectural discipline that allows a system to grow without leaving its users behind.
+:::
+
 
 
 *Chapter 33 examines the practical discipline of refactoring — how to move a system from its current structure to a better one while proving that its behavior remains unchanged.*

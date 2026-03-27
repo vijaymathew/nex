@@ -146,20 +146,24 @@ In all three systems, the interface is the line at which internal freedom is tra
 **Versioning by breakage.** An interface that changes its existing contract — redefining what a status code means, removing a field from a response object, tightening a precondition — breaks every caller simultaneously. Breakage is sometimes necessary, but it must be a deliberate decision with a migration plan, not a consequence of an implementation change that happened to affect the contract. The discipline of additive evolution — adding new operations and new status values rather than modifying existing ones — preserves the contract for existing callers while extending it for new ones.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one interface in your system that is consumed by more than one caller and document its complete contract with five parts: the input preconditions for its primary operation, the output guarantee for the success case, the failure semantics for each distinct failure mode, one cross-call invariant that callers depend on, and one internal detail that the interface must not expose.
 
 Then write one integration test that validates the contract without inspecting the implementation. The test should remain valid across any internal change that does not alter the contract. If the test would break when the internal algorithm changes, it is testing the implementation rather than the interface.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - An interface is a promise: what the component requires, what it guarantees, and what it reports when it cannot deliver. The quality of the promise determines the stability of every caller.
 - A good interface is minimal, explicit, stable, and testable. Weakness in any one of these properties will eventually produce integration failures.
 - The complete contract of an interface operation has four parts: input preconditions, output guarantees, failure semantics, and cross-call invariants. An interface with any of these missing is an interface with implicit assumptions that callers will discover in production.
 - Leaking internals, ambiguous failure modes, over-wide interfaces, and versioning by breakage are the four failure modes of interface design. All four are preventable by contract-first thinking.
 - The line between what is behind the interface and what is in front of it is the line between internal freedom and external stability. Stable interfaces are what make internal evolution possible.
+:::
+
 
 
 *Part VI has now assembled the complete toolkit for building real software: components, functional thinking, object-oriented responsibility design, and stable interfaces. These are the tools that connect the algorithmic correctness of Parts III and V to the architectural quality of the systems that algorithms ultimately inhabit.*

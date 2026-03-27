@@ -169,6 +169,32 @@ end"
           output (execute-method-output code)]
       (is (= ["\"value=10\"" "\"box=Box(7)\""] output)))))
 
+(deftest print-coerces-objects-with-to-string
+  (testing "print uses a class-defined to_string for object output"
+    (let [code "class Box
+  feature
+    value: Integer
+
+    to_string(): String do
+      result := \"Box(\" + value.to_string() + \")\"
+    end
+
+  create
+    make(v: Integer) do
+      value := v
+    end
+end
+
+class Test
+  feature
+    demo() do
+      let b: Box := create Box.make(7)
+      print(b)
+    end
+end"
+          output (execute-method-output code)]
+      (is (= ["Box(7)"] output)))))
+
 (deftest any-root-runtime-methods
   (testing "Explicit Any subclasses inherit to_string, equals, and clone at runtime"
     (let [code "class Box inherit Any

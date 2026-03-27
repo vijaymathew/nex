@@ -140,20 +140,24 @@ In all three systems, the component boundaries follow the same principle: a comp
 **Dependency direction inversions.** When a core domain component depends on a delivery, persistence, or presentation component — when the route algorithm imports the notification client, or when the ranking model directly queries the database — the domain is coupled to infrastructure. Testing the domain requires the infrastructure. Changing the infrastructure requires the domain. The correct direction is for infrastructure to depend on domain contracts, not the reverse. This inversion may require introducing an interface or adapter, but the cost of that indirection is small compared to the cost of domain code that cannot be tested or evolved independently of the systems it is deployed alongside.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one workflow in your system that currently mixes more than one concern — a function or module that computes, updates state, and produces output — and redesign it as a set of components with four parts: the core algorithm component and its contract, the state component and its contract, the side-effect component and its contract, and the coordinator that orchestrates them.
 
 For each component, write the precondition and postcondition of its primary operation. Then identify one place in the current implementation where a dependency flows in the wrong direction — where a domain concern depends on an infrastructure detail — and describe what would need to change to invert it.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - A component is a unit with a defined responsibility, a stable contract, and an interior it can change without requiring callers to change. The boundary is semantic, not syntactic.
 - High cohesion and low coupling are not style preferences. They are the properties that determine whether a component can be understood, tested, and changed in isolation.
 - A coordinator's contract should be derivable from the contracts of the components it orchestrates. A coordinator that has absorbed logic it should have delegated has compromised its own testability and clarity.
 - Dependency direction matters as much as component separation. Domain logic must not depend on delivery, persistence, or presentation details. The direction of dependency should follow the direction of abstraction.
 - Component boundaries make algorithmic quality into software quality. A correct algorithm embedded in a tangled system is not a reliable system.
+:::
+
 
 
 *Chapter 24 examines functional thinking as a strategy for designing components that are composable and testable by construction — components whose behavior can be understood and verified from their types and contracts alone, without reference to shared state or execution order.*

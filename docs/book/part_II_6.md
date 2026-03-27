@@ -141,7 +141,8 @@ Knowing the pattern does not prevent all mistakes. The following five failures a
 **Treating the model as documentation only.** The symptom is diagrams that exist and code that disagrees with them. A model that lives only in a design document is not enforced by anything. The recovery is to encode model assumptions in types, contracts, and tests — and to keep them synchronized with the implementation.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one of the three running systems and produce a minimal model draft with four parts:
 
@@ -153,15 +154,18 @@ Choose one of the three running systems and produce a minimal model draft with f
 Then ask two questions about your current implementation of that system: which parts of the implementation are not represented in this model? And which parts of the model are not currently enforced in code?
 
 The gap between those two answers is where reliability work should start.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - A model is the missing layer between specification and implementation: it describes what exists and how it can change, independently of how the machine executes it.
 - Stable entities, explicit boundaries, invariants, and transitions are the core elements of any model.
 - The right algorithm depends on the model. Choose algorithms after the model is clear, not before.
 - Most failures at scale are model failures before they are code failures.
 - A model that exists only in documentation is not enforced. Encode model assumptions in types, contracts, and tests.
+:::
+
 
 
 *Chapter 7 develops the first modeling primitive in depth: entities. We will distinguish identity from state, assign responsibilities, and choose representations that remain stable as the system grows.*

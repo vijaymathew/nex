@@ -1632,6 +1632,8 @@
 (defn nex-display-value [value]
   (value/nex-display-value nex-object? nex-format-value value))
 
+(declare print-output-value)
+
 ;;
 ;; Built-in Functions
 ;;
@@ -1639,13 +1641,13 @@
 (def builtins
   {"print"
    (fn [ctx & args]
-     (let [output (str/join " " (map nex-format-value args))]
+     (let [output (str/join " " (map #(print-output-value ctx %) args))]
        (add-output ctx output)
        nil))
 
    "println"
    (fn [ctx & args]
-     (let [output (str/join " " (map nex-format-value args))]
+     (let [output (str/join " " (map #(print-output-value ctx %) args))]
        (add-output ctx output)
        nil))
 
@@ -2350,6 +2352,15 @@
 
        :else
        (js/Promise.resolve (call-builtin-method nil nil value "to_string" [])))))
+
+(defn- print-output-value
+  "Convert a value for built-in print/println output.
+   Preserve existing formatting for non-objects, but respect user-defined
+   to_string implementations on Nex objects."
+  [ctx value]
+  (if (nex-object? value)
+    (concat-string-value ctx value)
+    (nex-format-value value)))
 
 (defn apply-unary-op
   "Apply a unary operator to a value."

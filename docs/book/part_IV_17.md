@@ -129,20 +129,24 @@ This is the most common tree performance failure, and it occurs silently. The st
 **Confusing trees with graphs.** A node that acquires two parents, or a sequence of nodes that forms a cycle, is no longer a tree node. The tree algorithms — depth-first search, binary search, hierarchical aggregation — do not handle multiple parents or cycles correctly, and the failures they produce are often difficult to reproduce because they depend on the order in which the problematic structure was created. Enforcing the single-parent and acyclic invariants at insertion time is what prevents the tree from silently becoming a graph.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one place in your system where data has genuine hierarchical structure — a containment relationship, a classification taxonomy, a configuration scope — and model it as a tree with five components: the node identity key and a justification for its stability and uniqueness within the hierarchy, the parent-child rule, one search operation and its contract, one structural invariant beyond what is already implied by the tree shape, and one invalid state the structure must reject.
 
 Then answer this question: why would a map from key to value lose information that the tree preserves? If you cannot give a specific answer — if the map would serve just as well — reconsider whether the hierarchy is genuine.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Trees represent genuine hierarchy and make structured search efficient. They are not a substitute for maps when the data is flat.
 - The ordering invariant of a binary search tree is what makes logarithmic search possible. Maintaining it at every modification is mandatory, not optional.
 - Balance is not guaranteed by tree structure alone. An unbalanced tree provides the complexity of a tree with the performance of a list.
 - Tree algorithms depend on three structural invariants: no cycles, single parent for every non-root node, and (for search trees) the ordering rule. Violations produce silent correctness failures.
 - Use a tree when the parent-child relationship corresponds to something real in the domain and when search can exploit that structure. When neither is true, a map is simpler and sufficient.
+:::
+
 
 
 *Chapter 18 generalizes from trees to graphs — structures in which the restriction to a single parent is lifted and cycles are permitted. Graphs model the most general form of connected data, and they are the natural representation for routing, dependency, and reachability problems that trees cannot express.*

@@ -129,20 +129,24 @@ In all three systems, the traversal algorithm is chosen to match the structure o
 **Implicit or absent bounds.** A traversal with no depth or expansion limit will process the entire reachable component of the starting node. For a knowledge engine document graph where any document may be linked to any other, this can mean processing the entire collection. For a delivery network where the graph is fully connected, this means processing every location. Bounds must be chosen deliberately based on what the computation needs, not omitted because the test graphs are small. When a bound is required, its value must be visible in the design — a configurable parameter or a named constant — not buried in a loop condition.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one graph or tree operation in your system and specify its traversal design with five components: the traversal type (DFS or BFS) and a one-sentence justification based on the objective, the visited policy and where it is enforced, the depth or expansion bound and how it is chosen, the output order rule and whether it must be deterministic, and the declared behavior for invalid input.
 
 Then consider: would swapping DFS for BFS, or BFS for DFS, produce incorrect results, slower results, or the same results? If the answer is "the same results," the traversal type may not have been chosen for a principled reason.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - DFS and BFS are not interchangeable. DFS is suited to exhaustive exploration and recursive decomposition; BFS is suited to minimum-hop reachability and layer-by-layer discovery. The objective determines the choice.
 - A visited set is mandatory for any traversal over a graph that may contain cycles. It is not optional and not a performance concern — it is a correctness requirement.
 - Depth and expansion bounds must be chosen deliberately and stated explicitly. A traversal without explicit bounds will process arbitrarily large subgraphs on sufficiently connected inputs.
 - When traversal output order matters, the ordering must be declared and enforced. An ordering that depends on insertion order or machine state is not a deterministic algorithm.
 - The graph structure and the traversal algorithm are separate concerns. The traversal's correctness depends on what the adjacency structure reports, not on how it is implemented.
+:::
+
 
 
 *Chapter 22 builds on traversal to address a more demanding question: not just which nodes are reachable, but which path to a destination is best by some defined criterion. Path optimization requires both traversal and a cost model, and the interplay between the two determines which algorithms are applicable and what guarantees they can provide.*

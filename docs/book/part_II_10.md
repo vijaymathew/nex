@@ -110,20 +110,24 @@ What is absent is also significant. There is no operation `mark_pending` that mo
 **No audit trail for transitions.** When a system reaches an invalid state and nobody can explain how it got there, the investigation begins from nothing. An audit trail that records the intent and outcome of each transition — which operation was attempted, what the preconditions were, whether the postconditions were verified — makes invalid states diagnosable. More importantly, it reveals which part of the transition model failed to prevent them.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one entity from your system and construct a complete transition model for it with six parts: all legal states, all allowed transitions between them, one explicitly forbidden transition and the reason it is forbidden, preconditions for one transition, postconditions for the same transition, and the behavior when that transition cannot complete because its preconditions are not met.
 
 Then ask: if the event that triggers this transition were delivered twice, would the second delivery produce a different outcome than the first? If yes, what must be added to make the operation idempotent?
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Most real failures occur during state transitions, not in stored state. A model that describes states without describing transitions is incomplete.
 - Legal transitions must be explicit and enforced. Absent transitions are design decisions, not omissions, and should be recognizable as such.
 - Ordering, conflict policy, and idempotency are model-level concerns. They cannot be reliably addressed in implementation if they were never addressed in design.
 - Partial failure must be designed for, not improvised around. Half-states that are invisible to monitoring are more dangerous than acknowledged failures.
 - Change is structured behavior. Treat it as such from the beginning.
+:::
+
 
 
 *Part II has now built a complete modeling foundation: entities, relationships, data models, and the semantics of change. Part III shifts from representation to computation — what algorithms are, how to decompose problems into them, and how to reason about their behavior under real conditions.*

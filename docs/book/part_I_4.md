@@ -118,7 +118,8 @@ Choosing between them forces a decision about the meaning of a route. That decis
 The edge case did not complicate the design. It completed it.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Take the problem statement you wrote at the end of Chapter 3 and apply the three-category inventory to it.
 
@@ -129,15 +130,18 @@ For each category — input edges, size edges, state edges — identify at least
 3. Which cases would you test first, and why?
 
 If your specification handles every case you can identify without modification, push harder. In our experience, a specification that survives its first edge analysis without revision is one whose edges were not examined closely enough.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Programs fail at the boundaries of their assumptions, not at the center of their logic.
 - Edge cases cluster around boundaries: degenerate inputs, extreme sizes, conflicting states.
 - Thinking like a tester — adversarially, systematically — is a learnable and transferable skill.
 - Edge analysis refines the specification: every gap it exposes is a requirement that was always there, waiting to be written down.
 - Almost correct is a category of wrong.
+:::
+
 
 
 *Chapter 5 takes the next step: turning problem statements, examples, and edge analyses into formal specifications — requirements precise enough that two programmers, working independently, build the same system.*

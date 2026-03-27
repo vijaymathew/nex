@@ -53,8 +53,6 @@ Suggested files:
 - `world_scale_from_studio2.nex`
 - `studio_3_main.nex`
 
-If using the web IDE, place all classes in one file and run `App.run`.
-
 ### Reused Studio 2 Models (Unchanged)
 
 ```nex

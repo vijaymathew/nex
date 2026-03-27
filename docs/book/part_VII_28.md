@@ -107,20 +107,24 @@ In all three systems, invariants are not defensive checks added to make buggy co
 **Duplicate rule definitions that drift apart.** When the same constraint appears in both a class invariant and the postconditions of multiple operations, the two definitions may diverge over time. One operation's postcondition is updated to reflect a new understanding of the constraint; the invariant is not. Another operation is added with a postcondition that was written to match the updated understanding; the old operations are not updated. The invariant and the operations now describe different constraints, and the system enforces whichever one the checker happens to evaluate. The remedy is to treat the class invariant as the single authoritative statement of each constraint and to write postconditions that reference or derive from the invariant rather than restating it independently.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one class in your system and define its complete invariant with three parts: two field-level invariants that constrain individual fields to their valid domains, one relationship invariant that constrains the relationship between two or more fields, and one operation that could violate one of the invariants if written carelessly.
 
 Then write one test that calls the potentially violating operation with inputs designed to produce a boundary case and verifies that the invariants hold afterward. If the test requires reading the implementation to write, the invariants are not yet strong enough to specify the boundary independently.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - An invariant is a property that holds for every observable state of an object — not after one operation, but across the entire object's lifetime. It is a constraint on the state space, not a claim about a single transition.
 - Invariants and contracts are complementary. Invariants protect against invalid states across all operations; contracts specify the input-output relationship of individual operations. Both are necessary.
 - Three categories cover most invariants: field-level constraints on individual fields, relationship invariants on the dependencies between fields, and range or bound invariants on computed values.
 - Invariants should constrain the outcomes of transitions, not their inputs. Transition inputs belong in preconditions; permanently forbidden states belong in invariants.
 - Duplicate rule definitions drift apart. The class invariant is the authoritative statement of each constraint; operation postconditions should derive from it, not independently restate it.
+:::
+
 
 
 *Chapter 29 examines how testing extends the guarantees established by contracts and invariants. Where contracts specify what must be true, tests provide evidence that the specifications have been met — and they do so by exploring behavior across the full range of inputs, not just the ones the developer thought of first.*

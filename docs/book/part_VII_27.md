@@ -111,20 +111,24 @@ In all three systems, contracts turn the informal expectations that developers c
 **Contract drift between similar operations.** A codebase with many similar operations — multiple transition operations, multiple search operations, multiple update operations — will accumulate contracts that began as consistent and gradually diverged through independent modifications. One transition requires non-empty task id; another was written later and omits it. One search guarantees `NOT_FOUND` on miss; another returns an empty string. The inconsistency is invisible until a caller that works correctly with one operation fails with another. The remedy is to review contracts across similar operations periodically and to establish conventions — all transitions require non-empty identifiers, all searches declare an explicit miss status — that future contracts are written to match.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one routine in your system — one that is called from multiple places and whose behavior callers depend on — and write its complete contract with four parts: three preconditions that state the caller's obligations, three postconditions that state the routine's guarantees, one input that violates a precondition and the behavior that should result, and one valid input with the specific postconditions it should satisfy.
 
 Then verify that the postconditions still hold after one plausible refactor of the routine body. If a refactor that improves the implementation without changing the observable behavior would break a postcondition, the postcondition is specifying implementation rather than guarantees.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - A precondition is the caller's obligation. If the caller does not satisfy it, the routine's behavior is unspecified. Preconditions should fail fast, not handle invalid inputs gracefully.
 - A postcondition is the routine's guarantee. If the precondition is satisfied, the postcondition holds — unconditionally, regardless of which path through the routine body execution takes.
 - Three categories belong in preconditions: input presence and validity, required state, and relationship constraints. Three categories belong in postconditions: result constraints, state transition outcomes, and derivable consequences.
 - A contract is complete when the precondition and postcondition together fully specify the routine's behavior for all valid inputs.
 - Contracts turn implicit assumptions into explicit, executable statements that fail close to their source when violated.
+:::
+
 
 
 *Chapter 28 extends the contract discipline from individual routines to entire objects. Where postconditions specify what is true after a single operation, invariants specify what is true at all times — before every call and after every return. Invariants are the class-level counterpart of postconditions, and they are what make it possible to reason about an object's state without reading every operation that might have modified it.*

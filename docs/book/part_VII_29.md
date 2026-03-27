@@ -120,20 +120,24 @@ In all three systems, the test portfolio that matters is not the one that maximi
 **Shared assumptions between test and implementation.** A test written by the same developer who wrote the implementation, immediately after writing the implementation, will often encode the same assumptions as the implementation. If the implementation misunderstands the requirement, the test will likely misunderstand it the same way. The oracle should be derived from the specification — the contract, the worked examples from Chapter 3, the edge cases from Chapter 4 — not from the implementation the developer just wrote. When possible, tests should be written before the implementation, so the oracle is derived from the requirement rather than from the code.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one routine in your system and design a test portfolio with five tests: two example tests of the nominal behavior, two boundary tests at the edges of the input space, and one property-based check derived from the postcondition that should hold across a range of inputs.
 
 For each test, write the oracle explicitly — the specific property that the output must satisfy, stated without reference to the implementation. Then map each test to the specific failure mode it is designed to detect. If a test is not clearly targeted at a specific failure mode, revise it until it is.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Testing is exploration, not confirmation. The goal is to discover failures, not to demonstrate that the cases you already understood work correctly.
 - Three kinds of tests cover different parts of the failure space: example tests for nominal behavior, boundary tests for edge cases, and property-based checks for contract-wide guarantees.
 - An oracle is how a test decides whether the outcome is correct. The oracle must be independent of the implementation and derived from the specification. A weak oracle misses most meaningful defects.
 - The strongest oracles are derived from contracts. A test that verifies the postcondition holds for a range of inputs provides more evidence than a test that verifies a single expected value for a single input.
 - A test portfolio designed from the contract outward — asking what inputs would violate the contract — is more reliable than one designed from the implementation inward.
+:::
+
 
 
 *Chapter 30 examines debugging as a hypothesis-driven engineering process. When tests discover a failure, debugging is the discipline of reasoning from the failure to its cause — treating the failed test as an observation that constrains the set of possible explanations, and designing experiments to narrow that set until the cause is identified.*

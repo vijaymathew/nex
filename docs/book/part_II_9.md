@@ -124,22 +124,26 @@ What the sketch does not address is the storage backend, the query execution str
 **No versioning strategy.** Models change. Fields are added, relationships are restructured, invariants are tightened or relaxed. A model that was not designed with change in mind will require migrations that break compatibility with existing data or existing clients. The recovery is to make model changes additive where possible — adding fields rather than modifying them, extending enumerations rather than replacing them — and to document the compatibility assumptions that each version of the model relies on.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 For one of the three running systems, write a one-page data model brief with six sections: core entities, core relationships, the three most important read operations, the three most important write operations, three invariants that must hold across all of them, and one foreseeable extension that the current model should not implement but should not prevent.
 
 Then name one tradeoff your model makes — between normalization and duplication, generality and simplicity, or strictness and flexibility — and explain why you made it.
 
 If you cannot name a tradeoff, look harder. A model with no visible tradeoffs is a model whose tradeoffs have not yet been examined.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - A good data model is operational, not merely conceptual: it is shaped by the queries and transitions the system must support, not just the entities the domain contains.
 - Critical access patterns must inform model structure from the beginning. Performance problems that originate in model design are the most expensive to fix.
 - Every non-trivial model embodies tradeoffs between normalization and duplication, generality and simplicity, strictness and flexibility. Make these tradeoffs explicit and document them.
 - Transition rules are part of the data model. A model that defines states without defining legal transitions between them is incomplete.
 - The test of a model's quality is not how it looks at design time but how well it absorbs change over the life of the system.
+:::
+
 
 
 *Chapter 10 examines the dimension of data modeling that most designs underestimate: change over time. A model that handles its initial requirements correctly may still fail as the system evolves. Chapter 10 makes the patterns of temporal change explicit and shows how to design for them.*

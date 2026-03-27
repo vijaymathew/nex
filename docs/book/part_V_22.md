@@ -134,20 +134,24 @@ In all three systems, the path algorithm is a direct consequence of the cost mod
 **Undefined unreachable semantics.** A path algorithm that returns an empty path, a zero-cost result, or a null when the destination is unreachable is indistinguishable, from the caller's perspective, from an algorithm that found an empty path that is the optimal path. The `UNREACHABLE` status must be a distinct, declared outcome. Every caller must handle it explicitly.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one routing problem in your system and define its best-path specification completely with five components: the objective function and how edge costs are combined, the edge validity rules and when they are checked, the tie-break rule when multiple paths have equal cost, the declared behavior when the destination is unreachable, and the algorithm and the assumption it requires to be correct.
 
 Then construct one adversarial input — a graph where a locally greedy choice produces a suboptimal global result — and verify that your chosen algorithm handles it correctly.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Best-path optimality is defined relative to a cost model. The cost model must be stated before the algorithm is chosen, because the algorithm's correctness guarantees are relative to it.
 - Dijkstra's algorithm is correct for non-negative edge costs. Modifying the cost model — allowing negative edges, changing the combination function — requires reconsidering the algorithm.
 - Local optimality does not imply global optimality. An algorithm that makes irrevocable local choices will fail on graphs where the globally optimal path requires a locally suboptimal step.
 - Edge validity must be checked during expansion, not just at the start. In dynamic environments, an edge that was valid when the search began may become invalid before it is reached.
 - Unreachability is a distinct outcome that must be declared explicitly. An empty path is not an unreachable status.
+:::
+
 
 
 *Part V has now covered the core algorithm families: search, sorting, traversal, and path optimization. Part VI applies these tools to the problems of system design at scale — where algorithms and data structures must be composed into architectures that are correct, efficient, and maintainable under real conditions.*

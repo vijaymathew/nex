@@ -144,20 +144,24 @@ In all three systems, contracts and invariants are the primary localization tool
 **No regression safety net.** A fix without a regression test is a fix without evidence of permanence. The same bug can be reintroduced by a future change that does not know the previous fix was needed. The regression test is the record of the bug — its existence says: a failure at this boundary was found here, was fixed here, and must be detected here if it recurs. A codebase whose bug fixes are systematically accompanied by regression tests is a codebase that becomes harder to break over time, rather than one that maintains a constant defect rate despite continuous repair.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Take one recent bug — a failure that was observed, diagnosed, and fixed — and reconstruct the debugging process in six parts: the minimal reproducible case, the localized failure boundary, the specific hypothesis that was formed, the targeted check that confirmed it, the patch that was applied, and the regression test that was added.
 
 If any step is missing from the reconstruction — if the fix was applied without a confirmed hypothesis, or without a regression test — identify what evidence that step would have provided and what risk its absence created. The reconstruction is not retrospective documentation; it is a test of whether the debugging process that was used was engineering-grade or trial-and-error.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Debugging is hypothesis-driven engineering. The six steps — reproduce, localize, hypothesize, check, confirm, patch — are not formalities. Each one provides evidence that the subsequent steps depend on.
 - Reproducibility is a prerequisite, not a convenience. A fix applied to an unreproduced failure is a guess, not an engineering decision.
 - Contracts and invariants are localization tools. A violated precondition identifies the caller; a violated postcondition identifies the routine; a violated invariant identifies the operation. They convert debugging from search to investigation.
 - One hypothesis, one change, one check. Multiple simultaneous changes produce results that cannot be interpreted. Each hypothesis must be tested independently.
 - Every fix needs a regression test. The test is the record of the bug — the evidence that the same failure cannot recur without detection.
+:::
+
 
 
 *Part VII has established the complete trustworthiness toolkit: preconditions and postconditions that define behavioral contracts, invariants that enforce object-level consistency, tests that provide evidence that contracts hold, and debugging that addresses causes rather than symptoms. These are the practices that make software dependable not just at completion but over the full arc of its evolution.*

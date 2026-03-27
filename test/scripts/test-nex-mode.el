@@ -80,6 +80,18 @@
     (should (string= comment-start "-- "))
     (should (string= comment-end ""))))
 
+(ert-deftest nex-underscore-is-part-of-identifiers ()
+  "Test that underscores are treated as part of identifiers."
+  (with-temp-buffer
+    (nex-mode)
+    (should (eq (char-syntax ?_) ?w))
+    (insert "from_loc from")
+    (goto-char (point-min))
+    (should-not (re-search-forward (regexp-opt nex-keywords 'words) 9 t))
+    (goto-char (point-min))
+    (search-forward "from" nil t 2)
+    (should (= (match-beginning 0) 10))))
+
 (ert-deftest nex-imenu-support ()
   "Test that imenu support is configured."
   (with-temp-buffer

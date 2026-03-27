@@ -143,7 +143,8 @@ Vague contracts produce unpredictable systems. Precise ones make every downstrea
 When something goes wrong — and something always does — a well-written problem statement tells you whether the implementation violated the contract or the contract itself was wrong. Either way, you know where to look.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one of these three systems: the delivery robot, the knowledge engine, or the virtual world. Write a problem statement with exactly three parts:
 
@@ -154,15 +155,18 @@ Choose one of these three systems: the delivery robot, the knowledge engine, or 
 Then add one normal example, one edge case, and one failure case.
 
 If your statement specifies an algorithm or data structure, rewrite it to focus on outcomes instead.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - A strong problem statement is precise about outcomes and silent about implementation.
 - Vague statements create misalignment; over-specified ones lock in decisions too early.
 - Examples, edge cases, and counterexamples surface missing requirements before they become costly mistakes.
 - A problem statement is a contract between intent, design, and code.
 - Clear contracts make algorithm selection, testing, and debugging substantially easier.
+:::
+
 
 
 *In Chapter 4, we stress-test problem statements systematically — probing edge cases, failure conditions, and contradictions. If Chapter 3 defines the contract, Chapter 4 tries to break it.*

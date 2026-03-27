@@ -77,9 +77,6 @@ feature
   is_structurally_valid(): Boolean do
     result := from_id /= "" and to_id /= ""
 	          and link_type /= ""
-  ensure
-    result_is_boolean: result = true
-	                   or result = false
   end
 
 create
@@ -111,20 +108,24 @@ The same structure generalizes: `Path` in the delivery network is a relationship
 **Hidden lifecycle rules.** When an entity is removed and the links that referenced it are not updated, the system accumulates broken references that will produce failures at some unpredictable future point. The lifecycle policy — cascade, orphan, or preserve — must be defined explicitly at the model level and verified by tests that exercise entity removal, not just entity creation.
 
 
-## Quick Exercise
+::: {.note-exercise}
+**Quick Exercise**
 
 Choose one of the three running systems and construct a relationship matrix. For each relationship you identify, record: the two entity types it connects, the relationship type and cardinality, and one constraint rule that must always hold.
 
 Then identify one reverse query that your model must support — a query that traverses the relationship in the direction opposite to how you first defined it. If that reverse query is expensive or ambiguous under your current model, the model needs refinement before implementation begins.
+:::
 
-
-## Takeaways
+::: {.note-takeaways}
+**Takeaways**
 
 - Relationships are first-class elements of a model: they have cardinality, direction, ownership, lifecycle coupling, and constraint rules.
 - Getting relationships wrong produces silent integrity failures and invisible cascading behavior — more dangerous, in practice, than getting entities wrong.
 - A relationship that carries metadata or supports multiple semantic types is usually better modeled as an entity in its own right.
 - Model for real access patterns. A relationship that supports only forward traversal is only half a relationship.
 - Lifecycle rules must be explicit. The choice between cascade, orphan, and preserve has consequences that compound over the lifetime of a system.
+:::
+
 
 
 *Chapter 9 brings entities and relationships together into a complete data model, and examines the tradeoffs that arise when a model must serve multiple competing concerns simultaneously.*
