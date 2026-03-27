@@ -56,8 +56,6 @@ Suggested files:
 - `migration_runner.nex`
 - `studio_6_main.nex`
 
-If using the web IDE, place all classes in one file and run `App.run`.
-
 ### Shared Evolution Types
 
 ```nex

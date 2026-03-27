@@ -55,8 +55,6 @@ Suggested files:
 - `world_reliability.nex`
 - `studio_5_main.nex`
 
-If using the web IDE, place all classes in one file and run `App.run`.
-
 ### Shared Reliability Types
 
 ```nex

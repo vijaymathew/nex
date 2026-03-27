@@ -57,7 +57,6 @@ Suggested files:
 - `algorithm_lab_2.nex`
 - `algorithm_lab_2_main.nex`
 
-If using the web IDE, place everything in one file and run `App.run`.
 
 ### Shared Result Type
 

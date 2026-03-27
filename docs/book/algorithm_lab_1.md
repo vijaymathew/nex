@@ -60,7 +60,6 @@ Suggested file names:
 - `algorithm_lab_1.nex`
 - `algorithm_lab_1_main.nex`
 
-If using the web IDE, place everything in one file and run `App.run`.
 
 ### Result Type
 

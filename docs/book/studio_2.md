@@ -62,8 +62,6 @@ Suggested files:
 - `world_model_v2.nex`
 - `studio_2_main.nex`
 
-If using the web IDE, place all classes in one file and run `App.run`.
-
 ### Delivery Model V2
 
 Focus: identity + legal transitions + assignment relationship.
@@ -164,8 +162,6 @@ feature
       (link_type = "references" 
 	   or link_type = "related" 
 	   or link_type = "contradicts")
-  ensure
-    bool_result: result = true or result = false
   end
 create
   make(f: String, t: String, lt: String) do
