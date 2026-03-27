@@ -96,35 +96,35 @@ feature
         found := true
         idx := 0
       elseif a2 = target then
-        steps := steps + 1
+        steps := 2
         found := true
         idx := 1
       elseif a3 = target then
-        steps := steps + 1
+        steps := 3
         found := true
         idx := 2
       elseif a4 = target then
-        steps := steps + 1
+        steps := 4
         found := true
         idx := 3
       elseif a5 = target then
-        steps := steps + 1
+        steps := 5
         found := true
         idx := 4
       elseif a6 = target then
-        steps := steps + 1
+        steps := 6
         found := true
         idx := 5
       elseif a7 = target then
-        steps := steps + 1
+        steps := 7
         found := true
         idx := 6
       elseif a8 = target then
-        steps := steps + 1
+        steps := 8
         found := true
         idx := 7
       else
-        steps := steps + 1
+        steps := 9
       end
 
       result := create Search_Result.make(found, idx, steps)
@@ -141,42 +141,55 @@ end
 ```nex
 class Binary_Search_Algo
 feature
-  find(a1, a2, a3, a4, a5, a6, a7, a8, 
-       target: Integer): Search_Result
-    require
-      sorted_input:
-        a1 <= a2 and a2 <= a3 and a3 <= a4 and
-        a4 <= a5 and a5 <= a6 and a6 <= a7 
-		and a7 <= a8
-    do
-      if a4 = target then
-        result := create Search_Result.make(true, 3, 1)
-      elseif target < a4 and a2 = target then
-        result := create Search_Result.make(true, 1, 2)
-      elseif target < a2 and a1 = target then
+  find(a1, a2, a3, a4, a5, a6, a7, a8, target: Integer): Search_Result
+require
+  sorted_input:
+  a1 <= a2 and a2 <= a3 and a3 <= a4 and
+  a4 <= a5 and a5 <= a6 and a6 <= a7 
+	and a7 <= a8
+do
+  if a4 = target then
+    result := create Search_Result.make(true, 3, 1)
+  elseif target < a4 then
+    if a2 = target then
+      result := create Search_Result.make(true, 1, 2)
+    elseif target < a2 then
+      if a1 = target then
         result := create Search_Result.make(true, 0, 3)
-      elseif target > a2 and target < a4 
-	         and a3 = target then
+      else
+        result := create Search_Result.make(false, -1, 3)
+      end
+    else
+      if a3 = target then
         result := create Search_Result.make(true, 2, 3)
-      elseif target > a4 and a6 = target then
-        result := create Search_Result.make(true, 5, 2)
-      elseif target > a4 and target < a6 
-	         and a5 = target then
+      else
+        result := create Search_Result.make(false, -1, 3)
+      end
+    end
+  else
+    if a6 = target then
+      result := create Search_Result.make(true, 5, 2)
+    elseif target < a6 then
+      if a5 = target then
         result := create Search_Result.make(true, 4, 3)
-      elseif target > a6 and a7 = target then
+      else
+        result := create Search_Result.make(false, -1, 3)
+      end
+    else
+      if a7 = target then
         result := create Search_Result.make(true, 6, 3)
       elseif target > a7 and a8 = target then
         result := create Search_Result.make(true, 7, 4)
-      else
+      elseif target > a7 then
         result := create Search_Result.make(false, -1, 4)
+      else
+        result := create Search_Result.make(false, -1, 3)
       end
-    ensure
-      steps_bounded: result.steps >= 1 
-	                 and result.steps <= 4
-      valid_index: result.index >= -1 
-	               and result.index <= 7
     end
+   end
+ end
 end
+
 ```
 
 ### Driver: Compare Behaviors
