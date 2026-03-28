@@ -69,11 +69,15 @@ You do not need a complex toolchain to begin. A local Nex REPL is enough for all
 
 
 
-## Note on the Code Examples
+## A Note on Code Examples
 
-The code examples in this book are provided for illustrative purposes, designed to clarify the engineering principles and patterns being discussed. They are not intended to be "production-ready" out of the box.
+The code examples in this book are sketches, not solutions. They are written to make an engineering principle visible — to show the shape of an idea clearly enough that you can reason about it — not to be taken directly into production.
 
-When working on the challenges provided in the Studio chapters, you are encouraged to implement complete, robust versions of the code yourself. This process of implementation is where much of the real learning happens. To support this work, you should make use of the additional sources provided in the References section of this book. Furthermore, for a deeper dive into the language itself, you should refer to the companion book, *Programming in Nex*, which is available from [schemer.in](https://schemer.in).
+A typical example will fix things that a real implementation would leave flexible: a collection hardcoded to a small number of elements, a search written as a chain of conditions rather than a loop, a class designed for one specific scenario rather than a family of them. These are not oversights. Each constraint is there because it removes a layer of machinery that would distract from the principle being illustrated. The sketch is as small as it can be while still being concrete enough to reason about.
+
+The gap between that sketch and a working implementation — one that handles arbitrary inputs, uses appropriate data structures, manages edge cases, and performs well under real conditions — is yours to close. That gap is intentional, and it is where the real learning happens. A principle you have read about is not the same as a principle you have implemented, broken, debugged, and made work on real inputs.
+
+The Studio chapters make this contract explicit: each presents a problem and enough structure to orient you, then stops. To support your work, draw on the references at the end of the book. For thorough grounding in the language itself, the companion volume Programming in Nex, available at [schemer.in](https://schemer.in), covers Nex in full detail from first principles.
 
 
 ## Before the Prologue

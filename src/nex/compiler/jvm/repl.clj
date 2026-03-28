@@ -141,12 +141,17 @@
 
 (defn- builtin-target-call-in-ctx?
   [ctx expr]
-  (let [target-expr (normalize-call-target (:target expr))]
+  (let [target-expr (normalize-call-target (:target expr))
+        target-type (when target-expr
+                      (infer-type-in-ctx ctx target-expr))
+        base (base-type-name target-type)
+        builtin-class (some #(when (= (:name %) base) %) (builtin-class-defs))
+        visible-class (some #(when (= (:name %) base) %) (:classes ctx))]
     (and target-expr
          (supported-expr-in-ctx? ctx target-expr)
          (every? #(supported-expr-in-ctx? ctx %) (:args expr))
-         (contains? builtin-runtime-receiver-types
-                    (base-type-name (infer-type-in-ctx ctx target-expr))))))
+         (contains? builtin-runtime-receiver-types base)
+         (= builtin-class visible-class))))
 
 (defn- class-method-in-ctx
   [ctx class-name method-name arity]

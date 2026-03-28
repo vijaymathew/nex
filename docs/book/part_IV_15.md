@@ -37,7 +37,7 @@ For the delivery system, two operations on task collections matter. The first is
 
 The mismatch between these two operations and a single list structure is the central tension of this chapter. A list satisfies the first operation directly. It satisfies the second only at a cost that grows with the number of tasks. At small scale, this cost is invisible. As the system grows, it becomes the bottleneck.
 
-The resolution — keeping a list for ordered display and introducing a separate index for keyed lookup — is the subject of Chapter 16. This chapter holds the tension open deliberately, because understanding why the list alone is insufficient is a prerequisite for understanding what the index adds.
+The resolution — keeping a list for ordered display and introducing a separate index for keyed lookup — is the subject of Chapter 17. This chapter holds the tension open deliberately, because understanding why the list alone is insufficient is a prerequisite for understanding what the index adds.
 
 
 ## A Sequence in Code
@@ -150,4 +150,4 @@ Then write one contract for the most frequent operation — a precondition that 
 
 
 
-*Chapter 16 introduces sets and maps — the structures that make membership testing and keyed lookup efficient. Where this chapter identified the cost of what lists cannot do, Chapter 16 introduces the structures designed to do exactly those things.*
+*Chapter 17 introduces sets and maps — the structures that make membership testing and keyed lookup efficient. Where this chapter identified the cost of what lists cannot do, Chapter 17 introduces the structures designed to do exactly those things.*

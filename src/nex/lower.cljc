@@ -126,8 +126,12 @@
     :else nil))
 
 (defn- builtin-runtime-receiver-type?
-  [t]
-  (contains? builtin-runtime-receiver-types (base-type-name t)))
+  [env t]
+  (let [base (base-type-name t)
+        builtin-class (some #(when (= (:name %) base) %) (builtin-class-defs))
+        visible-class (get (visible-class-map env) base)]
+    (and (contains? builtin-runtime-receiver-types base)
+         (= builtin-class visible-class))))
 
 (defn- generic-type-args
   [t]
@@ -194,8 +198,9 @@
     false))
 
 (defn- direct-concurrency-method?
-  [target-type method]
-  (case (base-type-name target-type)
+  [env target-type method]
+  (case (when (builtin-runtime-receiver-type? env target-type)
+          (base-type-name target-type))
     "Task" (contains? direct-task-methods method)
     "Channel" (contains? direct-channel-methods method)
     false))
@@ -2482,7 +2487,7 @@
                                              nex-type
                                              jvm-type))
 
-                (direct-concurrency-method? target-type (:method expr))
+                (direct-concurrency-method? env target-type (:method expr))
                 (let [target-ir (lower-expression env target-expr)
                       nex-type (infer-type env expr)
                       jvm-type (resolve-jvm-type env nex-type)]
@@ -2535,7 +2540,7 @@
                                           nex-type
                                           jvm-type)))
 
-                (builtin-runtime-receiver-type? target-type)
+                (builtin-runtime-receiver-type? env target-type)
                 (let [target-ir (lower-expression env target-expr)
                       base-type (base-type-name target-type)
                       nex-type (infer-type env expr)
