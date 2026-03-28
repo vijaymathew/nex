@@ -1,6 +1,6 @@
 # Thinking Recursively
 
-Chapter 12 established that decomposition means dividing a problem into subproblems with clear interfaces and distinct responsibilities. Recursion is a special and important case of this principle: it applies when the subproblem has the same shape as the original problem, only smaller.
+`Breaking Problems Apart` established that decomposition means dividing a problem into subproblems with clear interfaces and distinct responsibilities. Recursion is a special and important case of this principle: it applies when the subproblem has the same shape as the original problem, only smaller.
 
 This is not a trick or an advanced technique reserved for difficult cases. It is a natural way to express algorithms over data whose structure is self-referential — trees, graphs, nested containment hierarchies, any domain where the whole is made of parts that resemble the whole. In these domains, a recursive algorithm often expresses the solution more directly and more transparently than an iterative one, because the structure of the algorithm matches the structure of the data.
 
@@ -93,7 +93,7 @@ end
 
 Read this sketch against the four elements above. The first branch of the conditional is the base case: the node has been visited, return zero. The remaining branches are the recursive step: mark the node visited, count it, and add the result of the recursive call. The `visited` field serves as the cycle guard. The progress metric is implicit — each call either terminates immediately (the base case) or adds a new node to `visited` before recursing — but in a full implementation it would be worth making the progress argument explicit, either in a comment or in an assertion.
 
-The postcondition `result >= 0` is minimal but meaningful. A negative count is nonsensical, and guaranteeing non-negativity allows the caller to depend on this property rather than defensively check for it. As with the decomposed stages in Chapter 12, the contract at the boundary is what allows the piece to be composed with other pieces safely.
+The postcondition `result >= 0` is minimal but meaningful. A negative count is nonsensical, and guaranteeing non-negativity allows the caller to depend on this property rather than defensively check for it. As with the decomposed stages in `Breaking Problems Apart`, the contract at the boundary is what allows the piece to be composed with other pieces safely.
 
 
 ## Four Ways Recursive Algorithms Fail
@@ -127,4 +127,4 @@ Then test it against three inputs: a trivial input that exercises only the base 
 
 
 
-*Chapter 14 shifts from the correctness of algorithms to their cost. A correct algorithm that is too slow for its inputs is not a usable algorithm. Understanding how algorithmic cost grows with input size is what makes it possible to choose between correct alternatives — and to predict, before deployment, whether an algorithm will hold up under real conditions.*
+*The next chapter, `Measuring Algorithm Behavior`, shifts from the correctness of algorithms to their cost. A correct algorithm that is too slow for its inputs is not a usable algorithm. Understanding how algorithmic cost grows with input size is what makes it possible to choose between correct alternatives — and to predict, before deployment, whether an algorithm will hold up under real conditions.*

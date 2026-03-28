@@ -1,6 +1,6 @@
 # Sets and Maps
 
-Chapter 15 arrived at a tension: lists preserve order well but answer keyed questions poorly, and the dominant operations in many real systems are keyed. This chapter introduces the two structures designed to resolve that tension.
+`Lists and Sequences` arrived at a tension: lists preserve order well but answer keyed questions poorly, and the dominant operations in many real systems are keyed. This chapter introduces the two structures designed to resolve that tension.
 
 A **set** is a collection with no duplicates that answers one question efficiently: is this element present? A **map** is a collection of key-value pairs that answers one question efficiently: given this key, what value is associated with it? Neither preserves insertion order. Neither is organized for sequential traversal. Both are organized for direct access — the operation that lists cannot perform without scanning.
 
@@ -170,4 +170,4 @@ Then compare the asymptotic cost of the original scan with the cost of the direc
 
 
 
-*Chapter 17 introduces trees — structures that organize data hierarchically and make ordered search efficient. Where sets and maps provide direct access by key, trees provide something different: efficient navigation through data that has natural structure, and efficient answers to range queries that neither lists nor maps can serve well.*
+*The next chapter, `Trees — Structured Data`, introduces trees — structures that organize data hierarchically and make ordered search efficient. Where sets and maps provide direct access by key, trees provide something different: efficient navigation through data that has natural structure, and efficient answers to range queries that neither lists nor maps can serve well.*

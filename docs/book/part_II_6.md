@@ -168,4 +168,4 @@ The gap between those two answers is where reliability work should start.
 
 
 
-*Chapter 7 develops the first modeling primitive in depth: entities. We will distinguish identity from state, assign responsibilities, and choose representations that remain stable as the system grows.*
+*The next chapter, `Entities — The Things That Exist`, develops the first modeling primitive in depth. We will distinguish identity from state, assign responsibilities, and choose representations that remain stable as the system grows.*

@@ -117,4 +117,4 @@ Write out what efficient means in terms of a measurable criterion. State what in
 
 
 
-*Part I has now established the full arc from problem understanding to precise specification: stories that identify the situation, problem statements that define the computational task, edge cases that test the boundaries of the definition, and specifications that transform intent into formal claims. Part II opens with the next question: before algorithms can operate on a problem, the world must be represented. Chapter 6 asks why software needs models before it needs optimization.*
+*Part I has now established the full arc from problem understanding to precise specification: stories that identify the situation, problem statements that define the computational task, edge cases that test the boundaries of the definition, and specifications that transform intent into formal claims. Part II opens with the next question: before algorithms can operate on a problem, the world must be represented. `Why Software Needs Models` asks why software needs models before it needs optimization.*

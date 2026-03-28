@@ -149,4 +149,4 @@ For each module, ask: does this module's behavior need to change when domain rul
 
 
 
-*Chapter 32 examines how to design boundaries that absorb future change safely — the discipline of identifying the seams at which a system is most likely to change and structuring those seams so that changes on one side do not force changes on the other.*
+*The next chapter, `Designing for Change`, examines how to design boundaries that absorb future change safely — the discipline of identifying the seams at which a system is most likely to change and structuring those seams so that changes on one side do not force changes on the other.*

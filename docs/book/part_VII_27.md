@@ -93,9 +93,9 @@ The postcondition closes the loop: every claim made in the `do` block has a corr
 
 ## Contracts in the Three Systems
 
-In the delivery system, every state transition on `DeliveryTask` — assign, start, complete, fail — has a contract. The preconditions encode the legal transition graph from Chapter 10: which states permit which operations. The postconditions encode the resulting state and return value. A developer modifying the transition logic can see immediately what the contract requires and whether their change satisfies it.
+In the delivery system, every state transition on `DeliveryTask` — assign, start, complete, fail — has a contract. The preconditions encode the legal transition graph from `Modeling Change`: which states permit which operations. The postconditions encode the resulting state and return value. A developer modifying the transition logic can see immediately what the contract requires and whether their change satisfies it.
 
-In the knowledge engine, the route computation operation has a precondition that requires non-empty inputs and a postcondition that guarantees one of three declared statuses. The scoring operation has a precondition that requires non-empty document and query strings and a postcondition that guarantees a non-negative score. These contracts make the pipeline from Chapter 12's decomposition independently verifiable at each stage.
+In the knowledge engine, the route computation operation has a precondition that requires non-empty inputs and a postcondition that guarantees one of three declared statuses. The scoring operation has a precondition that requires non-empty document and query strings and a postcondition that guarantees a non-negative score. These contracts make the pipeline from `Breaking Problems Apart` independently verifiable at each stage.
 
 In the virtual world, the state update operation for each tick has a precondition that requires the entity to exist in the current frame and a postcondition that guarantees the entity's state satisfies the world's invariants after the update. Violations of the postcondition are caught at the boundary of the update, before the corrupted state propagates to collision detection or event output.
 
@@ -131,4 +131,4 @@ Then verify that the postconditions still hold after one plausible refactor of t
 
 
 
-*Chapter 28 extends the contract discipline from individual routines to entire objects. Where postconditions specify what is true after a single operation, invariants specify what is true at all times — before every call and after every return. Invariants are the class-level counterpart of postconditions, and they are what make it possible to reason about an object's state without reading every operation that might have modified it.*
+*The next chapter, `Invariants — Rules That Must Never Break`, extends the contract discipline from individual routines to entire objects. Where postconditions specify what is true after a single operation, invariants specify what is true at all times — before every call and after every return. Invariants are the class-level counterpart of postconditions, and they are what make it possible to reason about an object's state without reading every operation that might have modified it.*

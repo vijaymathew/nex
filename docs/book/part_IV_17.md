@@ -149,4 +149,4 @@ Then answer this question: why would a map from key to value lose information th
 
 
 
-*Chapter 18 generalizes from trees to graphs — structures in which the restriction to a single parent is lifted and cycles are permitted. Graphs model the most general form of connected data, and they are the natural representation for routing, dependency, and reachability problems that trees cannot express.*
+*The next chapter, `Graphs — Networks of Everything`, generalizes from trees to graphs — structures in which the restriction to a single parent is lifted and cycles are permitted. Graphs model the most general form of connected data, and they are the natural representation for routing, dependency, and reachability problems that trees cannot express.*

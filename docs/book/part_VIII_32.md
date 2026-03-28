@@ -1,6 +1,6 @@
 # Designing for Change
 
-Managing complexity, as we saw in Chapter 31, is the discipline of keeping a system understandable today. It is about drawing boundaries so that the cost of reasoning remains within our budget. But a system that is easy to understand today may still be prohibitively expensive to change tomorrow. Requirements evolve, technology stacks shift, and business models pivot. If every such change requires reaching across boundaries and rewriting stable logic, the system has failed a fundamental engineering test.
+Managing complexity, as we saw in `Managing Complexity`, is the discipline of keeping a system understandable today. It is about drawing boundaries so that the cost of reasoning remains within our budget. But a system that is easy to understand today may still be prohibitively expensive to change tomorrow. Requirements evolve, technology stacks shift, and business models pivot. If every such change requires reaching across boundaries and rewriting stable logic, the system has failed a fundamental engineering test.
 
 Designing for change is the practice of building "seams" into a system — locations where behavior can vary without breaking the contracts that surround them. The goal is not to predict the future, which is impossible, but to build a system that can absorb it.
 
@@ -160,4 +160,4 @@ Pick one part of your system that you expect to change in the next six months. D
 
 
 
-*Chapter 33 examines the practical discipline of refactoring — how to move a system from its current structure to a better one while proving that its behavior remains unchanged.*
+*The next chapter, `Refactoring Without Fear`, examines the practical discipline of refactoring — how to move a system from its current structure to a better one while proving that its behavior remains unchanged.*

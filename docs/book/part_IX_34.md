@@ -141,4 +141,4 @@ Compare the quality of the AI's output with what you might have gotten from a on
 
 
 
-*Chapter 35 moves from generation to validation: how to rigorously review AI-generated code to ensure it meets our standards for safety and correctness.*
+*The next chapter, `Reviewing AI-Generated Code`, moves from generation to validation: how to rigorously review AI-generated code to ensure it meets our standards for safety and correctness.*

@@ -1,6 +1,6 @@
 # Sorting the World
 
-Chapter 19 showed that search strategy depends on how data is organized. Sorting is often what creates that organization. A sorted collection is not just a collection in a particular display order — it is a collection with a structure that algorithms can exploit. Binary search requires sorted input. Efficient merging of two result sets requires sorted input. Detecting duplicates in a large collection becomes a linear scan through sorted data rather than a quadratic comparison of every pair. In each case, sorting is not the end of the computation but the preparation that makes efficient computation possible downstream.
+`Searching for What Matters` showed that search strategy depends on how data is organized. Sorting is often what creates that organization. A sorted collection is not just a collection in a particular display order — it is a collection with a structure that algorithms can exploit. Binary search requires sorted input. Efficient merging of two result sets requires sorted input. Detecting duplicates in a large collection becomes a linear scan through sorted data rather than a quadratic comparison of every pair. In each case, sorting is not the end of the computation but the preparation that makes efficient computation possible downstream.
 
 The distinction matters because it changes how we think about sorting's cost. The upfront cost of sorting a collection is not paid for the sort itself — it is paid for every subsequent operation that benefits from the ordered structure. When that structure is used many times, the upfront cost is amortized across all those uses. When it is used once or not at all, the sort was unnecessary work.
 
@@ -166,4 +166,4 @@ Then write one test case using two elements with equal primary keys that verifie
 
 
 
-*Chapter 21 turns from sorting data to traversing structures — the algorithms that systematically visit every node in a tree or graph. Traversal is the basis for search, analysis, and transformation of structured data, and the order in which nodes are visited determines what the traversal can compute.*
+*The next chapter, `Exploring Trees and Graphs`, turns from sorting data to traversing structures — the algorithms that systematically visit every node in a tree or graph. Traversal is the basis for search, analysis, and transformation of structured data, and the order in which nodes are visited determines what the traversal can compute.*

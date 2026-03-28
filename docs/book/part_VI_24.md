@@ -1,6 +1,6 @@
 # Functional Thinking
 
-Chapter 23 established that component boundaries determine where responsibilities live and how changes propagate. This chapter examines a complementary question: within those boundaries, how should behavior be structured so that it is easy to reason about, easy to test, and resistant to a specific class of errors that boundary design alone cannot prevent?
+`From Algorithms to Components` established that component boundaries determine where responsibilities live and how changes propagate. This chapter examines a complementary question: within those boundaries, how should behavior be structured so that it is easy to reason about, easy to test, and resistant to a specific class of errors that boundary design alone cannot prevent?
 
 The answer is functional thinking — the practice of representing logic as explicit transformations over data, with no hidden state and no side effects. This is not a requirement to work in a functional programming language or to eliminate all mutable state from a system. It is a discipline of design: separate the code that computes from the code that acts, and keep the computing parts testable in isolation.
 
@@ -43,7 +43,7 @@ A functional decomposition separates the pipeline into stages:
 4. `take_top(sorted_documents, 3)` returns the first three elements.
 5. The effect layer delivers the result.
 
-Stages one through four are pure. Each can be tested in isolation: `tokenize` can be verified to produce consistent normalized output, `score` can be verified to return non-negative results with the correct relative ordering, `sort_by_score` can be verified against the sort invariant from Chapter 20. Stage five is effectful, but it is also thin: it receives the computed result and delivers it. When stage five fails, the failure is in delivery. When stages one through four produce wrong results, the failure is in computation. The separation makes diagnosis local.
+Stages one through four are pure. Each can be tested in isolation: `tokenize` can be verified to produce consistent normalized output, `score` can be verified to return non-negative results with the correct relative ordering, `sort_by_score` can be verified against the sort invariant from `Sorting the World`. Stage five is effectful, but it is also thin: it receives the computed result and delivers it. When stage five fails, the failure is in delivery. When stages one through four produce wrong results, the failure is in computation. The separation makes diagnosis local.
 
 
 ## A Functional Design in Code
@@ -148,4 +148,4 @@ Write one contract for each part. Then run tests for the two pure functions with
 
 
 
-*Chapter 25 turns to object-oriented thinking — the complementary approach to organizing behavior around entities that own state and expose operations through defined interfaces. Where functional thinking decomposes computation into transformations, object-oriented thinking decomposes a system into collaborating agents, each responsible for its own state and behavior.*
+*The next chapter, `Object-Oriented Thinking`, turns to object-oriented thinking — the complementary approach to organizing behavior around entities that own state and expose operations through defined interfaces. Where functional thinking decomposes computation into transformations, object-oriented thinking decomposes a system into collaborating agents, each responsible for its own state and behavior.*

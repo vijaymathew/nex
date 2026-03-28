@@ -1,6 +1,6 @@
 # Object-Oriented Thinking
 
-Chapter 24 showed that functional thinking organizes a system as a pipeline of transformations: data flows in, computations happen, results flow out, effects are confined to the edges. This model is powerful for systems where the dominant question is *what should be computed?* But many systems also have to answer a different kind of question: *who is responsible for maintaining this constraint?* When a delivery task transitions to a delivered state, something must ensure that it cannot transition back to pending. When a robot is assigned to a task, something must ensure that the robot existed when the assignment was made. When two world objects interact, something must ensure that the interaction rules for their types are consulted.
+`Functional Thinking` showed that functional thinking organizes a system as a pipeline of transformations: data flows in, computations happen, results flow out, effects are confined to the edges. This model is powerful for systems where the dominant question is *what should be computed?* But many systems also have to answer a different kind of question: *who is responsible for maintaining this constraint?* When a delivery task transitions to a delivered state, something must ensure that it cannot transition back to pending. When a robot is assigned to a task, something must ensure that the robot existed when the assignment was made. When two world objects interact, something must ensure that the interaction rules for their types are consulted.
 
 These are questions about ownership and responsibility, and they are the domain where object-oriented thinking provides its clearest value. Not the value of classes and inheritance as syntactic features, but the value of a design discipline that assigns behavior to the objects that own the relevant state — that makes each object responsible for the invariants it is best positioned to enforce, rather than scattering that responsibility across the system.
 
@@ -20,7 +20,7 @@ An object-oriented system is not a collection of objects that act independently.
 
 A well-designed collaboration protocol has two sides. The requesting object asks for a defined behavior through a method with a declared contract. The responding object performs the behavior and enforces its own invariants, returning a result through the same contract. Neither object inspects or modifies the other's internal fields. The boundary between them is the contract.
 
-When collaborations become complex — when multiple objects must participate in a single workflow — a coordinator is the right structure. The coordinator calls each object's methods in the right order, handles the cases where any call fails, and passes results between objects. It does not own any domain state, enforce any domain invariants, or contain any domain logic. Its only responsibility is orchestration. This is the same coordinator design from Chapter 23, now applied to object collaboration rather than component assembly: the coordinator orchestrates, the objects enforce, and neither responsibility leaks into the other's domain.
+When collaborations become complex — when multiple objects must participate in a single workflow — a coordinator is the right structure. The coordinator calls each object's methods in the right order, handles the cases where any call fails, and passes results between objects. It does not own any domain state, enforce any domain invariants, or contain any domain logic. Its only responsibility is orchestration. This is the same coordinator design from `From Algorithms to Components`, now applied to object collaboration rather than component assembly: the coordinator orchestrates, the objects enforce, and neither responsibility leaks into the other's domain.
 
 
 ## From Requirement to Object Design
@@ -110,7 +110,7 @@ What the sketch does not show is equally important. No code outside `Robot` sets
 
 ## Object-Oriented Thinking in the Three Systems
 
-In the delivery system, `Robot` and `DeliveryTask` are the central domain objects. Each owns its own state transitions and enforces its own invariants. A dispatch coordinator orchestrates their interaction but does not duplicate their logic. The route computation from Chapter 22, which is a pure function, remains separate — it is not made into a method of either object because it does not depend on or modify either object's state.
+In the delivery system, `Robot` and `DeliveryTask` are the central domain objects. Each owns its own state transitions and enforces its own invariants. A dispatch coordinator orchestrates their interaction but does not duplicate their logic. The route computation from `Finding the Best Path`, which is a pure function, remains separate — it is not made into a method of either object because it does not depend on or modify either object's state.
 
 In the knowledge engine, `Document` and `Tag` are the central domain objects. A document owns its metadata integrity and its link structure. A tag owns its label and its membership rules. A ranking coordinator calls scoring functions — which are pure — and then delivers results through an output component. The document does not know how it will be ranked; the ranker does not know how the document stores its metadata.
 
@@ -148,4 +148,4 @@ For each object, identify one transition it must enforce and write the precondit
 
 
 
-*Chapter 26 formalizes interface design — the discipline of defining stable contracts between components that allows each side of a boundary to evolve independently. An interface is the promise a component makes to its callers, and the quality of that promise determines how much of the system must be understood before any part of it can be changed.*
+*The next chapter, `Designing Interfaces`, formalizes interface design — the discipline of defining stable contracts between components that allows each side of a boundary to evolve independently. An interface is the promise a component makes to its callers, and the quality of that promise determines how much of the system must be understood before any part of it can be changed.*

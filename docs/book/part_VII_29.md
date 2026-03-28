@@ -37,7 +37,7 @@ Consider the requirement:
 
 > *"The route planner should return a valid route or an explicit unreachable status."*
 
-The word "valid" is not self-defining. A valid route is a connected sequence of traversable edges from the start to the destination. The contract from Chapter 27 made this precise: status is `FOUND`, `UNREACHABLE`, or `INVALID_INPUT`; a `FOUND` result's path uses only existing edges; the path's first node is the start and last node is the destination. The test portfolio explores whether the implementation satisfies this contract.
+The word "valid" is not self-defining. A valid route is a connected sequence of traversable edges from the start to the destination. The contract from `Preconditions and Postconditions` made this precise: status is `FOUND`, `UNREACHABLE`, or `INVALID_INPUT`; a `FOUND` result's path uses only existing edges; the path's first node is the start and last node is the destination. The test portfolio explores whether the implementation satisfies this contract.
 
 **Nominal case.** Start is `A`, destination is `C`, a path exists: `A→B→C`. Expected status: `FOUND`. Expected path: `"A->B->C"`. This is the case the routine was primarily designed for.
 
@@ -117,7 +117,7 @@ In all three systems, the test portfolio that matters is not the one that maximi
 
 **Fragile assertions.** A test that asserts the exact string representation of a complex result, including incidental whitespace and ordering that are not part of the contract, will fail when the formatting changes even if the behavior is correct. A test whose oracle is weaker than the contract — that asserts only that the result is non-empty rather than that it satisfies the contract's properties — will pass when the behavior is wrong. The oracle should assert exactly what the contract guarantees, no more and no less.
 
-**Shared assumptions between test and implementation.** A test written by the same developer who wrote the implementation, immediately after writing the implementation, will often encode the same assumptions as the implementation. If the implementation misunderstands the requirement, the test will likely misunderstand it the same way. The oracle should be derived from the specification — the contract, the worked examples from Chapter 3, the edge cases from Chapter 4 — not from the implementation the developer just wrote. When possible, tests should be written before the implementation, so the oracle is derived from the requirement rather than from the code.
+**Shared assumptions between test and implementation.** A test written by the same developer who wrote the implementation, immediately after writing the implementation, will often encode the same assumptions as the implementation. If the implementation misunderstands the requirement, the test will likely misunderstand it the same way. The oracle should be derived from the specification — the contract, the worked examples from `Writing a Problem Statement`, the edge cases from `Edge Cases — Where Systems Break` — not from the implementation the developer just wrote. When possible, tests should be written before the implementation, so the oracle is derived from the requirement rather than from the code.
 
 
 ::: {.note-exercise}
@@ -140,4 +140,4 @@ For each test, write the oracle explicitly — the specific property that the ou
 
 
 
-*Chapter 30 examines debugging as a hypothesis-driven engineering process. When tests discover a failure, debugging is the discipline of reasoning from the failure to its cause — treating the failed test as an observation that constrains the set of possible explanations, and designing experiments to narrow that set until the cause is identified.*
+*The next chapter, `Debugging Like an Engineer`, examines debugging as a hypothesis-driven engineering process. When tests discover a failure, debugging is the discipline of reasoning from the failure to its cause — treating the failed test as an observation that constrains the set of possible explanations, and designing experiments to narrow that set until the cause is identified.*

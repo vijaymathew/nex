@@ -25,7 +25,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const num = link.querySelector(".chapter-number");
     if (num) num.remove();
     const title = link.querySelector(".chapter-title");
-    if (title && title.textContent.trim() === "index.html") {
+    if (title) {
       title.textContent = "Home";
     }
   });
