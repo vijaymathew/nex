@@ -1,6 +1,6 @@
 # Entities — The Things That Exist
 
-Chapter 6 established that a model is the necessary layer between specification and implementation. Now we build the first element of that model.
+`Why Software Needs Models` established that a model is the necessary layer between specification and implementation. Now we build the first element of that model.
 
 An entity is something the system must track as a distinct thing over time.
 
@@ -158,4 +158,4 @@ Those two gaps are where entity modeling work should begin.
 
 
 
-*Chapter 8 moves from things to connections. Entities alone are not enough — behavior emerges from the relationships between them.*
+*The next chapter, `Relationships — How Things Connect`, moves from things to connections. Entities alone are not enough — behavior emerges from the relationships between them.*

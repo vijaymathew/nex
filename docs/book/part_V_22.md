@@ -1,6 +1,6 @@
 # Finding the Best Path
 
-Chapter 21 drew the line between reachability and path quality. Traversal answers whether a destination can be reached at all. Best-path algorithms answer a harder question: among all paths that reach the destination, which one is optimal?
+`Exploring Trees and Graphs` drew the line between reachability and path quality. Traversal answers whether a destination can be reached at all. Best-path algorithms answer a harder question: among all paths that reach the destination, which one is optimal?
 
 The word *optimal* has no meaning without a cost model. A path that minimizes the number of hops is not necessarily the path that minimizes travel time, and neither is necessarily the path that minimizes risk or energy consumption. Different objectives require different algorithms, and an algorithm that is correct under one cost model may produce wrong answers under another. This is the central discipline of best-path design: the cost model must be declared before the algorithm is chosen, because the algorithm's correctness guarantees are relative to the cost model, not absolute.
 
@@ -11,7 +11,7 @@ A cost model assigns a numeric value to each edge in the graph and defines how t
 
 The choice of combination function has consequences for which algorithms apply. The most important of these consequences concerns the assumption of non-negative edge costs. Dijkstra's algorithm, the canonical best-path algorithm for weighted graphs, requires that all edge costs be non-negative. Given this assumption, it guarantees that when it finalizes a node — when it removes it from the frontier and commits to its current cost as the minimum — no future path can improve on that cost. This guarantee depends entirely on non-negativity: if negative edges exist, a path that was suboptimal at one moment may become optimal when a negative edge is discovered later, and the finalization decision was premature.
 
-If edge costs can be negative, a different algorithm is required. If edge costs are all equal — if the graph is unweighted — breadth-first search from Chapter 21 finds the minimum-hop path more efficiently than Dijkstra. The algorithm choice follows from the cost model, and the cost model must be determined first.
+If edge costs can be negative, a different algorithm is required. If edge costs are all equal — if the graph is unweighted — breadth-first search from `Exploring Trees and Graphs` finds the minimum-hop path more efficiently than Dijkstra. The algorithm choice follows from the cost model, and the cost model must be determined first.
 
 
 ## Priority-Driven Frontier Management

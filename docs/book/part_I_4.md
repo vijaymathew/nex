@@ -77,7 +77,7 @@ These questions may seem adversarial. They are. That is the point. The adversary
 
 There is a deeper reason to take edge cases seriously. They do not merely reveal holes in a design — they reveal that the original problem statement was about a simpler problem than the one we actually need to solve.
 
-Return to the specification from Chapter 3:
+Return to the specification from `Writing a Problem Statement`:
 
 > *Given a starting location and a destination, the robot must find a route that reaches the destination while avoiding any blocked paths.*
 
@@ -121,7 +121,7 @@ The edge case did not complicate the design. It completed it.
 ::: {.note-exercise}
 **Quick Exercise**
 
-Take the problem statement you wrote at the end of Chapter 3 and apply the three-category inventory to it.
+Take the problem statement you wrote at the end of `Writing a Problem Statement` and apply the three-category inventory to it.
 
 For each category — input edges, size edges, state edges — identify at least one case your current specification does not address. Then answer:
 
@@ -144,4 +144,4 @@ If your specification handles every case you can identify without modification, 
 
 
 
-*Chapter 5 takes the next step: turning problem statements, examples, and edge analyses into formal specifications — requirements precise enough that two programmers, working independently, build the same system.*
+*The next chapter, `From Stories to Specifications`, takes the next step: turning problem statements, examples, and edge analyses into formal specifications — requirements precise enough that two programmers, working independently, build the same system.*

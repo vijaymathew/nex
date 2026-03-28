@@ -141,4 +141,4 @@ Then apply this test: give your specification to another engineer and ask them t
 
 
 
-*Chapter 12 examines decomposition: how to take a complex algorithmic problem and divide it into pieces that can be designed, implemented, and tested independently. The discipline of decomposition is what separates algorithms that can be reasoned about from algorithms that can only be run.*
+*The next chapter, `Breaking Problems Apart`, examines decomposition: how to take a complex algorithmic problem and divide it into pieces that can be designed, implemented, and tested independently. The discipline of decomposition is what separates algorithms that can be reasoned about from algorithms that can only be run.*

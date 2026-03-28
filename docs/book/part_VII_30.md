@@ -1,6 +1,6 @@
 # Debugging Like an Engineer
 
-Chapter 29 showed how tests discover failures. A failed test is evidence that something is wrong — that some input produces output inconsistent with the contract. Debugging begins where testing ends. Its task is to answer two questions: why does the failure occur, and how can it be corrected without introducing new failures?
+`Testing as Exploration` showed how tests discover failures. A failed test is evidence that something is wrong — that some input produces output inconsistent with the contract. Debugging begins where testing ends. Its task is to answer two questions: why does the failure occur, and how can it be corrected without introducing new failures?
 
 These questions admit engineering answers. Debugging is not a search through a codebase for suspicious lines. It is a process of scientific reasoning: observe a failure, form a hypothesis about its cause, design a check that would distinguish the hypothesis from alternatives, execute the check, and revise the hypothesis based on the result. The process is iterative, but each iteration is directed rather than exploratory — each step produces information that narrows the space of possible causes.
 
@@ -121,7 +121,7 @@ The `complete` operation now carries the precondition `in_transit: status = "IN_
 
 `Debug_Smoke_Test.run` exercises the legal transition sequence: `PENDING → IN_TRANSIT → DELIVERED` via `start` followed by `complete`. The test confirms that the corrected `complete` still works correctly on valid inputs. It is not the regression test for the bug — that test would attempt to call `complete` from `PENDING` and confirm it is rejected — but it is evidence that the fix did not break the operation for the inputs it was designed to handle.
 
-The `start` operation also has a precondition: `status = "PENDING" or status = "FAILED"`. This is the transition contract from Chapter 10's model: the complete legal transition graph, encoded as preconditions on each operation. The bug exposed by the failing report was a gap in this graph — `complete` without its precondition allowed a transition the model declared illegal. The fix closes the gap.
+The `start` operation also has a precondition: `status = "PENDING" or status = "FAILED"`. This is the transition contract from `Modeling Change`: the complete legal transition graph, encoded as preconditions on each operation. The bug exposed by the failing report was a gap in this graph — `complete` without its precondition allowed a transition the model declared illegal. The fix closes the gap.
 
 
 ## Debugging in the Three Systems

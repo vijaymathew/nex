@@ -1,4 +1,4 @@
-# Algorithm Lab — When Algorithms Compete
+# Algorithm Lab — When Algorithms Compete {-}
 
 ## Subtitle
 

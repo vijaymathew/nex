@@ -146,4 +146,4 @@ Did you find anything that a "style-only" review would have missed?
 
 
 
-*Chapter 36 closes the book with the final piece of the puzzle: the role of human judgment and accountability in a world where AI is doing more and more of the work.*
+*The next chapter, `Human Judgment in an AI World`, closes the book with the final piece of the puzzle: the role of human judgment and accountability in a world where AI is doing more and more of the work.*

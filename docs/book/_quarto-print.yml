@@ -72,6 +72,9 @@ book:
     - index_terms.md
     - references.md
 
+crossref:
+  chapters: true
+
 format:
   pdf:
     output-file: beyond-code-print.pdf

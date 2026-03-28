@@ -1,6 +1,6 @@
 # Invariants — Rules That Must Never Break
 
-Chapter 27 introduced contracts at the level of individual operations: preconditions that state what must be true before a routine is called, and postconditions that state what will be true when it returns. These are powerful tools for reasoning about individual calls. They do not, by themselves, answer a broader question: what is always true about an object, regardless of which sequence of operations has been applied to it, and regardless of what state it was in before any particular call?
+`Preconditions and Postconditions` introduced contracts at the level of individual operations: preconditions that state what must be true before a routine is called, and postconditions that state what will be true when it returns. These are powerful tools for reasoning about individual calls. They do not, by themselves, answer a broader question: what is always true about an object, regardless of which sequence of operations has been applied to it, and regardless of what state it was in before any particular call?
 
 This is the question invariants answer. An invariant is a property that holds for every observable state of an object — after construction, before every operation call, and after every operation return. It is not a claim about one call or one transition; it is a claim about the object's entire lifetime. Where a postcondition says "after this operation, the status is `IN_TRANSIT`," an invariant says "at all times, the status is one of four declared values." The postcondition is a consequence of a specific operation; the invariant is a constraint on the entire state space.
 
@@ -84,7 +84,7 @@ The three invariants cover all three categories. `id_present` is a field-level i
 
 The interaction between the invariant and the postcondition on `step` is the central design relationship in this sketch. The invariant asserts `x_bounded` as a permanent truth. The postcondition on `step` asserts `bounded_after_step`, which is the same condition. This is intentional: the postcondition is the per-call evidence that the invariant is preserved across the `step` operation. If a future modification to `step` removed the clamping logic and the postcondition, the invariant would immediately catch any execution that left `x` out of bounds.
 
-The precondition on `step` — `max_valid: max_x >= 0` — might look redundant given the class invariant `max_non_negative`. It is not redundant for the same reason the `task_id_present` precondition in Chapter 27 was not redundant: the invariant guarantees the condition for any correctly constructed object; the precondition is a defensive assertion that makes the assumption visible in the operation's own contract. As the class evolves and `step` is read in isolation, the precondition communicates the operation's requirements without requiring the reader to consult the class invariant.
+The precondition on `step` — `max_valid: max_x >= 0` — might look redundant given the class invariant `max_non_negative`. It is not redundant for the same reason the `task_id_present` precondition in `Preconditions and Postconditions` was not redundant: the invariant guarantees the condition for any correctly constructed object; the precondition is a defensive assertion that makes the assumption visible in the operation's own contract. As the class evolves and `step` is read in isolation, the precondition communicates the operation's requirements without requiring the reader to consult the class invariant.
 
 
 ## Invariants in the Three Systems
@@ -127,4 +127,4 @@ Then write one test that calls the potentially violating operation with inputs d
 
 
 
-*Chapter 29 examines how testing extends the guarantees established by contracts and invariants. Where contracts specify what must be true, tests provide evidence that the specifications have been met — and they do so by exploring behavior across the full range of inputs, not just the ones the developer thought of first.*
+*The next chapter, `Testing as Exploration`, examines how testing extends the guarantees established by contracts and invariants. Where contracts specify what must be true, tests provide evidence that the specifications have been met — and they do so by exploring behavior across the full range of inputs, not just the ones the developer thought of first.*

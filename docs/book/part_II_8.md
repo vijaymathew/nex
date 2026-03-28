@@ -4,7 +4,7 @@ Entities give us the vocabulary of a system. Relationships give it grammar.
 
 A model composed only of entities is a list of nouns with no verbs, no dependencies, no structure. The interesting behavior of any real system — the behavior that is difficult to reason about, difficult to test, and difficult to change without breaking something — lives almost entirely in how entities connect to one another. Getting entities wrong makes a system confusing. Getting relationships wrong makes it dangerous: data diverges silently, cascading failures become invisible, and the system acquires behavior that nobody designed and nobody can fully explain.
 
-Relationships deserve the same deliberate treatment we gave entities in Chapter 7. That means making them explicit, naming their properties, and encoding the rules that govern them before those rules get buried in application code.
+Relationships deserve the same deliberate treatment we gave entities in `Entities — The Things That Exist`. That means making them explicit, naming their properties, and encoding the rules that govern them before those rules get buried in application code.
 
 
 ## What a Relationship Is
@@ -128,4 +128,4 @@ Then identify one reverse query that your model must support — a query that tr
 
 
 
-*Chapter 9 brings entities and relationships together into a complete data model, and examines the tradeoffs that arise when a model must serve multiple competing concerns simultaneously.*
+*The next chapter, `Designing a Good Data Model`, brings entities and relationships together into a complete data model, and examines the tradeoffs that arise when a model must serve multiple competing concerns simultaneously.*

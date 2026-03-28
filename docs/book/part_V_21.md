@@ -31,7 +31,7 @@ For the delivery system's route-finding problem, BFS over an unweighted graph fi
 
 A traversal that visits the right nodes in the right order is correct. A traversal without safety controls is correct on graphs that cooperate and incorrect on graphs that do not.
 
-**Visited tracking** is the first required control, and it is not optional for any graph that may contain cycles. A traversal that does not record which nodes have been visited will follow a cycle indefinitely, revisiting the same nodes without making progress. The visited set — introduced in Chapter 13 for recursive DFS — is equally necessary for iterative BFS. Every node is added to the visited set at the moment it is first discovered, before it is processed, so that subsequent encounters with the same node are recognized and skipped.
+**Visited tracking** is the first required control, and it is not optional for any graph that may contain cycles. A traversal that does not record which nodes have been visited will follow a cycle indefinitely, revisiting the same nodes without making progress. The visited set — introduced in `Thinking Recursively` for recursive DFS — is equally necessary for iterative BFS. Every node is added to the visited set at the moment it is first discovered, before it is processed, so that subsequent encounters with the same node are recognized and skipped.
 
 **Depth and expansion bounds** are the second required control for traversals that must be bounded. A BFS over a document graph with no depth limit will explore the entire connected component of the starting node, which may be the entire document collection. A depth limit of two means: visit the start node and its direct neighbors (depth one) and their neighbors (depth two), then stop. The bound must be enforced explicitly — it does not emerge automatically from the traversal structure — and it must be chosen based on what the system needs to compute, not on what happens to work in testing.
 
@@ -104,7 +104,7 @@ end
 
 The structure of `bfs_from_a_depth2` encodes the five design decisions from the worked path. The cases are organized by what edges exist, reflecting the depth-layer structure of BFS: direct neighbors of A first, then their neighbors. The `ISOLATED` case handles the failure mode of a start node with no outgoing edges. The postcondition guarantees that the result status is always one of the two declared values — the traversal never returns an undeclared state.
 
-The adjacency fields — `a_to_b`, `a_to_c`, `b_to_d`, `c_to_d` — are the explicit representation of the graph's structure. The traversal consults them directly rather than inferring connectivity from the traversal's own control flow. This is the same separation established in Chapter 18: the graph structure and the traversal algorithm are distinct, and the traversal's correctness depends only on what the adjacency structure reports, not on how it is implemented.
+The adjacency fields — `a_to_b`, `a_to_c`, `b_to_d`, `c_to_d` — are the explicit representation of the graph's structure. The traversal consults them directly rather than inferring connectivity from the traversal's own control flow. This is the same separation established in `Graphs — Networks of Everything`: the graph structure and the traversal algorithm are distinct, and the traversal's correctness depends only on what the adjacency structure reports, not on how it is implemented.
 
 What the sketch does not show — and cannot, at this size — is the visited set and the queue that BFS requires in a general implementation. In a full implementation over an arbitrary graph, both are essential. The sketch's fixed size and hardcoded structure mean the cases are enumerable; in production, the structure must be traversed programmatically, and the safety controls are what prevent the traversal from becoming incorrect when the graph grows.
 
@@ -149,4 +149,4 @@ Then consider: would swapping DFS for BFS, or BFS for DFS, produce incorrect res
 
 
 
-*Chapter 22 builds on traversal to address a more demanding question: not just which nodes are reachable, but which path to a destination is best by some defined criterion. Path optimization requires both traversal and a cost model, and the interplay between the two determines which algorithms are applicable and what guarantees they can provide.*
+*The next chapter, `Finding the Best Path`, builds on traversal to address a more demanding question: not just which nodes are reachable, but which path to a destination is best by some defined criterion. Path optimization requires both traversal and a cost model, and the interplay between the two determines which algorithms are applicable and what guarantees they can provide.*

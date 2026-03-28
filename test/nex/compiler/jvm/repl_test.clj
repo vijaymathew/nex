@@ -419,7 +419,74 @@ let s := create Savings_Account.make(10.0, 0.2)"))
       (is (:compiled? define-result))
       (compiled-repl/sync-session->interpreter! session ctx)
       (let [result (interp/eval-node ctx (-> (p/ast "s.balance") :statements first))]
-        (is (= 10.0 result)))))) 
+        (is (= 10.0 result))))))
+
+(deftest repl-compiled-backend-user-task-shadow-does-not-hit-builtin-task-runtime-test
+  (testing "compiled backend treats a user-defined Task class as a user class, not the builtin Task runtime type"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx0 "class Task
+create
+  make(id: String, status: String) do
+    this.id := id
+    this.status := status
+  end
+feature
+  id: String
+  status: String
+invariant
+  id_present: id /= \"\"
+  valid_status:
+    status = \"PENDING\" or
+    status = \"IN_TRANSIT\" or
+    status = \"DELIVERED\" or
+    status = \"FAILED\"
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "class Task_Sequence
+create
+  make(t1: Task, t2: Task, t3: Task) do
+    this.t1 := t1
+    this.t2 := t2
+    this.t3 := t3
+  end
+feature
+  t1: Task
+  t2: Task
+  t3: Task
+
+  find_by_id(task_id: String): String
+    require
+      id_present: task_id /= \"\"
+    do
+      if t1.id = task_id then
+        result := t1.status
+      elseif t2.id = task_id then
+        result := t2.status
+      elseif t3.id = task_id then
+        result := t3.status
+      else
+        result := \"NOT_FOUND\"
+      end
+    ensure
+      declared_result:
+        result = \"PENDING\" or
+        result = \"IN_TRANSIT\" or
+        result = \"DELIVERED\" or
+        result = \"FAILED\" or
+        result = \"NOT_FOUND\"
+    end
+end"))
+        (with-out-str
+          (repl/eval-code ctx0 "let ts := create Task_Sequence.make(create Task.make(\"123\", \"PENDING\"), create Task.make(\"456\", \"IN_TRANSIT\"), create Task.make(\"789\", \"DELIVERED\"))"))
+        (let [output (with-out-str
+                       (repl/eval-code ctx0 "ts.find_by_id(\"456\")"))]
+          (is (not (str/includes? output "Error:")))
+          (is (str/includes? output "IN_TRANSIT")))))))
 
 (deftest repl-compiled-backend-polymorphic-across-test
   (testing "compiled backend supports polymorphic method dispatch in across loops"

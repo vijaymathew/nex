@@ -1,4 +1,4 @@
-# Algorithm Lab — The First Experiments
+# Algorithm Lab — The First Experiments {-}
 
 ## Subtitle
 

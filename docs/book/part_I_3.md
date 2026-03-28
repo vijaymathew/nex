@@ -169,4 +169,4 @@ If your statement specifies an algorithm or data structure, rewrite it to focus 
 
 
 
-*In Chapter 4, we stress-test problem statements systematically — probing edge cases, failure conditions, and contradictions. If Chapter 3 defines the contract, Chapter 4 tries to break it.*
+*In the next chapter, we stress-test problem statements systematically — probing edge cases, failure conditions, and contradictions. If this chapter defines the contract, the next chapter tries to break it.*

@@ -227,6 +227,65 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-user-class-can-shadow-builtin-task-type
+  (testing "A user-defined Task class should not be clobbered by the builtin Task placeholder"
+    (let [code "class Task
+                  create
+                    make(id: String, status: String) do
+                      this.id := id
+                      this.status := status
+                    end
+                  feature
+                    id: String
+                    status: String
+                  invariant
+                    id_present: id /= \"\"
+                    valid_status:
+                      status = \"PENDING\" or
+                      status = \"IN_TRANSIT\" or
+                      status = \"DELIVERED\" or
+                      status = \"FAILED\"
+                  end
+
+                class Task_Sequence
+                  create
+                    make(t1: Task, t2: Task, t3: Task) do
+                      this.t1 := t1
+                      this.t2 := t2
+                      this.t3 := t3
+                    end
+                  feature
+                    t1: Task
+                    t2: Task
+                    t3: Task
+
+                    find_by_id(task_id: String): String
+                      require
+                        id_present: task_id /= \"\"
+                      do
+                        if t1.id = task_id then
+                          result := t1.status
+                        elseif t2.id = task_id then
+                          result := t2.status
+                        elseif t3.id = task_id then
+                          result := t3.status
+                        else
+                          result := \"NOT_FOUND\"
+                        end
+                      ensure
+                        declared_result:
+                          result = \"PENDING\" or
+                          result = \"IN_TRANSIT\" or
+                          result = \"DELIVERED\" or
+                          result = \"FAILED\" or
+                          result = \"NOT_FOUND\"
+                      end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-nil-equality
   (testing "Equality comparison with nil should type check"
     (let [code "class Test

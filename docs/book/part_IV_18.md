@@ -45,7 +45,7 @@ Consider the requirement:
 
 **Step 3: Choose a traversal algorithm.** For the first version of the system, with unweighted edges and the objective of fewest hops, breadth-first search is the right choice. BFS explores nodes in order of their distance from the source, measured in hops, and guarantees that the first path it finds to any node is the shortest one. If the objective were minimum total cost on a weighted graph, Dijkstra's algorithm would be the right choice. The algorithm is chosen to match the objective, not selected by habit.
 
-**Step 4: Add traversal safety.** Graphs may contain cycles. A traversal that does not track which nodes have been visited will follow cycles indefinitely, consuming memory and time without making progress. The visited set, introduced in Chapter 13 for recursive traversals, is equally necessary for iterative ones. Unknown nodes — identifiers not present in the graph — should produce `INVALID_INPUT` rather than being treated as disconnected nodes.
+**Step 4: Add traversal safety.** Graphs may contain cycles. A traversal that does not track which nodes have been visited will follow cycles indefinitely, consuming memory and time without making progress. The visited set, introduced in `Thinking Recursively` for recursive traversals, is equally necessary for iterative ones. Unknown nodes — identifiers not present in the graph — should produce `INVALID_INPUT` rather than being treated as disconnected nodes.
 
 **Step 5: Keep the representation explicit.** The adjacency structure is a first-class element of the model, not a detail hidden inside the traversal algorithm. Exposing it explicitly makes the graph's content inspectable, testable, and modifiable independently of the algorithms that operate on it.
 

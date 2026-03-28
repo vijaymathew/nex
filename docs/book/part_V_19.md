@@ -85,16 +85,16 @@ feature
       if task_id = id1 then
         final_status := st1
       elseif task_id = id2 then
-        steps := steps + 1
+        steps := 2
         final_status := st2
       elseif task_id = id3 then
-        steps := steps + 1
+        steps := 3
         final_status := st3
       elseif task_id = id4 then
-        steps := steps + 1
+        steps := 4
         final_status := st4
       else
-        steps := steps + 1
+        steps := 4
       end
       result := create Search_Result.make(
         final_status,
@@ -116,7 +116,7 @@ The `steps` field deserves particular attention. A search algorithm that returns
 
 ## Search in the Three Systems
 
-In the delivery system, searching for a task by identifier is a frequent operation: robots request their assignments, status updates target specific tasks, and dispatch logic queries task states. The collection of active tasks grows as the system scales. Linear search over a sequence of tasks will degrade at scale; a map from task identifier to task, introduced in Chapter 16, is the appropriate structure when identifier lookup is the dominant operation.
+In the delivery system, searching for a task by identifier is a frequent operation: robots request their assignments, status updates target specific tasks, and dispatch logic queries task states. The collection of active tasks grows as the system scales. Linear search over a sequence of tasks will degrade at scale; a map from task identifier to task, introduced in `Sets and Maps`, is the appropriate structure when identifier lookup is the dominant operation.
 
 In the knowledge engine, search operates at two levels. The first level locates candidate documents by token, tag, or identifier — a structured search over index entries. The second level ranks the candidates by relevance — a scoring and comparison over a much smaller set. These are distinct operations with distinct performance requirements, and they warrant distinct strategies. The first benefits from indexed structure; the second operates on a small enough candidate set that a linear scan over ranked scores is appropriate.
 
@@ -153,4 +153,4 @@ Then write the precondition and postcondition for that operation. If the postcon
 
 
 
-*Chapter 20 examines sorting — the operation that turns unordered data into a form where faster search, efficient merge, and reliable comparison become possible. Understanding sorting as a prerequisite for other algorithms, rather than as a standalone operation, is what connects it to the system design concerns of this part.*
+*The next chapter, `Sorting the World`, examines sorting — the operation that turns unordered data into a form where faster search, efficient merge, and reliable comparison become possible. Understanding sorting as a prerequisite for other algorithms, rather than as a standalone operation, is what connects it to the system design concerns of this part.*

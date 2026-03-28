@@ -22,7 +22,7 @@ These two properties reinforce each other. A component with high cohesion is eas
 
 When algorithms are assembled into a system, their natural organization suggests the component boundaries. The question to ask of any proposed boundary is not whether it is convenient but whether it groups a coherent responsibility and separates it from a different one.
 
-For the delivery system, a requirement like "compute the best route and notify clients when it changes" contains three distinct concerns. Route computation is a pure algorithmic concern: given a graph and a pair of locations, produce an optimal path or report failure. Task state management is an entity-level concern from Chapter 7: what are the legal states of a delivery task, and what transitions are permitted? Notification delivery is a side-effect concern: given a message and a recipient, deliver the message. These three concerns have different reasons to change — the route algorithm might be replaced by a more efficient one, the task state model might acquire new statuses, the notification channel might change from push to pull — and their changes are independent. They belong in separate components.
+For the delivery system, a requirement like "compute the best route and notify clients when it changes" contains three distinct concerns. Route computation is a pure algorithmic concern: given a graph and a pair of locations, produce an optimal path or report failure. Task state management is an entity-level concern from `Entities — The Things That Exist`: what are the legal states of a delivery task, and what transitions are permitted? Notification delivery is a side-effect concern: given a message and a recipient, deliver the message. These three concerns have different reasons to change — the route algorithm might be replaced by a more efficient one, the task state model might acquire new statuses, the notification channel might change from push to pull — and their changes are independent. They belong in separate components.
 
 The direction of dependency matters as much as the separation itself. The route computation component should not depend on the notification component — computing a route does not require knowing how notifications are delivered, and introducing that dependency would mean that changing the notification system requires reconsidering the route algorithm. The correct direction is for both to depend on a coordinator that orchestrates their interaction, while neither depends on the other directly.
 
@@ -41,7 +41,7 @@ A componentized design separates the concerns:
 
 **`Route_Component`** owns the route computation algorithm and the rules that govern valid routes. Its contract is: given a start location and an end location, return a valid path or report that none exists. It knows nothing about tasks, notifications, or persistence.
 
-**`Task_Component`** owns the task state model from Chapter 7: the legal states, the permitted transitions, and the invariants that must hold. Its contract is the set of transition operations defined in that model. It knows nothing about route computation or notification.
+**`Task_Component`** owns the task state model from `Entities — The Things That Exist`: the legal states, the permitted transitions, and the invariants that must hold. Its contract is the set of transition operations defined in that model. It knows nothing about route computation or notification.
 
 **`Notify_Component`** owns message delivery. Its contract is: given a task identifier and a message, deliver the message and return a status. It knows nothing about routes or tasks.
 
@@ -160,4 +160,4 @@ For each component, write the precondition and postcondition of its primary oper
 
 
 
-*Chapter 24 examines functional thinking as a strategy for designing components that are composable and testable by construction — components whose behavior can be understood and verified from their types and contracts alone, without reference to shared state or execution order.*
+*The next chapter, `Functional Thinking`, examines functional thinking as a strategy for designing components that are composable and testable by construction — components whose behavior can be understood and verified from their types and contracts alone, without reference to shared state or execution order.*

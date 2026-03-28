@@ -3502,11 +3502,12 @@
            (let [simple-name (last (str/split qualified-name #"\."))]
              (env-add-class env simple-name {:name simple-name :body [] :import qualified-name}))))
 
-       ;; First pass: collect all class definitions
+       (register-builtin-methods env)
+
+       ;; First pass: collect all class definitions, allowing user classes to
+       ;; override builtin placeholder names such as Task or Channel.
        (doseq [class-def classes]
          (collect-class-info env class-def))
-
-       (register-builtin-methods env)
 
        ;; Inject pre-existing variable types (e.g., from REPL)
        (doseq [[var-name var-type] (:var-types opts)]
@@ -3563,9 +3564,9 @@
         (when (nil? source)
           (let [simple-name (last (str/split qualified-name #"\."))]
             (env-add-class env simple-name {:name simple-name :body [] :import qualified-name}))))
+      (register-builtin-methods env)
       (doseq [class-def (:classes opts)]
         (collect-class-info env class-def))
-      (register-builtin-methods env)
       (doseq [fn-def (:functions opts)]
         (env-add-var env (:name fn-def) (:class-name fn-def)))
       (doseq [[var-name var-type] (:var-types opts)]

@@ -146,4 +146,4 @@ If you cannot name a tradeoff, look harder. A model with no visible tradeoffs is
 
 
 
-*Chapter 10 examines the dimension of data modeling that most designs underestimate: change over time. A model that handles its initial requirements correctly may still fail as the system evolves. Chapter 10 makes the patterns of temporal change explicit and shows how to design for them.*
+*The next chapter, `Modeling Change`, examines the dimension of data modeling that most designs underestimate: change over time. A model that handles its initial requirements correctly may still fail as the system evolves. `Modeling Change` makes the patterns of temporal change explicit and shows how to design for them.*
