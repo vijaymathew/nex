@@ -85,16 +85,16 @@ feature
       if task_id = id1 then
         final_status := st1
       elseif task_id = id2 then
-        steps := steps + 1
+        steps := 2
         final_status := st2
       elseif task_id = id3 then
-        steps := steps + 1
+        steps := 3
         final_status := st3
       elseif task_id = id4 then
-        steps := steps + 1
+        steps := 4
         final_status := st4
       else
-        steps := steps + 1
+        steps := 4
       end
       result := create Search_Result.make(
         final_status,
