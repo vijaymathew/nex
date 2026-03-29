@@ -3095,12 +3095,37 @@
 (defn check-inheritance
   "Check that inheritance declarations are valid"
   [env class-name parents]
+  (letfn [(cycle-path [start-parent]
+            (letfn [(visit [current path seen]
+                      (cond
+                        (= current class-name)
+                        (conj path current)
+
+                        (contains? seen current)
+                        nil
+
+                        :else
+                        (when-let [class-def (env-lookup-class env current)]
+                          (let [seen' (conj seen current)
+                                path' (conj path current)]
+                            (some #(visit (:parent %) path' seen')
+                                  (:parents class-def))))))]
+              (visit start-parent [class-name] #{class-name})))]
   (doseq [{:keys [parent]} parents]
     ;; Check that parent class exists
     (when-not (or (env-lookup-class env parent) (builtin-type? parent))
       (throw (ex-info (str "Parent class " parent " not found for class " class-name)
                       {:error (type-error
-                               (str "Undefined parent class: " parent))})))))
+                               (str "Undefined parent class: " parent))})))
+    (when (= parent class-name)
+      (throw (ex-info (str "Class " class-name " cannot inherit from itself")
+                      {:error (type-error
+                               (str "Class " class-name " cannot inherit from itself"))})))
+    (when-let [path (cycle-path parent)]
+      (throw (ex-info (str "Cyclic inheritance detected: " (str/join " -> " path))
+                      {:error (type-error
+                               (str "Cyclic inheritance detected: "
+                                    (str/join " -> " path)))}))))))
 
 (defn check-class
   "Check a class definition"

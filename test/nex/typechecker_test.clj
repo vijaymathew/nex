@@ -612,6 +612,26 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-self-inheritance-fails
+  (testing "Inheriting from self should fail with a real type error"
+    (let [code "class C inherit C end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"cannot inherit from itself" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-cyclic-inheritance-fails
+  (testing "Inheritance cycles should fail with a real type error"
+    (let [code "class A inherit B end
+
+class B inherit A end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"Cyclic inheritance detected" %)
+                (map tc/format-type-error (:errors result)))))))
+
 ;; Let type inference tests
 
 (deftest test-let-without-type-annotation-succeeds

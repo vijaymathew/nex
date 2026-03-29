@@ -103,6 +103,18 @@ end"))
         (is (str/includes? private-output "Error:"))
         (is (not (str/includes? private-output "Integer 11")))))))
 
+(deftest repl-compiled-backend-self-inheritance-reports-error-test
+  (testing "compiled-default REPL reports self-inheritance as a user error instead of crashing later"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "class C inherit C end"))]
+        (is (str/includes? output "cannot inherit from itself"))
+        (is (not (str/includes? output "StackOverflowError")))))))
+
 (deftest repl-compiled-backend-syncs-existing-interpreter-state-test
   (testing "switching to compiled syncs existing interpreter state into the compiled session"
     (binding [repl/*type-checking-enabled* (atom false)
