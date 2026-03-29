@@ -3,6 +3,26 @@
             [nex.parser :as p]
             [nex.interpreter :as interp]))
 
+(deftest self-inheritance-registration-fails-test
+  (testing "register-class rejects self-inheritance instead of recursing later"
+    (let [ast (p/ast "class C inherit C end")
+          ctx (interp/make-context)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"cannot inherit from itself"
+                            (interp/register-class ctx (first (:classes ast))))))))
+
+(deftest cyclic-inheritance-registration-fails-test
+  (testing "register-class rejects cycles when the closing class is registered"
+    (let [ast (p/ast "class A inherit B end
+
+class B inherit A end")
+          ctx (interp/make-context)
+          [a b] (:classes ast)]
+      (interp/register-class ctx a)
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Cyclic inheritance detected"
+                            (interp/register-class ctx b))))))
+
 (deftest calling-inherited-method-test
   (testing "Calling inherited method from parent class"
     (let [code "class Animal

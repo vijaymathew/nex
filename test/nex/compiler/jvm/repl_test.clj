@@ -103,6 +103,88 @@ end"))
         (is (str/includes? private-output "Error:"))
         (is (not (str/includes? private-output "Integer 11")))))))
 
+(deftest repl-compiled-backend-self-inheritance-reports-error-test
+  (testing "compiled-default REPL reports self-inheritance as a user error instead of crashing later"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "class C inherit C end"))]
+        (is (str/includes? output "cannot inherit from itself"))
+        (is (not (str/includes? output "StackOverflowError")))))))
+
+(deftest repl-compiled-backend-parent-qualified-zero-arg-method-typechecks-test
+  (testing "compiled-default REPL typechecks parent-qualified zero-arg methods without parentheses"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "class A
+feature
+  MAX = 10
+  x: Integer
+  p(y: Integer): Integer do result := x + y end
+create
+  make(x: Integer) do this.x := x end
+end"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "class B
+feature
+  p(): Integer do result := 100 end
+end"))
+            class-output (with-out-str
+                           (repl/eval-code ctx0 "class C inherit A, B
+feature
+  p(): Integer do result := A.MAX + A.p(20) + B.p end
+create
+  make(x: Integer) do
+    A.make(x)
+  end
+end"))
+            _ (with-out-str (repl/eval-code ctx0 "let c := create C.make(2)"))
+            call-output (with-out-str (repl/eval-code ctx0 "c.p"))]
+        (is (not (str/includes? class-output "Type error:")) class-output)
+        (is (not (str/includes? class-output "Error:")) class-output)
+        (is (str/includes? call-output "132"))))))
+
+(deftest repl-compiled-backend-static-type-zero-arg-method-mismatch-reports-arity-test
+  (testing "compiled-default REPL reports method arity mismatch instead of undefined field for zero-arg query syntax"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "class A
+feature
+  x: Integer
+  p(y: Integer): Integer do result := x + y end
+create
+  make(x: Integer) do this.x := x end
+end"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "class B
+feature
+  p(): Integer do result := 100 end
+end"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "class C inherit A, B
+feature
+  p(): Integer do result := B.p end
+create
+  make(x: Integer) do
+    A.make(x)
+  end
+end"))
+            _ (with-out-str (repl/eval-code ctx0 "let c1: A := create C.make(20)"))
+            output (with-out-str (repl/eval-code ctx0 "c1.p"))]
+        (is (str/includes? output "requires 1 argument(s); zero-argument access is invalid") output)
+        (is (not (str/includes? output "Undefined field: p")) output)))))
+
 (deftest repl-compiled-backend-syncs-existing-interpreter-state-test
   (testing "switching to compiled syncs existing interpreter state into the compiled session"
     (binding [repl/*type-checking-enabled* (atom false)

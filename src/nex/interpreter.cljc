@@ -17,6 +17,7 @@
 (declare eval-node-async)
 (declare lookup-method-with-inheritance)
 (declare lookup-class)
+(declare lookup-class-if-exists)
 (declare call-builtin-method)
 (declare eval-node)
 (declare nex-ordering-compare)
@@ -334,7 +335,44 @@
 (defn register-class
   "Register a class definition in the context."
   [ctx class-def]
-  (swap! (:classes ctx) assoc (:name class-def) class-def))
+  (letfn [(cycle-path [class-name start-parent]
+            (letfn [(visit [current path seen]
+                      (cond
+                        (= current class-name)
+                        (conj path current)
+
+                        (contains? seen current)
+                        nil
+
+                        :else
+                        (when-let [current-def (lookup-class-if-exists ctx current)]
+                          (let [seen' (conj seen current)
+                                path' (conj path current)]
+                            (some #(visit (:parent %) path' seen')
+                                  (:parents current-def))))))]
+              (visit start-parent [class-name] #{class-name})))
+          (validate-class! [registered-class]
+            (let [class-name (:name registered-class)]
+              (doseq [{:keys [parent]} (:parents registered-class)]
+                (when (= parent class-name)
+                  (throw (ex-info (str "Class " class-name " cannot inherit from itself")
+                                  {:class-name class-name
+                                   :parent parent})))
+                (when-let [path (cycle-path class-name parent)]
+                  (throw (ex-info (str "Cyclic inheritance detected: "
+                                       (str/join " -> " path))
+                                  {:class-name class-name
+                                   :cycle path}))))))]
+    (let [class-name (:name class-def)
+          previous (get @(:classes ctx) class-name)]
+      (swap! (:classes ctx) assoc class-name class-def)
+      (try
+        (validate-class! class-def)
+        (catch Exception e
+          (if previous
+            (swap! (:classes ctx) assoc class-name previous)
+            (swap! (:classes ctx) dissoc class-name))
+          (throw e))))))
 
 (defn lookup-class
   "Look up a class definition by name."
@@ -1444,10 +1482,14 @@
 (defn is-parent?
   "Check if parent-name appears in the parent chain of class-name."
   [ctx class-name parent-name]
-  (when-let [class-def (lookup-class-if-exists ctx class-name)]
-    (when-let [parents (:parents class-def)]
-      (or (some #(= (:parent %) parent-name) parents)
-          (some #(is-parent? ctx (:parent %) parent-name) parents)))))
+  (letfn [(parent? [current seen]
+            (when (and current (not (contains? seen current)))
+              (when-let [class-def (lookup-class-if-exists ctx current)]
+                (when-let [parents (:parents class-def)]
+                  (let [seen' (conj seen current)]
+                    (or (some #(= (:parent %) parent-name) parents)
+                        (some #(parent? (:parent %) seen') parents)))))))]
+    (parent? class-name #{})))
 
 (defn- runtime-type-name [value]
   (typeinfo/runtime-type-name nex-object? get-type-name value))
