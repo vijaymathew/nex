@@ -472,6 +472,30 @@
                              (:parents class-def)))))))]
      (lookup-method class-name #{}))))
 
+(defn lookup-class-method-any-arity
+  "Look up a method name on a class and its parent chain, ignoring arity."
+  [env class-name method-name caller-class-name]
+  (letfn [(lookup-method [cn visited]
+            (when (and cn (not (contains? visited cn)))
+              (let [class-def (env-lookup-class env cn)
+                    visited' (conj visited cn)
+                    feature-member (when class-def
+                                     (some (fn [member]
+                                             (when (and (= (:type member) :method)
+                                                        (= (:name member) method-name))
+                                               member))
+                                           (feature-members class-def)))
+                    method-sig (when (and feature-member
+                                          (or (= caller-class-name cn)
+                                              (public-member? feature-member)))
+                                 (env-lookup-method env cn method-name))]
+                (or method-sig
+                    (when class-def
+                      (some (fn [{:keys [parent]}]
+                              (lookup-method parent visited'))
+                            (:parents class-def)))))))]
+    (lookup-method class-name #{})))
+
 #?(:clj
    (defn- resolve-imported-java-class
      [env class-name]
@@ -1100,7 +1124,12 @@
       (and class-target (false? has-parens))
       (if-let [constant (lookup-class-constant env base-type method)]
         (resolve-generic-type (:field-type constant) type-map)
-        "Any")
+        (if-let [method-sig (and current-class
+                                 (not= current-class base-type)
+                                 (class-subtype? env current-class base-type)
+                                 (lookup-class-method env base-type method 0 current-class))]
+          (check-call-signature env method [] method-sig type-map :arg-types [])
+          "Any"))
 
       (and (= base-type "Array") (= method "sort"))
       (do
@@ -1134,9 +1163,17 @@
                   (if with-java?
                     "Any"
                     (if (and class-def (not (:import class-def)))
-                    (throw (ex-info (str "Undefined field: " method)
-                                    {:error (type-error (str "Undefined field: " method))}))
-                    "Any")))
+                      (if-let [method-sig (lookup-class-method-any-arity env base-type method current-class)]
+                        (throw (ex-info (str "Method " method " on " base-type
+                                             " requires " (count (:params method-sig))
+                                             " argument(s); zero-argument access is invalid")
+                                        {:error (type-error
+                                                 (str "Method " method " on " base-type
+                                                      " requires " (count (:params method-sig))
+                                                      " argument(s); zero-argument access is invalid"))}))
+                        (throw (ex-info (str "Undefined field: " method)
+                                        {:error (type-error (str "Undefined field: " method))})))
+                      "Any")))
                 (if with-java?
                   "Any"
                   (if (and class-def (not (:import class-def)))
