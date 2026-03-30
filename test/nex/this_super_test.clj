@@ -107,6 +107,10 @@ end"
 (deftest super-method-call
   (testing "super.method() is not executed by interpreter yet"
     (let [code "class A
+  create
+    make(x: Integer) do
+      this.x := x
+    end
   feature
     x: Integer
     show do
@@ -118,7 +122,7 @@ class B
   inherit A
   create
     make(x: Integer, y: Integer) do
-      this.x := x
+      A.make(x)
       this.y := y
     end
   feature
@@ -176,6 +180,10 @@ end"
 (deftest typecheck-this-super-usage
   (testing "this and super usage passes type checking"
       (let [code "class A
+  create
+    make(x: Integer) do
+      this.x := x
+    end
   feature
     x: Integer
     show do
@@ -187,7 +195,7 @@ class B
   inherit A
   create
     make(x: Integer, y: Integer) do
-      this.x := x
+      A.make(x)
       this.y := y
     end
   feature

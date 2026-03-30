@@ -1464,13 +1464,18 @@
                                        (not (:constant? member))
                                        (= (:name member) field-name)
                                        (member-visible? member (:name class-def) caller-class-name))
-                              member))
+                              (assoc member :declaring-class (:name class-def))))
                           (feature-members class-def))]
     (or local-field
         (when-let [parents (get-parent-classes ctx class-def)]
           (some (fn [{:keys [class-def]}]
                   (lookup-field-with-inheritance ctx class-def field-name caller-class-name))
                 parents)))))
+
+(defn- field-write-error-message
+  [field-name declaring-class]
+  (str "Cannot assign to field " field-name
+       " outside of class " declaring-class))
 
 (defn- ensure-callable-defined!
   [callable]
@@ -3124,10 +3129,10 @@
                        (assoc :current-env method-env)
                        (assoc :current-object current-obj)
                        (assoc :current-target (:current-target ctx))
-                       (assoc :current-class-name (:class-name current-obj))
+                       (assoc :current-class-name parent-class-name)
                        (assoc :current-method-name method)
                        (update :debug-stack (fnil conj [])
-                               {:class (:class-name current-obj)
+                               {:class parent-class-name
                                 :method method
                                 :env method-env
                                 :arg-names (set (map :name (or params [])))
@@ -3241,12 +3246,12 @@
                                  (assoc :current-env method-env)
                                  (assoc :current-object obj)
                                  (assoc :current-target target-name)
-                                 (assoc :current-class-name (:class-name obj))
+                                 (assoc :current-class-name (:name source-class))
                                  (assoc :current-method-name method)
                                  (assoc :old-values old-values)
                                  (assoc :modified-fields modified-fields)
                                  (update :debug-stack (fnil conj [])
-                                         {:class (:class-name obj)
+                                         {:class (:name source-class)
                                           :method method
                                           :env method-env
                                           :arg-names (set (map :name (or params [])))
@@ -3415,17 +3420,23 @@
   (let [target-expr (or object (when (= object-type :this) {:type :this}))
         target-obj (eval-node ctx target-expr)
         class-name (or (:class-name target-obj) (:current-class-name ctx))
-        class-def (when class-name (lookup-class-if-exists ctx class-name))]
+        class-def (when class-name (lookup-class-if-exists ctx class-name))
+        field-def (when class-def
+                    (lookup-field-with-inheritance ctx class-def field (:current-class-name ctx)))]
     (when-not (nex-object? target-obj)
       (throw (ex-info "Field assignment target must be an object"
                       {:target target-expr :value target-obj})))
     (when (and class-def (lookup-class-constant ctx class-def field))
       (throw (ex-info (str "Cannot assign to constant: " field)
                       {:field field :constant? true})))
-    (when-not (and class-def
-                   (lookup-field-with-inheritance ctx class-def field (:current-class-name ctx)))
+    (when-not field-def
       (throw (ex-info (str "Undefined field: " field)
                       {:field field :class-name class-name})))
+    (when-not (= (:current-class-name ctx) (:declaring-class field-def))
+      (throw (ex-info (field-write-error-message field (:declaring-class field-def))
+                      {:field field
+                       :class-name class-name
+                       :declaring-class (:declaring-class field-def)})))
     (let [val (eval-node ctx value)]
       (if (and (= (:type target-expr) :this) (:current-object ctx))
         (do
@@ -3774,7 +3785,8 @@
 (defn lookup-constructor-with-inheritance
   "Look up a constructor by name in a class and its parent chain."
   [ctx class-def constructor-name]
-  (or (lookup-constructor class-def constructor-name)
+  (or (some-> (lookup-constructor class-def constructor-name)
+              (assoc :source-class class-def))
       (some (fn [{:keys [class-def]}]
               (lookup-constructor-with-inheritance ctx class-def constructor-name))
             (get-parent-classes ctx class-def))))
@@ -3873,13 +3885,14 @@
                                         (doseq [[param arg-val] (map vector params arg-values)]
                                           (env-define ctor-env (:name param) arg-val)))
                                     temp-obj (make-object effective-class-name initial-field-map)
+                                    source-class-name (:name (:source-class ctor-def))
                                     new-ctx (-> ctx
                                                (assoc :current-env ctor-env)
                                                (assoc :current-object temp-obj)
-                                               (assoc :current-class-name effective-class-name)
+                                               (assoc :current-class-name source-class-name)
                                                (assoc :current-method-name constructor)
                                                (update :debug-stack (fnil conj [])
-                                                       {:class effective-class-name
+                                                       {:class source-class-name
                                                         :method (or constructor "make")
                                                         :env ctor-env
                                                         :arg-names (set (map :name (or params [])))
@@ -4316,12 +4329,12 @@
                                                                (assoc :current-env method-env)
                                                                (assoc :current-object obj)
                                                                (assoc :current-target target-name)
-                                                               (assoc :current-class-name (:class-name obj))
+                                                               (assoc :current-class-name (:name source-class))
                                                                (assoc :current-method-name method)
                                                                (assoc :old-values old-values)
                                                                (assoc :modified-fields modified-fields)
                                                                (update :debug-stack (fnil conj [])
-                                                                       {:class (:class-name obj)
+                                                                       {:class (:name source-class)
                                                                         :method method
                                                                         :env method-env
                                                                         :arg-names (set (map :name (or params [])))
@@ -4758,13 +4771,14 @@
                                     _ (doseq [[param arg-val] (map vector params arg-values)]
                                         (env-define ctor-env (:name param) arg-val))
                                     temp-obj (make-object effective-class-name initial-field-map)
+                                    source-class-name (:name (:source-class ctor-def))
                                     new-ctx (-> ctx
                                                 (assoc :current-env ctor-env)
                                                 (assoc :current-object temp-obj)
-                                                (assoc :current-class-name effective-class-name)
+                                                (assoc :current-class-name source-class-name)
                                                 (assoc :current-method-name constructor)
                                                 (update :debug-stack (fnil conj [])
-                                                        {:class effective-class-name
+                                                        {:class source-class-name
                                                          :method (or constructor "make")
                                                          :env ctor-env
                                                          :arg-names (set (map :name (or params [])))

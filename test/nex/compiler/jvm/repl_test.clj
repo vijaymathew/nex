@@ -103,6 +103,100 @@ end"))
         (is (str/includes? private-output "Error:"))
         (is (not (str/includes? private-output "Integer 11")))))))
 
+(deftest repl-compiled-backend-public-field-is-not-publicly-writable-test
+  (testing "compiled backend rejects top-level writes to public fields"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx "class Counter
+  feature
+    value: Integer
+
+    set_to(v: Integer): Integer
+    do
+      this.value := v
+      result := this.value
+    end
+
+    current(): Integer
+    do
+      result := this.value
+    end
+end"))
+            _ (with-out-str (repl/eval-code ctx "let c := create Counter"))
+            assign-output (with-out-str (repl/eval-code ctx "c.value := 9"))
+            current-output (with-out-str (repl/eval-code ctx "c.current"))]
+        (is (str/includes? assign-output "Error:"))
+        (is (str/includes? assign-output "Cannot assign to field value outside of class Counter"))
+        (is (str/includes? current-output "0"))))))
+
+(deftest repl-compiled-backend-allows-same-class-write-to-other-instance-test
+  (testing "compiled backend allows a class to assign its own field on another instance of the same class"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx "class Counter
+  feature
+    value: Integer
+    sync_to(other: Counter, v: Integer) do
+      other.value := v
+    end
+    current(): Integer
+    do
+      result := value
+    end
+  end"))
+            _ (with-out-str (repl/eval-code ctx "let a := create Counter"))
+            _ (with-out-str (repl/eval-code ctx "let b := create Counter"))
+            sync-output (with-out-str (repl/eval-code ctx "a.sync_to(b, 9)"))
+            current-output (with-out-str (repl/eval-code ctx "b.current"))]
+        (is (not (str/includes? sync-output "Error:")) sync-output)
+        (is (str/includes? current-output "9"))))))
+
+(deftest repl-compiled-backend-rejects-multiple-inheritance-parent-field-writes-test
+  (testing "compiled backend rejects direct writes to either parent field from a multiply-inheriting child"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx "class A
+  feature
+    x: Integer
+end
+
+class B
+  feature
+    y: Integer
+end"))
+            bad-left-output (with-out-str
+                              (repl/eval-code ctx "class CX
+  inherit A, B
+  feature
+    break_x() do
+      this.x := 1
+    end
+end"))
+            bad-right-output (with-out-str
+                               (repl/eval-code ctx "class CY
+  inherit A, B
+  feature
+    break_y() do
+      this.y := 2
+    end
+end"))]
+        (is (str/includes? bad-left-output "Error:"))
+        (is (str/includes? bad-left-output "Cannot assign to field x outside of class A"))
+        (is (str/includes? bad-right-output "Error:"))
+        (is (str/includes? bad-right-output "Cannot assign to field y outside of class B"))))))
+
 (deftest repl-compiled-backend-self-inheritance-reports-error-test
   (testing "compiled-default REPL reports self-inheritance as a user error instead of crashing later"
     (binding [repl/*type-checking-enabled* (atom true)

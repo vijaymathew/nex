@@ -39,6 +39,31 @@ nex> across books as book do
 "Foundation (1951)"
 ```
 
+## The `convert` Expression
+
+Nested structures often use `Any` at the boundary, because not every value in a map has the same type. Before using one of those values as an `Integer`, `String`, or some other specific type, you often need to check whether it really has that type.
+
+That is what `convert` does:
+
+```text
+if convert expr to name: Type then
+   -- use name here
+end
+```
+
+If the conversion succeeds, `name` is bound inside the `then` branch with the requested type. If it fails, the branch is skipped.
+
+For example:
+
+```text
+nex> if convert books.get(0).get("year") to year: Integer then
+     print(year + 1)
+  end
+1966
+```
+
+This is especially useful when working with maps such as `Map[String, Any]`, where a key may or may not hold the kind of value you expect.
+
 To find records matching a condition — all books published before 1970, say:
 
 ```

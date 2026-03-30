@@ -358,18 +358,17 @@ end"
     (let [code "class A
   feature
     x: Integer
+    set_x(v: Integer) do
+      this.x := v
+    end
   invariant
     parent_positive: x > 0
 end
 
 class B inherit A
-feature
-  set_x(v: Integer) do
-    this.x := v
-  end
 create
   make(x0: Integer) do
-    this.x := x0
+    A.set_x(x0)
   end
 invariant
   local_lt_ten: x < 10
