@@ -227,6 +227,105 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-member-field-assignment-rejected-outside-declaring-class
+  (testing "Top-level object.field assignment is rejected even for public fields"
+    (let [code "class Task
+                  feature
+                    status: String
+                  end
+
+                let t: Task := create Task
+                t.status := \"PENDING\""
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(str/includes? (tc/format-type-error %) "Cannot assign to field status outside of class Task")
+                (:errors result))))))
+
+(deftest test-member-field-assignment-rejected-in-subclass
+  (testing "A subclass cannot directly assign a parent field"
+    (let [code "class Account
+                  feature
+                    balance: Real
+                  end
+
+                class Savings_Account
+                  inherit Account
+                  feature
+                    reset_balance() do
+                      this.balance := 0.0
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(str/includes? (tc/format-type-error %) "Cannot assign to field balance outside of class Account")
+                (:errors result))))))
+
+(deftest test-member-field-assignment-rejected-in-multiple-inheritance-first-parent
+  (testing "A multiply-inheriting child cannot directly assign a field from its first parent"
+    (let [code "class A
+                  feature
+                    x: Integer
+                  end
+
+                class B
+                  feature
+                    y: Integer
+                  end
+
+                class C
+                  inherit A, B
+                  feature
+                    break_x() do
+                      this.x := 1
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(str/includes? (tc/format-type-error %) "Cannot assign to field x outside of class A")
+                (:errors result))))))
+
+(deftest test-member-field-assignment-rejected-in-multiple-inheritance-second-parent
+  (testing "A multiply-inheriting child cannot directly assign a field from its second parent"
+    (let [code "class A
+                  feature
+                    x: Integer
+                  end
+
+                class B
+                  feature
+                    y: Integer
+                  end
+
+                class C
+                  inherit A, B
+                  feature
+                    break_y() do
+                      this.y := 2
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(str/includes? (tc/format-type-error %) "Cannot assign to field y outside of class B")
+                (:errors result))))))
+
+(deftest test-member-field-assignment-allowed-on-other-instance-within-declaring-class
+  (testing "A class may directly assign one of its own fields on another instance of the same class"
+    (let [code "class Counter
+                  feature
+                    value: Integer
+                    sync_to(other: Counter, v: Integer) do
+                      other.value := v
+                    end
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-user-class-can-shadow-builtin-task-type
   (testing "A user-defined Task class should not be clobbered by the builtin Task placeholder"
     (let [code "class Task

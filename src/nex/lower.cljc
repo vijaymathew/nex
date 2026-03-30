@@ -1069,7 +1069,7 @@
                                                      (not (:constant? member))
                                                      (= (:name member) field-name)
                                                      (member-visible? env member cn))
-                                            member))
+                                            (assoc member :declaring-class cn)))
                                         (feature-members class-def)))]
                   (or own-field
                       (when class-def
@@ -1077,6 +1077,11 @@
                                 (lookup-field parent visited'))
                               (:parents class-def)))))))]
       (lookup-field (:name class-def) #{}))))
+
+(defn- field-write-error-message
+  [field-name declaring-class]
+  (str "Cannot assign to field " field-name
+       " outside of class " declaring-class))
 
 (defn- lookup-class-constant
   [env class-name constant-name]
@@ -2634,46 +2639,51 @@
                 target-type (when-not super-target? (infer-type env target-expr))
                 owner (base-type-name target-type)
                 class-def (get (visible-class-map env) owner)
-                field-def (when class-def (class-field-def class-def field-name))
+                field-def (when class-def (accessible-field-def env class-def field-name))
                 value-ir (lower-expression env (:value stmt))]
             (cond
               super-target?
-              (let [parent-name (single-super-parent-name env)
-                    target-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                                 (str "_parent_" parent-name)
-                                                 (ir/this-node (:this-type env)
-                                                               (exact-class-jvm-type env (:this-type env)))
-                                                 parent-name
-                                                 (exact-class-jvm-type env parent-name))]
-                [env (ir/call-runtime-node (str "user-field-set:" field-name)
-                                           [target-ir value-ir]
-                                           "Void"
-                                           :void)])
+              (let [parent-name (single-super-parent-name env)]
+                (throw (ex-info (field-write-error-message field-name parent-name)
+                                {:field field-name
+                                 :declaring-class parent-name
+                                 :target target-expr})))
 
               (and (= (:type target-expr) :this)
                    (get (:fields env) field-name))
               (let [field-info (get (:fields env) field-name)
-                    target-ir (if-let [carrier-field (:carrier-field field-info)]
-                                (ir/field-get-node (:internal-name (class-jvm-meta env (:carrier-owner field-info)))
-                                                   carrier-field
-                                                   (ir/this-node (:this-type env)
-                                                                 (exact-class-jvm-type env (:this-type env)))
-                                                   (:owner field-info)
-                                                   (:carrier-jvm-type field-info))
-                                (ir/this-node (:this-type env)
-                                              (exact-class-jvm-type env (:this-type env))))]
-                [env (ir/field-set-node (:internal-name (class-jvm-meta env (:owner field-info)))
-                                        field-name
-                                        target-ir
-                                        value-ir
-                                        (:nex-type field-info)
-                                        (:jvm-type field-info))])
+                    writable? (= (:owner field-info) (:current-class env))]
+                (when-not writable?
+                  (throw (ex-info (field-write-error-message field-name (:owner field-info))
+                                  {:field field-name
+                                   :declaring-class (:owner field-info)
+                                   :target target-expr})))
+                (let [target-ir (if-let [carrier-field (:carrier-field field-info)]
+                                  (ir/field-get-node (:internal-name (class-jvm-meta env (:carrier-owner field-info)))
+                                                     carrier-field
+                                                     (ir/this-node (:this-type env)
+                                                                   (exact-class-jvm-type env (:this-type env)))
+                                                     (:owner field-info)
+                                                     (:carrier-jvm-type field-info))
+                                  (ir/this-node (:this-type env)
+                                                (exact-class-jvm-type env (:this-type env))))]
+                  [env (ir/field-set-node (:internal-name (class-jvm-meta env (:owner field-info)))
+                                          field-name
+                                          target-ir
+                                          value-ir
+                                          (:nex-type field-info)
+                                          (:jvm-type field-info))]))
 
               field-def
-              [env (ir/call-runtime-node (str "user-field-set:" field-name)
-                                         [(lower-expression env target-expr) value-ir]
-                                         "Void"
-                                         :void)]
+              (if (= (:current-class env) (:declaring-class field-def))
+                [env (ir/call-runtime-node (str "user-field-set:" field-name)
+                                           [(lower-expression env target-expr) value-ir]
+                                           "Void"
+                                           :void)]
+                (throw (ex-info (field-write-error-message field-name (:declaring-class field-def))
+                                {:field field-name
+                                 :declaring-class (:declaring-class field-def)
+                                 :target target-expr})))
 
               (imported-java-qualified-name env owner)
               [env (ir/call-runtime-node "java-set-field"

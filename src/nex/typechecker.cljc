@@ -424,6 +424,7 @@
 (declare check-class)
 (declare convert-guard-binding)
 (declare resolve-generic-type)
+(declare lookup-class-field-member)
 
 (defn check-literal
   "Check the type of a literal expression"
@@ -610,11 +611,19 @@
   ([env class-name field-name]
    (lookup-class-field env class-name field-name class-name))
   ([env class-name field-name caller-class-name]
+   (some-> (lookup-class-field-member env class-name field-name caller-class-name)
+           :field-type)))
+
+(defn lookup-class-field-member
+  "Look up a field member on a class and its parent chain."
+  ([env class-name field-name]
+   (lookup-class-field-member env class-name field-name class-name))
+  ([env class-name field-name caller-class-name]
    (letfn [(lookup-field [cn visited]
             (when (and cn (not (contains? visited cn)))
               (let [class-def (env-lookup-class env cn)
                     visited' (conj visited cn)
-                    own-field-type
+                    own-field
                     (when class-def
                       (some (fn [member]
                               (when (and (= (:type member) :field)
@@ -622,9 +631,9 @@
                                          (= (:name member) field-name)
                                          (or (= caller-class-name cn)
                                              (public-member? member)))
-                                (:field-type member)))
+                                (assoc member :declaring-class cn)))
                             (feature-members class-def)))]
-                (or own-field-type
+                (or own-field
                     (when class-def
                       (some (fn [{:keys [parent]}]
                               (lookup-field parent visited'))
@@ -645,6 +654,12 @@
 (defn public-member?
   [member]
   (not= :private (-> member :visibility :type)))
+
+(defn- field-write-error
+  [field-name declaring-class]
+  (type-error
+   (str "Cannot assign to field " field-name
+        " outside of class " declaring-class)))
 
 (defn lookup-class-constant
   "Look up a constant on a class and its parent chain.
@@ -2927,11 +2942,15 @@
             _ (when (lookup-class-constant env class-name field-name)
                 (throw (ex-info (str "Cannot assign to constant: " field-name)
                                 {:error (type-error (str "Cannot assign to constant: " field-name))})))
-            field-type (lookup-class-field env class-name field-name current-class)
+            field-member (lookup-class-field-member env class-name field-name current-class)
+            field-type (:field-type field-member)
             val-type (check-expression env (:value stmt))]
         (when-not field-type
           (throw (ex-info (str "Undefined field: " field-name)
                           {:error (type-error (str "Undefined field: " field-name))})))
+        (when-not (= current-class (:declaring-class field-member))
+          (throw (ex-info (str "Cannot assign to field " field-name)
+                          {:error (field-write-error field-name (:declaring-class field-member))})))
         (when-not (types-compatible? env val-type field-type)
           (throw (ex-info (str "Type mismatch in assignment to " field-name)
                           {:error (type-error

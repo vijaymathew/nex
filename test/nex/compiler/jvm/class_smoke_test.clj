@@ -299,7 +299,7 @@ end
 class B inherit A
 create
   make(x0, y0: Integer) do
-    this.x := x0
+    set_x(x0)
     this.y := y0
   end
 feature
@@ -307,7 +307,7 @@ feature
 
   break_parent(): Integer
   do
-    this.x := 0
+    set_x(0)
     result := y
   end
 invariant
@@ -356,23 +356,27 @@ end")
       (is (= 12 (:result field-result))))))
 
 (deftest compiled-class-constructor-and-field-assign-test
-  (testing "compiled helper supports named constructors and explicit target field assignment"
+  (testing "compiled helper rejects top-level explicit target field assignment"
     (let [session (compiled-repl/make-session)
           define-result (compiled-repl/compile-and-eval! session
                                                          (p/ast (str counter-with-constructor-program
                                                                      "\n\n"
                                                                      "let c: Counter := create Counter.with_value(5)\n"
                                                                      "c.value")))
-          assign-result (compiled-repl/compile-and-eval! session
-                                                         (p/ast "c.value := 9\nc.bump()"))
+          assign-ex (try
+                      (compiled-repl/compile-and-eval! session
+                                                       (p/ast "c.value := 9\nc.bump()"))
+                      nil
+                      (catch Throwable t
+                        (root-cause t)))
           field-result (compiled-repl/compile-and-eval! session
                                                         (p/ast "c.current()"))]
       (is (:compiled? define-result))
-      (is (:compiled? assign-result))
       (is (:compiled? field-result))
       (is (= 5 (:result define-result)))
-      (is (= 10 (:result assign-result)))
-      (is (= 10 (:result field-result))))))
+      (is (some? assign-ex))
+      (is (re-find #"Cannot assign to field value outside of class Counter" (str assign-ex)))
+      (is (= 5 (:result field-result))))))
 
 (deftest compiled-repl-class-definition-test
   (testing "compiled REPL backend can define and use a simple class without deopting"
