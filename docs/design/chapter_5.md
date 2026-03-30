@@ -1,17 +1,25 @@
 # JVM Bytecode Translation Reference
 
-The JVM backend is no longer a narrow experiment. It now covers most of the Nex language surface, supports both REPL compilation and file-to-jar compilation, and uses a mixed strategy of direct bytecode emission plus explicit runtime helper calls where that is the better engineering trade.
+The JVM backend is a mature execution target for Nex. It covers most of the language surface, supports both compiled REPL execution and file-to-jar compilation, and uses a mixed strategy of direct bytecode emission plus explicit runtime helper calls where that is the better engineering trade.
 
-This chapter is a translation guide for the current implementation. It is not a wishlist, and it is not a plan. The code in:
+This chapter is a translation guide for the current implementation. It is not a wishlist, and it is not a plan. The primary implementation lives in:
 
-- [`src/nex/lower.cljc`](../../src/nex/lower.cljc)
-- [`src/nex/ir.cljc`](../../src/nex/ir.cljc)
-- [`src/nex/compiler/jvm/emit.clj`](../../src/nex/compiler/jvm/emit.clj)
-- [`src/nex/compiler/jvm/runtime.clj`](../../src/nex/compiler/jvm/runtime.clj)
-- [`src/nex/compiler/jvm/repl.clj`](../../src/nex/compiler/jvm/repl.clj)
-- [`src/nex/compiler/jvm/file.clj`](../../src/nex/compiler/jvm/file.clj)
+- [`src/nex/lower.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/lower.cljc)
+- [`src/nex/ir.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/ir.cljc)
+- [`src/nex/compiler/jvm/emit.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/emit.clj)
+- [`src/nex/compiler/jvm/runtime.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/runtime.clj)
+- [`src/nex/compiler/jvm/repl.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/repl.clj)
+- [`src/nex/compiler/jvm/file.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/file.clj)
 
-is the primary evidence. This chapter explains the design choices that are no longer obvious from reading those files one by one.
+The validation surface is substantial too. The most useful tests to read alongside the implementation are:
+
+- [`test/nex/compiler/jvm/repl_test.clj`](https://github.com/vijaymathew/nex/blob/main/test/nex/compiler/jvm/repl_test.clj)
+- [`test/nex/compiler/jvm/compiled_repl_soak_test.clj`](https://github.com/vijaymathew/nex/blob/main/test/nex/compiler/jvm/compiled_repl_soak_test.clj)
+- [`test/nex/compiler/jvm/file_test.clj`](https://github.com/vijaymathew/nex/blob/main/test/nex/compiler/jvm/file_test.clj)
+- [`test/nex/compiler/jvm/file_smoke_test.clj`](https://github.com/vijaymathew/nex/blob/main/test/nex/compiler/jvm/file_smoke_test.clj)
+- [`test/nex/compiler/jvm/cli_integration.clj`](https://github.com/vijaymathew/nex/blob/main/test/nex/compiler/jvm/cli_integration.clj)
+
+This chapter explains the design choices that are no longer obvious from reading those files one by one.
 
 
 ## 5.1 Purpose and Scope
@@ -30,7 +38,7 @@ This chapter does **not** try to document every helper function or every opcode 
 - where the compiler deliberately deopts to the interpreter,
 - and what invariants the mixed-mode design depends on.
 
-The remaining deopt surface is real and intentional. The compiled backend is the default REPL path now, but it is still a mixed-mode system rather than a pure ahead-of-time replacement for the interpreter.
+The remaining deopt surface is real and intentional. That does not make the backend experimental. It means the implementation prefers semantic fidelity over forced compilation when a boundary is not yet worth specializing. The compiled backend is the default REPL path and the file compiler produces runnable jars; mixed-mode execution is part of the mature design, not evidence that the target is provisional.
 
 
 ## 5.2 Compilation Pipeline
@@ -47,9 +55,9 @@ Typechecking still belongs to the shared typechecker, not to the JVM backend. Th
 
 ### Lowering
 
-The lowering pass in [`src/nex/lower.cljc`](../../src/nex/lower.cljc) converts AST nodes into:
+The lowering pass in [`src/nex/lower.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/lower.cljc) converts AST nodes into:
 
-- expression and statement IR in [`src/nex/ir.cljc`](../../src/nex/ir.cljc),
+- expression and statement IR in [`src/nex/ir.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/ir.cljc),
 - function specs,
 - class specs,
 - launcher/program units for file compilation.
@@ -62,7 +70,7 @@ Lowering is where most of the backend strategy lives. It decides whether a const
 
 ### Emission
 
-The emitter in [`src/nex/compiler/jvm/emit.clj`](../../src/nex/compiler/jvm/emit.clj) turns lowered units and class specs into byte arrays using ASM. It emits:
+The emitter in [`src/nex/compiler/jvm/emit.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/emit.clj) turns lowered units and class specs into byte arrays using ASM. It emits:
 
 - compiled REPL cell classes,
 - user-defined classes,
@@ -72,7 +80,7 @@ The emitter in [`src/nex/compiler/jvm/emit.clj`](../../src/nex/compiler/jvm/emit
 
 ### Runtime Helpers
 
-The JVM backend does not try to inline the entire Nex runtime into bytecode. It relies on [`src/nex/compiler/jvm/runtime.clj`](../../src/nex/compiler/jvm/runtime.clj) for:
+The JVM backend does not try to inline the entire Nex runtime into bytecode. It relies on [`src/nex/compiler/jvm/runtime.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/runtime.clj) for:
 
 - REPL state access,
 - host interop,
@@ -99,7 +107,7 @@ This shared core is what keeps the JVM backend coherent: REPL compilation is not
 
 ### `NexReplState`
 
-The compiled REPL runtime is organized around `NexReplState` in [`src/nex/compiler/jvm/runtime.clj`](../../src/nex/compiler/jvm/runtime.clj). It stores:
+The compiled REPL runtime is organized around `NexReplState` in [`src/nex/compiler/jvm/runtime.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/runtime.clj). It stores:
 
 - top-level values,
 - top-level types,
@@ -114,7 +122,7 @@ This is the canonical runtime state for compiled REPL execution.
 
 ### Compiled Session vs Interpreter Sync
 
-The compiled REPL session in [`src/nex/compiler/jvm/repl.clj`](../../src/nex/compiler/jvm/repl.clj) stores more than runtime values. It also remembers:
+The compiled REPL session in [`src/nex/compiler/jvm/repl.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/repl.clj) stores more than runtime values. It also remembers:
 
 - function ASTs,
 - class ASTs,
@@ -141,7 +149,7 @@ The compiler does not attempt to compile every AST shape. If an input is outside
 
 The correct way to think about the REPL now is:
 
-- compiled by default,
+- compiled by default and used in ordinary work,
 - interpreter as a correctness-preserving fallback,
 - not “compiled unless we forgot to implement it.”
 
@@ -387,7 +395,7 @@ Debugger behavior under compiled mode is currently safe because the REPL routes 
 
 The compiled backend is the default REPL path, but the fallback surface still matters.
 
-The remaining deopt cases are not “all advanced features.” They are mostly:
+The remaining deopt cases are not “all advanced features,” and they are not a sign that the backend is still a side path. They are mostly:
 
 - AST shapes outside the compiled eligibility gate,
 - debugger-enabled REPL evaluation,
@@ -401,7 +409,20 @@ Two design rules are important here:
 2. A deopt must preserve user-visible semantics after sync, not just finish execution somehow.
 
 
-## 5.13 Worked Examples
+## 5.13 Validation Surface
+
+This chapter documents the current JVM compiler as implemented, tested, and used.
+
+Three kinds of validation matter in practice:
+
+- compiled REPL tests, which check ordinary interactive use and regression behavior across a wide language surface,
+- soak tests, which stress long mixed-mode sessions with deopt/reopt cycles and cross-cell state,
+- file and CLI tests, which verify standalone compilation, jar packaging, launcher generation, and end-to-end execution under `java -jar`.
+
+This matters when reading the source. Many design choices that would otherwise look conservative or overly explicit are there because the backend is expected to survive real REPL sessions and standalone compilation workflows, not only unit-sized translation examples.
+
+
+## 5.14 Worked Examples
 
 ### Example 1: Top-Level `let`
 

@@ -16,6 +16,8 @@ book:
     - chapter_4.md
     - chapter_5.md
     - chapter_6.md
+  appendices:
+    - appendix_a.md
 
 format:
   html:
