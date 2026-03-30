@@ -232,6 +232,9 @@ nex> class Account
              result := false
            end
          end
+         set_balance(new_balance: Real) do
+           balance := new_balance
+         end
          get_balance(): Real do
            result := balance
          end
@@ -249,7 +252,7 @@ nex> class Savings_Account inherit Account
        feature
          interest_rate: Real
          apply_interest() do
-           balance := balance + balance * interest_rate
+           Account.set_balance(balance + balance * interest_rate)
          end
          describe(): String do
            result := Account.describe + " (savings, rate: " + interest_rate.to_string + ")"
@@ -266,7 +269,7 @@ nex> class Overdraft_Account inherit Account
          overdraft_limit: Real
          withdraw(amount: Real): Boolean do
            if balance - amount >= -overdraft_limit then
-             balance := balance - amount
+             Account.set_balance(balance - amount)
              result := true
            else
              result := false

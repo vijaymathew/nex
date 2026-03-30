@@ -246,11 +246,14 @@ For example:
 class Account
 feature
   balance: Real
+  set_balance(new_balance: Real) do
+    balance := new_balance
+  end
   withdraw(amount: Real)
     require
       enough: amount <= balance
     do
-      balance := balance - amount
+      set_balance(balance - amount)
     end
   create
     make(balance: Real) do this.balance := balance end
@@ -263,7 +266,7 @@ feature
     require
       within_limit: amount <= balance + overdraft_limit
     do
-      balance := balance - amount
+      Account.set_balance(balance - amount)
     end
   overdraft_limit: Real
   create
