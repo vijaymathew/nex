@@ -18,6 +18,7 @@ Run commands from `docs/design`.
 - `index.md` - title page
 - `introduction.md` and `chapter_*.md` - book content
 - `chapter_5.md` - translation guide for the JVM bytecode backend
+- `appendix_a.md` - bytecode patterns by major Nex construct
 - `../md/COMPILED_REPL_STATUS.md` - current boundary of the experimental JVM compiled REPL backend
 - `../md/COMPILED_REPL_DEFAULT_EXIT_CRITERIA.md` - exit criteria checklist for making the compiled REPL backend the default
 - `../md/COMPILER_FEATURE_GAP.md` - current gap between the interpreter and the JVM bytecode compiler
