@@ -9,5 +9,13 @@ document.addEventListener("DOMContentLoaded", function () {
       title.textContent = "Home";
     }
   });
+
+  document.querySelectorAll(".chapter-number").forEach(function (el) {
+    if (el.closest('a[href$="index.html"]')) return;
+    const value = parseInt(el.textContent, 10);
+    if (!Number.isNaN(value) && value > 1) {
+      el.textContent = String(value - 1);
+    }
+  });
 });
 </script>

@@ -1,6 +1,12 @@
 ---
+title: ""
+pagetitle: "Home"
 numbered: false
+number-sections: false
 title-block: false
+format:
+  html:
+    title: "Home"
 ---
 
 # {-}
