@@ -32,6 +32,7 @@ To make review a routine discipline, use a focused checklist for every AI-genera
 ## From Draft to Verified Implementation
 
 Consider a requirement:
+
 > *"The AI was asked to add retry logic to the delivery dispatch port."*
 
 The AI provides a loop that retries on failure. A naive reviewer sees "it retries" and approves. A rigorous reviewer asks the following:
