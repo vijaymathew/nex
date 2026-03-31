@@ -385,6 +385,84 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-later-class-field-name-does-not-poison-earlier-method-call-resolution
+  (testing "A later class field named v2 should not change the type of an earlier class field named v2"
+    (let [code "class Evolution_Result
+                  create
+                    make(status: String, value: String, mode: String) do
+                      this.status := status
+                      this.value := value
+                      this.mode := mode
+                    end
+                  feature
+                    status: String
+                    value: String
+                    mode: String
+                  end
+
+                class Rollout_Config
+                  feature
+                    use_v2: Boolean
+                  end
+
+                class Delivery_Policy_V1
+                  feature
+                    decide_priority(tier: String): String
+                      do
+                        result := \"FAST_TRACK\"
+                      end
+                  end
+
+                class Delivery_Policy_V2
+                  feature
+                    decide_priority(tier: String, risk_score: Integer): String
+                      do
+                        result := \"SAFE_TRACK\"
+                      end
+                  end
+
+                class Delivery_Evolution_Service
+                  create
+                    make(v1: Delivery_Policy_V1, v2: Delivery_Policy_V2, config: Rollout_Config) do
+                      this.v1 := v1
+                      this.v2 := v2
+                      this.config := config
+                    end
+                  feature
+                    v1: Delivery_Policy_V1
+                    v2: Delivery_Policy_V2
+                    config: Rollout_Config
+                    route_mode(tier: String, risk_score: Integer): Evolution_Result
+                      do
+                        if config.use_v2 then
+                          result := create Evolution_Result.make(\"OK\", v2.decide_priority(tier, risk_score), \"V2\")
+                        else
+                          result := create Evolution_Result.make(\"OK\", v1.decide_priority(tier), \"V1\")
+                        end
+                      end
+                  end
+
+                class Knowledge_Query_V2
+                  feature
+                    run(query: String, intent: String): String
+                      do
+                        result := \"DOC:K-FAST\"
+                      end
+                  end
+
+                class Knowledge_Compatibility_Adapter
+                  create
+                    make(v2: Knowledge_Query_V2) do
+                      this.v2 := v2
+                    end
+                  feature
+                    v2: Knowledge_Query_V2
+                  end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-nil-equality
   (testing "Equality comparison with nil should type check"
     (let [code "class Test
