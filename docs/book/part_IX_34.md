@@ -34,6 +34,7 @@ By anchoring the AI in your system's existing contracts, you force its output to
 ## From Requirement to AI-Assisted Implementation
 
 Consider the requirement:
+
 > *"Add a fallback mechanism to our Knowledge Query Service so that if the primary retrieval fails, it returns a cached result."*
 
 An undisciplined prompt might just ask for "fallback logic." A disciplined workflow looks like this:

@@ -36,6 +36,7 @@ This pattern minimizes the "distance" between a mistake and its discovery. If st
 ## From Problem to Refactored Design
 
 Consider the requirement:
+
 > *"The Search Service has grown too large. It now handles both document retrieval and relevance ranking. We need to split these into two independent services."*
 
 A naive approach might be to create two new classes and move code between them. A disciplined approach follows the incremental pattern:

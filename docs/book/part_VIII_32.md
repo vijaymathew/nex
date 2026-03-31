@@ -33,6 +33,7 @@ Without versioning discipline and contract stability, every "improvement" to the
 ## From Requirement to Flexible Design
 
 Consider the requirement:
+
 > *"We need to experiment with a new ranking algorithm for search results, but we must be able to switch back to the old one instantly if the metrics drop."*
 
 Without a seam, the ranking logic is likely embedded in the search service. Switching algorithms means a code change, a deployment, and a high-risk transition.
