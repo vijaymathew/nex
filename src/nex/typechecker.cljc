@@ -706,6 +706,24 @@
                 (concat own inherited))))]
     (collect-ctors class-name #{})))
 
+(defn- bind-visible-class-fields!
+  "Bind fields visible inside class-name into target-env.
+   Own fields are always visible; inherited fields must be public."
+  [target-env env class-name]
+  (letfn [(bind-fields [cn visited inherited?]
+            (when (and cn (not (contains? visited cn)))
+              (when-let [class-def (env-lookup-class env cn)]
+                (let [visited' (conj visited cn)]
+                  (doseq [{:keys [parent]} (:parents class-def)]
+                    (bind-fields parent visited' true))
+                  (doseq [member (feature-members class-def)]
+                    (when (and (= (:type member) :field)
+                               (not (:constant? member))
+                               (or (not inherited?)
+                                   (public-member? member)))
+                      (env-add-var target-env (:name member) (:field-type member))))))))]
+    (bind-fields class-name #{} false)))
+
 (defn check-identifier
   "Check the type of an identifier"
   [env {:keys [name] :as expr}]
@@ -3189,7 +3207,10 @@
   (let [class-def (or (env-lookup-class env name) class-def)
         body (:body class-def)
         invariant (:invariant class-def)
-        parents (:parents class-def)]
+        parents (:parents class-def)
+        class-env (make-type-env env)]
+  (env-add-var class-env "__current_class__" name)
+  (bind-visible-class-fields! class-env env name)
   ;; Check inheritance
   (when parents
     (check-inheritance env name parents))
@@ -3197,7 +3218,7 @@
   ;; Check invariants
   (doseq [assertion invariant]
     (when (and assertion (:expr assertion))
-      (let [inv-type (check-expression env (:expr assertion))]
+      (let [inv-type (check-expression class-env (:expr assertion))]
         (when-not (or (= inv-type "Boolean") (= inv-type "Void"))
           (throw (ex-info (str "Invariant must be Boolean in class " name)
                           {:error (type-error
@@ -3211,14 +3232,14 @@
         (cond
           (= (:type member) :method)
           (when-not (:declaration-only? member)
-            (check-method env name member))
+            (check-method class-env name member))
           (= (:type member) :field)
           (when-not (:constant? member)
-            (validate-type-annotation env (:field-type member)))))
+            (validate-type-annotation class-env (:field-type member)))))
 
       (= (:type section) :constructors)
       (doseq [ctor (:constructors section)]
-        (check-constructor env name ctor))))
+        (check-constructor class-env name ctor))))
 
   ;; Void-safety: attachable class-object fields must be initialized by all ctors.
   (let [fields (->> body
