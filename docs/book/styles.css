@@ -46,6 +46,17 @@ h4 {
   color: var(--nex-text);
 }
 
+.sidebar-menu-container .chapter-number,
+.quarto-title-block .chapter-number,
+.quarto-page-breadcrumbs .chapter-number {
+  display: none;
+}
+
+.header-section-number,
+.toc-section-number {
+  display: none;
+}
+
 h1.title {
   font-weight: 700;
   letter-spacing: 0.02em;

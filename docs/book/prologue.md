@@ -1,4 +1,9 @@
-# Prologue — The Day the System Broke
+---
+numbered: false
+number-sections: false
+---
+
+# Prologue — The Day the System Broke {-}
 
 At 9:12 on a Monday morning, a delivery robot stopped in the middle of an intersection and refused to move.
 
