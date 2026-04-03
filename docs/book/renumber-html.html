@@ -1,5 +1,15 @@
 <script>
 document.addEventListener("DOMContentLoaded", function () {
+  function adjustNumber(el) {
+    const text = el.textContent.trim();
+    const parts = text.split(".");
+    const value = parseInt(parts[0], 10);
+    if (!Number.isNaN(value) && value > 4) {
+      parts[0] = String(value - 4);
+      el.textContent = parts.join(".");
+    }
+  }
+
   const indexLinks = document.querySelectorAll('a[href$="index.html"]');
   indexLinks.forEach(function (link) {
     const num = link.querySelector(".chapter-number");
@@ -10,12 +20,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   });
 
-  document.querySelectorAll(".chapter-number").forEach(function (el) {
-    if (el.closest('a[href$="index.html"]')) return;
-    const value = parseInt(el.textContent, 10);
-    if (!Number.isNaN(value) && value > 1) {
-      el.textContent = String(value - 1);
-    }
-  });
+  document.querySelectorAll(".header-section-number").forEach(adjustNumber);
+  document.querySelectorAll(".toc-section-number").forEach(adjustNumber);
 });
 </script>

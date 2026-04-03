@@ -1,8 +1,9 @@
 ---
 numbered: false
+number-sections: false
 ---
 
-# Epilogue — The Systems Behind Everything
+# Epilogue — The Systems Behind Everything {-}
 
 We began this book with a simple premise: that software engineering is not about writing code, but about modeling the world. We explored this idea through the lens of three very different systems — a delivery network navigating the chaos of the physical world, a knowledge engine organizing the vastness of information, and a virtual world simulating the complexity of life.
 
