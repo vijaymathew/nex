@@ -115,7 +115,7 @@
           (delete-tree! tmp-dir))))))
 
 (deftest io-binary-file-runtime-test
-  (testing "Binary_File library reads and writes bytes through the JVM interpreter"
+  (testing "Binary_File library reads, writes, and seeks through the JVM interpreter"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-bin-io-" (System/nanoTime)))
           ctx (repl/init-repl-context)
           root-path (.getAbsolutePath tmp-dir)]
@@ -128,14 +128,26 @@
                        (repl/eval-code ctx "let file: Path := root.child(\"bytes.bin\")")
                        (repl/eval-code ctx "let writer: Binary_File := create Binary_File.open_write(file)")
                        (repl/eval-code ctx "writer.write([65, 66, 67, 68])")
+                       (repl/eval-code ctx "print(writer.position())")
+                       (repl/eval-code ctx "writer.seek(1)")
+                       (repl/eval-code ctx "writer.write([90, 91])")
+                       (repl/eval-code ctx "print(writer.position())")
                        (repl/eval-code ctx "writer.close()")
                        (repl/eval-code ctx "let reader: Binary_File := create Binary_File.open_read(file)")
                        (repl/eval-code ctx "print(reader.read(2))")
+                       (repl/eval-code ctx "print(reader.position())")
+                       (repl/eval-code ctx "reader.seek(1)")
+                       (repl/eval-code ctx "print(reader.read(2))")
+                       (repl/eval-code ctx "print(reader.position())")
                        (repl/eval-code ctx "reader.close()")
                        (repl/eval-code ctx "let reader2: Binary_File := create Binary_File.open_read(file)")
                        (repl/eval-code ctx "print(reader2.read_all())")
                        (repl/eval-code ctx "reader2.close()"))]
-          (is (.contains output "[65, 66]"))
-          (is (.contains output "[65, 66, 67, 68]")))
+          (is (.contains output "4"))
+          (is (.contains output "[65, 90]"))
+          (is (.contains output "2"))
+          (is (.contains output "[90, 91]"))
+          (is (.contains output "3"))
+          (is (.contains output "[65, 90, 91, 68]")))
         (finally
           (delete-tree! tmp-dir))))))

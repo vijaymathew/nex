@@ -2170,6 +2170,30 @@
                                           (display-type bytes-type)))}))))
         "Void")
 
+      (= method "binary_file_position")
+      (do
+        (when (not= (count args) 1)
+          (throw (ex-info "binary_file_position expects exactly 1 argument"
+                          {:error (type-error
+                                   (str "binary_file_position expects 1 argument, got " (count args)))})))
+        (check-expression env (first args))
+        "Integer")
+
+      (= method "binary_file_seek")
+      (do
+        (when (not= (count args) 2)
+          (throw (ex-info "binary_file_seek expects exactly 2 arguments"
+                          {:error (type-error
+                                   (str "binary_file_seek expects 2 arguments, got " (count args)))})))
+        (check-expression env (first args))
+        (let [offset-type (check-expression env (second args))]
+          (when-not (= (attachable-type offset-type) "Integer")
+            (throw (ex-info "binary_file_seek second argument must be Integer"
+                            {:error (type-error
+                                     (str "binary_file_seek second argument must be Integer, got "
+                                          (display-type offset-type)))}))))
+        "Void")
+
       (= method "binary_file_close")
       (do
         (when (not= (count args) 1)

@@ -1653,10 +1653,18 @@ end")
                               "let h := text_file_open_read(\"" file-path "\")\n"
                               "print(text_file_read_line(h))\n"
                               "text_file_close(h)\n"
-                              "binary_file_close(binary_file_open_write(\"" file-path-bin "\"))\n"
+                              "let b := binary_file_open_write(\"" file-path-bin "\")\n"
+                              "binary_file_write(b, [65, 66, 67])\n"
+                              "print(binary_file_position(b))\n"
+                              "binary_file_seek(b, 1)\n"
+                              "binary_file_write(b, [90])\n"
+                              "binary_file_close(b)\n"
+                              "let br := binary_file_open_read(\"" file-path-bin "\")\n"
+                              "print(binary_file_read(br, 3))\n"
+                              "binary_file_close(br)\n"
                               "path_read_text(\"" file-path "\")"))))]
           (is (:compiled? result))
-          (is (= ["true" "\"hello\""] (:output result)))
+          (is (= ["true" "\"hello\"" "3" "[65, 90, 67]"] (:output result)))
           (is (= "hello" (:result result))))
         (finally
           (when (.exists tmp-dir)

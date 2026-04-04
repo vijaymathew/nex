@@ -1,7 +1,7 @@
 intern io/Path
 
 class Binary_File
-  note "Sequential binary file IO wrapper built on top of runtime binary-file primitives."
+  note "Binary file IO wrapper built on top of runtime binary-file primitives."
 
 create
   open_read(path_value: Path) do
@@ -29,6 +29,14 @@ feature
 
   read(count: Integer): Array[Integer] do
     result := binary_file_read(handle, count)
+  end
+
+  position(): Integer do
+    result := binary_file_position(handle)
+  end
+
+  seek(offset: Integer) do
+    binary_file_seek(handle, offset)
   end
 
   write(bytes: Array[Integer]) do
