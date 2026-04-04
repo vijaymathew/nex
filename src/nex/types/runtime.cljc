@@ -487,81 +487,135 @@
               v)
             values)))))
 
+#?(:cljs
+   (defn- binary-file-fs []
+     (js/require "fs")))
+
+#?(:clj
+   (defn- make-binary-file-handle
+     [mode ^java.io.RandomAccessFile raf]
+     {:nex-builtin-type :BinaryFileHandle
+      :mode mode
+      :index (atom (.getFilePointer raf))
+      :raf raf}))
+
+#?(:cljs
+   (defn- make-binary-file-handle
+     [mode fd index]
+     {:nex-builtin-type :BinaryFileHandle
+      :mode mode
+      :index (atom index)
+      :fd fd}))
+
 #?(:clj
    (defn binary-file-open-read [path]
-     {:nex-builtin-type :BinaryFileHandle
-      :mode :read
-      :data (byte-array (java.nio.file.Files/readAllBytes (java.nio.file.Paths/get path (make-array String 0))))
-      :index (atom 0)
-      :out nil}))
+     (make-binary-file-handle :read
+                              (java.io.RandomAccessFile. path "r"))))
 
 #?(:cljs
    (defn binary-file-open-read [path]
-     {:nex-builtin-type :BinaryFileHandle
-      :mode :read
-      :data (.readFileSync (js/require "fs") path)
-      :index (atom 0)
-      :path path}))
+     (make-binary-file-handle :read
+                              (.openSync (binary-file-fs) path "r")
+                              0)))
 
 #?(:clj
    (defn binary-file-open-write [path]
-     {:nex-builtin-type :BinaryFileHandle
-      :mode :write
-      :data nil
-      :index (atom 0)
-      :out (java.io.FileOutputStream. path false)}))
+     (let [raf (java.io.RandomAccessFile. path "rw")]
+       (.setLength raf 0)
+       (.seek raf 0)
+        (make-binary-file-handle :write raf))))
 
 #?(:cljs
    (defn binary-file-open-write [path]
-     (do
-       (.writeFileSync (js/require "fs") path (js/Buffer.alloc 0))
-       {:nex-builtin-type :BinaryFileHandle
-        :mode :write
-        :path path})))
+     (make-binary-file-handle :write
+                              (.openSync (binary-file-fs) path "w+")
+                              0)))
 
 #?(:clj
    (defn binary-file-open-append [path]
-     {:nex-builtin-type :BinaryFileHandle
-      :mode :append
-      :data nil
-      :index (atom 0)
-      :out (java.io.FileOutputStream. path true)}))
+     (let [raf (java.io.RandomAccessFile. path "rw")
+           size (.length raf)]
+       (.seek raf size)
+       (make-binary-file-handle :append raf))))
 
 #?(:cljs
    (defn binary-file-open-append [path]
-     {:nex-builtin-type :BinaryFileHandle
-      :mode :append
-      :path path}))
+     (let [fs (binary-file-fs)]
+       (when-not (.existsSync fs path)
+         (.writeFileSync fs path (js/Buffer.alloc 0)))
+       (let [fd (.openSync fs path "r+")
+             size (.-size (.fstatSync fs fd))]
+         (make-binary-file-handle :append fd size)))))
 
 (defn binary-file-read-all [handle]
-  #?(:clj (bytes->int-array ^bytes (:data handle))
-     :cljs (bytes->int-array (:data handle))))
+  #?(:clj (let [^java.io.RandomAccessFile raf (:raf handle)
+                pos (.getFilePointer raf)
+                size (int (.length raf))
+                data (byte-array size)]
+            (.seek raf 0)
+            (.readFully raf data)
+            (.seek raf pos)
+            (bytes->int-array data))
+     :cljs (let [fs (binary-file-fs)
+                 fd (:fd handle)
+                 size (.-size (.fstatSync fs fd))
+                 out (js/Buffer.alloc size)]
+             (.readSync fs fd out 0 size 0)
+             (bytes->int-array out))))
 
 (defn binary-file-read [handle count]
-  #?(:clj (let [data ^bytes (:data handle)
+  #?(:clj (let [^java.io.RandomAccessFile raf (:raf handle)
                 idx @(:index handle)
-                n (min (+ idx count) (alength data))
-                out (java.util.Arrays/copyOfRange data idx n)]
-            (reset! (:index handle) n)
+                size (.length raf)
+                bytes-to-read (int (max 0 (min count (- size idx))))
+                out (byte-array bytes-to-read)]
+            (.seek raf idx)
+            (when (pos? bytes-to-read)
+              (.readFully raf out))
+            (reset! (:index handle) (+ idx bytes-to-read))
             (bytes->int-array out))
-     :cljs (let [data (:data handle)
+     :cljs (let [fs (binary-file-fs)
+                 fd (:fd handle)
                  idx @(:index handle)
-                 n (min (+ idx count) (.-length data))
-                 out (.subarray data idx n)]
-             (reset! (:index handle) n)
+                 size (.-size (.fstatSync fs fd))
+                 bytes-to-read (max 0 (min count (- size idx)))
+                 out (js/Buffer.alloc bytes-to-read)]
+             (.readSync fs fd out 0 bytes-to-read idx)
+             (reset! (:index handle) (+ idx bytes-to-read))
              (bytes->int-array out))))
 
 (defn binary-file-write [handle values]
-  #?(:clj (let [out ^java.io.FileOutputStream (:out handle)]
-            (.write out ^bytes (int-array->bytes values))
-            (.flush out))
-     :cljs (.appendFileSync (js/require "fs") (:path handle) (int-array->bytes values)))
+  #?(:clj (let [^java.io.RandomAccessFile raf (:raf handle)
+                idx @(:index handle)
+                data ^bytes (int-array->bytes values)]
+            (.seek raf idx)
+            (.write raf data)
+            (reset! (:index handle) (+ idx (alength data))))
+     :cljs (let [fs (binary-file-fs)
+                 fd (:fd handle)
+                 idx @(:index handle)
+                 data (int-array->bytes values)]
+             (.writeSync fs fd data 0 (.-length data) idx)
+             (reset! (:index handle) (+ idx (.-length data)))))
+  nil)
+
+(defn binary-file-position [handle]
+  @(:index handle))
+
+(defn binary-file-seek [handle offset]
+  (when (neg? offset)
+    (throw (ex-info "binary file position must be non-negative" {:offset offset})))
+  (reset! (:index handle) offset)
+  #?(:clj (when-let [^java.io.RandomAccessFile raf (:raf handle)]
+            (.seek raf offset))
+     :cljs nil)
   nil)
 
 (defn binary-file-close [handle]
-  #?(:clj (when-let [out ^java.io.FileOutputStream (:out handle)]
-            (.close out))
-     :cljs nil)
+  #?(:clj (when-let [^java.io.RandomAccessFile raf (:raf handle)]
+            (.close raf))
+     :cljs (when-let [fd (:fd handle)]
+             (.closeSync (binary-file-fs) fd)))
   nil)
 
 (defn nex-process-getenv [name]

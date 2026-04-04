@@ -2194,6 +2194,18 @@
        (throw (ex-info "binary_file_write expects exactly 2 arguments" {:function "binary_file_write"})))
      (rt/binary-file-write (first args) (second args)))
 
+   "binary_file_position"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_position expects exactly 1 argument" {:function "binary_file_position"})))
+     (rt/binary-file-position (first args)))
+
+   "binary_file_seek"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "binary_file_seek expects exactly 2 arguments" {:function "binary_file_seek"})))
+     (rt/binary-file-seek (first args) (second args)))
+
    "binary_file_close"
    (fn [_ctx & args]
      (when (not= (count args) 1)

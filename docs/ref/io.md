@@ -205,6 +205,8 @@ reader.close()
 `Binary_File` is the byte-oriented file wrapper.
 
 Bytes are represented as `Array[Integer]`, with each element required to be in `0..255`.
+The file maintains an explicit cursor. `seek(offset)` sets the absolute byte position,
+and `position()` returns the current cursor offset.
 
 ```nex
 class Binary_File
@@ -215,6 +217,8 @@ create
 feature
   read_all(): Array[Integer]
   read(count: Integer): Array[Integer]
+  position(): Integer
+  seek(offset: Integer)
   write(bytes: Array[Integer])
   close()
   to_string(): String
@@ -230,9 +234,14 @@ intern io/Binary_File
 let path: Path := create Path.make("data.bin")
 let writer: Binary_File := create Binary_File.open_write(path)
 writer.write([65, 66, 67])
+writer.seek(1)
+writer.write([90])
 writer.close()
 
 let reader: Binary_File := create Binary_File.open_read(path)
 print(reader.read(2))
+print(reader.position())
+reader.seek(0)
+print(reader.read_all())
 reader.close()
 ```

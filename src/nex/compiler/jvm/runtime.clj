@@ -1159,6 +1159,14 @@
   [handle values]
   (rt/binary-file-write handle values))
 
+(defn builtin-binary-file-position
+  [handle]
+  (rt/binary-file-position handle))
+
+(defn builtin-binary-file-seek
+  [handle offset]
+  (rt/binary-file-seek handle offset))
+
 (defn builtin-binary-file-close
   [handle]
   (rt/binary-file-close handle))

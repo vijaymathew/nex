@@ -1210,4 +1210,6 @@ end"
       (is (str/includes? binary-code "class Binary_File"))
       (is (str/includes? binary-code "__nexBinaryFileOpenWrite("))
       (is (str/includes? binary-code "__nexBinaryFileRead("))
-      (is (str/includes? binary-code "__nexBinaryFileWrite(")))))
+      (is (str/includes? binary-code "__nexBinaryFileWrite("))
+      (is (str/includes? binary-code "__nexBinaryFilePosition("))
+      (is (str/includes? binary-code "__nexBinaryFileSeek(")))))
