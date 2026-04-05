@@ -50,7 +50,7 @@
           (recur (assoc opts :root "docs/tut") rest)
 
           (= arg "--root")
-          (recur (assoc opts :root (first rest)) (rest rest))
+          (recur (assoc opts :root (first rest)) (next rest))
 
           :else
           (recur (update opts :files conj (io/file arg)) rest))))))
