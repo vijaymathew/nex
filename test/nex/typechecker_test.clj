@@ -809,6 +809,23 @@ class B inherit A end"
       (is (some #(re-find #"Cyclic inheritance detected" %)
                 (map tc/format-type-error (:errors result)))))))
 
+(deftest test-array-filled-constructor-types
+  (testing "Array.filled typechecks with inferred or explicit element type"
+    (let [ok-code "class Test
+  feature
+    demo() do
+      let xs: Array[Integer] := create Array.filled(3, 0)
+    end
+end"
+          bad-code "class Test
+  feature
+    demo() do
+      let xs: Array[Integer] := create Array.filled(3, \"oops\")
+    end
+end"]
+      (is (:success (tc/type-check (p/ast ok-code))))
+      (is (not (:success (tc/type-check (p/ast bad-code))))))))
+
 ;; Let type inference tests
 
 (deftest test-let-without-type-annotation-succeeds

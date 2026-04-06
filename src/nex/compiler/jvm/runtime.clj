@@ -203,6 +203,20 @@
                               [])}]
      (interp/eval-node ctx create-node))))
 
+(defn create-array
+  []
+  (rt/nex-array))
+
+(defn create-array-filled
+  [size value]
+  (when-not (integer? size)
+    (throw (ex-info "Array.filled requires an Integer size"
+                    {:size size})))
+  (when (neg? size)
+    (throw (ex-info "Array size must be non-negative"
+                    {:size size})))
+  (rt/nex-array-from (vec (repeat size value))))
+
 (defn java-create-object
   [state class-name args]
   (let [ctx (rebuild-interpreter-ctx state)]
@@ -1465,6 +1479,12 @@
     (if (seq args)
       (create-channel (first args))
       (create-channel))
+
+    (= name "create-array")
+    (create-array)
+
+    (= name "create-array-filled")
+    (create-array-filled (first args) (second args))
 
     (= name "java-create-object")
     (java-create-object state (first args) (vec (rest args)))

@@ -1757,6 +1757,21 @@ ch.is_closed"))]
         (is (str/includes? output "true"))
         (is (str/includes? output "7"))))))
 
+(deftest repl-compiled-backend-array-filled-constructor-test
+  (testing "compiled backend can create Array.filled and use it as a normal array"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "let failure: Array[Integer] := create Array.filled(3, 0)
+print(failure.length)
+print(failure.get(0))
+print(failure.get(2))"))]
+        (is (str/includes? output "3"))
+        (is (>= (count (re-seq #"0" output)) 2) output)))))
+
 (deftest repl-compiled-backend-task-and-channel-state-methods-test
   (testing "compiled backend specializes task/channel state methods too"
     (binding [repl/*type-checking-enabled* (atom true)

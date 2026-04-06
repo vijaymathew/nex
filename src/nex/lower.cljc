@@ -2167,6 +2167,33 @@
             (throw (ex-info "Unsupported Channel constructor in compiled lowering"
                             {:expr expr
                              :constructor (:constructor expr)}))))
+        (if (= class-name "Array")
+          (let [nex-type (infer-type env expr)]
+            (case (:constructor expr)
+              nil
+              (do
+                (when (seq (:args expr))
+                  (throw (ex-info "create Array takes no arguments in compiled lowering"
+                                  {:expr expr})))
+                (ir/call-runtime-node "create-array"
+                                      []
+                                      nex-type
+                                      (resolve-jvm-type env nex-type)))
+
+              "filled"
+              (do
+                (when-not (= 2 (count (:args expr)))
+                  (throw (ex-info "Array.filled expects exactly 2 arguments in compiled lowering"
+                                  {:expr expr})))
+                (ir/call-runtime-node "create-array-filled"
+                                      [(lower-expression env (first (:args expr)))
+                                       (lower-expression env (second (:args expr)))]
+                                      nex-type
+                                      (resolve-jvm-type env nex-type)))
+
+              (throw (ex-info "Unsupported Array constructor in compiled lowering"
+                              {:expr expr
+                               :constructor (:constructor expr)}))))
         (cond
           (and class-def (:import class-def))
           (do
@@ -2221,7 +2248,7 @@
                                                          class-name
                                                          nex-type
                                                          (resolve-jvm-type env nex-type))
-                                            nex-type))))))))
+                                            nex-type)))))))))
 
     :anonymous-function
     (let [class-name (:class-name expr)

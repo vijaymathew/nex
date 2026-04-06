@@ -3809,6 +3809,21 @@
   (case class-name
     "Console" {:nex-builtin-type :Console}
     "Process" {:nex-builtin-type :Process}
+    "Array" (let [arg-values (mapv #(eval-node ctx %) args)]
+              (cond
+                (nil? constructor) (nex-array)
+                (= constructor "filled")
+                (let [[size value] arg-values]
+                  (when-not (integer? size)
+                    (throw (ex-info "Array.filled requires an Integer size"
+                                    {:class-name "Array" :constructor constructor})))
+                  (when (neg? size)
+                    (throw (ex-info "Array size must be non-negative"
+                                    {:class-name "Array" :constructor constructor})))
+                  (nex-array-from (vec (repeat size value))))
+                :else
+                (throw (ex-info (str "Constructor not found: Array." constructor)
+                                {:class-name "Array" :constructor constructor}))))
     "Map" (nex-map)
     "Channel" #?(:clj (let [arg-values (mapv #(eval-node ctx %) args)]
                         (cond
@@ -4710,6 +4725,20 @@
                    (case class-name
                       "Console" {:nex-builtin-type :Console}
                       "Process" {:nex-builtin-type :Process}
+                      "Array" (cond
+                                (nil? constructor) (nex-array)
+                                (= constructor "filled")
+                                (let [[size value] arg-values]
+                                  (when-not (integer? size)
+                                    (throw (ex-info "Array.filled requires an Integer size"
+                                                    {:class-name "Array" :constructor constructor})))
+                                  (when (neg? size)
+                                    (throw (ex-info "Array size must be non-negative"
+                                                    {:class-name "Array" :constructor constructor})))
+                                  (nex-array-from (vec (repeat size value))))
+                                :else
+                                (throw (ex-info (str "Constructor not found: Array." constructor)
+                                                {:class-name "Array" :constructor constructor})))
                       "Map" (nex-map)
                       "Channel" (cond
                                   (nil? constructor) (make-channel)

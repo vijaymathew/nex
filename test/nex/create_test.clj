@@ -161,3 +161,14 @@ end"
       ;; Just verify it parses correctly
       (is (= 2 (count (:classes ast)))))))
 
+(deftest array-filled-runtime-test
+  (testing "create Array.filled builds a mutable array with repeated values"
+    (let [ctx (interp/make-context)
+          value (interp/eval-node ctx {:type :create
+                                       :class-name "Array"
+                                       :generic-args ["Integer"]
+                                       :constructor "filled"
+                                       :args [{:type :literal :value 3}
+                                              {:type :literal :value 0}]})]
+      (is (= 3 (count value)))
+      (is (= [0 0 0] (vec value))))))

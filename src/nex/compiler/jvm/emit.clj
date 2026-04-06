@@ -897,6 +897,19 @@
                                   args))
         (emit-return (:jvm-type expr)))
 
+      "create-array"
+      (do
+        (emit-runtime-call! mv "create-array" [])
+        (emit-return (:jvm-type expr)))
+
+      "create-array-filled"
+      (do
+        (emit-runtime-call! mv "create-array-filled"
+                            (mapv (fn [arg]
+                                    (fn [] (emit-boxed-expr! mv arg state-slot)))
+                                  args))
+        (emit-return (:jvm-type expr)))
+
       "op:await-all"
       (do
         (emit-runtime-call! mv "task-await-all"

@@ -2454,6 +2454,47 @@
   "Check the type of a create expression"
   [env {:keys [class-name generic-args constructor args] :as expr}]
   (cond
+    ;; Handle built-in Array type
+    (= class-name "Array")
+    (let [target-type (if (seq generic-args)
+                        (do
+                          (validate-generic-args env class-name generic-args)
+                          {:base-type "Array" :type-args generic-args})
+                        "Array")]
+      (cond
+        (nil? constructor)
+        (do
+          (when (seq args)
+            (throw (ex-info "create Array expects no arguments"
+                            {:error (type-error "create Array expects no arguments")})))
+          target-type)
+
+        (= constructor "filled")
+        (do
+          (when-not (= 2 (count args))
+            (throw (ex-info "Array.filled expects 2 arguments"
+                            {:error (type-error "Array.filled expects exactly 2 arguments")})))
+          (let [size-type (check-expression env (first args))
+                value-type (check-expression env (second args))
+                elem-type (or (first generic-args) value-type)]
+            (when-not (types-compatible? env size-type "Integer")
+              (throw (ex-info "Array.filled requires Integer size"
+                              {:error (type-error
+                                       (str "Array.filled expects Integer size, got "
+                                            (display-type size-type)))})))
+            (when-not (types-compatible? env value-type elem-type)
+              (throw (ex-info "Array.filled value type mismatch"
+                              {:error (type-error
+                                       (str "Array.filled expects "
+                                            (display-type elem-type)
+                                            " value, got "
+                                            (display-type value-type)))})))
+            {:base-type "Array" :type-args [elem-type]}))
+
+        :else
+        (throw (ex-info (str "Constructor not found: Array." constructor)
+                        {:error (type-error (str "Constructor not found: Array." constructor))}))))
+
     ;; Handle built-in Console type
     (= class-name "Console") "Console"
     ;; Handle built-in Process type
@@ -3522,6 +3563,10 @@
   ;; Register Array[T] class and methods
   (env-add-class env "Array" {:name "Array"
                                :generic-params [{:name "T"}]})
+  (env-add-method env "Array" "filled"
+                  {:params [{:name "size" :type "Integer"}
+                            {:name "value" :type "T"}]
+                   :return-type {:base-type "Array" :type-params ["T"]}})
   (doseq [[method-name sig]
           {"get"         {:params [{:name "index" :type "Integer"}] :return-type "T"}
            "add"         {:params [{:name "value" :type "T"}] :return-type "Void"}

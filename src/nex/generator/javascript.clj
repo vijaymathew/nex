@@ -992,6 +992,17 @@
     (case class-name
       "Console" "({_type: 'Console'})"
       "Process" "({_type: 'Process'})"
+      "Array" (cond
+                (nil? constructor) "[]"
+                (= constructor "filled")
+                (str "Array.from({ length: "
+                     (generate-expression (first args))
+                     " }, () => "
+                     (generate-expression (second args))
+                     ")")
+                :else
+                (throw (ex-info (str "Unsupported built-in Array constructor: " constructor)
+                                {:constructor constructor})))
       "Map" "new Map()"
       "Channel" (cond
                   (nil? constructor) "new __nexChannel()"
