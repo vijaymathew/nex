@@ -98,6 +98,84 @@ create Channel[Integer].with_capacity(2)
 - Buffered values remain receivable after `close`.
 - Once a channel is closed and drained, `receive` fails.
 
+## `Atomic_Integer`
+
+### Construction
+
+```nex
+create Atomic_Integer.make(0)
+```
+
+### Methods
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `load` | none | `Integer` | Read the current value. |
+| `store` | `value: Integer` | `Void` | Replace the current value. |
+| `compare_and_set` | `expected: Integer, update: Integer` | `Boolean` | Replace the value only if it currently matches `expected`. |
+| `get_and_add` | `delta: Integer` | `Integer` | Return the old value, then add `delta`. |
+| `add_and_get` | `delta: Integer` | `Integer` | Add `delta`, then return the new value. |
+| `increment` | none | `Integer` | Increment by 1 and return the new value. |
+| `decrement` | none | `Integer` | Decrement by 1 and return the new value. |
+
+## `Atomic_Integer64`
+
+### Construction
+
+```nex
+create Atomic_Integer64.make(0)
+```
+
+### Methods
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `load` | none | `Integer64` | Read the current value. |
+| `store` | `value: Integer64` | `Void` | Replace the current value. |
+| `compare_and_set` | `expected: Integer64, update: Integer64` | `Boolean` | Replace the value only if it currently matches `expected`. |
+| `get_and_add` | `delta: Integer64` | `Integer64` | Return the old value, then add `delta`. |
+| `add_and_get` | `delta: Integer64` | `Integer64` | Add `delta`, then return the new value. |
+| `increment` | none | `Integer64` | Increment by 1 and return the new value. |
+| `decrement` | none | `Integer64` | Decrement by 1 and return the new value. |
+
+## `Atomic_Boolean`
+
+### Construction
+
+```nex
+create Atomic_Boolean.make(false)
+```
+
+### Methods
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `load` | none | `Boolean` | Read the current value. |
+| `store` | `value: Boolean` | `Void` | Replace the current value. |
+| `compare_and_set` | `expected: Boolean, update: Boolean` | `Boolean` | Replace the value only if it currently matches `expected`. |
+
+## `Atomic_Reference[T]`
+
+### Construction
+
+```nex
+create Atomic_Reference[String].make("ready")
+create Atomic_Reference.make(nil)
+```
+
+### Methods
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `load` | none | `?T` | Read the current reference value. |
+| `store` | `value: ?T` | `Void` | Replace the current reference value. |
+| `compare_and_set` | `expected: ?T, update: ?T` | `Boolean` | Replace the value only if it currently matches `expected`. |
+
+### Notes
+
+- `Atomic_Reference[T]` can store `nil`.
+- `compare_and_set` for `Atomic_Reference[T]` uses Nex value equality at the language level.
+
 ## Examples
 
 ```nex
@@ -125,4 +203,13 @@ print(t.await)
 let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
 print(ch.try_send(7))
 print(ch.receive)
+
+let ai := create Atomic_Integer.make(0)
+print(ai.increment)
+print(ai.compare_and_set(1, 5))
+print(ai.load)
+
+let ref: Atomic_Reference[String] := create Atomic_Reference.make("a")
+print(ref.compare_and_set("a", "b"))
+print(ref.load)
 ```

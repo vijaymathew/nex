@@ -81,7 +81,8 @@
 
 (def ^:private builtin-runtime-receiver-types
   #{"Any" "Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Set" "Min_Heap" "Cursor" "Task" "Channel" "Console" "Process"})
+    "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
+    "Cursor" "Task" "Channel" "Console" "Process"})
 
 (def ^:private next-synthetic-closure-id (atom 0))
 
@@ -2233,6 +2234,58 @@
             (throw (ex-info "Unsupported Min_Heap constructor in compiled lowering"
                             {:expr expr
                              :constructor (:constructor expr)}))))
+
+        (= class-name "Atomic_Integer")
+        (let [nex-type (infer-type env expr)]
+          (when-not (= "make" (:constructor expr))
+            (throw (ex-info "Unsupported Atomic_Integer constructor in compiled lowering"
+                            {:expr expr :constructor (:constructor expr)})))
+          (when-not (= 1 (count (:args expr)))
+            (throw (ex-info "Atomic_Integer.make expects exactly 1 argument in compiled lowering"
+                            {:expr expr})))
+          (ir/call-runtime-node "create-atomic-integer"
+                                [(lower-expression env (first (:args expr)))]
+                                nex-type
+                                (resolve-jvm-type env nex-type)))
+
+        (= class-name "Atomic_Integer64")
+        (let [nex-type (infer-type env expr)]
+          (when-not (= "make" (:constructor expr))
+            (throw (ex-info "Unsupported Atomic_Integer64 constructor in compiled lowering"
+                            {:expr expr :constructor (:constructor expr)})))
+          (when-not (= 1 (count (:args expr)))
+            (throw (ex-info "Atomic_Integer64.make expects exactly 1 argument in compiled lowering"
+                            {:expr expr})))
+          (ir/call-runtime-node "create-atomic-integer64"
+                                [(lower-expression env (first (:args expr)))]
+                                nex-type
+                                (resolve-jvm-type env nex-type)))
+
+        (= class-name "Atomic_Boolean")
+        (let [nex-type (infer-type env expr)]
+          (when-not (= "make" (:constructor expr))
+            (throw (ex-info "Unsupported Atomic_Boolean constructor in compiled lowering"
+                            {:expr expr :constructor (:constructor expr)})))
+          (when-not (= 1 (count (:args expr)))
+            (throw (ex-info "Atomic_Boolean.make expects exactly 1 argument in compiled lowering"
+                            {:expr expr})))
+          (ir/call-runtime-node "create-atomic-boolean"
+                                [(lower-expression env (first (:args expr)))]
+                                nex-type
+                                (resolve-jvm-type env nex-type)))
+
+        (= class-name "Atomic_Reference")
+        (let [nex-type (infer-type env expr)]
+          (when-not (= "make" (:constructor expr))
+            (throw (ex-info "Unsupported Atomic_Reference constructor in compiled lowering"
+                            {:expr expr :constructor (:constructor expr)})))
+          (when-not (= 1 (count (:args expr)))
+            (throw (ex-info "Atomic_Reference.make expects exactly 1 argument in compiled lowering"
+                            {:expr expr})))
+          (ir/call-runtime-node "create-atomic-reference"
+                                [(lower-expression env (first (:args expr)))]
+                                nex-type
+                                (resolve-jvm-type env nex-type)))
 
         (and class-def (:import class-def))
         (do

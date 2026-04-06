@@ -10,7 +10,8 @@
             [nex.types.typeinfo :as typeinfo]
             [nex.types.bootstrap :as bootstrap])
   #?(:clj (:import [java.lang.reflect Field]
-                   [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException])))
+                   [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException]
+                   [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference])))
 
 (declare nex-format-value)
 (declare eval-node)
@@ -1683,6 +1684,53 @@
    :data (atom [])
    :comparator comparator})
 
+(defn- make-atomic-integer
+  [initial]
+  {:nex-builtin-type :AtomicInteger
+   :state #?(:clj (AtomicInteger. (int initial))
+             :cljs (atom initial))})
+
+(defn- make-atomic-integer64
+  [initial]
+  {:nex-builtin-type :AtomicInteger64
+   :state #?(:clj (AtomicLong. (long initial))
+             :cljs (atom initial))})
+
+(defn- make-atomic-boolean
+  [initial]
+  {:nex-builtin-type :AtomicBoolean
+   :state #?(:clj (AtomicBoolean. (boolean initial))
+             :cljs (atom initial))})
+
+(defn- make-atomic-reference
+  [initial]
+  {:nex-builtin-type :AtomicReference
+   :state #?(:clj (AtomicReference. initial)
+             :cljs (atom initial))})
+
+(defn- deep-equals-runtime?
+  [a b]
+  (value/nex-deep-equals? nex-object? a b))
+
+(defn- atomic-reference-cas!
+  [atomic expected update]
+  #?(:clj (loop []
+            (let [^AtomicReference state (:state atomic)
+                  current (.get state)]
+              (if (deep-equals-runtime? current expected)
+                (if (.compareAndSet state current update)
+                  true
+                  (recur))
+                false)))
+     :cljs (let [state (:state atomic)]
+             (loop []
+               (let [current @state]
+                 (if (deep-equals-runtime? current expected)
+                   (do
+                     (reset! state update)
+                     true)
+                   false))))))
+
 (defn- heap-compare
   [ctx heap left right]
   (let [comparator (:comparator heap)]
@@ -2800,6 +2848,85 @@
     "try_peek"        (fn [heap & _] (heap-peek heap))
     "size"            (fn [heap & _] (count @(:data heap)))
     "is_empty"        (fn [heap & _] (empty? @(:data heap)))}
+
+   :Atomic_Integer
+   {"load"            (fn [atomic & _] #?(:clj (.get ^AtomicInteger (:state atomic))
+                                          :cljs @(:state atomic)))
+    "store"           (fn [atomic value & _]
+                        #?(:clj (.set ^AtomicInteger (:state atomic) (int value))
+                           :cljs (reset! (:state atomic) value))
+                        nil)
+    "compare_and_set" (fn [atomic expected update & _]
+                        #?(:clj (.compareAndSet ^AtomicInteger (:state atomic) (int expected) (int update))
+                           :cljs (if (= @(:state atomic) expected)
+                                   (do (reset! (:state atomic) update) true)
+                                   false)))
+    "get_and_add"     (fn [atomic delta & _]
+                        #?(:clj (.getAndAdd ^AtomicInteger (:state atomic) (int delta))
+                           :cljs (let [current @(:state atomic)]
+                                   (swap! (:state atomic) + delta)
+                                   current)))
+    "add_and_get"     (fn [atomic delta & _]
+                        #?(:clj (.addAndGet ^AtomicInteger (:state atomic) (int delta))
+                           :cljs (swap! (:state atomic) + delta)))
+    "increment"       (fn [atomic & _]
+                        #?(:clj (.incrementAndGet ^AtomicInteger (:state atomic))
+                           :cljs (swap! (:state atomic) inc)))
+    "decrement"       (fn [atomic & _]
+                        #?(:clj (.decrementAndGet ^AtomicInteger (:state atomic))
+                           :cljs (swap! (:state atomic) dec)))}
+
+   :Atomic_Integer64
+   {"load"            (fn [atomic & _] #?(:clj (.get ^AtomicLong (:state atomic))
+                                          :cljs @(:state atomic)))
+    "store"           (fn [atomic value & _]
+                        #?(:clj (.set ^AtomicLong (:state atomic) (long value))
+                           :cljs (reset! (:state atomic) value))
+                        nil)
+    "compare_and_set" (fn [atomic expected update & _]
+                        #?(:clj (.compareAndSet ^AtomicLong (:state atomic) (long expected) (long update))
+                           :cljs (if (= @(:state atomic) expected)
+                                   (do (reset! (:state atomic) update) true)
+                                   false)))
+    "get_and_add"     (fn [atomic delta & _]
+                        #?(:clj (.getAndAdd ^AtomicLong (:state atomic) (long delta))
+                           :cljs (let [current @(:state atomic)]
+                                   (swap! (:state atomic) + delta)
+                                   current)))
+    "add_and_get"     (fn [atomic delta & _]
+                        #?(:clj (.addAndGet ^AtomicLong (:state atomic) (long delta))
+                           :cljs (swap! (:state atomic) + delta)))
+    "increment"       (fn [atomic & _]
+                        #?(:clj (.incrementAndGet ^AtomicLong (:state atomic))
+                           :cljs (swap! (:state atomic) inc)))
+    "decrement"       (fn [atomic & _]
+                        #?(:clj (.decrementAndGet ^AtomicLong (:state atomic))
+                           :cljs (swap! (:state atomic) dec)))}
+
+   :Atomic_Boolean
+   {"load"            (fn [atomic & _] #?(:clj (.get ^AtomicBoolean (:state atomic))
+                                          :cljs @(:state atomic)))
+    "store"           (fn [atomic value & _]
+                        #?(:clj (.set ^AtomicBoolean (:state atomic) (boolean value))
+                           :cljs (reset! (:state atomic) value))
+                        nil)
+    "compare_and_set" (fn [atomic expected update & _]
+                        #?(:clj (.compareAndSet ^AtomicBoolean (:state atomic)
+                                                (boolean expected)
+                                                (boolean update))
+                           :cljs (if (= @(:state atomic) expected)
+                                   (do (reset! (:state atomic) update) true)
+                                   false)))}
+
+   :Atomic_Reference
+   {"load"            (fn [atomic & _] #?(:clj (.get ^AtomicReference (:state atomic))
+                                          :cljs @(:state atomic)))
+    "store"           (fn [atomic value & _]
+                        #?(:clj (.set ^AtomicReference (:state atomic) value)
+                           :cljs (reset! (:state atomic) value))
+                        nil)
+    "compare_and_set" (fn [atomic expected update & _]
+                        (atomic-reference-cas! atomic expected update))}
 
    :Task
    {"await"    (fn [t & [timeout]]
@@ -3953,6 +4080,38 @@
                    :else
                    (throw (ex-info (str "Constructor not found: Min_Heap." constructor)
                                    {:class-name "Min_Heap" :constructor constructor}))))
+    "Atomic_Integer" (let [arg-values (mapv #(eval-node ctx %) args)]
+                       (when-not (= constructor "make")
+                         (throw (ex-info (str "Constructor not found: Atomic_Integer." constructor)
+                                         {:class-name "Atomic_Integer" :constructor constructor})))
+                       (when-not (= 1 (count arg-values))
+                         (throw (ex-info "Atomic_Integer.make expects 1 argument"
+                                         {:class-name "Atomic_Integer" :constructor constructor})))
+                       (make-atomic-integer (first arg-values)))
+    "Atomic_Integer64" (let [arg-values (mapv #(eval-node ctx %) args)]
+                         (when-not (= constructor "make")
+                           (throw (ex-info (str "Constructor not found: Atomic_Integer64." constructor)
+                                           {:class-name "Atomic_Integer64" :constructor constructor})))
+                         (when-not (= 1 (count arg-values))
+                           (throw (ex-info "Atomic_Integer64.make expects 1 argument"
+                                           {:class-name "Atomic_Integer64" :constructor constructor})))
+                         (make-atomic-integer64 (first arg-values)))
+    "Atomic_Boolean" (let [arg-values (mapv #(eval-node ctx %) args)]
+                       (when-not (= constructor "make")
+                         (throw (ex-info (str "Constructor not found: Atomic_Boolean." constructor)
+                                         {:class-name "Atomic_Boolean" :constructor constructor})))
+                       (when-not (= 1 (count arg-values))
+                         (throw (ex-info "Atomic_Boolean.make expects 1 argument"
+                                         {:class-name "Atomic_Boolean" :constructor constructor})))
+                       (make-atomic-boolean (first arg-values)))
+    "Atomic_Reference" (let [arg-values (mapv #(eval-node ctx %) args)]
+                         (when-not (= constructor "make")
+                           (throw (ex-info (str "Constructor not found: Atomic_Reference." constructor)
+                                           {:class-name "Atomic_Reference" :constructor constructor})))
+                         (when-not (= 1 (count arg-values))
+                           (throw (ex-info "Atomic_Reference.make expects 1 argument"
+                                           {:class-name "Atomic_Reference" :constructor constructor})))
+                         (make-atomic-reference (first arg-values)))
     "Channel" #?(:clj (let [arg-values (mapv #(eval-node ctx %) args)]
                         (cond
                           (nil? constructor) (make-channel)
@@ -4884,6 +5043,38 @@
                                    :else
                                    (throw (ex-info (str "Constructor not found: Min_Heap." constructor)
                                                    {:class-name "Min_Heap" :constructor constructor})))
+                      "Atomic_Integer" (do
+                                         (when-not (= constructor "make")
+                                           (throw (ex-info (str "Constructor not found: Atomic_Integer." constructor)
+                                                           {:class-name "Atomic_Integer" :constructor constructor})))
+                                         (when-not (= 1 (count arg-values))
+                                           (throw (ex-info "Atomic_Integer.make expects 1 argument"
+                                                           {:class-name "Atomic_Integer" :constructor constructor})))
+                                         (make-atomic-integer (first arg-values)))
+                      "Atomic_Integer64" (do
+                                           (when-not (= constructor "make")
+                                             (throw (ex-info (str "Constructor not found: Atomic_Integer64." constructor)
+                                                             {:class-name "Atomic_Integer64" :constructor constructor})))
+                                           (when-not (= 1 (count arg-values))
+                                             (throw (ex-info "Atomic_Integer64.make expects 1 argument"
+                                                             {:class-name "Atomic_Integer64" :constructor constructor})))
+                                           (make-atomic-integer64 (first arg-values)))
+                      "Atomic_Boolean" (do
+                                         (when-not (= constructor "make")
+                                           (throw (ex-info (str "Constructor not found: Atomic_Boolean." constructor)
+                                                           {:class-name "Atomic_Boolean" :constructor constructor})))
+                                         (when-not (= 1 (count arg-values))
+                                           (throw (ex-info "Atomic_Boolean.make expects 1 argument"
+                                                           {:class-name "Atomic_Boolean" :constructor constructor})))
+                                         (make-atomic-boolean (first arg-values)))
+                      "Atomic_Reference" (do
+                                           (when-not (= constructor "make")
+                                             (throw (ex-info (str "Constructor not found: Atomic_Reference." constructor)
+                                                             {:class-name "Atomic_Reference" :constructor constructor})))
+                                           (when-not (= 1 (count arg-values))
+                                             (throw (ex-info "Atomic_Reference.make expects 1 argument"
+                                                             {:class-name "Atomic_Reference" :constructor constructor})))
+                                           (make-atomic-reference (first arg-values)))
                       "Channel" (cond
                                   (nil? constructor) (make-channel)
                                   (= constructor "with_capacity")

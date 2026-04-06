@@ -65,7 +65,8 @@
 
 (def ^:private builtin-runtime-receiver-types
   #{"Any" "Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Set" "Min_Heap" "Cursor" "Task" "Channel" "Console" "Process"})
+    "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
+    "Cursor" "Task" "Channel" "Console" "Process"})
 
 (defn- base-type-name
   [t]

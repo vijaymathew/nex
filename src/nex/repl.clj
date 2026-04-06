@@ -39,7 +39,8 @@
 
 (def nex-types
   ["Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-   "Array" "Map" "Set" "Min_Heap" "Task" "Channel" "Function" "Cursor" "Console" "Process"])
+   "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
+   "Task" "Channel" "Function" "Cursor" "Console" "Process"])
 
 (def nex-builtins ["print" "println" "type_of" "type_is"])
 

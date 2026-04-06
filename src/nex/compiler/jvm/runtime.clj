@@ -14,7 +14,8 @@
   (:import [clojure.lang DynamicClassLoader]
            [java.lang.reflect Field Method InvocationTargetException]
            [java.util HashMap]
-           [java.util.concurrent CompletableFuture TimeUnit TimeoutException ExecutionException CancellationException]))
+           [java.util.concurrent CompletableFuture TimeUnit TimeoutException ExecutionException CancellationException]
+           [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference]))
 
 (declare rebuild-interpreter-ctx)
 (declare lowered-instance-method-name)
@@ -229,6 +230,26 @@
   {:nex-builtin-type :MinHeap
    :data (atom [])
    :comparator compare})
+
+(defn create-atomic-integer
+  [initial]
+  {:nex-builtin-type :AtomicInteger
+   :state (AtomicInteger. (int initial))})
+
+(defn create-atomic-integer64
+  [initial]
+  {:nex-builtin-type :AtomicInteger64
+   :state (AtomicLong. (long initial))})
+
+(defn create-atomic-boolean
+  [initial]
+  {:nex-builtin-type :AtomicBoolean
+   :state (AtomicBoolean. (boolean initial))})
+
+(defn create-atomic-reference
+  [initial]
+  {:nex-builtin-type :AtomicReference
+   :state (AtomicReference. initial)})
 
 (defn java-create-object
   [state class-name args]
@@ -453,6 +474,97 @@
 (defn min-heap-is-empty-method
   [state heap]
   (empty? @(:data heap)))
+
+(defn builtin-method-atomic_integer-load
+  [target]
+  (.get ^AtomicInteger (:state target)))
+
+(defn builtin-method-atomic_integer-store
+  [target value]
+  (.set ^AtomicInteger (:state target) (int value))
+  nil)
+
+(defn builtin-method-atomic_integer-compare-and-set
+  [target expected update]
+  (.compareAndSet ^AtomicInteger (:state target) (int expected) (int update)))
+
+(defn builtin-method-atomic_integer-get-and-add
+  [target delta]
+  (.getAndAdd ^AtomicInteger (:state target) (int delta)))
+
+(defn builtin-method-atomic_integer-add-and-get
+  [target delta]
+  (.addAndGet ^AtomicInteger (:state target) (int delta)))
+
+(defn builtin-method-atomic_integer-increment
+  [target]
+  (.incrementAndGet ^AtomicInteger (:state target)))
+
+(defn builtin-method-atomic_integer-decrement
+  [target]
+  (.decrementAndGet ^AtomicInteger (:state target)))
+
+(defn builtin-method-atomic_integer64-load
+  [target]
+  (.get ^AtomicLong (:state target)))
+
+(defn builtin-method-atomic_integer64-store
+  [target value]
+  (.set ^AtomicLong (:state target) (long value))
+  nil)
+
+(defn builtin-method-atomic_integer64-compare-and-set
+  [target expected update]
+  (.compareAndSet ^AtomicLong (:state target) (long expected) (long update)))
+
+(defn builtin-method-atomic_integer64-get-and-add
+  [target delta]
+  (.getAndAdd ^AtomicLong (:state target) (long delta)))
+
+(defn builtin-method-atomic_integer64-add-and-get
+  [target delta]
+  (.addAndGet ^AtomicLong (:state target) (long delta)))
+
+(defn builtin-method-atomic_integer64-increment
+  [target]
+  (.incrementAndGet ^AtomicLong (:state target)))
+
+(defn builtin-method-atomic_integer64-decrement
+  [target]
+  (.decrementAndGet ^AtomicLong (:state target)))
+
+(defn builtin-method-atomic_boolean-load
+  [target]
+  (.get ^AtomicBoolean (:state target)))
+
+(defn builtin-method-atomic_boolean-store
+  [target value]
+  (.set ^AtomicBoolean (:state target) (boolean value))
+  nil)
+
+(defn builtin-method-atomic_boolean-compare-and-set
+  [target expected update]
+  (.compareAndSet ^AtomicBoolean (:state target) (boolean expected) (boolean update)))
+
+(defn builtin-method-atomic_reference-load
+  [target]
+  (.get ^AtomicReference (:state target)))
+
+(defn builtin-method-atomic_reference-store
+  [target value]
+  (.set ^AtomicReference (:state target) value)
+  nil)
+
+(defn builtin-method-atomic_reference-compare-and-set
+  [target expected update]
+  (loop []
+    (let [^AtomicReference state (:state target)
+          current (.get state)]
+      (if (value/nex-deep-equals? interp/nex-object? current expected)
+        (if (.compareAndSet state current update)
+          true
+          (recur))
+        false))))
 
 (defn- invoke-interpreter-object-method
   [state target method-name args]
@@ -1611,6 +1723,18 @@
 
     (= name "create-min-heap-from-comparator")
     (create-min-heap-from-comparator (first args))
+
+    (= name "create-atomic-integer")
+    (create-atomic-integer (first args))
+
+    (= name "create-atomic-integer64")
+    (create-atomic-integer64 (first args))
+
+    (= name "create-atomic-boolean")
+    (create-atomic-boolean (first args))
+
+    (= name "create-atomic-reference")
+    (create-atomic-reference (first args))
 
     (= name "java-create-object")
     (java-create-object state (first args) (vec (rest args)))

@@ -973,6 +973,30 @@
                                   args))
         (emit-return (:jvm-type expr)))
 
+      "create-atomic-integer"
+      (do
+        (emit-runtime-call! mv "create-atomic-integer"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "create-atomic-integer64"
+      (do
+        (emit-runtime-call! mv "create-atomic-integer64"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "create-atomic-boolean"
+      (do
+        (emit-runtime-call! mv "create-atomic-boolean"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "create-atomic-reference"
+      (do
+        (emit-runtime-call! mv "create-atomic-reference"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
       "op:await-all"
       (do
         (emit-runtime-call! mv "task-await-all"

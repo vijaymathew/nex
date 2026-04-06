@@ -633,6 +633,10 @@
 (defn nex-task? [v] (and (map? v) (= (:nex-builtin-type v) :Task)))
 (defn nex-channel? [v] (and (map? v) (= (:nex-builtin-type v) :Channel)))
 (defn nex-min-heap? [v] (and (map? v) (= (:nex-builtin-type v) :MinHeap)))
+(defn nex-atomic-integer? [v] (and (map? v) (= (:nex-builtin-type v) :AtomicInteger)))
+(defn nex-atomic-integer64? [v] (and (map? v) (= (:nex-builtin-type v) :AtomicInteger64)))
+(defn nex-atomic-boolean? [v] (and (map? v) (= (:nex-builtin-type v) :AtomicBoolean)))
+(defn nex-atomic-reference? [v] (and (map? v) (= (:nex-builtin-type v) :AtomicReference)))
 
 (defn nex-array-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :ArrayCursor)))
 (defn nex-string-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :StringCursor)))

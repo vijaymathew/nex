@@ -308,6 +308,25 @@ end"
       (is (str/includes? js-code "let custom = __nexMinHeap(cmp)"))
       (is (str/includes? js-code "__nexMinHeapTryExtractMin(custom)")))))
 
+(deftest atomic-generation-test
+  (testing "atomic built-ins lower to JavaScript atomic helpers"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let ai: Atomic_Integer := create Atomic_Integer.make(1)
+      print(ai.increment)
+      let ar: Atomic_Reference[String] := create Atomic_Reference.make(\"x\")
+      print(ar.compare_and_set(\"x\", \"y\"))
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "function __nexAtomicInteger("))
+      (is (str/includes? js-code "function __nexAtomicReference("))
+      (is (str/includes? js-code "let ai = __nexAtomicInteger(1)"))
+      (is (str/includes? js-code "__nexAtomicAddAndGet(ai, 1)"))
+      (is (str/includes? js-code "let ar = __nexAtomicReference(\"x\")"))
+      (is (str/includes? js-code "__nexAtomicCompareAndSet(ar, \"x\", \"y\")")))))
+
 (deftest array-slice-and-reverse-generation-test
   (testing "Array slice and reverse lower to JavaScript array helpers"
     (let [nex-code "class Test

@@ -21,6 +21,10 @@
     (rt/nex-task? value) :Task
     (rt/nex-channel? value) :Channel
     (rt/nex-min-heap? value) :Min_Heap
+    (rt/nex-atomic-integer? value) :Atomic_Integer
+    (rt/nex-atomic-integer64? value) :Atomic_Integer64
+    (rt/nex-atomic-boolean? value) :Atomic_Boolean
+    (rt/nex-atomic-reference? value) :Atomic_Reference
     (rt/nex-array-cursor? value) :ArrayCursor
     (rt/nex-string-cursor? value) :StringCursor
     (rt/nex-map-cursor? value) :MapCursor

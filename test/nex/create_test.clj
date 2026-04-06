@@ -204,3 +204,29 @@ end"
       (interp/call-builtin-method ctx custom custom "insert" [1])
       (interp/call-builtin-method ctx custom custom "insert" [3])
       (is (= 5 (interp/call-builtin-method ctx custom custom "extract_min" []))))))
+
+(deftest atomic-builtins-runtime-test
+  (testing "atomic built-ins support load/store/update and reference CAS"
+    (let [ctx (interp/make-context)
+          ai (interp/eval-node ctx {:type :create
+                                    :class-name "Atomic_Integer"
+                                    :generic-args nil
+                                    :constructor "make"
+                                    :args [{:type :literal :value 10}]})
+          ar (interp/eval-node ctx {:type :create
+                                    :class-name "Atomic_Reference"
+                                    :generic-args ["String"]
+                                    :constructor "make"
+                                    :args [{:type :literal :value "a"}]})]
+      (is (= 10 (interp/call-builtin-method ctx ai ai "load" [])))
+      (is (= 10 (interp/call-builtin-method ctx ai ai "get_and_add" [5])))
+      (is (= 15 (interp/call-builtin-method ctx ai ai "load" [])))
+      (is (= 16 (interp/call-builtin-method ctx ai ai "increment" [])))
+      (is (= 15 (interp/call-builtin-method ctx ai ai "decrement" [])))
+      (is (true? (interp/call-builtin-method ctx ai ai "compare_and_set" [15 7])))
+      (is (= 7 (interp/call-builtin-method ctx ai ai "load" [])))
+      (is (= "a" (interp/call-builtin-method ctx ar ar "load" [])))
+      (is (true? (interp/call-builtin-method ctx ar ar "compare_and_set" ["a" "b"])))
+      (is (= "b" (interp/call-builtin-method ctx ar ar "load" [])))
+      (interp/call-builtin-method ctx ar ar "store" [nil])
+      (is (nil? (interp/call-builtin-method ctx ar ar "load" []))))))

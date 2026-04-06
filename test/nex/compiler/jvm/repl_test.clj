@@ -2089,3 +2089,28 @@ end"))
         (is (str/includes? empty-peek-output "true"))
         (is (str/includes? empty-extract-output "true"))
         (is (str/includes? reverse-output "5"))))))
+
+(deftest repl-compiled-backend-atomic-builtins-test
+  (testing "compiled-default REPL supports atomic built-ins"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str (repl/eval-code ctx0 "let ai: Atomic_Integer := create Atomic_Integer.make(10)"))
+            add-output (with-out-str (repl/eval-code ctx0 "ai.get_and_add(5)"))
+            load-output (with-out-str (repl/eval-code ctx0 "ai.load"))
+            cas-output (with-out-str (repl/eval-code ctx0 "ai.compare_and_set(15, 2)"))
+            inc-output (with-out-str (repl/eval-code ctx0 "ai.increment"))
+            _ (with-out-str (repl/eval-code ctx0 "let ar: Atomic_Reference[String] := create Atomic_Reference.make(\"a\")"))
+            ref-cas-output (with-out-str (repl/eval-code ctx0 "ar.compare_and_set(\"a\", \"b\")"))
+            ref-load-output (with-out-str (repl/eval-code ctx0 "ar.load"))
+            _ (with-out-str (repl/eval-code ctx0 "ar.store(nil)"))
+            ref-nil-output (with-out-str (repl/eval-code ctx0 "ar.load = nil"))]
+        (is (str/includes? add-output "10"))
+        (is (str/includes? load-output "15"))
+        (is (str/includes? cas-output "true"))
+        (is (str/includes? inc-output "3"))
+        (is (str/includes? ref-cas-output "true"))
+        (is (str/includes? ref-load-output "b"))
+        (is (str/includes? ref-nil-output "true"))))))

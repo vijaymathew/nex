@@ -59,6 +59,10 @@
                     "Map" "Map"
                     "Set" "Set"
                     "Min_Heap" "Min_Heap"
+                    "Atomic_Integer" "Atomic_Integer"
+                    "Atomic_Integer64" "Atomic_Integer64"
+                    "Atomic_Boolean" "Atomic_Boolean"
+                    "Atomic_Reference" "Atomic_Reference"
                     "Task" "Task"
                     "Channel" "Channel"
                     base-type)
@@ -84,6 +88,10 @@
       "Map" "Map"
       "Set" "Set"
       "Min_Heap" "Min_Heap"
+      "Atomic_Integer" "Atomic_Integer"
+      "Atomic_Integer64" "Atomic_Integer64"
+      "Atomic_Boolean" "Atomic_Boolean"
+      "Atomic_Reference" "Atomic_Reference"
       "Task" "Task"
       "Channel" "Channel"
       "Console" "Object"
@@ -105,6 +113,10 @@
         "Map" "new Map()"
         "Set" "new Set()"
         "Min_Heap" "__nexMinHeap()"
+        "Atomic_Integer" "null"
+        "Atomic_Integer64" "null"
+        "Atomic_Boolean" "null"
+        "Atomic_Reference" "null"
         "Task" "null"
         "Channel" "null"
         "null"))
@@ -123,6 +135,10 @@
       "Map" "new Map()"
       "Set" "new Set()"
       "Min_Heap" "__nexMinHeap()"
+      "Atomic_Integer" "null"
+      "Atomic_Integer64" "null"
+      "Atomic_Boolean" "null"
+      "Atomic_Reference" "null"
       "Task" "null"
       "Channel" "null"
       "Console" "({_type: 'Console'})"
@@ -388,6 +404,26 @@
                              "is_empty" "Boolean"
                              "insert" "Void"
                              "Any")
+                "Atomic_Integer" (case (:method expr)
+                                   ("load" "get_and_add" "add_and_get" "increment" "decrement") "Integer"
+                                   "store" "Void"
+                                   "compare_and_set" "Boolean"
+                                   "Any")
+                "Atomic_Integer64" (case (:method expr)
+                                     ("load" "get_and_add" "add_and_get" "increment" "decrement") "Integer64"
+                                     "store" "Void"
+                                     "compare_and_set" "Boolean"
+                                     "Any")
+                "Atomic_Boolean" (case (:method expr)
+                                   "load" "Boolean"
+                                   "store" "Void"
+                                   "compare_and_set" "Boolean"
+                                   "Any")
+                "Atomic_Reference" (case (:method expr)
+                                     "load" {:base-type (or (first type-args) "Any") :detachable true}
+                                     "store" "Void"
+                                     "compare_and_set" "Boolean"
+                                     "Any")
                 "Set" (case (:method expr)
                         ("contains" "is_empty") "Boolean"
                         "size" "Integer"
@@ -820,6 +856,34 @@
     "size"            (fn [target _] (str target ".data.length"))
     "is_empty"        (fn [target _] (str "(" target ".data.length === 0)"))}
 
+   :Atomic_Integer
+   {"load"            (fn [target _] (str "__nexAtomicLoad(" target ")"))
+    "store"           (fn [target args] (str "__nexAtomicStore(" target ", " args ")"))
+    "compare_and_set" (fn [target args] (str "__nexAtomicCompareAndSet(" target ", " args ")"))
+    "get_and_add"     (fn [target args] (str "__nexAtomicGetAndAdd(" target ", " args ")"))
+    "add_and_get"     (fn [target args] (str "__nexAtomicAddAndGet(" target ", " args ")"))
+    "increment"       (fn [target _] (str "__nexAtomicAddAndGet(" target ", 1)"))
+    "decrement"       (fn [target _] (str "__nexAtomicAddAndGet(" target ", -1)"))}
+
+   :Atomic_Integer64
+   {"load"            (fn [target _] (str "__nexAtomicLoad(" target ")"))
+    "store"           (fn [target args] (str "__nexAtomicStore(" target ", " args ")"))
+    "compare_and_set" (fn [target args] (str "__nexAtomicCompareAndSet(" target ", " args ")"))
+    "get_and_add"     (fn [target args] (str "__nexAtomicGetAndAdd(" target ", " args ")"))
+    "add_and_get"     (fn [target args] (str "__nexAtomicAddAndGet(" target ", " args ")"))
+    "increment"       (fn [target _] (str "__nexAtomicAddAndGet(" target ", 1)"))
+    "decrement"       (fn [target _] (str "__nexAtomicAddAndGet(" target ", -1)"))}
+
+   :Atomic_Boolean
+   {"load"            (fn [target _] (str "__nexAtomicLoad(" target ")"))
+    "store"           (fn [target args] (str "__nexAtomicStore(" target ", " args ")"))
+    "compare_and_set" (fn [target args] (str "__nexAtomicCompareAndSet(" target ", " args ")"))}
+
+   :Atomic_Reference
+   {"load"            (fn [target _] (str "__nexAtomicLoad(" target ")"))
+    "store"           (fn [target args] (str "__nexAtomicStore(" target ", " args ")"))
+    "compare_and_set" (fn [target args] (str "__nexAtomicCompareAndSet(" target ", " args ")"))}
+
    :Task
    {"await"    (fn [target args] (str "await " target ".await(" args ")"))
     "cancel"   (fn [target _] (str target ".cancel()"))
@@ -859,7 +923,9 @@
     (and (nil? method)
          (map? target)
          (= :create (:type target))
-        (not (#{"Console" "Process" "Set" "Channel" "Min_Heap"} (:class-name target))))
+        (not (#{"Console" "Process" "Set" "Channel" "Min_Heap"
+                "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"}
+              (:class-name target))))
     true
 
     (nil? method) false
@@ -1030,6 +1096,22 @@
                    :else
                    (throw (ex-info (str "Unsupported built-in Min_Heap constructor: " constructor)
                                    {:constructor constructor})))
+      "Atomic_Integer" (cond
+                         (= constructor "make") (str "__nexAtomicInteger(" args-code ")")
+                         :else (throw (ex-info (str "Unsupported built-in Atomic_Integer constructor: " constructor)
+                                               {:constructor constructor})))
+      "Atomic_Integer64" (cond
+                           (= constructor "make") (str "__nexAtomicInteger64(" args-code ")")
+                           :else (throw (ex-info (str "Unsupported built-in Atomic_Integer64 constructor: " constructor)
+                                                 {:constructor constructor})))
+      "Atomic_Boolean" (cond
+                         (= constructor "make") (str "__nexAtomicBoolean(" args-code ")")
+                         :else (throw (ex-info (str "Unsupported built-in Atomic_Boolean constructor: " constructor)
+                                               {:constructor constructor})))
+      "Atomic_Reference" (cond
+                           (= constructor "make") (str "__nexAtomicReference(" args-code ")")
+                           :else (throw (ex-info (str "Unsupported built-in Atomic_Reference constructor: " constructor)
+                                                 {:constructor constructor})))
       "Channel" (cond
                   (nil? constructor) "new __nexChannel()"
                   (= constructor "with_capacity") (str "new __nexChannel(" args-code ")")
@@ -2242,6 +2324,25 @@
        "  const value = __nexMinHeapTryExtractMin(heap);\n"
        "  if (value === null || value === undefined) throw new Error('Min_Heap is empty');\n"
        "  return value;\n"
+       "}\n"
+       "function __nexAtomicInteger(initial) { return { _type: 'Atomic_Integer', value: initial | 0 }; }\n"
+       "function __nexAtomicInteger64(initial) { return { _type: 'Atomic_Integer64', value: Number(initial) }; }\n"
+       "function __nexAtomicBoolean(initial) { return { _type: 'Atomic_Boolean', value: !!initial }; }\n"
+       "function __nexAtomicReference(initial) { return { _type: 'Atomic_Reference', value: initial ?? null }; }\n"
+       "function __nexAtomicLoad(cell) { return cell.value; }\n"
+       "function __nexAtomicStore(cell, value) { cell.value = value; }\n"
+       "function __nexAtomicCompareAndSet(cell, expected, update) {\n"
+       "  if (__nexDeepEquals(cell.value, expected)) { cell.value = update; return true; }\n"
+       "  return false;\n"
+       "}\n"
+       "function __nexAtomicGetAndAdd(cell, delta) {\n"
+       "  const current = cell.value;\n"
+       "  cell.value += delta;\n"
+       "  return current;\n"
+       "}\n"
+       "function __nexAtomicAddAndGet(cell, delta) {\n"
+       "  cell.value += delta;\n"
+       "  return cell.value;\n"
        "}\n"
        "function __nexCloneValue(v) {\n"
        "  if (v === null || v === undefined || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;\n"

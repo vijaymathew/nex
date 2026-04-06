@@ -152,6 +152,21 @@ let boxes: Min_Heap[Box] := create Min_Heap[Box].empty"
       (is (some #(str/includes? (:message %) "Min_Heap.empty requires")
                 (:errors bad-result))))))
 
+(deftest test-atomic-constructors-and-methods-typecheck
+  (testing "atomic built-ins typecheck with their declared value types"
+    (let [code "let ai: Atomic_Integer := create Atomic_Integer.make(1)
+let ai64: Atomic_Integer64 := create Atomic_Integer64.make(1)
+let ab: Atomic_Boolean := create Atomic_Boolean.make(true)
+let ar: Atomic_Reference[String] := create Atomic_Reference.make(\"x\")
+let n: Integer := ai.increment
+let ok: Boolean := ai.compare_and_set(n, 10)
+let s: ?String := ar.load
+ar.store(nil)
+let swapped: Boolean := ar.compare_and_set(nil, \"done\")"
+          result (tc/type-check (p/ast code))]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-comparison-operators
   (testing "Comparison operators should work on compatible types"
     (let [code "class Test

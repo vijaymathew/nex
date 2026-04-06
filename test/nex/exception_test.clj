@@ -10,6 +10,13 @@
 (defn parse [code]
   (p/ast code))
 
+(defn js-method-section
+  [js method-name]
+  (let [needle (str "async " method-name "(")
+        start (str/index-of js needle)]
+    (when start
+      (subs js start))))
+
 (defn execute-method [code]
   (let [ast (p/ast code)
         ctx (interp/make-context)
@@ -258,12 +265,13 @@ end")
       end
     end
 end")
-          js (js-gen/translate-ast ast {:skip-contracts true})]
-      (is (re-find #"while \(true\)" js))
-      (is (re-find #"try \{" js))
-      (is (re-find #"catch \(_nex_e\)" js))
-      (is (re-find #"continue;" js))
-      (is (re-find #"break;" js)))))
+          js (js-gen/translate-ast ast {:skip-contracts true})
+          method-js (js-method-section js "demo")]
+      (is (re-find #"while \(true\)" method-js))
+      (is (re-find #"try \{" method-js))
+      (is (re-find #"catch \(_nex_e\)" method-js))
+      (is (re-find #"continue;" method-js))
+      (is (re-find #"break;" method-js)))))
 
 (deftest js-rescue-no-retry-test
   (testing "rescue without retry generates try/catch recovery in JavaScript"
@@ -277,8 +285,9 @@ end")
       end
     end
 end")
-          js (js-gen/translate-ast ast {:skip-contracts true})]
-      (is (re-find #"try \{" js))
-      (is (re-find #"catch \(_nex_e\)" js))
-      (is (not (re-find #"throw _nex_e;" js)))
-      (is (not (re-find #"while \(true\)" js))))))
+          js (js-gen/translate-ast ast {:skip-contracts true})
+          method-js (js-method-section js "demo")]
+      (is (re-find #"try \{" method-js))
+      (is (re-find #"catch \(_nex_e\)" method-js))
+      (is (not (re-find #"throw _nex_e;" method-js)))
+      (is (not (re-find #"while \(true\)" method-js))))))
