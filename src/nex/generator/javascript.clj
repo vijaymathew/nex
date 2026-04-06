@@ -676,6 +676,7 @@
     "trim"        (fn [target _] (str target ".trim()"))
     "replace"     (fn [target args] (str target ".replace(" args ")"))
     "char_at"     (fn [target args] (str target ".charAt(" args ")"))
+    "chars"       (fn [target _] (str target ".split(\"\")"))
     "compare"     (fn [target args] (str "__nexCompare(" target ", " args ")"))
     "hash"        (fn [target _] (str "__nexHash(" target ")"))
     "split"       (fn [target args] (str target ".split(" args ")"))

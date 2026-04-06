@@ -2637,6 +2637,9 @@
     "trim"        (fn [s & _] (str/trim s))
     "replace"     (fn [s old new & _] (str/replace s old new))
     "char_at"     (fn [s idx & _] (get s idx))
+    "chars"       (fn [s & _]
+                    (nex-array-from
+                     (mapv #(get s %) (range (count s)))))
     "split"       (fn [s delim & _] (vec (str/split s (re-pattern delim))))
     ;; String operator methods
     "plus"        (fn [s other & [ctx]]

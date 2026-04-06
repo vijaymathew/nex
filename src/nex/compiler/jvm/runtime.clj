@@ -1545,6 +1545,7 @@
 (def-builtin-method-wrapper builtin-method-string-trim "trim")
 (def-builtin-method-wrapper builtin-method-string-replace "replace")
 (def-builtin-method-wrapper builtin-method-string-char-at "char_at")
+(def-builtin-method-wrapper builtin-method-string-chars "chars")
 (def-builtin-method-wrapper builtin-method-string-compare "compare")
 (def-builtin-method-wrapper builtin-method-string-hash "hash")
 (defn builtin-method-string-split

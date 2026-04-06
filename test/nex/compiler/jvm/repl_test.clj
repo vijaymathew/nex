@@ -1772,6 +1772,22 @@ print(failure.get(2))"))]
         (is (str/includes? output "3"))
         (is (>= (count (re-seq #"0" output)) 2) output)))))
 
+(deftest repl-compiled-backend-string-chars-test
+  (testing "compiled backend keeps String.chars on the compiled path with Array[Char] semantics"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "let xs: Array[Char] := \"cat\".chars()
+print(xs)
+print(xs.length)
+print(xs.get(1))"))]
+        (is (str/includes? output "[#c, #a, #t]"))
+        (is (str/includes? output "3"))
+        (is (str/includes? output "#a"))))))
+
 (deftest repl-compiled-backend-task-and-channel-state-methods-test
   (testing "compiled backend specializes task/channel state methods too"
     (binding [repl/*type-checking-enabled* (atom true)

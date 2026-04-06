@@ -173,6 +173,18 @@ end"
       (is (= 3 (count value)))
       (is (= [0 0 0] (vec value))))))
 
+(deftest string-chars-runtime-test
+  (testing "String.chars returns a fresh Array[Char] in the same iteration order as char_at"
+    (let [ctx (interp/make-context)
+          chars (interp/call-builtin-method ctx "cat" "cat" "chars" [])]
+      (is (= 3 (.size chars)))
+      (is (= [\c \a \t] (vec chars)))
+      (is (= \a (interp/call-builtin-method ctx chars chars "get" [1])))
+      (interp/call-builtin-method ctx chars chars "add" [\!])
+      (is (= 4 (.size chars)))
+      (is (= 3 (interp/call-builtin-method ctx "cat" "cat" "length" [])))
+      (is (= \a (interp/call-builtin-method ctx "cat" "cat" "char_at" [1]))))))
+
 (deftest min-heap-runtime-test
   (testing "Min_Heap supports natural ordering, comparator ordering, and safe empty reads"
     (let [ctx (interp/make-context)

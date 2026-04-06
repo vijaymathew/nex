@@ -872,6 +872,17 @@ end"]
       (is (:success (tc/type-check (p/ast ok-code))))
       (is (not (:success (tc/type-check (p/ast bad-code))))))))
 
+(deftest test-string-chars-types
+  (testing "String.chars typechecks as Array[Char]"
+    (let [code "class Test
+  feature
+    demo() do
+      let xs: Array[Char] := \"cat\".chars()
+      let ch: Char := xs.get(1)
+    end
+end"]
+      (is (:success (tc/type-check (p/ast code)))))))
+
 ;; Let type inference tests
 
 (deftest test-let-without-type-annotation-succeeds
