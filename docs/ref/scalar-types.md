@@ -24,6 +24,8 @@ All scalar classes are modeled as inheriting `Any` and implementing
 | `trim` | none | `String` | Remove leading/trailing whitespace. |
 | `replace` | `old: String, new: String` | `String` | Replace all occurrences of `old`. |
 | `char_at` | `idx: Integer` | `Char` | Character at index. |
+| `chars` | none | `Array[Char]` | New array of characters in string order. |
+| `to_bytes` | none | `Array[Integer]` | UTF-8 bytes of the string. |
 | `split` | `delim: String` | `Array[String]` | Split into an array. |
 | `plus` | `other: Any` | `String` | Concatenate with `other`. |
 | `equals` | `other: Any` | `Boolean` | Equality check. |
@@ -35,6 +37,27 @@ All scalar classes are modeled as inheriting `Any` and implementing
 | `compare` | `other: Any` | `Integer` | Ordering as integer result. |
 | `hash` | none | `Integer` | Hash code. |
 | `cursor` | none | `StringCursor` | Create character iterator. |
+
+Laws:
+
+- `s.chars().length = s.length`
+- `s.chars().get(i) = s.char_at(i)` for every valid `i`
+
+Examples:
+
+```nex
+let xs: Array[Char] := "cat".chars()
+print(xs)        -- [#c, #a, #t]
+print(xs.length) -- 3
+print(xs.get(1)) -- #a
+```
+
+`to_bytes()` uses UTF-8 encoding and returns an `Array[Integer]` with byte values in `0..255`.
+
+```nex
+let bytes: Array[Integer] := "cat".to_bytes()
+print(bytes) -- [99, 97, 116]
+```
 
 ## `Integer`
 

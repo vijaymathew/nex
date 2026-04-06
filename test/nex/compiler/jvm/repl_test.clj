@@ -1757,6 +1757,53 @@ ch.is_closed"))]
         (is (str/includes? output "true"))
         (is (str/includes? output "7"))))))
 
+(deftest repl-compiled-backend-array-filled-constructor-test
+  (testing "compiled backend can create Array.filled and use it as a normal array"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "let failure: Array[Integer] := create Array.filled(3, 0)
+print(failure.length)
+print(failure.get(0))
+print(failure.get(2))"))]
+        (is (str/includes? output "3"))
+        (is (>= (count (re-seq #"0" output)) 2) output)))))
+
+(deftest repl-compiled-backend-string-chars-test
+  (testing "compiled backend keeps String.chars on the compiled path with Array[Char] semantics"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "let xs: Array[Char] := \"cat\".chars()
+print(xs)
+print(xs.length)
+print(xs.get(1))"))]
+        (is (str/includes? output "[#c, #a, #t]"))
+        (is (str/includes? output "3"))
+        (is (str/includes? output "#a"))))))
+
+(deftest repl-compiled-backend-string-to-bytes-test
+  (testing "compiled backend keeps String.to_bytes on the compiled path with UTF-8 bytes"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "let xs: Array[Integer] := \"cat\".to_bytes()
+print(xs)
+print(xs.length)
+print(xs.get(1))"))]
+        (is (str/includes? output "[99, 97, 116]"))
+        (is (str/includes? output "3"))
+        (is (str/includes? output "97"))))))
+
 (deftest repl-compiled-backend-task-and-channel-state-methods-test
   (testing "compiled backend specializes task/channel state methods too"
     (binding [repl/*type-checking-enabled* (atom true)
@@ -2036,3 +2083,92 @@ end"
             out (with-out-str (repl/eval-code ctx filter-code))]
         (is (not (str/includes? out "VerifyError")))
         (is (not (str/includes? out "Error:")))))))
+
+(deftest repl-compiled-backend-min-heap-builtins-test
+  (testing "compiled-default REPL supports Min_Heap natural ordering, comparator ordering, and safe variants"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str (repl/eval-code ctx0 "let h: Min_Heap[Integer] := create Min_Heap.empty"))
+            _ (with-out-str (repl/eval-code ctx0 "h.insert(5)"))
+            _ (with-out-str (repl/eval-code ctx0 "h.insert(1)"))
+            _ (with-out-str (repl/eval-code ctx0 "h.insert(3)"))
+            peek-output (with-out-str (repl/eval-code ctx0 "h.peek"))
+            extract-output (with-out-str (repl/eval-code ctx0 "h.extract_min"))
+            _ (with-out-str (repl/eval-code ctx0 "h.extract_min"))
+            _ (with-out-str (repl/eval-code ctx0 "h.extract_min"))
+            empty-peek-output (with-out-str (repl/eval-code ctx0 "h.try_peek = nil"))
+            empty-extract-output (with-out-str (repl/eval-code ctx0 "h.try_extract_min = nil"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "let cmp: Function := fn (a: Integer, b: Integer): Integer do
+  if a > b then
+    result := -1
+  elseif a < b then
+    result := 1
+  else
+    result := 0
+  end
+end"))
+            _ (with-out-str (repl/eval-code ctx0 "let rev: Min_Heap[Integer] := create Min_Heap.from_comparator(cmp)"))
+            _ (with-out-str (repl/eval-code ctx0 "rev.insert(5)"))
+            _ (with-out-str (repl/eval-code ctx0 "rev.insert(1)"))
+            _ (with-out-str (repl/eval-code ctx0 "rev.insert(3)"))
+            reverse-output (with-out-str (repl/eval-code ctx0 "rev.extract_min"))]
+        (is (str/includes? peek-output "1"))
+        (is (str/includes? extract-output "1"))
+        (is (str/includes? empty-peek-output "true"))
+        (is (str/includes? empty-extract-output "true"))
+        (is (str/includes? reverse-output "5"))))))
+
+(deftest repl-compiled-backend-atomic-builtins-test
+  (testing "compiled-default REPL supports atomic built-ins"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str (repl/eval-code ctx0 "let ai: Atomic_Integer := create Atomic_Integer.make(10)"))
+            add-output (with-out-str (repl/eval-code ctx0 "ai.get_and_add(5)"))
+            load-output (with-out-str (repl/eval-code ctx0 "ai.load"))
+            cas-output (with-out-str (repl/eval-code ctx0 "ai.compare_and_set(15, 2)"))
+            inc-output (with-out-str (repl/eval-code ctx0 "ai.increment"))
+            _ (with-out-str (repl/eval-code ctx0 "let ar: Atomic_Reference[String] := create Atomic_Reference.make(\"a\")"))
+            ref-cas-output (with-out-str (repl/eval-code ctx0 "ar.compare_and_set(\"a\", \"b\")"))
+            ref-load-output (with-out-str (repl/eval-code ctx0 "ar.load"))
+            _ (with-out-str (repl/eval-code ctx0 "ar.store(nil)"))
+            ref-nil-output (with-out-str (repl/eval-code ctx0 "ar.load = nil"))]
+        (is (str/includes? add-output "10"))
+        (is (str/includes? load-output "15"))
+        (is (str/includes? cas-output "true"))
+        (is (str/includes? inc-output "3"))
+        (is (str/includes? ref-cas-output "true"))
+        (is (str/includes? ref-load-output "b"))
+        (is (str/includes? ref-nil-output "true"))))))
+
+(deftest repl-compiled-backend-random-real-builtin-test
+  (testing "compiled-default REPL supports random_real as a Real-valued global builtin"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (repl/eval-code ctx0 "let r: Real := random_real()")
+        (is (= "Real" (get @repl/*repl-var-types* "r")))
+        (let [r (runtime/state-get-value (:state @repl/*compiled-repl-session*) "r")]
+          (is (number? r))
+          (is (<= 0.0 r))
+          (is (< r 1.0)))))))
+
+(deftest repl-compiled-backend-hint-spin-builtin-test
+  (testing "compiled-default REPL supports hint_spin as a direct no-op builtin"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "hint_spin()
+print(\"ok\")"))]
+        (is (str/includes? output "ok"))))))

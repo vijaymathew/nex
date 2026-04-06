@@ -241,11 +241,12 @@
    :jvm-type jvm-type})
 
 (defn convert-node
-  [value binding target-type nex-type jvm-type temp-slot]
+  [value binding target-type target-runtime nex-type jvm-type temp-slot]
   {:op :convert
    :value value
    :binding binding
    :target-type target-type
+   :target-runtime target-runtime
    :temp-slot temp-slot
    :nex-type nex-type
    :jvm-type jvm-type})

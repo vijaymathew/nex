@@ -81,7 +81,8 @@
 
 (def ^:private builtin-runtime-receiver-types
   #{"Any" "Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Set" "Cursor" "Task" "Channel" "Console" "Process"})
+    "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
+    "Cursor" "Task" "Channel" "Console" "Process"})
 
 (def ^:private next-synthetic-closure-id (atom 0))
 
@@ -232,11 +233,13 @@
   - `:retry-allowed?` whether `retry` is legal in the current lowering scope
   - `:old-field-locals` snapshot locals for `old` in postconditions
   - `:generic-param-names` visible generic parameter identifiers lowered as JVM Object
+  - `:generic-runtime-values` map of generic parameter name -> IR expression that yields
+    the runtime type token string for that parameter
   - `:with-java?` whether unresolved target calls should lower as JVM host interop"
   ([] (make-lowering-env {}))
   ([{:keys [locals top-level? repl? state-slot next-slot classes functions imports var-types
             compiled-classes current-class fields this-type old-field-locals
-            generic-param-names with-java? across-cursors] :as opts}]
+            generic-param-names generic-runtime-values with-java? across-cursors] :as opts}]
    {:locals (or locals {})
     :top-level? (if (contains? opts :top-level?) top-level? true)
     :repl? (if (contains? opts :repl?) repl? true)
@@ -254,8 +257,21 @@
     :retry-allowed? false
     :old-field-locals (or old-field-locals {})
     :generic-param-names (set generic-param-names)
+    :generic-runtime-values (or generic-runtime-values {})
     :with-java? (boolean with-java?)
     :across-cursors (or across-cursors {})}))
+
+(defn- string-jvm-type
+  []
+  (ir/object-jvm-type "java/lang/String"))
+
+(defn- generic-runtime-field-name
+  [generic-name]
+  (str "__generic_type_" generic-name))
+
+(defn- generic-runtime-param-name
+  [generic-name]
+  (str "__generic_type_arg_" generic-name))
 
 (defn- resolve-jvm-type
   [env nex-type]
@@ -279,6 +295,55 @@
 (defn- exact-class-jvm-type
   [env class-name]
   (ir/object-jvm-type (:internal-name (class-jvm-meta env class-name))))
+
+(defn- generic-runtime-field-ir
+  [env class-name generic-name]
+  (ir/field-get-node (:internal-name (class-jvm-meta env class-name))
+                     (generic-runtime-field-name generic-name)
+                     (ir/this-node class-name
+                                   (exact-class-jvm-type env class-name))
+                     "String"
+                     (string-jvm-type)))
+
+(defn- generic-runtime-field-bindings
+  [env class-name generic-params]
+  (into {}
+        (map (fn [{:keys [name]}]
+               [name (generic-runtime-field-ir env class-name name)]))
+        generic-params))
+
+(defn- runtime-type-token-ir
+  [env nex-type]
+  (let [base (base-type-name nex-type)]
+    (cond
+      (and (string? base)
+           (contains? (:generic-param-names env) base))
+      (or (get (:generic-runtime-values env) base)
+          (throw (ex-info "Missing runtime type token for generic parameter"
+                          {:generic-param base
+                           :nex-type nex-type
+                           :current-class (:current-class env)})))
+
+      (string? base)
+      (ir/const-node base "String" (string-jvm-type))
+
+      :else
+      (ir/const-node "Any" "String" (string-jvm-type)))))
+
+(defn- class-generic-runtime-args
+  [env class-def target-type]
+  (let [generic-params (:generic-params class-def)
+        target-args (vec (or (generic-type-args target-type) []))]
+    (mapv (fn [idx _]
+            (runtime-type-token-ir env (or (nth target-args idx nil) "Any")))
+          (range (count generic-params))
+          generic-params)))
+
+(defn- parent-generic-runtime-args
+  [env class-def parent-name]
+  (let [parent-ref (some #(when (= parent-name (:parent %)) %) (:parents class-def))]
+    (mapv #(runtime-type-token-ir env %)
+          (or (:generic-args parent-ref) []))))
 
 (defn- java-host-class-root-name
   [env expr]
@@ -522,6 +587,10 @@
 (defn- lowered-constructor-method-name
   [ctor-def]
   (str "__ctor_" (:name ctor-def) "$arity" (count (:params ctor-def))))
+
+(defn- generic-init-method-name
+  []
+  "__generic_init$arity0")
 
 (defn- function-return-type
   [fn-def]
@@ -1350,10 +1419,7 @@
 (defn- lower-convert-expression
   [env {:keys [value var-name target-type] :as expr}]
   (let [target-name (if (map? target-type) (:base-type target-type) target-type)
-        _ (when (contains? (:generic-param-names env) target-name)
-            (throw (ex-info "convert to generic parameter is not yet supported in compiled lowering"
-                            {:expr expr
-                             :target-type target-type})))
+        target-runtime (runtime-type-token-ir env target-type)
         binding (or (lookup-convert-binding env var-name)
                     (throw (ex-info "convert binding must exist before lowering expression"
                                     {:expr expr
@@ -1363,6 +1429,7 @@
      (ir/convert-node (lower-expression env value)
                       binding
                       target-name
+                      target-runtime
                       "Boolean"
                       :boolean
                       temp-slot)]))
@@ -2141,7 +2208,8 @@
     (let [class-name (:class-name expr)
           compiled (get (:compiled-classes env) class-name)
           class-def (get (visible-class-map env) class-name)]
-      (if (= class-name "Channel")
+      (cond
+        (= class-name "Channel")
         (let [nex-type (infer-type env expr)]
           (case (:constructor expr)
             nil
@@ -2167,31 +2235,150 @@
             (throw (ex-info "Unsupported Channel constructor in compiled lowering"
                             {:expr expr
                              :constructor (:constructor expr)}))))
-        (cond
-          (and class-def (:import class-def))
-          (do
-            (when (:constructor expr)
-              (throw (ex-info "Imported Java classes do not support named constructors on the compiled path"
-                              {:expr expr
-                               :class-name class-name
-                               :constructor (:constructor expr)})))
-            (let [nex-type (infer-type env expr)]
-              (ir/call-runtime-node "java-create-object"
-                                    (into [(ir/const-node class-name
-                                                          "String"
-                                                          (ir/object-jvm-type "java/lang/String"))]
-                                          (mapv #(lower-expression env %) (:args expr)))
-                                    nex-type
-                                    (resolve-jvm-type env nex-type))))
 
-          :else
-          (do
-            (when-not compiled
-              (throw (ex-info "Create of non-compiled class is not supported in lowering"
-                              {:expr expr :class-name class-name})))
-            (when (:deferred? class-def)
-              (throw (ex-info "Unsupported create of deferred class in compiled lowering"
-                              {:expr expr :class-name class-name})))
+        (= class-name "Array")
+        (let [nex-type (infer-type env expr)]
+          (case (:constructor expr)
+            nil
+            (do
+              (when (seq (:args expr))
+                (throw (ex-info "create Array takes no arguments in compiled lowering"
+                                {:expr expr})))
+              (ir/call-runtime-node "create-array"
+                                    []
+                                    nex-type
+                                    (resolve-jvm-type env nex-type)))
+
+            "filled"
+            (do
+              (when-not (= 2 (count (:args expr)))
+                (throw (ex-info "Array.filled expects exactly 2 arguments in compiled lowering"
+                                {:expr expr})))
+              (ir/call-runtime-node "create-array-filled"
+                                    [(lower-expression env (first (:args expr)))
+                                     (lower-expression env (second (:args expr)))]
+                                    nex-type
+                                    (resolve-jvm-type env nex-type)))
+
+            (throw (ex-info "Unsupported Array constructor in compiled lowering"
+                            {:expr expr
+                             :constructor (:constructor expr)}))))
+
+        (= class-name "Min_Heap")
+        (let [nex-type (infer-type env expr)]
+          (case (:constructor expr)
+            nil
+            (do
+              (when (seq (:args expr))
+                (throw (ex-info "create Min_Heap takes no arguments in compiled lowering"
+                                {:expr expr})))
+              (ir/call-runtime-node "create-min-heap-empty"
+                                    []
+                                    nex-type
+                                    (resolve-jvm-type env nex-type)))
+
+            "empty"
+            (do
+              (when (seq (:args expr))
+                (throw (ex-info "Min_Heap.empty takes no arguments in compiled lowering"
+                                {:expr expr})))
+              (ir/call-runtime-node "create-min-heap-empty"
+                                    []
+                                    nex-type
+                                    (resolve-jvm-type env nex-type)))
+
+            "from_comparator"
+            (do
+              (when-not (= 1 (count (:args expr)))
+                (throw (ex-info "Min_Heap.from_comparator expects exactly 1 argument in compiled lowering"
+                                {:expr expr})))
+              (ir/call-runtime-node "create-min-heap-from-comparator"
+                                    [(lower-expression env (first (:args expr)))]
+                                    nex-type
+                                    (resolve-jvm-type env nex-type)))
+
+            (throw (ex-info "Unsupported Min_Heap constructor in compiled lowering"
+                            {:expr expr
+                             :constructor (:constructor expr)}))))
+
+        (= class-name "Atomic_Integer")
+        (let [nex-type (infer-type env expr)]
+          (when-not (= "make" (:constructor expr))
+            (throw (ex-info "Unsupported Atomic_Integer constructor in compiled lowering"
+                            {:expr expr :constructor (:constructor expr)})))
+          (when-not (= 1 (count (:args expr)))
+            (throw (ex-info "Atomic_Integer.make expects exactly 1 argument in compiled lowering"
+                            {:expr expr})))
+          (ir/call-runtime-node "create-atomic-integer"
+                                [(lower-expression env (first (:args expr)))]
+                                nex-type
+                                (resolve-jvm-type env nex-type)))
+
+        (= class-name "Atomic_Integer64")
+        (let [nex-type (infer-type env expr)]
+          (when-not (= "make" (:constructor expr))
+            (throw (ex-info "Unsupported Atomic_Integer64 constructor in compiled lowering"
+                            {:expr expr :constructor (:constructor expr)})))
+          (when-not (= 1 (count (:args expr)))
+            (throw (ex-info "Atomic_Integer64.make expects exactly 1 argument in compiled lowering"
+                            {:expr expr})))
+          (ir/call-runtime-node "create-atomic-integer64"
+                                [(lower-expression env (first (:args expr)))]
+                                nex-type
+                                (resolve-jvm-type env nex-type)))
+
+        (= class-name "Atomic_Boolean")
+        (let [nex-type (infer-type env expr)]
+          (when-not (= "make" (:constructor expr))
+            (throw (ex-info "Unsupported Atomic_Boolean constructor in compiled lowering"
+                            {:expr expr :constructor (:constructor expr)})))
+          (when-not (= 1 (count (:args expr)))
+            (throw (ex-info "Atomic_Boolean.make expects exactly 1 argument in compiled lowering"
+                            {:expr expr})))
+          (ir/call-runtime-node "create-atomic-boolean"
+                                [(lower-expression env (first (:args expr)))]
+                                nex-type
+                                (resolve-jvm-type env nex-type)))
+
+        (= class-name "Atomic_Reference")
+        (let [nex-type (infer-type env expr)]
+          (when-not (= "make" (:constructor expr))
+            (throw (ex-info "Unsupported Atomic_Reference constructor in compiled lowering"
+                            {:expr expr :constructor (:constructor expr)})))
+          (when-not (= 1 (count (:args expr)))
+            (throw (ex-info "Atomic_Reference.make expects exactly 1 argument in compiled lowering"
+                            {:expr expr})))
+          (ir/call-runtime-node "create-atomic-reference"
+                                [(lower-expression env (first (:args expr)))]
+                                nex-type
+                                (resolve-jvm-type env nex-type)))
+
+        (and class-def (:import class-def))
+        (do
+          (when (:constructor expr)
+            (throw (ex-info "Imported Java classes do not support named constructors on the compiled path"
+                            {:expr expr
+                             :class-name class-name
+                             :constructor (:constructor expr)})))
+          (let [nex-type (infer-type env expr)]
+            (ir/call-runtime-node "java-create-object"
+                                  (into [(ir/const-node class-name
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))]
+                                        (mapv #(lower-expression env %) (:args expr)))
+                                  nex-type
+                                  (resolve-jvm-type env nex-type))))
+
+        :else
+        (do
+          (when-not compiled
+            (throw (ex-info "Create of non-compiled class is not supported in lowering"
+                            {:expr expr :class-name class-name})))
+          (when (:deferred? class-def)
+            (throw (ex-info "Unsupported create of deferred class in compiled lowering"
+                            {:expr expr :class-name class-name})))
+          (let [created-type (infer-type env expr)
+                runtime-generic-args (class-generic-runtime-args env class-def created-type)]
             (if-let [constructor-name (:constructor expr)]
               (let [ctor-def (own-or-inherited-constructor-def env class-def constructor-name (count (:args expr)))]
                 (when-not ctor-def
@@ -2205,23 +2392,34 @@
                                       (desc/repl-instance-method-descriptor)
                                       (ir/new-node (:internal-name compiled)
                                                    class-name
-                                                   (infer-type env expr)
+                                                   created-type
                                                    (exact-class-jvm-type env class-name))
-                                      (mapv #(lower-expression env %) (:args expr))
-                                      (infer-type env expr)
-                                      (resolve-jvm-type env (infer-type env expr))))
+                                      (into (mapv #(lower-expression env %) (:args expr))
+                                            runtime-generic-args)
+                                      created-type
+                                      (resolve-jvm-type env created-type)))
               (do
                 (when (seq (:args expr))
                   (throw (ex-info "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
                                   {:expr expr})))
-                (let [nex-type (infer-type env expr)]
+                (if (seq (:generic-params class-def))
+                  (ir/call-virtual-node (:internal-name compiled)
+                                        (generic-init-method-name)
+                                        (desc/repl-instance-method-descriptor)
+                                        (ir/new-node (:internal-name compiled)
+                                                     class-name
+                                                     created-type
+                                                     (resolve-jvm-type env created-type))
+                                        runtime-generic-args
+                                        created-type
+                                        (resolve-jvm-type env created-type))
                   (validate-object-state-ir env
                                             class-name
                                             (ir/new-node (:internal-name compiled)
                                                          class-name
-                                                         nex-type
-                                                         (resolve-jvm-type env nex-type))
-                                            nex-type))))))))
+                                                         created-type
+                                                         (resolve-jvm-type env created-type))
+                                            created-type))))))))
 
     :anonymous-function
     (let [class-name (:class-name expr)
@@ -2743,6 +2941,7 @@
                                                   (:method stmt)
                                                   (count (:args stmt)))
                   parent-meta (class-jvm-meta env parent-name)
+                  parent-runtime-args (parent-generic-runtime-args env (current-class-def env) parent-name)
                   call-ir (ir/call-virtual-node (:internal-name parent-meta)
                                                 (lowered-constructor-method-name ctor-def)
                                                 (desc/repl-instance-method-descriptor)
@@ -2752,7 +2951,8 @@
                                                                                  (exact-class-jvm-type env (:this-type env)))
                                                                    parent-name
                                                                    (exact-class-jvm-type env parent-name))
-                                                (mapv #(lower-expression env %) (:args stmt))
+                                                (into (mapv #(lower-expression env %) (:args stmt))
+                                                      parent-runtime-args)
                                                 parent-name
                                                 (resolve-jvm-type env parent-name))]
               [env (ir/pop-node call-ir)])
@@ -2918,6 +3118,32 @@
           [env []]
           statements))
 
+(defn- add-generic-runtime-param-locals
+  [env generic-params]
+  (reduce (fn [[env acc] {:keys [name]}]
+            (let [[env' local] (env-add-local env
+                                              (generic-runtime-param-name name)
+                                              "String")]
+              [env' (conj acc (assoc local :arg-index (count acc)))]))
+          [env []]
+          generic-params))
+
+(defn- generic-runtime-field-set-stmts
+  [env class-name generic-params runtime-params]
+  (mapv (fn [{:keys [name]} {:keys [slot]}]
+          (ir/field-set-node (:internal-name (class-jvm-meta env class-name))
+                             (generic-runtime-field-name name)
+                             (ir/this-node class-name
+                                           (exact-class-jvm-type env class-name))
+                             (ir/local-node (generic-runtime-param-name name)
+                                            slot
+                                            "String"
+                                            (string-jvm-type))
+                             "String"
+                             (string-jvm-type)))
+        generic-params
+        runtime-params))
+
 (defn- lower-repl-tail
   [env stmt]
   (cond
@@ -3007,6 +3233,10 @@
                                  :compiled-classes (:compiled-classes fn-def)
                                  :current-class current-class
                                  :generic-param-names generic-param-names
+                                 :generic-runtime-values (generic-runtime-field-bindings
+                                                          {:compiled-classes (:compiled-classes fn-def)}
+                                                          current-class
+                                                          (:generic-params (:class-def fn-def)))
                                  :fields (field-info-map {:compiled-classes (:compiled-classes fn-def)
                                                           :classes visible-classes
                                                           :generic-param-names generic-param-names}
@@ -3149,6 +3379,10 @@
                                  :compiled-classes compiled-classes
                                  :current-class class-name
                                  :generic-param-names generic-param-names
+                                 :generic-runtime-values (generic-runtime-field-bindings
+                                                          {:compiled-classes compiled-classes}
+                                                          class-name
+                                                          (:generic-params class-def))
                                  :fields (field-info-map {:compiled-classes compiled-classes
                                                           :classes visible-classes
                                                           :generic-param-names generic-param-names}
@@ -3164,8 +3398,18 @@
                     [env' (conj acc (assoc local :arg-index (count acc)))]))
                 [env0 []]
                 (:params ctor-def))
+        [env-with-runtime runtime-params]
+        (add-generic-runtime-param-locals env-with-params (:generic-params class-def))
+        params (vec (concat params
+                            (map-indexed (fn [idx local]
+                                           (assoc local :arg-index (+ (count params) idx)))
+                                         runtime-params)))
+        runtime-field-set-stmts (generic-runtime-field-set-stmts env-with-runtime
+                                                                 class-name
+                                                                 (:generic-params class-def)
+                                                                 runtime-params)
         [env-with-old old-snapshot-stmts old-field-locals]
-        (add-old-field-snapshots env-with-params (:ensure ctor-def))
+        (add-old-field-snapshots env-with-runtime (:ensure ctor-def))
         env-with-old (assoc env-with-old :old-field-locals old-field-locals)]
     (if-let [shim-parent (:shim-parent ctor-def)]
       (let [parent-meta (class-jvm-meta {:compiled-classes compiled-classes} shim-parent)
@@ -3179,21 +3423,23 @@
                                           (lowered-constructor-method-name ctor-def)
                                           (desc/repl-instance-method-descriptor)
                                           target-ir
-                                          (mapv (fn [{:keys [name]}]
-                                                  (let [{:keys [slot nex-type jvm-type]}
-                                                        (get (:locals env-with-params) name)]
-                                                    (ir/local-node name slot nex-type jvm-type)))
-                                                (:params ctor-def))
+                                          (into (mapv (fn [{:keys [name]}]
+                                                        (let [{:keys [slot nex-type jvm-type]}
+                                                              (get (:locals env-with-runtime) name)]
+                                                          (ir/local-node name slot nex-type jvm-type)))
+                                                      (:params ctor-def))
+                                          (parent-generic-runtime-args env-with-runtime class-def shim-parent))
                                           shim-parent
                                           (resolve-jvm-type {:compiled-classes compiled-classes} shim-parent))]
         (ir/fn-node {:name (:name ctor-def)
                      :owner unit-name
                      :emitted-name (lowered-constructor-method-name ctor-def)
-                    :params params
+                     :params params
                      :return-type class-name
                      :return-jvm-type (ir/object-jvm-type "java/lang/Object")
                      :locals (vec (vals (:locals env-with-old)))
-                     :body (vec (concat old-snapshot-stmts
+                     :body (vec (concat runtime-field-set-stmts
+                                        old-snapshot-stmts
                                         (map #(assertion-ir env-with-old :require %) (:require ctor-def))
                                         [(ir/pop-node call-ir)]
                                         (map #(assertion-ir env-with-old :ensure %) (:ensure ctor-def))
@@ -3214,7 +3460,8 @@
                      :return-type class-name
                      :return-jvm-type (ir/object-jvm-type "java/lang/Object")
                      :locals (vec (vals (:locals env-after-rescue)))
-                     :body (vec (concat old-snapshot-stmts
+                     :body (vec (concat runtime-field-set-stmts
+                                        old-snapshot-stmts
                                         (map #(assertion-ir env-with-old :require %) (:require ctor-def))
                                         lowered-body
                                         (map #(assertion-ir (assoc env-after-rescue :old-field-locals old-field-locals)
@@ -3228,6 +3475,56 @@
                                                                     class-name)
                                           class-name
                                           (ir/object-jvm-type "java/lang/Object"))]))})))))
+
+(defn- lower-generic-init-method
+  [unit-name visible-functions visible-imports visible-classes class-def compiled-classes]
+  (let [class-name (:name class-def)
+        generic-param-names (set (map :name (:generic-params class-def)))
+        env0 (make-lowering-env {:classes visible-classes
+                                 :functions visible-functions
+                                 :imports visible-imports
+                                 :var-types (field-type-map class-def)
+                                 :compiled-classes compiled-classes
+                                 :current-class class-name
+                                 :generic-param-names generic-param-names
+                                 :generic-runtime-values (generic-runtime-field-bindings
+                                                          {:compiled-classes compiled-classes}
+                                                          class-name
+                                                          (:generic-params class-def))
+                                 :fields (field-info-map {:compiled-classes compiled-classes
+                                                          :classes visible-classes
+                                                          :generic-param-names generic-param-names}
+                                                         class-def)
+                                 :this-type class-name
+                                 :top-level? false
+                                 :repl? true
+                                 :state-slot 1
+                                 :next-slot 3})
+        [env-with-runtime runtime-params]
+        (add-generic-runtime-param-locals env0 (:generic-params class-def))
+        params (vec (map-indexed (fn [idx local]
+                                   (assoc local :arg-index idx))
+                                 runtime-params))
+        runtime-field-set-stmts (generic-runtime-field-set-stmts env-with-runtime
+                                                                 class-name
+                                                                 (:generic-params class-def)
+                                                                 runtime-params)]
+    (ir/fn-node {:name (generic-init-method-name)
+                 :owner unit-name
+                 :emitted-name (generic-init-method-name)
+                 :params params
+                 :return-type class-name
+                 :return-jvm-type (ir/object-jvm-type "java/lang/Object")
+                 :locals (vec (vals (:locals env-with-runtime)))
+                 :body (vec (concat runtime-field-set-stmts
+                                    [(ir/return-node
+                                      (validate-object-state-ir {:compiled-classes compiled-classes}
+                                                                class-name
+                                                                (ir/this-node class-name
+                                                                              (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                                                class-name)
+                                      class-name
+                                      (ir/object-jvm-type "java/lang/Object"))]))})))
 
 (defn- make-delegation-method-node
   [env class-meta class-name compiled-classes {:keys [source-class carrier-owner carrier-field owner-internal-name method-def carrier-jvm-type]}]
@@ -3317,6 +3614,14 @@
                                                      class-def
                                                      ctor-def
                                                      compiled-classes))))
+        constructors (cond-> constructors
+                       (seq (:generic-params class-def))
+                       (conj (lower-generic-init-method (:jvm-name class-meta)
+                                                        visible-functions
+                                                        visible-imports
+                                                        (:classes opts)
+                                                        class-def
+                                                        compiled-classes)))
         own-methods (->> (class-methods class-def)
                          (mapv (fn [method-def]
                                  (lower-function (:jvm-name class-meta)
@@ -3348,6 +3653,11 @@
                                                      :generic-param-names (set (map :name (:generic-params class-def)))}
                                                     (:field-type field))})
                      (remove :constant? (class-fields class-def)))
+        runtime-type-fields (mapv (fn [{:keys [name]}]
+                                    {:name (generic-runtime-field-name name)
+                                     :nex-type "String"
+                                     :jvm-type (string-jvm-type)})
+                                  (:generic-params class-def))
         constants (mapv (fn [field]
                           (let [constant-env (make-lowering-env {:classes (:classes opts)
                                                                  :functions visible-functions
@@ -3380,6 +3690,7 @@
                                   :jvm-type (exact-class-jvm-type {:compiled-classes compiled-classes} nex-name)})
                                (resolve-parent-metas env class-def))
      :fields fields
+     :runtime-type-fields runtime-type-fields
      :constants constants
      :constructors constructors
      :methods methods}))

@@ -114,6 +114,12 @@
              (map (fn [{:keys [name jvm-type]}]
                     {:name name
                      :descriptor (desc/jvm-type->descriptor jvm-type)
+                     :flags Opcodes/ACC_PRIVATE
+                     :jvm-type jvm-type})
+                  (:runtime-type-fields class-spec))
+             (map (fn [{:keys [name jvm-type]}]
+                    {:name name
+                     :descriptor (desc/jvm-type->descriptor jvm-type)
                      :flags Opcodes/ACC_PUBLIC
                      :jvm-type jvm-type})
                   (:fields class-spec))))
@@ -132,6 +138,7 @@
                 :owner (:internal-name class-spec)
                 :super-name "java/lang/Object"
                 :composition-fields (:composition-fields class-spec)
+                :runtime-type-fields (:runtime-type-fields class-spec)
                 :fields (:fields class-spec)}
                {:name "<clinit>"
                 :descriptor "()V"
@@ -283,7 +290,7 @@
       (.visitEnd mv))))
 
 (defn- emit-user-default-constructor!
-  [^ClassWriter cw {:keys [name descriptor flags fields composition-fields owner super-name]}]
+  [^ClassWriter cw {:keys [name descriptor flags fields composition-fields runtime-type-fields owner super-name]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
     (.visitVarInsn mv Opcodes/ALOAD 0)
@@ -311,7 +318,7 @@
         (.visitFieldInsn mv Opcodes/GETFIELD owner name (desc/jvm-type->descriptor jvm-type))
         (.visitVarInsn mv Opcodes/ALOAD 0)
         (.visitFieldInsn mv Opcodes/PUTFIELD (second jvm-type) "__outer__" "Ljava/lang/Object;")))
-    (doseq [{:keys [name jvm-type]} fields]
+    (doseq [{:keys [name jvm-type]} (concat runtime-type-fields fields)]
       (.visitVarInsn mv Opcodes/ALOAD 0)
       (emit-const! mv {:value (class-default-value jvm-type) :jvm-type jvm-type})
       (.visitFieldInsn mv
@@ -705,6 +712,56 @@
                              (fn [] (emit-expr! mv (first args) state-slot))])
         (emit-return (:jvm-type expr)))
 
+      "builtin-method:Min_Heap:insert"
+      (do
+        (emit-runtime-call! mv "min-heap-insert-method"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Min_Heap:extract_min"
+      (do
+        (emit-runtime-call! mv "min-heap-extract-min-method"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Min_Heap:try_extract_min"
+      (do
+        (emit-runtime-call! mv "min-heap-try-extract-min-method"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Min_Heap:peek"
+      (do
+        (emit-runtime-call! mv "min-heap-peek-method"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Min_Heap:try_peek"
+      (do
+        (emit-runtime-call! mv "min-heap-try-peek-method"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Min_Heap:size"
+      (do
+        (emit-runtime-call! mv "min-heap-size-method"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Min_Heap:is_empty"
+      (do
+        (emit-runtime-call! mv "min-heap-is-empty-method"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
       "print"
       (do
         (emit-runtime-call! mv "builtin-print!"
@@ -738,6 +795,11 @@
       (do
         (emit-runtime-call! mv "builtin-sleep!"
                             [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "hint_spin"
+      (do
+        (emit-runtime-call! mv "builtin-hint-spin!" [])
         (emit-return (:jvm-type expr)))
 
       "http_get"
@@ -895,6 +957,56 @@
                             (mapv (fn [arg]
                                     (fn [] (emit-boxed-expr! mv arg state-slot)))
                                   args))
+        (emit-return (:jvm-type expr)))
+
+      "create-array"
+      (do
+        (emit-runtime-call! mv "create-array" [])
+        (emit-return (:jvm-type expr)))
+
+      "create-array-filled"
+      (do
+        (emit-runtime-call! mv "create-array-filled"
+                            (mapv (fn [arg]
+                                    (fn [] (emit-boxed-expr! mv arg state-slot)))
+                                  args))
+        (emit-return (:jvm-type expr)))
+
+      "create-min-heap-empty"
+      (do
+        (emit-runtime-call! mv "create-min-heap-empty" [])
+        (emit-return (:jvm-type expr)))
+
+      "create-min-heap-from-comparator"
+      (do
+        (emit-runtime-call! mv "create-min-heap-from-comparator"
+                            (mapv (fn [arg]
+                                    (fn [] (emit-boxed-expr! mv arg state-slot)))
+                                  args))
+        (emit-return (:jvm-type expr)))
+
+      "create-atomic-integer"
+      (do
+        (emit-runtime-call! mv "create-atomic-integer"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "create-atomic-integer64"
+      (do
+        (emit-runtime-call! mv "create-atomic-integer64"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "create-atomic-boolean"
+      (do
+        (emit-runtime-call! mv "create-atomic-boolean"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "create-atomic-reference"
+      (do
+        (emit-runtime-call! mv "create-atomic-reference"
+                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
         (emit-return (:jvm-type expr)))
 
       "op:await-all"
@@ -1152,13 +1264,18 @@
   (.visitInsn mv Opcodes/POP))
 
 (defn- emit-convert!
-  [^MethodVisitor mv {:keys [value binding target-type temp-slot]} state-slot]
+  [^MethodVisitor mv {:keys [value binding target-type target-runtime temp-slot]} state-slot]
   (emit-runtime-var! mv "convert-value")
   (.visitVarInsn mv Opcodes/ALOAD state-slot)
   (let [value-type (emit-expr! mv value state-slot)]
     (when (contains? ir/primitive-jvm-types value-type)
       (emit-box! mv value-type)))
-  (.visitLdcInsn mv ^String (if (map? target-type) (:base-type target-type) target-type))
+  (if (ir/ir-node? target-runtime)
+    (do
+      (let [target-type-jvm (emit-expr! mv target-runtime state-slot)]
+        (when (contains? ir/primitive-jvm-types target-type-jvm)
+          (emit-box! mv target-type-jvm))))
+    (.visitLdcInsn mv ^String (if (map? target-type) (:base-type target-type) target-type)))
   (.visitMethodInsn mv
                     Opcodes/INVOKEVIRTUAL
                     var-internal-name

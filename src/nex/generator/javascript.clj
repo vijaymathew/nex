@@ -58,6 +58,11 @@
                     "Array" "Array"
                     "Map" "Map"
                     "Set" "Set"
+                    "Min_Heap" "Min_Heap"
+                    "Atomic_Integer" "Atomic_Integer"
+                    "Atomic_Integer64" "Atomic_Integer64"
+                    "Atomic_Boolean" "Atomic_Boolean"
+                    "Atomic_Reference" "Atomic_Reference"
                     "Task" "Task"
                     "Channel" "Channel"
                     base-type)
@@ -82,6 +87,11 @@
       "Array" "Array"
       "Map" "Map"
       "Set" "Set"
+      "Min_Heap" "Min_Heap"
+      "Atomic_Integer" "Atomic_Integer"
+      "Atomic_Integer64" "Atomic_Integer64"
+      "Atomic_Boolean" "Atomic_Boolean"
+      "Atomic_Reference" "Atomic_Reference"
       "Task" "Task"
       "Channel" "Channel"
       "Console" "Object"
@@ -102,6 +112,11 @@
         "Array" "[]"
         "Map" "new Map()"
         "Set" "new Set()"
+        "Min_Heap" "__nexMinHeap()"
+        "Atomic_Integer" "null"
+        "Atomic_Integer64" "null"
+        "Atomic_Boolean" "null"
+        "Atomic_Reference" "null"
         "Task" "null"
         "Channel" "null"
         "null"))
@@ -119,6 +134,11 @@
       "Array" "[]"
       "Map" "new Map()"
       "Set" "new Set()"
+      "Min_Heap" "__nexMinHeap()"
+      "Atomic_Integer" "null"
+      "Atomic_Integer64" "null"
+      "Atomic_Boolean" "null"
+      "Atomic_Reference" "null"
       "Task" "null"
       "Channel" "null"
       "Console" "({_type: 'Console'})"
@@ -281,6 +301,8 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
+                  "hint_spin" "Void"
+                  "random_real" "Real"
                   "regex_validate" "Boolean"
                   "regex_matches" "Boolean"
                   "regex_find" {:base-type "String" :detachable true}
@@ -377,6 +399,33 @@
                             "try_send" "Boolean"
                             "close" "Void"
                             "Any")
+                "Min_Heap" (case (:method expr)
+                             ("extract_min" "peek") (or (first type-args) "Any")
+                             ("try_extract_min" "try_peek") {:base-type (or (first type-args) "Any") :detachable true}
+                             "size" "Integer"
+                             "is_empty" "Boolean"
+                             "insert" "Void"
+                             "Any")
+                "Atomic_Integer" (case (:method expr)
+                                   ("load" "get_and_add" "add_and_get" "increment" "decrement") "Integer"
+                                   "store" "Void"
+                                   "compare_and_set" "Boolean"
+                                   "Any")
+                "Atomic_Integer64" (case (:method expr)
+                                     ("load" "get_and_add" "add_and_get" "increment" "decrement") "Integer64"
+                                     "store" "Void"
+                                     "compare_and_set" "Boolean"
+                                     "Any")
+                "Atomic_Boolean" (case (:method expr)
+                                   "load" "Boolean"
+                                   "store" "Void"
+                                   "compare_and_set" "Boolean"
+                                   "Any")
+                "Atomic_Reference" (case (:method expr)
+                                     "load" {:base-type (or (first type-args) "Any") :detachable true}
+                                     "store" "Void"
+                                     "compare_and_set" "Boolean"
+                                     "Any")
                 "Set" (case (:method expr)
                         ("contains" "is_empty") "Boolean"
                         "size" "Integer"
@@ -527,6 +576,8 @@
       "type_of" (str "__nexTypeOf(" args-code ")")
       "type_is" (str "__nexTypeIs(" args-code ")")
       "sleep" (str "await __nexSleep(" args-code ")")
+      "hint_spin" "__nexHintSpin()"
+      "random_real" "Math.random()"
       "regex_validate" (str "__nexRegexValidate(" args-code ")")
       "regex_matches" (str "__nexRegexMatches(" args-code ")")
       "regex_find" (str "__nexRegexFind(" args-code ")")
@@ -629,6 +680,8 @@
     "trim"        (fn [target _] (str target ".trim()"))
     "replace"     (fn [target args] (str target ".replace(" args ")"))
     "char_at"     (fn [target args] (str target ".charAt(" args ")"))
+    "chars"       (fn [target _] (str target ".split(\"\")"))
+    "to_bytes"    (fn [target _] (str "__nexStringToBytes(" target ")"))
     "compare"     (fn [target args] (str "__nexCompare(" target ", " args ")"))
     "hash"        (fn [target _] (str "__nexHash(" target ")"))
     "split"       (fn [target args] (str target ".split(" args ")"))
@@ -800,6 +853,43 @@
     "clone"                (fn [target _] (str "__nexDeepClone(" target ")"))
     "cursor"               (fn [target _] (str "__nexSetCursor(" target ")"))}
 
+   :Min_Heap
+   {"insert"          (fn [target args] (str "__nexMinHeapInsert(" target ", " args ")"))
+    "extract_min"     (fn [target _] (str "__nexMinHeapExtractMin(" target ")"))
+    "try_extract_min" (fn [target _] (str "__nexMinHeapTryExtractMin(" target ")"))
+    "peek"            (fn [target _] (str "__nexMinHeapPeek(" target ")"))
+    "try_peek"        (fn [target _] (str "__nexMinHeapTryPeek(" target ")"))
+    "size"            (fn [target _] (str target ".data.length"))
+    "is_empty"        (fn [target _] (str "(" target ".data.length === 0)"))}
+
+   :Atomic_Integer
+   {"load"            (fn [target _] (str "__nexAtomicLoad(" target ")"))
+    "store"           (fn [target args] (str "__nexAtomicStore(" target ", " args ")"))
+    "compare_and_set" (fn [target args] (str "__nexAtomicCompareAndSet(" target ", " args ")"))
+    "get_and_add"     (fn [target args] (str "__nexAtomicGetAndAdd(" target ", " args ")"))
+    "add_and_get"     (fn [target args] (str "__nexAtomicAddAndGet(" target ", " args ")"))
+    "increment"       (fn [target _] (str "__nexAtomicAddAndGet(" target ", 1)"))
+    "decrement"       (fn [target _] (str "__nexAtomicAddAndGet(" target ", -1)"))}
+
+   :Atomic_Integer64
+   {"load"            (fn [target _] (str "__nexAtomicLoad(" target ")"))
+    "store"           (fn [target args] (str "__nexAtomicStore(" target ", " args ")"))
+    "compare_and_set" (fn [target args] (str "__nexAtomicCompareAndSet(" target ", " args ")"))
+    "get_and_add"     (fn [target args] (str "__nexAtomicGetAndAdd(" target ", " args ")"))
+    "add_and_get"     (fn [target args] (str "__nexAtomicAddAndGet(" target ", " args ")"))
+    "increment"       (fn [target _] (str "__nexAtomicAddAndGet(" target ", 1)"))
+    "decrement"       (fn [target _] (str "__nexAtomicAddAndGet(" target ", -1)"))}
+
+   :Atomic_Boolean
+   {"load"            (fn [target _] (str "__nexAtomicLoad(" target ")"))
+    "store"           (fn [target args] (str "__nexAtomicStore(" target ", " args ")"))
+    "compare_and_set" (fn [target args] (str "__nexAtomicCompareAndSet(" target ", " args ")"))}
+
+   :Atomic_Reference
+   {"load"            (fn [target _] (str "__nexAtomicLoad(" target ")"))
+    "store"           (fn [target args] (str "__nexAtomicStore(" target ", " args ")"))
+    "compare_and_set" (fn [target args] (str "__nexAtomicCompareAndSet(" target ", " args ")"))}
+
    :Task
    {"await"    (fn [target args] (str "await " target ".await(" args ")"))
     "cancel"   (fn [target _] (str target ".cancel()"))
@@ -839,7 +929,9 @@
     (and (nil? method)
          (map? target)
          (= :create (:type target))
-        (not (#{"Console" "Process" "Set" "Channel"} (:class-name target))))
+        (not (#{"Console" "Process" "Set" "Channel" "Min_Heap"
+                "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"}
+              (:class-name target))))
     true
 
     (nil? method) false
@@ -992,7 +1084,40 @@
     (case class-name
       "Console" "({_type: 'Console'})"
       "Process" "({_type: 'Process'})"
+      "Array" (cond
+                (nil? constructor) "[]"
+                (= constructor "filled")
+                (str "Array.from({ length: "
+                     (generate-expression (first args))
+                     " }, () => "
+                     (generate-expression (second args))
+                     ")")
+                :else
+                (throw (ex-info (str "Unsupported built-in Array constructor: " constructor)
+                                {:constructor constructor})))
       "Map" "new Map()"
+      "Min_Heap" (cond
+                   (or (nil? constructor) (= constructor "empty")) "__nexMinHeap()"
+                   (= constructor "from_comparator") (str "__nexMinHeap(" args-code ")")
+                   :else
+                   (throw (ex-info (str "Unsupported built-in Min_Heap constructor: " constructor)
+                                   {:constructor constructor})))
+      "Atomic_Integer" (cond
+                         (= constructor "make") (str "__nexAtomicInteger(" args-code ")")
+                         :else (throw (ex-info (str "Unsupported built-in Atomic_Integer constructor: " constructor)
+                                               {:constructor constructor})))
+      "Atomic_Integer64" (cond
+                           (= constructor "make") (str "__nexAtomicInteger64(" args-code ")")
+                           :else (throw (ex-info (str "Unsupported built-in Atomic_Integer64 constructor: " constructor)
+                                                 {:constructor constructor})))
+      "Atomic_Boolean" (cond
+                         (= constructor "make") (str "__nexAtomicBoolean(" args-code ")")
+                         :else (throw (ex-info (str "Unsupported built-in Atomic_Boolean constructor: " constructor)
+                                               {:constructor constructor})))
+      "Atomic_Reference" (cond
+                           (= constructor "make") (str "__nexAtomicReference(" args-code ")")
+                           :else (throw (ex-info (str "Unsupported built-in Atomic_Reference constructor: " constructor)
+                                                 {:constructor constructor})))
       "Channel" (cond
                   (nil? constructor) "new __nexChannel()"
                   (= constructor "with_capacity") (str "new __nexChannel(" args-code ")")
@@ -2147,6 +2272,84 @@
        "function __nexArraySort(values) {\n"
        "  return [...values].sort((a, b) => __nexCompareValues(a, b));\n"
        "}\n"
+       "function __nexMinHeap(compare = null) {\n"
+       "  return { _type: 'MinHeap', data: [], compare };\n"
+       "}\n"
+       "function __nexMinHeapCompare(heap, a, b) {\n"
+       "  if (!heap.compare) return __nexCompareValues(a, b);\n"
+       "  const result = (typeof heap.compare === 'function') ? heap.compare(a, b) : heap.compare.call2(a, b);\n"
+       "  if (!Number.isInteger(result)) throw new Error('Min_Heap comparator must return Integer');\n"
+       "  return result;\n"
+       "}\n"
+       "function __nexMinHeapSiftUp(heap, index) {\n"
+       "  while (index > 0) {\n"
+       "    const parent = Math.floor((index - 1) / 2);\n"
+       "    if (__nexMinHeapCompare(heap, heap.data[index], heap.data[parent]) >= 0) break;\n"
+       "    const tmp = heap.data[index];\n"
+       "    heap.data[index] = heap.data[parent];\n"
+       "    heap.data[parent] = tmp;\n"
+       "    index = parent;\n"
+       "  }\n"
+       "}\n"
+       "function __nexMinHeapSiftDown(heap, index) {\n"
+       "  while (true) {\n"
+       "    const left = index * 2 + 1;\n"
+       "    const right = left + 1;\n"
+       "    let smallest = index;\n"
+       "    if (left < heap.data.length && __nexMinHeapCompare(heap, heap.data[left], heap.data[smallest]) < 0) smallest = left;\n"
+       "    if (right < heap.data.length && __nexMinHeapCompare(heap, heap.data[right], heap.data[smallest]) < 0) smallest = right;\n"
+       "    if (smallest === index) break;\n"
+       "    const tmp = heap.data[index];\n"
+       "    heap.data[index] = heap.data[smallest];\n"
+       "    heap.data[smallest] = tmp;\n"
+       "    index = smallest;\n"
+       "  }\n"
+       "}\n"
+       "function __nexMinHeapInsert(heap, value) {\n"
+       "  heap.data.push(value);\n"
+       "  __nexMinHeapSiftUp(heap, heap.data.length - 1);\n"
+       "}\n"
+       "function __nexMinHeapTryPeek(heap) {\n"
+       "  return heap.data.length === 0 ? null : heap.data[0];\n"
+       "}\n"
+       "function __nexMinHeapPeek(heap) {\n"
+       "  if (heap.data.length === 0) throw new Error('Min_Heap is empty');\n"
+       "  return heap.data[0];\n"
+       "}\n"
+       "function __nexMinHeapTryExtractMin(heap) {\n"
+       "  if (heap.data.length === 0) return null;\n"
+       "  const min = heap.data[0];\n"
+       "  const last = heap.data.pop();\n"
+       "  if (heap.data.length > 0) {\n"
+       "    heap.data[0] = last;\n"
+       "    __nexMinHeapSiftDown(heap, 0);\n"
+       "  }\n"
+       "  return min;\n"
+       "}\n"
+       "function __nexMinHeapExtractMin(heap) {\n"
+       "  const value = __nexMinHeapTryExtractMin(heap);\n"
+       "  if (value === null || value === undefined) throw new Error('Min_Heap is empty');\n"
+       "  return value;\n"
+       "}\n"
+       "function __nexAtomicInteger(initial) { return { _type: 'Atomic_Integer', value: initial | 0 }; }\n"
+       "function __nexAtomicInteger64(initial) { return { _type: 'Atomic_Integer64', value: Number(initial) }; }\n"
+       "function __nexAtomicBoolean(initial) { return { _type: 'Atomic_Boolean', value: !!initial }; }\n"
+       "function __nexAtomicReference(initial) { return { _type: 'Atomic_Reference', value: initial ?? null }; }\n"
+       "function __nexAtomicLoad(cell) { return cell.value; }\n"
+       "function __nexAtomicStore(cell, value) { cell.value = value; }\n"
+       "function __nexAtomicCompareAndSet(cell, expected, update) {\n"
+       "  if (__nexDeepEquals(cell.value, expected)) { cell.value = update; return true; }\n"
+       "  return false;\n"
+       "}\n"
+       "function __nexAtomicGetAndAdd(cell, delta) {\n"
+       "  const current = cell.value;\n"
+       "  cell.value += delta;\n"
+       "  return current;\n"
+       "}\n"
+       "function __nexAtomicAddAndGet(cell, delta) {\n"
+       "  cell.value += delta;\n"
+       "  return cell.value;\n"
+       "}\n"
        "function __nexCloneValue(v) {\n"
        "  if (v === null || v === undefined || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;\n"
        "  if (Array.isArray(v)) return v.slice();\n"
@@ -2186,6 +2389,9 @@
        "}\n"
        "function __nexParseInt(raw) {\n"
        "  return __nexParseLong(raw);\n"
+       "}\n"
+       "function __nexStringToBytes(text) {\n"
+       "  return Array.from(new TextEncoder().encode(String(text)));\n"
        "}\n"
        "function __nexJsonToNex(value) {\n"
        "  if (value === null || value === undefined) return null;\n"
@@ -2275,6 +2481,9 @@
        "}\n"
        "function __nexSleep(ms) {\n"
        "  return new Promise(resolve => setTimeout(resolve, ms));\n"
+       "}\n"
+       "function __nexHintSpin() {\n"
+       "  return null;\n"
        "}\n"
        "function __nexRegexFlags(flags) {\n"
        "  let out = 'g';\n"

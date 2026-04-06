@@ -14,7 +14,8 @@
   (:import [clojure.lang DynamicClassLoader]
            [java.lang.reflect Field Method InvocationTargetException]
            [java.util HashMap]
-           [java.util.concurrent CompletableFuture TimeUnit TimeoutException ExecutionException CancellationException]))
+           [java.util.concurrent CompletableFuture TimeUnit TimeoutException ExecutionException CancellationException]
+           [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference]))
 
 (declare rebuild-interpreter-ctx)
 (declare lowered-instance-method-name)
@@ -22,6 +23,7 @@
 (declare runtime-type-name)
 (declare runtime-compatible-with?)
 (declare invoke-user-method)
+(declare runtime-compare-values)
 
 (defmacro ^:private def-builtin-method-wrapper
   [fn-name method-name]
@@ -203,6 +205,52 @@
                               [])}]
      (interp/eval-node ctx create-node))))
 
+(defn create-array
+  []
+  (rt/nex-array))
+
+(defn create-array-filled
+  [size value]
+  (when-not (integer? size)
+    (throw (ex-info "Array.filled requires an Integer size"
+                    {:size size})))
+  (when (neg? size)
+    (throw (ex-info "Array size must be non-negative"
+                    {:size size})))
+  (rt/nex-array-from (vec (repeat size value))))
+
+(defn create-min-heap-empty
+  []
+  {:nex-builtin-type :MinHeap
+   :data (atom [])
+   :comparator nil})
+
+(defn create-min-heap-from-comparator
+  [compare]
+  {:nex-builtin-type :MinHeap
+   :data (atom [])
+   :comparator compare})
+
+(defn create-atomic-integer
+  [initial]
+  {:nex-builtin-type :AtomicInteger
+   :state (AtomicInteger. (int initial))})
+
+(defn create-atomic-integer64
+  [initial]
+  {:nex-builtin-type :AtomicInteger64
+   :state (AtomicLong. (long initial))})
+
+(defn create-atomic-boolean
+  [initial]
+  {:nex-builtin-type :AtomicBoolean
+   :state (AtomicBoolean. (boolean initial))})
+
+(defn create-atomic-reference
+  [initial]
+  {:nex-builtin-type :AtomicReference
+   :state (AtomicReference. initial)})
+
 (defn java-create-object
   [state class-name args]
   (let [ctx (rebuild-interpreter-ctx state)]
@@ -319,6 +367,204 @@
 (defn channel-size-method
   [ch]
   (interp/call-builtin-method nil ch ch "size" []))
+
+(defn- min-heap-compare
+  [state heap left right]
+  (let [comparator (:comparator heap)]
+    (if comparator
+      (let [result (if (fn? comparator)
+                     (comparator left right)
+                     (invoke-function-object state comparator [left right]))]
+        (if (integer? result)
+          result
+          (throw (ex-info "Min_Heap comparator must return Integer"
+                          {:left left :right right :result result}))))
+      (runtime-compare-values state left right))))
+
+(defn- min-heap-sift-up
+  [state heap values idx]
+  (loop [items values
+         child idx]
+    (if (zero? child)
+      items
+      (let [parent (quot (dec child) 2)
+            child-value (nth items child)
+            parent-value (nth items parent)]
+        (if (neg? (min-heap-compare state heap child-value parent-value))
+          (recur (-> items
+                     (assoc child parent-value)
+                     (assoc parent child-value))
+                 parent)
+          items)))))
+
+(defn- min-heap-sift-down
+  [state heap values idx]
+  (let [n (count values)]
+    (loop [items values
+           parent idx]
+      (let [left (+ (* 2 parent) 1)
+            right (+ left 1)]
+        (if (>= left n)
+          items
+          (let [smallest-child (if (and (< right n)
+                                        (neg? (min-heap-compare state
+                                                                heap
+                                                                (nth items right)
+                                                                (nth items left))))
+                                 right
+                                 left)
+                parent-value (nth items parent)
+                child-value (nth items smallest-child)]
+            (if (neg? (min-heap-compare state heap child-value parent-value))
+              (recur (-> items
+                         (assoc parent child-value)
+                         (assoc smallest-child parent-value))
+                     smallest-child)
+              items)))))))
+
+(defn min-heap-insert-method
+  [state heap value]
+  (swap! (:data heap)
+         (fn [items]
+           (let [expanded (conj items value)]
+             (min-heap-sift-up state heap expanded (dec (count expanded))))))
+  nil)
+
+(defn- min-heap-peek*
+  [heap]
+  (let [items @(:data heap)]
+    (when (seq items)
+      (first items))))
+
+(defn min-heap-peek-method
+  [state heap]
+  (or (min-heap-peek* heap)
+      (throw (ex-info "Min_Heap is empty" {:heap heap}))))
+
+(defn min-heap-try-peek-method
+  [state heap]
+  (min-heap-peek* heap))
+
+(defn- min-heap-extract*
+  [state heap]
+  (let [items @(:data heap)]
+    (when (seq items)
+      (let [minimum (first items)
+            last-value (peek items)
+            remaining-count (dec (count items))
+            replacement (if (zero? remaining-count)
+                          []
+                          (min-heap-sift-down state heap (assoc (pop items) 0 last-value) 0))]
+        (reset! (:data heap) replacement)
+        minimum))))
+
+(defn min-heap-extract-min-method
+  [state heap]
+  (or (min-heap-extract* state heap)
+      (throw (ex-info "Min_Heap is empty" {:heap heap}))))
+
+(defn min-heap-try-extract-min-method
+  [state heap]
+  (min-heap-extract* state heap))
+
+(defn min-heap-size-method
+  [state heap]
+  (count @(:data heap)))
+
+(defn min-heap-is-empty-method
+  [state heap]
+  (empty? @(:data heap)))
+
+(defn builtin-method-atomic_integer-load
+  [target]
+  (.get ^AtomicInteger (:state target)))
+
+(defn builtin-method-atomic_integer-store
+  [target value]
+  (.set ^AtomicInteger (:state target) (int value))
+  nil)
+
+(defn builtin-method-atomic_integer-compare-and-set
+  [target expected update]
+  (.compareAndSet ^AtomicInteger (:state target) (int expected) (int update)))
+
+(defn builtin-method-atomic_integer-get-and-add
+  [target delta]
+  (.getAndAdd ^AtomicInteger (:state target) (int delta)))
+
+(defn builtin-method-atomic_integer-add-and-get
+  [target delta]
+  (.addAndGet ^AtomicInteger (:state target) (int delta)))
+
+(defn builtin-method-atomic_integer-increment
+  [target]
+  (.incrementAndGet ^AtomicInteger (:state target)))
+
+(defn builtin-method-atomic_integer-decrement
+  [target]
+  (.decrementAndGet ^AtomicInteger (:state target)))
+
+(defn builtin-method-atomic_integer64-load
+  [target]
+  (.get ^AtomicLong (:state target)))
+
+(defn builtin-method-atomic_integer64-store
+  [target value]
+  (.set ^AtomicLong (:state target) (long value))
+  nil)
+
+(defn builtin-method-atomic_integer64-compare-and-set
+  [target expected update]
+  (.compareAndSet ^AtomicLong (:state target) (long expected) (long update)))
+
+(defn builtin-method-atomic_integer64-get-and-add
+  [target delta]
+  (.getAndAdd ^AtomicLong (:state target) (long delta)))
+
+(defn builtin-method-atomic_integer64-add-and-get
+  [target delta]
+  (.addAndGet ^AtomicLong (:state target) (long delta)))
+
+(defn builtin-method-atomic_integer64-increment
+  [target]
+  (.incrementAndGet ^AtomicLong (:state target)))
+
+(defn builtin-method-atomic_integer64-decrement
+  [target]
+  (.decrementAndGet ^AtomicLong (:state target)))
+
+(defn builtin-method-atomic_boolean-load
+  [target]
+  (.get ^AtomicBoolean (:state target)))
+
+(defn builtin-method-atomic_boolean-store
+  [target value]
+  (.set ^AtomicBoolean (:state target) (boolean value))
+  nil)
+
+(defn builtin-method-atomic_boolean-compare-and-set
+  [target expected update]
+  (.compareAndSet ^AtomicBoolean (:state target) (boolean expected) (boolean update)))
+
+(defn builtin-method-atomic_reference-load
+  [target]
+  (.get ^AtomicReference (:state target)))
+
+(defn builtin-method-atomic_reference-store
+  [target value]
+  (.set ^AtomicReference (:state target) value)
+  nil)
+
+(defn builtin-method-atomic_reference-compare-and-set
+  [target expected update]
+  (loop []
+    (let [^AtomicReference state (:state target)
+          current (.get state)]
+      (if (value/nex-deep-equals? interp/nex-object? current expected)
+        (if (.compareAndSet state current update)
+          true
+          (recur))
+        false))))
 
 (defn- invoke-interpreter-object-method
   [state target method-name args]
@@ -795,6 +1041,11 @@
 (defn builtin-sleep!
   [millis]
   (Thread/sleep (long millis))
+  nil)
+
+(defn builtin-hint-spin!
+  []
+  (Thread/onSpinWait)
   nil)
 
 (defn builtin-http-get
@@ -1299,6 +1550,8 @@
 (def-builtin-method-wrapper builtin-method-string-trim "trim")
 (def-builtin-method-wrapper builtin-method-string-replace "replace")
 (def-builtin-method-wrapper builtin-method-string-char-at "char_at")
+(def-builtin-method-wrapper builtin-method-string-chars "chars")
+(def-builtin-method-wrapper builtin-method-string-to-bytes "to_bytes")
 (def-builtin-method-wrapper builtin-method-string-compare "compare")
 (def-builtin-method-wrapper builtin-method-string-hash "hash")
 (defn builtin-method-string-split
@@ -1465,6 +1718,30 @@
     (if (seq args)
       (create-channel (first args))
       (create-channel))
+
+    (= name "create-array")
+    (create-array)
+
+    (= name "create-array-filled")
+    (create-array-filled (first args) (second args))
+
+    (= name "create-min-heap-empty")
+    (create-min-heap-empty)
+
+    (= name "create-min-heap-from-comparator")
+    (create-min-heap-from-comparator (first args))
+
+    (= name "create-atomic-integer")
+    (create-atomic-integer (first args))
+
+    (= name "create-atomic-integer64")
+    (create-atomic-integer64 (first args))
+
+    (= name "create-atomic-boolean")
+    (create-atomic-boolean (first args))
+
+    (= name "create-atomic-reference")
+    (create-atomic-reference (first args))
 
     (= name "java-create-object")
     (java-create-object state (first args) (vec (rest args)))

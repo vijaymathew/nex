@@ -121,6 +121,52 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-min-heap-constructors-typecheck
+  (testing "Min_Heap.empty requires Comparable elements while from_comparator supports custom ordering"
+    (let [ok-code "class Box
+  feature
+    value: Integer
+  create
+    make(v: Integer) do
+      value := v
+    end
+end
+
+function cmp(a: Box, b: Box): Integer
+do
+  result := a.value - b.value
+end
+
+let numbers: Min_Heap[Integer] := create Min_Heap.empty
+let boxes: Min_Heap[Box] := create Min_Heap.from_comparator(cmp)"
+          ok-result (tc/type-check (p/ast ok-code))
+          bad-code "class Box
+  feature
+    value: Integer
+end
+
+let boxes: Min_Heap[Box] := create Min_Heap[Box].empty"
+          bad-result (tc/type-check (p/ast bad-code))]
+      (is (:success ok-result))
+      (is (not (:success bad-result)))
+      (is (some #(str/includes? (:message %) "Min_Heap.empty requires")
+                (:errors bad-result))))))
+
+(deftest test-atomic-constructors-and-methods-typecheck
+  (testing "atomic built-ins typecheck with their declared value types"
+    (let [code "let ai: Atomic_Integer := create Atomic_Integer.make(1)
+let ai64: Atomic_Integer64 := create Atomic_Integer64.make(1)
+let ab: Atomic_Boolean := create Atomic_Boolean.make(true)
+let ar: Atomic_Reference[String] := create Atomic_Reference.make(\"x\")
+let n: Integer := ai.increment
+let ok: Boolean := ai.compare_and_set(n, 10)
+let s: ?String := ar.load
+ar.store(nil)
+let swapped: Boolean := ar.compare_and_set(nil, \"done\")"
+          result (tc/type-check (p/ast code))]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-comparison-operators
   (testing "Comparison operators should work on compatible types"
     (let [code "class Test
@@ -808,6 +854,45 @@ class B inherit A end"
       (is (not (:success result)))
       (is (some #(re-find #"Cyclic inheritance detected" %)
                 (map tc/format-type-error (:errors result)))))))
+
+(deftest test-array-filled-constructor-types
+  (testing "Array.filled typechecks with inferred or explicit element type"
+    (let [ok-code "class Test
+  feature
+    demo() do
+      let xs: Array[Integer] := create Array.filled(3, 0)
+    end
+end"
+          bad-code "class Test
+  feature
+    demo() do
+      let xs: Array[Integer] := create Array.filled(3, \"oops\")
+    end
+end"]
+      (is (:success (tc/type-check (p/ast ok-code))))
+      (is (not (:success (tc/type-check (p/ast bad-code))))))))
+
+(deftest test-string-chars-types
+  (testing "String.chars typechecks as Array[Char]"
+    (let [code "class Test
+  feature
+    demo() do
+      let xs: Array[Char] := \"cat\".chars()
+      let ch: Char := xs.get(1)
+    end
+end"]
+      (is (:success (tc/type-check (p/ast code)))))))
+
+(deftest test-string-to-bytes-types
+  (testing "String.to_bytes typechecks as Array[Integer]"
+    (let [code "class Test
+  feature
+    demo() do
+      let xs: Array[Integer] := \"cat\".to_bytes()
+      let b: Integer := xs.get(1)
+    end
+end"]
+      (is (:success (tc/type-check (p/ast code)))))))
 
 ;; Let type inference tests
 

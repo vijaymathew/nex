@@ -160,6 +160,44 @@ print(apply(add2, 40))")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-convert-to-generic-parameter-smoke-test
+  (testing "compile-jar supports convert to a bare generic parameter inside compiled class methods"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-generic-convert")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class Box[T]
+create
+  with_value(v: Any) do
+    this.value := v
+  end
+feature
+  value: Any
+
+  typed_or(default: T): T
+  do
+    if convert value to current: T then
+      result := current
+    else
+      result := default
+    end
+  end
+end
+
+let ok: Box[Integer] := create Box[Integer].with_value(7)
+let fallback: Box[Integer] := create Box[Integer].with_value(\"oops\")
+print(ok.typed_or(99))
+print(fallback.typed_or(99))")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["7" "99"] output-lines)))
+      (finally
+        (when (.exists tmp-dir)
+          (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-concurrency-and-select-smoke-test
   (testing "compile-jar runs spawn, channels, select, and await_any end-to-end"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-concurrency")

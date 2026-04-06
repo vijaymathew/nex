@@ -161,3 +161,92 @@ end"
       ;; Just verify it parses correctly
       (is (= 2 (count (:classes ast)))))))
 
+(deftest array-filled-runtime-test
+  (testing "create Array.filled builds a mutable array with repeated values"
+    (let [ctx (interp/make-context)
+          value (interp/eval-node ctx {:type :create
+                                       :class-name "Array"
+                                       :generic-args ["Integer"]
+                                       :constructor "filled"
+                                       :args [{:type :literal :value 3}
+                                              {:type :literal :value 0}]})]
+      (is (= 3 (count value)))
+      (is (= [0 0 0] (vec value))))))
+
+(deftest string-chars-runtime-test
+  (testing "String.chars returns a fresh Array[Char] in the same iteration order as char_at"
+    (let [ctx (interp/make-context)
+          chars (interp/call-builtin-method ctx "cat" "cat" "chars" [])]
+      (is (= 3 (.size chars)))
+      (is (= [\c \a \t] (vec chars)))
+      (is (= \a (interp/call-builtin-method ctx chars chars "get" [1])))
+      (interp/call-builtin-method ctx chars chars "add" [\!])
+      (is (= 4 (.size chars)))
+      (is (= 3 (interp/call-builtin-method ctx "cat" "cat" "length" [])))
+      (is (= \a (interp/call-builtin-method ctx "cat" "cat" "char_at" [1]))))))
+
+(deftest string-to-bytes-runtime-test
+  (testing "String.to_bytes returns UTF-8 bytes as Array[Integer]"
+    (let [ctx (interp/make-context)
+          ascii (interp/call-builtin-method ctx "cat" "cat" "to_bytes" [])
+          unicode (interp/call-builtin-method ctx "é" "é" "to_bytes" [])]
+      (is (= [99 97 116] (vec ascii)))
+      (is (= [195 169] (vec unicode))))))
+
+(deftest min-heap-runtime-test
+  (testing "Min_Heap supports natural ordering, comparator ordering, and safe empty reads"
+    (let [ctx (interp/make-context)
+          natural (interp/eval-node ctx {:type :create
+                                         :class-name "Min_Heap"
+                                         :generic-args ["Integer"]
+                                         :constructor "empty"
+                                         :args []})
+          reverse-compare (fn [a b]
+                            (cond
+                              (> a b) -1
+                              (< a b) 1
+                              :else 0))
+          custom (interp/eval-node ctx {:type :create
+                                        :class-name "Min_Heap"
+                                        :generic-args ["Integer"]
+                                        :constructor "from_comparator"
+                                        :args [{:type :literal :value reverse-compare}]})]
+      (interp/call-builtin-method ctx natural natural "insert" [5])
+      (interp/call-builtin-method ctx natural natural "insert" [1])
+      (interp/call-builtin-method ctx natural natural "insert" [3])
+      (is (= 1 (interp/call-builtin-method ctx natural natural "peek" [])))
+      (is (= 1 (interp/call-builtin-method ctx natural natural "extract_min" [])))
+      (is (= 3 (interp/call-builtin-method ctx natural natural "extract_min" [])))
+      (is (= 5 (interp/call-builtin-method ctx natural natural "extract_min" [])))
+      (is (nil? (interp/call-builtin-method ctx natural natural "try_peek" [])))
+      (is (nil? (interp/call-builtin-method ctx natural natural "try_extract_min" [])))
+      (interp/call-builtin-method ctx custom custom "insert" [5])
+      (interp/call-builtin-method ctx custom custom "insert" [1])
+      (interp/call-builtin-method ctx custom custom "insert" [3])
+      (is (= 5 (interp/call-builtin-method ctx custom custom "extract_min" []))))))
+
+(deftest atomic-builtins-runtime-test
+  (testing "atomic built-ins support load/store/update and reference CAS"
+    (let [ctx (interp/make-context)
+          ai (interp/eval-node ctx {:type :create
+                                    :class-name "Atomic_Integer"
+                                    :generic-args nil
+                                    :constructor "make"
+                                    :args [{:type :literal :value 10}]})
+          ar (interp/eval-node ctx {:type :create
+                                    :class-name "Atomic_Reference"
+                                    :generic-args ["String"]
+                                    :constructor "make"
+                                    :args [{:type :literal :value "a"}]})]
+      (is (= 10 (interp/call-builtin-method ctx ai ai "load" [])))
+      (is (= 10 (interp/call-builtin-method ctx ai ai "get_and_add" [5])))
+      (is (= 15 (interp/call-builtin-method ctx ai ai "load" [])))
+      (is (= 16 (interp/call-builtin-method ctx ai ai "increment" [])))
+      (is (= 15 (interp/call-builtin-method ctx ai ai "decrement" [])))
+      (is (true? (interp/call-builtin-method ctx ai ai "compare_and_set" [15 7])))
+      (is (= 7 (interp/call-builtin-method ctx ai ai "load" [])))
+      (is (= "a" (interp/call-builtin-method ctx ar ar "load" [])))
+      (is (true? (interp/call-builtin-method ctx ar ar "compare_and_set" ["a" "b"])))
+      (is (= "b" (interp/call-builtin-method ctx ar ar "load" [])))
+      (interp/call-builtin-method ctx ar ar "store" [nil])
+      (is (nil? (interp/call-builtin-method ctx ar ar "load" []))))))

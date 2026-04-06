@@ -113,7 +113,8 @@
 
 (def builtin-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Set" "Task" "Channel" "Any" "Void" "Nil" "Console" "Process" "Function"
+    "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
+    "Task" "Channel" "Any" "Void" "Nil" "Console" "Process" "Function"
     "Cursor"})
 
 (defn builtin-type? [type-name]
@@ -1100,6 +1101,73 @@
         "size" (when (= argc 0) {:params [] :return-type "Integer"})
         nil))
 
+    "Min_Heap"
+    (let [elem-type (or (resolve-generic-type "T" type-map) "Any")]
+      (case method
+        "insert" (when (= argc 1)
+                   {:params [{:name "value" :type elem-type}] :return-type "Void"})
+        "extract_min" (when (= argc 0)
+                        {:params [] :return-type elem-type})
+        "try_extract_min" (when (= argc 0)
+                            {:params [] :return-type (detachable-version elem-type)})
+        "peek" (when (= argc 0)
+                 {:params [] :return-type elem-type})
+        "try_peek" (when (= argc 0)
+                     {:params [] :return-type (detachable-version elem-type)})
+        "size" (when (= argc 0) {:params [] :return-type "Integer"})
+        "is_empty" (when (= argc 0) {:params [] :return-type "Boolean"})
+        nil))
+
+    "Atomic_Integer"
+    (case method
+      "load" (when (= argc 0) {:params [] :return-type "Integer"})
+      "store" (when (= argc 1) {:params [{:name "value" :type "Integer"}] :return-type "Void"})
+      "compare_and_set" (when (= argc 2)
+                          {:params [{:name "expected" :type "Integer"}
+                                    {:name "update" :type "Integer"}]
+                           :return-type "Boolean"})
+      "get_and_add" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
+      "add_and_get" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
+      "increment" (when (= argc 0) {:params [] :return-type "Integer"})
+      "decrement" (when (= argc 0) {:params [] :return-type "Integer"})
+      nil)
+
+    "Atomic_Integer64"
+    (case method
+      "load" (when (= argc 0) {:params [] :return-type "Integer64"})
+      "store" (when (= argc 1) {:params [{:name "value" :type "Integer64"}] :return-type "Void"})
+      "compare_and_set" (when (= argc 2)
+                          {:params [{:name "expected" :type "Integer64"}
+                                    {:name "update" :type "Integer64"}]
+                           :return-type "Boolean"})
+      "get_and_add" (when (= argc 1) {:params [{:name "delta" :type "Integer64"}] :return-type "Integer64"})
+      "add_and_get" (when (= argc 1) {:params [{:name "delta" :type "Integer64"}] :return-type "Integer64"})
+      "increment" (when (= argc 0) {:params [] :return-type "Integer64"})
+      "decrement" (when (= argc 0) {:params [] :return-type "Integer64"})
+      nil)
+
+    "Atomic_Boolean"
+    (case method
+      "load" (when (= argc 0) {:params [] :return-type "Boolean"})
+      "store" (when (= argc 1) {:params [{:name "value" :type "Boolean"}] :return-type "Void"})
+      "compare_and_set" (when (= argc 2)
+                          {:params [{:name "expected" :type "Boolean"}
+                                    {:name "update" :type "Boolean"}]
+                           :return-type "Boolean"})
+      nil)
+
+    "Atomic_Reference"
+    (let [elem-type (or (resolve-generic-type "T" type-map) "Any")
+          maybe-elem (detachable-version elem-type)]
+      (case method
+        "load" (when (= argc 0) {:params [] :return-type maybe-elem})
+        "store" (when (= argc 1) {:params [{:name "value" :type maybe-elem}] :return-type "Void"})
+        "compare_and_set" (when (= argc 2)
+                            {:params [{:name "expected" :type maybe-elem}
+                                      {:name "update" :type maybe-elem}]
+                             :return-type "Boolean"})
+        nil))
+
     "Cursor"
     (case method
       "start" (when (= argc 0)
@@ -1246,8 +1314,24 @@
             (throw (ex-info "sleep argument must be Integer"
                             {:error (type-error
                                      (str "sleep argument must be Integer, got "
-                                          (display-type arg-type)))}))))
+                                         (display-type arg-type)))}))))
         "Void")
+
+      (= method "hint_spin")
+      (do
+        (when (not= (count args) 0)
+          (throw (ex-info "hint_spin expects exactly 0 arguments"
+                          {:error (type-error
+                                   (str "hint_spin expects 0 arguments, got " (count args)))})))
+        "Void")
+
+      (= method "random_real")
+      (do
+        (when (not= (count args) 0)
+          (throw (ex-info "random_real expects exactly 0 arguments"
+                          {:error (type-error
+                                   (str "random_real expects 0 arguments, got " (count args)))})))
+        "Real")
 
       (= method "type_of")
       (do
@@ -2454,10 +2538,179 @@
   "Check the type of a create expression"
   [env {:keys [class-name generic-args constructor args] :as expr}]
   (cond
+    ;; Handle built-in Array type
+    (= class-name "Array")
+    (let [target-type (if (seq generic-args)
+                        (do
+                          (validate-generic-args env class-name generic-args)
+                          {:base-type "Array" :type-args generic-args})
+                        "Array")]
+      (cond
+        (nil? constructor)
+        (do
+          (when (seq args)
+            (throw (ex-info "create Array expects no arguments"
+                            {:error (type-error "create Array expects no arguments")})))
+          target-type)
+
+        (= constructor "filled")
+        (do
+          (when-not (= 2 (count args))
+            (throw (ex-info "Array.filled expects 2 arguments"
+                            {:error (type-error "Array.filled expects exactly 2 arguments")})))
+          (let [size-type (check-expression env (first args))
+                value-type (check-expression env (second args))
+                elem-type (or (first generic-args) value-type)]
+            (when-not (types-compatible? env size-type "Integer")
+              (throw (ex-info "Array.filled requires Integer size"
+                              {:error (type-error
+                                       (str "Array.filled expects Integer size, got "
+                                            (display-type size-type)))})))
+            (when-not (types-compatible? env value-type elem-type)
+              (throw (ex-info "Array.filled value type mismatch"
+                              {:error (type-error
+                                       (str "Array.filled expects "
+                                            (display-type elem-type)
+                                            " value, got "
+                                            (display-type value-type)))})))
+            {:base-type "Array" :type-args [elem-type]}))
+
+        :else
+        (throw (ex-info (str "Constructor not found: Array." constructor)
+                        {:error (type-error (str "Constructor not found: Array." constructor))}))))
+
     ;; Handle built-in Console type
     (= class-name "Console") "Console"
     ;; Handle built-in Process type
     (= class-name "Process") "Process"
+    ;; Handle built-in Min_Heap type
+    (= class-name "Min_Heap")
+    (let [target-type (if (seq generic-args)
+                        (do
+                          (validate-generic-args env class-name generic-args)
+                          {:base-type "Min_Heap" :type-args generic-args})
+                        "Min_Heap")]
+      (case constructor
+        nil
+        (do
+          (when (seq args)
+            (throw (ex-info "create Min_Heap expects no arguments"
+                            {:error (type-error "create Min_Heap expects no arguments")})))
+          (when-let [elem-type (first generic-args)]
+            (when-not (sortable-array-element-type? env elem-type)
+              (throw (ex-info "Min_Heap.empty requires Comparable element type"
+                              {:error (type-error
+                                       (str "Min_Heap.empty requires a built-in sortable type or Comparable element type, got "
+                                            (display-type elem-type)
+                                            ". Use Min_Heap.from_comparator(...) instead."))}))))
+          target-type)
+
+        "empty"
+        (do
+          (when (seq args)
+            (throw (ex-info "Min_Heap.empty expects no arguments"
+                            {:error (type-error "Min_Heap.empty expects no arguments")})))
+          (when-let [elem-type (first generic-args)]
+            (when-not (sortable-array-element-type? env elem-type)
+              (throw (ex-info "Min_Heap.empty requires Comparable element type"
+                              {:error (type-error
+                                       (str "Min_Heap.empty requires a built-in sortable type or Comparable element type, got "
+                                            (display-type elem-type)
+                                            ". Use Min_Heap.from_comparator(...) instead."))}))))
+          target-type)
+
+        "from_comparator"
+        (do
+          (when-not (= 1 (count args))
+            (throw (ex-info "Min_Heap.from_comparator expects 1 argument"
+                            {:error (type-error "Min_Heap.from_comparator expects exactly 1 Function argument")})))
+          (let [compare-type (check-expression env (first args))]
+            (when-not (types-compatible? env compare-type "Function")
+              (throw (ex-info "Min_Heap.from_comparator requires a Function"
+                              {:error (type-error
+                                       (str "Min_Heap.from_comparator expects Function, got "
+                                            (display-type compare-type)))}))))
+          target-type)
+
+        (throw (ex-info (str "Constructor not found: Min_Heap." constructor)
+                        {:error (type-error (str "Constructor not found: Min_Heap." constructor))}))))
+
+    (= class-name "Atomic_Integer")
+    (do
+      (when-not (= constructor "make")
+        (throw (ex-info (str "Constructor not found: Atomic_Integer." constructor)
+                        {:error (type-error (str "Constructor not found: Atomic_Integer." constructor))})))
+      (when-not (= 1 (count args))
+        (throw (ex-info "Atomic_Integer.make expects 1 argument"
+                        {:error (type-error "Atomic_Integer.make expects exactly 1 Integer argument")})))
+      (let [arg-type (check-expression env (first args))]
+        (when-not (types-compatible? env arg-type "Integer")
+          (throw (ex-info "Atomic_Integer.make requires Integer initial value"
+                          {:error (type-error
+                                   (str "Atomic_Integer.make expects Integer, got "
+                                        (display-type arg-type)))}))))
+      "Atomic_Integer")
+
+    (= class-name "Atomic_Integer64")
+    (do
+      (when-not (= constructor "make")
+        (throw (ex-info (str "Constructor not found: Atomic_Integer64." constructor)
+                        {:error (type-error (str "Constructor not found: Atomic_Integer64." constructor))})))
+      (when-not (= 1 (count args))
+        (throw (ex-info "Atomic_Integer64.make expects 1 argument"
+                        {:error (type-error "Atomic_Integer64.make expects exactly 1 Integer64 argument")})))
+      (let [arg-type (check-expression env (first args))]
+        (when-not (types-compatible? env arg-type "Integer64")
+          (throw (ex-info "Atomic_Integer64.make requires Integer64 initial value"
+                          {:error (type-error
+                                   (str "Atomic_Integer64.make expects Integer64, got "
+                                        (display-type arg-type)))}))))
+      "Atomic_Integer64")
+
+    (= class-name "Atomic_Boolean")
+    (do
+      (when-not (= constructor "make")
+        (throw (ex-info (str "Constructor not found: Atomic_Boolean." constructor)
+                        {:error (type-error (str "Constructor not found: Atomic_Boolean." constructor))})))
+      (when-not (= 1 (count args))
+        (throw (ex-info "Atomic_Boolean.make expects 1 argument"
+                        {:error (type-error "Atomic_Boolean.make expects exactly 1 Boolean argument")})))
+      (let [arg-type (check-expression env (first args))]
+        (when-not (types-compatible? env arg-type "Boolean")
+          (throw (ex-info "Atomic_Boolean.make requires Boolean initial value"
+                          {:error (type-error
+                                   (str "Atomic_Boolean.make expects Boolean, got "
+                                        (display-type arg-type)))}))))
+      "Atomic_Boolean")
+
+    (= class-name "Atomic_Reference")
+    (let [target-type (if (seq generic-args)
+                        (do
+                          (validate-generic-args env class-name generic-args)
+                          {:base-type "Atomic_Reference" :type-args generic-args})
+                        nil)]
+      (when-not (= constructor "make")
+        (throw (ex-info (str "Constructor not found: Atomic_Reference." constructor)
+                        {:error (type-error (str "Constructor not found: Atomic_Reference." constructor))})))
+      (when-not (= 1 (count args))
+        (throw (ex-info "Atomic_Reference.make expects 1 argument"
+                        {:error (type-error "Atomic_Reference.make expects exactly 1 argument")})))
+      (let [arg-type (check-expression env (first args))
+            elem-type (or (first generic-args)
+                          (if (= (attachable-type arg-type) "Nil")
+                            "Any"
+                            (attachable-type arg-type)))
+            maybe-elem (detachable-version elem-type)]
+        (when-not (types-compatible? env arg-type maybe-elem)
+          (throw (ex-info "Atomic_Reference.make initial value type mismatch"
+                          {:error (type-error
+                                   (str "Atomic_Reference.make expects "
+                                        (display-type maybe-elem)
+                                        ", got "
+                                        (display-type arg-type)))})))
+        (or target-type
+            {:base-type "Atomic_Reference" :type-args [elem-type]})))
+
     ;; Handle built-in Channel type
     (= class-name "Channel")
     (do
@@ -3492,6 +3745,8 @@
            "trim"        {:params [] :return-type "String"}
            "replace"     {:params [{:name "old" :type "String"} {:name "new" :type "String"}] :return-type "String"}
            "char_at"     {:params [{:name "index" :type "Integer"}] :return-type "Char"}
+           "chars"       {:params [] :return-type {:base-type "Array" :type-params ["Char"]}}
+           "to_bytes"    {:params [] :return-type {:base-type "Array" :type-params ["Integer"]}}
            "compare"     {:params [{:name "a" :type "Any"}] :return-type "Integer"}
            "hash"        {:params [] :return-type "Integer"}
            "split"       {:params [{:name "delimiter" :type "String"}]
@@ -3522,6 +3777,10 @@
   ;; Register Array[T] class and methods
   (env-add-class env "Array" {:name "Array"
                                :generic-params [{:name "T"}]})
+  (env-add-method env "Array" "filled"
+                  {:params [{:name "size" :type "Integer"}
+                            {:name "value" :type "T"}]
+                   :return-type {:base-type "Array" :type-params ["T"]}})
   (doseq [[method-name sig]
           {"get"         {:params [{:name "index" :type "Integer"}] :return-type "T"}
            "add"         {:params [{:name "value" :type "T"}] :return-type "Void"}
@@ -3592,6 +3851,83 @@
            "clone"                {:params [] :return-type {:base-type "Set" :type-params ["T"]}}
            "cursor"               {:params [] :return-type "Cursor"}}]
     (env-add-method env "Set" method-name sig))
+
+  ;; Register Min_Heap[T] class and methods
+  (env-add-class env "Min_Heap" {:name "Min_Heap"
+                                 :generic-params [{:name "T"}]})
+  (env-add-method env "Min_Heap" "empty"
+                  {:params []
+                   :return-type {:base-type "Min_Heap" :type-params ["T"]}})
+  (env-add-method env "Min_Heap" "from_comparator"
+                  {:params [{:name "compare" :type "Function"}]
+                   :return-type {:base-type "Min_Heap" :type-params ["T"]}})
+  (doseq [[method-name sig]
+          {"insert"          {:params [{:name "value" :type "T"}] :return-type "Void"}
+           "extract_min"     {:params [] :return-type "T"}
+           "try_extract_min" {:params [] :return-type {:base-type "T" :detachable true}}
+           "peek"            {:params [] :return-type "T"}
+           "try_peek"        {:params [] :return-type {:base-type "T" :detachable true}}
+           "size"            {:params [] :return-type "Integer"}
+           "is_empty"        {:params [] :return-type "Boolean"}}]
+    (env-add-method env "Min_Heap" method-name sig))
+
+  ;; Register atomic built-ins
+  (env-add-class env "Atomic_Integer" {:name "Atomic_Integer"})
+  (env-add-method env "Atomic_Integer" "make"
+                  {:params [{:name "initial" :type "Integer"}]
+                   :return-type "Atomic_Integer"})
+  (doseq [[method-name sig]
+          {"load" {:params [] :return-type "Integer"}
+           "store" {:params [{:name "value" :type "Integer"}] :return-type "Void"}
+           "compare_and_set" {:params [{:name "expected" :type "Integer"}
+                                       {:name "update" :type "Integer"}]
+                              :return-type "Boolean"}
+           "get_and_add" {:params [{:name "delta" :type "Integer"}] :return-type "Integer"}
+           "add_and_get" {:params [{:name "delta" :type "Integer"}] :return-type "Integer"}
+           "increment" {:params [] :return-type "Integer"}
+           "decrement" {:params [] :return-type "Integer"}}]
+    (env-add-method env "Atomic_Integer" method-name sig))
+
+  (env-add-class env "Atomic_Integer64" {:name "Atomic_Integer64"})
+  (env-add-method env "Atomic_Integer64" "make"
+                  {:params [{:name "initial" :type "Integer64"}]
+                   :return-type "Atomic_Integer64"})
+  (doseq [[method-name sig]
+          {"load" {:params [] :return-type "Integer64"}
+           "store" {:params [{:name "value" :type "Integer64"}] :return-type "Void"}
+           "compare_and_set" {:params [{:name "expected" :type "Integer64"}
+                                       {:name "update" :type "Integer64"}]
+                              :return-type "Boolean"}
+           "get_and_add" {:params [{:name "delta" :type "Integer64"}] :return-type "Integer64"}
+           "add_and_get" {:params [{:name "delta" :type "Integer64"}] :return-type "Integer64"}
+           "increment" {:params [] :return-type "Integer64"}
+           "decrement" {:params [] :return-type "Integer64"}}]
+    (env-add-method env "Atomic_Integer64" method-name sig))
+
+  (env-add-class env "Atomic_Boolean" {:name "Atomic_Boolean"})
+  (env-add-method env "Atomic_Boolean" "make"
+                  {:params [{:name "initial" :type "Boolean"}]
+                   :return-type "Atomic_Boolean"})
+  (doseq [[method-name sig]
+          {"load" {:params [] :return-type "Boolean"}
+           "store" {:params [{:name "value" :type "Boolean"}] :return-type "Void"}
+           "compare_and_set" {:params [{:name "expected" :type "Boolean"}
+                                       {:name "update" :type "Boolean"}]
+                              :return-type "Boolean"}}]
+    (env-add-method env "Atomic_Boolean" method-name sig))
+
+  (env-add-class env "Atomic_Reference" {:name "Atomic_Reference"
+                                         :generic-params [{:name "T"}]})
+  (env-add-method env "Atomic_Reference" "make"
+                  {:params [{:name "initial" :type {:base-type "T" :detachable true}}]
+                   :return-type {:base-type "Atomic_Reference" :type-params ["T"]}})
+  (doseq [[method-name sig]
+          {"load" {:params [] :return-type {:base-type "T" :detachable true}}
+           "store" {:params [{:name "value" :type {:base-type "T" :detachable true}}] :return-type "Void"}
+           "compare_and_set" {:params [{:name "expected" :type {:base-type "T" :detachable true}}
+                                       {:name "update" :type {:base-type "T" :detachable true}}]
+                              :return-type "Boolean"}}]
+    (env-add-method env "Atomic_Reference" method-name sig))
 
   ;; Register Channel[T] class and methods
   (env-add-class env "Channel" {:name "Channel"

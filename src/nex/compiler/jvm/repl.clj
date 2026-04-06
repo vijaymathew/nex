@@ -65,7 +65,8 @@
 
 (def ^:private builtin-runtime-receiver-types
   #{"Any" "Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Set" "Cursor" "Task" "Channel" "Console" "Process"})
+    "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
+    "Cursor" "Task" "Channel" "Console" "Process"})
 
 (defn- base-type-name
   [t]
@@ -428,9 +429,7 @@
        (supported-expr-in-ctx? ctx (:value expr))
        (let [target-type (:target-type expr)
              base (if (map? target-type) (:base-type target-type) target-type)]
-         (and (string? base)
-              (not (contains? #{"T" "U" "V" "K" "KEY" "VALUE"} base))
-              true))))
+         (string? base))))
 
 (defn supported-stmt-in-ctx?
   [ctx stmt]

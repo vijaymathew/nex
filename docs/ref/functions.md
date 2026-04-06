@@ -44,6 +44,30 @@ Blocks the current task for approximately `ms` milliseconds. Returns `nil`.
 
 `ms` must be a non-negative integer.
 
+## `random_real`
+
+```nex
+random_real(): Real
+```
+
+Returns a pseudorandom real value in `[0.0, 1.0)`.
+
+## `hint_spin`
+
+```nex
+hint_spin()
+```
+
+Advisory only. Tells the runtime that the current thread is in a spin-wait loop.
+Returns `nil`.
+
+Rules:
+
+- does not block
+- does not change program-visible state
+- may map to a platform primitive or a no-op
+- safe to call repeatedly inside retry loops
+
 ## `http_get`
 
 ```nex

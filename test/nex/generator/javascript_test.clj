@@ -133,6 +133,33 @@ end"
       (is (str/includes? js-code "__nexTypeOf(v)"))
       (is (str/includes? js-code "__nexTypeIs(\"Vehicle\", v)")))))
 
+(deftest random-real-generation-test
+  (testing "random_real lowers to Math.random in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let r: Real := random_real()
+      print(r)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "let r = Math.random()"))
+      (is (str/includes? js-code "console.log(__nexPrintValue(r))")))))
+
+(deftest hint-spin-generation-test
+  (testing "hint_spin lowers to a no-op runtime helper in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      hint_spin()
+      print(\"ok\")
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "function __nexHintSpin()"))
+      (is (str/includes? js-code "__nexHintSpin()"))
+      (is (str/includes? js-code "console.log(__nexPrintValue(\"ok\"))")))))
+
 (deftest inherited-class-invariants-deduped-test
   (testing "Inherited class invariants are generated recursively and deduped by ancestor class"
     (let [nex-code "class A
@@ -283,6 +310,76 @@ end"
       (is (str/includes? js-code "new __nexChannel(2)"))
       (is (str/includes? js-code "console.log(__nexPrintValue(ch.capacity()))"))
       (is (str/includes? js-code "console.log(__nexPrintValue(ch.size()))")))))
+
+(deftest min-heap-generation-test
+  (testing "Min_Heap constructors and methods lower to JavaScript heap helpers"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let h: Min_Heap[Integer] := create Min_Heap.empty
+      h.insert(3)
+      print(h.peek)
+
+      let cmp: Function := fn (a: Integer, b: Integer): Integer do
+        result := a - b
+      end
+      let custom: Min_Heap[Integer] := create Min_Heap.from_comparator(cmp)
+      print(custom.try_extract_min)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "function __nexMinHeap("))
+      (is (str/includes? js-code "let h = __nexMinHeap()"))
+      (is (str/includes? js-code "__nexMinHeapInsert(h, 3)"))
+      (is (str/includes? js-code "__nexMinHeapPeek(h)"))
+      (is (str/includes? js-code "let custom = __nexMinHeap(cmp)"))
+      (is (str/includes? js-code "__nexMinHeapTryExtractMin(custom)")))))
+
+(deftest atomic-generation-test
+  (testing "atomic built-ins lower to JavaScript atomic helpers"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let ai: Atomic_Integer := create Atomic_Integer.make(1)
+      print(ai.increment)
+      let ar: Atomic_Reference[String] := create Atomic_Reference.make(\"x\")
+      print(ar.compare_and_set(\"x\", \"y\"))
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "function __nexAtomicInteger("))
+      (is (str/includes? js-code "function __nexAtomicReference("))
+      (is (str/includes? js-code "let ai = __nexAtomicInteger(1)"))
+      (is (str/includes? js-code "__nexAtomicAddAndGet(ai, 1)"))
+      (is (str/includes? js-code "let ar = __nexAtomicReference(\"x\")"))
+      (is (str/includes? js-code "__nexAtomicCompareAndSet(ar, \"x\", \"y\")")))))
+
+(deftest string-chars-generation-test
+  (testing "String.chars lowers to code-unit string splitting in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let xs: Array[Char] := \"cat\".chars()
+      print(xs.get(1))
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "let xs = \"cat\".split(\"\")"))
+      (is (str/includes? js-code "console.log(__nexPrintValue(xs[1]))")))))
+
+(deftest string-to-bytes-generation-test
+  (testing "String.to_bytes lowers to UTF-8 byte helper in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let xs: Array[Integer] := \"cat\".to_bytes()
+      print(xs.get(1))
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "function __nexStringToBytes(text)"))
+      (is (str/includes? js-code "let xs = __nexStringToBytes(\"cat\")"))
+      (is (str/includes? js-code "console.log(__nexPrintValue(xs[1]))")))))
 
 (deftest array-slice-and-reverse-generation-test
   (testing "Array slice and reverse lower to JavaScript array helpers"

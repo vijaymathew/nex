@@ -69,6 +69,43 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest random-real-runtime-and-type
+  (testing "random_real returns a Real in the unit interval"
+    (let [code "class Test
+  feature
+    demo() do
+      let r: Real := random_real()
+      print(type_of(r))
+      print(r >= 0.0)
+      print(r < 1.0)
+    end
+end"
+          output (execute-method-output code)]
+      (is (= "\"Real\"" (nth output 0)))
+      (is (= "true" (nth output 1)))
+      (is (= "true" (nth output 2))))))
+
+(deftest hint-spin-runtime-and-type
+  (testing "hint_spin typechecks and executes as a no-op builtin"
+    (let [code "class Test
+  feature
+    demo() do
+      hint_spin()
+      print(\"ok\")
+    end
+end"
+          output (execute-method-output code)
+          typed "class Test
+  feature
+    demo() do
+      hint_spin()
+    end
+end"
+          result (tc/type-check (p/ast typed))]
+      (is (= ["\"ok\""] output))
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest type-is-first-arg-must-be-string
   (testing "type_is requires first argument to be String"
     (let [code "class Test
