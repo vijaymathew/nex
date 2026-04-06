@@ -429,9 +429,7 @@
        (supported-expr-in-ctx? ctx (:value expr))
        (let [target-type (:target-type expr)
              base (if (map? target-type) (:base-type target-type) target-type)]
-         (and (string? base)
-              (not (contains? #{"T" "U" "V" "K" "KEY" "VALUE"} base))
-              true))))
+         (string? base))))
 
 (defn supported-stmt-in-ctx?
   [ctx stmt]

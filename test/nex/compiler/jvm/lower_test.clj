@@ -499,3 +499,36 @@ end")
       (is (= :set-local (-> loop-ir :body (nth 2) :op)))
       (is (= :set-local (-> loop-ir :body (nth 3) :op)))
       (is (= :assert (:op (last (:body loop-ir))))))))
+
+(deftest lower-convert-to-generic-parameter-uses-runtime-type-token-test
+  (testing "compiled lowering resolves bare generic convert targets through hidden runtime type fields"
+    (let [program (p/ast "class Box[T]
+feature
+  value: Any
+
+  typed_or(default: T): T
+  do
+    if convert value to current: T then
+      result := current
+    else
+      result := default
+    end
+  end
+end")
+          compiled-classes {"Box" {:name "Box"
+                                   :internal-name "nex/repl/Box_0001"
+                                   :jvm-name "nex/repl/Box_0001"
+                                   :binary-name "nex.repl.Box_0001"}}
+          class-ir (lower/lower-class-def (first (:classes program))
+                                          {:compiled-classes compiled-classes
+                                           :classes (:classes program)
+                                           :functions []
+                                           :imports []})
+          method-ir (first (:methods class-ir))
+          convert-ir (some #(when (and (map? %) (= :convert (:op %))) %)
+                           (tree-seq coll? seq (:body method-ir)))]
+      (is (some? convert-ir))
+      (is (= "T" (:target-type convert-ir)))
+      (is (= :field-get (-> convert-ir :target-runtime :op)))
+      (is (= "__generic_type_T" (-> convert-ir :target-runtime :field)))
+      (is (= :this (-> convert-ir :target-runtime :target :op))))))
