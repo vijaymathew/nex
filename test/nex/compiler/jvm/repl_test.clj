@@ -1788,6 +1788,22 @@ print(xs.get(1))"))]
         (is (str/includes? output "3"))
         (is (str/includes? output "#a"))))))
 
+(deftest repl-compiled-backend-string-to-bytes-test
+  (testing "compiled backend keeps String.to_bytes on the compiled path with UTF-8 bytes"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "let xs: Array[Integer] := \"cat\".to_bytes()
+print(xs)
+print(xs.length)
+print(xs.get(1))"))]
+        (is (str/includes? output "[99, 97, 116]"))
+        (is (str/includes? output "3"))
+        (is (str/includes? output "97"))))))
+
 (deftest repl-compiled-backend-task-and-channel-state-methods-test
   (testing "compiled backend specializes task/channel state methods too"
     (binding [repl/*type-checking-enabled* (atom true)

@@ -677,6 +677,7 @@
     "replace"     (fn [target args] (str target ".replace(" args ")"))
     "char_at"     (fn [target args] (str target ".charAt(" args ")"))
     "chars"       (fn [target _] (str target ".split(\"\")"))
+    "to_bytes"    (fn [target _] (str "__nexStringToBytes(" target ")"))
     "compare"     (fn [target args] (str "__nexCompare(" target ", " args ")"))
     "hash"        (fn [target _] (str "__nexHash(" target ")"))
     "split"       (fn [target args] (str target ".split(" args ")"))
@@ -2384,6 +2385,9 @@
        "}\n"
        "function __nexParseInt(raw) {\n"
        "  return __nexParseLong(raw);\n"
+       "}\n"
+       "function __nexStringToBytes(text) {\n"
+       "  return Array.from(new TextEncoder().encode(String(text)));\n"
        "}\n"
        "function __nexJsonToNex(value) {\n"
        "  if (value === null || value === undefined) return null;\n"

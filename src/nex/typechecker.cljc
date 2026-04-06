@@ -3730,6 +3730,7 @@
            "replace"     {:params [{:name "old" :type "String"} {:name "new" :type "String"}] :return-type "String"}
            "char_at"     {:params [{:name "index" :type "Integer"}] :return-type "Char"}
            "chars"       {:params [] :return-type {:base-type "Array" :type-params ["Char"]}}
+           "to_bytes"    {:params [] :return-type {:base-type "Array" :type-params ["Integer"]}}
            "compare"     {:params [{:name "a" :type "Any"}] :return-type "Integer"}
            "hash"        {:params [] :return-type "Integer"}
            "split"       {:params [{:name "delimiter" :type "String"}]

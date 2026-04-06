@@ -340,6 +340,20 @@ end"
       (is (str/includes? js-code "let xs = \"cat\".split(\"\")"))
       (is (str/includes? js-code "console.log(__nexPrintValue(xs[1]))")))))
 
+(deftest string-to-bytes-generation-test
+  (testing "String.to_bytes lowers to UTF-8 byte helper in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let xs: Array[Integer] := \"cat\".to_bytes()
+      print(xs.get(1))
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "function __nexStringToBytes(text)"))
+      (is (str/includes? js-code "let xs = __nexStringToBytes(\"cat\")"))
+      (is (str/includes? js-code "console.log(__nexPrintValue(xs[1]))")))))
+
 (deftest array-slice-and-reverse-generation-test
   (testing "Array slice and reverse lower to JavaScript array helpers"
     (let [nex-code "class Test

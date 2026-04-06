@@ -10,6 +10,7 @@
             [nex.types.typeinfo :as typeinfo]
             [nex.types.bootstrap :as bootstrap])
   #?(:clj (:import [java.lang.reflect Field]
+                   [java.nio.charset StandardCharsets]
                    [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException]
                    [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference])))
 
@@ -2640,6 +2641,13 @@
     "chars"       (fn [s & _]
                     (nex-array-from
                      (mapv #(get s %) (range (count s)))))
+    "to_bytes"    (fn [s & _]
+                    #?(:clj (nex-array-from
+                             (mapv #(bit-and (int %) 0xFF)
+                                   (.getBytes ^String s StandardCharsets/UTF_8)))
+                       :cljs (nex-array-from
+                              (mapv identity
+                                    (js->clj (.encode (js/TextEncoder.) s))))))
     "split"       (fn [s delim & _] (vec (str/split s (re-pattern delim))))
     ;; String operator methods
     "plus"        (fn [s other & [ctx]]

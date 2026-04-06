@@ -185,6 +185,14 @@ end"
       (is (= 3 (interp/call-builtin-method ctx "cat" "cat" "length" [])))
       (is (= \a (interp/call-builtin-method ctx "cat" "cat" "char_at" [1]))))))
 
+(deftest string-to-bytes-runtime-test
+  (testing "String.to_bytes returns UTF-8 bytes as Array[Integer]"
+    (let [ctx (interp/make-context)
+          ascii (interp/call-builtin-method ctx "cat" "cat" "to_bytes" [])
+          unicode (interp/call-builtin-method ctx "é" "é" "to_bytes" [])]
+      (is (= [99 97 116] (vec ascii)))
+      (is (= [195 169] (vec unicode))))))
+
 (deftest min-heap-runtime-test
   (testing "Min_Heap supports natural ordering, comparator ordering, and safe empty reads"
     (let [ctx (interp/make-context)

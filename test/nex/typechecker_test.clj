@@ -883,6 +883,17 @@ end"]
 end"]
       (is (:success (tc/type-check (p/ast code)))))))
 
+(deftest test-string-to-bytes-types
+  (testing "String.to_bytes typechecks as Array[Integer]"
+    (let [code "class Test
+  feature
+    demo() do
+      let xs: Array[Integer] := \"cat\".to_bytes()
+      let b: Integer := xs.get(1)
+    end
+end"]
+      (is (:success (tc/type-check (p/ast code)))))))
+
 ;; Let type inference tests
 
 (deftest test-let-without-type-annotation-succeeds
