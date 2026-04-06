@@ -790,6 +790,11 @@
                             [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
         (emit-return (:jvm-type expr)))
 
+      "hint_spin"
+      (do
+        (emit-runtime-call! mv "builtin-hint-spin!" [])
+        (emit-return (:jvm-type expr)))
+
       "http_get"
       (do
         (emit-runtime-call! mv "builtin-http-get"

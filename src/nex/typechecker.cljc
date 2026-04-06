@@ -1314,8 +1314,24 @@
             (throw (ex-info "sleep argument must be Integer"
                             {:error (type-error
                                      (str "sleep argument must be Integer, got "
-                                          (display-type arg-type)))}))))
+                                         (display-type arg-type)))}))))
         "Void")
+
+      (= method "hint_spin")
+      (do
+        (when (not= (count args) 0)
+          (throw (ex-info "hint_spin expects exactly 0 arguments"
+                          {:error (type-error
+                                   (str "hint_spin expects 0 arguments, got " (count args)))})))
+        "Void")
+
+      (= method "random_real")
+      (do
+        (when (not= (count args) 0)
+          (throw (ex-info "random_real expects exactly 0 arguments"
+                          {:error (type-error
+                                   (str "random_real expects 0 arguments, got " (count args)))})))
+        "Real")
 
       (= method "type_of")
       (do

@@ -1043,6 +1043,11 @@
   (Thread/sleep (long millis))
   nil)
 
+(defn builtin-hint-spin!
+  []
+  (Thread/onSpinWait)
+  nil)
+
 (defn builtin-http-get
   ([state url]
    (builtin-http-get state url nil))

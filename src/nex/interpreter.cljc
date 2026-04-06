@@ -1895,6 +1895,22 @@
         :cljs (js/Promise. (fn [resolve _reject]
                              (js/setTimeout #(resolve nil) (long (first args)))))))
 
+   "hint_spin"
+   (fn [_ctx & args]
+     (when (not= (count args) 0)
+       (throw (ex-info "hint_spin expects exactly 0 arguments"
+                       {:function "hint_spin" :expected 0 :actual (count args)})))
+     #?(:clj (Thread/onSpinWait)
+        :cljs nil)
+     nil)
+
+   "random_real"
+   (fn [_ctx & args]
+     (when (not= (count args) 0)
+       (throw (ex-info "random_real expects exactly 0 arguments"
+                       {:function "random_real" :expected 0 :actual (count args)})))
+     (rand))
+
    "http_get"
    (fn [_ctx & args]
      (when-not (or (= (count args) 1) (= (count args) 2))

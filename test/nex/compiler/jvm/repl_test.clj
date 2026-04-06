@@ -2146,3 +2146,29 @@ end"))
         (is (str/includes? ref-cas-output "true"))
         (is (str/includes? ref-load-output "b"))
         (is (str/includes? ref-nil-output "true"))))))
+
+(deftest repl-compiled-backend-random-real-builtin-test
+  (testing "compiled-default REPL supports random_real as a Real-valued global builtin"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        (repl/eval-code ctx0 "let r: Real := random_real()")
+        (is (= "Real" (get @repl/*repl-var-types* "r")))
+        (let [r (runtime/state-get-value (:state @repl/*compiled-repl-session*) "r")]
+          (is (number? r))
+          (is (<= 0.0 r))
+          (is (< r 1.0)))))))
+
+(deftest repl-compiled-backend-hint-spin-builtin-test
+  (testing "compiled-default REPL supports hint_spin as a direct no-op builtin"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "hint_spin()
+print(\"ok\")"))]
+        (is (str/includes? output "ok"))))))

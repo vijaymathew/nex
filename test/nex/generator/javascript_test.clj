@@ -133,6 +133,33 @@ end"
       (is (str/includes? js-code "__nexTypeOf(v)"))
       (is (str/includes? js-code "__nexTypeIs(\"Vehicle\", v)")))))
 
+(deftest random-real-generation-test
+  (testing "random_real lowers to Math.random in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let r: Real := random_real()
+      print(r)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "let r = Math.random()"))
+      (is (str/includes? js-code "console.log(__nexPrintValue(r))")))))
+
+(deftest hint-spin-generation-test
+  (testing "hint_spin lowers to a no-op runtime helper in JavaScript"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      hint_spin()
+      print(\"ok\")
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "function __nexHintSpin()"))
+      (is (str/includes? js-code "__nexHintSpin()"))
+      (is (str/includes? js-code "console.log(__nexPrintValue(\"ok\"))")))))
+
 (deftest inherited-class-invariants-deduped-test
   (testing "Inherited class invariants are generated recursively and deduped by ancestor class"
     (let [nex-code "class A

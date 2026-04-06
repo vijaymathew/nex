@@ -301,6 +301,8 @@
                   "type_of" "String"
                   "type_is" "Boolean"
                   "sleep" "Void"
+                  "hint_spin" "Void"
+                  "random_real" "Real"
                   "regex_validate" "Boolean"
                   "regex_matches" "Boolean"
                   "regex_find" {:base-type "String" :detachable true}
@@ -574,6 +576,8 @@
       "type_of" (str "__nexTypeOf(" args-code ")")
       "type_is" (str "__nexTypeIs(" args-code ")")
       "sleep" (str "await __nexSleep(" args-code ")")
+      "hint_spin" "__nexHintSpin()"
+      "random_real" "Math.random()"
       "regex_validate" (str "__nexRegexValidate(" args-code ")")
       "regex_matches" (str "__nexRegexMatches(" args-code ")")
       "regex_find" (str "__nexRegexFind(" args-code ")")
@@ -2477,6 +2481,9 @@
        "}\n"
        "function __nexSleep(ms) {\n"
        "  return new Promise(resolve => setTimeout(resolve, ms));\n"
+       "}\n"
+       "function __nexHintSpin() {\n"
+       "  return null;\n"
        "}\n"
        "function __nexRegexFlags(flags) {\n"
        "  let out = 'g';\n"
