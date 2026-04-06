@@ -22,6 +22,7 @@
 (declare runtime-type-name)
 (declare runtime-compatible-with?)
 (declare invoke-user-method)
+(declare runtime-compare-values)
 
 (defmacro ^:private def-builtin-method-wrapper
   [fn-name method-name]
@@ -217,6 +218,18 @@
                     {:size size})))
   (rt/nex-array-from (vec (repeat size value))))
 
+(defn create-min-heap-empty
+  []
+  {:nex-builtin-type :MinHeap
+   :data (atom [])
+   :comparator nil})
+
+(defn create-min-heap-from-comparator
+  [compare]
+  {:nex-builtin-type :MinHeap
+   :data (atom [])
+   :comparator compare})
+
 (defn java-create-object
   [state class-name args]
   (let [ctx (rebuild-interpreter-ctx state)]
@@ -333,6 +346,113 @@
 (defn channel-size-method
   [ch]
   (interp/call-builtin-method nil ch ch "size" []))
+
+(defn- min-heap-compare
+  [state heap left right]
+  (let [comparator (:comparator heap)]
+    (if comparator
+      (let [result (if (fn? comparator)
+                     (comparator left right)
+                     (invoke-function-object state comparator [left right]))]
+        (if (integer? result)
+          result
+          (throw (ex-info "Min_Heap comparator must return Integer"
+                          {:left left :right right :result result}))))
+      (runtime-compare-values state left right))))
+
+(defn- min-heap-sift-up
+  [state heap values idx]
+  (loop [items values
+         child idx]
+    (if (zero? child)
+      items
+      (let [parent (quot (dec child) 2)
+            child-value (nth items child)
+            parent-value (nth items parent)]
+        (if (neg? (min-heap-compare state heap child-value parent-value))
+          (recur (-> items
+                     (assoc child parent-value)
+                     (assoc parent child-value))
+                 parent)
+          items)))))
+
+(defn- min-heap-sift-down
+  [state heap values idx]
+  (let [n (count values)]
+    (loop [items values
+           parent idx]
+      (let [left (+ (* 2 parent) 1)
+            right (+ left 1)]
+        (if (>= left n)
+          items
+          (let [smallest-child (if (and (< right n)
+                                        (neg? (min-heap-compare state
+                                                                heap
+                                                                (nth items right)
+                                                                (nth items left))))
+                                 right
+                                 left)
+                parent-value (nth items parent)
+                child-value (nth items smallest-child)]
+            (if (neg? (min-heap-compare state heap child-value parent-value))
+              (recur (-> items
+                         (assoc parent child-value)
+                         (assoc smallest-child parent-value))
+                     smallest-child)
+              items)))))))
+
+(defn min-heap-insert-method
+  [state heap value]
+  (swap! (:data heap)
+         (fn [items]
+           (let [expanded (conj items value)]
+             (min-heap-sift-up state heap expanded (dec (count expanded))))))
+  nil)
+
+(defn- min-heap-peek*
+  [heap]
+  (let [items @(:data heap)]
+    (when (seq items)
+      (first items))))
+
+(defn min-heap-peek-method
+  [state heap]
+  (or (min-heap-peek* heap)
+      (throw (ex-info "Min_Heap is empty" {:heap heap}))))
+
+(defn min-heap-try-peek-method
+  [state heap]
+  (min-heap-peek* heap))
+
+(defn- min-heap-extract*
+  [state heap]
+  (let [items @(:data heap)]
+    (when (seq items)
+      (let [minimum (first items)
+            last-value (peek items)
+            remaining-count (dec (count items))
+            replacement (if (zero? remaining-count)
+                          []
+                          (min-heap-sift-down state heap (assoc (pop items) 0 last-value) 0))]
+        (reset! (:data heap) replacement)
+        minimum))))
+
+(defn min-heap-extract-min-method
+  [state heap]
+  (or (min-heap-extract* state heap)
+      (throw (ex-info "Min_Heap is empty" {:heap heap}))))
+
+(defn min-heap-try-extract-min-method
+  [state heap]
+  (min-heap-extract* state heap))
+
+(defn min-heap-size-method
+  [state heap]
+  (count @(:data heap)))
+
+(defn min-heap-is-empty-method
+  [state heap]
+  (empty? @(:data heap)))
 
 (defn- invoke-interpreter-object-method
   [state target method-name args]
@@ -1485,6 +1605,12 @@
 
     (= name "create-array-filled")
     (create-array-filled (first args) (second args))
+
+    (= name "create-min-heap-empty")
+    (create-min-heap-empty)
+
+    (= name "create-min-heap-from-comparator")
+    (create-min-heap-from-comparator (first args))
 
     (= name "java-create-object")
     (java-create-object state (first args) (vec (rest args)))

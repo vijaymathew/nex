@@ -20,6 +20,7 @@
     (rt/nex-process? value) :Process
     (rt/nex-task? value) :Task
     (rt/nex-channel? value) :Channel
+    (rt/nex-min-heap? value) :Min_Heap
     (rt/nex-array-cursor? value) :ArrayCursor
     (rt/nex-string-cursor? value) :StringCursor
     (rt/nex-map-cursor? value) :MapCursor

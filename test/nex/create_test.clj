@@ -172,3 +172,35 @@ end"
                                               {:type :literal :value 0}]})]
       (is (= 3 (count value)))
       (is (= [0 0 0] (vec value))))))
+
+(deftest min-heap-runtime-test
+  (testing "Min_Heap supports natural ordering, comparator ordering, and safe empty reads"
+    (let [ctx (interp/make-context)
+          natural (interp/eval-node ctx {:type :create
+                                         :class-name "Min_Heap"
+                                         :generic-args ["Integer"]
+                                         :constructor "empty"
+                                         :args []})
+          reverse-compare (fn [a b]
+                            (cond
+                              (> a b) -1
+                              (< a b) 1
+                              :else 0))
+          custom (interp/eval-node ctx {:type :create
+                                        :class-name "Min_Heap"
+                                        :generic-args ["Integer"]
+                                        :constructor "from_comparator"
+                                        :args [{:type :literal :value reverse-compare}]})]
+      (interp/call-builtin-method ctx natural natural "insert" [5])
+      (interp/call-builtin-method ctx natural natural "insert" [1])
+      (interp/call-builtin-method ctx natural natural "insert" [3])
+      (is (= 1 (interp/call-builtin-method ctx natural natural "peek" [])))
+      (is (= 1 (interp/call-builtin-method ctx natural natural "extract_min" [])))
+      (is (= 3 (interp/call-builtin-method ctx natural natural "extract_min" [])))
+      (is (= 5 (interp/call-builtin-method ctx natural natural "extract_min" [])))
+      (is (nil? (interp/call-builtin-method ctx natural natural "try_peek" [])))
+      (is (nil? (interp/call-builtin-method ctx natural natural "try_extract_min" [])))
+      (interp/call-builtin-method ctx custom custom "insert" [5])
+      (interp/call-builtin-method ctx custom custom "insert" [1])
+      (interp/call-builtin-method ctx custom custom "insert" [3])
+      (is (= 5 (interp/call-builtin-method ctx custom custom "extract_min" []))))))

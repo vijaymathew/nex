@@ -20,6 +20,7 @@
 (declare lookup-class-if-exists)
 (declare call-builtin-method)
 (declare eval-node)
+(declare eval-node)
 (declare nex-ordering-compare)
 (declare make-object)
 (declare invoke-http-server-handler)
@@ -1676,6 +1677,97 @@
              (.sort out (fn [a b] (nex-value-compare ctx a b)))
              out)))
 
+(defn- make-min-heap
+  [comparator]
+  {:nex-builtin-type :MinHeap
+   :data (atom [])
+   :comparator comparator})
+
+(defn- heap-compare
+  [ctx heap left right]
+  (let [comparator (:comparator heap)]
+    (if comparator
+      (let [result (if (fn? comparator)
+                     (comparator left right)
+                     (eval-node ctx {:type :call
+                                     :target {:type :literal :value comparator}
+                                     :method "call2"
+                                     :args [{:type :literal :value left}
+                                            {:type :literal :value right}]}))]
+        (if (integer? result)
+          result
+          (throw (ex-info "Min_Heap comparator must return Integer"
+                          {:left left :right right :result result}))))
+      (nex-value-compare ctx left right))))
+
+(defn- heap-sift-up
+  [ctx heap values idx]
+  (loop [items values
+         child idx]
+    (if (zero? child)
+      items
+      (let [parent (quot (dec child) 2)
+            child-value (nth items child)
+            parent-value (nth items parent)]
+        (if (neg? (heap-compare ctx heap child-value parent-value))
+          (recur (-> items
+                     (assoc child parent-value)
+                     (assoc parent child-value))
+                 parent)
+          items)))))
+
+(defn- heap-sift-down
+  [ctx heap values idx]
+  (let [n (count values)]
+    (loop [items values
+           parent idx]
+      (let [left (+ (* 2 parent) 1)
+            right (+ left 1)]
+        (if (>= left n)
+          items
+          (let [smallest-child (if (and (< right n)
+                                        (neg? (heap-compare ctx
+                                                            heap
+                                                            (nth items right)
+                                                            (nth items left))))
+                                 right
+                                 left)
+                parent-value (nth items parent)
+                child-value (nth items smallest-child)]
+            (if (neg? (heap-compare ctx heap child-value parent-value))
+              (recur (-> items
+                         (assoc parent child-value)
+                         (assoc smallest-child parent-value))
+                     smallest-child)
+              items)))))))
+
+(defn- heap-insert!
+  [ctx heap value]
+  (swap! (:data heap)
+         (fn [items]
+           (let [expanded (conj items value)]
+             (heap-sift-up ctx heap expanded (dec (count expanded))))))
+  nil)
+
+(defn- heap-peek
+  [heap]
+  (let [items @(:data heap)]
+    (when (seq items)
+      (first items))))
+
+(defn- heap-extract-min!
+  [ctx heap]
+  (let [items @(:data heap)]
+    (when (seq items)
+      (let [minimum (first items)
+            last-value (peek items)
+            remaining-count (dec (count items))
+            replacement (if (zero? remaining-count)
+                          []
+                          (heap-sift-down ctx heap (assoc (pop items) 0 last-value) 0))]
+        (reset! (:data heap) replacement)
+        minimum))))
+
 (defn nex-display-value [value]
   (value/nex-display-value nex-object? nex-format-value value))
 
@@ -2440,6 +2532,7 @@
       "Array" (nex-array)
       "Map" (nex-map)
       "Set" (nex-set)
+      "Min_Heap" (make-min-heap nil)
       nil)
 
     ;; Handle simple types
@@ -2452,6 +2545,7 @@
       "Char" \0
       "Boolean" false
       "String" ""
+      "Min_Heap" (make-min-heap nil)
       "Console" {:nex-builtin-type :Console}
       "Process" {:nex-builtin-type :Process}
       "Task" nil
@@ -2694,6 +2788,19 @@
                               :values (atom #?(:clj (vec s) :cljs (vec (es6-iterator-seq (.values s)))))
                               :index (atom 0)})}
 
+   :Min_Heap
+   {"insert"          (fn [heap value & [ctx]] (heap-insert! ctx heap value))
+    "extract_min"     (fn [heap & [ctx]]
+                        (or (heap-extract-min! ctx heap)
+                            (throw (ex-info "Min_Heap is empty" {:heap heap}))))
+    "try_extract_min" (fn [heap & [ctx]] (heap-extract-min! ctx heap))
+    "peek"            (fn [heap & _]
+                        (or (heap-peek heap)
+                            (throw (ex-info "Min_Heap is empty" {:heap heap}))))
+    "try_peek"        (fn [heap & _] (heap-peek heap))
+    "size"            (fn [heap & _] (count @(:data heap)))
+    "is_empty"        (fn [heap & _] (empty? @(:data heap)))}
+
    :Task
    {"await"    (fn [t & [timeout]]
                   (let [result (if (some? timeout)
@@ -2828,8 +2935,10 @@
                     (get methods method-name)))
                 (get-in builtin-type-methods [:Any method-name]))]
      (if (and ctx
-              (= method-name "sort")
-              (= (get-type-name value) :Array))
+              (let [type-name (get-type-name value)]
+                (or (and (= method-name "sort")
+                         (= type-name :Array))
+                    (= type-name :Min_Heap))))
        (apply method-fn value (concat args [ctx]))
        (apply method-fn value args))
      (throw (ex-info (str "Method not found on type: " method-name)
@@ -3825,6 +3934,25 @@
                 (throw (ex-info (str "Constructor not found: Array." constructor)
                                 {:class-name "Array" :constructor constructor}))))
     "Map" (nex-map)
+    "Min_Heap" (let [arg-values (mapv #(eval-node ctx %) args)]
+                 (cond
+                   (or (nil? constructor) (= constructor "empty"))
+                   (do
+                     (when (seq arg-values)
+                       (throw (ex-info "Min_Heap.empty expects no arguments"
+                                       {:class-name "Min_Heap" :constructor constructor})))
+                     (make-min-heap nil))
+
+                   (= constructor "from_comparator")
+                   (do
+                     (when-not (= 1 (count arg-values))
+                       (throw (ex-info "Min_Heap.from_comparator expects 1 argument"
+                                       {:class-name "Min_Heap" :constructor constructor})))
+                     (make-min-heap (first arg-values)))
+
+                   :else
+                   (throw (ex-info (str "Constructor not found: Min_Heap." constructor)
+                                   {:class-name "Min_Heap" :constructor constructor}))))
     "Channel" #?(:clj (let [arg-values (mapv #(eval-node ctx %) args)]
                         (cond
                           (nil? constructor) (make-channel)
@@ -4740,6 +4868,22 @@
                                 (throw (ex-info (str "Constructor not found: Array." constructor)
                                                 {:class-name "Array" :constructor constructor})))
                       "Map" (nex-map)
+                      "Min_Heap" (cond
+                                   (or (nil? constructor) (= constructor "empty"))
+                                   (do
+                                     (when (seq arg-values)
+                                       (throw (ex-info "Min_Heap.empty expects no arguments"
+                                                       {:class-name "Min_Heap" :constructor constructor})))
+                                     (make-min-heap nil))
+                                   (= constructor "from_comparator")
+                                   (do
+                                     (when-not (= 1 (count arg-values))
+                                       (throw (ex-info "Min_Heap.from_comparator expects 1 argument"
+                                                       {:class-name "Min_Heap" :constructor constructor})))
+                                     (make-min-heap (first arg-values)))
+                                   :else
+                                   (throw (ex-info (str "Constructor not found: Min_Heap." constructor)
+                                                   {:class-name "Min_Heap" :constructor constructor})))
                       "Channel" (cond
                                   (nil? constructor) (make-channel)
                                   (= constructor "with_capacity")

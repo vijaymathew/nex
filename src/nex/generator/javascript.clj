@@ -58,6 +58,7 @@
                     "Array" "Array"
                     "Map" "Map"
                     "Set" "Set"
+                    "Min_Heap" "Min_Heap"
                     "Task" "Task"
                     "Channel" "Channel"
                     base-type)
@@ -82,6 +83,7 @@
       "Array" "Array"
       "Map" "Map"
       "Set" "Set"
+      "Min_Heap" "Min_Heap"
       "Task" "Task"
       "Channel" "Channel"
       "Console" "Object"
@@ -102,6 +104,7 @@
         "Array" "[]"
         "Map" "new Map()"
         "Set" "new Set()"
+        "Min_Heap" "__nexMinHeap()"
         "Task" "null"
         "Channel" "null"
         "null"))
@@ -119,6 +122,7 @@
       "Array" "[]"
       "Map" "new Map()"
       "Set" "new Set()"
+      "Min_Heap" "__nexMinHeap()"
       "Task" "null"
       "Channel" "null"
       "Console" "({_type: 'Console'})"
@@ -377,6 +381,13 @@
                             "try_send" "Boolean"
                             "close" "Void"
                             "Any")
+                "Min_Heap" (case (:method expr)
+                             ("extract_min" "peek") (or (first type-args) "Any")
+                             ("try_extract_min" "try_peek") {:base-type (or (first type-args) "Any") :detachable true}
+                             "size" "Integer"
+                             "is_empty" "Boolean"
+                             "insert" "Void"
+                             "Any")
                 "Set" (case (:method expr)
                         ("contains" "is_empty") "Boolean"
                         "size" "Integer"
@@ -800,6 +811,15 @@
     "clone"                (fn [target _] (str "__nexDeepClone(" target ")"))
     "cursor"               (fn [target _] (str "__nexSetCursor(" target ")"))}
 
+   :Min_Heap
+   {"insert"          (fn [target args] (str "__nexMinHeapInsert(" target ", " args ")"))
+    "extract_min"     (fn [target _] (str "__nexMinHeapExtractMin(" target ")"))
+    "try_extract_min" (fn [target _] (str "__nexMinHeapTryExtractMin(" target ")"))
+    "peek"            (fn [target _] (str "__nexMinHeapPeek(" target ")"))
+    "try_peek"        (fn [target _] (str "__nexMinHeapTryPeek(" target ")"))
+    "size"            (fn [target _] (str target ".data.length"))
+    "is_empty"        (fn [target _] (str "(" target ".data.length === 0)"))}
+
    :Task
    {"await"    (fn [target args] (str "await " target ".await(" args ")"))
     "cancel"   (fn [target _] (str target ".cancel()"))
@@ -839,7 +859,7 @@
     (and (nil? method)
          (map? target)
          (= :create (:type target))
-        (not (#{"Console" "Process" "Set" "Channel"} (:class-name target))))
+        (not (#{"Console" "Process" "Set" "Channel" "Min_Heap"} (:class-name target))))
     true
 
     (nil? method) false
@@ -1004,6 +1024,12 @@
                 (throw (ex-info (str "Unsupported built-in Array constructor: " constructor)
                                 {:constructor constructor})))
       "Map" "new Map()"
+      "Min_Heap" (cond
+                   (or (nil? constructor) (= constructor "empty")) "__nexMinHeap()"
+                   (= constructor "from_comparator") (str "__nexMinHeap(" args-code ")")
+                   :else
+                   (throw (ex-info (str "Unsupported built-in Min_Heap constructor: " constructor)
+                                   {:constructor constructor})))
       "Channel" (cond
                   (nil? constructor) "new __nexChannel()"
                   (= constructor "with_capacity") (str "new __nexChannel(" args-code ")")
@@ -2157,6 +2183,65 @@
        "}\n"
        "function __nexArraySort(values) {\n"
        "  return [...values].sort((a, b) => __nexCompareValues(a, b));\n"
+       "}\n"
+       "function __nexMinHeap(compare = null) {\n"
+       "  return { _type: 'MinHeap', data: [], compare };\n"
+       "}\n"
+       "function __nexMinHeapCompare(heap, a, b) {\n"
+       "  if (!heap.compare) return __nexCompareValues(a, b);\n"
+       "  const result = (typeof heap.compare === 'function') ? heap.compare(a, b) : heap.compare.call2(a, b);\n"
+       "  if (!Number.isInteger(result)) throw new Error('Min_Heap comparator must return Integer');\n"
+       "  return result;\n"
+       "}\n"
+       "function __nexMinHeapSiftUp(heap, index) {\n"
+       "  while (index > 0) {\n"
+       "    const parent = Math.floor((index - 1) / 2);\n"
+       "    if (__nexMinHeapCompare(heap, heap.data[index], heap.data[parent]) >= 0) break;\n"
+       "    const tmp = heap.data[index];\n"
+       "    heap.data[index] = heap.data[parent];\n"
+       "    heap.data[parent] = tmp;\n"
+       "    index = parent;\n"
+       "  }\n"
+       "}\n"
+       "function __nexMinHeapSiftDown(heap, index) {\n"
+       "  while (true) {\n"
+       "    const left = index * 2 + 1;\n"
+       "    const right = left + 1;\n"
+       "    let smallest = index;\n"
+       "    if (left < heap.data.length && __nexMinHeapCompare(heap, heap.data[left], heap.data[smallest]) < 0) smallest = left;\n"
+       "    if (right < heap.data.length && __nexMinHeapCompare(heap, heap.data[right], heap.data[smallest]) < 0) smallest = right;\n"
+       "    if (smallest === index) break;\n"
+       "    const tmp = heap.data[index];\n"
+       "    heap.data[index] = heap.data[smallest];\n"
+       "    heap.data[smallest] = tmp;\n"
+       "    index = smallest;\n"
+       "  }\n"
+       "}\n"
+       "function __nexMinHeapInsert(heap, value) {\n"
+       "  heap.data.push(value);\n"
+       "  __nexMinHeapSiftUp(heap, heap.data.length - 1);\n"
+       "}\n"
+       "function __nexMinHeapTryPeek(heap) {\n"
+       "  return heap.data.length === 0 ? null : heap.data[0];\n"
+       "}\n"
+       "function __nexMinHeapPeek(heap) {\n"
+       "  if (heap.data.length === 0) throw new Error('Min_Heap is empty');\n"
+       "  return heap.data[0];\n"
+       "}\n"
+       "function __nexMinHeapTryExtractMin(heap) {\n"
+       "  if (heap.data.length === 0) return null;\n"
+       "  const min = heap.data[0];\n"
+       "  const last = heap.data.pop();\n"
+       "  if (heap.data.length > 0) {\n"
+       "    heap.data[0] = last;\n"
+       "    __nexMinHeapSiftDown(heap, 0);\n"
+       "  }\n"
+       "  return min;\n"
+       "}\n"
+       "function __nexMinHeapExtractMin(heap) {\n"
+       "  const value = __nexMinHeapTryExtractMin(heap);\n"
+       "  if (value === null || value === undefined) throw new Error('Min_Heap is empty');\n"
+       "  return value;\n"
        "}\n"
        "function __nexCloneValue(v) {\n"
        "  if (v === null || v === undefined || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;\n"

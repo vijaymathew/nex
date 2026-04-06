@@ -113,7 +113,7 @@
 
 (def builtin-types
   #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
-    "Array" "Map" "Set" "Task" "Channel" "Any" "Void" "Nil" "Console" "Process" "Function"
+    "Array" "Map" "Set" "Min_Heap" "Task" "Channel" "Any" "Void" "Nil" "Console" "Process" "Function"
     "Cursor"})
 
 (defn builtin-type? [type-name]
@@ -1098,6 +1098,23 @@
         "is_closed" (when (= argc 0) {:params [] :return-type "Boolean"})
         "capacity" (when (= argc 0) {:params [] :return-type "Integer"})
         "size" (when (= argc 0) {:params [] :return-type "Integer"})
+        nil))
+
+    "Min_Heap"
+    (let [elem-type (or (resolve-generic-type "T" type-map) "Any")]
+      (case method
+        "insert" (when (= argc 1)
+                   {:params [{:name "value" :type elem-type}] :return-type "Void"})
+        "extract_min" (when (= argc 0)
+                        {:params [] :return-type elem-type})
+        "try_extract_min" (when (= argc 0)
+                            {:params [] :return-type (detachable-version elem-type)})
+        "peek" (when (= argc 0)
+                 {:params [] :return-type elem-type})
+        "try_peek" (when (= argc 0)
+                     {:params [] :return-type (detachable-version elem-type)})
+        "size" (when (= argc 0) {:params [] :return-type "Integer"})
+        "is_empty" (when (= argc 0) {:params [] :return-type "Boolean"})
         nil))
 
     "Cursor"
@@ -2499,6 +2516,57 @@
     (= class-name "Console") "Console"
     ;; Handle built-in Process type
     (= class-name "Process") "Process"
+    ;; Handle built-in Min_Heap type
+    (= class-name "Min_Heap")
+    (let [target-type (if (seq generic-args)
+                        (do
+                          (validate-generic-args env class-name generic-args)
+                          {:base-type "Min_Heap" :type-args generic-args})
+                        "Min_Heap")]
+      (case constructor
+        nil
+        (do
+          (when (seq args)
+            (throw (ex-info "create Min_Heap expects no arguments"
+                            {:error (type-error "create Min_Heap expects no arguments")})))
+          (when-let [elem-type (first generic-args)]
+            (when-not (sortable-array-element-type? env elem-type)
+              (throw (ex-info "Min_Heap.empty requires Comparable element type"
+                              {:error (type-error
+                                       (str "Min_Heap.empty requires a built-in sortable type or Comparable element type, got "
+                                            (display-type elem-type)
+                                            ". Use Min_Heap.from_comparator(...) instead."))}))))
+          target-type)
+
+        "empty"
+        (do
+          (when (seq args)
+            (throw (ex-info "Min_Heap.empty expects no arguments"
+                            {:error (type-error "Min_Heap.empty expects no arguments")})))
+          (when-let [elem-type (first generic-args)]
+            (when-not (sortable-array-element-type? env elem-type)
+              (throw (ex-info "Min_Heap.empty requires Comparable element type"
+                              {:error (type-error
+                                       (str "Min_Heap.empty requires a built-in sortable type or Comparable element type, got "
+                                            (display-type elem-type)
+                                            ". Use Min_Heap.from_comparator(...) instead."))}))))
+          target-type)
+
+        "from_comparator"
+        (do
+          (when-not (= 1 (count args))
+            (throw (ex-info "Min_Heap.from_comparator expects 1 argument"
+                            {:error (type-error "Min_Heap.from_comparator expects exactly 1 Function argument")})))
+          (let [compare-type (check-expression env (first args))]
+            (when-not (types-compatible? env compare-type "Function")
+              (throw (ex-info "Min_Heap.from_comparator requires a Function"
+                              {:error (type-error
+                                       (str "Min_Heap.from_comparator expects Function, got "
+                                            (display-type compare-type)))}))))
+          target-type)
+
+        (throw (ex-info (str "Constructor not found: Min_Heap." constructor)
+                        {:error (type-error (str "Constructor not found: Min_Heap." constructor))}))))
     ;; Handle built-in Channel type
     (= class-name "Channel")
     (do
@@ -3637,6 +3705,25 @@
            "clone"                {:params [] :return-type {:base-type "Set" :type-params ["T"]}}
            "cursor"               {:params [] :return-type "Cursor"}}]
     (env-add-method env "Set" method-name sig))
+
+  ;; Register Min_Heap[T] class and methods
+  (env-add-class env "Min_Heap" {:name "Min_Heap"
+                                 :generic-params [{:name "T"}]})
+  (env-add-method env "Min_Heap" "empty"
+                  {:params []
+                   :return-type {:base-type "Min_Heap" :type-params ["T"]}})
+  (env-add-method env "Min_Heap" "from_comparator"
+                  {:params [{:name "compare" :type "Function"}]
+                   :return-type {:base-type "Min_Heap" :type-params ["T"]}})
+  (doseq [[method-name sig]
+          {"insert"          {:params [{:name "value" :type "T"}] :return-type "Void"}
+           "extract_min"     {:params [] :return-type "T"}
+           "try_extract_min" {:params [] :return-type {:base-type "T" :detachable true}}
+           "peek"            {:params [] :return-type "T"}
+           "try_peek"        {:params [] :return-type {:base-type "T" :detachable true}}
+           "size"            {:params [] :return-type "Integer"}
+           "is_empty"        {:params [] :return-type "Boolean"}}]
+    (env-add-method env "Min_Heap" method-name sig))
 
   ;; Register Channel[T] class and methods
   (env-add-class env "Channel" {:name "Channel"

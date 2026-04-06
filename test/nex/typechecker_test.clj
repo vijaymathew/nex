@@ -121,6 +121,37 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-min-heap-constructors-typecheck
+  (testing "Min_Heap.empty requires Comparable elements while from_comparator supports custom ordering"
+    (let [ok-code "class Box
+  feature
+    value: Integer
+  create
+    make(v: Integer) do
+      value := v
+    end
+end
+
+function cmp(a: Box, b: Box): Integer
+do
+  result := a.value - b.value
+end
+
+let numbers: Min_Heap[Integer] := create Min_Heap.empty
+let boxes: Min_Heap[Box] := create Min_Heap.from_comparator(cmp)"
+          ok-result (tc/type-check (p/ast ok-code))
+          bad-code "class Box
+  feature
+    value: Integer
+end
+
+let boxes: Min_Heap[Box] := create Min_Heap[Box].empty"
+          bad-result (tc/type-check (p/ast bad-code))]
+      (is (:success ok-result))
+      (is (not (:success bad-result)))
+      (is (some #(str/includes? (:message %) "Min_Heap.empty requires")
+                (:errors bad-result))))))
+
 (deftest test-comparison-operators
   (testing "Comparison operators should work on compatible types"
     (let [code "class Test

@@ -705,6 +705,56 @@
                              (fn [] (emit-expr! mv (first args) state-slot))])
         (emit-return (:jvm-type expr)))
 
+      "builtin-method:Min_Heap:insert"
+      (do
+        (emit-runtime-call! mv "min-heap-insert-method"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Min_Heap:extract_min"
+      (do
+        (emit-runtime-call! mv "min-heap-extract-min-method"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Min_Heap:try_extract_min"
+      (do
+        (emit-runtime-call! mv "min-heap-try-extract-min-method"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Min_Heap:peek"
+      (do
+        (emit-runtime-call! mv "min-heap-peek-method"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Min_Heap:try_peek"
+      (do
+        (emit-runtime-call! mv "min-heap-try-peek-method"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Min_Heap:size"
+      (do
+        (emit-runtime-call! mv "min-heap-size-method"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
+      "builtin-method:Min_Heap:is_empty"
+      (do
+        (emit-runtime-call! mv "min-heap-is-empty-method"
+                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-return (:jvm-type expr)))
+
       "print"
       (do
         (emit-runtime-call! mv "builtin-print!"
@@ -905,6 +955,19 @@
       "create-array-filled"
       (do
         (emit-runtime-call! mv "create-array-filled"
+                            (mapv (fn [arg]
+                                    (fn [] (emit-boxed-expr! mv arg state-slot)))
+                                  args))
+        (emit-return (:jvm-type expr)))
+
+      "create-min-heap-empty"
+      (do
+        (emit-runtime-call! mv "create-min-heap-empty" [])
+        (emit-return (:jvm-type expr)))
+
+      "create-min-heap-from-comparator"
+      (do
+        (emit-runtime-call! mv "create-min-heap-from-comparator"
                             (mapv (fn [arg]
                                     (fn [] (emit-boxed-expr! mv arg state-slot)))
                                   args))

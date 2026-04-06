@@ -1,8 +1,9 @@
 # Collection Types
 
 This section covers the standard collection abstractions used throughout Nex code.
-`Array`, `Map`, and `Set` are built-in collection types. `Stack[T]` is a common
-generic collection class pattern built on top of `Array[T]`.
+`Array`, `Map`, `Set`, and `Min_Heap[T]` are built-in collection types.
+`Stack[T]` is a common generic collection class pattern built on top of
+`Array[T]`.
 
 All built-in collection types inherit `Any`. Their `to_string`, `equals`, and
 `clone` methods operate recursively: `to_string` renders nested structure,
@@ -14,7 +15,16 @@ All built-in collection types inherit `Any`. Their `to_string`, `equals`, and
 
 ```nex
 []
+create Array.filled(3, 0)
+create Array[String].filled(2, "x")
 ```
+
+- `[]` creates an empty array literal.
+- `create Array.filled(size, value)` creates a new array of length `size` where
+  each element is initialized to `value`.
+- `size` must be a non-negative `Integer`.
+- The element type is inferred from `value`, or checked against `Array[T]` when
+  the target array type is declared explicitly.
 
 ### Methods
 
@@ -89,6 +99,50 @@ Set literals use `#{...}`. The empty map literal remains `{}`.
 | `equals` | `other: Any` | `Boolean` | Deep structural equality. |
 | `clone` | none | `Set[T]` | Deep-copy the set and its nested values while preserving element type. |
 | `cursor` | none | `SetCursor` | Create iterator. |
+
+## `Min_Heap[T]`
+
+### Construction
+
+```nex
+create Min_Heap.empty
+create Min_Heap[Integer].empty
+create Min_Heap[Box].from_comparator(compare_boxes)
+```
+
+- `create Min_Heap.empty` creates an empty heap that uses natural ordering.
+- `empty()` is intended for element types that already support ordering:
+  built-in sortable scalars or classes implementing `Comparable`.
+- For non-`Comparable` element types, use `from_comparator(...)`.
+- `from_comparator(compare)` expects a function that takes two values and
+  returns an `Integer` comparison result:
+  negative when the first value is smaller, positive when larger, `0` when equal.
+
+### Methods
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `insert` | `value: T` | `Void` | Insert a value into the heap. |
+| `extract_min` | none | `T` | Remove and return the smallest value. Fails if empty. |
+| `try_extract_min` | none | `?T` | Remove and return the smallest value, or `nil` if empty. |
+| `peek` | none | `T` | Return the smallest value without removing it. Fails if empty. |
+| `try_peek` | none | `?T` | Return the smallest value, or `nil` if empty. |
+| `size` | none | `Integer` | Number of stored elements. |
+| `is_empty` | none | `Boolean` | True when the heap has no elements. |
+
+### Example
+
+```nex
+let failure: Min_Heap[Integer] := create Min_Heap.empty
+failure.insert(0)
+failure.insert(3)
+failure.insert(1)
+print(failure.peek)              -- 0
+print(failure.extract_min)       -- 0
+print(failure.try_extract_min)   -- 1
+print(failure.try_extract_min)   -- 3
+print(failure.try_extract_min)   -- nil
+```
 
 ## `Stack[T]`
 

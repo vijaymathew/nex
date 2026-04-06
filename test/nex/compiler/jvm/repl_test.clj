@@ -2051,3 +2051,41 @@ end"
             out (with-out-str (repl/eval-code ctx filter-code))]
         (is (not (str/includes? out "VerifyError")))
         (is (not (str/includes? out "Error:")))))))
+
+(deftest repl-compiled-backend-min-heap-builtins-test
+  (testing "compiled-default REPL supports Min_Heap natural ordering, comparator ordering, and safe variants"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str (repl/eval-code ctx0 "let h: Min_Heap[Integer] := create Min_Heap.empty"))
+            _ (with-out-str (repl/eval-code ctx0 "h.insert(5)"))
+            _ (with-out-str (repl/eval-code ctx0 "h.insert(1)"))
+            _ (with-out-str (repl/eval-code ctx0 "h.insert(3)"))
+            peek-output (with-out-str (repl/eval-code ctx0 "h.peek"))
+            extract-output (with-out-str (repl/eval-code ctx0 "h.extract_min"))
+            _ (with-out-str (repl/eval-code ctx0 "h.extract_min"))
+            _ (with-out-str (repl/eval-code ctx0 "h.extract_min"))
+            empty-peek-output (with-out-str (repl/eval-code ctx0 "h.try_peek = nil"))
+            empty-extract-output (with-out-str (repl/eval-code ctx0 "h.try_extract_min = nil"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "let cmp: Function := fn (a: Integer, b: Integer): Integer do
+  if a > b then
+    result := -1
+  elseif a < b then
+    result := 1
+  else
+    result := 0
+  end
+end"))
+            _ (with-out-str (repl/eval-code ctx0 "let rev: Min_Heap[Integer] := create Min_Heap.from_comparator(cmp)"))
+            _ (with-out-str (repl/eval-code ctx0 "rev.insert(5)"))
+            _ (with-out-str (repl/eval-code ctx0 "rev.insert(1)"))
+            _ (with-out-str (repl/eval-code ctx0 "rev.insert(3)"))
+            reverse-output (with-out-str (repl/eval-code ctx0 "rev.extract_min"))]
+        (is (str/includes? peek-output "1"))
+        (is (str/includes? extract-output "1"))
+        (is (str/includes? empty-peek-output "true"))
+        (is (str/includes? empty-extract-output "true"))
+        (is (str/includes? reverse-output "5"))))))

@@ -632,6 +632,7 @@
 (defn nex-process? [v] (and (map? v) (= (:nex-builtin-type v) :Process)))
 (defn nex-task? [v] (and (map? v) (= (:nex-builtin-type v) :Task)))
 (defn nex-channel? [v] (and (map? v) (= (:nex-builtin-type v) :Channel)))
+(defn nex-min-heap? [v] (and (map? v) (= (:nex-builtin-type v) :MinHeap)))
 
 (defn nex-array-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :ArrayCursor)))
 (defn nex-string-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :StringCursor)))

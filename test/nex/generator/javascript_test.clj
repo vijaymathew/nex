@@ -284,6 +284,30 @@ end"
       (is (str/includes? js-code "console.log(__nexPrintValue(ch.capacity()))"))
       (is (str/includes? js-code "console.log(__nexPrintValue(ch.size()))")))))
 
+(deftest min-heap-generation-test
+  (testing "Min_Heap constructors and methods lower to JavaScript heap helpers"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let h: Min_Heap[Integer] := create Min_Heap.empty
+      h.insert(3)
+      print(h.peek)
+
+      let cmp: Function := fn (a: Integer, b: Integer): Integer do
+        result := a - b
+      end
+      let custom: Min_Heap[Integer] := create Min_Heap.from_comparator(cmp)
+      print(custom.try_extract_min)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "function __nexMinHeap("))
+      (is (str/includes? js-code "let h = __nexMinHeap()"))
+      (is (str/includes? js-code "__nexMinHeapInsert(h, 3)"))
+      (is (str/includes? js-code "__nexMinHeapPeek(h)"))
+      (is (str/includes? js-code "let custom = __nexMinHeap(cmp)"))
+      (is (str/includes? js-code "__nexMinHeapTryExtractMin(custom)")))))
+
 (deftest array-slice-and-reverse-generation-test
   (testing "Array slice and reverse lower to JavaScript array helpers"
     (let [nex-code "class Test
