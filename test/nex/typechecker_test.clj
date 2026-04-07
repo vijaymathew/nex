@@ -1251,6 +1251,28 @@ end"
       (is (some #(re-find #"Cannot call feature 'show' on detachable" %)
                 (map tc/format-type-error (:errors result)))))))
 
+(deftest test-type-errors-include-source-location
+  (testing "Type errors are reported with AST source line and column when available"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+
+class B
+  feature
+    a: ?A
+    demo() do
+      a.show()
+    end
+end"
+          result (tc/type-check (p/ast code))
+          formatted (map tc/format-type-error (:errors result))]
+      (is (not (:success result)))
+      (is (some #(re-find #"Type error at line 12, column 7: Cannot call feature 'show' on detachable" %)
+                formatted)))))
+
 (deftest test-detachable-feature-access-with-nil-guard-succeeds
   (testing "Calling a feature on detachable object inside `if a /= nil` should pass"
     (let [code "class A
