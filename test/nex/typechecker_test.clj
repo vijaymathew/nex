@@ -1299,6 +1299,40 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-detachable-feature-access-in-elseif-after-nil-guard-succeeds
+  (testing "Elseif conditions inherit non-nil refinement after `if a = nil`"
+    (let [code "class Node [K, V]
+  create
+    make(key: K, value: V) do
+      this.key := key
+      this.value := value
+      this.left := nil
+      this.right := nil
+    end
+  feature
+    key: K
+    value: ?V
+    left: ?Node[K, V]
+    right: ?Node[K, V]
+end
+
+function search(node: ?Node[K, V], key: K): ?V
+do
+  if node = nil then
+    result := nil
+  elseif key < node.key then
+    result := search(node.left, key)
+  elseif key > node.key then
+    result := search(node.right, key)
+  else
+    result := node.value
+  end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-default-create-disallowed-when-constructors-exist
   (testing "create B without constructor should fail if class B defines constructors"
     (let [code "class A

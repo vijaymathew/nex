@@ -3039,20 +3039,27 @@
     (apply-condition-branch-refinement! then-env condition :then)
     (doseq [stmt then]
       (check-statement then-env stmt)))
-  (doseq [clause elseif]
-    (let [ei-cond-type (check-expression env (:condition clause))]
-      (when-not (= ei-cond-type "Boolean")
-        (throw (ex-info "Elseif condition must be Boolean"
-                        {:error (type-error
-                                 (str "Elseif condition must be Boolean, got " ei-cond-type))}))))
-    (let [elseif-env (make-type-env env)]
-      (apply-condition-branch-refinement! elseif-env (:condition clause) :then)
-      (doseq [stmt (:then clause)]
-        (check-statement elseif-env stmt))))
+  (let [else-chain-env (doto (make-type-env env)
+                         (apply-condition-branch-refinement! condition :else))
+        final-else-env
+        (reduce
+         (fn [residual-env clause]
+           (let [ei-cond-type (check-expression residual-env (:condition clause))]
+             (when-not (= ei-cond-type "Boolean")
+               (throw (ex-info "Elseif condition must be Boolean"
+                               {:error (type-error
+                                        (str "Elseif condition must be Boolean, got " ei-cond-type))}))))
+           (let [elseif-env (make-type-env residual-env)]
+             (apply-condition-branch-refinement! elseif-env (:condition clause) :then)
+             (doseq [stmt (:then clause)]
+               (check-statement elseif-env stmt)))
+           (doto (make-type-env residual-env)
+             (apply-condition-branch-refinement! (:condition clause) :else)))
+         else-chain-env
+         elseif)]
   (when else
-    (let [else-env (make-type-env env)]
-      (apply-condition-branch-refinement! else-env condition :else)
-      (doseq [stmt else] (check-statement else-env stmt)))))
+    (doseq [stmt else]
+      (check-statement final-else-env stmt)))))
 
 (defn check-loop
   "Check a loop statement"
