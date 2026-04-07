@@ -2064,36 +2064,49 @@
     (let [declared-left-type (:jvm-type (:left expr))
           declared-right-type (:jvm-type (:right expr))
           compare-type (or (numeric-promotion-jvm-type declared-left-type declared-right-type)
-                           (when (= declared-left-type declared-right-type) declared-left-type)
                            (when (and (ir/object-jvm-type? declared-left-type)
                                       (ir/object-jvm-type? declared-right-type))
-                             (ir/object-jvm-type "java/lang/Object")))]
+                             (ir/object-jvm-type "java/lang/Object"))
+                           (when (= declared-left-type declared-right-type) declared-left-type))]
       (when-not compare-type
         (throw (ex-info "Compare operands lowered to incompatible JVM types"
                         {:expr expr
                          :left-jvm-type declared-left-type
                          :right-jvm-type declared-right-type})))
-      (let [left-type (emit-expr! mv (:left expr) state-slot)]
-        (emit-stack-coerce! mv left-type compare-type))
-      (let [right-type (emit-expr! mv (:right expr) state-slot)]
-        (emit-stack-coerce! mv right-type compare-type))
-      (cond
-        (#{:int :boolean :char} compare-type)
-        (emit-numeric-compare! mv (:operator expr) compare-type)
-
-        (#{:long :double} compare-type)
-        (emit-long-or-double-compare! mv (:operator expr) compare-type)
-
-        (ir/object-jvm-type? compare-type)
+      (if (and (ir/object-jvm-type? compare-type)
+               (not (#{:eq :neq} (:operator expr))))
         (do
-          (when-not (#{:eq :neq} (:operator expr))
-            (throw (ex-info "Only eq/neq object comparisons are supported"
-                            {:expr expr :jvm-type compare-type})))
-          (emit-object-compare! mv (:operator expr)))
+            (emit-runtime-var! mv "runtime-compare-values")
+            (.visitVarInsn mv Opcodes/ALOAD state-slot)
+            (emit-boxed-expr! mv (:left expr) state-slot)
+            (emit-boxed-expr! mv (:right expr) state-slot)
+            (.visitMethodInsn mv
+                              Opcodes/INVOKEVIRTUAL
+                              var-internal-name
+                              "invoke"
+                              "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                              false)
+            (emit-unbox-or-cast! mv :int)
+            (.visitInsn mv Opcodes/ICONST_0)
+            (emit-numeric-compare! mv (:operator expr) :int))
+        (do
+          (let [left-type (emit-expr! mv (:left expr) state-slot)]
+            (emit-stack-coerce! mv left-type compare-type))
+          (let [right-type (emit-expr! mv (:right expr) state-slot)]
+            (emit-stack-coerce! mv right-type compare-type))
+          (cond
+            (#{:int :boolean :char} compare-type)
+            (emit-numeric-compare! mv (:operator expr) compare-type)
 
-        :else
-        (throw (ex-info "Unsupported compare emission type"
-                        {:expr expr :jvm-type compare-type})))
+            (#{:long :double} compare-type)
+            (emit-long-or-double-compare! mv (:operator expr) compare-type)
+
+            (ir/object-jvm-type? compare-type)
+            (emit-object-compare! mv (:operator expr))
+
+            :else
+            (throw (ex-info "Unsupported compare emission type"
+                            {:expr expr :jvm-type compare-type})))))
       (:jvm-type expr))
 
     :if

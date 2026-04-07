@@ -55,6 +55,68 @@ print(y)")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-class-method-calls-generic-top-level-helpers-test
+  (testing "class methods can call generic top-level helpers and compare Comparable generic values"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-generic-helpers")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class Node [K -> Comparable]
+create
+  make(key: K) do
+    this.key := key
+    this.left := nil
+  end
+feature
+  key: K
+  left: ?Node[K]
+
+  set_left(n: ?Node[K]) do
+    this.left := n
+  end
+end
+
+function before(a: K, b: K): Boolean
+do
+  result := a < b
+end
+
+function traverse(node: ?Node[K], result_arr: Array[K])
+do
+  if convert node to current: Node[K] then
+    traverse(current.left, result_arr)
+    result_arr.add(current.key)
+  end
+end
+
+class Tree [K -> Comparable]
+create
+  make(root: ?Node[K]) do
+    this.root := root
+  end
+feature
+  root: ?Node[K]
+
+  keys(): Array[K] do
+    let result_arr: Array[K] := []
+    traverse(root, result_arr)
+    result := result_arr
+  end
+end
+
+let root: Node[Integer] := create Node[Integer].make(5)
+let tree: Tree[Integer] := create Tree[Integer].make(root)
+print(before(3, 5))
+print(tree.keys().length)")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))]
+          (is (= 0 exit) err)
+          (is (= "true\n1" (str/trim out))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-object-model-and-contracts-smoke-test
   (testing "compile-jar runs inheritance, super, contracts, old, and invariants end-to-end"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-oo")

@@ -30,6 +30,7 @@
 (declare generic-type-map)
 (declare normalize-call-target)
 (declare function-return-type)
+(declare normalized-function-def)
 (declare lookup-class-constant)
 (declare constant-nex-type)
 (declare resolve-parent-metas)
@@ -319,10 +320,10 @@
       (and (string? base)
            (contains? (:generic-param-names env) base))
       (or (get (:generic-runtime-values env) base)
-          (throw (ex-info "Missing runtime type token for generic parameter"
-                          {:generic-param base
-                           :nex-type nex-type
-                           :current-class (:current-class env)})))
+          ;; Top-level helper functions can use free generic names such as K/V
+          ;; without having a reified receiver object to carry runtime type
+          ;; tokens. Those generics are erased for runtime construction.
+          (ir/const-node "Any" "String" (string-jvm-type)))
 
       (string? base)
       (ir/const-node base "String" (string-jvm-type))
@@ -542,6 +543,13 @@
         target-expr (normalize-call-target raw-target)]
     (if (nil? target-expr)
       (or
+       (when-let [fn-def (some (fn [fn-def]
+                                 (when (and (= (:name fn-def) (:method expr))
+                                            (= (count (or (:params fn-def) []))
+                                               (count (:args expr))))
+                                   fn-def))
+                               (:functions env))]
+         (function-return-type (normalized-function-def fn-def)))
        (when (function-object-call? env (:method expr) (count (:args expr)))
          (let [binding-type (function-object-binding-type env (:method expr))
                base-type (base-type-name binding-type)
@@ -615,12 +623,34 @@
     (merge callable fn-def)
     fn-def))
 
+(defn- type-name-set
+  [t]
+  (cond
+    (string? t) #{t}
+    (map? t) (set (concat (when-let [base (:base-type t)] [base])
+                          (mapcat type-name-set (or (:type-args t) (:type-params t) []))))
+    :else #{}))
+
+(defn- free-function-generic-param-names
+  [visible-classes fn-def]
+  (let [class-names (set (keep :name visible-classes))
+        names (set (concat (mapcat (comp type-name-set :type) (:params fn-def))
+                           (type-name-set (:return-type fn-def))))]
+    (set (remove #(or (contains? class-names %)
+                      (tc/builtin-type? %)
+                      (str/starts-with? % "__"))
+                 names))))
+
+(declare implicit-if-expression?)
+
 (defn- if-branch-expression
   [env branch]
   (when (= 1 (count branch))
     (let [stmt (first branch)]
       (cond
         (and (contains? expression-node-types (:type stmt))
+             (or (not= :if (:type stmt))
+                 (implicit-if-expression? env stmt))
              (not= "Void" (infer-type env stmt)))
         stmt
 
@@ -643,7 +673,15 @@
                     :then)
           else-env (refine-condition-branch-env env (:condition stmt) :else)]
       (and (some? (if-branch-expression then-env (:then stmt)))
-           (some? (elseif->else-expr else-env (:elseif stmt) (:else stmt)))))))
+           (if-let [clause (first (:elseif stmt))]
+             (implicit-if-expression?
+              else-env
+              {:type :if
+               :condition (:condition clause)
+               :then (:then clause)
+               :elseif (vec (rest (:elseif stmt)))
+               :else (:else stmt)})
+             (some? (if-branch-expression else-env (:else stmt))))))))
 
 (defn- scoped-env
   [env child-env]
@@ -3225,7 +3263,8 @@
                                      [(:class-def fn-def)]
                                      (keep :class-def visible-functions)))
         current-class (:class-name fn-def)
-        generic-param-names (set (map :name (:generic-params (:class-def fn-def))))
+        generic-param-names (set (concat (map :name (:generic-params (:class-def fn-def)))
+                                         (free-function-generic-param-names visible-classes fn-def)))
         env0 (make-lowering-env {:classes visible-classes
                                  :functions visible-functions
                                  :imports visible-imports
