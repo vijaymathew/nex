@@ -1273,6 +1273,29 @@ end"
       (is (some #(re-find #"Type error at line 12, column 7: Cannot call feature 'show' on detachable" %)
                 formatted)))))
 
+(deftest test-convert-in-and-condition-refines-then-branch
+  (testing "Convert bindings nested under `and` are attached in the then branch"
+    (let [code "class Node
+  feature
+    left: ?Node
+end
+
+function is_red(node: ?Node): Boolean do
+  result := node /= nil
+end
+
+function fix(node: Node)
+do
+  if is_red(node.left) and convert node.left to left_child: Node then
+    if is_red(left_child.left) then
+      print(\"ok\")
+    end
+  end
+end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-detachable-feature-access-with-nil-guard-succeeds
   (testing "Calling a feature on detachable object inside `if a /= nil` should pass"
     (let [code "class A

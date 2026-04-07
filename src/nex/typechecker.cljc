@@ -457,6 +457,7 @@
 (declare collect-class-info)
 (declare check-class)
 (declare convert-guard-binding)
+(declare convert-guard-bindings)
 (declare resolve-generic-type)
 (declare lookup-class-field-member)
 
@@ -993,7 +994,7 @@
     (do
       (when-let [non-nil-var (guarded-non-nil-var condition)]
         (env-mark-non-nil env non-nil-var))
-      (when-let [{:keys [name type]} (convert-guard-binding condition)]
+      (doseq [{:keys [name type]} (convert-guard-bindings condition)]
         (env-add-var env name type)
         (env-mark-non-nil env name))
       env)
@@ -1013,6 +1014,25 @@
   (when (and (map? condition) (= :convert (:type condition)))
     {:name (:var-name condition)
      :type (attachable-type (:target-type condition))}))
+
+(defn convert-guard-bindings
+  "Extract convert-bound variables that are guaranteed in a true condition.
+   In `a and convert x to y: T`, both operands must be true, so y is attached
+   in the then branch."
+  [condition]
+  (cond
+    (nil? condition) []
+
+    (and (map? condition) (= :convert (:type condition)))
+    [(convert-guard-binding condition)]
+
+    (and (map? condition)
+         (= :binary (:type condition))
+         (= "and" (:operator condition)))
+    (vec (concat (convert-guard-bindings (:left condition))
+                 (convert-guard-bindings (:right condition))))
+
+    :else []))
 
 (defn detachable-version
   "Return a detachable type version for variable bindings that may be nil."
