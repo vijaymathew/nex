@@ -105,6 +105,54 @@
 (defn- generate-unique-fn-name []
   (str "AnonymousFunction_" (swap! next-fn-id inc)))
 
+(defn- identifier-target-expr [target]
+  (if (string? target)
+    {:type :identifier :name target}
+    target))
+
+(defn- call-target [acc]
+  (if (and (map? acc) (= :identifier (:type acc)))
+    (:name acc)
+    acc))
+
+(defn- desugar-safe-call [call-node]
+  (if (and (:safe? call-node)
+           (:target call-node)
+           (:method call-node))
+    (let [temp-name (str "__safe_receiver_" (swap! next-fn-id inc) "__")
+          target-expr (identifier-target-expr (:target call-node))]
+      {:type :scoped-block
+       :body [{:type :let
+               :name temp-name
+               :synthetic true
+               :value target-expr}
+              {:type :if
+               :condition {:type :binary
+                           :operator "/="
+                           :left {:type :identifier :name temp-name}
+                           :right {:type :nil}}
+               :then [(-> call-node
+                          (dissoc :safe?)
+                          (assoc :target temp-name))]
+               :elseif []
+               :else nil}]
+       :rescue nil})
+    call-node))
+
+(defn- desugar-safe-expression-call [call-node]
+  (if (and (:safe? call-node)
+           (string? (:target call-node))
+           (:method call-node))
+    (let [target-name (:target call-node)]
+      {:type :when
+       :condition {:type :binary
+                   :operator "/="
+                   :left {:type :identifier :name target-name}
+                   :right {:type :nil}}
+       :consequent (dissoc call-node :safe?)
+       :alternative {:type :nil}})
+    call-node))
+
 (def node-handlers
   {:program
    (fn [[_ & nodes]]
@@ -840,48 +888,49 @@
        (let [[primary-node call-chain] rest
              base (transform-node primary-node)
              parts (transform-node call-chain)]
-         (reduce (fn [acc part]
-                 (case (:type part)
-                   :member-access
-                   (cond-> {:type :call
-                            :target (if (and (map? acc) (= :identifier (:type acc)))
-                                      (:name acc)
-                                      acc)
-                            :method (:name part)
-                            :args (:args part)}
-                     (some? (:has-parens part))
-                     (assoc :has-parens (:has-parens part)))
+         (desugar-safe-call
+          (reduce (fn [acc part]
+                    (case (:type part)
+                      :member-access
+                      (cond-> {:type :call
+                               :target (call-target acc)
+                               :method (:name part)
+                               :args (:args part)}
+                        (some? (:has-parens part))
+                        (assoc :has-parens (:has-parens part))
+                        (:safe? part)
+                        (assoc :safe? true))
 
-                     :call-suffix
-                     (cond
-                       ;; Function call: f(...)
-                       (and (map? acc) (= :identifier (:type acc)))
-                       {:type :call
-                        :target nil
-                        :method (:name acc)
-                        :args (:args part)
-                        :has-parens true}
+                      :call-suffix
+                      (cond
+                        ;; Function call: f(...)
+                        (and (map? acc) (= :identifier (:type acc)))
+                        {:type :call
+                         :target nil
+                         :method (:name acc)
+                         :args (:args part)
+                         :has-parens true}
 
-                       ;; Method call split as memberAccess + callSuffix: obj.m(...)
-                       (and (map? acc)
-                            (= :call (:type acc))
-                            (some? (:method acc))
-                            (not (:has-parens acc)))
-                       (assoc acc
-                              :args (:args part)
-                              :has-parens true)
+                        ;; Method call split as memberAccess + callSuffix: obj.m(...)
+                        (and (map? acc)
+                             (= :call (:type acc))
+                             (some? (:method acc))
+                             (not (:has-parens acc)))
+                        (assoc acc
+                               :args (:args part)
+                               :has-parens true)
 
-                       ;; Call on expression result: (expr)(...)
-                       :else
-                       {:type :call
-                        :target acc
-                        :method nil
-                        :args (:args part)
-                        :has-parens true})
+                        ;; Call on expression result: (expr)(...)
+                        :else
+                        {:type :call
+                         :target acc
+                         :method nil
+                         :args (:args part)
+                         :has-parens true})
 
-                     acc))
-                 base
-                 parts))))
+                      acc))
+                  base
+                  parts)))))
 
    :callChain
    (fn [[_ & parts]]
@@ -941,14 +990,15 @@
        (reduce (fn [acc part]
                  (case (:type part)
                    :member-access
-                   (cond-> {:type :call
-                            :target (if (and (map? acc) (= :identifier (:type acc)))
-                                      (:name acc)
-                                      acc)
-                            :method (:name part)
-                            :args (:args part)}
-                     (some? (:has-parens part))
-                     (assoc :has-parens (:has-parens part)))
+                   (desugar-safe-expression-call
+                    (cond-> {:type :call
+                             :target (call-target acc)
+                             :method (:name part)
+                             :args (:args part)}
+                      (some? (:has-parens part))
+                      (assoc :has-parens (:has-parens part))
+                      (:safe? part)
+                      (assoc :safe? true)))
 
                    :call-suffix
                    (cond
@@ -965,9 +1015,10 @@
                           (= :call (:type acc))
                           (some? (:method acc))
                           (not (:has-parens acc)))
-                     (assoc acc
-                            :args (:args part)
-                            :has-parens true)
+                     (desugar-safe-expression-call
+                      (assoc acc
+                             :args (:args part)
+                             :has-parens true))
 
                      ;; Call on expression result: (expr)(...)
                      :else
@@ -986,17 +1037,23 @@
      (transform-node part))
 
    :memberAccess
-   (fn [[_ _dot name & rest]]
-     (let [has-parens (boolean (some #(= "(" %) rest))
+   (fn [[_ & children]]
+     (let [safe? (boolean (some #(= "?" %) children))
+           name (first (filter #(and (string? %)
+                                     (not (#{"?" "." "(" ")"} %)))
+                               children))
+           rest (drop-while #(not= name %) children)
+           has-parens (boolean (some #(= "(" %) rest))
            args-node (first (filter #(and (sequential? %)
                                          (= :argumentList (first %)))
                                     rest))]
-       {:type :member-access
-        :name (token-text name)
-        :has-parens has-parens
-        :args (if args-node
-               (transform-node args-node)
-               [])}))
+       (cond-> {:type :member-access
+                :name (token-text name)
+                :has-parens has-parens
+                :args (if args-node
+                        (transform-node args-node)
+                        [])}
+         safe? (assoc :safe? true))))
 
    :callSuffix
    (fn [[_ & rest]]

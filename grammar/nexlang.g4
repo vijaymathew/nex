@@ -288,7 +288,7 @@ postfixPart
     ;
 
 memberAccess
-    : '.' IDENTIFIER ('(' argumentList? ')')?
+    : QMARK? '.' IDENTIFIER ('(' argumentList? ')')?
     ;
 
 callSuffix

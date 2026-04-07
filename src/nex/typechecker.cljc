@@ -2887,19 +2887,28 @@
                    alt-env (doto (make-type-env env)
                              (apply-condition-branch-refinement! (:condition expr) :else))
                    cons-type (check-expression cons-env (:consequent expr))
-                   alt-type (check-expression alt-env (:alternative expr))]
+                   alt-type (check-expression alt-env (:alternative expr))
+                   cons-nil? (= (normalize-type cons-type) "Nil")
+                   alt-nil? (= (normalize-type alt-type) "Nil")
+                   result-type (cond
+                                 (and cons-nil? alt-nil?) "Nil"
+                                 cons-nil? (detachable-version alt-type)
+                                 alt-nil? (detachable-version cons-type)
+                                 :else cons-type)]
                (when-not (types-compatible? env cond-type "Boolean")
                  (throw (ex-info "when condition must be Boolean"
                                  {:error (type-error
                                           (str "when condition has type " cond-type ", expected Boolean"))})))
-               (when-not (or (types-compatible? env cons-type alt-type)
+               (when-not (or cons-nil?
+                             alt-nil?
+                             (types-compatible? env cons-type alt-type)
                              (types-compatible? env alt-type cons-type))
                  (throw (ex-info "when branches must have compatible types"
                                  {:error (type-error
                                           (str "when branches have incompatible types: "
                                                (display-type cons-type) " and "
                                                (display-type alt-type)))})))
-               cons-type)
+               result-type)
       :old (check-expression env (:expr expr))
       :convert (check-convert env expr)
       :spawn (check-spawn env expr)
