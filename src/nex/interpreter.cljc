@@ -16,6 +16,7 @@
 
 (declare nex-format-value)
 (declare eval-node)
+(declare runtime-resolve-call-user-method)
 (declare eval-node-async)
 (declare lookup-method-with-inheritance)
 (declare lookup-class)
@@ -422,6 +423,12 @@
      "Call a Java method via reflection."
      [target method-name arg-values]
      (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array arg-values))))
+
+#?(:clj
+   (defn runtime-resolve-call-user-method
+     [ctx target method-name arg-values]
+     (let [resolver (requiring-resolve 'nex.compiler.jvm.runtime/call-compiled-user-method)]
+       (resolver (:compiled-state ctx) target method-name arg-values))))
 
 #?(:clj
    (defn- reflected-field
@@ -3605,19 +3612,20 @@
           #?(:clj (let [compiled-class-name (compiled-runtime-class-name ctx obj)
                         compiled-class-def (when compiled-class-name
                                              (lookup-class-if-exists ctx compiled-class-name))]
-                    (if (and (empty? arg-values)
-                             (false? has-parens)
-                             compiled-class-def)
-                      (if-let [_ (lookup-field-with-inheritance ctx
-                                                                compiled-class-def
-                                                                method
-                                                                (:current-class-name ctx))]
-                        (if-let [[_ field-value] (compiled-object-field obj method)]
-                          field-value
-                          (throw (ex-info (str "Undefined field: " method)
-                                          {:field method
-                                           :class-name compiled-class-name})))
-                        (java-call-method obj method arg-values))
+                    (if compiled-class-def
+                      (if (and (empty? arg-values)
+                               (false? has-parens))
+                        (if-let [_ (lookup-field-with-inheritance ctx
+                                                                  compiled-class-def
+                                                                  method
+                                                                  (:current-class-name ctx))]
+                          (if-let [[_ field-value] (compiled-object-field obj method)]
+                            field-value
+                            (throw (ex-info (str "Undefined field: " method)
+                                            {:field method
+                                             :class-name compiled-class-name})))
+                          (runtime-resolve-call-user-method ctx obj method arg-values))
+                        (runtime-resolve-call-user-method ctx obj method arg-values))
                       (java-call-method obj method arg-values)))
              :cljs (throw (ex-info (str "Method not found on type: " method)
                                    {:target target :value obj :method method})))))

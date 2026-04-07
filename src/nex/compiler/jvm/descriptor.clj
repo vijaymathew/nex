@@ -56,6 +56,7 @@
       "Atomic_Boolean" (ir/object-jvm-type "java/lang/Object")
       "Atomic_Reference" (ir/object-jvm-type "java/lang/Object")
       "Any" (ir/object-jvm-type "java/lang/Object")
+      "Comparable" (ir/object-jvm-type "java/lang/Object")
       "Function" (ir/object-jvm-type "java/lang/Object")
       "Cursor" (ir/object-jvm-type "java/lang/Object")
       "Console" (ir/object-jvm-type "java/lang/Object")

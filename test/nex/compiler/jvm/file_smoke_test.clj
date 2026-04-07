@@ -117,6 +117,44 @@ print(tree.keys().length)")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-invariant-helper-method-and-comparable-param-test
+  (testing "compiled invariants can call helper methods and Comparable-typed params use builtin compare"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-invariant-helper")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "function before_key(key: Comparable, other: K): Boolean
+do
+  result := key.compare(other) < 0
+end
+
+class Box [K -> Comparable]
+create
+  make(value: K) do
+    this.value := value
+  end
+feature
+  value: K
+
+  invariant_ok(): Boolean do
+    result := true
+  end
+invariant
+  valid: invariant_ok()
+end
+
+let box: Box[Integer] := create Box[Integer].make(5)
+print(before_key(3, box.value))
+print(box.value)")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))]
+          (is (= 0 exit) err)
+          (is (= "true\n5" (str/trim out))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-object-model-and-contracts-smoke-test
   (testing "compile-jar runs inheritance, super, contracts, old, and invariants end-to-end"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-oo")
