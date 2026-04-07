@@ -25,6 +25,8 @@
 (declare invoke-user-method)
 (declare runtime-compare-values)
 
+(def ^:dynamic *validating-object-state* false)
+
 (defmacro ^:private def-builtin-method-wrapper
   [fn-name method-name]
   `(defn ~fn-name
@@ -575,6 +577,10 @@
                            :args (mapv (fn [v] {:type :literal :value v}) args)
                            :has-parens true})))
 
+(defn call-compiled-user-method
+  [state target method-name args]
+  (invoke-user-method state target method-name (vec args)))
+
 (defn- dispatch-cursor-method
   [state target method-name args]
   (let [runtime-name (runtime-type-name state target)]
@@ -721,7 +727,7 @@
                copy)))
     (doseq [[k v] @(:values state)]
       (interp/env-define (:globals ctx) k v))
-    ctx))
+    (assoc ctx :compiled-state state)))
 
 (defn- lowered-instance-method-name
   [method-name arity]
@@ -781,13 +787,19 @@
                  (string? runtime-name)
                  (runtime-compatible-with? state runtime-name "Cursor"))
           target
-          (throw (ex-info (format "No matching method %s found taking %d args for class %s"
-                                  method-name
-                                  (count args)
-                                  (.getName cls))
-                          {:method method-name
-                           :arity (count args)
-                           :class (.getName cls)})))))))
+          (let [builtin-result (try
+                                 (when (typeinfo/get-type-name target)
+                                   (interp/call-builtin-method nil target target method-name args))
+                                 (catch Exception _ ::not-found))]
+            (if (not= builtin-result ::not-found)
+              builtin-result
+              (throw (ex-info (format "No matching method %s found taking %d args for class %s"
+                                      method-name
+                                      (count args)
+                                      (.getName cls))
+                              {:method method-name
+                               :arity (count args)
+                               :class (.getName cls)})))))))))
 
 (defn- get-user-field
   [target field-name]
@@ -917,27 +929,46 @@
 
 (defn validate-object-state
   [state class-name value]
-  (when-not (some? value)
-    (throw (ex-info "Cannot validate nil object on compiled path"
-                    {:class-name class-name})))
-  (let [class-def (class-def-by-name state class-name)]
-    (when-not class-def
-      (throw (ex-info "Missing compiled class metadata for object validation"
-                      {:class-name class-name})))
-    (let [ctx (rebuild-interpreter-ctx state)
-          runtime-name (runtime-type-name state value)
-          compatible? (and (string? class-name)
-                           (string? runtime-name)
-                           (runtime-compatible-with? state runtime-name class-name))]
-      (when-not compatible?
-        (throw (ex-info "Compiled object model mismatch"
-                        {:expected class-name
-                         :runtime runtime-name})))
-      (let [inv-env (interp/make-env (:current-env ctx))]
-        (doseq [field-name (collect-effective-field-names state class-def)]
-          (interp/env-define inv-env field-name (get-user-field value field-name)))
-        (interp/check-class-invariant (assoc ctx :current-env inv-env) class-def))
-      value)))
+  (if *validating-object-state*
+    value
+    (binding [*validating-object-state* true]
+      (when-not (some? value)
+        (throw (ex-info "Cannot validate nil object on compiled path"
+                        {:class-name class-name})))
+      (let [class-def (class-def-by-name state class-name)]
+        (when-not class-def
+          (throw (ex-info "Missing compiled class metadata for object validation"
+                          {:class-name class-name})))
+        (let [ctx (rebuild-interpreter-ctx state)
+              runtime-name (runtime-type-name state value)
+              compatible? (and (string? class-name)
+                               (string? runtime-name)
+                               (runtime-compatible-with? state runtime-name class-name))]
+          (when-not compatible?
+            (throw (ex-info "Compiled object model mismatch"
+                            {:expected class-name
+                             :runtime runtime-name})))
+          (let [inv-env (interp/make-env (:current-env ctx))]
+            (doseq [field-name (collect-effective-field-names state class-def)]
+              (interp/env-define inv-env field-name (get-user-field value field-name)))
+            (interp/env-define (:current-env ctx) "this" value)
+            (interp/env-define (:current-env ctx) "__compiled_this" value)
+            (interp/env-define inv-env "this" value)
+            (interp/env-define inv-env "__compiled_this" value)
+            (interp/check-class-invariant
+             (assoc ctx
+                    :current-env inv-env
+                    :current-object (interp/make-object
+                                     class-name
+                                     (into {}
+                                           (map (fn [field-name]
+                                                  [(keyword field-name)
+                                                   (get-user-field value field-name)]))
+                                           (collect-effective-field-names state class-def)))
+                    :current-target "__compiled_this"
+                    :current-class-name class-name)
+             class-def))
+          value)))))
 
 (defn- concat-string-value
   [state value]

@@ -1251,6 +1251,51 @@ end"
       (is (some #(re-find #"Cannot call feature 'show' on detachable" %)
                 (map tc/format-type-error (:errors result)))))))
 
+(deftest test-type-errors-include-source-location
+  (testing "Type errors are reported with AST source line and column when available"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+
+class B
+  feature
+    a: ?A
+    demo() do
+      a.show()
+    end
+end"
+          result (tc/type-check (p/ast code))
+          formatted (map tc/format-type-error (:errors result))]
+      (is (not (:success result)))
+      (is (some #(re-find #"Type error at line 12, column 7: Cannot call feature 'show' on detachable" %)
+                formatted)))))
+
+(deftest test-convert-in-and-condition-refines-then-branch
+  (testing "Convert bindings nested under `and` are attached in the then branch"
+    (let [code "class Node
+  feature
+    left: ?Node
+end
+
+function is_red(node: ?Node): Boolean do
+  result := node /= nil
+end
+
+function fix(node: Node)
+do
+  if is_red(node.left) and convert node.left to left_child: Node then
+    if is_red(left_child.left) then
+      print(\"ok\")
+    end
+  end
+end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-detachable-feature-access-with-nil-guard-succeeds
   (testing "Calling a feature on detachable object inside `if a /= nil` should pass"
     (let [code "class A
@@ -1297,6 +1342,94 @@ end"
           ast (p/ast code)
           result (tc/type-check ast)]
       (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-detachable-feature-access-in-elseif-after-nil-guard-succeeds
+  (testing "Elseif conditions inherit non-nil refinement after `if a = nil`"
+    (let [code "class Node [K, V]
+  create
+    make(key: K, value: V) do
+      this.key := key
+      this.value := value
+      this.left := nil
+      this.right := nil
+    end
+  feature
+    key: K
+    value: ?V
+    left: ?Node[K, V]
+    right: ?Node[K, V]
+end
+
+function search(node: ?Node[K, V], key: K): ?V
+do
+  if node = nil then
+    result := nil
+  elseif key < node.key then
+    result := search(node.left, key)
+  elseif key > node.key then
+    result := search(node.right, key)
+  else
+    result := node.value
+  end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-detachable-value-refines-in-elseif-after-nil-guard-succeeds
+  (testing "Elseif branches can pass a nil-guarded detachable variable as an attachable value"
+    (let [code "class Node [K -> Comparable, V]
+  create
+    make(key: K, value: V) do
+      this.key := key
+      this.value := value
+      this.left := nil
+      this.right := nil
+    end
+  feature
+    key: K
+    value: ?V
+    left: ?Node[K, V]
+    right: ?Node[K, V]
+
+    set_left(n: ?Node[K, V]) do
+      this.left := n
+    end
+
+    set_right(n: ?Node[K, V]) do
+      this.right := n
+    end
+
+    set_value(v: V) do
+      this.value := v
+    end
+end
+
+function rebalance(node: Node[K, V]): Node[K, V]
+do
+  result := node
+end
+
+function insert(node: ?Node[K, V], key: K, value: V): Node[K, V]
+do
+  if node = nil then
+    result := create Node[K, V].make(key, value)
+  elseif key < node.key then
+    node.set_left(insert(node.left, key, value))
+    result := rebalance(node)
+  elseif key > node.key then
+    node.set_right(insert(node.right, key, value))
+    result := rebalance(node)
+  else
+    node.set_value(value)
+    result := node
+  end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str (:errors result)))
       (is (empty? (:errors result))))))
 
 (deftest test-default-create-disallowed-when-constructors-exist

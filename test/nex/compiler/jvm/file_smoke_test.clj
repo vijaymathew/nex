@@ -55,6 +55,106 @@ print(y)")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-class-method-calls-generic-top-level-helpers-test
+  (testing "class methods can call generic top-level helpers and compare Comparable generic values"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-generic-helpers")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class Node [K -> Comparable]
+create
+  make(key: K) do
+    this.key := key
+    this.left := nil
+  end
+feature
+  key: K
+  left: ?Node[K]
+
+  set_left(n: ?Node[K]) do
+    this.left := n
+  end
+end
+
+function before(a: K, b: K): Boolean
+do
+  result := a < b
+end
+
+function traverse(node: ?Node[K], result_arr: Array[K])
+do
+  if convert node to current: Node[K] then
+    traverse(current.left, result_arr)
+    result_arr.add(current.key)
+  end
+end
+
+class Tree [K -> Comparable]
+create
+  make(root: ?Node[K]) do
+    this.root := root
+  end
+feature
+  root: ?Node[K]
+
+  keys(): Array[K] do
+    let result_arr: Array[K] := []
+    traverse(root, result_arr)
+    result := result_arr
+  end
+end
+
+let root: Node[Integer] := create Node[Integer].make(5)
+let tree: Tree[Integer] := create Tree[Integer].make(root)
+print(before(3, 5))
+print(tree.keys().length)")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))]
+          (is (= 0 exit) err)
+          (is (= "true\n1" (str/trim out))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-invariant-helper-method-and-comparable-param-test
+  (testing "compiled invariants can call helper methods and Comparable-typed params use builtin compare"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-invariant-helper")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "function before_key(key: Comparable, other: K): Boolean
+do
+  result := key.compare(other) < 0
+end
+
+class Box [K -> Comparable]
+create
+  make(value: K) do
+    this.value := value
+  end
+feature
+  value: K
+
+  invariant_ok(): Boolean do
+    result := true
+  end
+invariant
+  valid: invariant_ok()
+end
+
+let box: Box[Integer] := create Box[Integer].make(5)
+print(before_key(3, box.value))
+print(box.value)")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))]
+          (is (= 0 exit) err)
+          (is (= "true\n5" (str/trim out))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-object-model-and-contracts-smoke-test
   (testing "compile-jar runs inheritance, super, contracts, old, and invariants end-to-end"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-oo")
@@ -197,6 +297,51 @@ print(fallback.typed_or(99))")
       (finally
         (when (.exists tmp-dir)
           (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-convert-in-and-condition-smoke-test
+  (testing "compile-jar supports convert bindings nested under and conditions"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-convert-and")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class Node
+create
+  make(left: ?Node) do
+    this.left := left
+  end
+feature
+  left: ?Node
+end
+
+function is_attached(node: ?Node): Boolean do
+  result := node /= nil
+end
+
+function check(node: Node)
+do
+  if is_attached(node.left) and convert node.left to left_child: Node then
+    if is_attached(left_child.left) then
+      print(\"nested\")
+    else
+      print(\"leaf\")
+    end
+  else
+    print(\"empty\")
+  end
+end
+
+let leaf := create Node.make(nil)
+let root := create Node.make(leaf)
+check(root)")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["\"leaf\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
 
 (deftest compile-jar-concurrency-and-select-smoke-test
   (testing "compile-jar runs spawn, channels, select, and await_any end-to-end"

@@ -30,6 +30,7 @@
 (declare generic-type-map)
 (declare normalize-call-target)
 (declare function-return-type)
+(declare normalized-function-def)
 (declare lookup-class-constant)
 (declare constant-nex-type)
 (declare resolve-parent-metas)
@@ -319,10 +320,10 @@
       (and (string? base)
            (contains? (:generic-param-names env) base))
       (or (get (:generic-runtime-values env) base)
-          (throw (ex-info "Missing runtime type token for generic parameter"
-                          {:generic-param base
-                           :nex-type nex-type
-                           :current-class (:current-class env)})))
+          ;; Top-level helper functions can use free generic names such as K/V
+          ;; without having a reified receiver object to carry runtime type
+          ;; tokens. Those generics are erased for runtime construction.
+          (ir/const-node "Any" "String" (string-jvm-type)))
 
       (string? base)
       (ir/const-node base "String" (string-jvm-type))
@@ -542,6 +543,13 @@
         target-expr (normalize-call-target raw-target)]
     (if (nil? target-expr)
       (or
+       (when-let [fn-def (some (fn [fn-def]
+                                 (when (and (= (:name fn-def) (:method expr))
+                                            (= (count (or (:params fn-def) []))
+                                               (count (:args expr))))
+                                   fn-def))
+                               (:functions env))]
+         (function-return-type (normalized-function-def fn-def)))
        (when (function-object-call? env (:method expr) (count (:args expr)))
          (let [binding-type (function-object-binding-type env (:method expr))
                base-type (base-type-name binding-type)
@@ -615,12 +623,34 @@
     (merge callable fn-def)
     fn-def))
 
+(defn- type-name-set
+  [t]
+  (cond
+    (string? t) #{t}
+    (map? t) (set (concat (when-let [base (:base-type t)] [base])
+                          (mapcat type-name-set (or (:type-args t) (:type-params t) []))))
+    :else #{}))
+
+(defn- free-function-generic-param-names
+  [visible-classes fn-def]
+  (let [class-names (set (keep :name visible-classes))
+        names (set (concat (mapcat (comp type-name-set :type) (:params fn-def))
+                           (type-name-set (:return-type fn-def))))]
+    (set (remove #(or (contains? class-names %)
+                      (tc/builtin-type? %)
+                      (str/starts-with? % "__"))
+                 names))))
+
+(declare implicit-if-expression?)
+
 (defn- if-branch-expression
   [env branch]
   (when (= 1 (count branch))
     (let [stmt (first branch)]
       (cond
         (and (contains? expression-node-types (:type stmt))
+             (or (not= :if (:type stmt))
+                 (implicit-if-expression? env stmt))
              (not= "Void" (infer-type env stmt)))
         stmt
 
@@ -643,7 +673,15 @@
                     :then)
           else-env (refine-condition-branch-env env (:condition stmt) :else)]
       (and (some? (if-branch-expression then-env (:then stmt)))
-           (some? (elseif->else-expr else-env (:elseif stmt) (:else stmt)))))))
+           (if-let [clause (first (:elseif stmt))]
+             (implicit-if-expression?
+              else-env
+              {:type :if
+               :condition (:condition clause)
+               :then (:then clause)
+               :elseif (vec (rest (:elseif stmt)))
+               :else (:else stmt)})
+             (some? (if-branch-expression else-env (:else stmt))))))))
 
 (defn- scoped-env
   [env child-env]
@@ -1434,6 +1472,52 @@
                       :boolean
                       temp-slot)]))
 
+(declare lower-expression)
+
+(defn- ensure-convert-bindings
+  [env condition]
+  (reduce (fn [[env' bindings] {:keys [name] :as binding}]
+            (let [[env'' lowered-binding] (ensure-convert-binding env'
+                                                                  (assoc binding :var-name name))]
+              [env'' (conj bindings lowered-binding)]))
+          [env []]
+          (tc/convert-guard-bindings condition)))
+
+(defn- lower-boolean-condition
+  [env expr]
+  (if (and (map? expr)
+           (= :binary (:type expr)))
+    (case (:operator expr)
+      "and"
+      (let [[left-env left-ir] (lower-boolean-condition env (:left expr))
+            right-input-env (refine-condition-branch-env left-env (:left expr) :then)
+            [right-env right-ir] (lower-boolean-condition right-input-env (:right expr))]
+        [right-env
+         (ir/binary-node :and left-ir right-ir "Boolean" :boolean)])
+
+      "or"
+      (let [[left-env left-ir] (lower-boolean-condition env (:left expr))
+            [right-env right-ir] (lower-boolean-condition left-env (:right expr))]
+        [right-env
+         (ir/binary-node :or left-ir right-ir "Boolean" :boolean)])
+
+      (let [[env' _] (ensure-convert-bindings (scoped-child-env env) expr)]
+        [env' (lower-expression env' expr)]))
+    (let [[env' _] (ensure-convert-bindings (scoped-child-env env) expr)]
+      [env' (lower-expression env' expr)])))
+
+(defn- convert-binding-init-stmts
+  [env condition]
+  (->> (tc/convert-guard-bindings condition)
+       (keep (fn [{:keys [name]}]
+               (when-let [{:keys [kind slot nex-type jvm-type]} (lookup-convert-binding env name)]
+                 (when (= kind :local)
+                   (ir/set-local-node slot
+                                      (default-const-node nex-type jvm-type)
+                                      nex-type
+                                      jvm-type)))))
+       vec))
+
 (defn- refine-var-non-nil
   [env var-name]
   (let [current-type (or (get-in env [:locals var-name :nex-type])
@@ -1455,22 +1539,23 @@
     (let [env' (if-let [var-name (tc/guarded-non-nil-var condition)]
                  (refine-var-non-nil env var-name)
                  env)]
-      (if-let [{:keys [name type]} (tc/convert-guard-binding condition)]
-        (refine-var-non-nil
-         (cond
-           (get-in env' [:locals name])
-           (let [refined-type (tc/attachable-type type)]
-             (-> env'
-                 (assoc-in [:locals name :nex-type] refined-type)
-                 (assoc-in [:locals name :jvm-type] (resolve-jvm-type env' refined-type))
-                 (assoc-in [:var-types name] refined-type)))
+      (reduce (fn [acc {:keys [name type]}]
+                (refine-var-non-nil
+                 (cond
+                   (get-in acc [:locals name])
+                   (let [refined-type (tc/attachable-type type)]
+                     (-> acc
+                         (assoc-in [:locals name :nex-type] refined-type)
+                         (assoc-in [:locals name :jvm-type] (resolve-jvm-type acc refined-type))
+                         (assoc-in [:var-types name] refined-type)))
 
-           (:top-level? env')
-           (assoc-in env' [:var-types name] (tc/attachable-type type))
+                   (:top-level? acc)
+                   (assoc-in acc [:var-types name] (tc/attachable-type type))
 
-           :else env')
-         name)
-        env'))
+                   :else acc)
+                 name))
+              env'
+              (tc/convert-guard-bindings condition)))
 
     :else
     (if-let [var-name (tc/guarded-else-non-nil-var condition)]
@@ -2101,8 +2186,22 @@
                       {:expr expr})))
 
     :binary
-    (let [left-ir (lower-expression env (:left expr))
-          right-ir (lower-expression env (:right expr))
+    (let [op (:operator expr)
+          [left-ir right-ir]
+          (case op
+            "and"
+            (let [[left-env left-ir] (lower-boolean-condition env (:left expr))
+                  right-input-env (refine-condition-branch-env left-env (:left expr) :then)
+                  [_right-env right-ir] (lower-boolean-condition right-input-env (:right expr))]
+              [left-ir right-ir])
+
+            "or"
+            (let [[_left-env left-ir] (lower-boolean-condition env (:left expr))
+                  [_right-env right-ir] (lower-boolean-condition env (:right expr))]
+              [left-ir right-ir])
+
+            [(lower-expression env (:left expr))
+             (lower-expression env (:right expr))])
           inferred-type (infer-type env expr)
           nex-type (if (= "Any" inferred-type)
                      (cond
@@ -2114,8 +2213,7 @@
 
                        :else inferred-type)
                      inferred-type)
-          jvm-type (resolve-jvm-type env nex-type)
-          op (:operator expr)]
+          jvm-type (resolve-jvm-type env nex-type)]
       (cond
         (and (= "+" op) (= "String" nex-type))
         (ir/call-runtime-node "op:string-concat" [left-ir right-ir] nex-type jvm-type)
@@ -2167,11 +2265,7 @@
     (let [elseif (:elseif expr)
           then-branch (:then expr)
           else-branch (:else expr)]
-      (let [[cond-env test-ir] (if (= :convert (:type (:condition expr)))
-                                 (let [[cond-env _] (ensure-convert-binding (scoped-child-env env) (:condition expr))
-                                       [cond-env' convert-ir] (lower-convert-expression cond-env (:condition expr))]
-                                   [cond-env' convert-ir])
-                                 [env (lower-expression env (:condition expr))])
+      (let [[cond-env test-ir] (lower-boolean-condition env (:condition expr))
             then-env (refine-condition-branch-env cond-env (:condition expr) :then)
             else-env (refine-condition-branch-env env (:condition expr) :else)
             then-expr (if-branch-expression then-env then-branch)
@@ -2187,11 +2281,7 @@
           (ir/if-node test-ir [then-ir] [else-ir] nex-type jvm-type))))
 
     :when
-    (let [[cond-env test-ir] (if (= :convert (:type (:condition expr)))
-                               (let [[cond-env _] (ensure-convert-binding (scoped-child-env env) (:condition expr))
-                                     [cond-env' convert-ir] (lower-convert-expression cond-env (:condition expr))]
-                                 [cond-env' convert-ir])
-                               [env (lower-expression env (:condition expr))])
+    (let [[cond-env test-ir] (lower-boolean-condition env (:condition expr))
           then-ir (lower-expression (refine-condition-branch-env cond-env (:condition expr) :then) (:consequent expr))
           else-ir (lower-expression (refine-condition-branch-env env (:condition expr) :else) (:alternative expr))
           nex-type (infer-type env expr)
@@ -2970,11 +3060,8 @@
             [env (with-stmt-debug (ir/block-node []) stmt)])
 
           (= :if (:type stmt))
-          (let [[cond-env test-ir] (if (= :convert (:type (:condition stmt)))
-                                     (let [[cond-env _] (ensure-convert-binding (scoped-child-env env) (:condition stmt))
-                                           [cond-env' convert-ir] (lower-convert-expression cond-env (:condition stmt))]
-                                       [cond-env' convert-ir])
-                                     [env (lower-expression env (:condition stmt))])
+          (let [[cond-env test-ir] (lower-boolean-condition env (:condition stmt))
+                condition-init-stmts (convert-binding-init-stmts cond-env (:condition stmt))
                 [then-env then-body] (lower-scoped-statements (refine-condition-branch-env cond-env (:condition stmt) :then)
                                                               (:then stmt))
                 [else-env else-body]
@@ -2991,7 +3078,10 @@
                                                                         :else)
                                            (or (:else stmt) [])))]
             [(scoped-env env else-env)
-             (ir/if-stmt-node test-ir then-body else-body)])
+             (if (seq condition-init-stmts)
+               (ir/block-node (conj condition-init-stmts
+                                    (ir/if-stmt-node test-ir then-body else-body)))
+               (ir/if-stmt-node test-ir then-body else-body))])
 
           (= :scoped-block (:type stmt))
           (if-let [rescue (:rescue stmt)]
@@ -3225,7 +3315,8 @@
                                      [(:class-def fn-def)]
                                      (keep :class-def visible-functions)))
         current-class (:class-name fn-def)
-        generic-param-names (set (map :name (:generic-params (:class-def fn-def))))
+        generic-param-names (set (concat (map :name (:generic-params (:class-def fn-def)))
+                                         (free-function-generic-param-names visible-classes fn-def)))
         env0 (make-lowering-env {:classes visible-classes
                                  :functions visible-functions
                                  :imports visible-imports

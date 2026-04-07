@@ -142,6 +142,39 @@
          ": " message)
     (str "Type error: " message)))
 
+(defn- location-from-node
+  [node]
+  (when (map? node)
+    (let [line (:dbg/line node)
+          column (:dbg/col node)]
+      (when line
+        {:line line :column column}))))
+
+(defn- error-with-location
+  [err node]
+  (let [{:keys [line column]} (location-from-node node)]
+    (if (and err line (nil? (:line err)))
+      (cond-> (assoc err :line line)
+        column (assoc :column column))
+      err)))
+
+(defn- annotate-type-exception
+  [e node]
+  (let [data (ex-data e)
+        err (:error data)]
+    (if-let [located (or (error-with-location err node)
+                         (when-let [{:keys [line column]} (location-from-node node)]
+                           (type-error (ex-message e) line column)))]
+      (ex-info (ex-message e) (assoc data :error located) e)
+      e)))
+
+(defn- with-type-error-location
+  [node f]
+  (try
+    (f)
+    (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e
+      (throw (annotate-type-exception e node)))))
+
 (defn display-type
   "Format a type value for human-readable display."
   [type-val]
@@ -424,6 +457,7 @@
 (declare collect-class-info)
 (declare check-class)
 (declare convert-guard-binding)
+(declare convert-guard-bindings)
 (declare resolve-generic-type)
 (declare lookup-class-field-member)
 
@@ -729,10 +763,16 @@
   "Check the type of an identifier"
   [env {:keys [name] :as expr}]
   (if-let [var-type (env-lookup-var env name)]
-    var-type
+    (if (and (env-var-non-nil? env name)
+             (detachable-type? var-type))
+      (attachable-type var-type)
+      var-type)
     (if-let [current-class (env-lookup-var env "__current_class__")]
       (if-let [field-type (lookup-class-field env current-class name)]
-        field-type
+        (if (and (env-var-non-nil? env name)
+                 (detachable-type? field-type))
+          (attachable-type field-type)
+          field-type)
         (if-let [constant (lookup-class-constant env current-class name)]
           (:field-type constant)
           (if-let [method-sig (lookup-class-method env current-class name)]
@@ -954,7 +994,7 @@
     (do
       (when-let [non-nil-var (guarded-non-nil-var condition)]
         (env-mark-non-nil env non-nil-var))
-      (when-let [{:keys [name type]} (convert-guard-binding condition)]
+      (doseq [{:keys [name type]} (convert-guard-bindings condition)]
         (env-add-var env name type)
         (env-mark-non-nil env name))
       env)
@@ -974,6 +1014,25 @@
   (when (and (map? condition) (= :convert (:type condition)))
     {:name (:var-name condition)
      :type (attachable-type (:target-type condition))}))
+
+(defn convert-guard-bindings
+  "Extract convert-bound variables that are guaranteed in a true condition.
+   In `a and convert x to y: T`, both operands must be true, so y is attached
+   in the then branch."
+  [condition]
+  (cond
+    (nil? condition) []
+
+    (and (map? condition) (= :convert (:type condition)))
+    [(convert-guard-binding condition)]
+
+    (and (map? condition)
+         (= :binary (:type condition))
+         (= "and" (:operator condition)))
+    (vec (concat (convert-guard-bindings (:left condition))
+                 (convert-guard-bindings (:right condition))))
+
+    :else []))
 
 (defn detachable-version
   "Return a detachable type version for variable bindings that may be nil."
@@ -2849,63 +2908,75 @@
 (defn check-expression
   "Check the type of an expression"
   [env expr]
-  (cond
-    (nil? expr) "Void"
-    (string? expr) (or (env-lookup-var env expr)
-                      (throw (ex-info (str "Undefined variable: " expr)
-                                      {:error (type-error (str "Undefined variable: " expr))})))
-    (number? expr) "Integer"
-    (boolean? expr) "Boolean"
-    (map? expr)
-    (case (:type expr)
-      :integer (check-literal env expr)
-      :real (check-literal env expr)
-      :string (check-literal env expr)
-      :char (check-literal env expr)
-      :boolean (check-literal env expr)
-      :nil (check-literal env expr)
-      :identifier (check-identifier env expr)
-      :binary (check-binary-op env expr)
-      :unary (check-unary-op env expr)
-      :call (check-call env expr)
-      :create (check-create env expr)
-      :array-literal (check-array-literal env expr)
-      :set-literal (check-set-literal env expr)
-      :map-literal (check-map-literal env expr)
-      :anonymous-function (let [class-def (:class-def expr)
-                                 class-name (:class-name expr)]
-                            ;; Register the dynamic class definition in the type environment
-                            (collect-class-info env class-def)
-                            ;; Check the class (this will check the callN method body)
-                            (check-class env class-def)
-                            ;; Return the class name.
-                            ;; Since it inherits from Function, it will support callN methods.
-                            class-name)
-      :when (let [cond-type (check-expression env (:condition expr))
-                   cons-env (doto (make-type-env env)
-                              (apply-condition-branch-refinement! (:condition expr) :then))
-                   alt-env (doto (make-type-env env)
-                             (apply-condition-branch-refinement! (:condition expr) :else))
-                   cons-type (check-expression cons-env (:consequent expr))
-                   alt-type (check-expression alt-env (:alternative expr))]
-               (when-not (types-compatible? env cond-type "Boolean")
-                 (throw (ex-info "when condition must be Boolean"
-                                 {:error (type-error
-                                          (str "when condition has type " cond-type ", expected Boolean"))})))
-               (when-not (or (types-compatible? env cons-type alt-type)
-                             (types-compatible? env alt-type cons-type))
-                 (throw (ex-info "when branches must have compatible types"
-                                 {:error (type-error
-                                          (str "when branches have incompatible types: "
-                                               (display-type cons-type) " and "
-                                               (display-type alt-type)))})))
-               cons-type)
-      :old (check-expression env (:expr expr))
-      :convert (check-convert env expr)
-      :spawn (check-spawn env expr)
-      :this (or (env-lookup-var env "__current_class__") "Any")
-      "Any")
-    :else "Any"))
+  (with-type-error-location
+    expr
+    (fn []
+      (cond
+        (nil? expr) "Void"
+        (string? expr) (or (env-lookup-var env expr)
+                          (throw (ex-info (str "Undefined variable: " expr)
+                                          {:error (type-error (str "Undefined variable: " expr))})))
+        (number? expr) "Integer"
+        (boolean? expr) "Boolean"
+        (map? expr)
+        (case (:type expr)
+          :integer (check-literal env expr)
+          :real (check-literal env expr)
+          :string (check-literal env expr)
+          :char (check-literal env expr)
+          :boolean (check-literal env expr)
+          :nil (check-literal env expr)
+          :identifier (check-identifier env expr)
+          :binary (check-binary-op env expr)
+          :unary (check-unary-op env expr)
+          :call (check-call env expr)
+          :create (check-create env expr)
+          :array-literal (check-array-literal env expr)
+          :set-literal (check-set-literal env expr)
+          :map-literal (check-map-literal env expr)
+          :anonymous-function (let [class-def (:class-def expr)
+                                     class-name (:class-name expr)]
+                                ;; Register the dynamic class definition in the type environment
+                                (collect-class-info env class-def)
+                                ;; Check the class (this will check the callN method body)
+                                (check-class env class-def)
+                                ;; Return the class name.
+                                ;; Since it inherits from Function, it will support callN methods.
+                                class-name)
+          :when (let [cond-type (check-expression env (:condition expr))
+                       cons-env (doto (make-type-env env)
+                                  (apply-condition-branch-refinement! (:condition expr) :then))
+                       alt-env (doto (make-type-env env)
+                                 (apply-condition-branch-refinement! (:condition expr) :else))
+                       cons-type (check-expression cons-env (:consequent expr))
+                       alt-type (check-expression alt-env (:alternative expr))
+                       cons-nil? (= (normalize-type cons-type) "Nil")
+                       alt-nil? (= (normalize-type alt-type) "Nil")
+                       result-type (cond
+                                     (and cons-nil? alt-nil?) "Nil"
+                                     cons-nil? (detachable-version alt-type)
+                                     alt-nil? (detachable-version cons-type)
+                                     :else cons-type)]
+                   (when-not (types-compatible? env cond-type "Boolean")
+                     (throw (ex-info "when condition must be Boolean"
+                                     {:error (type-error
+                                              (str "when condition has type " cond-type ", expected Boolean"))})))
+                   (when-not (or cons-nil?
+                                 alt-nil?
+                                 (types-compatible? env cons-type alt-type)
+                                 (types-compatible? env alt-type cons-type))
+                     (throw (ex-info "when branches must have compatible types"
+                                     {:error (type-error
+                                              (str "when branches have incompatible types: "
+                                                   (display-type cons-type) " and "
+                                                   (display-type alt-type)))})))
+                   result-type)
+          :old (check-expression env (:expr expr))
+          :convert (check-convert env expr)
+          :spawn (check-spawn env expr)
+          :this (or (env-lookup-var env "__current_class__") "Any")
+          "Any")
+        :else "Any"))))
 
 ;;
 ;; Statement Type Checking
@@ -3039,20 +3110,27 @@
     (apply-condition-branch-refinement! then-env condition :then)
     (doseq [stmt then]
       (check-statement then-env stmt)))
-  (doseq [clause elseif]
-    (let [ei-cond-type (check-expression env (:condition clause))]
-      (when-not (= ei-cond-type "Boolean")
-        (throw (ex-info "Elseif condition must be Boolean"
-                        {:error (type-error
-                                 (str "Elseif condition must be Boolean, got " ei-cond-type))}))))
-    (let [elseif-env (make-type-env env)]
-      (apply-condition-branch-refinement! elseif-env (:condition clause) :then)
-      (doseq [stmt (:then clause)]
-        (check-statement elseif-env stmt))))
+  (let [else-chain-env (doto (make-type-env env)
+                         (apply-condition-branch-refinement! condition :else))
+        final-else-env
+        (reduce
+         (fn [residual-env clause]
+           (let [ei-cond-type (check-expression residual-env (:condition clause))]
+             (when-not (= ei-cond-type "Boolean")
+               (throw (ex-info "Elseif condition must be Boolean"
+                               {:error (type-error
+                                        (str "Elseif condition must be Boolean, got " ei-cond-type))}))))
+           (let [elseif-env (make-type-env residual-env)]
+             (apply-condition-branch-refinement! elseif-env (:condition clause) :then)
+             (doseq [stmt (:then clause)]
+               (check-statement elseif-env stmt)))
+           (doto (make-type-env residual-env)
+             (apply-condition-branch-refinement! (:condition clause) :else)))
+         else-chain-env
+         elseif)]
   (when else
-    (let [else-env (make-type-env env)]
-      (apply-condition-branch-refinement! else-env condition :else)
-      (doseq [stmt else] (check-statement else-env stmt)))))
+    (doseq [stmt else]
+      (check-statement final-else-env stmt)))))
 
 (defn check-loop
   "Check a loop statement"
@@ -3188,74 +3266,77 @@
 (defn check-statement
   "Check a statement"
   [env stmt]
-  (when (map? stmt)
-    (case (:type stmt)
-      :assign (check-assignment env stmt)
-      :let (check-let env stmt)
-      :call (check-expression env stmt)
-      :convert (check-expression env stmt)
-      :spawn (check-expression env stmt)
-      :if (check-if env stmt)
-      :loop (check-loop env stmt)
-      :select (check-select env stmt)
-      :scoped-block (do
-                      (let [block-env (make-type-env env)]
-                        (doseq [s (:body stmt)] (check-statement block-env s)))
-                      (when-let [rescue (:rescue stmt)]
-                        (let [rescue-env (make-type-env env)]
-                          (env-add-var rescue-env "exception" "Any")
-                          (doseq [s rescue] (check-statement rescue-env s)))))
-      :with (if (= (:target stmt) "java")
-              (let [with-env (make-type-env env)]
-                (env-add-var with-env "__with_java__" true)
-                (doseq [s (:body stmt)]
-                  (check-statement with-env s))
-                (doseq [[name type] @(:vars with-env)]
-                  (when-not (= name "__with_java__")
-                    (env-add-var env name type))))
-              (doseq [s (:body stmt)] (check-statement env s)))
-      :case (do
-              (check-expression env (:expr stmt))
-              (doseq [clause (:clauses stmt)]
-                (check-statement env (:body clause)))
-              (when-let [else-stmt (:else stmt)]
-                (check-statement env else-stmt)))
-      :raise (check-expression env (:value stmt))
-      :retry nil
-      :member-assign
-      (let [field-name (:field stmt)
-            target-expr (or (:object stmt) {:type :this})
-            target-type (check-expression env target-expr)
-            base-target-type (attachable-type target-type)
-            class-name (if (map? base-target-type)
-                         (:base-type base-target-type)
-                         base-target-type)
-            current-class (env-lookup-var env "__current_class__")
-            _ (when-not class-name
-                (throw (ex-info "Field assignment target must be an object"
-                                {:error (type-error "Field assignment target must be an object")})))
-            _ (when (lookup-class-constant env class-name field-name)
-                (throw (ex-info (str "Cannot assign to constant: " field-name)
-                                {:error (type-error (str "Cannot assign to constant: " field-name))})))
-            field-member (lookup-class-field-member env class-name field-name current-class)
-            field-type (:field-type field-member)
-            val-type (check-expression env (:value stmt))]
-        (when-not field-type
-          (throw (ex-info (str "Undefined field: " field-name)
-                          {:error (type-error (str "Undefined field: " field-name))})))
-        (when-not (= current-class (:declaring-class field-member))
-          (throw (ex-info (str "Cannot assign to field " field-name)
-                          {:error (field-write-error field-name (:declaring-class field-member))})))
-        (when-not (types-compatible? env val-type field-type)
-          (throw (ex-info (str "Type mismatch in assignment to " field-name)
-                          {:error (type-error
-                                   (str "Cannot assign " (display-type val-type)
-                                        " to field of type " (display-type field-type)))}))))
+  (with-type-error-location
+    stmt
+    (fn []
+      (when (map? stmt)
+        (case (:type stmt)
+          :assign (check-assignment env stmt)
+          :let (check-let env stmt)
+          :call (check-expression env stmt)
+          :convert (check-expression env stmt)
+          :spawn (check-expression env stmt)
+          :if (check-if env stmt)
+          :loop (check-loop env stmt)
+          :select (check-select env stmt)
+          :scoped-block (do
+                          (let [block-env (make-type-env env)]
+                            (doseq [s (:body stmt)] (check-statement block-env s)))
+                          (when-let [rescue (:rescue stmt)]
+                            (let [rescue-env (make-type-env env)]
+                              (env-add-var rescue-env "exception" "Any")
+                              (doseq [s rescue] (check-statement rescue-env s)))))
+          :with (if (= (:target stmt) "java")
+                  (let [with-env (make-type-env env)]
+                    (env-add-var with-env "__with_java__" true)
+                    (doseq [s (:body stmt)]
+                      (check-statement with-env s))
+                    (doseq [[name type] @(:vars with-env)]
+                      (when-not (= name "__with_java__")
+                        (env-add-var env name type))))
+                  (doseq [s (:body stmt)] (check-statement env s)))
+          :case (do
+                  (check-expression env (:expr stmt))
+                  (doseq [clause (:clauses stmt)]
+                    (check-statement env (:body clause)))
+                  (when-let [else-stmt (:else stmt)]
+                    (check-statement env else-stmt)))
+          :raise (check-expression env (:value stmt))
+          :retry nil
+          :member-assign
+          (let [field-name (:field stmt)
+                target-expr (or (:object stmt) {:type :this})
+                target-type (check-expression env target-expr)
+                base-target-type (attachable-type target-type)
+                class-name (if (map? base-target-type)
+                             (:base-type base-target-type)
+                             base-target-type)
+                current-class (env-lookup-var env "__current_class__")
+                _ (when-not class-name
+                    (throw (ex-info "Field assignment target must be an object"
+                                    {:error (type-error "Field assignment target must be an object")})))
+                _ (when (lookup-class-constant env class-name field-name)
+                    (throw (ex-info (str "Cannot assign to constant: " field-name)
+                                    {:error (type-error (str "Cannot assign to constant: " field-name))})))
+                field-member (lookup-class-field-member env class-name field-name current-class)
+                field-type (:field-type field-member)
+                val-type (check-expression env (:value stmt))]
+            (when-not field-type
+              (throw (ex-info (str "Undefined field: " field-name)
+                              {:error (type-error (str "Undefined field: " field-name))})))
+            (when-not (= current-class (:declaring-class field-member))
+              (throw (ex-info (str "Cannot assign to field " field-name)
+                              {:error (field-write-error field-name (:declaring-class field-member))})))
+            (when-not (types-compatible? env val-type field-type)
+              (throw (ex-info (str "Type mismatch in assignment to " field-name)
+                              {:error (type-error
+                                       (str "Cannot assign " (display-type val-type)
+                                            " to field of type " (display-type field-type)))}))))
 
-      ;; Top-level REPL/program expression inputs are often parsed into
-      ;; :statements, so fall back to expression checking for any remaining
-      ;; expression-shaped node.
-      (check-expression env stmt))))
+          ;; Top-level REPL/program expression inputs are often parsed into
+          ;; :statements, so fall back to expression checking for any remaining
+          ;; expression-shaped node.
+          (check-expression env stmt))))))
 
 ;;
 ;; Method/Constructor Type Checking
