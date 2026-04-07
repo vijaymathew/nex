@@ -298,6 +298,51 @@ print(fallback.typed_or(99))")
         (when (.exists tmp-dir)
           (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-convert-in-and-condition-smoke-test
+  (testing "compile-jar supports convert bindings nested under and conditions"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-convert-and")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class Node
+create
+  make(left: ?Node) do
+    this.left := left
+  end
+feature
+  left: ?Node
+end
+
+function is_attached(node: ?Node): Boolean do
+  result := node /= nil
+end
+
+function check(node: Node)
+do
+  if is_attached(node.left) and convert node.left to left_child: Node then
+    if is_attached(left_child.left) then
+      print(\"nested\")
+    else
+      print(\"leaf\")
+    end
+  else
+    print(\"empty\")
+  end
+end
+
+let leaf := create Node.make(nil)
+let root := create Node.make(leaf)
+check(root)")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["\"leaf\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-concurrency-and-select-smoke-test
   (testing "compile-jar runs spawn, channels, select, and await_any end-to-end"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-concurrency")
