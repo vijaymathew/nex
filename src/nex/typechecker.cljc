@@ -729,10 +729,16 @@
   "Check the type of an identifier"
   [env {:keys [name] :as expr}]
   (if-let [var-type (env-lookup-var env name)]
-    var-type
+    (if (and (env-var-non-nil? env name)
+             (detachable-type? var-type))
+      (attachable-type var-type)
+      var-type)
     (if-let [current-class (env-lookup-var env "__current_class__")]
       (if-let [field-type (lookup-class-field env current-class name)]
-        field-type
+        (if (and (env-var-non-nil? env name)
+                 (detachable-type? field-type))
+          (attachable-type field-type)
+          field-type)
         (if-let [constant (lookup-class-constant env current-class name)]
           (:field-type constant)
           (if-let [method-sig (lookup-class-method env current-class name)]

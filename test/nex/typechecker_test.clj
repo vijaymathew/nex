@@ -1333,6 +1333,60 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-detachable-value-refines-in-elseif-after-nil-guard-succeeds
+  (testing "Elseif branches can pass a nil-guarded detachable variable as an attachable value"
+    (let [code "class Node [K -> Comparable, V]
+  create
+    make(key: K, value: V) do
+      this.key := key
+      this.value := value
+      this.left := nil
+      this.right := nil
+    end
+  feature
+    key: K
+    value: ?V
+    left: ?Node[K, V]
+    right: ?Node[K, V]
+
+    set_left(n: ?Node[K, V]) do
+      this.left := n
+    end
+
+    set_right(n: ?Node[K, V]) do
+      this.right := n
+    end
+
+    set_value(v: V) do
+      this.value := v
+    end
+end
+
+function rebalance(node: Node[K, V]): Node[K, V]
+do
+  result := node
+end
+
+function insert(node: ?Node[K, V], key: K, value: V): Node[K, V]
+do
+  if node = nil then
+    result := create Node[K, V].make(key, value)
+  elseif key < node.key then
+    node.set_left(insert(node.left, key, value))
+    result := rebalance(node)
+  elseif key > node.key then
+    node.set_right(insert(node.right, key, value))
+    result := rebalance(node)
+  else
+    node.set_value(value)
+    result := node
+  end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str (:errors result)))
+      (is (empty? (:errors result))))))
+
 (deftest test-default-create-disallowed-when-constructors-exist
   (testing "create B without constructor should fail if class B defines constructors"
     (let [code "class A
