@@ -41,6 +41,7 @@
           (or (.contains msg "Unsupported")
               (.contains msg "Unable to infer expression type during lowering")
               (.contains msg "Only expression-shaped or result-assignment if branches are supported in lowering")
+              (.contains msg "Only eq/neq object comparisons are supported")
               (.contains msg "Missing compiled class metadata during lowering")
               (.contains msg "Create of non-compiled class is not supported in lowering"))))))
 

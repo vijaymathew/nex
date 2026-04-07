@@ -1032,7 +1032,7 @@
 (defn- string-ordered-comparison?
   [ctx node]
   (when (and (map? node)
-             (= :binary-op (:type node))
+             (#{:binary :binary-op} (:type node))
              (contains? ordered-comparison-ops (:operator node))
              @*type-checking-enabled*)
     (let [env {:classes (vals @(:classes ctx))
@@ -1043,12 +1043,17 @@
           right-type (try (tc/infer-expression-type (:right node) env)
                           (catch Exception _ nil))]
       (or (= "String" left-type)
-          (= "String" right-type)))))
+          (= "String" right-type)
+          (nil? left-type)
+          (nil? right-type)
+          (not (contains? builtin-sortable-types left-type))
+          (not (contains? builtin-sortable-types right-type))))))
 
 (defn- ast-needs-interpreter-fallback?
   [ctx ast]
   (let [top-nodes (concat (:statements ast)
-                          (:calls ast))
+                          (:calls ast)
+                          (:functions ast))
         nodes (tree-seq coll? seq top-nodes)]
     (boolean
      (some (fn [node]

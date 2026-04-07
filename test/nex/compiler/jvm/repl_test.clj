@@ -1874,6 +1874,48 @@ end"))]
                      (repl/handle-command ctx ":backend status"))]
         (is (str/includes? output "COMPILED"))))))
 
+(deftest repl-compiled-backend-generic-function-with-detachable-elseif-fallback-test
+  (testing "compiled REPL accepts generic functions that require detachable refinement across elseif"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            class-output
+            (with-out-str
+              (repl/eval-code ctx0 "class Node [K, V]
+  create
+    make(key: K, value: V) do
+      this.key := key
+      this.value := value
+      this.height := 1
+    end
+  feature
+    key: K
+    value: ?V
+    left: ?Node[K, V]
+    right: ?Node[K, V]
+    height: Integer
+end"))
+            fn-output
+            (with-out-str
+              (repl/eval-code ctx0 "function search(node: ?Node[K, V], key: K): ?V
+do
+  if node = nil then
+    result := nil
+  elseif key < node.key then
+    result := search(node.left, key)
+  elseif key > node.key then
+    result := search(node.right, key)
+  else
+    result := node.value
+  end
+end"))]
+        (is (not (str/includes? class-output "Error:")))
+        (is (not (str/includes? fn-output "Error:")))
+        (is (not (str/includes? fn-output "Type checking failed")))
+        (is (contains? @repl/*repl-var-types* "search"))))))
+
 (deftest compiled-session-stores-deferred-class-metadata-test
   (testing "compiled session keeps deferred and parent metadata as canonical class state"
     (let [session (compiled-repl/make-session)
