@@ -117,11 +117,12 @@
                      :flags Opcodes/ACC_PRIVATE
                      :jvm-type jvm-type})
                   (:runtime-type-fields class-spec))
-             (map (fn [{:keys [name jvm-type]}]
+             (map (fn [{:keys [name jvm-type nex-type]}]
                     {:name name
                      :descriptor (desc/jvm-type->descriptor jvm-type)
                      :flags Opcodes/ACC_PUBLIC
-                     :jvm-type jvm-type})
+                     :jvm-type jvm-type
+                     :nex-type nex-type})
                   (:fields class-spec))))
    :static-fields (mapv (fn [{:keys [name jvm-type]}]
                           {:name name
@@ -318,9 +319,33 @@
         (.visitFieldInsn mv Opcodes/GETFIELD owner name (desc/jvm-type->descriptor jvm-type))
         (.visitVarInsn mv Opcodes/ALOAD 0)
         (.visitFieldInsn mv Opcodes/PUTFIELD (second jvm-type) "__outer__" "Ljava/lang/Object;")))
-    (doseq [{:keys [name jvm-type]} (concat runtime-type-fields fields)]
+    (doseq [{:keys [name jvm-type nex-type]} (concat runtime-type-fields fields)]
       (.visitVarInsn mv Opcodes/ALOAD 0)
-      (emit-const! mv {:value (class-default-value jvm-type) :jvm-type jvm-type})
+      (cond
+        (= (ir/object-jvm-type "java/util/ArrayList") jvm-type)
+        (do
+          (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
+          (.visitInsn mv Opcodes/DUP)
+          (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "()V" false))
+
+        (= (ir/object-jvm-type "java/util/HashMap") jvm-type)
+        (do
+          (.visitTypeInsn mv Opcodes/NEW hashmap-internal-name)
+          (.visitInsn mv Opcodes/DUP)
+          (.visitMethodInsn mv Opcodes/INVOKESPECIAL hashmap-internal-name "<init>" "()V" false))
+
+        (= (ir/object-jvm-type "java/util/LinkedHashSet") jvm-type)
+        (do
+          (.visitTypeInsn mv Opcodes/NEW linkedhashset-internal-name)
+          (.visitInsn mv Opcodes/DUP)
+          (.visitMethodInsn mv Opcodes/INVOKESPECIAL linkedhashset-internal-name "<init>" "()V" false))
+
+        (and (= (ir/object-jvm-type "java/lang/String") jvm-type)
+             (= "String" nex-type))
+        (.visitLdcInsn mv "")
+
+        :else
+        (emit-const! mv {:value (class-default-value jvm-type) :jvm-type jvm-type}))
       (.visitFieldInsn mv
                        Opcodes/PUTFIELD
                        owner
