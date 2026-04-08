@@ -343,6 +343,40 @@ check(root)")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-auto-initializes-builtin-collection-fields-test
+  (testing "compiled constructors see empty defaults for non-detachable Array/Map/Set/String fields"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-field-defaults")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class Holder
+create
+  make() do
+    xs.add(1)
+    ys.put(\"a\", 2)
+  end
+feature
+  xs: Array[Integer]
+  ys: Map[String, Integer]
+  zs: Set[Integer]
+  s: String
+end
+
+let h := create Holder.make()
+print(h.xs.length)
+print(h.ys.get(\"a\"))
+print(h.zs.size)
+print(h.s)")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["1" "2" "0" "\"\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-concurrency-and-select-smoke-test
   (testing "compile-jar runs spawn, channels, select, and await_any end-to-end"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-concurrency")
