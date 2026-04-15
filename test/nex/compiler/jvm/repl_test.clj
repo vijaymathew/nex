@@ -1941,6 +1941,26 @@ end"))
         (is (str/includes? call-output "Array[Integer]"))
         (is (str/includes? call-output "[1, 2, 3]"))))))
 
+(deftest repl-compiled-backend-generic-free-function-return-instantiates-test
+  (testing "compiled REPL instantiates bare generic free-function return types from call arguments"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            reduce-output (with-out-str
+                            (repl/eval-code ctx0 "function reduce[T](a: Array[T], f: Function, init: T): T do
+  result := init
+  across a as elem do
+    result := f(result, elem)
+  end
+end"))
+            call-output (with-out-str
+                          (repl/eval-code ctx0 "reduce([1, 2, 3], fn(a: Integer, b: Integer): Integer do result := a + b end, 0)"))]
+        (is (not (str/includes? reduce-output "Error:")))
+        (is (not (str/includes? call-output "Error:")))
+        (is (str/includes? call-output "Integer 6"))))))
+
 (deftest compiled-session-stores-deferred-class-metadata-test
   (testing "compiled session keeps deferred and parent metadata as canonical class state"
     (let [session (compiled-repl/make-session)

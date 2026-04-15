@@ -360,6 +360,31 @@ check(root)")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-generic-free-function-return-instantiation-smoke-test
+  (testing "compile-jar instantiates bare generic free-function return types from call arguments"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-generic-free-return")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "function reduce[T](a: Array[T], f: Function, init: T): T do
+  result := init
+  across a as elem do
+    result := f(result, elem)
+  end
+end
+
+let r := reduce([1, 2, 3], fn(a: Integer, b: Integer): Integer do result := a + b end, 0)
+print(r)")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["6"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-auto-initializes-builtin-collection-fields-test
   (testing "compiled constructors see empty defaults for non-detachable Array/Map/Set/String fields"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-field-defaults")

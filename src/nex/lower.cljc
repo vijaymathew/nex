@@ -40,7 +40,8 @@
 (declare accessible-field-def)
 (declare accessible-method-def)
 (declare single-super-parent-name)
-(declare infer-call-type)
+(declare infer-call-type
+         infer-free-function-return-type)
 (declare collect-anonymous-class-defs)
 (declare refine-condition-branch-env)
 (declare function-object-call?)
@@ -563,7 +564,7 @@
                                                (count (:args expr))))
                                    fn-def))
                                (:functions env))]
-         (function-return-type (normalized-function-def fn-def)))
+         (infer-free-function-return-type env fn-def (:args expr)))
        (when (function-object-call? env (:method expr) (count (:args expr)))
          (let [binding-type (function-object-binding-type env (:method expr))
                base-type (base-type-name binding-type)
@@ -654,6 +655,61 @@
                       (tc/builtin-type? %)
                       (str/starts-with? % "__"))
                  names))))
+
+(defn- merge-inferred-generic-bindings
+  [env left right]
+  (reduce-kv
+   (fn [acc generic-name inferred-type]
+     (if-let [existing (get acc generic-name)]
+       (if (or (tc/types-equal? env existing inferred-type)
+               (tc/types-compatible? env inferred-type existing)
+               (tc/types-compatible? env existing inferred-type))
+         acc
+         left)
+       (assoc acc generic-name inferred-type)))
+   left
+   right))
+
+(defn- infer-generic-type-map-from-arg
+  [env generic-names param-type arg-type]
+  (let [param-type (tc/normalize-type param-type)
+        arg-type (tc/normalize-type arg-type)]
+    (cond
+      (and (string? param-type) (contains? generic-names param-type))
+      {param-type arg-type}
+
+      (and (map? param-type) (map? arg-type)
+           (= (:base-type param-type) (:base-type arg-type)))
+      (let [param-args (vec (or (:type-params param-type) (:type-args param-type)))
+            arg-args (vec (or (:type-params arg-type) (:type-args arg-type)))]
+        (if (= (count param-args) (count arg-args))
+          (reduce (fn [acc [param-arg arg-arg]]
+                    (merge-inferred-generic-bindings
+                     env acc (infer-generic-type-map-from-arg env generic-names param-arg arg-arg)))
+                  {}
+                  (map vector param-args arg-args))
+          {}))
+
+      :else
+      {})))
+
+(defn- infer-free-function-return-type
+  [env fn-def args]
+  (let [fn-def (normalized-function-def fn-def)
+        generic-names (set (concat (map :name (:generic-params fn-def))
+                                   (free-function-generic-param-names (:classes env) fn-def)))
+        type-map (reduce (fn [acc [param arg]]
+                           (merge-inferred-generic-bindings
+                            env
+                            acc
+                            (infer-generic-type-map-from-arg
+                             env
+                             generic-names
+                             (:type param)
+                             (infer-type env arg))))
+                         {}
+                         (map vector (:params fn-def) args))]
+    (tc/resolve-generic-type (function-return-type fn-def) type-map)))
 
 (declare implicit-if-expression?)
 
