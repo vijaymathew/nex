@@ -850,7 +850,7 @@
                                  (str "Operator " operator " requires numeric operands, got "
                                       (display-type left-type) " and " (display-type right-type)))})))
 
-      ("=" "/=")
+      ("=" "/=" "==" "!=")
       (if (or (= left-type "Nil")
               (= right-type "Nil")
               (types-compatible? env left-type right-type)

@@ -2493,6 +2493,24 @@
             (neg? (compare sx sy)) -1
             :else 1))))))
 
+(defn- scalar-identity-value?
+  [v]
+  (or (nil? v)
+      (string? v)
+      (number? v)
+      (boolean? v)
+      (char? v)))
+
+(defn- nex-identity-equals?
+  [a b]
+  (cond
+    (and (scalar-identity-value? a)
+         (scalar-identity-value? b))
+    (= a b)
+
+    :else
+    (identical? a b)))
+
 (defn apply-binary-op
   "Apply a binary operator to two values."
   [op left right]
@@ -2517,6 +2535,8 @@
           (mod left right))
     "=" (= left right)
     "/=" (not= left right)
+    "==" (nex-identity-equals? left right)
+    "!=" (not (nex-identity-equals? left right))
     "<" (neg? (nex-ordering-compare left right))
     "<=" (not (pos? (nex-ordering-compare left right)))
     ">" (pos? (nex-ordering-compare left right))

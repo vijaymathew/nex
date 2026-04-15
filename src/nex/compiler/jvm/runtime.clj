@@ -1620,6 +1620,24 @@
   [a b]
   (value/nex-deep-equals? interp/nex-object? a b))
 
+(defn- scalar-identity-value?
+  [v]
+  (or (nil? v)
+      (string? v)
+      (number? v)
+      (boolean? v)
+      (char? v)))
+
+(defn identity-equals
+  [a b]
+  (cond
+    (and (scalar-identity-value? a)
+         (scalar-identity-value? b))
+    (= a b)
+
+    :else
+    (identical? a b)))
+
 (defn clone-value
   [value]
   (value/nex-clone-value interp/nex-object? interp/make-object value))

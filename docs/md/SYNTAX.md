@@ -53,11 +53,48 @@ Use lowercase prefixes `0b`, `0o`, and `0x`. `_` may be used as a digit separato
 ```nex
 x = y                            -- equal?
 x /= y                           -- not equal?
+x == y                           -- same object?
+x != y                           -- different object?
 x < y    x <= y                  -- less than? less or equal?
 x > y    x >= y                  -- greater than? greater or equal?
 x and y                          -- both true?
 x or y                           -- at least one true?
 not x                            -- flip true/false
+```
+
+## Comparison
+
+Nex has two kinds of equality:
+
+- `=` and `/=` compare by value
+- `==` and `!=` compare by identity
+
+Value equality checks whether two values have the same contents:
+
+```nex
+print([1, 2] = [1, 2])           -- true
+print([1, 2] /= [1, 2])          -- false
+print("abc" = "abc")             -- true
+```
+
+Identity equality checks whether two variables refer to the same runtime object:
+
+```nex
+let a := [1, 2]
+let b := a
+let c := [1, 2]
+
+print(a == b)                    -- true
+print(a == c)                    -- false
+print(a != c)                    -- true
+```
+
+For scalar values like numbers, booleans, characters, strings, and `nil`, `==`
+and `!=` compare the values directly:
+
+```nex
+print(1 == 1)                    -- true
+print("x" != "y")                -- true
 ```
 
 ## Choosing: if / then / else

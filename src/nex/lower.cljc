@@ -417,7 +417,7 @@
                              left-type))
               (= "^" op) (tc/power-result-type (infer-type env (:left expr))
                                                (infer-type env (:right expr)))
-              (#{"and" "or" "=" "/=" "<" "<=" ">" ">="} op) "Boolean"
+              (#{"and" "or" "=" "/=" "==" "!=" "<" "<=" ">" ">="} op) "Boolean"
               :else nil))
 
           :unary
@@ -2278,7 +2278,7 @@
                        (#{"+" "-" "*" "/" "%"} (:operator expr))
                        (:nex-type left-ir)
 
-                       (#{"and" "or" "=" "/=" "<" "<=" ">" ">="} (:operator expr))
+                       (#{"and" "or" "=" "/=" "==" "!=" "<" "<=" ">" ">="} (:operator expr))
                        "Boolean"
 
                        :else inferred-type)
@@ -2316,7 +2316,9 @@
                                "<" :lt
                                "<=" :lte
                                "=" :eq
-                               "/=" :neq}
+                               "/=" :neq
+                               "==" :ident-eq
+                               "!=" :ident-neq}
                               op)
                          left-ir right-ir nex-type jvm-type)))
 

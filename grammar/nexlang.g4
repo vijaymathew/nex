@@ -257,7 +257,7 @@ logicalAnd
     ;
 
 equality
-    : comparison ((EQUAL | NOTEQUAL) comparison)*
+    : comparison ((IDENTEQUAL | IDENTITYNOTEQUAL | EQUAL | NOTEQUAL) comparison)*
     ;
 
 comparison
@@ -466,6 +466,8 @@ DIV          : '/';
 POW          : '^';
 MOD          : '%';
 
+IDENTEQUAL   : '==';
+IDENTITYNOTEQUAL : '!=';
 EQUAL        : '=';
 NOTEQUAL     : '/=';
 QMARK        : '?';

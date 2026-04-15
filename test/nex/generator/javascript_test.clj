@@ -751,6 +751,19 @@ end"
       (is (str/includes? js-code "==="))
       (is (str/includes? js-code "!==")))))
 
+(deftest identity-operators-test
+  (testing "Identity operator translation to strict JavaScript equality"
+    (let [nex-code "class Test
+  feature
+    test(a: Array[Integer], b: Array[Integer]) do
+      let x: Boolean := a == b
+      let y: Boolean := a != b
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "==="))
+      (is (str/includes? js-code "!==")))))
+
 (deftest skip-contracts-option-test
   (testing "Skip contracts option for production builds"
     (let [nex-code "class Account

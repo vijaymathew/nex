@@ -386,6 +386,29 @@ print(r = 6)")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-identity-equality-smoke-test
+  (testing "compile-jar supports identity equality operators"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-identity-eq")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "let a := [1]
+let b := a
+let c := [1]
+print(a == b)
+print(a == c)
+print(a != c)
+print(1 == 1)")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["true" "false" "true" "true"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-auto-initializes-builtin-collection-fields-test
   (testing "compiled constructors see empty defaults for non-detachable Array/Map/Set/String fields"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-field-defaults")

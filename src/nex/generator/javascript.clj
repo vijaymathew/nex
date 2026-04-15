@@ -182,6 +182,8 @@
   (case operator
     "and" "&&"
     "or" "||"
+    "==" "==="
+    "!=" "!=="
     "=" "==="
     "/=" "!=="
     ">=" ">="
@@ -223,7 +225,7 @@
     :binary (let [lt (infer-constant-type (:left expr) constants-by-name)
                   rt (infer-constant-type (:right expr) constants-by-name)]
               (case (:operator expr)
-                ("=" "/=" "<" "<=" ">" ">=" "and" "or") "Boolean"
+                ("=" "/=" "==" "!=" "<" "<=" ">" ">=" "and" "or") "Boolean"
                 "+" (if (or (= lt "String") (= rt "String")) "String" lt)
                 ("-" "*" "/" "%" "^") lt
                 "Any"))
@@ -274,7 +276,7 @@
       :binary (let [left-type (builtin-dispatch-type (infer-expression-type (:left expr)))
                     right-type (builtin-dispatch-type (infer-expression-type (:right expr)))]
                 (case (:operator expr)
-                  ("=" "/=" "<" "<=" ">" ">=" "and" "or") "Boolean"
+                  ("=" "/=" "==" "!=" "<" "<=" ">" ">=" "and" "or") "Boolean"
                   "+" (if (or (= left-type "String") (= right-type "String")) "String" left-type)
                   "/" (division-dispatch-type left-type right-type)
                   "^" (power-dispatch-type left-type right-type)
