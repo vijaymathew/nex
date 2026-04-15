@@ -58,3 +58,13 @@ end
 let r5 := reshape(r4, 3, 4)
 print(r5)
 print(r5 = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
+
+function gradeUp[T -> Comparable](a: Array[T]): Array[Integer] do
+  result := []
+  from let i := 0
+  until i >= a.length do
+    result.add(i)
+    i := i + 1
+  end
+  result.sort(fn(i, j: Integer): Integer do result := a.get(i).compare(a.get(j)) end)
+end

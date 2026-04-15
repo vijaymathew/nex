@@ -304,7 +304,7 @@
 ;; Runtime Context (holds classes, globals, current environment)
 ;;
 
-(defrecord Context [classes globals current-env output imports specialized-classes])
+(defrecord Context [classes globals current-env output imports specialized-classes compiled-state])
 
 (declare register-class)
 
@@ -325,7 +325,8 @@
                globals             ; current environment starts as global
                (atom [])           ; output accumulator
                (atom [])           ; imports registry
-               (atom {}))]         ; specialized classes cache
+               (atom {})           ; specialized classes cache
+               (atom nil))]        ; compiled runtime state for fallback dispatch
       ;; Register built-in base classes
       (register-class ctx (build-any-base-class))
       (register-class ctx (build-function-base-class))
@@ -427,8 +428,13 @@
 #?(:clj
    (defn runtime-resolve-call-user-method
      [ctx target method-name arg-values]
-     (let [resolver (requiring-resolve 'nex.compiler.jvm.runtime/call-compiled-user-method)]
-       (resolver (:compiled-state ctx) target method-name arg-values))))
+     (let [resolver (requiring-resolve 'nex.compiler.jvm.runtime/call-compiled-user-method)
+           compiled-state-slot (:compiled-state ctx)
+           state (cond
+                   (instance? clojure.lang.IDeref compiled-state-slot) @compiled-state-slot
+                   (some? compiled-state-slot) compiled-state-slot
+                   :else nil)]
+       (resolver state target method-name arg-values))))
 
 #?(:clj
    (defn- reflected-field
@@ -1480,6 +1486,20 @@
         (when-let [parents (get-parent-classes ctx class-def)]
           (some (fn [{:keys [class-def]}]
                   (lookup-field-with-inheritance ctx class-def field-name caller-class-name))
+                parents)))))
+
+(defn- lookup-field-with-inheritance-any-visibility
+  [ctx class-def field-name]
+  (let [local-field (some (fn [member]
+                            (when (and (= (:type member) :field)
+                                       (not (:constant? member))
+                                       (= (:name member) field-name))
+                              (assoc member :declaring-class (:name class-def))))
+                          (feature-members class-def))]
+    (or local-field
+        (when-let [parents (get-parent-classes ctx class-def)]
+          (some (fn [{:keys [class-def]}]
+                  (lookup-field-with-inheritance-any-visibility ctx class-def field-name))
                 parents)))))
 
 (defn- field-write-error-message
@@ -3672,7 +3692,13 @@
                             (throw (ex-info (str "Undefined field: " method)
                                             {:field method
                                              :class-name compiled-class-name})))
-                          (runtime-resolve-call-user-method ctx obj method arg-values))
+                          (if-let [_ (lookup-field-with-inheritance-any-visibility ctx
+                                                                                   compiled-class-def
+                                                                                   method)]
+                            (throw (ex-info (str "Undefined field: " method)
+                                            {:field method
+                                             :class-name compiled-class-name}))
+                            (runtime-resolve-call-user-method ctx obj method arg-values)))
                         (runtime-resolve-call-user-method ctx obj method arg-values))
                       (java-call-method obj method arg-values)))
              :cljs (throw (ex-info (str "Method not found on type: " method)
@@ -3682,7 +3708,9 @@
                      (env-lookup (:current-env ctx) method)
                      (catch #?(:clj Exception :cljs :default) _ ::not-found))]
         (if (not= fn-obj ::not-found)
-          (if (nex-object? fn-obj)
+          (let [compiled-callable? #?(:clj (boolean (compiled-runtime-class-name ctx fn-obj))
+                                      :cljs false)]
+            (if (or (nex-object? fn-obj) compiled-callable?)
             (if (not= has-parens false)
               ;; has-parens is true or nil (default): invoke the Function
               (let [call-method (str "call" (count args))]
@@ -3697,7 +3725,7 @@
             (if (false? has-parens)
               fn-obj
               (throw (ex-info (str "Undefined function: " method)
-                              {:function method}))))
+                              {:function method})))))
           (if-let [current-obj (:current-object ctx)]
             (let [class-def (lookup-class ctx (:class-name current-obj))
                   method-lookup (lookup-method-with-inheritance ctx

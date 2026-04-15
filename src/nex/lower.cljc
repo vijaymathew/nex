@@ -59,7 +59,10 @@
 
 (defn- builtin-class-defs
   []
-  (vals @(:classes (interp/make-context))))
+  (let [interp-builtins @(:classes (interp/make-context))
+        env (tc/make-type-env)]
+    (tc/register-builtin-methods env)
+    (vals (merge interp-builtins @(:classes env)))))
 
 (defn- merge-visible-classes
   [& class-groups]
@@ -82,7 +85,7 @@
   (set (keys interp/builtins)))
 
 (def ^:private builtin-runtime-receiver-types
-  #{"Any" "Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
+  #{"Any" "Comparable" "Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Cursor" "Task" "Channel" "Console" "Process"})
 

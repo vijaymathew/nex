@@ -717,6 +717,8 @@
     (reset! (:bindings (:globals ctx)) {})
     (reset! (:output ctx) @(:output state))
     (reset! (:imports ctx) (vec @(:imports state)))
+    (when-let [compiled-state-slot (:compiled-state ctx)]
+      (reset! compiled-state-slot state))
     (swap! (:classes ctx)
            (fn [builtins]
              (let [copy (HashMap.)]
@@ -727,7 +729,7 @@
                copy)))
     (doseq [[k v] @(:values state)]
       (interp/env-define (:globals ctx) k v))
-    (assoc ctx :compiled-state state)))
+    ctx))
 
 (defn- lowered-instance-method-name
   [method-name arity]
@@ -1463,6 +1465,8 @@
 (def-builtin-method-wrapper builtin-method-any-at-end "at_end")
 (def-builtin-method-wrapper builtin-method-any-get "get")
 (def-builtin-method-wrapper builtin-method-any-length "length")
+
+(def-builtin-method-wrapper builtin-method-comparable-compare "compare")
 
 (def-builtin-method-wrapper builtin-method-integer-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-integer-to-integer "to_integer")

@@ -1381,7 +1381,7 @@ end"
 
 (deftest test-detachable-feature-access-in-elseif-after-nil-guard-succeeds
   (testing "Elseif conditions inherit non-nil refinement after `if a = nil`"
-    (let [code "class Node [K, V]
+    (let [code "class Node [K -> Comparable, V]
   create
     make(key: K, value: V) do
       this.key := key

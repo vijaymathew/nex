@@ -79,6 +79,114 @@
   [env class-name class-def]
   (swap! (:classes env) assoc class-name class-def))
 
+(declare normalize-type type-name-string)
+
+(defn- merge-generic-constraint-entry
+  [acc generic-name constraint]
+  (let [generic-name (cond
+                       (string? generic-name) generic-name
+                       (symbol? generic-name) (name generic-name)
+                       (keyword? generic-name) (name generic-name)
+                       :else generic-name)
+        constraint (cond
+                     (string? constraint) constraint
+                     (symbol? constraint) (name constraint)
+                     (keyword? constraint) (name constraint)
+                     :else constraint)]
+    (cond
+      (nil? generic-name) acc
+      (not (contains? acc generic-name)) (assoc acc generic-name constraint)
+      (and (nil? (get acc generic-name)) constraint) (assoc acc generic-name constraint)
+      :else acc)))
+(defn- infer-generic-constraints-from-type
+  [class-lookup type-expr]
+  (let [t (normalize-type type-expr)]
+    (cond
+      (string? t) {}
+      (map? t)
+      (let [base (:base-type t)
+            args (or (:type-params t) (:type-args t) [])
+            class-def (class-lookup base)
+            param-constraints (reduce (fn [acc [{:keys [name constraint]} arg]]
+                                        (let [acc' (if (and (string? arg)
+                                                            (re-matches #"[A-Z][A-Za-z0-9_]*" arg))
+                                                     (merge-generic-constraint-entry acc arg constraint)
+                                                     acc)]
+                                          (merge acc'
+                                                 (infer-generic-constraints-from-type class-lookup arg))))
+                                      {}
+                                      (map vector (:generic-params class-def) args))]
+        param-constraints)
+      :else {})))
+
+(defn- normalize-generic-params
+  [generic-params constraint-map]
+  (let [ordered-names (->> generic-params
+                           (map (comp type-name-string :name))
+                           (remove nil?)
+                           distinct)]
+    (mapv (fn [generic-name]
+            {:name generic-name
+             :constraint (get constraint-map generic-name)})
+          ordered-names)))
+
+(defn- normalize-function-def
+  [class-lookup {:keys [params return-type class-def generic-params] :as fn-def}]
+  (let [constraint-sources (concat
+                            (map #(infer-generic-constraints-from-type class-lookup (:type %)) params)
+                            [(infer-generic-constraints-from-type class-lookup return-type)]
+                            [(reduce (fn [acc {:keys [name constraint]}]
+                                       (merge-generic-constraint-entry acc name constraint))
+                                     {}
+                                     generic-params)])
+        constraint-map (reduce (fn [acc source]
+                                 (reduce-kv (fn [inner generic-name constraint]
+                                              (merge-generic-constraint-entry inner generic-name constraint))
+                                            acc
+                                            source))
+                               {}
+                               constraint-sources)
+        normalized-generic-params (normalize-generic-params generic-params constraint-map)
+        normalized-class-def (assoc class-def :generic-params normalized-generic-params)]
+    (-> fn-def
+        (assoc :generic-params normalized-generic-params)
+        (assoc :class-def normalized-class-def))))
+
+(defn- normalize-function-defs
+  [classes functions]
+  (let [class-map (merge
+                   (into {} (map (fn [class-def] [(:name class-def) class-def]) classes))
+                   {"Array" {:name "Array" :generic-params [{:name "T"}]}
+                    "Map" {:name "Map" :generic-params [{:name "K"} {:name "V"}]}
+                    "Set" {:name "Set" :generic-params [{:name "T"}]}
+                    "Task" {:name "Task" :generic-params [{:name "T"}]}
+                    "Channel" {:name "Channel" :generic-params [{:name "T"}]}
+                    "Min_Heap" {:name "Min_Heap" :generic-params [{:name "T"}]}
+                    "Atomic_Reference" {:name "Atomic_Reference" :generic-params [{:name "T"}]}})
+        class-lookup (fn [class-name] (get class-map class-name))]
+    (mapv #(normalize-function-def class-lookup %) functions)))
+
+(defn- class-defs-by-name-last-wins
+  [class-defs]
+  (->> class-defs
+       (reduce (fn [acc class-def]
+                 (assoc acc (:name class-def) class-def))
+               {})
+       vals
+       vec))
+
+(defn- function-class-defs
+  [functions]
+  (keep :class-def functions))
+
+(defn- type-name-string
+  [x]
+  (cond
+    (string? x) x
+    (symbol? x) (name x)
+    (keyword? x) (name x)
+    :else x))
+
 (defn env-mark-non-nil
   "Mark a variable as proven non-nil in this environment scope."
   [env var-name]
@@ -242,13 +350,61 @@
   ([type]
    (let [t (normalize-type type)]
      (and (string? t)
-          (re-matches #"[A-Z]" t))))
+          (re-matches #"[A-Z][A-Za-z0-9_]*" t))))
   ([env type]
    (let [t (normalize-type type)]
      (and (string? t)
-          (re-matches #"[A-Z]" t)
+          (re-matches #"[A-Z][A-Za-z0-9_]*" t)
           (not (env-lookup-class env t))
           (not (builtin-type? t))))))
+
+(declare visible-class-defs)
+
+(defn- declared-generic-param?
+  [env type]
+  (let [t (normalize-type type)
+        current-class (some-> (env-lookup-var env "__current_class__")
+                              type-name-string)
+        current-class-def (when current-class
+                            (env-lookup-class env current-class))
+        current-class-generic? (some (fn [{:keys [name]}]
+                                       (= (type-name-string name) t))
+                                     (:generic-params current-class-def))
+        visible-generic? (some (fn [class-def]
+                                 (some (fn [{:keys [name]}]
+                                         (= (type-name-string name) t))
+                                       (:generic-params class-def)))
+                               (visible-class-defs env))]
+    (and (string? t)
+         (re-matches #"[A-Z][A-Za-z0-9_]*" t)
+         (or current-class-generic?
+             visible-generic?))))
+
+(defn- visible-class-defs
+  [env]
+  (let [here (vals @(:classes env))]
+    (if-let [parent (:parent env)]
+      (concat here (visible-class-defs parent))
+      here)))
+
+(defn- generic-param-constraint
+  [env generic-name]
+  (let [generic-name (type-name-string generic-name)
+        current-class (env-lookup-var env "__current_class__")
+        current-class-constraint (when current-class
+                                   (some (fn [{:keys [name constraint]}]
+                                           (when (= (type-name-string name) generic-name)
+                                             (type-name-string constraint)))
+                                         (:generic-params (env-lookup-class env current-class))))
+        visible-constraints (->> (visible-class-defs env)
+                                 (mapcat :generic-params)
+                                 (filter #(= (type-name-string (:name %)) generic-name))
+                                 (keep (comp type-name-string :constraint))
+                                 distinct
+                                 vec)]
+    (or current-class-constraint
+        (when (= 1 (count visible-constraints))
+          (first visible-constraints)))))
 
 (defn types-equal?
   "Check if two types are equal"
@@ -290,7 +446,13 @@
       (= sub super) true
       (not (and (string? sub) (string? super))) false
       :else
-      (letfn [(sub? [current seen]
+      (let [sub (or (when-not (env-lookup-class env sub)
+                      (generic-param-constraint env sub))
+                    sub)
+            super (or (when-not (env-lookup-class env super)
+                        (generic-param-constraint env super))
+                      super)]
+        (letfn [(sub? [current seen]
                 (if (contains? seen current)
                   false
                   (if-let [class-def (env-lookup-class env current)]
@@ -299,7 +461,7 @@
                       (or (some #(= % super) parents)
                           (some #(sub? % seen) parents)))
                     false)))]
-        (sub? sub #{})))))
+          (sub? sub #{}))))))
 
 (defn types-compatible?
   "Check if two types are compatible (including inheritance)."
@@ -401,6 +563,62 @@
       "Cursor" "Any"
       "Any")))
 
+(defn- collect-generic-names-from-type
+  [type-expr]
+  (let [t (normalize-type type-expr)]
+    (cond
+      (string? t) #{t}
+      (map? t) (reduce set/union #{}
+                       (map collect-generic-names-from-type
+                            (or (:type-params t) (:type-args t) [])))
+      :else #{})))
+
+(defn- generic-constraint-map
+  [class-defs]
+  (reduce (fn [acc {:keys [name generic-params]}]
+            (if (or (builtin-type? name) (empty? generic-params))
+              acc
+              (reduce (fn [inner {:keys [name constraint]}]
+                        (let [name (type-name-string name)
+                              constraint (type-name-string constraint)]
+                          (cond
+                            (not (contains? inner name)) (assoc inner name constraint)
+                            (and (nil? (get inner name)) constraint) (assoc inner name constraint)
+                            :else inner)))
+                      acc
+                      generic-params)))
+          {}
+          class-defs))
+
+(defn- register-generic-param-classes!
+  [env generic-params]
+  (doseq [{:keys [name constraint]} generic-params]
+    (let [name (type-name-string name)
+          constraint (type-name-string constraint)]
+      (when (and name
+               (not (builtin-type? name))
+               (not (env-lookup-class env name)))
+        (env-add-class env name
+                       (cond-> {:name name
+                                :deferred? true
+                                :generic-params nil
+                                :parents [{:parent "Any"}]
+                                :body []}
+                         constraint
+                         (update :parents conj {:parent constraint})))))))
+
+(defn- register-visible-generic-classes!
+  [env class-defs var-types]
+  (let [constraint-map (generic-constraint-map class-defs)
+        visible-generic-names (reduce set/union #{}
+                                      (map collect-generic-names-from-type (vals var-types)))]
+    (doseq [generic-name visible-generic-names]
+      (when (and (not (builtin-type? generic-name))
+                 (not (env-lookup-class env generic-name)))
+        (register-generic-param-classes!
+         env
+         [{:name generic-name :constraint (get constraint-map generic-name)}])))))
+
 (defn integral-type?
   "Check if a type is an integral numeric type."
   [type]
@@ -483,7 +701,10 @@
   ([env class-name method-name arity]
    (lookup-class-method env class-name method-name arity class-name))
   ([env class-name method-name arity caller-class-name]
-   (letfn [(lookup-method [cn visited]
+   (let [class-name (or (when-not (env-lookup-class env class-name)
+                          (generic-param-constraint env class-name))
+                        class-name)]
+     (letfn [(lookup-method [cn visited]
              (when (and cn (not (contains? visited cn)))
                (let [class-def (env-lookup-class env cn)
                      visited' (conj visited cn)
@@ -506,12 +727,15 @@
                        (some (fn [{:keys [parent]}]
                                (lookup-method parent visited'))
                              (:parents class-def)))))))]
-     (lookup-method class-name #{}))))
+       (lookup-method class-name #{})))))
 
 (defn lookup-class-method-any-arity
   "Look up a method name on a class and its parent chain, ignoring arity."
   [env class-name method-name caller-class-name]
-  (letfn [(lookup-method [cn visited]
+  (let [class-name (or (when-not (env-lookup-class env class-name)
+                         (generic-param-constraint env class-name))
+                       class-name)]
+    (letfn [(lookup-method [cn visited]
             (when (and cn (not (contains? visited cn)))
               (let [class-def (env-lookup-class env cn)
                     visited' (conj visited cn)
@@ -530,7 +754,7 @@
                       (some (fn [{:keys [parent]}]
                               (lookup-method parent visited'))
                             (:parents class-def)))))))]
-    (lookup-method class-name #{})))
+      (lookup-method class-name #{}))))
 
 #?(:clj
    (defn- resolve-imported-java-class
@@ -864,12 +1088,11 @@
                                  (str "Cannot compare " left-type " with " right-type))})))
 
       ("<" "<=" ">" ">=")
-      (if (or (and (is-comparable-type? left-type)
-                   (is-comparable-type? right-type)
-                   (types-equal? env left-type right-type))
-              ;; Allow comparisons with generic type parameters
-              (is-generic-type-param? env left-type)
-              (is-generic-type-param? env right-type))
+      (if (and (or (is-comparable-type? left-type)
+                   (types-compatible? env left-type "Comparable"))
+               (or (is-comparable-type? right-type)
+                   (types-compatible? env right-type "Comparable"))
+               (types-equal? env left-type right-type))
         "Boolean"
         (throw (ex-info (str "Cannot compare " left-type " with " right-type)
                         {:error (type-error
@@ -1094,7 +1317,11 @@
   (let [value-type (check-expression env value)
         target-type (normalize-type target-type)
         compatible? (or (types-compatible? env value-type target-type)
-                        (types-compatible? env target-type value-type))]
+                        (types-compatible? env target-type value-type)
+                        (declared-generic-param? env value-type)
+                        (declared-generic-param? env target-type)
+                        (is-generic-type-param? env value-type)
+                        (is-generic-type-param? env target-type))]
     (when-not compatible?
       (throw (ex-info "Invalid convert type relation"
                       {:error (type-error
@@ -3635,13 +3862,14 @@
 
 (defn check-class
   "Check a class definition"
-  [env {:keys [name body invariant parents] :as class-def}]
+  [env {:keys [name body invariant parents generic-params] :as class-def}]
   (let [class-def (or (env-lookup-class env name) class-def)
         body (:body class-def)
         invariant (:invariant class-def)
         parents (:parents class-def)
         class-env (make-type-env env)]
   (env-add-var class-env "__current_class__" name)
+  (register-generic-param-classes! class-env generic-params)
   (bind-visible-class-fields! class-env env name)
   ;; Check inheritance
   (when parents
@@ -3915,6 +4143,8 @@
            "new_line" {:params [] :return-type "Void"}
            "read_integer" {:params [] :return-type "Integer"}
            "read_real" {:params [] :return-type "Real"}}]
+    (env-add-class env "Console" {:name "Console"
+                                  :generic-params nil})
     (env-add-method env "Console" method-name sig))
   (env-add-class env "Task" {:name "Task"
                              :generic-params [{:name "T"}]})
@@ -3928,6 +4158,8 @@
           {"getenv" {:params [{:name "name" :type "String"}] :return-type "String"}
            "setenv" {:params [{:name "name" :type "String"} {:name "value" :type "String"}] :return-type "Void"}
            "command_line" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}}]
+    (env-add-class env "Process" {:name "Process"
+                                  :generic-params nil})
     (env-add-method env "Process" method-name sig))
   ;; Register Array[T] class and methods
   (env-add-class env "Array" {:name "Array"
@@ -4113,7 +4345,10 @@
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([program] (check-program program {}))
   ([{:keys [classes calls statements imports functions] :as program} opts]
-   (let [env (make-type-env)]
+   (let [env (make-type-env)
+         normalized-functions (normalize-function-defs classes functions)
+         visible-classes (class-defs-by-name-last-wins
+                          (vec (concat classes (function-class-defs normalized-functions))))]
      (try
        ;; Register imported Java classes (as placeholders)
        (doseq [{:keys [qualified-name source]} imports]
@@ -4125,7 +4360,7 @@
 
        ;; First pass: collect all class definitions, allowing user classes to
        ;; override builtin placeholder names such as Task or Channel.
-       (doseq [class-def classes]
+       (doseq [class-def visible-classes]
          (collect-class-info env class-def))
 
        ;; Inject pre-existing variable types (e.g., from REPL)
@@ -4133,7 +4368,7 @@
          (env-add-var env var-name var-type))
 
        ;; Register function variables (name -> generated class)
-       (doseq [fn-def functions]
+       (doseq [fn-def normalized-functions]
          (let [arity (count (:params fn-def))]
            (when (> arity 32)
              (throw (ex-info (str "Function " (:name fn-def)
@@ -4143,8 +4378,8 @@
                                            " must have at most 32 parameters"))}))))
          (env-add-var env (:name fn-def) (:class-name fn-def)))
 
-       ;; Second pass: check class bodies
-       (doseq [class-def classes]
+       ;; Second pass: check class bodies, including normalized function classes.
+       (doseq [class-def visible-classes]
          (check-class env class-def))
 
        ;; Check top-level statements in source order when available.
@@ -4178,17 +4413,22 @@
    Returns the type (string or map) or nil on failure."
   [expr opts]
   (try
-    (let [env (make-type-env)]
+    (let [env (make-type-env)
+          normalized-functions (normalize-function-defs (:classes opts) (:functions opts))
+          function-classes (vec (function-class-defs normalized-functions))
+          visible-classes (vec (concat (:classes opts) function-classes))
+          visible-var-types (or (:var-types opts) {})]
       (doseq [{:keys [qualified-name source]} (:imports opts)]
         (when (nil? source)
           (let [simple-name (last (str/split qualified-name #"\."))]
             (env-add-class env simple-name {:name simple-name :body [] :import qualified-name}))))
       (register-builtin-methods env)
-      (doseq [class-def (:classes opts)]
+      (doseq [class-def visible-classes]
         (collect-class-info env class-def))
-      (doseq [fn-def (:functions opts)]
+      (register-visible-generic-classes! env visible-classes visible-var-types)
+      (doseq [fn-def normalized-functions]
         (env-add-var env (:name fn-def) (:class-name fn-def)))
-      (doseq [[var-name var-type] (:var-types opts)]
+      (doseq [[var-name var-type] visible-var-types]
         (env-add-var env var-name var-type))
       (check-expression env expr))
     (catch #?(:clj Exception :cljs :default) _ nil)))

@@ -1883,7 +1883,7 @@ end"))]
       (let [ctx0 (repl/init-repl-context)
             class-output
             (with-out-str
-              (repl/eval-code ctx0 "class Node [K, V]
+              (repl/eval-code ctx0 "class Node [K -> Comparable, V]
   create
     make(key: K, value: V) do
       this.key := key
@@ -2259,3 +2259,30 @@ end"))
                      (repl/eval-code ctx0 "hint_spin()
 print(\"ok\")"))]
         (is (str/includes? output "ok"))))))
+
+(deftest repl-compiled-backend-generic-comparable-in-sort-comparator-test
+  (testing "compiled REPL typechecks generic constrained method calls inside sort comparator lambdas"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            define-output (with-out-str
+                            (repl/eval-code ctx0 "function gradeUp[T -> Comparable](a: Array[T]): Array[Integer] do
+  result := []
+  from let i := 0
+  until i >= a.length do
+    result.add(i)
+    i := i + 1
+  end
+  result.sort(fn(i: Integer, j: Integer): Integer do
+    result := a.get(i).compare(a.get(j))
+  end)
+end"))
+            call-output (with-out-str
+                          (repl/eval-code ctx0 "gradeUp([3,1,4,1])"))]
+        (is (not (str/includes? define-output "Type error")))
+        (is (not (str/includes? define-output "Error:")))
+        (is (not (str/includes? call-output "Type error")))
+        (is (not (str/includes? call-output "Error:")))
+        (is (str/includes? call-output "[0, 1, 2, 3]"))))))

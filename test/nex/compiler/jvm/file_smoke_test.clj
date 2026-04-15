@@ -77,12 +77,12 @@ feature
   end
 end
 
-function before(a: K, b: K): Boolean
+function before[K -> Comparable](a: K, b: K): Boolean
 do
   result := a < b
 end
 
-function traverse(node: ?Node[K], result_arr: Array[K])
+function traverse[K -> Comparable](node: ?Node[K], result_arr: Array[K])
 do
   if convert node to current: Node[K] then
     traverse(current.left, result_arr)
