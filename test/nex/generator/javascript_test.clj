@@ -420,7 +420,22 @@ end"
       (is (str/includes? js-code "console.log(__nexPrintValue(__nexArraySort(scores)))"))
       (is (str/includes? js-code "console.log(__nexPrintValue(__nexArraySort(boxes)))"))
       (is (str/includes? js-code "function __nexCompareValues(a, b)"))
-      (is (str/includes? js-code "function __nexArraySort(values)")))))
+      (is (str/includes? js-code "function __nexArraySort(values, compareFn = null)")))))
+
+(deftest array-sort-with-comparator-generation-test
+  (testing "Array sort with comparator lowers to JavaScript helper with compareFn"
+    (let [nex-code "class Test
+  feature
+    demo(scores: Array[Integer]) do
+      print(scores.sort(fn(a: Integer, b: Integer): Integer do
+        result := b - a
+      end))
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "__nexArraySort(scores,")) 
+      (is (str/includes? js-code "function __nexArraySort(values, compareFn = null)"))
+      (is (str/includes? js-code "compareFn(a, b)")))))
 
 (deftest select-generation-test
   (testing "select lowers to try_send/try_receive polling in JavaScript"

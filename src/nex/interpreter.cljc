@@ -1676,15 +1676,36 @@
                     {:left a :right b}))))
 
 (defn- nex-array-sort-with-ctx
-  [ctx arr]
-  #?(:clj (let [out (java.util.ArrayList. arr)]
-            (.sort out (reify java.util.Comparator
-                         (compare [_ a b]
-                           (int (nex-value-compare ctx a b)))))
-            out)
-     :cljs (let [out (.slice arr)]
-             (.sort out (fn [a b] (nex-value-compare ctx a b)))
-             out)))
+  ([ctx arr]
+   #?(:clj (let [out (java.util.ArrayList. arr)]
+             (.sort out (reify java.util.Comparator
+                          (compare [_ a b]
+                            (int (nex-value-compare ctx a b)))))
+             out)
+      :cljs (let [out (.slice arr)]
+              (.sort out (fn [a b] (nex-value-compare ctx a b)))
+              out)))
+  ([ctx arr comparator]
+   (let [compare-fn (fn [a b]
+                      (let [result (if (fn? comparator)
+                                     (comparator a b)
+                                     (eval-node ctx {:type :call
+                                                     :target {:type :literal :value comparator}
+                                                     :method "call2"
+                                                     :args [{:type :literal :value a}
+                                                            {:type :literal :value b}]}))]
+                        (if (integer? result)
+                          result
+                          (throw (ex-info "Array.sort comparator must return Integer"
+                                          {:left a :right b :result result})))))]
+     #?(:clj (let [out (java.util.ArrayList. arr)]
+               (.sort out (reify java.util.Comparator
+                            (compare [_ a b]
+                              (compare-fn a b))))
+               out)
+        :cljs (let [out (.slice arr)]
+                (.sort out compare-fn)
+                out)))))
 
 (defn- make-min-heap
   [comparator]
@@ -2836,7 +2857,14 @@
                       (if (>= idx 0) idx -1)))
     "remove"      (fn [arr idx & _] (nex-array-remove arr idx))
     "reverse"     (fn [arr & _] (nex-array-reverse arr))
-    "sort"        (fn [arr & [ctx]] (nex-array-sort-with-ctx ctx arr))
+    "sort"        (fn [arr & args]
+                    (let [ctx (last args)
+                          method-args (butlast args)]
+                      (case (count method-args)
+                        0 (nex-array-sort-with-ctx ctx arr)
+                        1 (nex-array-sort-with-ctx ctx arr (first method-args))
+                        (throw (ex-info "Method sort expects 0 or 1 arguments"
+                                        {:target arr :method "sort" :actual (count method-args)})))))
     "slice"       (fn [arr start end & _] (nex-array-slice arr start end))
     "to_string"   (fn [arr & _] (nex-array-str arr))
     "equals"      (fn [arr other & _] (nex-deep-equals? arr other))

@@ -1704,13 +1704,26 @@
                           {:left a :right b :result result})))))))
 
 (defn array-sort
-  [state values]
-  (let [out (java.util.ArrayList. values)]
-    (.sort out
-           (reify java.util.Comparator
-             (compare [_ a b]
-               (int (runtime-compare-values state a b)))))
-    out))
+  ([state values]
+   (let [out (java.util.ArrayList. values)]
+     (.sort out
+            (reify java.util.Comparator
+              (compare [_ a b]
+                (int (runtime-compare-values state a b)))))
+     out))
+  ([state values comparator]
+   (let [out (java.util.ArrayList. values)]
+     (.sort out
+            (reify java.util.Comparator
+              (compare [_ a b]
+                (let [result (if (fn? comparator)
+                               (comparator a b)
+                               (invoke-function-object state comparator [a b]))]
+                  (if (integer? result)
+                    result
+                    (throw (ex-info "Array.sort comparator must return Integer"
+                                    {:left a :right b :result result})))))))
+     out)))
 
 (defn array-join
   [state values sep]

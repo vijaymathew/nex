@@ -1336,20 +1336,31 @@
 
       (and (= base-type "Array") (= method "sort"))
       (do
-        (when (not= (count args) 0)
-          (throw (ex-info "Method sort expects 0 arguments"
-                          {:error (type-error
-                                   (str "Method sort expects 0 arguments, got " (count args)))})))
         (let [elem-type (if (map? target-type)
                           (or (first (or (:type-params target-type) (:type-args target-type)))
                               "Any")
                           "Any")]
-          (when-not (sortable-array-element-type? env elem-type)
-            (throw (ex-info "Array.sort requires Comparable element type"
+          (case (count args)
+            0
+            (do
+              (when-not (sortable-array-element-type? env elem-type)
+                (throw (ex-info "Array.sort requires Comparable element type"
+                                {:error (type-error
+                                         (str "Array.sort requires elements of a built-in sortable type or Comparable, got "
+                                              (display-type elem-type)))})))
+              (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map))
+
+            1
+            (let [compare-type (check-expression env (first args))]
+              (when-not (types-compatible? env compare-type "Function")
+                (throw (ex-info "Array.sort(compareFn) expects a Function argument"
+                                {:error (type-error
+                                         (str "Expected Function, got " (display-type compare-type)))})))
+              (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map))
+
+            (throw (ex-info "Method sort expects 0 or 1 arguments"
                             {:error (type-error
-                                     (str "Array.sort requires elements of a built-in sortable type or Comparable, got "
-                                          (display-type elem-type)))})))
-          (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map)))
+                                     (str "Method sort expects 0 or 1 arguments, got " (count args)))})))))
 
       :else
       (let [class-def (env-lookup-class env base-type)]
@@ -3938,7 +3949,9 @@
            "index_of"    {:params [{:name "elem" :type "T"}] :return-type "Integer"}
            "remove"      {:params [{:name "index" :type "Integer"}] :return-type "Void"}
            "reverse"     {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
-           "sort"        {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
+           "sort"        {0 {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
+                          1 {:params [{:name "compareFn" :type "Function"}]
+                             :return-type {:base-type "Array" :type-params ["T"]}}}
            "slice"       {:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}]
                           :return-type {:base-type "Array" :type-params ["T"]}}
            "first"       {:params [] :return-type "T"}

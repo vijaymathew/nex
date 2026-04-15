@@ -1481,10 +1481,11 @@
         jvm-type)
 
       [:array "sort"]
-      (do
-        (emit-runtime-call! mv "array-sort"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-expr! mv target state-slot))])
+      (let [arg-emitters (cond-> [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                                  (fn [] (emit-expr! mv target state-slot))]
+                           (first (:args expr))
+                           (conj (fn [] (emit-boxed-expr! mv (first (:args expr)) state-slot))))]
+        (emit-runtime-call! mv "array-sort" arg-emitters)
         (emit-unbox-or-cast! mv jvm-type)
         jvm-type)
 

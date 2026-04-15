@@ -533,3 +533,56 @@ across c as i do print(i) end")
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-user-defined-method-overload-by-arity-smoke-test
+  (testing "compile-jar dispatches user-defined methods with the same name by arity"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-method-arity-overload")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class Greeter
+feature
+  greet(): String
+  do
+    result := \"hello\"
+  end
+
+  greet(name: String): String
+  do
+    result := \"hello, \" + name
+  end
+end
+
+let g: Greeter := create Greeter
+print(g.greet())
+print(g.greet(\"Ada\"))")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["\"hello\"" "\"hello, Ada\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-array-sort-with-comparator-smoke-test
+  (testing "compile-jar supports Array.sort(compareFn)"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-array-sort-comparefn")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "let xs: Array[Integer] := [10, 2, 3]
+let sorted := xs.sort(fn(a: Integer, b: Integer): Integer do
+  result := b - a
+end)
+print(sorted)")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["[10, 3, 2]"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))

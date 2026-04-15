@@ -1696,6 +1696,32 @@ end"
       (is (some #(str/includes? (tc/format-type-error %) "Array.sort requires elements of a built-in sortable type or Comparable")
                 (:errors bad-result))))))
 
+(deftest test-array-sort-with-comparator-function
+  (testing "Array.sort(compareFn) accepts a Function comparator and returns Array[T]"
+    (let [ok-code "class Main
+  feature
+    demo() do
+      let xs: Array[Integer] := [10, 2, 3]
+      let sorted: Array[Integer] := xs.sort(fn(a: Integer, b: Integer): Integer do
+        result := b - a
+      end)
+    end
+end"
+          bad-code "class Main
+  feature
+    demo() do
+      let xs: Array[Integer] := [10, 2, 3]
+      let sorted := xs.sort(123)
+    end
+end"
+          ok-result (tc/type-check (p/ast ok-code))
+          bad-result (tc/type-check (p/ast bad-code))]
+      (is (:success ok-result))
+      (is (empty? (:errors ok-result)))
+      (is (false? (:success bad-result)))
+      (is (some #(str/includes? (tc/format-type-error %) "Expected Function, got Integer")
+                (:errors bad-result))))))
+
 (deftest test-array-reverse-types-as-array-expression
   (testing "Array.reverse remains an Array[T] expression so it composes with type_of"
     (let [code "class Main
@@ -1732,6 +1758,33 @@ end"
   {\"title\": \"Neuromancer\", \"author\": \"William Gibson\", \"year\": 1984},
   {\"title\": \"Foundation\", \"author\": \"Isaac Asimov\", \"year\": 1951}
 ]"
+          result (tc/type-check (p/ast code))]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-user-defined-methods-can-overload-by-arity
+  (testing "user-defined methods with the same name dispatch by arity"
+    (let [code "class Greeter
+feature
+  greet(): String
+  do
+    result := \"hello\"
+  end
+
+  greet(name: String): String
+  do
+    result := \"hello, \" + name
+  end
+end
+
+class Main
+feature
+  demo() do
+    let g: Greeter := create Greeter
+    print(g.greet())
+    print(g.greet(\"Ada\"))
+  end
+end"
           result (tc/type-check (p/ast code))]
       (is (:success result))
       (is (empty? (:errors result))))))
