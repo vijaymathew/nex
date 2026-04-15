@@ -129,7 +129,7 @@ print(xs = [5, 7, 9])")
         (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
               {:keys [exit out err]} (run-jar! (:jar result))]
           (is (= 0 exit) err)
-          (is (= "false" (str/trim out))))
+          (is (= "true" (str/trim out))))
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
@@ -375,12 +375,13 @@ check(root)")
 end
 
 let r := reduce([1, 2, 3], fn(a: Integer, b: Integer): Integer do result := a + b end, 0)
-print(r)")
+print(r)
+print(r = 6)")
         (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
               {:keys [exit out err]} (run-jar! (:jar result))
               output-lines (remove str/blank? (str/split-lines out))]
           (is (= 0 exit) err)
-          (is (= ["6"] output-lines)))
+          (is (= ["6" "true"] output-lines)))
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))

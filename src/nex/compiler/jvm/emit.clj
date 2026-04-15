@@ -2089,6 +2089,10 @@
     (let [declared-left-type (:jvm-type (:left expr))
           declared-right-type (:jvm-type (:right expr))
           compare-type (or (numeric-promotion-jvm-type declared-left-type declared-right-type)
+                           (when (and (#{:eq :neq} (:operator expr))
+                                      (or (ir/object-jvm-type? declared-left-type)
+                                          (ir/object-jvm-type? declared-right-type)))
+                             (ir/object-jvm-type "java/lang/Object"))
                            (when (and (ir/object-jvm-type? declared-left-type)
                                       (ir/object-jvm-type? declared-right-type))
                              (ir/object-jvm-type "java/lang/Object"))
@@ -2114,7 +2118,22 @@
             (emit-unbox-or-cast! mv :int)
             (.visitInsn mv Opcodes/ICONST_0)
             (emit-numeric-compare! mv (:operator expr) :int))
-        (do
+        (if (ir/object-jvm-type? compare-type)
+          (do
+            (emit-runtime-var! mv "deep-equals")
+            (emit-boxed-expr! mv (:left expr) state-slot)
+            (emit-boxed-expr! mv (:right expr) state-slot)
+            (.visitMethodInsn mv
+                              Opcodes/INVOKEVIRTUAL
+                              var-internal-name
+                              "invoke"
+                              "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                              false)
+            (emit-unbox-or-cast! mv :boolean)
+            (when (= :neq (:operator expr))
+              (.visitInsn mv Opcodes/ICONST_1)
+              (.visitInsn mv Opcodes/IXOR)))
+          (do
           (let [left-type (emit-expr! mv (:left expr) state-slot)]
             (emit-stack-coerce! mv left-type compare-type))
           (let [right-type (emit-expr! mv (:right expr) state-slot)]
@@ -2131,7 +2150,7 @@
 
             :else
             (throw (ex-info "Unsupported compare emission type"
-                            {:expr expr :jvm-type compare-type})))))
+                            {:expr expr :jvm-type compare-type}))))))
       (:jvm-type expr))
 
     :if
