@@ -63,9 +63,10 @@
 (declare supported-anonymous-function-in-ctx?)
 (declare supported-select-clause-in-ctx?)
 (declare merge-import-like-nodes)
+(declare class-def-in-ctx)
 
 (def ^:private builtin-runtime-receiver-types
-  #{"Any" "Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
+  #{"Any" "Comparable" "Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Cursor" "Task" "Channel" "Console" "Process"})
 
@@ -95,7 +96,10 @@
 
 (defn- builtin-class-defs
   []
-  (vals @(:classes (interp/make-context))))
+  (let [interp-builtins @(:classes (interp/make-context))
+        env (tc/make-type-env)]
+    (tc/register-builtin-methods env)
+    (vals (merge interp-builtins @(:classes env)))))
 
 (defn- import-placeholder-classes
   [imports]
@@ -111,6 +115,72 @@
   (let [synthetic-class-names (set (keep :class-name (:functions ast)))]
     (remove #(contains? synthetic-class-names (:name %))
             (:classes ast))))
+
+(defn- function-class-defs
+  [functions]
+  (keep :class-def functions))
+
+(defn- type-name-string
+  [x]
+  (cond
+    (string? x) x
+    (symbol? x) (name x)
+    (keyword? x) (name x)
+    :else x))
+
+(defn- collect-generic-names-from-type
+  [type-expr]
+  (cond
+    (string? type-expr) #{type-expr}
+    (map? type-expr) (reduce set/union #{}
+                             (map collect-generic-names-from-type
+                                  (or (:type-params type-expr)
+                                      (:type-args type-expr)
+                                      [])))
+    :else #{}))
+
+(defn- generic-constraint-map
+  [classes]
+  (let [builtin-class-names (set (map :name (builtin-class-defs)))]
+    (reduce (fn [acc {:keys [name generic-params]}]
+              (if (or (contains? builtin-class-names name)
+                      (empty? generic-params))
+                acc
+                (reduce (fn [inner {:keys [name constraint]}]
+                          (let [name (type-name-string name)
+                                constraint (type-name-string constraint)]
+                            (cond
+                              (not (contains? inner name)) (assoc inner name constraint)
+                              (and (nil? (get inner name)) constraint) (assoc inner name constraint)
+                              :else inner)))
+                        acc
+                        generic-params)))
+          {}
+          classes)))
+
+(defn- augment-ctx-with-visible-generic-classes
+  [ctx]
+  (let [builtin-class-names (set (map :name (builtin-class-defs)))
+        constraints (generic-constraint-map (:classes ctx))
+        visible-generic-names (reduce set/union #{}
+                                      (map collect-generic-names-from-type
+                                           (vals (:var-types ctx))))
+        existing-class-names (set (map :name (:classes ctx)))
+        synthetic-classes (->> visible-generic-names
+                               (remove #(or (contains? builtin-class-names %)
+                                            (contains? existing-class-names %)))
+                               (map (fn [generic-name]
+                                      (cond-> {:name generic-name
+                                               :deferred? true
+                                               :generic-params nil
+                                               :parents [{:parent "Any"}]
+                                               :body []}
+                                        (get constraints generic-name)
+                                        (update :parents conj {:parent (get constraints generic-name)}))))
+                               vec)]
+    (if (seq synthetic-classes)
+      (update ctx :classes into synthetic-classes)
+      ctx)))
 
 (defn- anonymous-class-defs
   [ast]
@@ -148,7 +218,7 @@
                       (infer-type-in-ctx ctx target-expr))
         base (base-type-name target-type)
         builtin-class (some #(when (= (:name %) base) %) (builtin-class-defs))
-        visible-class (some #(when (= (:name %) base) %) (:classes ctx))]
+        visible-class (class-def-in-ctx ctx base)]
     (and target-expr
          (supported-expr-in-ctx? ctx target-expr)
          (every? #(supported-expr-in-ctx? ctx %) (:args expr))
@@ -215,13 +285,13 @@
   [ctx expr]
   (let [raw-target (:target expr)
         class-target-def (when (string? raw-target)
-                           (some #(when (= (:name %) raw-target) %) (:classes ctx)))
+                           (class-def-in-ctx ctx raw-target))
         target-expr (normalize-call-target raw-target)
         target-type (when (and target-expr (not class-target-def))
                       (infer-type-in-ctx ctx target-expr))
         base (or (:name class-target-def) (base-type-name target-type))
         class-def (or class-target-def
-                      (some #(when (= (:name %) base) %) (:classes ctx)))
+                      (class-def-in-ctx ctx base))
         field-name (:method expr)
         field-def (when (and class-def (false? (:has-parens expr)))
                     (if class-target-def
@@ -237,12 +307,12 @@
 (defn- imported-java-target-call-in-ctx?
   [ctx expr]
   (let [class-target-def (when (string? (:target expr))
-                           (some #(when (= (:name %) (:target expr)) %) (:classes ctx)))
+                           (class-def-in-ctx ctx (:target expr)))
         target-expr (normalize-call-target (:target expr))
         target-type (when target-expr
                       (infer-type-in-ctx ctx target-expr))
         base (base-type-name target-type)
-        class-def (some #(when (= (:name %) base) %) (:classes ctx))]
+        class-def (class-def-in-ctx ctx base)]
     (and target-expr
          (nil? class-target-def)
          (supported-expr-in-ctx? ctx target-expr)
@@ -254,7 +324,7 @@
   (mapcat (fn [section]
             (when (= :constructors (:type section))
               (:constructors section)))
-          (:body (some #(when (= (:name %) class-name) %) (:classes ctx)))))
+          (:body (class-def-in-ctx ctx class-name))))
 
 (defn- known-constructor-in-ctx?
   [ctx class-name constructor-name arity]
@@ -273,7 +343,7 @@
 
 (defn- class-def-in-ctx
   [ctx class-name]
-  (some #(when (= (:name %) class-name) %) (:classes ctx)))
+  (get (into {} (map (juxt :name identity) (:classes ctx))) class-name))
 
 (defn- function-object-call-in-ctx?
   [ctx expr]
@@ -295,7 +365,8 @@
                       (update :var-types merge (into {}
                                                      (concat
                                                       (map (fn [{:keys [name type]}] [name type]) params)
-                                                      [["result" (or (:return-type expr) "Any")]]))))]
+                                                      [["result" (or (:return-type expr) "Any")]])))
+                      (augment-ctx-with-visible-generic-classes))]
     (boolean (supported-stmt-block? child-ctx (:body expr)))))
 
 (defn normalize-program-ast
@@ -321,108 +392,114 @@
 (defn- initial-eligibility-ctx
   [session ast]
   (let [actual-classes (vec (concat (user-class-defs ast)
-                                    (anonymous-class-defs ast)))
+                                    (function-class-defs (:functions ast))
+                                    (anonymous-class-defs ast)
+                                    (function-class-defs (vals @(:function-asts session)))))
         imported-classes (import-placeholder-classes (:imports ast))
         compiled-fns (set (keys @(:functions (:state session))))]
-    {:known-vars (set (concat (keys (session-var-types session))
-                              (keys @(:values (:state session)))))
-     :known-fns (set (concat builtin-function-names
-                             compiled-fns
-                             (map :name (:functions ast))))
-     :var-types (merge (session-var-types session)
-                     (into {}
-                           (map (fn [fn-def]
-                                  [(:name fn-def) (:class-name fn-def)]))
-                           (concat (vals @(:function-asts session)) (:functions ast))))
-     :functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
-     :classes (vec (concat (builtin-class-defs)
-                           imported-classes
-                           (vals @(:class-asts session))
-                           actual-classes))
-     :compiled-class-names (set (concat (compiled-class-names session)
-                                        (map :name actual-classes)))
-     :imports (:imports ast)
-     :retry-allowed? false}))
+    (augment-ctx-with-visible-generic-classes
+     {:known-vars (set (concat (keys (session-var-types session))
+                               (keys @(:values (:state session)))))
+      :known-fns (set (concat builtin-function-names
+                              compiled-fns
+                              (map :name (:functions ast))))
+      :var-types (merge (session-var-types session)
+                        (into {}
+                              (map (fn [fn-def]
+                                     [(:name fn-def) (:class-name fn-def)]))
+                              (concat (vals @(:function-asts session)) (:functions ast))))
+      :functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
+      :classes (vec (concat (builtin-class-defs)
+                            imported-classes
+                            (vals @(:class-asts session))
+                            actual-classes))
+      :compiled-class-names (set (concat (compiled-class-names session)
+                                         (map :name actual-classes)))
+      :imports (:imports ast)
+      :retry-allowed? false})))
 
 (defn supported-expr-in-ctx?
   [ctx expr]
-  (case (:type expr)
-    :integer true
-    :real true
-    :string true
-    :char true
-    :boolean true
-    :nil true
-    :array-literal (every? #(supported-expr-in-ctx? ctx %) (:elements expr))
-    :map-literal (every? (fn [{:keys [key value]}]
-                           (and (supported-expr-in-ctx? ctx key)
-                                (supported-expr-in-ctx? ctx value)))
-                         (:entries expr))
-    :set-literal (every? #(supported-expr-in-ctx? ctx %) (:elements expr))
-    :anonymous-function (supported-anonymous-function-in-ctx? ctx expr)
-    :create (if (= "Channel" (:class-name expr))
+  (if (string? expr)
+    (or (contains? (:known-vars ctx) expr)
+        (java-host-class-root? ctx expr))
+    (case (:type expr)
+      :integer true
+      :real true
+      :string true
+      :char true
+      :boolean true
+      :nil true
+      :array-literal (every? #(supported-expr-in-ctx? ctx %) (:elements expr))
+      :map-literal (every? (fn [{:keys [key value]}]
+                             (and (supported-expr-in-ctx? ctx key)
+                                  (supported-expr-in-ctx? ctx value)))
+                           (:entries expr))
+      :set-literal (every? #(supported-expr-in-ctx? ctx %) (:elements expr))
+      :anonymous-function (supported-anonymous-function-in-ctx? ctx expr)
+      :create (if (= "Channel" (:class-name expr))
+                (and (every? #(supported-expr-in-ctx? ctx %) (:args expr))
+                     (case (:constructor expr)
+                       nil (empty? (:args expr))
+                       "with_capacity" (= 1 (count (:args expr)))
+                       false))
+                (let [class-def (class-def-in-ctx ctx (:class-name expr))]
+                  (if (:import class-def)
+                    (and (nil? (:constructor expr))
+                         (every? #(supported-expr-in-ctx? ctx %) (:args expr)))
+                    (and (contains? (:compiled-class-names ctx) (:class-name expr))
+                         class-def
+                         (not (:deferred? class-def))
+                         (every? #(supported-expr-in-ctx? ctx %) (:args expr))
+                         (if-let [ctor (:constructor expr)]
+                           (known-constructor-in-ctx? ctx (:class-name expr) ctor (count (:args expr)))
+                           (empty? (:args expr)))))))
+      :identifier (or (contains? (:known-vars ctx) (:name expr))
+                      (java-host-class-root? ctx (:name expr)))
+      :spawn (boolean (supported-stmt-block? (-> ctx
+                                                 (update :known-vars conj "result")
+                                                 (assoc-in [:var-types "result"] "Any"))
+                                             (:body expr)))
+      :call (if (nil? (:target expr))
               (and (every? #(supported-expr-in-ctx? ctx %) (:args expr))
-                   (case (:constructor expr)
-                     nil (empty? (:args expr))
-                     "with_capacity" (= 1 (count (:args expr)))
-                     false))
-              (let [class-def (class-def-in-ctx ctx (:class-name expr))]
-                (if (:import class-def)
-                  (and (nil? (:constructor expr))
+                   (or (and (empty? (:args expr))
+                            (not (:has-parens expr)))
+                       (contains? (:known-fns ctx) (:method expr))
+                       (function-object-call-in-ctx? ctx expr)))
+              (or (and (:with-java? ctx)
+                       (supported-expr-in-ctx? ctx (normalize-call-target (:target expr)))
                        (every? #(supported-expr-in-ctx? ctx %) (:args expr)))
-                  (and (contains? (:compiled-class-names ctx) (:class-name expr))
-                       class-def
-                       (not (:deferred? class-def))
-                       (every? #(supported-expr-in-ctx? ctx %) (:args expr))
-                       (if-let [ctor (:constructor expr)]
-                         (known-constructor-in-ctx? ctx (:class-name expr) ctor (count (:args expr)))
-                         (empty? (:args expr)))))))
-    :identifier (or (contains? (:known-vars ctx) (:name expr))
-                    (java-host-class-root? ctx (:name expr)))
-    :spawn (boolean (supported-stmt-block? (-> ctx
-                                               (update :known-vars conj "result")
-                                               (assoc-in [:var-types "result"] "Any"))
-                                           (:body expr)))
-    :call (if (nil? (:target expr))
-            (and (every? #(supported-expr-in-ctx? ctx %) (:args expr))
-                 (or (and (empty? (:args expr))
-                          (not (:has-parens expr)))
-                     (contains? (:known-fns ctx) (:method expr))
-                     (function-object-call-in-ctx? ctx expr)))
-            (or (and (:with-java? ctx)
-                     (supported-expr-in-ctx? ctx (normalize-call-target (:target expr)))
-                     (every? #(supported-expr-in-ctx? ctx %) (:args expr)))
-                (builtin-target-call-in-ctx? ctx expr)
-                (user-target-call-in-ctx? ctx expr)
-                (imported-java-target-call-in-ctx? ctx expr)))
-    :binary (and (contains? (into #{"+" "-" "*" "/" "%" "^" "and" "or"} relational-ops) (:operator expr))
-                 (supported-expr-in-ctx? ctx (:left expr))
-                 (supported-expr-in-ctx? ctx (:right expr)))
-    :unary (supported-expr-in-ctx? ctx (:expr expr))
-    :old (supported-expr-in-ctx? ctx (:expr expr))
-    :if (and ((if (= :convert (:type (:condition expr)))
-                supported-convert-in-ctx?
-                supported-expr-in-ctx?)
-              ctx
-              (:condition expr))
-             (supported-if-branches? ctx (:then expr))
-             (if-let [clause (first (:elseif expr))]
-               (supported-expr-in-ctx?
-                ctx
-                {:type :if
-                 :condition (:condition clause)
-                 :then (:then clause)
-                 :elseif (vec (rest (:elseif expr)))
-                 :else (:else expr)})
-               (supported-if-branches? ctx (:else expr))))
-    :when (and ((if (= :convert (:type (:condition expr)))
+                  (builtin-target-call-in-ctx? ctx expr)
+                  (user-target-call-in-ctx? ctx expr)
+                  (imported-java-target-call-in-ctx? ctx expr)))
+      :binary (and (contains? (into #{"+" "-" "*" "/" "%" "^" "and" "or"} relational-ops) (:operator expr))
+                   (supported-expr-in-ctx? ctx (:left expr))
+                   (supported-expr-in-ctx? ctx (:right expr)))
+      :unary (supported-expr-in-ctx? ctx (:expr expr))
+      :old (supported-expr-in-ctx? ctx (:expr expr))
+      :if (and ((if (= :convert (:type (:condition expr)))
                   supported-convert-in-ctx?
                   supported-expr-in-ctx?)
                 ctx
                 (:condition expr))
-               (supported-expr-in-ctx? ctx (:consequent expr))
-               (supported-expr-in-ctx? ctx (:alternative expr)))
-    false))
+               (supported-if-branches? ctx (:then expr))
+               (if-let [clause (first (:elseif expr))]
+                 (supported-expr-in-ctx?
+                  ctx
+                  {:type :if
+                   :condition (:condition clause)
+                   :then (:then clause)
+                   :elseif (vec (rest (:elseif expr)))
+                   :else (:else expr)})
+                 (supported-if-branches? ctx (:else expr))))
+      :when (and ((if (= :convert (:type (:condition expr)))
+                    supported-convert-in-ctx?
+                    supported-expr-in-ctx?)
+                  ctx
+                  (:condition expr))
+                 (supported-expr-in-ctx? ctx (:consequent expr))
+                 (supported-expr-in-ctx? ctx (:alternative expr)))
+      false)))
 
 (defn supported-convert-in-ctx?
   [ctx expr]
@@ -531,23 +608,24 @@
 
 (defn- advance-eligibility-ctx
   [ctx stmt]
-  (case (:type stmt)
-    :let (let [ctx' (if (= :convert (:type (:value stmt)))
-                      (-> ctx
-                          (update :known-vars conj (:var-name (:value stmt)))
-                          (assoc-in [:var-types (:var-name (:value stmt))]
-                                    (tc/detachable-version (:target-type (:value stmt)))))
-                      ctx)
-               nex-type (or (:var-type stmt)
-                            (infer-type-in-ctx ctx' (:value stmt)))]
-           (-> ctx'
-               (update :known-vars conj (:name stmt))
-               (assoc-in [:var-types (:name stmt)] nex-type)))
-    :convert (-> ctx
-                 (update :known-vars conj (:var-name stmt))
-                 (assoc-in [:var-types (:var-name stmt)]
-                           (tc/detachable-version (:target-type stmt))))
-    ctx))
+  (augment-ctx-with-visible-generic-classes
+   (case (:type stmt)
+     :let (let [ctx' (if (= :convert (:type (:value stmt)))
+                       (-> ctx
+                           (update :known-vars conj (:var-name (:value stmt)))
+                           (assoc-in [:var-types (:var-name (:value stmt))]
+                                     (tc/detachable-version (:target-type (:value stmt)))))
+                       ctx)
+                nex-type (or (:var-type stmt)
+                             (infer-type-in-ctx ctx' (:value stmt)))]
+            (-> ctx'
+                (update :known-vars conj (:name stmt))
+                (assoc-in [:var-types (:name stmt)] nex-type)))
+     :convert (-> ctx
+                  (update :known-vars conj (:var-name stmt))
+                  (assoc-in [:var-types (:var-name stmt)]
+                            (tc/detachable-version (:target-type stmt))))
+     ctx)))
 
 (defn eligible-ast?
   [session ast]
@@ -846,24 +924,27 @@
   "Materialize compiled-session top-level state into the interpreter context.
    Returns {:ctx ctx :var-types {..}} for the caller to update REPL globals."
   [session ctx]
-  (reset! (:bindings (:globals ctx)) {})
-  (reset! (:imports ctx) [])
-  (let [builtin-classes @(:classes (interp/make-context))]
-    (reset! (:classes ctx) builtin-classes))
-  (reset! (:imports ctx) (vec @(:import-asts session)))
-  (doseq [class-def (vals @(:class-asts session))]
-    (interp/eval-node ctx class-def))
-  (doseq [fn-def (vals @(:function-asts session))]
-    (interp/eval-node ctx fn-def))
-  (doseq [[k v] @(:values (:state session))]
-    (interp/env-define (:globals ctx) k v))
-  {:ctx ctx
-   :var-types (merge
-               (into {}
-                     (map (fn [[name fn-def]]
-                            [name (:class-name fn-def)]))
-                     @(:function-asts session))
-               (session-var-types session))})
+  (let [ctx' ctx]
+    (when-let [compiled-state (:compiled-state ctx')]
+      (reset! compiled-state (:state session)))
+    (reset! (:bindings (:globals ctx')) {})
+    (reset! (:imports ctx') [])
+    (let [builtin-classes @(:classes (interp/make-context))]
+      (reset! (:classes ctx') builtin-classes))
+    (reset! (:imports ctx') (vec @(:import-asts session)))
+    (doseq [class-def (vals @(:class-asts session))]
+      (interp/eval-node ctx' class-def))
+    (doseq [fn-def (vals @(:function-asts session))]
+      (interp/eval-node ctx' fn-def))
+    (doseq [[k v] @(:values (:state session))]
+      (interp/env-define (:globals ctx') k v))
+    {:ctx ctx'
+     :var-types (merge
+                 (into {}
+                       (map (fn [[name fn-def]]
+                              [name (:class-name fn-def)]))
+                       @(:function-asts session))
+                 (session-var-types session))}))
 
 (defn compile-and-eval!
   "Attempt compiled evaluation for a narrow REPL-safe top-level subset.

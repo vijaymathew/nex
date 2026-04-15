@@ -182,6 +182,8 @@
   (case operator
     "and" "&&"
     "or" "||"
+    "==" "==="
+    "!=" "!=="
     "=" "==="
     "/=" "!=="
     ">=" ">="
@@ -223,7 +225,7 @@
     :binary (let [lt (infer-constant-type (:left expr) constants-by-name)
                   rt (infer-constant-type (:right expr) constants-by-name)]
               (case (:operator expr)
-                ("=" "/=" "<" "<=" ">" ">=" "and" "or") "Boolean"
+                ("=" "/=" "==" "!=" "<" "<=" ">" ">=" "and" "or") "Boolean"
                 "+" (if (or (= lt "String") (= rt "String")) "String" lt)
                 ("-" "*" "/" "%" "^") lt
                 "Any"))
@@ -274,7 +276,7 @@
       :binary (let [left-type (builtin-dispatch-type (infer-expression-type (:left expr)))
                     right-type (builtin-dispatch-type (infer-expression-type (:right expr)))]
                 (case (:operator expr)
-                  ("=" "/=" "<" "<=" ">" ">=" "and" "or") "Boolean"
+                  ("=" "/=" "==" "!=" "<" "<=" ">" ">=" "and" "or") "Boolean"
                   "+" (if (or (= left-type "String") (= right-type "String")) "String" left-type)
                   "/" (division-dispatch-type left-type right-type)
                   "^" (power-dispatch-type left-type right-type)
@@ -818,7 +820,10 @@
     "index_of"  (fn [target args] (str "__nexArrayIndexOf(" target ", " args ")"))
     "remove"    (fn [target args] (str "(" target ".splice(" args ", 1), null)"))
     "reverse"   (fn [target _] (str "[..." target "].reverse()"))
-    "sort"      (fn [target _] (str "__nexArraySort(" target ")"))
+    "sort"      (fn [target args]
+                  (if (str/blank? args)
+                    (str "__nexArraySort(" target ")")
+                    (str "__nexArraySort(" target ", " args ")")))
     "slice"     (fn [target args] (str target ".slice(" args ")"))
     "to_string" (fn [target _] (str "__nexToString(" target ")"))
     "equals"    (fn [target args] (str "__nexDeepEquals(" target ", " args ")"))
@@ -2269,8 +2274,13 @@
        "  if (a && typeof a.compare === 'function') return a.compare(b);\n"
        "  throw new Error('Array.sort requires Comparable elements');\n"
        "}\n"
-       "function __nexArraySort(values) {\n"
-       "  return [...values].sort((a, b) => __nexCompareValues(a, b));\n"
+       "function __nexArraySort(values, compareFn = null) {\n"
+       "  if (!compareFn) return [...values].sort((a, b) => __nexCompareValues(a, b));\n"
+       "  return [...values].sort((a, b) => {\n"
+       "    const result = (typeof compareFn === 'function') ? compareFn(a, b) : compareFn.call2(a, b);\n"
+       "    if (!Number.isInteger(result)) throw new Error('Array.sort comparator must return Integer');\n"
+       "    return result;\n"
+       "  });\n"
        "}\n"
        "function __nexMinHeap(compare = null) {\n"
        "  return { _type: 'MinHeap', data: [], compare };\n"

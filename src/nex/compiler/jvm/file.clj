@@ -50,6 +50,39 @@
            :imports merged-imports
            :classes (vec (concat intern-classes (:classes ast))))))
 
+(defn- debug-location
+  [x]
+  (cond
+    (and (map? x) (:dbg/line x))
+    [(:dbg/line x) (:dbg/col x)]
+
+    (and (map? x) (:line x))
+    [(:line x) (:column x)]
+
+    :else
+    (some debug-location
+          (concat
+           (vals (select-keys x [:expr :stmt :value :target :left :right :condition]))
+           (when (sequential? x) x)))))
+
+(defn- format-exception-diagnostics
+  [^Exception e]
+  (let [data (ex-data e)
+        existing-errors (:errors data)
+        [line col] (or (debug-location data)
+                       (debug-location (:error data)))]
+    (cond
+      (seq existing-errors)
+      (vec existing-errors)
+
+      line
+      [(str "At line " line
+            (when col
+              (str ", column " col)))]
+
+      :else
+      [])))
+
 (defn- user-class-defs
   [ast]
   (let [synthetic-class-names (set (keep :class-name (:functions ast)))]
@@ -98,49 +131,57 @@
    :classes {<binary-name> <byte-array> ...}}"
   ([source-id ast] (compile-ast source-id ast {}))
   ([source-id ast opts]
-   (let [module-ast (augment-ast-with-interns source-id ast)
-         _ (when-not (:skip-type-check opts)
-             (let [result (tc/type-check module-ast)]
-               (when-not (:success result)
-                 (throw (ex-info "Type checking failed"
-                                 {:errors (map tc/format-type-error (:errors result))})))))
-         prepared-ast (lower/prepare-program-for-closures
-                       module-ast
-                       {:classes (:classes module-ast)
-                        :functions (:functions module-ast)
-                        :imports (:imports module-ast)
-                        :var-types {}})
-         package-root (hidden-package-root source-id)
-         program-internal-name (str package-root "/__nex/Program")
-         launcher-internal-name (str package-root "/__nex/Main")
-         compiled-classes (file-class-metadata source-id prepared-ast)
-         {:keys [unit]} (lower/lower-repl-cell prepared-ast
-                                               {:name program-internal-name
-                                                :source-file source-id
-                                                :compiled-classes compiled-classes
-                                                :classes []
-                                                :functions []
-                                                :imports (:imports prepared-ast)
-                                                :var-types {}})
-         class-asts (vec (concat (user-class-defs prepared-ast)
-                                 (lower/collect-anonymous-class-defs prepared-ast)))
-         class-bytes (into {(desc/binary-class-name program-internal-name)
-                            (emit/compile-unit->bytes unit)
-                            (desc/binary-class-name launcher-internal-name)
-                            (emit/compile-launcher->bytes
-                             {:internal-name launcher-internal-name
-                              :binary-name (desc/binary-class-name launcher-internal-name)
-                              :source-file source-id
-                              :program-internal-name program-internal-name
-                              :classes-edn (pr-str class-asts)
-                              :imports-edn (pr-str (:imports prepared-ast))})}
-                           (map (fn [lowered-class]
-                                  [(desc/binary-class-name (:jvm-name lowered-class))
-                                   (emit/compile-user-class->bytes lowered-class)])
-                                (:classes unit)))]
-     {:program-class (desc/binary-class-name program-internal-name)
-      :main-class (desc/binary-class-name launcher-internal-name)
-      :classes class-bytes})))
+   (try
+     (let [module-ast (augment-ast-with-interns source-id ast)
+           _ (when-not (:skip-type-check opts)
+               (let [result (tc/type-check module-ast)]
+                 (when-not (:success result)
+                   (throw (ex-info "Type checking failed"
+                                   {:errors (map tc/format-type-error (:errors result))})))))
+           prepared-ast (lower/prepare-program-for-closures
+                         module-ast
+                         {:classes (:classes module-ast)
+                          :functions (:functions module-ast)
+                          :imports (:imports module-ast)
+                          :var-types {}})
+           package-root (hidden-package-root source-id)
+           program-internal-name (str package-root "/__nex/Program")
+           launcher-internal-name (str package-root "/__nex/Main")
+           compiled-classes (file-class-metadata source-id prepared-ast)
+           {:keys [unit]} (lower/lower-repl-cell prepared-ast
+                                                 {:name program-internal-name
+                                                  :source-file source-id
+                                                  :compiled-classes compiled-classes
+                                                  :classes []
+                                                  :functions []
+                                                  :imports (:imports prepared-ast)
+                                                  :var-types {}})
+           class-asts (vec (concat (user-class-defs prepared-ast)
+                                   (lower/collect-anonymous-class-defs prepared-ast)))
+           class-bytes (into {(desc/binary-class-name program-internal-name)
+                              (emit/compile-unit->bytes unit)
+                              (desc/binary-class-name launcher-internal-name)
+                              (emit/compile-launcher->bytes
+                               {:internal-name launcher-internal-name
+                                :binary-name (desc/binary-class-name launcher-internal-name)
+                                :source-file source-id
+                                :program-internal-name program-internal-name
+                                :classes-edn (pr-str class-asts)
+                                :imports-edn (pr-str (:imports prepared-ast))})}
+                             (map (fn [lowered-class]
+                                    [(desc/binary-class-name (:jvm-name lowered-class))
+                                     (emit/compile-user-class->bytes lowered-class)])
+                                  (:classes unit)))]
+       {:program-class (desc/binary-class-name program-internal-name)
+        :main-class (desc/binary-class-name launcher-internal-name)
+        :classes class-bytes})
+     (catch clojure.lang.ExceptionInfo e
+       (let [diagnostics (format-exception-diagnostics e)]
+         (if (seq diagnostics)
+           (throw (ex-info (.getMessage e)
+                           (assoc (or (ex-data e) {}) :errors diagnostics)
+                           e))
+           (throw e)))))))
 
 (defn compile-file
   "Compile a Nex source file into JVM `.class` files.

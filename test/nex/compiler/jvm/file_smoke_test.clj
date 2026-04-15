@@ -77,12 +77,12 @@ feature
   end
 end
 
-function before(a: K, b: K): Boolean
+function before[K -> Comparable](a: K, b: K): Boolean
 do
   result := a < b
 end
 
-function traverse(node: ?Node[K], result_arr: Array[K])
+function traverse[K -> Comparable](node: ?Node[K], result_arr: Array[K])
 do
   if convert node to current: Node[K] then
     traverse(current.left, result_arr)
@@ -113,6 +113,23 @@ print(tree.keys().length)")
               {:keys [exit out err]} (run-jar! (:jar result))]
           (is (= 0 exit) err)
           (is (= "true\n1" (str/trim out))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-top-level-print-of-array-equality-smoke-test
+  (testing "compiled top-level print can lower built-in calls whose arguments contain array equality"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-print-array-eq")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "let xs := [5, 7, 9]
+print(xs = [5, 7, 9])")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))]
+          (is (= 0 exit) err)
+          (is (= "true" (str/trim out))))
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
@@ -343,6 +360,55 @@ check(root)")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-generic-free-function-return-instantiation-smoke-test
+  (testing "compile-jar instantiates bare generic free-function return types from call arguments"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-generic-free-return")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "function reduce[T](a: Array[T], f: Function, init: T): T do
+  result := init
+  across a as elem do
+    result := f(result, elem)
+  end
+end
+
+let r := reduce([1, 2, 3], fn(a: Integer, b: Integer): Integer do result := a + b end, 0)
+print(r)
+print(r = 6)")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["6" "true"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-identity-equality-smoke-test
+  (testing "compile-jar supports identity equality operators"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-identity-eq")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "let a := [1]
+let b := a
+let c := [1]
+print(a == b)
+print(a == c)
+print(a != c)
+print(1 == 1)")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["true" "false" "true" "true"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-auto-initializes-builtin-collection-fields-test
   (testing "compiled constructors see empty defaults for non-detachable Array/Map/Set/String fields"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-field-defaults")
@@ -464,6 +530,59 @@ across c as i do print(i) end")
               output-lines (remove str/blank? (str/split-lines out))]
           (is (= 0 exit) err)
           (is (= ["0" "1" "2"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-user-defined-method-overload-by-arity-smoke-test
+  (testing "compile-jar dispatches user-defined methods with the same name by arity"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-method-arity-overload")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class Greeter
+feature
+  greet(): String
+  do
+    result := \"hello\"
+  end
+
+  greet(name: String): String
+  do
+    result := \"hello, \" + name
+  end
+end
+
+let g: Greeter := create Greeter
+print(g.greet())
+print(g.greet(\"Ada\"))")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["\"hello\"" "\"hello, Ada\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-array-sort-with-comparator-smoke-test
+  (testing "compile-jar supports Array.sort(compareFn)"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-array-sort-comparefn")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "let xs: Array[Integer] := [10, 2, 3]
+let sorted := xs.sort(fn(a: Integer, b: Integer): Integer do
+  result := b - a
+end)
+print(sorted)")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["[10, 3, 2]"] output-lines)))
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))

@@ -40,7 +40,8 @@
 (declare accessible-field-def)
 (declare accessible-method-def)
 (declare single-super-parent-name)
-(declare infer-call-type)
+(declare infer-call-type
+         infer-free-function-return-type)
 (declare collect-anonymous-class-defs)
 (declare refine-condition-branch-env)
 (declare function-object-call?)
@@ -58,7 +59,10 @@
 
 (defn- builtin-class-defs
   []
-  (vals @(:classes (interp/make-context))))
+  (let [interp-builtins @(:classes (interp/make-context))
+        env (tc/make-type-env)]
+    (tc/register-builtin-methods env)
+    (vals (merge interp-builtins @(:classes env)))))
 
 (defn- merge-visible-classes
   [& class-groups]
@@ -81,7 +85,7 @@
   (set (keys interp/builtins)))
 
 (def ^:private builtin-runtime-receiver-types
-  #{"Any" "Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
+  #{"Any" "Comparable" "Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Cursor" "Task" "Channel" "Console" "Process"})
 
@@ -308,10 +312,13 @@
 
 (defn- generic-runtime-field-bindings
   [env class-name generic-params]
-  (into {}
-        (map (fn [{:keys [name]}]
-               [name (generic-runtime-field-ir env class-name name)]))
-        generic-params))
+  (if (and (seq generic-params)
+           (get (:compiled-classes env) class-name))
+    (into {}
+          (map (fn [{:keys [name]}]
+                 [name (generic-runtime-field-ir env class-name name)]))
+          generic-params)
+    {}))
 
 (defn- runtime-type-token-ir
   [env nex-type]
@@ -413,7 +420,7 @@
                              left-type))
               (= "^" op) (tc/power-result-type (infer-type env (:left expr))
                                                (infer-type env (:right expr)))
-              (#{"and" "or" "=" "/=" "<" "<=" ">" ">="} op) "Boolean"
+              (#{"and" "or" "=" "/=" "==" "!=" "<" "<=" ">" ">="} op) "Boolean"
               :else nil))
 
           :unary
@@ -543,13 +550,24 @@
         target-expr (normalize-call-target raw-target)]
     (if (nil? target-expr)
       (or
+       (case (:method expr)
+         "print" "Void"
+         "println" "Void"
+         "sleep" "Void"
+         "hint_spin" "Void"
+         "random_real" "Real"
+         "type_of" "String"
+         "type_is" "Boolean"
+         "path_exists" "Boolean"
+         "datetime_now" "Integer64"
+         nil)
        (when-let [fn-def (some (fn [fn-def]
                                  (when (and (= (:name fn-def) (:method expr))
                                             (= (count (or (:params fn-def) []))
                                                (count (:args expr))))
                                    fn-def))
                                (:functions env))]
-         (function-return-type (normalized-function-def fn-def)))
+         (infer-free-function-return-type env fn-def (:args expr)))
        (when (function-object-call? env (:method expr) (count (:args expr)))
          (let [binding-type (function-object-binding-type env (:method expr))
                base-type (base-type-name binding-type)
@@ -640,6 +658,61 @@
                       (tc/builtin-type? %)
                       (str/starts-with? % "__"))
                  names))))
+
+(defn- merge-inferred-generic-bindings
+  [env left right]
+  (reduce-kv
+   (fn [acc generic-name inferred-type]
+     (if-let [existing (get acc generic-name)]
+       (if (or (tc/types-equal? env existing inferred-type)
+               (tc/types-compatible? env inferred-type existing)
+               (tc/types-compatible? env existing inferred-type))
+         acc
+         left)
+       (assoc acc generic-name inferred-type)))
+   left
+   right))
+
+(defn- infer-generic-type-map-from-arg
+  [env generic-names param-type arg-type]
+  (let [param-type (tc/normalize-type param-type)
+        arg-type (tc/normalize-type arg-type)]
+    (cond
+      (and (string? param-type) (contains? generic-names param-type))
+      {param-type arg-type}
+
+      (and (map? param-type) (map? arg-type)
+           (= (:base-type param-type) (:base-type arg-type)))
+      (let [param-args (vec (or (:type-params param-type) (:type-args param-type)))
+            arg-args (vec (or (:type-params arg-type) (:type-args arg-type)))]
+        (if (= (count param-args) (count arg-args))
+          (reduce (fn [acc [param-arg arg-arg]]
+                    (merge-inferred-generic-bindings
+                     env acc (infer-generic-type-map-from-arg env generic-names param-arg arg-arg)))
+                  {}
+                  (map vector param-args arg-args))
+          {}))
+
+      :else
+      {})))
+
+(defn- infer-free-function-return-type
+  [env fn-def args]
+  (let [fn-def (normalized-function-def fn-def)
+        generic-names (set (concat (map :name (:generic-params fn-def))
+                                   (free-function-generic-param-names (:classes env) fn-def)))
+        type-map (reduce (fn [acc [param arg]]
+                           (merge-inferred-generic-bindings
+                            env
+                            acc
+                            (infer-generic-type-map-from-arg
+                             env
+                             generic-names
+                             (:type param)
+                             (infer-type env arg))))
+                         {}
+                         (map vector (:params fn-def) args))]
+    (tc/resolve-generic-type (function-return-type fn-def) type-map)))
 
 (declare implicit-if-expression?)
 
@@ -1688,6 +1761,8 @@
 
     (= :call (:type expr))
     (let [target (:target expr)
+          _ (when (string? target)
+              (capture-reference! captures local-types (:var-types ctx) target))
           method (:method expr)
           args (mapv #(rewrite-expression-for-closures ctx local-types captures %)
                      (:args expr))
@@ -2208,7 +2283,7 @@
                        (#{"+" "-" "*" "/" "%"} (:operator expr))
                        (:nex-type left-ir)
 
-                       (#{"and" "or" "=" "/=" "<" "<=" ">" ">="} (:operator expr))
+                       (#{"and" "or" "=" "/=" "==" "!=" "<" "<=" ">" ">="} (:operator expr))
                        "Boolean"
 
                        :else inferred-type)
@@ -2246,7 +2321,9 @@
                                "<" :lt
                                "<=" :lte
                                "=" :eq
-                               "/=" :neq}
+                               "/=" :neq
+                               "==" :ident-eq
+                               "!=" :ident-neq}
                               op)
                          left-ir right-ir nex-type jvm-type)))
 

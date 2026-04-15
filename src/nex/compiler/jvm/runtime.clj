@@ -717,6 +717,8 @@
     (reset! (:bindings (:globals ctx)) {})
     (reset! (:output ctx) @(:output state))
     (reset! (:imports ctx) (vec @(:imports state)))
+    (when-let [compiled-state-slot (:compiled-state ctx)]
+      (reset! compiled-state-slot state))
     (swap! (:classes ctx)
            (fn [builtins]
              (let [copy (HashMap.)]
@@ -727,7 +729,7 @@
                copy)))
     (doseq [[k v] @(:values state)]
       (interp/env-define (:globals ctx) k v))
-    (assoc ctx :compiled-state state)))
+    ctx))
 
 (defn- lowered-instance-method-name
   [method-name arity]
@@ -1464,6 +1466,8 @@
 (def-builtin-method-wrapper builtin-method-any-get "get")
 (def-builtin-method-wrapper builtin-method-any-length "length")
 
+(def-builtin-method-wrapper builtin-method-comparable-compare "compare")
+
 (def-builtin-method-wrapper builtin-method-integer-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-integer-to-integer "to_integer")
 (def-builtin-method-wrapper builtin-method-integer-to-integer64 "to_integer64")
@@ -1620,6 +1624,24 @@
   [a b]
   (value/nex-deep-equals? interp/nex-object? a b))
 
+(defn- scalar-identity-value?
+  [v]
+  (or (nil? v)
+      (string? v)
+      (number? v)
+      (boolean? v)
+      (char? v)))
+
+(defn identity-equals
+  [a b]
+  (cond
+    (and (scalar-identity-value? a)
+         (scalar-identity-value? b))
+    (= a b)
+
+    :else
+    (identical? a b)))
+
 (defn clone-value
   [value]
   (value/nex-clone-value interp/nex-object? interp/make-object value))
@@ -1686,13 +1708,26 @@
                           {:left a :right b :result result})))))))
 
 (defn array-sort
-  [state values]
-  (let [out (java.util.ArrayList. values)]
-    (.sort out
-           (reify java.util.Comparator
-             (compare [_ a b]
-               (int (runtime-compare-values state a b)))))
-    out))
+  ([state values]
+   (let [out (java.util.ArrayList. values)]
+     (.sort out
+            (reify java.util.Comparator
+              (compare [_ a b]
+                (int (runtime-compare-values state a b)))))
+     out))
+  ([state values comparator]
+   (let [out (java.util.ArrayList. values)]
+     (.sort out
+            (reify java.util.Comparator
+              (compare [_ a b]
+                (let [result (if (fn? comparator)
+                               (comparator a b)
+                               (invoke-function-object state comparator [a b]))]
+                  (if (integer? result)
+                    result
+                    (throw (ex-info "Array.sort comparator must return Integer"
+                                    {:left a :right b :result result})))))))
+     out)))
 
 (defn array-join
   [state values sep]

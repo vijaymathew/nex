@@ -28,7 +28,7 @@ classDecl
     ;
 
 functionDecl
-    : FUNCTION IDENTIFIER '(' paramList? ')' (':' type)? noteClause? (requireClause? DO block ensureClause? rescueClause? END)?
+    : FUNCTION IDENTIFIER genericParams? '(' paramList? ')' (':' type)? noteClause? (requireClause? DO block ensureClause? rescueClause? END)?
     ;
 
 genericParams
@@ -257,7 +257,7 @@ logicalAnd
     ;
 
 equality
-    : comparison ((EQUAL | NOTEQUAL) comparison)*
+    : comparison ((IDENTEQUAL | IDENTITYNOTEQUAL | EQUAL | NOTEQUAL) comparison)*
     ;
 
 comparison
@@ -317,7 +317,7 @@ whenExpression
     ;
 
 anonymousFunction
-    : FN '(' paramList? ')' (':' type)? DO block END
+    : FN genericParams? '(' paramList? ')' (':' type)? DO block END
     ;
 
 oldExpression
@@ -466,6 +466,8 @@ DIV          : '/';
 POW          : '^';
 MOD          : '%';
 
+IDENTEQUAL   : '==';
+IDENTITYNOTEQUAL : '!=';
 EQUAL        : '=';
 NOTEQUAL     : '/=';
 QMARK        : '?';

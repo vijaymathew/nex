@@ -1049,6 +1049,19 @@
           (not (contains? builtin-sortable-types left-type))
           (not (contains? builtin-sortable-types right-type))))))
 
+(defn- uncompiled-user-function-call?
+  [node]
+  (when (and (= :compiled @*repl-backend*)
+             (map? node)
+             (= :call (:type node))
+             (nil? (:target node)))
+    (let [function-name (:method node)
+          binding-type (get @*repl-var-types* function-name)
+          compiled-function-names (when-let [session @*compiled-repl-session*]
+                                    (set (keys @(:functions (:state session)))))]
+      (and binding-type
+           (not (contains? compiled-function-names function-name))))))
+
 (defn- ast-needs-interpreter-fallback?
   [ctx ast]
   (let [top-nodes (concat (:statements ast)
@@ -1058,7 +1071,8 @@
     (boolean
      (some (fn [node]
              (or (string-ordered-comparison? ctx node)
-                 (nonbuiltin-array-sort? ctx node)))
+                 (nonbuiltin-array-sort? ctx node)
+                 (uncompiled-user-function-call? node)))
            nodes))))
 
 (defn- fallback-eligible-compiled-error?
@@ -1238,8 +1252,19 @@
                      (seq (:statements ast)) (seq (:calls ast))))
         ;; Create an augmented AST that includes previously defined classes
         ;; so the type checker knows about them
-        (let [prev-classes (remove #(= "__ReplTemp__" (:name %))
-                                  (vals @(:classes ctx)))
+        (let [prev-functions (if (= :compiled @*repl-backend*)
+                               (vals @(:function-asts @*compiled-repl-session*))
+                               [])
+              synthetic-function-class-names (set (map :class-name prev-functions))
+              referenced-anonymous-class-names (->> (vals @*repl-var-types*)
+                                                    (filter string?)
+                                                    (filter #(str/starts-with? % "AnonymousFunction_"))
+                                                    set)
+              prev-classes (remove #(or (= "__ReplTemp__" (:name %))
+                                        (contains? synthetic-function-class-names (:name %))
+                                        (and (str/starts-with? (str (:name %)) "AnonymousFunction_")
+                                             (not (contains? referenced-anonymous-class-names (:name %)))))
+                                   (vals @(:classes ctx)))
               intern-classes (interp/resolve-interned-classes source-id ast)
               prev-imports @(:imports ctx)
               augmented-ast (cond
@@ -1272,6 +1297,9 @@
 
                               :else
                               ast)
+              augmented-ast (if (seq prev-functions)
+                              (update augmented-ast :functions #(vec (concat prev-functions %)))
+                              augmented-ast)
               result (tc/type-check augmented-ast {:var-types @*repl-var-types*})]
           (when-not (:success result)
             (doseq [error (:errors result)]

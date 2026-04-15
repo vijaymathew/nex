@@ -304,7 +304,7 @@
 ;; Runtime Context (holds classes, globals, current environment)
 ;;
 
-(defrecord Context [classes globals current-env output imports specialized-classes])
+(defrecord Context [classes globals current-env output imports specialized-classes compiled-state])
 
 (declare register-class)
 
@@ -325,7 +325,8 @@
                globals             ; current environment starts as global
                (atom [])           ; output accumulator
                (atom [])           ; imports registry
-               (atom {}))]         ; specialized classes cache
+               (atom {})           ; specialized classes cache
+               (atom nil))]        ; compiled runtime state for fallback dispatch
       ;; Register built-in base classes
       (register-class ctx (build-any-base-class))
       (register-class ctx (build-function-base-class))
@@ -427,8 +428,13 @@
 #?(:clj
    (defn runtime-resolve-call-user-method
      [ctx target method-name arg-values]
-     (let [resolver (requiring-resolve 'nex.compiler.jvm.runtime/call-compiled-user-method)]
-       (resolver (:compiled-state ctx) target method-name arg-values))))
+     (let [resolver (requiring-resolve 'nex.compiler.jvm.runtime/call-compiled-user-method)
+           compiled-state-slot (:compiled-state ctx)
+           state (cond
+                   (instance? clojure.lang.IDeref compiled-state-slot) @compiled-state-slot
+                   (some? compiled-state-slot) compiled-state-slot
+                   :else nil)]
+       (resolver state target method-name arg-values))))
 
 #?(:clj
    (defn- reflected-field
@@ -1482,6 +1488,20 @@
                   (lookup-field-with-inheritance ctx class-def field-name caller-class-name))
                 parents)))))
 
+(defn- lookup-field-with-inheritance-any-visibility
+  [ctx class-def field-name]
+  (let [local-field (some (fn [member]
+                            (when (and (= (:type member) :field)
+                                       (not (:constant? member))
+                                       (= (:name member) field-name))
+                              (assoc member :declaring-class (:name class-def))))
+                          (feature-members class-def))]
+    (or local-field
+        (when-let [parents (get-parent-classes ctx class-def)]
+          (some (fn [{:keys [class-def]}]
+                  (lookup-field-with-inheritance-any-visibility ctx class-def field-name))
+                parents)))))
+
 (defn- field-write-error-message
   [field-name declaring-class]
   (str "Cannot assign to field " field-name
@@ -1676,15 +1696,36 @@
                     {:left a :right b}))))
 
 (defn- nex-array-sort-with-ctx
-  [ctx arr]
-  #?(:clj (let [out (java.util.ArrayList. arr)]
-            (.sort out (reify java.util.Comparator
-                         (compare [_ a b]
-                           (int (nex-value-compare ctx a b)))))
-            out)
-     :cljs (let [out (.slice arr)]
-             (.sort out (fn [a b] (nex-value-compare ctx a b)))
-             out)))
+  ([ctx arr]
+   #?(:clj (let [out (java.util.ArrayList. arr)]
+             (.sort out (reify java.util.Comparator
+                          (compare [_ a b]
+                            (int (nex-value-compare ctx a b)))))
+             out)
+      :cljs (let [out (.slice arr)]
+              (.sort out (fn [a b] (nex-value-compare ctx a b)))
+              out)))
+  ([ctx arr comparator]
+   (let [compare-fn (fn [a b]
+                      (let [result (if (fn? comparator)
+                                     (comparator a b)
+                                     (eval-node ctx {:type :call
+                                                     :target {:type :literal :value comparator}
+                                                     :method "call2"
+                                                     :args [{:type :literal :value a}
+                                                            {:type :literal :value b}]}))]
+                        (if (integer? result)
+                          result
+                          (throw (ex-info "Array.sort comparator must return Integer"
+                                          {:left a :right b :result result})))))]
+     #?(:clj (let [out (java.util.ArrayList. arr)]
+               (.sort out (reify java.util.Comparator
+                            (compare [_ a b]
+                              (compare-fn a b))))
+               out)
+        :cljs (let [out (.slice arr)]
+                (.sort out compare-fn)
+                out)))))
 
 (defn- make-min-heap
   [comparator]
@@ -2493,6 +2534,24 @@
             (neg? (compare sx sy)) -1
             :else 1))))))
 
+(defn- scalar-identity-value?
+  [v]
+  (or (nil? v)
+      (string? v)
+      (number? v)
+      (boolean? v)
+      (char? v)))
+
+(defn- nex-identity-equals?
+  [a b]
+  (cond
+    (and (scalar-identity-value? a)
+         (scalar-identity-value? b))
+    (= a b)
+
+    :else
+    (identical? a b)))
+
 (defn apply-binary-op
   "Apply a binary operator to two values."
   [op left right]
@@ -2517,6 +2576,8 @@
           (mod left right))
     "=" (= left right)
     "/=" (not= left right)
+    "==" (nex-identity-equals? left right)
+    "!=" (not (nex-identity-equals? left right))
     "<" (neg? (nex-ordering-compare left right))
     "<=" (not (pos? (nex-ordering-compare left right)))
     ">" (pos? (nex-ordering-compare left right))
@@ -2816,7 +2877,14 @@
                       (if (>= idx 0) idx -1)))
     "remove"      (fn [arr idx & _] (nex-array-remove arr idx))
     "reverse"     (fn [arr & _] (nex-array-reverse arr))
-    "sort"        (fn [arr & [ctx]] (nex-array-sort-with-ctx ctx arr))
+    "sort"        (fn [arr & args]
+                    (let [ctx (last args)
+                          method-args (butlast args)]
+                      (case (count method-args)
+                        0 (nex-array-sort-with-ctx ctx arr)
+                        1 (nex-array-sort-with-ctx ctx arr (first method-args))
+                        (throw (ex-info "Method sort expects 0 or 1 arguments"
+                                        {:target arr :method "sort" :actual (count method-args)})))))
     "slice"       (fn [arr start end & _] (nex-array-slice arr start end))
     "to_string"   (fn [arr & _] (nex-array-str arr))
     "equals"      (fn [arr other & _] (nex-deep-equals? arr other))
@@ -3624,7 +3692,13 @@
                             (throw (ex-info (str "Undefined field: " method)
                                             {:field method
                                              :class-name compiled-class-name})))
-                          (runtime-resolve-call-user-method ctx obj method arg-values))
+                          (if-let [_ (lookup-field-with-inheritance-any-visibility ctx
+                                                                                   compiled-class-def
+                                                                                   method)]
+                            (throw (ex-info (str "Undefined field: " method)
+                                            {:field method
+                                             :class-name compiled-class-name}))
+                            (runtime-resolve-call-user-method ctx obj method arg-values)))
                         (runtime-resolve-call-user-method ctx obj method arg-values))
                       (java-call-method obj method arg-values)))
              :cljs (throw (ex-info (str "Method not found on type: " method)
@@ -3634,7 +3708,9 @@
                      (env-lookup (:current-env ctx) method)
                      (catch #?(:clj Exception :cljs :default) _ ::not-found))]
         (if (not= fn-obj ::not-found)
-          (if (nex-object? fn-obj)
+          (let [compiled-callable? #?(:clj (boolean (compiled-runtime-class-name ctx fn-obj))
+                                      :cljs false)]
+            (if (or (nex-object? fn-obj) compiled-callable?)
             (if (not= has-parens false)
               ;; has-parens is true or nil (default): invoke the Function
               (let [call-method (str "call" (count args))]
@@ -3649,7 +3725,7 @@
             (if (false? has-parens)
               fn-obj
               (throw (ex-info (str "Undefined function: " method)
-                              {:function method}))))
+                              {:function method})))))
           (if-let [current-obj (:current-object ctx)]
             (let [class-def (lookup-class ctx (:class-name current-obj))
                   method-lookup (lookup-method-with-inheritance ctx

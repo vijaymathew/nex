@@ -1883,7 +1883,7 @@ end"))]
       (let [ctx0 (repl/init-repl-context)
             class-output
             (with-out-str
-              (repl/eval-code ctx0 "class Node [K, V]
+              (repl/eval-code ctx0 "class Node [K -> Comparable, V]
   create
     make(key: K, value: V) do
       this.key := key
@@ -1915,6 +1915,51 @@ end"))]
         (is (not (str/includes? fn-output "Error:")))
         (is (not (str/includes? fn-output "Type checking failed")))
         (is (contains? @repl/*repl-var-types* "search"))))))
+
+(deftest repl-compiled-backend-generic-function-call-infers-type-params-test
+  (testing "compiled REPL infers explicit generic free-function type parameters from argument types"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            zip-output (with-out-str
+                         (repl/eval-code ctx0 "function zip[T](a: Array[T], b: Array[T], f: Function): Array[T]
+do
+  result := a
+end"))
+            add-output (with-out-str
+                         (repl/eval-code ctx0 "function add(a: Integer, b: Integer): Integer
+do
+  result := a + b
+end"))
+            call-output (with-out-str
+                          (repl/eval-code ctx0 "zip([1, 2, 3], [4, 5, 6], add)"))]
+        (is (not (str/includes? zip-output "Error:")))
+        (is (not (str/includes? add-output "Error:")))
+        (is (not (str/includes? call-output "Error:")))
+        (is (str/includes? call-output "Array[Integer]"))
+        (is (str/includes? call-output "[1, 2, 3]"))))))
+
+(deftest repl-compiled-backend-generic-free-function-return-instantiates-test
+  (testing "compiled REPL instantiates bare generic free-function return types from call arguments"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            reduce-output (with-out-str
+                            (repl/eval-code ctx0 "function reduce[T](a: Array[T], f: Function, init: T): T do
+  result := init
+  across a as elem do
+    result := f(result, elem)
+  end
+end"))
+            call-output (with-out-str
+                          (repl/eval-code ctx0 "reduce([1, 2, 3], fn(a: Integer, b: Integer): Integer do result := a + b end, 0)"))]
+        (is (not (str/includes? reduce-output "Error:")))
+        (is (not (str/includes? call-output "Error:")))
+        (is (str/includes? call-output "Integer 6"))))))
 
 (deftest compiled-session-stores-deferred-class-metadata-test
   (testing "compiled session keeps deferred and parent metadata as canonical class state"
@@ -2214,3 +2259,30 @@ end"))
                      (repl/eval-code ctx0 "hint_spin()
 print(\"ok\")"))]
         (is (str/includes? output "ok"))))))
+
+(deftest repl-compiled-backend-generic-comparable-in-sort-comparator-test
+  (testing "compiled REPL typechecks generic constrained method calls inside sort comparator lambdas"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            define-output (with-out-str
+                            (repl/eval-code ctx0 "function gradeUp[T -> Comparable](a: Array[T]): Array[Integer] do
+  result := []
+  from let i := 0
+  until i >= a.length do
+    result.add(i)
+    i := i + 1
+  end
+  result.sort(fn(i: Integer, j: Integer): Integer do
+    result := a.get(i).compare(a.get(j))
+  end)
+end"))
+            call-output (with-out-str
+                          (repl/eval-code ctx0 "gradeUp([3,1,4,1])"))]
+        (is (not (str/includes? define-output "Type error")))
+        (is (not (str/includes? define-output "Error:")))
+        (is (not (str/includes? call-output "Type error")))
+        (is (not (str/includes? call-output "Error:")))
+        (is (str/includes? call-output "[0, 1, 2, 3]"))))))

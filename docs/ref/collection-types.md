@@ -40,12 +40,18 @@ create Array[String].filled(2, "x")
 | `index_of` | `elem: Any` | `Integer` | First index or `-1` if not found. |
 | `remove` | `index: Integer` | `Void` | Remove element at index. |
 | `reverse` | none | `Array[Any]` | Return reversed array. |
-| `sort` | none | `Array[Any]` | Sort array in-place/runtime order. |
+| `sort` | none | `Array[Any]` | Return a new array sorted by built-in order or `Comparable.compare`. |
+| `sort` | `compareFn: Function` | `Array[Any]` | Return a new array sorted using `compareFn(a, b) -> Integer`. |
 | `slice` | `start: Integer, end: Integer` | `Array[Any]` | Subrange from `start` to `end`. |
 | `to_string` | none | `String` | Render the array and its nested values as text. |
 | `equals` | `other: Any` | `Boolean` | Deep structural equality. |
 | `clone` | none | `Array[T]` | Deep-copy the array and its nested values while preserving element type. |
 | `cursor` | none | `ArrayCursor` | Create iterator. |
+
+- `sort()` requires elements to be built-in sortable scalars or `Comparable`.
+- `sort(compareFn)` uses the provided comparator function instead. The
+  comparator must return an `Integer`: negative when `a < b`, positive when
+  `a > b`, `0` when equal.
 
 ## `Map`
 
