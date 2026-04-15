@@ -502,6 +502,37 @@ let b: Box [Integer] := create Box[Integer].make(42)
 b.value -- 42
 ```
 
+Generic functions use the same bracket syntax after the function name:
+
+```nex
+function first[T](values: Array[T]): T
+do
+  result := values.get(0)
+end
+
+print(first([10, 20, 30]))      -- 10
+print(first(["a", "b", "c"]))   -- "a"
+```
+
+Multiple generic parameters are allowed:
+
+```nex
+function pick_or_default[K, V](present: Boolean, value: V, fallback: V): V
+do
+  result := when present value else fallback end
+end
+```
+
+Anonymous functions can also declare generic parameters explicitly:
+
+```nex
+let id: Function := fn[T](x: T): T do
+  result := x
+end
+
+print(id(42))                   -- 42
+```
+
 ## Assignment
 
 ```nex
