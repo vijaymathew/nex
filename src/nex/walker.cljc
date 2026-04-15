@@ -36,6 +36,35 @@
       ast-node)
     ast-node))
 
+(def ^:private implicit-generic-builtins
+  #{"Any" "Void" "Nil" "Boolean" "Integer" "Integer64" "Real" "Decimal"
+    "String" "Char" "Array" "Map" "Set" "Function" "Console" "Process"
+    "Cursor" "Task" "Channel" "Min_Heap" "Atomic_Integer" "Atomic_Integer64"
+    "Atomic_Boolean" "Atomic_Reference"})
+
+(defn- collect-implicit-generic-names
+  [type-expr]
+  (letfn [(collect* [t]
+            (cond
+              (string? t)
+              (if (and (not (contains? implicit-generic-builtins t))
+                       (re-matches #"[A-Z]" t))
+                [t]
+                [])
+
+              (map? t)
+              (vec (concat (collect* (:base-type t))
+                           (mapcat collect* (or (:type-args t) (:type-params t)))))
+
+              :else
+              []))]
+    (reduce (fn [acc generic-name]
+              (if (some #(= (:name %) generic-name) acc)
+                acc
+                (conj acc {:name generic-name})))
+            []
+            (collect* type-expr))))
+
 ;;
 ;; Reusable transformation functions
 ;;
@@ -259,6 +288,9 @@
    :functionDecl
    (fn [[_ _function-kw name & rest]]
      (let [cleaned (remove #(#{"(" ")" "do" "end" ":"} %) rest)
+           generic-params (first (filter #(and (sequential? %)
+                                               (= :genericParams (first %)))
+                                         cleaned))
            params (first (filter #(and (sequential? %)
                                        (= :paramList (first %)))
                                  cleaned))
@@ -287,6 +319,12 @@
            fn-name (token-text name)
            class-name (str fn-name "_Function")
            method-name (str "call" (count params-v))
+           explicit-generic-params (when generic-params (transform-node generic-params))
+           generic-params-v (or explicit-generic-params
+                                (vec (reduce (fn [acc {:keys [type]}]
+                                               (into acc (collect-implicit-generic-names type)))
+                                             (collect-implicit-generic-names return-type-v)
+                                             params-v)))
            method-def {:type :method
                        :name method-name
                        :params params-v
@@ -299,7 +337,7 @@
                        :rescue (when rescue-clause (transform-node rescue-clause))}
            class-def {:type :class
                       :name class-name
-                      :generic-params nil
+                      :generic-params generic-params-v
                       :note nil
                       :parents [{:parent "Function"}]
                       :body [{:type :feature-section
@@ -307,8 +345,9 @@
                               :members [method-def]}]
                       :invariant nil}]
        {:type :function
-        :name fn-name
+       :name fn-name
         :class-name class-name
+        :generic-params generic-params-v
         :declaration-only? declaration-only?
         :params params-v
         :return-type return-type-v
@@ -318,6 +357,9 @@
    :anonymousFunction
    (fn [[_ _fn-kw & rest]]
      (let [cleaned (remove #(#{"(" ")" "do" "end" ":"} %) rest)
+           generic-params (first (filter #(and (sequential? %)
+                                               (= :genericParams (first %)))
+                                         cleaned))
            params (first (filter #(and (sequential? %)
                                        (= :paramList (first %)))
                                  cleaned))
@@ -332,6 +374,12 @@
            body (transform-node block)
            class-name (generate-unique-fn-name)
            method-name (str "call" (count params-v))
+           explicit-generic-params (when generic-params (transform-node generic-params))
+           generic-params-v (or explicit-generic-params
+                                (vec (reduce (fn [acc {:keys [type]}]
+                                               (into acc (collect-implicit-generic-names type)))
+                                             (collect-implicit-generic-names return-type-v)
+                                             params-v)))
            method-def {:type :method
                        :name method-name
                        :params params-v
@@ -342,7 +390,7 @@
                        :ensure nil}
            class-def {:type :class
                       :name class-name
-                      :generic-params nil
+                      :generic-params generic-params-v
                       :note nil
                       :parents [{:parent "Function"}]
                       :body [{:type :feature-section
@@ -351,6 +399,7 @@
                       :invariant nil}]
        {:type :anonymous-function
         :class-name class-name
+        :generic-params generic-params-v
         :params params-v
         :return-type return-type-v
         :body body

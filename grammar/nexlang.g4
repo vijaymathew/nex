@@ -28,7 +28,7 @@ classDecl
     ;
 
 functionDecl
-    : FUNCTION IDENTIFIER '(' paramList? ')' (':' type)? noteClause? (requireClause? DO block ensureClause? rescueClause? END)?
+    : FUNCTION IDENTIFIER genericParams? '(' paramList? ')' (':' type)? noteClause? (requireClause? DO block ensureClause? rescueClause? END)?
     ;
 
 genericParams
@@ -317,7 +317,7 @@ whenExpression
     ;
 
 anonymousFunction
-    : FN '(' paramList? ')' (':' type)? DO block END
+    : FN genericParams? '(' paramList? ')' (':' type)? DO block END
     ;
 
 oldExpression

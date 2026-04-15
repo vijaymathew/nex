@@ -308,10 +308,13 @@
 
 (defn- generic-runtime-field-bindings
   [env class-name generic-params]
-  (into {}
-        (map (fn [{:keys [name]}]
-               [name (generic-runtime-field-ir env class-name name)]))
-        generic-params))
+  (if (and (seq generic-params)
+           (get (:compiled-classes env) class-name))
+    (into {}
+          (map (fn [{:keys [name]}]
+                 [name (generic-runtime-field-ir env class-name name)]))
+          generic-params)
+    {}))
 
 (defn- runtime-type-token-ir
   [env nex-type]

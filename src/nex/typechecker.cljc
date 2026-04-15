@@ -942,6 +942,49 @@
                  generic-params
                  (concat type-args (repeat "Any")))))))
 
+(defn- merge-inferred-generic-bindings
+  [env left right]
+  (reduce-kv
+   (fn [acc generic-name inferred-type]
+     (if-let [existing (get acc generic-name)]
+       (if (or (types-equal? env existing inferred-type)
+               (types-compatible? env inferred-type existing)
+               (types-compatible? env existing inferred-type))
+         acc
+         (throw (ex-info (str "Conflicting inferred types for generic parameter " generic-name)
+                         {:error (type-error
+                                  (str "Conflicting inferred types for generic parameter "
+                                       generic-name ": "
+                                       (display-type existing)
+                                       " and "
+                                       (display-type inferred-type)))})))
+       (assoc acc generic-name inferred-type)))
+   left
+   right))
+
+(defn- infer-generic-type-map-from-arg
+  [env generic-names param-type arg-type]
+  (let [param-type (normalize-type param-type)
+        arg-type (normalize-type arg-type)]
+    (cond
+      (and (string? param-type) (contains? generic-names param-type))
+      {param-type arg-type}
+
+      (and (map? param-type) (map? arg-type)
+           (= (:base-type param-type) (:base-type arg-type)))
+      (let [param-args (vec (or (:type-params param-type) (:type-args param-type)))
+            arg-args (vec (or (:type-params arg-type) (:type-args arg-type)))]
+        (if (= (count param-args) (count arg-args))
+          (reduce (fn [acc [param-arg arg-arg]]
+                    (merge-inferred-generic-bindings
+                     env acc (infer-generic-type-map-from-arg env generic-names param-arg arg-arg)))
+                  {}
+                  (map vector param-args arg-args))
+          {}))
+
+      :else
+      {})))
+
 (defn nil-literal?
   "Whether an expression node is a nil literal."
   [expr]
@@ -2547,25 +2590,45 @@
       (let [base-type (if (map? var-type) (:base-type var-type) var-type)
             call-name (str "call" (count args))
             method-sig (env-lookup-method env base-type call-name (count args))
-            type-map (build-generic-type-map env var-type)]
+            class-def (env-lookup-class env base-type)]
         (when-not method-sig
           (throw (ex-info (str "Method not found: " call-name)
                           {:error (type-error
                                    (str "Method not found: " call-name))})))
-        (when (not= (count args) (count (:params method-sig)))
-          (throw (ex-info (str "Method " call-name " expects " (count (:params method-sig))
-                               " arguments, got " (count args))
-                          {:error (type-error
-                                   (str "Method " call-name " expects " (count (:params method-sig))
-                                        " arguments, got " (count args)))})))
-        (doseq [[arg param] (map vector args (:params method-sig))]
-          (let [arg-type (check-expression env arg)
-                param-type (resolve-generic-type (:type param) type-map)]
-            (when-not (types-compatible? env arg-type param-type)
-              (throw (ex-info (str "Argument type mismatch for method " call-name)
+        (let [generic-names (set (map :name (:generic-params class-def)))
+              arg-types (mapv #(check-expression env %) args)
+              inferred-type-map (reduce (fn [acc [arg-type param]]
+                                          (merge-inferred-generic-bindings
+                                           env
+                                           acc
+                                           (infer-generic-type-map-from-arg
+                                            env generic-names (:type param) arg-type)))
+                                        {}
+                                        (map vector arg-types (:params method-sig)))
+              type-map (merge (build-generic-type-map env var-type)
+                              inferred-type-map)]
+          (when (not= (count args) (count (:params method-sig)))
+            (throw (ex-info (str "Method " call-name " expects " (count (:params method-sig))
+                                 " arguments, got " (count args))
+                            {:error (type-error
+                                     (str "Method " call-name " expects " (count (:params method-sig))
+                                          " arguments, got " (count args)))})))
+          (doseq [[arg-type param] (map vector arg-types (:params method-sig))]
+            (let [param-type (resolve-generic-type (:type param) type-map)]
+            (when (and (is-generic-type-param? env param-type)
+                       (not (contains? type-map param-type)))
+              (throw (ex-info (str "Could not infer generic type parameter " param-type
+                                   " for function " method)
                               {:error (type-error
-                                       (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
-        (resolve-generic-type (:return-type method-sig) type-map))
+                                       (str "Could not infer generic type parameter "
+                                            param-type
+                                            " for function "
+                                            method))})))
+              (when-not (types-compatible? env arg-type param-type)
+                (throw (ex-info (str "Argument type mismatch for method " call-name)
+                                {:error (type-error
+                                         (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
+          (resolve-generic-type (:return-type method-sig) type-map)))
         (if-let [current-class (env-lookup-var env "__current_class__")]
           (if-let [method-sig (lookup-class-method env current-class method (count args) current-class)]
             (do

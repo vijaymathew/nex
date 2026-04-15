@@ -625,6 +625,41 @@ end"
       (is (not (:success result)))
       (is (seq (:errors result)))))) 
 
+(deftest test-explicit-generic-function-call-infers-type-params-from-arguments
+  (testing "Explicit generic free-function calls infer type parameters from argument types"
+    (let [code "function zip[T](a: Array[T], b: Array[T], f: Function): Array[T]
+do
+  result := a
+end
+function add(a: Integer, b: Integer): Integer
+do
+  result := a + b
+end
+class Test
+  feature
+    demo() do
+      let values: Array[Integer] := zip([1, 2, 3], [4, 5, 6], add)
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str result)))))
+
+(deftest test-explicit-generic-anonymous-function-typechecks
+  (testing "Explicit generic anonymous functions typecheck"
+    (let [code "class Test
+  feature
+    demo() do
+      let id := fn[T](x: T): T do
+        result := x
+      end
+      let y: Integer := id(10)
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str result)))))
+
 (deftest test-string-concatenation-typecheck
   (testing "String concatenation with + should typecheck"
     (let [code "class Test
