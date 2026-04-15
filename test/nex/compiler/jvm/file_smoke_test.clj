@@ -117,6 +117,23 @@ print(tree.keys().length)")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-top-level-print-of-array-equality-smoke-test
+  (testing "compiled top-level print can lower built-in calls whose arguments contain array equality"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-print-array-eq")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "let xs := [5, 7, 9]
+print(xs = [5, 7, 9])")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))]
+          (is (= 0 exit) err)
+          (is (= "false" (str/trim out))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-invariant-helper-method-and-comparable-param-test
   (testing "compiled invariants can call helper methods and Comparable-typed params use builtin compare"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-invariant-helper")

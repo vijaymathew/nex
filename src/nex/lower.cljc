@@ -546,6 +546,17 @@
         target-expr (normalize-call-target raw-target)]
     (if (nil? target-expr)
       (or
+       (case (:method expr)
+         "print" "Void"
+         "println" "Void"
+         "sleep" "Void"
+         "hint_spin" "Void"
+         "random_real" "Real"
+         "type_of" "String"
+         "type_is" "Boolean"
+         "path_exists" "Boolean"
+         "datetime_now" "Integer64"
+         nil)
        (when-let [fn-def (some (fn [fn-def]
                                  (when (and (= (:name fn-def) (:method expr))
                                             (= (count (or (:params fn-def) []))
