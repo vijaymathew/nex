@@ -66,5 +66,9 @@ function gradeUp[T -> Comparable](a: Array[T]): Array[Integer] do
     result.add(i)
     i := i + 1
   end
-  result.sort(fn(i, j: Integer): Integer do result := a.get(i).compare(a.get(j)) end)
+  result := result.sort(fn(i, j: Integer): Integer do result := a.get(i).compare(a.get(j)) end)
 end
+
+let r6 := gradeUp([3, 1, 4, 1])
+print(r6)
+print(r6 = [1, 3, 0, 2])

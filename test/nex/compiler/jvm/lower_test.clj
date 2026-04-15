@@ -168,6 +168,27 @@ end")
       (is (true? (:closure-runtime-object? (:class-def anon-expr))))
       (is (true? (:closure-runtime-object? anon-class)))))) 
 
+(deftest prepare-program-for-captured-call-target-closures-test
+  (testing "closure preparation captures outer variables used as raw call targets"
+    (let [program (p/ast "function gradeUp[T -> Comparable](a: Array[T]): Array[Integer]
+do
+  result := []
+  result := result.sort(fn(i: Integer, j: Integer): Integer do
+    result := a.get(i).compare(a.get(j))
+  end)
+end")
+          prepared (lower/prepare-program-for-closures program
+                                                       {:classes []
+                                                        :functions []
+                                                        :imports []
+                                                        :var-types {}})
+          anon-class (first (lower/collect-anonymous-class-defs prepared))
+          anon-expr (-> prepared :functions first :body second :value :args first)]
+      (is (= [{:name "a" :type {:base-type "Array" :type-args ["T"]}}]
+             (:captures anon-expr)))
+      (is (true? (:closure-runtime-object? (:class-def anon-expr))))
+      (is (true? (:closure-runtime-object? anon-class))))))
+
 
 (deftest lower-collection-literals-test
   (testing "collection literals lower to explicit IR nodes"

@@ -1761,6 +1761,8 @@
 
     (= :call (:type expr))
     (let [target (:target expr)
+          _ (when (string? target)
+              (capture-reference! captures local-types (:var-types ctx) target))
           method (:method expr)
           args (mapv #(rewrite-expression-for-closures ctx local-types captures %)
                      (:args expr))

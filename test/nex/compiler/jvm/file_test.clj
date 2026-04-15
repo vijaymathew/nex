@@ -2,7 +2,9 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [nex.compiler.jvm.file :as file]))
+            [nex.compiler.jvm.file :as file]
+            [nex.lower :as lower]
+            [nex.parser :as p]))
 
 (defn- delete-tree!
   [root]
@@ -259,3 +261,19 @@ print(s.size)")
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
+
+(deftest compile-ast-lowering-error-includes-line-diagnostics
+  (testing "compile-ast surfaces line and column diagnostics for lowering failures"
+    (let [ast (p/ast "print(1)")
+          failure (ex-info "Unable to infer expression type during lowering"
+                           {:expr {:type :identifier
+                                   :name "a"
+                                   :dbg/line 7
+                                   :dbg/col 13}})]
+      (with-redefs [lower/lower-repl-cell (fn [& _] (throw failure))]
+        (try
+          (file/compile-ast "sample.nex" ast {})
+          (is false "Expected compile-ast to rethrow lowering failure")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= "Unable to infer expression type during lowering" (.getMessage e)))
+            (is (= ["At line 7, column 13"] (:errors (ex-data e))))))))))
