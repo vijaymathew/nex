@@ -2376,6 +2376,26 @@
           compiled (get (:compiled-classes env) class-name)
           class-def (get (visible-class-map env) class-name)]
       (cond
+        (= class-name "Console")
+        (let [nex-type (infer-type env expr)]
+          (when (or (:constructor expr) (seq (:args expr)))
+            (throw (ex-info "create Console takes no constructor or arguments in compiled lowering"
+                            {:expr expr})))
+          (ir/call-runtime-node "create-console"
+                                []
+                                nex-type
+                                (resolve-jvm-type env nex-type)))
+
+        (= class-name "Process")
+        (let [nex-type (infer-type env expr)]
+          (when (or (:constructor expr) (seq (:args expr)))
+            (throw (ex-info "create Process takes no constructor or arguments in compiled lowering"
+                            {:expr expr})))
+          (ir/call-runtime-node "create-process"
+                                []
+                                nex-type
+                                (resolve-jvm-type env nex-type)))
+
         (= class-name "Channel")
         (let [nex-type (infer-type env expr)]
           (case (:constructor expr)

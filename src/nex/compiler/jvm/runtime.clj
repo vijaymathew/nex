@@ -700,14 +700,29 @@
     (state-set-imports! state imports)
     state))
 
+(defn state-set-immediate-output!
+  [state enabled]
+  (swap! (:values state)
+         (fn [^HashMap m]
+           (doto m (.put "__immediate_output__" (boolean enabled)))))
+  nil)
+
+(defn- immediate-output?
+  [state]
+  (let [^HashMap vals @(:values state)]
+    (true? (.get vals "__immediate_output__"))))
+
 (defn print-state-output!
   [state]
-  (doseq [line (state-output state)]
-    (println line))
+  (when-not (immediate-output? state)
+    (doseq [line (state-output state)]
+      (println line)))
   nil)
 
 (defn- add-output!
   [state line]
+  (when (immediate-output? state)
+    (println line))
   (swap! (:output state) conj line)
   nil)
 
@@ -1052,11 +1067,13 @@
 
 (defn builtin-print!
   [state args]
-  (add-output! state (str/join " " (map #(print-value state %) args))))
+  (let [line (str/join " " (map #(print-value state %) args))]
+    (add-output! state line)))
 
 (defn builtin-println!
   [state args]
-  (add-output! state (str/join " " (map #(print-value state %) args))))
+  (let [line (str/join " " (map #(print-value state %) args))]
+    (add-output! state line)))
 
 (defn builtin-type-of
   [state value]
@@ -1779,6 +1796,12 @@
 
     (= name "make-captured-function-object")
     (make-captured-function-object state (first args) (vec (rest args)))
+
+    (= name "create-console")
+    {:nex-builtin-type :Console}
+
+    (= name "create-process")
+    {:nex-builtin-type :Process}
 
     (= name "create-channel")
     (if (seq args)
