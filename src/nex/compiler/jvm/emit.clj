@@ -265,6 +265,15 @@
                            (fn [] (.visitLdcInsn mv ^String imports-edn))])
       (.visitInsn mv Opcodes/POP)
 
+      (emit-runtime-call! mv "state-set-immediate-output!"
+                          [(fn [] (.visitVarInsn mv Opcodes/ALOAD 1))
+                           (fn []
+                             (.visitInsn mv Opcodes/ICONST_1)
+                             (.visitMethodInsn mv Opcodes/INVOKESTATIC
+                                               "java/lang/Boolean" "valueOf"
+                                               "(Z)Ljava/lang/Boolean;" false))])
+      (.visitInsn mv Opcodes/POP)
+
       (.visitVarInsn mv Opcodes/ALOAD 1)
       (.visitMethodInsn mv
                         Opcodes/INVOKESTATIC
