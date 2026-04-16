@@ -483,24 +483,37 @@
       false
 
       :else
-      (or (and (map? a1) (map? a2)
+      (or ;; Empty-collection element sentinel is compatible with any concrete type
+          (contains? #{"__EmptyArrayElement" "__EmptyMapKey" "__EmptyMapValue" "__EmptySetElement"} (str a1))
+          (contains? #{"__EmptyArrayElement" "__EmptyMapKey" "__EmptyMapValue" "__EmptySetElement"} (str a2))
+          (and (map? a1) (map? a2)
                (= (:base-type a1) "Array")
                (= (:base-type a2) "Array")
-               (= (:type-params a1) ["__EmptyArrayElement"]))
+               (or (= (:type-params a1) ["__EmptyArrayElement"])
+                   (= (:type-params a2) ["__EmptyArrayElement"])))
           (and (map? a1) (map? a2)
                (= (:base-type a1) "Map")
                (= (:base-type a2) "Map")
-               (= (:type-params a1) ["__EmptyMapKey" "__EmptyMapValue"]))
+               (or (= (:type-params a1) ["__EmptyMapKey" "__EmptyMapValue"])
+                   (= (:type-params a2) ["__EmptyMapKey" "__EmptyMapValue"])))
           (and (map? a1) (map? a2)
                (= (:base-type a1) "Set")
                (= (:base-type a2) "Set")
-               (= (:type-params a1) ["__EmptySetElement"]))
+               (or (= (:type-params a1) ["__EmptySetElement"])
+                   (= (:type-params a2) ["__EmptySetElement"])))
           (types-equal? env a1 a2)
           (and (string? a1) (string? a2) (class-subtype? env a1 a2))
           (and (map? a1) (string? a2) (class-subtype? env (:base-type a1) a2))
           (and (map? a1) (map? a2)
                (class-subtype? env (:base-type a1) (:base-type a2))
-               (= (:type-params a1) (:type-params a2)))))))
+               (= (:type-params a1) (:type-params a2)))
+          (and (map? a1) (map? a2)
+               (= (:base-type a1) (:base-type a2))
+               (= (count (:type-params a1)) (count (:type-params a2)))
+               (every? true? (map (fn [p1 p2]
+                                    (or (= p2 "Any")
+                                        (types-compatible? env p1 p2)))
+                                  (:type-params a1) (:type-params a2))))))))
 
 (defn validate-generic-args
   "Validate generic arguments against a class's generic constraints."
