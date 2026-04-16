@@ -1,3 +1,6 @@
+-- APL-like abstractions. For more context, see https://schemer.in/explainers/array-programming.html.
+
+-- Primitives
 function zip[T](a: Array[T], b: Array[T], f: Function): Array[T] do
   let i := 0
   result := []
@@ -102,3 +105,20 @@ across order as i do
   r9.add(scrambled.get(i))
 end
 console.print_line("sorted via grade =" + r9 + " " + is(r9, [1, 1, 2, 3, 4, 5, 6, 9]))
+
+function shape(a: Array[Any]): Array[Integer] do
+  result := []
+  from let cur := a
+  until not(type_is("Array", cur)) do
+    result.add(cur.length)
+    cur := cur.get(0)
+  end
+end
+
+function rank[T](a: Array[T]): Integer do
+  result := shape(a).length
+end
+
+function numel[T](a: Array[T]): Integer do
+  result := reduce(shape(a), fn(p, d: Integer): Integer do result := p*d end, 1)
+end

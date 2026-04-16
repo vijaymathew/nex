@@ -506,7 +506,14 @@
           (and (map? a1) (string? a2) (class-subtype? env (:base-type a1) a2))
           (and (map? a1) (map? a2)
                (class-subtype? env (:base-type a1) (:base-type a2))
-               (= (:type-params a1) (:type-params a2)))))))
+               (= (:type-params a1) (:type-params a2)))
+          (and (map? a1) (map? a2)
+               (= (:base-type a1) (:base-type a2))
+               (= (count (:type-params a1)) (count (:type-params a2)))
+               (every? true? (map (fn [p1 p2]
+                                    (or (= p2 "Any")
+                                        (types-compatible? env p1 p2)))
+                                  (:type-params a1) (:type-params a2))))))))
 
 (defn validate-generic-args
   "Validate generic arguments against a class's generic constraints."
