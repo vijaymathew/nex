@@ -413,13 +413,21 @@
           :binary
           (let [op (:operator expr)]
             (cond
-              (#{"-" "*" "/" "%"} op) (infer-type env (:left expr))
+              (#{"-" "*" "/" "%"} op) (let [left-type (infer-type env (:left expr))
+                                            right-type (infer-type env (:right expr))]
+                                        (if (and (tc/is-numeric-type? left-type)
+                                                 (tc/is-numeric-type? right-type))
+                                          (tc/numeric-result-type left-type right-type)
+                                          left-type))
               (= "+" op) (let [left-type (infer-type env (:left expr))
                                right-type (infer-type env (:right expr))]
                            (if (or (= "String" (base-type-name left-type))
                                    (= "String" (base-type-name right-type)))
                              "String"
-                             left-type))
+                             (if (and (tc/is-numeric-type? left-type)
+                                      (tc/is-numeric-type? right-type))
+                               (tc/numeric-result-type left-type right-type)
+                               left-type)))
               (= "^" op) (tc/power-result-type (infer-type env (:left expr))
                                                (infer-type env (:right expr)))
               (#{"and" "or" "=" "/=" "==" "!=" "<" "<=" ">" ">="} op) "Boolean"
@@ -3204,7 +3212,8 @@
           (= :with (:type stmt))
           (if (= "java" (:target stmt))
             (let [[env' lowered] (lower-statements (assoc env :with-java? true) (:body stmt))]
-              [env' (with-stmt-debug (ir/block-node lowered) stmt)])
+              [(assoc env' :with-java? (:with-java? env))
+               (with-stmt-debug (ir/block-node lowered) stmt)])
             [env (with-stmt-debug (ir/block-node []) stmt)])
 
           (= :if (:type stmt))
