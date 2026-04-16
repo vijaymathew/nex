@@ -1780,6 +1780,12 @@
     (= name "make-captured-function-object")
     (make-captured-function-object state (first args) (vec (rest args)))
 
+    (= name "create-console")
+    {:nex-builtin-type :Console}
+
+    (= name "create-process")
+    {:nex-builtin-type :Process}
+
     (= name "create-channel")
     (if (seq args)
       (create-channel (first args))
