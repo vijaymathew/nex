@@ -244,7 +244,8 @@
   ([] (make-lowering-env {}))
   ([{:keys [locals top-level? repl? state-slot next-slot classes functions imports var-types
             compiled-classes current-class fields this-type old-field-locals
-            generic-param-names generic-runtime-values with-java? across-cursors] :as opts}]
+            generic-param-names generic-param-constraints generic-runtime-values
+            with-java? across-cursors] :as opts}]
    {:locals (or locals {})
     :top-level? (if (contains? opts :top-level?) top-level? true)
     :repl? (if (contains? opts :repl?) repl? true)
@@ -262,6 +263,7 @@
     :retry-allowed? false
     :old-field-locals (or old-field-locals {})
     :generic-param-names (set generic-param-names)
+    :generic-param-constraints (or generic-param-constraints {})
     :generic-runtime-values (or generic-runtime-values {})
     :with-java? (boolean with-java?)
     :across-cursors (or across-cursors {})}))
@@ -536,7 +538,32 @@
                          function-return-type
                          (#(tc/resolve-generic-type % type-map)))))))
        (when (direct-collection-method? target-type (:method expr))
-         (collection-method-return-type target-type (:method expr)))))))
+         (collection-method-return-type target-type (:method expr)))
+       (when (= "Console" base-type)
+         (case (:method expr)
+           ("print" "print_line" "error" "new_line") "Void"
+           "read_line" "String"
+           "read_integer" "Integer"
+           "read_real" "Real"
+           nil))
+       (when (= "Process" base-type)
+         (case (:method expr)
+           "getenv" "String"
+           ("setenv" "exit" "sleep") "Void"
+           "args" {:base-type "Array" :type-args ["String"]}
+           nil))
+       ;; Generic type parameter with constraint - look up method on constraint type
+       (when-let [constraint (get (:generic-param-constraints env) base-type)]
+         (case constraint
+           "Comparable"
+           (case (:method expr)
+             "compare" "Integer"
+             nil)
+           "Hashable"
+           (case (:method expr)
+             "hash" "Integer"
+             nil)
+           nil))))))
 
 (defn- infer-call-type
   [env expr]
@@ -648,6 +675,15 @@
     (map? t) (set (concat (when-let [base (:base-type t)] [base])
                           (mapcat type-name-set (or (:type-args t) (:type-params t) []))))
     :else #{}))
+
+(defn- generic-param-constraint-map
+  "Build a map from generic parameter name to its constraint type.
+   E.g. for [T -> Comparable] returns {\"T\" \"Comparable\"}."
+  [generic-params]
+  (into {} (keep (fn [{:keys [name constraint]}]
+                   (when constraint
+                     [name constraint]))
+                 generic-params)))
 
 (defn- free-function-generic-param-names
   [visible-classes fn-def]
@@ -2940,6 +2976,21 @@
                                         nex-type
                                         jvm-type))
 
+                ;; Generic type parameter with a constraint (e.g. T -> Comparable)
+                ;; Dispatch through the constraint type's builtin methods at runtime
+                (when-let [constraint (get (:generic-param-constraints env)
+                                           (base-type-name target-type))]
+                  (contains? builtin-runtime-receiver-types constraint))
+                (let [target-ir (lower-expression env target-expr)
+                      constraint (get (:generic-param-constraints env)
+                                      (base-type-name target-type))
+                      nex-type (or (infer-type env expr) "Any")
+                      jvm-type (resolve-jvm-type env nex-type)]
+                  (ir/call-runtime-node (str "method:" (:method expr))
+                                        (into [target-ir] arg-irs)
+                                        nex-type
+                                        jvm-type))
+
                 :else
                 (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
                     (throw (ex-info "Unsupported target call expression for lowering"
@@ -3414,6 +3465,7 @@
         current-class (:class-name fn-def)
         generic-param-names (set (concat (map :name (:generic-params (:class-def fn-def)))
                                          (free-function-generic-param-names visible-classes fn-def)))
+        generic-param-constraints (generic-param-constraint-map (:generic-params (:class-def fn-def)))
         env0 (make-lowering-env {:classes visible-classes
                                  :functions visible-functions
                                  :imports visible-imports
@@ -3421,6 +3473,7 @@
                                  :compiled-classes (:compiled-classes fn-def)
                                  :current-class current-class
                                  :generic-param-names generic-param-names
+                                 :generic-param-constraints generic-param-constraints
                                  :generic-runtime-values (generic-runtime-field-bindings
                                                           {:compiled-classes (:compiled-classes fn-def)}
                                                           current-class
@@ -3560,6 +3613,7 @@
   [unit-name visible-functions visible-imports visible-classes class-def ctor-def compiled-classes]
   (let [class-name (:name class-def)
         generic-param-names (set (map :name (:generic-params class-def)))
+        generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
         env0 (make-lowering-env {:classes visible-classes
                                  :functions visible-functions
                                  :imports visible-imports
@@ -3567,6 +3621,7 @@
                                  :compiled-classes compiled-classes
                                  :current-class class-name
                                  :generic-param-names generic-param-names
+                                 :generic-param-constraints generic-param-constraints
                                  :generic-runtime-values (generic-runtime-field-bindings
                                                           {:compiled-classes compiled-classes}
                                                           class-name
@@ -3668,6 +3723,7 @@
   [unit-name visible-functions visible-imports visible-classes class-def compiled-classes]
   (let [class-name (:name class-def)
         generic-param-names (set (map :name (:generic-params class-def)))
+        generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
         env0 (make-lowering-env {:classes visible-classes
                                  :functions visible-functions
                                  :imports visible-imports
@@ -3675,6 +3731,7 @@
                                  :compiled-classes compiled-classes
                                  :current-class class-name
                                  :generic-param-names generic-param-names
+                                 :generic-param-constraints generic-param-constraints
                                  :generic-runtime-values (generic-runtime-field-bindings
                                                           {:compiled-classes compiled-classes}
                                                           class-name
@@ -3781,7 +3838,8 @@
                                 :functions (:functions opts)
                                 :imports (:imports opts)
                                 :compiled-classes compiled-classes
-                                :generic-param-names (set (map :name (:generic-params class-def)))})
+                                :generic-param-names (set (map :name (:generic-params class-def)))
+                                :generic-param-constraints (generic-param-constraint-map (:generic-params class-def))})
         visible-functions (vec (:functions opts))
         visible-imports (vec (:imports opts))
         own-ctor-names (set (map :name (class-constructors class-def)))
@@ -3852,6 +3910,7 @@
                                                                  :imports visible-imports
                                                                  :compiled-classes compiled-classes
                                                                  :generic-param-names (set (map :name (:generic-params class-def)))
+                                                                 :generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
                                                                  :current-class class-name
                                                                  :this-type class-name
                                                                  :top-level? false
