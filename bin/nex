@@ -208,6 +208,12 @@ cmd_eval() {
     rm -f "$tmpfile"
 }
 
+cmd_run_script() {
+    export NEX_USER_DIR=`pwd`
+    fullpath=$(readlink -f "$1")
+    cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.eval "$fullpath"
+}
+
 # Main command dispatcher
 main() {
     local command="${1:-repl}"
@@ -239,8 +245,12 @@ main() {
             show_version
             ;;
         *)
-            echo "Error: Unknown command '$command'"
-            echo "Run 'nex help' for usage information."
+	    if [[ -f "$command" && "$command" == *.nex ]]; then
+		cmd_run_script "$@"
+	    else
+		echo "Error: Unknown command '$command'"
+		echo "Run 'nex help' for usage information."
+	    fi
             exit 1
             ;;
     esac
