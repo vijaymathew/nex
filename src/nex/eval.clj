@@ -7,9 +7,8 @@
   "Parse and evaluate a Nex file"
   [file-path]
   (let [source (slurp file-path)
-        ast (parser/ast source)
-        ctx (interp/make-context)]
-    (interp/eval-node ctx ast)))
+        ast (parser/ast source)]
+    (interp/run ast)))
 
 (defn -main
   "Main entry point for nex eval command"

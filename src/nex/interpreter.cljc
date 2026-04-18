@@ -3221,6 +3221,8 @@
       Returns the absolute path if found, otherwise throws an exception."
      [ctx path class-name]
      (let [filenames (intern-filenames class-name)
+           current-root (System/getenv "NEX_USER_DIR")
+           current-dir (map #(str (clojure.java.io/file current-root %)) filenames)
            local-roots (intern-search-roots ctx)
            local-direct (mapcat (fn [root]
                                   (map #(str (clojure.java.io/file root %)) filenames))
@@ -3238,7 +3240,7 @@
                        (concat
                         (map #(str (System/getProperty "user.home") "/.nex/deps/" %) filenames)
                         (map #(str (System/getProperty "user.home") "/.nex/deps/src/" %) filenames)))
-           locations (vec (concat local-direct local-lib home-deps))
+           locations (vec (concat current-dir local-direct local-lib home-deps))
            found (first (filter #(-> % clojure.java.io/file .exists) locations))]
        (if found
          found

@@ -19,7 +19,7 @@ show_help() {
 Nex Language v0.1.1 - A high-level language for design and implementation
 
 USAGE:
-    nex [COMMAND] [OPTIONS]
+    nex [NEX_SCRIPT | COMMAND] [OPTIONS]
 
 COMMANDS:
     (no command)              Start the Nex REPL
@@ -37,6 +37,7 @@ COMPILE TARGETS:
 
 EXAMPLES:
     nex                                      # Start REPL
+    nex app.nex                              # Evaluate the code in app.nex
     nex compile jvm app.nex                  # Compile to a standalone app.jar in current dir
     nex compile jvm app.nex build/           # Compile to a standalone app.jar in build/
     nex compile js app.nex                   # Print JavaScript to stdout
@@ -208,6 +209,12 @@ cmd_eval() {
     rm -f "$tmpfile"
 }
 
+cmd_run_script() {
+    export NEX_USER_DIR=`pwd`
+    fullpath=$(readlink -f "$1")
+    cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.eval "$fullpath"
+}
+
 # Main command dispatcher
 main() {
     local command="${1:-repl}"
@@ -239,8 +246,12 @@ main() {
             show_version
             ;;
         *)
-            echo "Error: Unknown command '$command'"
-            echo "Run 'nex help' for usage information."
+	    if [[ -f "$command" && "$command" == *.nex ]]; then
+		cmd_run_script "$@"
+	    else
+		echo "Error: Unknown command '$command'"
+		echo "Run 'nex help' for usage information."
+	    fi
             exit 1
             ;;
     esac
