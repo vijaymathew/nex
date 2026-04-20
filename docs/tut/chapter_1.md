@@ -225,7 +225,7 @@ true
 nex> let initial: Char := #65
 #A
 
-nex> #10024
+nex> let sparkles: Char := #10024
 -- will print sparkles if your console supports unicode
 ```
 
@@ -236,7 +236,7 @@ If you enable strict checking with `:typecheck on`, type annotations on REPL `le
 You cannot mix types arbitrarily. Arithmetic operators still require numeric
 operands, for example. But string concatenation is special: if either side of
 `+` is a string, Nex concatenates the values and converts the non-string side by
-calling its `to_string` method internally.
+calling its `to_string` feature internally.
 
 
 
@@ -264,7 +264,10 @@ This is one of the most common operations in any program: constructing a message
 from a mix of fixed text and variable values. You can still write `.to_string`
 explicitly when you want to make that conversion visible in the code.
 
-
+```
+nex> "Age: " + age.to_string
+"Age: 12"
+```
 
 ## REPL Commands
 
@@ -351,6 +354,50 @@ Try it with a different starting value. Change `100.0` to `0.0` and recompute `f
 
 This is the edit-run cycle: write something, observe the result, adjust, repeat. At the REPL, each step takes seconds. The faster this cycle runs, the faster you learn.
 
+The same program can also be written as a script in a `.nex` file:
+
+```nex
+let celsius: Real := 100.0
+let fahrenheit: Real := celsius * 9.0 / 5.0 + 32.0
+
+print(celsius + " degrees Celsius is " + fahrenheit + " degrees Fahrenheit")
+```
+
+Suppose you save this as `temperature.nex`. You can run it directly from the command line:
+
+```bash
+nex temperature.nex
+```
+
+This file form is the bridge from interactive experimentation to ordinary programs. The REPL is ideal for discovering what you want to write. A script is how you save that work and run it again.
+
+Notice that the script uses explicit type annotations on the top-level bindings:
+
+- `celsius: Real`
+- `fahrenheit: Real`
+
+For scripts, these annotations should be treated as mandatory when you want to compile the program. File-based execution enables the typechecker by default, and the compiler relies on that checked form. In the REPL you can often omit annotations while learning; in scripts intended for compilation, write them explicitly.
+
+Once the script is in a file, the same source can be compiled to either current Nex target.
+
+Compile to the JVM:
+
+```bash
+nex compile jvm temperature.nex build/jvm/
+```
+
+This writes a standalone jar and generated class files under `build/jvm/`.
+
+Generate JavaScript:
+
+```bash
+nex compile js temperature.nex build/js/
+```
+
+This writes the generated JavaScript files under `build/js/`.
+
+The important idea is that you are not writing one version for the REPL, another for JVM use, and another for JavaScript use. You write one Nex program, save it as a script, and then run or compile that same source as needed.
+
 
 
 ## Summary
@@ -363,6 +410,9 @@ This chapter introduced the fundamental tools for working in Nex:
 - `let name := value` introduces a variable; `name := value` updates one
 - The basic scalar types are `Integer`, `Integer64`, `Real`, `Decimal`, `Char`, `Boolean`, and `String`
 - In the REPL, type annotations are optional by default, but with `:typecheck on` you should write them explicitly on `let` bindings
+- Scripts can be run with `nex my_program.nex`
+- Scripts intended for compilation should use explicit type annotations on top-level bindings, because file checking is enabled by default
+- The same script can be compiled with `nex compile jvm ...` or `nex compile js ...`
 - Strings are joined with `+`
 - REPL commands — `:vars`, `:clear`, `:quit` — manage the session
 - Error messages are information; read them before changing anything
