@@ -159,6 +159,35 @@ end"))
         (is (not (str/includes? sync-output "Error:")) sync-output)
         (is (str/includes? current-output "9"))))))
 
+(deftest repl-compiled-backend-missing-member-on-compiled-object-reports-error-test
+  (testing "compiled backend reports missing chained member access on compiled objects instead of returning nil"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx "class Node[Item]
+  feature
+    item: Item
+    next: ?Node[Item]
+
+    set_next(next: Node[Item]) do
+      this.next := next
+    end
+  create
+    make(item: Item) do
+      this.item := item
+    end
+end"))
+            _ (with-out-str (repl/eval-code ctx "let node := create Node[Integer].make(10)"))
+            _ (with-out-str (repl/eval-code ctx "node.set_next(create Node[Integer].make(100))"))
+            ok-output (with-out-str (repl/eval-code ctx "node.next.item"))
+            bad-output (with-out-str (repl/eval-code ctx "node.next.itedd"))]
+        (is (str/includes? ok-output "100"))
+        (is (str/includes? bad-output "Error:"))
+        (is (str/includes? bad-output "Method not found: itedd"))))))
+
 (deftest repl-compiled-backend-rejects-multiple-inheritance-parent-field-writes-test
   (testing "compiled backend rejects direct writes to either parent field from a multiply-inheriting child"
     (binding [repl/*type-checking-enabled* (atom false)

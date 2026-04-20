@@ -805,15 +805,13 @@
                  (runtime-compatible-with? state runtime-name "Cursor"))
           target
           (let [builtin-result (try
-                                 (when (typeinfo/get-type-name target)
-                                   (interp/call-builtin-method nil target target method-name args))
+                                 (if (typeinfo/get-type-name target)
+                                   (interp/call-builtin-method nil target target method-name args)
+                                   ::not-found)
                                  (catch Exception _ ::not-found))]
             (if (not= builtin-result ::not-found)
               builtin-result
-              (throw (ex-info (format "No matching method %s found taking %d args for class %s"
-                                      method-name
-                                      (count args)
-                                      (.getName cls))
+              (throw (ex-info (str "Method not found: " method-name)
                               {:method method-name
                                :arity (count args)
                                :class (.getName cls)})))))))))
