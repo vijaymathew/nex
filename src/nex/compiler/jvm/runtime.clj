@@ -1628,6 +1628,7 @@
 (def-builtin-method-wrapper builtin-method-console-read-line "read_line")
 (def-builtin-method-wrapper builtin-method-console-error "error")
 (def-builtin-method-wrapper builtin-method-console-new-line "new_line")
+(def-builtin-method-wrapper builtin-method-console-flush "flush")
 (def-builtin-method-wrapper builtin-method-console-read-integer "read_integer")
 (def-builtin-method-wrapper builtin-method-console-read-real "read_real")
 

@@ -55,6 +55,38 @@ end"
                     (interp/nex-console-newline))]
       (is (= "\n" printed)))))
 
+(deftest console-flush-test
+  (testing "Console.flush flushes stdout"
+    (let [buffer (java.io.StringWriter.)
+          flush-count (atom 0)
+          out (proxy [java.io.PrintWriter] [buffer]
+                (flush []
+                  (swap! flush-count inc)
+                  (proxy-super flush)))]
+      (binding [*out* out]
+        (interp/call-builtin-method "io" {:nex-builtin-type :Console} "print" ["hello"])
+        (interp/call-builtin-method "io" {:nex-builtin-type :Console} "flush" []))
+      (is (= "hello" (str buffer)))
+      (is (pos? @flush-count)))))
+
+(deftest console-read-line-flushes-output-test
+  (testing "Console.read_line flushes stdout before reading input"
+    (let [buffer (java.io.StringWriter.)
+          flush-count (atom 0)
+          out (proxy [java.io.PrintWriter] [buffer]
+                (flush []
+                  (swap! flush-count inc)
+                  (proxy-super flush)))]
+      (binding [*out* out]
+        (with-in-str "hello\n"
+          (is (= "hello"
+                 (interp/call-builtin-method "io"
+                                             {:nex-builtin-type :Console}
+                                             "read_line"
+                                             ["prompt: "])))))
+      (is (= "prompt: " (str buffer)))
+      (is (pos? @flush-count)))))
+
 (deftest console-type-detection-test
   (testing "Console type detection"
     (is (interp/nex-console? {:nex-builtin-type :Console}))
@@ -90,6 +122,7 @@ end"
       io.print_line(\"world\")
       io.error(\"oops\")
       io.new_line()
+      io.flush()
     end
 end"
           result (tc/type-check (p/ast code))]
@@ -134,6 +167,7 @@ end"
       io.print_line(\"world\")
       io.error(\"oops\")
       io.new_line()
+      io.flush()
     end
 end"
           js-code (js/translate code)]
@@ -141,7 +175,8 @@ end"
       (is (str/includes? js-code "process.stdout.write(String(\"hello\"))"))
       (is (str/includes? js-code "console.log(\"world\")"))
       (is (str/includes? js-code "console.error(\"oops\")"))
-      (is (str/includes? js-code "console.log()")))))
+      (is (str/includes? js-code "console.log()"))
+      (is (str/includes? js-code "process.stdout.write('')")))))
 
 ;; ============================================================================
 ;; PROCESS INTERPRETER TESTS

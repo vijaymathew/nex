@@ -58,13 +58,13 @@ Together, `/` and `%` give you full information: `10 / 3` is `3` remainder `1`. 
 Integers also have methods. Methods are operations invoked with dot notation:
 
 ```
-nex> (-7).abs
+nex> -7.abs
 7
 
-nex> (3).max(8)
+nex> 3.max(8)
 8
 
-nex> (3).min(8)
+nex> 3.min(8)
 3
 ```
 
@@ -75,17 +75,16 @@ for low-level work such as flags, masks, encodings, and compact state
 representations. The interface uses method names rather than symbolic operators:
 
 ```nex
-nex> (5).bitwise_left_shift(1)
+nex> 5.bitwise_left_shift(1)
 10
 
-nex> (6).bitwise_and(3)
+nex> 6.bitwise_and(3)
 2
 
-nex> (5).bitwise_is_set(0)
+nex> 5.bitwise_is_set(0)
 true
 ```
 
-Calls on integer literals can be written directly, as in `5.bitwise_left_shift(1)`.
 Bitwise operations use 32-bit integer semantics; Appendix B lists the full set of methods.
 
 One method worth knowing early is `pick`:
@@ -139,7 +138,7 @@ nex> 3.2.round
 Real numbers also have `abs`, `min`, and `max`:
 
 ```
-nex> (-3.5).abs
+nex> -3.5.abs
 3.5
 
 nex> 1.2.max(4.7)
@@ -262,23 +261,23 @@ nex> csv.split(",")
 
 ## Operators and Methods: Two Faces of the Same Thing
 
-You have now seen two ways to express the same operations. Addition can be written as `7 + 5` or as `(7).plus(5)`. Comparison can be written as `x > 5` or as `(x).greater_than(5)`. Both forms produce identical results.
+You have now seen two ways to express the same operations. Addition can be written as `7 + 5` or as `7.plus(5)`. Comparison can be written as `x > 5` or as `x.greater_than(5)`. Both forms produce identical results.
 
 ```
 nex> 7 + 5
 12
 
-nex> (7).plus(5)
+nex> 7.plus(5)
 12
 
 nex> 10 > 3
 true
 
-nex> (10).greater_than(3)
+nex> 10.greater_than(3)
 true
 ```
 
-The operator form is shorter and more familiar. The method form is more explicit about what is happening: `7.plus(5)` makes visible that `plus` is an operation that belongs to the value `7`, and that `5` is its argument. In most situations you will use operators. When you need to pass an operation as a value, or when working with generic code, the method form becomes necessary. For now, use whichever is clearer.
+The operator form is shorter and more familiar. The method form is more explicit about what is happening: `7.plus(5)` makes visible that `plus` is an operation that belongs to the value `7`, and that `5` is its argument. In most situations you will use operators. When working with generic code, the method form becomes necessary. For now, use whichever is clearer.
 
 
 
@@ -320,10 +319,7 @@ Converting a number to a string:
 nex> let age: Integer := 25
 25
 
-nex> let message: String := "Age: " + age
-"Age: 25"
-
-nex> message
+nex> "Age: " + age
 "Age: 25"
 ```
 
@@ -336,7 +332,7 @@ Converting a string to a number:
 
 ```
 nex> let s: String := "42"
-42
+"42"
 
 nex> let n: Integer := s.to_integer
 42
@@ -348,8 +344,8 @@ nex> n + 8
 Real conversion works the same way:
 
 ```
-nex> let r: Real := "3.14".to_real
-3.14
+nex> let r: Real := "3.14".to_real * 10 * 10
+314.0
 ```
 
 The conversion methods only work when the string actually represents a value of the target type. Calling `.to_integer` on a string that does not contain a valid integer raises an exception:
@@ -406,7 +402,7 @@ The `read_line` method reads a line of text from the user and returns it as a st
 ```
 nex> let con := create Console
 nex> con.print_line("What is your name?")
-"What is your name?"
+What is your name?
 nex> let name := con.read_line
 ```
 
@@ -424,12 +420,12 @@ Here is the complete interactive program as you would enter it at the REPL:
 ```
 nex> let con := create Console
 nex> con.print_line("Enter your age:")
-"Enter your age:"
+Enter your age:
 nex> let input := con.read_line
 nex> let age: Integer := input.to_integer
-nex> let birth_year: Integer := 2025 - age
+nex> let birth_year: Integer := 2026 - age
 nex> con.print_line("You were born around " + birth_year.to_string)
-"You were born around 2000"
+You were born around 2000
 ```
 
 This small program touches everything introduced in this chapter: a typed variable, string input, explicit type conversion from string to integer and back, and arithmetic on the result.

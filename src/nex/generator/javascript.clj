@@ -917,6 +917,7 @@
     "read_line"    (fn [_ _] "require('readline-sync').question('')")
     "error"        (fn [_ args] (str "console.error(" args ")"))
     "new_line"     (fn [_ _] "console.log()")
+    "flush"        (fn [_ _] "process.stdout.write('')")
     "read_integer" (fn [_ _] "__nexParseInt(require('readline-sync').question(''))")
     "read_real"    (fn [_ _] "parseFloat(require('readline-sync').question(''))")}
 
