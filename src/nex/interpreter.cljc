@@ -104,6 +104,7 @@
 (def nex-console-println rt/nex-console-println)
 (def nex-console-error rt/nex-console-error)
 (def nex-console-newline rt/nex-console-newline)
+(def nex-console-flush rt/nex-console-flush)
 (def nex-console-read-line rt/nex-console-read-line)
 (def nex-parse-integer64-string rt/nex-parse-integer64-string)
 (def nex-parse-integer rt/nex-parse-integer)
@@ -3065,6 +3066,7 @@
     "read_line"    (fn [_ & args] (when (seq args) (nex-console-print (str (first args)))) (nex-console-read-line))
     "error"        (fn [_ msg & _] (nex-console-error (nex-display-value msg)) nil)
     "new_line"     (fn [_ & _] (nex-console-newline) nil)
+    "flush"        (fn [_ & _] (nex-console-flush) nil)
     "read_integer" (fn [_ & _] (nex-parse-integer (nex-console-read-line)))
     "read_real"    (fn [_ & _] (nex-parse-real (nex-console-read-line)))}
 

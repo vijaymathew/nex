@@ -17,6 +17,7 @@ create Console
 | `read_line` | `prompt?: String` | `String` | Read one line from input. |
 | `error` | `msg: Any` | `Void` | Write to error output. |
 | `new_line` | none | `Void` | Emit blank line. |
+| `flush` | none | `Void` | Flush pending output. |
 | `read_integer` | none | `Integer` | Read and parse integer. |
 | `read_real` | none | `Real` | Read and parse real number. |
 
@@ -180,7 +181,8 @@ create Atomic_Reference.make(nil)
 
 ```nex
 let con := create Console
-con.print_line("Enter your name:")
+con.print("Enter your name: ")
+con.flush()
 let name := con.read_line()
 con.print_line("Hello, " + name)
 

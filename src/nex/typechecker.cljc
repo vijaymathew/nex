@@ -4154,6 +4154,7 @@
            "read_line" {:params [] :return-type "String"}
            "error" {:params [{:name "msg" :type "String"}] :return-type "Void"}
            "new_line" {:params [] :return-type "Void"}
+           "flush" {:params [] :return-type "Void"}
            "read_integer" {:params [] :return-type "Integer"}
            "read_real" {:params [] :return-type "Real"}}]
     (env-add-class env "Console" {:name "Console"

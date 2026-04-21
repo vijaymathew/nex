@@ -192,7 +192,12 @@
 (defn nex-console-println [msg] #?(:clj (println msg) :cljs (js/console.log msg)))
 (defn nex-console-error [msg] #?(:clj (binding [*out* *err*] (println msg)) :cljs (js/console.error msg)))
 (defn nex-console-newline [] #?(:clj (println) :cljs (js/console.log "")))
-(defn nex-console-read-line [] #?(:clj (read-line) :cljs (throw (ex-info "read-line not supported in ClojureScript" {}))))
+(defn nex-console-flush [] #?(:clj (flush) :cljs (.write js/process.stdout "")))
+(defn nex-console-read-line []
+  #?(:clj (do
+            (flush)
+            (read-line))
+     :cljs (throw (ex-info "read-line not supported in ClojureScript" {}))))
 
 (defn nex-parse-integer64-string [s]
   (let [trimmed (str/trim s)

@@ -549,7 +549,7 @@
          (collection-method-return-type target-type (:method expr)))
        (when (= "Console" base-type)
          (case (:method expr)
-           ("print" "print_line" "error" "new_line") "Void"
+           ("print" "print_line" "error" "new_line" "flush") "Void"
            "read_line" "String"
            "read_integer" "Integer"
            "read_real" "Real"
