@@ -345,6 +345,14 @@
     (and (string? base)
          (not (#{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean"} base)))))
 
+(defn- attached-non-scalar-type?
+  "Whether a type is an attached, non-scalar return type that must not
+   implicitly fall back to nil."
+  [t]
+  (let [n (normalize-type t)]
+    (and (not (detachable-type? n))
+         (reference-like-type? n))))
+
 (defn is-generic-type-param?
   "Check if a type is a generic type parameter (single uppercase letter)."
   ([type]
@@ -3248,15 +3256,14 @@
           :array-literal (check-array-literal env expr)
           :set-literal (check-set-literal env expr)
           :map-literal (check-map-literal env expr)
-          :anonymous-function (let [class-def (:class-def expr)
-                                     class-name (:class-name expr)]
+          :anonymous-function (let [class-def (:class-def expr)]
                                 ;; Register the dynamic class definition in the type environment
                                 (collect-class-info env class-def)
                                 ;; Check the class (this will check the callN method body)
                                 (check-class env class-def)
-                                ;; Return the class name.
-                                ;; Since it inherits from Function, it will support callN methods.
-                                class-name)
+                                ;; Anonymous functions have distinct generated runtime classes,
+                                ;; but their stable static type is Function.
+                                "Function")
           :when (let [cond-type (check-expression env (:condition expr))
                        cons-env (doto (make-type-env env)
                                   (apply-condition-branch-refinement! (:condition expr) :then))
@@ -3676,6 +3683,89 @@
       (some references-result? (vals node)))
     :else false))
 
+(declare result-definitely-assigned-in-body?)
+
+(defn- result-definitely-assigned-after-stmt
+  "Whether result is definitely assigned after executing stmt, assuming assigned? before it."
+  [stmt assigned?]
+  (case (:type stmt)
+    :assign (if (#{"result" "Result"} (:target stmt)) true assigned?)
+    :let (if (#{"result" "Result"} (:name stmt)) true assigned?)
+    :if (let [branch-outs (concat
+                           [(result-definitely-assigned-in-body? (:then stmt) assigned?)]
+                           (map #(result-definitely-assigned-in-body? (:then %) assigned?) (:elseif stmt))
+                           [(if (:else stmt)
+                              (result-definitely-assigned-in-body? (:else stmt) assigned?)
+                              assigned?)])]
+          (every? true? branch-outs))
+    :loop (result-definitely-assigned-in-body? (:init stmt) assigned?)
+    :select (let [clause-outs (map #(result-definitely-assigned-in-body? (:body %) assigned?) (:clauses stmt))
+                  timeout-out (when-let [timeout (:timeout stmt)]
+                                (result-definitely-assigned-in-body? (:body timeout) assigned?))
+                  else-out (when-let [else-body (:else stmt)]
+                             (result-definitely-assigned-in-body? else-body assigned?))
+                  all-outs (concat clause-outs
+                                   (when timeout-out [timeout-out])
+                                   (when else-out [else-out]))]
+              (if (seq all-outs)
+                (every? true? all-outs)
+                assigned?))
+    :scoped-block (let [body-out (result-definitely-assigned-in-body? (:body stmt) assigned?)]
+                    (if-let [rescue-body (:rescue stmt)]
+                      (and body-out
+                           (result-definitely-assigned-in-body? rescue-body assigned?))
+                      body-out))
+    :with (result-definitely-assigned-in-body? (:body stmt) assigned?)
+    :case (let [clause-outs (map #(result-definitely-assigned-in-body? (:body %) assigned?) (:clauses stmt))
+                else-out (if-let [else-body (:else stmt)]
+                           (result-definitely-assigned-in-body? else-body assigned?)
+                           assigned?)]
+            (every? true? (concat clause-outs [else-out])))
+    assigned?))
+
+(defn- result-definitely-assigned-in-body?
+  [body assigned?]
+  (reduce (fn [acc stmt]
+            (result-definitely-assigned-after-stmt stmt acc))
+          assigned?
+          body))
+
+(declare body-may-complete-normally?)
+
+(defn- stmt-may-complete-normally?
+  [stmt]
+  (case (:type stmt)
+    :raise false
+    :if (let [branch-outs (concat
+                           [(body-may-complete-normally? (:then stmt))]
+                           (map #(body-may-complete-normally? (:then %)) (:elseif stmt))
+                           [(if (:else stmt)
+                              (body-may-complete-normally? (:else stmt))
+                              true)])]
+          (some true? branch-outs))
+    :case (let [clause-outs (map #(body-may-complete-normally? (:body %)) (:clauses stmt))
+                else-out (if-let [else-body (:else stmt)]
+                           (body-may-complete-normally? else-body)
+                           true)]
+            (some true? (concat clause-outs [else-out])))
+    :scoped-block (or (body-may-complete-normally? (:body stmt))
+                      (when-let [rescue-body (:rescue stmt)]
+                        (body-may-complete-normally? rescue-body)))
+    :with (body-may-complete-normally? (:body stmt))
+    ;; Be conservative for constructs whose runtime completion depends on data/coordination.
+    :loop true
+    :select true
+    true))
+
+(defn- body-may-complete-normally?
+  [body]
+  (loop [stmts body]
+    (if-let [stmt (first stmts)]
+      (if (stmt-may-complete-normally? stmt)
+        (recur (rest stmts))
+        false)
+      true)))
+
 (defn check-method
   "Check a method definition"
   [env class-name {:keys [name params return-type require body ensure rescue] :as method}]
@@ -3719,20 +3809,36 @@
     (doseq [stmt body]
       (check-statement method-env stmt))
 
+    ;; Check rescue clause
+    (when rescue
+      (let [rescue-env (make-type-env method-env)]
+        (env-add-var rescue-env "exception" "Any")
+        (doseq [stmt rescue]
+          (check-statement rescue-env stmt))))
+
+    (let [normal-path-returns? (body-may-complete-normally? body)
+          rescue-path-returns? (when rescue (body-may-complete-normally? rescue))
+          normal-path-inits? (result-definitely-assigned-in-body? body false)
+          rescue-path-inits? (when rescue (result-definitely-assigned-in-body? rescue false))]
+    (when (and return-type
+               (attached-non-scalar-type? return-type)
+               (or (and normal-path-returns? (not normal-path-inits?))
+                   (and rescue-path-returns? (not rescue-path-inits?))))
+      (throw (ex-info (str "Method " name " does not initialize result")
+                      {:error (type-error
+                               (str "Method '" name "' declares return type "
+                                    (display-type return-type)
+                                    " but does not definitely assign result on all returning paths. "
+                                    "Use 'result :=' or declare the return type detachable."))})))
+    )
+
     ;; Check postconditions
     (doseq [assertion ensure]
       (let [cond-type (check-expression method-env (:condition assertion))]
         (when-not (= cond-type "Boolean")
           (throw (ex-info (str "Postcondition must be Boolean in method " name)
                           {:error (type-error
-                                   (str "Postcondition must be Boolean, got " cond-type))})))))
-
-    ;; Check rescue clause
-    (when rescue
-      (let [rescue-env (make-type-env method-env)]
-        (env-add-var rescue-env "exception" "Any")
-        (doseq [stmt rescue]
-          (check-statement rescue-env stmt))))))
+                                   (str "Postcondition must be Boolean, got " cond-type))})))))))
 
 (defn check-constructor
   "Check a constructor definition"
@@ -4151,7 +4257,6 @@
   (doseq [[method-name sig]
           {"print" {:params [{:name "msg" :type "String"}] :return-type "Void"}
            "print_line" {:params [{:name "msg" :type "String"}] :return-type "Void"}
-           "read_line" {:params [] :return-type "String"}
            "error" {:params [{:name "msg" :type "String"}] :return-type "Void"}
            "new_line" {:params [] :return-type "Void"}
            "flush" {:params [] :return-type "Void"}
@@ -4160,6 +4265,10 @@
     (env-add-class env "Console" {:name "Console"
                                   :generic-params nil})
     (env-add-method env "Console" method-name sig))
+  (env-add-method env "Console" "read_line"
+                  {:params [] :return-type "String"})
+  (env-add-method env "Console" "read_line"
+                  {:params [{:name "prompt" :type "String"}] :return-type "String"})
   (env-add-class env "Task" {:name "Task"
                              :generic-params [{:name "T"}]})
   (doseq [[method-name sig]
@@ -4186,6 +4295,7 @@
           {"get"         {:params [{:name "index" :type "Integer"}] :return-type "T"}
            "add"         {:params [{:name "value" :type "T"}] :return-type "Void"}
            "push"        {:params [{:name "value" :type "T"}] :return-type "Void"}
+           "add_at"      {:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}
            "at"          {:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}
            "set"         {:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}
            "length"      {:params [] :return-type "Integer"}

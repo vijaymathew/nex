@@ -10,8 +10,7 @@ A function is a named, reusable piece of code that takes inputs, performs a comp
 Functions are defined with the `function` keyword:
 
 ```
-nex> function greet(name: String)
-     do
+nex> function greet(name: String) do
        print("Hello, " + name)
      end
 ```
@@ -39,8 +38,7 @@ A *parameter* is the name given to an input in the function definition. An *argu
 Parameters are declared with their types. This is not optional:
 
 ```
-nex> function add(a: Integer, b: Integer)
-     do
+nex> function add(a: Integer, b: Integer) do
        print(a + b)
      end
 
@@ -51,8 +49,7 @@ nex> add(3, 7)
 Nex also supports grouped parameter syntax when multiple parameters share the same type:
 
 ```
-nex> function add(a, b: Integer)
-     do
+nex> function add(a, b: Integer) do
        print(a + b)
      end
 ```
@@ -68,8 +65,7 @@ Parameters are local to the function body — they exist only for the duration o
 A function that only produces side effects — like printing — is useful, but a function that computes and *returns* a value is more versatile. The return value is assigned to the special variable `result`:
 
 ```
-nex> function double(n: Integer): Integer
-     do
+nex> function double(n: Integer): Integer do
        result := n * 2
      end
 
@@ -86,6 +82,17 @@ The return type is declared after the parameter list, separated by a colon: `: I
 
 Because `double` returns a value, it can be used anywhere an expression of the right type is expected: inside `print`, on the right-hand side of an assignment, or as an argument to another function call.
 
+Return values are not limited to single-parameter functions. A function can take several inputs and still behave like an ordinary expression:
+
+```
+nex> function rectangle_area(width, height: Real): Real do
+       result := width * height
+     end
+
+nex> rectangle_area(4.0, 5.0)
+20.0
+```
+
 If a function body does not assign to `result`, the function returns no value — it is equivalent to a `Void` return. Attempting to use the return value of such a function as an expression will produce an error.
 
 
@@ -95,8 +102,7 @@ If a function body does not assign to `result`, the function returns no value �
 The `result` variable is how Nex functions return values, and it behaves slightly differently from ordinary variables. It is pre-declared with the function's return type — you do not use `let` to introduce it. You simply assign to it:
 
 ```
-nex> function max(a, b: Integer): Integer
-     do
+nex> function max(a, b: Integer): Integer do
        if a >= b then
          result := a
        else
@@ -111,13 +117,22 @@ nex> max(10, 4)
 10
 ```
 
+This design is deliberate. Many imperative languages use a `return` statement, often with several `return` points scattered through the body. Nex takes a different approach: the function computes its answer by assigning to `result`, and the body then runs to its ordinary end. That has several advantages.
+
+First, it encourages a more expression-oriented and functionally disciplined style. Instead of thinking "jump out of the function as soon as possible," you are encouraged to think "what value should this routine produce?" The emphasis shifts from control transfer to value computation.
+
+Second, it improves readability. A body with one clear exit is usually easier to read than a body with many early exits hidden in nested conditionals. When a reader reaches the end of a Nex routine, the control flow is unsurprising: the routine has finished, and the value of `result` is what it returns. There is less need to scan upward looking for a `return` that may have bypassed half the code.
+
+Third, `result` integrates naturally with contracts. Postconditions are written about the final state of the routine, and the return value is available under a stable, explicit name. That makes statements such as "the returned value is positive" or "the returned string is never empty" direct and convenient to express.
+
+You can also make a structural argument against `return`: in many languages, it is a constrained form of jump. It transfers control immediately to the end of the routine, bypassing the remaining statements. In that sense, `return` is often `goto` in disguise. Nex prefers the simpler discipline of explicit value assignment plus ordinary fall-through to the routine's end.
+
 `result` can be assigned more than once within a function body — the last assignment before the function returns is the value the caller receives. This is useful in functions with conditional logic, where different branches compute different return values.
 
 A common pattern is to give `result` a default value at the start of the body, then update it if necessary:
 
 ```
-nex> function describe(n: Integer): String
-     do
+nex> function describe(n: Integer): String do
        result := "other"
        if n < 0 then
          result := "negative"
@@ -140,25 +155,10 @@ nex> describe(42)
 
 The default `"other"` is never actually returned here because every integer is either negative, zero, or positive — but having a default means the function always returns something meaningful even if the conditional logic has a gap.
 
-
-
-## Multiple Parameters
-
-Functions can take any number of parameters:
+The same idea applies when a function has several parameters and several possible branches:
 
 ```
-nex> function rectangle_area(width, height: Real): Real
-     do
-       result := width * height
-     end
-
-nex> rectangle_area(4.0, 5.0)
-20.0
-```
-
-```
-nex> function clamp(value, low, high: Integer): Integer
-     do
+nex> function clamp(value, low, high: Integer): Integer do
        if value < low then
          result := low
        elseif value > high then
@@ -187,13 +187,11 @@ nex> clamp(7, 0, 10)
 A function body can call other functions. This is how larger computations are assembled from smaller ones:
 
 ```
-nex> function square(n: Integer): Integer
-     do
+nex> function square(n: Integer): Integer do
        result := n * n
      end
 
-nex> function sum_of_squares(a, b: Integer): Integer
-     do
+nex> function sum_of_squares(a, b: Integer): Integer do
        result := square(a) + square(b)
      end
 
@@ -221,13 +219,11 @@ nex> :typecheck on
 ```
 nex> function normalize_name(name: String): String
 
-nex> function greet_user(name: String): String
-     do
+nex> function greet_user(name: String): String do
        result := "Hello, " + normalize_name(name)
      end
 
-nex> function normalize_name(name: String): String
-     do
+nex> function normalize_name(name: String): String do
        result := name.trim()
      end
 
@@ -261,8 +257,7 @@ An anonymous function is a value — it can be assigned to a variable, passed as
 Anonymous functions are most useful when a function needs to be passed to another function as an argument. Suppose you wanted a function that applies any integer transformation twice:
 
 ```
-nex> function apply_twice(f: Function, n: Integer): Integer
-     do
+nex> function apply_twice(f: Function, n: Integer): Integer do
        result := f(f(n))
      end
 
@@ -313,18 +308,15 @@ The threshold for writing a function should be low. Functions are not reserved f
 Here is a small library of related functions, built up one at a time:
 
 ```
-nex> function celsius_to_fahrenheit(c: Real): Real
-     do
+nex> function celsius_to_fahrenheit(c: Real): Real do
        result := c * 9.0 / 5.0 + 32.0
      end
 
-nex> function fahrenheit_to_celsius(f: Real): Real
-     do
+nex> function fahrenheit_to_celsius(f: Real): Real do
        result := (f - 32.0) * 5.0 / 9.0
      end
 
-nex> function describe_temperature(c: Real): String
-     do
+nex> function describe_temperature(c: Real): String do
        if c < 0.0 then
          result := "freezing"
        elseif c < 15.0 then

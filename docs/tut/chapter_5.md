@@ -199,11 +199,11 @@ The variable `x` is bound to each element successively. Arrays are introduced fu
 nex> across "hello" as ch do
        print(ch)
     end
-"h"
-"e"
-"l"
-"l"
-"o"
+#h
+#e
+#l
+#l
+#o
 ```
 
 And on maps, which we cover in Chapter 10.
@@ -362,4 +362,4 @@ This is a pattern you will see often: a loop that continues until some goal is a
 5	10	15	20	25
 ```
 
-Use `print` (without a newline) to build each row, and `con.new_line` to end each row. You will need `create Console` for `new_line`.
+Use `console.print` to build each row, and `console.new_line` to end each row. You will need `let console := create Console` to access these methods.

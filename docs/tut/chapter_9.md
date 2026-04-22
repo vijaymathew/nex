@@ -72,12 +72,12 @@ nex> scores.get(0)
 Individual elements can be updated by assigning to an indexed position:
 
 ```
-nex> scores.put(2, 80)
+nex> scores.set(2, 80)
 nex> scores
 [85, 92, 80, 95, 60]
 ```
 
-The array itself is mutable — its elements can change — but its length cannot. An array created with five elements always has five elements. Adding or removing elements requires the operations in Section 9.5.
+The array itself is mutable. Its elements can change, and its length can also change. Updating an existing element with `set` preserves the current length; operations such as `add`, `add_at`, and `remove` in Section 9.5 grow or shrink the array.
 
 
 
@@ -253,8 +253,7 @@ This pattern — empty array, loop, `add` — is the standard way to construct a
 Arrays are values like any other and can be passed to and returned from functions:
 
 ```
-nex> function sum(arr: Array[Integer]): Integer
-     do
+nex> function sum(arr: Array[Integer]): Integer do
        result := 0
        across arr as x do
          result := result + x
@@ -269,8 +268,7 @@ nex> sum([])
 ```
 
 ```
-nex> function maximum(arr: Array[Integer]): Integer
-     do
+nex> function maximum(arr: Array[Integer]): Integer do
        result := arr.get(0)
        across arr as x do
          if x > result then
@@ -288,8 +286,7 @@ nex> maximum([3, 7, 1, 9, 4])
 Functions can also return arrays:
 
 ```
-nex> function filter_above(arr: Array[Integer], threshold: Integer): Array[Integer]
-     do
+nex> function filter_above(arr: Array[Integer], threshold: Integer): Array[Integer] do
        result := []
        across arr as x do
          if x > threshold then
@@ -327,28 +324,25 @@ This question — *who is responsible for ensuring the precondition?* — is one
 Here is a small collection of functions that compute basic statistics on an array of real numbers:
 
 ```
-nex> function mean(arr: Array[Real]): Real
-     do
+nex> function mean(arr: Array[Real]): Real do
        result := 0.0
        across arr as x do
          result := result + x
        end
-       result := result / arr.length.to_real
+       result := result / arr.length
      end
 
-nex> function variance(arr: Array[Real]): Real
-     do
+nex> function variance(arr: Array[Real]): Real do
        let m := mean(arr)
        result := 0.0
        across arr as x do
          let diff := x - m
          result := result + diff * diff
        end
-       result := result / arr.length.to_real
+       result := result / arr.length
      end
 
-nex> function std_dev(arr: Array[Real]): Real
-     do
+nex> function std_dev(arr: Array[Real]): Real do
        result := variance(arr) ^ 0.5
      end
 ```
@@ -378,7 +372,7 @@ All three functions have the same implicit precondition: the array must not be e
 - Elements are accessed by zero-based index: `arr.get(0)` is the first element, `arr.get(arr.length - 1)` is the last
 - Accessing an out-of-bounds index raises an exception; the precondition for `arr.get(i)` is `0 <= i < arr.length`
 - `across arr as x do` iterates over every element in order; the element type is inferred
-- `add`, `add_at`, `remove`, and `put` grow and shrink arrays
+- `add`, `add_at`, and `remove` grow and shrink arrays
 - `contains`, `index_of`, `slice`, `reverse`, and `sort` are common query and transformation operations
 - Arrays are values: they can be passed to and returned from functions
 - Build arrays programmatically with an empty array and `add` inside a loop

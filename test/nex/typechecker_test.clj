@@ -660,6 +660,61 @@ end"
           result (tc/type-check ast)]
       (is (:success result) (pr-str result)))))
 
+(deftest test-anonymous-function-let-infers-function-type
+  (testing "Unannotated let bindings infer Function for anonymous functions"
+    (let [code "class Test
+  feature
+    demo() do
+      let transform := fn(x: Integer): Integer do
+        result := x + x
+      end
+      transform := fn(x: Integer): Integer do
+        result := x * x
+      end
+      let y: Integer := transform(5)
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str result)))))
+
+(deftest test-console-read-line-allows-prompt
+  (testing "Console.read_line accepts an optional String prompt"
+    (let [code "class Test
+  feature
+    demo() do
+      let con: Console := create Console
+      let name: String := con.read_line(\"Name: \")
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str result)))))
+
+(deftest test-attached-non-scalar-return-requires-result-assignment
+  (testing "Attached non-scalar return types must definitely assign result"
+    (let [code "class Test
+  feature
+    bad(): Array[Integer] do
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"does not definitely assign result on all returning paths" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-detachable-non-scalar-return-may-omit-result-assignment
+  (testing "Detachable non-scalar return types may omit result assignment"
+    (let [code "class Test
+  feature
+    ok(): ?Array[Integer] do
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str result)))))
+
 (deftest test-string-concatenation-typecheck
   (testing "String concatenation with + should typecheck"
     (let [code "class Test

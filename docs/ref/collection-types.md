@@ -33,13 +33,13 @@ create Array[String].filled(2, "x")
 | `get` | `index: Integer` | `Any` | Read element at `index`. |
 | `add` | `value: Any` | `Void` | Append value. |
 | `add_at` | `index: Integer, value: Any` | `Void` | Insert value at index. |
-| `put` | `index: Integer, value: Any` | `Void` | Replace element at index. |
 | `length` | none | `Integer` | Number of elements. |
 | `is_empty` | none | `Boolean` | True when array has no elements. |
 | `contains` | `elem: Any` | `Boolean` | Membership test. |
 | `index_of` | `elem: Any` | `Integer` | First index or `-1` if not found. |
 | `remove` | `index: Integer` | `Void` | Remove element at index. |
 | `reverse` | none | `Array[Any]` | Return reversed array. |
+| `set` | `index: Integer, value: Any` | `Void` | Replace element at index. |
 | `sort` | none | `Array[Any]` | Return a new array sorted by built-in order or `Comparable.compare`. |
 | `sort` | `compareFn: Function` | `Array[Any]` | Return a new array sorted using `compareFn(a, b) -> Integer`. |
 | `slice` | `start: Integer, end: Integer` | `Array[Any]` | Subrange from `start` to `end`. |

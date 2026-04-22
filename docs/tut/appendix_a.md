@@ -156,8 +156,7 @@ end
 Function declaration:
 
 ```nex
-function max(a, b: Integer): Integer
-do
+function max(a, b: Integer): Integer do
   if a >= b then
     result := a
   else
@@ -180,8 +179,7 @@ Mutually recursive functions must declare their signatures before their bodies:
 function is_even(n: Integer): Boolean
 function is_odd(n: Integer): Boolean
 
-function is_even(n: Integer): Boolean
-do
+function is_even(n: Integer): Boolean do
   if n = 0 then
     result := true
   else
@@ -189,8 +187,7 @@ do
   end
 end
 
-function is_odd(n: Integer): Boolean
-do
+function is_odd(n: Integer): Boolean do
   if n = 0 then
     result := false
   else
@@ -393,8 +390,7 @@ end
 Routine-level rescue:
 
 ```nex
-function load_default(): String
-do
+function load_default(): String do
   raise "missing"
 rescue
   result := "fallback"

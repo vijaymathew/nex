@@ -165,8 +165,7 @@ end
 ## Functions
 
 ```nex
-function greet(name: String)
-do
+function greet(name: String) do
   print("Hello, " + name + "!")
 end
 
@@ -176,8 +175,7 @@ greet("Bob")
 A function that gives back a value:
 
 ```nex
-function double(n: Integer): Integer
-do
+function double(n: Integer): Integer do
   result := n * 2
 end
 
@@ -191,8 +189,7 @@ bodies afterwards:
 function is_even(n: Integer): Boolean
 function is_odd(n: Integer): Boolean
 
-function is_even(n: Integer): Boolean
-do
+function is_even(n: Integer): Boolean do
   if n = 0 then
     result := true
   else
@@ -200,8 +197,7 @@ do
   end
 end
 
-function is_odd(n: Integer): Boolean
-do
+function is_odd(n: Integer): Boolean do
   if n = 0 then
     result := false
   else
@@ -542,8 +538,7 @@ b.value -- 42
 Generic functions use the same bracket syntax after the function name:
 
 ```nex
-function first[T](values: Array[T]): T
-do
+function first[T](values: Array[T]): T do
   result := values.get(0)
 end
 
@@ -554,8 +549,7 @@ print(first(["a", "b", "c"]))   -- "a"
 Multiple generic parameters are allowed:
 
 ```nex
-function pick_or_default[K, V](present: Boolean, value: V, fallback: V): V
-do
+function pick_or_default[K, V](present: Boolean, value: V, fallback: V): V do
   result := when present value else fallback end
 end
 ```
