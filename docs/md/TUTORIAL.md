@@ -147,13 +147,11 @@ end
 Top-level functions use `function`:
 
 ```nex
-function greet(name: String)
-do
+function greet(name: String) do
   print("Hello, " + name)
 end
 
-function double(n: Integer): Integer
-do
+function double(n: Integer): Integer do
   result := n * 2
 end
 ```

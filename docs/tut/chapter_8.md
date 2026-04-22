@@ -8,8 +8,7 @@ A function can call other functions — that much we established in Chapter 6. A
 Start with a familiar computation: summing the integers from 1 to n. Chapter 5 wrote this as a loop. Here is the recursive version:
 
 ```
-nex> function sum_to(n: Integer): Integer
-     do
+nex> function sum_to(n: Integer): Integer do
        if n = 0 then
          result := 0
        else
@@ -46,7 +45,7 @@ sum_to(4)
 
 Each call suspends and waits for the result of the next call. When `sum_to(0)` returns `0`, the waiting calls can resolve from the inside out: `sum_to(1)` returns `1`, `sum_to(2)` returns `3`, and so on up to `sum_to(4)`, which returns `10`.
 
-This expansion — called the *call stack* — builds up as the recursion descends and collapses as it returns. For deep recursion this stack can become large. We return to this practical concern in Section 8.6.
+This expansion — called the *call stack* — builds up as the recursion descends and collapses as it returns. For deep recursion this stack can become large. We return to this practical concern in Section 8.7.
 
 
 
@@ -62,8 +61,7 @@ For `sum_to`: the simplest version is `sum_to(0)`, which is `0`. A sum up to `n`
 For factorial — the product of all integers from 1 to n:
 
 ```
-nex> function factorial(n: Integer): Integer
-     do
+nex> function factorial(n: Integer): Integer do
        if n = 0 then
          result := 1
        else
@@ -80,8 +78,7 @@ Base case: `factorial(0)` is `1` (the empty product, by convention). Recursive c
 For counting down and printing:
 
 ```
-nex> function count_down(n: Integer)
-     do
+nex> function count_down(n: Integer) do
        if n = 0 then
          print("Go!")
        else
@@ -124,8 +121,7 @@ nex> let tab: Char := #tab
 With that in hand:
 
 ```
-nex> function count_char(s: String, ch: Char): Integer
-     do
+nex> function count_char(s: String, ch: Char): Integer do
        if s.length = 0 then
          result := 0
        else
@@ -159,8 +155,7 @@ nex> function is_even(n: Integer): Boolean
 
 nex> function is_odd(n: Integer): Boolean
 
-nex> function is_even(n: Integer): Boolean
-     do
+nex> function is_even(n: Integer): Boolean do
        if n = 0 then
          result := true
        else
@@ -168,8 +163,7 @@ nex> function is_even(n: Integer): Boolean
        end
      end
 
-nex> function is_odd(n: Integer): Boolean
-     do
+nex> function is_odd(n: Integer): Boolean do
        if n = 0 then
          result := false
        else
@@ -204,8 +198,7 @@ Recursion tends to be clearer when:
 **The problem is defined recursively.** Fibonacci numbers, tree traversal, and many mathematical sequences are defined in terms of smaller instances of themselves. A recursive function mirrors that definition directly:
 
 ```
-nex> function fibonacci(n: Integer): Integer
-     do
+nex> function fibonacci(n: Integer): Integer do
        if n <= 1 then
          result := n
        else
@@ -236,8 +229,7 @@ nex> -- loop: immediately clear
 nex> from let i := 1 until i > 10 do print(i) i := i + 1 end
 
 nex> -- recursion: more thought required
-nex> function print_to(n, limit: Integer)
-     do
+nex> function print_to(n, limit: Integer) do
        if n <= limit then
          print(n)
          print_to(n + 1, limit)
@@ -268,7 +260,7 @@ nex> total
 50005000
 ```
 
-**Performance matters.** The naive recursive Fibonacci from Section 8.6 is correct but slow. `fibonacci(40)` requires computing `fibonacci(39)` and `fibonacci(38)`, each of which recomputes overlapping sub-problems. The number of calls grows exponentially with `n`. A loop-based version with two accumulator variables computes the same result in linear time. When a recursive solution recomputes the same sub-problems repeatedly, a loop — or a more advanced technique called memoisation — will be significantly faster.
+**Performance matters.** The naive recursive Fibonacci from Section 8.6 is correct but slow. `fibonacci(40)` requires computing `fibonacci(39)` and `fibonacci(38)`, each of which recomputes overlapping sub-problems. The number of calls grows exponentially with `n`. A loop-based version with two accumulator variables computes the same result in linear time. When a recursive solution recomputes the same sub-problems repeatedly, a loop — or a more advanced technique called memoisation, which stores previously computed results so the same sub-problem is not solved repeatedly — will be significantly faster.
 
 
 

@@ -11,6 +11,7 @@
                                          {:name (str "arg" i) :type "Any"})
                                        (range 1 (inc n))))
                        :return-type "Any"
+                       :declaration-only? true
                        :note nil
                        :require nil
                        :body []
@@ -36,6 +37,7 @@
    :body [{:type :feature-section
            :visibility {:type :public}
            :members [{:type :method :name "start" :params nil :return-type nil
+                      :declaration-only? true
                       :note nil :require nil :body [] :ensure nil}
                      {:type :method :name "cursor" :params nil :return-type "Cursor"
                       :note nil :require nil
@@ -44,10 +46,13 @@
                               :value {:type :this}}]
                       :ensure nil}
                      {:type :method :name "item" :params nil :return-type "Any"
+                      :declaration-only? true
                       :note nil :require nil :body [] :ensure nil}
                      {:type :method :name "next" :params nil :return-type nil
+                      :declaration-only? true
                       :note nil :require nil :body [] :ensure nil}
                      {:type :method :name "at_end" :params nil :return-type "Boolean"
+                      :declaration-only? true
                       :note nil :require nil :body [] :ensure nil}]}]
    :invariant nil})
 
@@ -64,6 +69,7 @@
            :members [{:type :method :name "compare"
                       :params [{:name "a" :type "Any"}]
                       :return-type "Integer"
+                      :declaration-only? true
                       :note nil :require nil :body [] :ensure nil}]}]
    :invariant nil})
 
@@ -91,6 +97,7 @@
            :members [{:type :method :name "hash"
                       :params nil
                       :return-type "Integer"
+                      :declaration-only? true
                       :note nil :require nil :body [] :ensure nil}]}]
    :invariant nil})
 

@@ -103,6 +103,34 @@ end"))
         (is (str/includes? private-output "Error:"))
         (is (not (str/includes? private-output "Integer 11")))))))
 
+(deftest repl-array-add-at-typechecks-and-inserts-test
+  (testing "REPL accepts Array.add_at under type checking and inserts at the requested index"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :interpreter)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx "let names: Array[String] := [\"Alice\", \"Carol\"]"))
+            add-at-output (with-out-str
+                            (repl/eval-code ctx "names.add_at(1, \"Bob\")"))
+            names-output (with-out-str
+                           (repl/eval-code ctx "names"))]
+        (is (not (str/includes? add-at-output "Error:")) add-at-output)
+        (is (str/includes? names-output "[\"Alice\", \"Bob\", \"Carol\"]"))))))
+
+(deftest repl-rejects-attached-non-scalar-function-without-result-assignment-test
+  (testing "REPL rejects attached non-scalar returns that never assign result"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :interpreter)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            fn-output (with-out-str
+                        (repl/eval-code ctx "function f(): Array[Integer] do end"))]
+        (is (str/includes? fn-output "Error:"))
+        (is (str/includes? fn-output "does not definitely assign result on all returning paths"))))))
+
 (deftest repl-compiled-backend-public-field-is-not-publicly-writable-test
   (testing "compiled backend rejects top-level writes to public fields"
     (binding [repl/*type-checking-enabled* (atom false)
@@ -1330,6 +1358,28 @@ end"))
         (is (str/includes? let-output "AnonymousFunction_"))
         (is (some? (runtime/state-get-value (:state session) "inc")))
         (is (str/includes? call-output "42"))))))
+
+(deftest repl-interpreter-backend-allows-anonymous-function-reassignment-with-typecheck-test
+  (testing "interpreter backend remembers unannotated anonymous functions as Function across REPL inputs"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :interpreter)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            let-output (with-out-str
+                         (repl/eval-code ctx "let transform := fn(x: Integer): Integer do result := x + x end"))
+            first-call-output (with-out-str
+                                (repl/eval-code ctx "transform(2)"))
+            reassign-output (with-out-str
+                              (repl/eval-code ctx "transform := fn(x: Integer): Integer do result := x * x end"))
+            second-call-output (with-out-str
+                                 (repl/eval-code ctx "transform(5)"))]
+        (is (= "Function" (get @repl/*repl-var-types* "transform")))
+        (is (str/includes? let-output "AnonymousFunction_"))
+        (is (str/includes? first-call-output "4"))
+        (is (not (str/includes? reassign-output "Type error")) reassign-output)
+        (is (str/includes? reassign-output "AnonymousFunction_"))
+        (is (str/includes? second-call-output "25"))))))
 
 (deftest repl-compiled-backend-higher-order-function-object-test
   (testing "compiled backend supports passing and returning no-capture function objects"

@@ -366,10 +366,9 @@ Current boundary for file compilation:
 A simple top-level batch:
 
 ```nex
-function inc(n: Integer): Integer
-  do
-    result := n + 1
-  end
+function inc(n: Integer): Integer do
+  result := n + 1
+end
 
 let x: Integer := inc(40)
 x := x + 1
