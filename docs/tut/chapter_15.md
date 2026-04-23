@@ -301,7 +301,8 @@ nex> class Result [V]
 ```
 
 ```
-nex> function safe_divide(a, b: Real): Result[Real] do
+nex> function safe_divide(a, b: Real): Result[Real] 
+     do
        if b = 0.0 then
          result := create Result[Real].failure("division by zero")
        else

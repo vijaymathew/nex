@@ -199,7 +199,8 @@ This builds a map from each word to its length. The loop body calls `set` once p
 Maps are values and can be passed to and returned from functions:
 
 ```
-nex> function invert(m: Map[String, String]): Map[String, String] do
+nex> function invert(m: Map[String, String]): Map[String, String]
+     do
        result := {}
        across m as entry do
          result.set(entry.get(1), entry.get(0))
@@ -233,7 +234,8 @@ A common pattern is to use both together: an array to preserve order and a map t
 A word frequency counter reads a string of text and counts how many times each word appears. Maps are the natural structure: the keys are words, the values are counts.
 
 ```
-nex> function word_frequencies(text: String): Map[String, Integer] do
+nex> function word_frequencies(text: String): Map[String, Integer]
+     do
        result := {}
        let words := text.to_lower.split(" ")
        across words as w do
@@ -262,7 +264,8 @@ The key line is `result.try_get(w, 0)` — it retrieves the current count for wo
 To find the most frequent word:
 
 ```
-nex> function most_frequent(freq: Map[String, Integer]): String do
+nex> function most_frequent(freq: Map[String, Integer]): String
+     do
        result := ""
        let started := false
        across freq as entry do

@@ -157,7 +157,8 @@ Postconditions apply to query routines as well as to commands.
 Consider a function that returns the larger of two integers:
 
 ```
-nex> function max(a, b: Integer): Integer do
+nex> function max(a, b: Integer): Integer 
+     do
        if a >= b then
          result := a
        else
