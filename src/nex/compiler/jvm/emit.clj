@@ -1474,6 +1474,20 @@
         (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
         jvm-type)
 
+      [:array "concat"]
+      (do
+        (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
+        (.visitInsn mv Opcodes/DUP)
+        (emit-expr! mv target state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+        (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
+        (.visitInsn mv Opcodes/DUP)
+        (emit-expr! mv (first args) state-slot)
+        (.visitTypeInsn mv Opcodes/CHECKCAST "java/util/Collection")
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "addAll" "(Ljava/util/Collection;)Z" false)
+        (.visitInsn mv Opcodes/POP)
+        jvm-type)
+
       [:array "first"]
       (emit-collection-method! mv (assoc expr :method "get" :args [(ir/const-node 0 "Integer" :int)]) state-slot)
 

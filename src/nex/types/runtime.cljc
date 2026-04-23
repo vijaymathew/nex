@@ -44,6 +44,10 @@
 (defn nex-array-slice [arr start end]
   #?(:clj (java.util.ArrayList. (.subList arr start end))
      :cljs (.slice arr start end)))
+(defn nex-array-concat [arr other]
+  #?(:clj (doto (java.util.ArrayList. arr)
+            (.addAll other))
+     :cljs (.concat arr other)))
 (defn nex-array-str [formatter arr]
   (str "[" (str/join ", " (map formatter #?(:clj arr :cljs (array-seq arr)))) "]"))
 

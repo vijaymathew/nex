@@ -108,7 +108,7 @@
 (def ^:private direct-array-methods
   #{"get" "add" "push" "add_at" "at" "put" "set" "length" "size" "is_empty"
     "contains" "index_of" "remove" "reverse" "slice" "sort" "first" "last"
-    "to_string" "equals" "clone" "join" "cursor"})
+    "concat" "to_string" "equals" "clone" "join" "cursor"})
 
 (def ^:private direct-map-methods
   #{"get" "try_get" "put" "at" "set" "size" "is_empty" "contains_key"
@@ -166,7 +166,7 @@
         ("add" "push" "add_at" "at" "put" "set" "remove") "Void"
         ("length" "size" "index_of") "Integer"
         ("is_empty" "contains" "equals") "Boolean"
-        ("reverse" "slice" "sort" "clone") (or target-type (array-type-of (or a "Any")))
+        ("reverse" "slice" "sort" "clone" "concat") (or target-type (array-type-of (or a "Any")))
         ("to_string" "join") "String"
         "cursor" "Cursor"
         nil)

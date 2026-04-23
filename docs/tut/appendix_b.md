@@ -142,6 +142,7 @@ Main methods:
 | `reverse` | Return reversed array. |
 | `sort` | Sort array. |
 | `slice(start, end)` | Subrange. |
+| `concat(other)` | Return a new array with `other` appended. |
 | `cursor` | Iterator for `across`. |
 
 ### `Map[K, V]`

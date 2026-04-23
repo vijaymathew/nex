@@ -143,6 +143,22 @@ nex> names.length
 
 The `add` method appends one element to the end of the array and increases its length by one.
 
+Use `concat` when you want a new array rather than changing either input:
+
+```
+nex> let first: Array[String] := ["Alice", "Bob"]
+
+nex> let second: Array[String] := ["Carol", "David"]
+
+nex> let everyone := first.concat(second)
+
+nex> everyone
+["Alice", "Bob", "Carol", "David"]
+
+nex> first
+["Alice", "Bob"]
+```
+
 Elements can be removed by index with `remove`:
 
 ```

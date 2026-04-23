@@ -135,6 +135,30 @@ end"))
         (is (not (str/includes? add-at-output "Error:")) add-at-output)
         (is (str/includes? names-output "[\"Alice\", \"Bob\", \"Carol\"]"))))))
 
+(deftest repl-array-concat-returns-new-array-test
+  (testing "Array.concat is accepted under type checking and does not mutate either input"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :interpreter)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx "let a: Array[Integer] := [1, 2]"))
+            _ (with-out-str
+                (repl/eval-code ctx "let b: Array[Integer] := [3, 4]"))
+            concat-output (with-out-str
+                            (repl/eval-code ctx "let c: Array[Integer] := a.concat(b)"))
+            c-output (with-out-str
+                       (repl/eval-code ctx "c"))
+            a-output (with-out-str
+                       (repl/eval-code ctx "a"))
+            b-output (with-out-str
+                       (repl/eval-code ctx "b"))]
+        (is (not (str/includes? concat-output "Error:")) concat-output)
+        (is (str/includes? c-output "[1, 2, 3, 4]"))
+        (is (str/includes? a-output "[1, 2]"))
+        (is (str/includes? b-output "[3, 4]"))))))
+
 (deftest repl-rejects-attached-non-scalar-function-without-result-assignment-test
   (testing "REPL rejects attached non-scalar returns that never assign result"
     (binding [repl/*type-checking-enabled* (atom true)
@@ -1091,6 +1115,27 @@ end"))]
         (is (str/includes? output "h"))
         (is (str/includes? output "e"))
         (is (str/includes? output "o"))))))
+
+(deftest repl-compiled-backend-array-concat-test
+  (testing "compiled backend can concatenate arrays without mutating inputs"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "let a: Array[Integer] := [1, 2]"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "let b: Array[Integer] := [3, 4]"))
+            concat-output (with-out-str
+                            (repl/eval-code ctx0 "let c: Array[Integer] := a.concat(b)"))
+            c-output (with-out-str
+                       (repl/eval-code ctx0 "c"))
+            a-output (with-out-str
+                       (repl/eval-code ctx0 "a"))]
+        (is (not (str/includes? concat-output "Error:")) concat-output)
+        (is (str/includes? c-output "[1, 2, 3, 4]"))
+        (is (str/includes? a-output "[1, 2]"))))))
 
 (deftest repl-compiled-backend-syncs-var-type-for-top-level-function-call-let-test
   (testing "compiled backend keeps top-level let types when the value is a compiled function call"

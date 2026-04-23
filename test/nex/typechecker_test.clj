@@ -150,6 +150,16 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-array-concat-typechecks
+  (testing "Array.concat returns a new array with the same element type"
+    (let [code "function append_scores(a, b: Array[Integer]): Array[Integer] do
+  result := a.concat(b)
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-min-heap-constructors-typecheck
   (testing "Min_Heap.empty requires Comparable elements while from_comparator supports custom ordering"
     (let [ok-code "class Box

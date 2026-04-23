@@ -43,6 +43,7 @@ create Array[String].filled(2, "x")
 | `sort` | none | `Array[Any]` | Return a new array sorted by built-in order or `Comparable.compare`. |
 | `sort` | `compareFn: Function` | `Array[Any]` | Return a new array sorted using `compareFn(a, b) -> Integer`. |
 | `slice` | `start: Integer, end: Integer` | `Array[Any]` | Subrange from `start` to `end`. |
+| `concat` | `other: Array[T]` | `Array[T]` | Return a new array containing this array followed by `other`. |
 | `to_string` | none | `String` | Render the array and its nested values as text. |
 | `equals` | `other: Any` | `Boolean` | Deep structural equality. |
 | `clone` | none | `Array[T]` | Deep-copy the array and its nested values while preserving element type. |

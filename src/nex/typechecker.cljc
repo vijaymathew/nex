@@ -4310,6 +4310,8 @@
                              :return-type {:base-type "Array" :type-params ["T"]}}}
            "slice"       {:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}]
                           :return-type {:base-type "Array" :type-params ["T"]}}
+           "concat"      {:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}]
+                          :return-type {:base-type "Array" :type-params ["T"]}}
            "first"       {:params [] :return-type "T"}
            "last"        {:params [] :return-type "T"}
            "join"        {:params [{:name "sep" :type "String"}] :return-type "String"}

@@ -57,6 +57,7 @@
 (def nex-array-reverse rt/nex-array-reverse)
 (def nex-array-sort rt/nex-array-sort)
 (def nex-array-slice rt/nex-array-slice)
+(def nex-array-concat rt/nex-array-concat)
 (defn nex-array-str [arr] (rt/nex-array-str nex-format-value arr))
 
 (def nex-map rt/nex-map)
@@ -2870,6 +2871,7 @@
     "add"         (fn [arr value & _] (nex-array-add arr value))
     "add_at"      (fn [arr index value & _] (nex-array-add-at arr index value))
     "put"         (fn [arr index value & _] (nex-array-set arr index value))
+    "set"         (fn [arr index value & _] (nex-array-set arr index value))
     "length"      (fn [arr & _] (nex-array-size arr))
     "is_empty"    (fn [arr & _] (nex-array-empty? arr))
     "contains"    (fn [arr elem & _] (nex-array-contains-value? arr elem))
@@ -2887,6 +2889,7 @@
                         (throw (ex-info "Method sort expects 0 or 1 arguments"
                                         {:target arr :method "sort" :actual (count method-args)})))))
     "slice"       (fn [arr start end & _] (nex-array-slice arr start end))
+    "concat"      (fn [arr other & _] (nex-array-concat arr other))
     "to_string"   (fn [arr & _] (nex-array-str arr))
     "equals"      (fn [arr other & _] (nex-deep-equals? arr other))
     "clone"       (fn [arr & _] (nex-clone-value arr))
