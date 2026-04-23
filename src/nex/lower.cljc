@@ -1554,10 +1554,13 @@
            :jvm-type (resolve-jvm-type env nex-type)}))))
 
 (defn- ensure-convert-binding
-  [env {:keys [var-name target-type]}]
-  (if-let [binding (lookup-convert-binding env var-name)]
+  [env {:keys [var-name target-type type]}]
+  (let [bound-type (or target-type type)]
+    (when-not bound-type
+      (throw (ex-info "convert binding is missing a target type"
+                      {:var-name var-name})))
+    (if-let [binding (lookup-convert-binding env var-name)]
     [env binding]
-    (let [bound-type target-type]
       (if (and (:top-level? env) (not (:scoped-locals? env)))
         (let [env' (update env :var-types assoc var-name bound-type)]
           [env' {:kind :top

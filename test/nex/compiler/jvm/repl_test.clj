@@ -2329,6 +2329,27 @@ end"
         (is (not (str/includes? out "VerifyError")))
         (is (not (str/includes? out "Error:")))))))
 
+(deftest repl-compiled-backend-top-level-convert-guard-on-map-value-test
+  (testing "compiled backend handles a top-level convert guard on Any-typed map values"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            books-code "let books: Array[Map[String, Any]] := [
+  {\"title\": \"Dune\", \"author\": \"Frank Herbert\", \"year\": 1965},
+  {\"title\": \"Neuromancer\", \"author\": \"William Gibson\", \"year\": 1984},
+  {\"title\": \"Foundation\", \"author\": \"Isaac Asimov\", \"year\": 1951}
+]"
+            code "if convert books.get(0).get(\"year\") to year: Integer then
+  print(year + 1)
+end"
+            _ (with-out-str (repl/eval-code ctx books-code))
+            out (with-out-str (repl/eval-code ctx code))]
+        (is (not (str/includes? out "VerifyError")) out)
+        (is (not (str/includes? out "Error:")) out)
+        (is (str/includes? out "1966") out)))))
+
 (deftest repl-compiled-backend-min-heap-builtins-test
   (testing "compiled-default REPL supports Min_Heap natural ordering, comparator ordering, and safe variants"
     (binding [repl/*type-checking-enabled* (atom true)

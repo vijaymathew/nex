@@ -222,6 +222,24 @@ end")
     (is (= "length" (:method ret-expr)))
     (is (= 0 (count (:args ret-expr))))))
 
+(deftest lower-top-level-if-convert-guard-binds-typed-local-test
+  (testing "top-level if convert guards allocate locals with the target JVM type"
+    (let [program (p/ast "if convert books.get(0).get(\"year\") to year: Integer then
+  print(year + 1)
+end")
+          {:keys [unit env]} (lower/lower-repl-cell program {:name "nex/repl/ConvertGuard_0001"
+                                                             :var-types {"books" {:base-type "Array"
+                                                                                   :type-params [{:base-type "Map"
+                                                                                                  :type-params ["String" "Any"]}]}}})
+          block (first (:body unit))
+          if-stmt (second (:body block))
+          binding (get-in if-stmt [:test :binding])]
+      (is (= 2 (:next-slot env)))
+      (is (= :local (:kind binding)))
+      (is (= "Integer" (:nex-type binding)))
+      (is (= :int (:jvm-type binding)))
+      (is (= :int (get-in if-stmt [:then 0 :expr :args 0 :left :jvm-type]))))))
+
 (deftest lower-operators-to-explicit-ir-test
   (testing "unary, concat, modulo, and bitwise operators lower to explicit operator-aware IR"
     (let [concat-program (p/ast "let s: String := \"n=\" + 10")
