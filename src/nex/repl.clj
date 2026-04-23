@@ -193,6 +193,21 @@
         text (->> lines
                   (map sanitize-line)
                   (str/join "\n"))
+        count-when-expressions
+        (fn [text]
+          (let [tokens (re-seq #"\bwhen\b|\bthen\b|\belse\b|\bend\b" text)]
+            (loop [tokens tokens
+                   count 0]
+              (if-let [token (first tokens)]
+                (if (= token "when")
+                  (let [tail (rest tokens)
+                        before-boundary (take-while #(not (#{"else" "end" "when"} %)) tail)]
+                    (recur tail
+                           (if (some #{"then"} before-boundary)
+                             count
+                             (inc count))))
+                  (recur (rest tokens) count))
+                count))))
         delimiter-balance
         (reduce (fn [balance ch]
                   (case ch
@@ -214,13 +229,16 @@
         repeat-count (count (re-seq #"\brepeat\b" text))
         across-count (count (re-seq #"\bacross\b" text))
         if-count (count (re-seq #"\bif\b" text))
+        when-count (count-when-expressions text)
         case-count (count (re-seq #"\bcase\b" text))
+        select-count (count (re-seq #"\bselect\b" text))
         end-count (count (re-seq #"\bend\b" text))
         ;; In loops, 'do' is part of 'from...until...do...end', 'repeat...do...end', or 'across...do...end'
         ;; So subtract from-count, repeat-count, and across-count from do-count to avoid double-counting
         standalone-do-count (max 0 (- do-count from-count repeat-count across-count))
         ;; Total blocks that need closing
-        open-blocks (+ class-count standalone-do-count from-count repeat-count across-count if-count case-count)
+        open-blocks (+ class-count standalone-do-count from-count repeat-count
+                       across-count if-count when-count case-count select-count)
         lines (vec (str/split-lines text))
         bare-function-header?
         (boolean

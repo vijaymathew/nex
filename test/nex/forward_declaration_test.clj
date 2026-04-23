@@ -61,6 +61,27 @@ end"
     (is (true? (repl/continue-reading? ["print("])))
     (is (false? (repl/continue-reading? ["print(" "  42)"])))))
 
+(deftest repl-input-completeness-balances-when-expressions
+  (testing "multi-line when expressions keep reading until else/end complete the expression"
+    (let [lines ["when convert expenses.get(\"children\") to children: Array[Map[String, Any]]"
+                 "  total_amount(children.get(0))"
+                 "else"
+                 "  0"
+                 "end"]]
+      (is (true? (repl/continue-reading? (subvec lines 0 1))))
+      (is (true? (repl/continue-reading? (subvec lines 0 2))))
+      (is (true? (repl/continue-reading? (subvec lines 0 3))))
+      (is (true? (repl/continue-reading? (subvec lines 0 4))))
+      (is (false? (repl/continue-reading? lines)))))
+  (testing "select clauses using when ... then do not add an extra unclosed when"
+    (is (true? (repl/continue-reading? ["select"
+                                        "  when ch.receive as value then"
+                                        "    print(value)"])))
+    (is (false? (repl/continue-reading? ["select"
+                                         "  when ch.receive as value then"
+                                         "    print(value)"
+                                         "end"])))))
+
 (deftest repl-read-input-collects-multi-line-array-literal
   (testing "read-input returns a complete multi-line literal as one REPL cell"
     (let [inputs (atom ["let books: Array[Map[String, Any]] := ["

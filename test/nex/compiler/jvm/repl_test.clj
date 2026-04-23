@@ -2350,6 +2350,30 @@ end"
         (is (not (str/includes? out "Error:")) out)
         (is (str/includes? out "1966") out)))))
 
+(deftest repl-compiled-backend-when-convert-expression-on-map-value-test
+  (testing "compiled backend handles when convert expressions over Any-typed map values"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            setup-fn "function total_amount(expense: Map[String, Any]): Integer do
+  result := 2400
+end"
+            setup-expenses "let expenses: Map[String, Any] := {\"children\": [{\"amount\": 2400}]}"
+            code "when convert expenses.get(\"children\") to children: Array[Map[String, Any]]
+  total_amount(children.get(0))
+else
+  0
+end"
+            _ (with-out-str (repl/eval-code ctx setup-fn))
+            _ (with-out-str (repl/eval-code ctx setup-expenses))
+            out (with-out-str (repl/eval-code ctx code))]
+        (is (not (str/includes? out "Syntax error")) out)
+        (is (not (str/includes? out "VerifyError")) out)
+        (is (not (str/includes? out "Error:")) out)
+        (is (str/includes? out "2400") out)))))
+
 (deftest repl-compiled-backend-min-heap-builtins-test
   (testing "compiled-default REPL supports Min_Heap natural ordering, comparator ordering, and safe variants"
     (binding [repl/*type-checking-enabled* (atom true)

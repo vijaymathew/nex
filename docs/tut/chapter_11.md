@@ -343,9 +343,13 @@ nex> function total_amount(node: Map[String, Any]): Integer
    end
 
 nex> total_amount(expenses)
-2950
+3150
 
-nex> total_amount(expenses.get("children").get(0))
+nex> when convert expenses.get("children") to children: Array[Map[String, Any]] 
+       total_amount(children.get(0)) 
+	 else 
+	   0 
+     end
 2400
 ```
 
