@@ -383,7 +383,7 @@ The function is concise because the recursive structure of the data and the recu
 
 **2.** Write a function `invert_index(books: Array[Map[String, Any]]): Map[String, Array[String]]` that takes the books array and returns a map from each author to an array of their book titles. For example, if Herbert wrote two books, `result.get("Frank Herbert")` should return an array of both titles.
 
-**3.** Using the filesystem tree from Section 11.5, write a function `count_files(node: Map[String, Any]): Integer` that recursively counts the total number of file nodes (nodes whose `"type"` is `"file"`). Verify that `count_files(filesystem)` returns 3.
+**3.** Using the filesystem tree from Section 11.6, write a function `count_files(node: Map[String, Any]): Integer` that recursively counts the total number of file nodes (nodes whose `"type"` is `"file"`). Verify that `count_files(filesystem)` returns 3.
 
 **4.** Write a function `tree_depth(node: Map[String, Any]): Integer` that returns the maximum depth of the tree rooted at `node`. A leaf node (empty children) has depth 0. A node with children has depth equal to 1 plus the maximum depth of its children. Test it on the filesystem tree (expected depth: 2) and a single-node tree (expected depth: 0).
 
