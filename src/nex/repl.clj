@@ -170,12 +170,42 @@
                     (do (.append out \space)
                         (recur (inc i) true false out))
 
+                    (and (= ch \#) next-ch (not= next-ch \{))
+                    ;; Character literals like #), #], or #} should not affect
+                    ;; delimiter balancing. Set literals start with #{, so keep
+                    ;; those characters visible to the delimiter pass.
+                    (let [j (cond
+                              (Character/isLetterOrDigit next-ch)
+                              (loop [j (inc i)]
+                                (if (and (< j n)
+                                         (Character/isLetterOrDigit (.charAt ^String line j)))
+                                  (recur (inc j))
+                                  j))
+
+                              :else
+                              (+ i 2))]
+                      (.append out (apply str (repeat (- j i) \space)))
+                      (recur j false false out))
+
                     :else
                     (do (.append out ch)
                         (recur (inc i) false false out))))))))
         text (->> lines
                   (map sanitize-line)
                   (str/join "\n"))
+        delimiter-balance
+        (reduce (fn [balance ch]
+                  (case ch
+                    \( (update balance :parens inc)
+                    \) (update balance :parens dec)
+                    \[ (update balance :brackets inc)
+                    \] (update balance :brackets dec)
+                    \{ (update balance :braces inc)
+                    \} (update balance :braces dec)
+                    balance))
+                {:parens 0 :brackets 0 :braces 0}
+                text)
+        open-delimiters? (some pos? (vals delimiter-balance))
         ;; Count keyword pairs that need to be closed
         class-count (count (re-seq #"\bclass\b" text))
         feature-count (count (re-seq #"\bfeature\b" text))
@@ -204,6 +234,7 @@
                 lines)))]
     ;; Continue if we have more opens than closes
     (or bare-function-header?
+        open-delimiters?
         (> open-blocks end-count))))
 
 (defn read-input

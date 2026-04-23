@@ -44,6 +44,40 @@ end"
     (is (false? (repl/continue-reading? ["declare function f(n: Integer): Integer"])))
     (is (false? (repl/continue-reading? ["function f(n: Integer): Integer do result := n end"])))))
 
+(deftest repl-input-completeness-balances-delimited-literals
+  (testing "multi-line array and map literals keep the REPL in continuation mode until delimiters close"
+    (let [lines ["let books: Array[Map[String, Any]] := ["
+                 "  {\"title\": \"Dune\", \"author\": \"Frank Herbert\", \"year\": 1965},"
+                 "  {\"title\": \"Neuromancer\", \"author\": \"William Gibson\", \"year\": 1984},"
+                 "  {\"title\": \"Foundation\", \"author\": \"Isaac Asimov\", \"year\": 1951}]"]]
+      (is (true? (repl/continue-reading? (subvec lines 0 1))))
+      (is (true? (repl/continue-reading? (subvec lines 0 2))))
+      (is (true? (repl/continue-reading? (subvec lines 0 3))))
+      (is (false? (repl/continue-reading? lines)))))
+  (testing "delimiters inside strings and character literals do not force continuation"
+    (is (false? (repl/continue-reading? ["let s := \"[not open\""])))
+    (is (false? (repl/continue-reading? ["let ch: Char := #]"]))))
+  (testing "multi-line calls also continue until the closing parenthesis"
+    (is (true? (repl/continue-reading? ["print("])))
+    (is (false? (repl/continue-reading? ["print(" "  42)"])))))
+
+(deftest repl-read-input-collects-multi-line-array-literal
+  (testing "read-input returns a complete multi-line literal as one REPL cell"
+    (let [inputs (atom ["let books: Array[Map[String, Any]] := ["
+                        "  {\"title\": \"Dune\", \"author\": \"Frank Herbert\", \"year\": 1965},"
+                        "  {\"title\": \"Neuromancer\", \"author\": \"William Gibson\", \"year\": 1984},"
+                        "  {\"title\": \"Foundation\", \"author\": \"Isaac Asimov\", \"year\": 1951}]"])]
+      (with-redefs [repl/read-line-safe (fn [_prompt]
+                                          (let [line (first @inputs)]
+                                            (swap! inputs subvec 1)
+                                            line))]
+        (is (= (str/join "\n" ["let books: Array[Map[String, Any]] := ["
+                               "  {\"title\": \"Dune\", \"author\": \"Frank Herbert\", \"year\": 1965},"
+                               "  {\"title\": \"Neuromancer\", \"author\": \"William Gibson\", \"year\": 1984},"
+                               "  {\"title\": \"Foundation\", \"author\": \"Isaac Asimov\", \"year\": 1951}]"])
+               (repl/read-input)))
+        (is (empty? @inputs))))))
+
 (deftest repl-forward-declarations-support-mutual-recursion
   (testing "REPL can typecheck and execute mutually recursive functions once signatures are declared"
     (binding [repl/*type-checking-enabled* (atom true)
