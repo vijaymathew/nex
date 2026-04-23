@@ -72,6 +72,22 @@
         (is (not (str/includes? let-output "Any {")))
         (is (str/includes? var-output "Map[String, String]"))))))
 
+(deftest repl-map-set-updates-entry-test
+  (testing "Map.set is accepted under type checking and updates a map entry"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :interpreter)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx "let scores: Map[String, Integer] := {}"))
+            set-output (with-out-str
+                         (repl/eval-code ctx "scores.set(\"Alice\", 95)"))
+            get-output (with-out-str
+                         (repl/eval-code ctx "scores.get(\"Alice\")"))]
+        (is (not (str/includes? set-output "Error:")) set-output)
+        (is (str/includes? get-output "95"))))))
+
 (deftest repl-compiled-backend-private-field-is-not-publicly-readable-test
   (testing "compiled backend rejects top-level access to private fields while keeping public methods callable"
     (binding [repl/*type-checking-enabled* (atom false)
@@ -118,6 +134,30 @@ end"))
                            (repl/eval-code ctx "names"))]
         (is (not (str/includes? add-at-output "Error:")) add-at-output)
         (is (str/includes? names-output "[\"Alice\", \"Bob\", \"Carol\"]"))))))
+
+(deftest repl-array-concat-returns-new-array-test
+  (testing "Array.concat is accepted under type checking and does not mutate either input"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :interpreter)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx "let a: Array[Integer] := [1, 2]"))
+            _ (with-out-str
+                (repl/eval-code ctx "let b: Array[Integer] := [3, 4]"))
+            concat-output (with-out-str
+                            (repl/eval-code ctx "let c: Array[Integer] := a.concat(b)"))
+            c-output (with-out-str
+                       (repl/eval-code ctx "c"))
+            a-output (with-out-str
+                       (repl/eval-code ctx "a"))
+            b-output (with-out-str
+                       (repl/eval-code ctx "b"))]
+        (is (not (str/includes? concat-output "Error:")) concat-output)
+        (is (str/includes? c-output "[1, 2, 3, 4]"))
+        (is (str/includes? a-output "[1, 2]"))
+        (is (str/includes? b-output "[3, 4]"))))))
 
 (deftest repl-rejects-attached-non-scalar-function-without-result-assignment-test
   (testing "REPL rejects attached non-scalar returns that never assign result"
@@ -1020,6 +1060,24 @@ end"))]
         (is (str/includes? output "Japan -> Tokyo"))
         (is (str/includes? output "Brazil -> Brasília"))))))
 
+(deftest repl-typechecked-map-across-entry-get-test
+  (testing "typechecked REPL can use get on map entries yielded by across"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :interpreter)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "let capitals := {\"France\": \"Paris\", \"Japan\": \"Tokyo\", \"Brazil\": \"Brasília\"}"))
+            output (with-out-str
+                     (repl/eval-code ctx0 "across capitals as entry do
+  print(entry.get(0) + \" -> \" + entry.get(1))
+end"))]
+        (is (not (str/includes? output "Error:")))
+        (is (str/includes? output "France -> Paris"))
+        (is (str/includes? output "Japan -> Tokyo"))
+        (is (str/includes? output "Brazil -> Brasília"))))))
+
 (deftest repl-compiled-backend-across-array-item-length-test
   (testing "compiled backend can use length on across-bound array items lowered as Any"
     (binding [repl/*type-checking-enabled* (atom false)
@@ -1057,6 +1115,27 @@ end"))]
         (is (str/includes? output "h"))
         (is (str/includes? output "e"))
         (is (str/includes? output "o"))))))
+
+(deftest repl-compiled-backend-array-concat-test
+  (testing "compiled backend can concatenate arrays without mutating inputs"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "let a: Array[Integer] := [1, 2]"))
+            _ (with-out-str
+                (repl/eval-code ctx0 "let b: Array[Integer] := [3, 4]"))
+            concat-output (with-out-str
+                            (repl/eval-code ctx0 "let c: Array[Integer] := a.concat(b)"))
+            c-output (with-out-str
+                       (repl/eval-code ctx0 "c"))
+            a-output (with-out-str
+                       (repl/eval-code ctx0 "a"))]
+        (is (not (str/includes? concat-output "Error:")) concat-output)
+        (is (str/includes? c-output "[1, 2, 3, 4]"))
+        (is (str/includes? a-output "[1, 2]"))))))
 
 (deftest repl-compiled-backend-syncs-var-type-for-top-level-function-call-let-test
   (testing "compiled backend keeps top-level let types when the value is a compiled function call"
@@ -1459,9 +1538,9 @@ let f1: Function := cf()"))
               repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
       (let [ctx0 (repl/init-repl-context)
             decl1-output (with-out-str
-                           (repl/eval-code ctx0 "function is_even(n: Integer): Boolean"))
+                           (repl/eval-code ctx0 "declare function is_even(n: Integer): Boolean"))
             decl2-output (with-out-str
-                           (repl/eval-code ctx0 "function is_odd(n: Integer): Boolean"))
+                           (repl/eval-code ctx0 "declare function is_odd(n: Integer): Boolean"))
             def1-output (with-out-str
                           (repl/eval-code ctx0 "function is_even(n: Integer): Boolean
 do
@@ -2249,6 +2328,51 @@ end"
             out (with-out-str (repl/eval-code ctx filter-code))]
         (is (not (str/includes? out "VerifyError")))
         (is (not (str/includes? out "Error:")))))))
+
+(deftest repl-compiled-backend-top-level-convert-guard-on-map-value-test
+  (testing "compiled backend handles a top-level convert guard on Any-typed map values"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            books-code "let books: Array[Map[String, Any]] := [
+  {\"title\": \"Dune\", \"author\": \"Frank Herbert\", \"year\": 1965},
+  {\"title\": \"Neuromancer\", \"author\": \"William Gibson\", \"year\": 1984},
+  {\"title\": \"Foundation\", \"author\": \"Isaac Asimov\", \"year\": 1951}
+]"
+            code "if convert books.get(0).get(\"year\") to year: Integer then
+  print(year + 1)
+end"
+            _ (with-out-str (repl/eval-code ctx books-code))
+            out (with-out-str (repl/eval-code ctx code))]
+        (is (not (str/includes? out "VerifyError")) out)
+        (is (not (str/includes? out "Error:")) out)
+        (is (str/includes? out "1966") out)))))
+
+(deftest repl-compiled-backend-when-convert-expression-on-map-value-test
+  (testing "compiled backend handles when convert expressions over Any-typed map values"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            setup-fn "function total_amount(expense: Map[String, Any]): Integer do
+  result := 2400
+end"
+            setup-expenses "let expenses: Map[String, Any] := {\"children\": [{\"amount\": 2400}]}"
+            code "when convert expenses.get(\"children\") to children: Array[Map[String, Any]]
+  total_amount(children.get(0))
+else
+  0
+end"
+            _ (with-out-str (repl/eval-code ctx setup-fn))
+            _ (with-out-str (repl/eval-code ctx setup-expenses))
+            out (with-out-str (repl/eval-code ctx code))]
+        (is (not (str/includes? out "Syntax error")) out)
+        (is (not (str/includes? out "VerifyError")) out)
+        (is (not (str/includes? out "Error:")) out)
+        (is (str/includes? out "2400") out)))))
 
 (deftest repl-compiled-backend-min-heap-builtins-test
   (testing "compiled-default REPL supports Min_Heap natural ordering, comparator ordering, and safe variants"

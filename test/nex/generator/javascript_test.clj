@@ -386,13 +386,28 @@ end"
     (let [nex-code "class Test
   feature
     demo(scores: Array[Integer]) do
+      scores.set(0, 99)
       print(scores.slice(1, 4))
       print(scores.reverse)
     end
 end"
           js-code (js/translate nex-code)]
+      (is (str/includes? js-code "__nexArrayPut(scores, 0, 99)"))
       (is (str/includes? js-code "console.log(__nexPrintValue(scores.slice(1, 4)))"))
       (is (str/includes? js-code "console.log(__nexPrintValue([...scores].reverse()))")))))
+
+(deftest array-concat-generation-test
+  (testing "Array concat lowers to JavaScript concat and returns a new array"
+    (let [nex-code "class Test
+  feature
+    demo(a, b: Array[Integer]) do
+      let c: Array[Integer] := a.concat(b)
+      print(c)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "let c = a.concat(b)"))
+      (is (str/includes? js-code "console.log(__nexPrintValue(c))")))))
 
 (deftest array-sort-generation-test
   (testing "Array sort lowers to comparator-based helper in JavaScript"
@@ -436,6 +451,17 @@ end"
       (is (str/includes? js-code "__nexArraySort(scores,")) 
       (is (str/includes? js-code "function __nexArraySort(values, compareFn = null)"))
       (is (str/includes? js-code "compareFn(a, b)")))))
+
+(deftest map-set-generation-test
+  (testing "Map.set lowers to the same JavaScript helper as Map.put"
+    (let [nex-code "class Test
+  feature
+    demo(scores: Map[String, Integer]) do
+      scores.set(\"Alice\", 95)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "__nexMapPut(scores, \"Alice\", 95)")))))
 
 (deftest select-generation-test
   (testing "select lowers to try_send/try_receive polling in JavaScript"

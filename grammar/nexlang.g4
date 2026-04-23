@@ -7,7 +7,7 @@ grammar nexlang;
  */
 
 program
-    : (importStmt | internStmt | classDecl | functionDecl | statement)* EOF
+    : (importStmt | internStmt | classDecl | declareFunctionDecl | functionDecl | statement)* EOF
     ;
 
 importStmt
@@ -28,7 +28,11 @@ classDecl
     ;
 
 functionDecl
-    : FUNCTION IDENTIFIER genericParams? '(' paramList? ')' (':' type)? noteClause? (requireClause? DO block ensureClause? rescueClause? END)?
+    : FUNCTION IDENTIFIER genericParams? '(' paramList? ')' (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
+    ;
+
+declareFunctionDecl
+    : DECLARE FUNCTION IDENTIFIER genericParams? '(' paramList? ')' (':' type)? noteClause?
     ;
 
 genericParams
@@ -400,6 +404,7 @@ setLiteral
 
 CLASS        : 'class';
 DEFERRED     : 'deferred';
+DECLARE      : 'declare';
 FUNCTION     : 'function';
 FN           : 'fn';
 FEATURE      : 'feature';

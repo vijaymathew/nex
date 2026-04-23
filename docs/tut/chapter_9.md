@@ -143,6 +143,22 @@ nex> names.length
 
 The `add` method appends one element to the end of the array and increases its length by one.
 
+Use `concat` when you want a new array rather than changing either input:
+
+```
+nex> let first: Array[String] := ["Alice", "Bob"]
+
+nex> let second: Array[String] := ["Carol", "David"]
+
+nex> let everyone := first.concat(second)
+
+nex> everyone
+["Alice", "Bob", "Carol", "David"]
+
+nex> first
+["Alice", "Bob"]
+```
+
 Elements can be removed by index with `remove`:
 
 ```
@@ -253,7 +269,8 @@ This pattern — empty array, loop, `add` — is the standard way to construct a
 Arrays are values like any other and can be passed to and returned from functions:
 
 ```
-nex> function sum(arr: Array[Integer]): Integer do
+nex> function sum(arr: Array[Integer]): Integer 
+     do
        result := 0
        across arr as x do
          result := result + x
@@ -268,7 +285,8 @@ nex> sum([])
 ```
 
 ```
-nex> function maximum(arr: Array[Integer]): Integer do
+nex> function maximum(arr: Array[Integer]): Integer 
+     do
        result := arr.get(0)
        across arr as x do
          if x > result then
@@ -286,7 +304,8 @@ nex> maximum([3, 7, 1, 9, 4])
 Functions can also return arrays:
 
 ```
-nex> function filter_above(arr: Array[Integer], threshold: Integer): Array[Integer] do
+nex> function filter_above(arr: Array[Integer], threshold: Integer): Array[Integer] 
+     do
        result := []
        across arr as x do
          if x > threshold then
@@ -324,7 +343,8 @@ This question — *who is responsible for ensuring the precondition?* — is one
 Here is a small collection of functions that compute basic statistics on an array of real numbers:
 
 ```
-nex> function mean(arr: Array[Real]): Real do
+nex> function mean(arr: Array[Real]): Real 
+     do
        result := 0.0
        across arr as x do
          result := result + x
@@ -332,7 +352,8 @@ nex> function mean(arr: Array[Real]): Real do
        result := result / arr.length
      end
 
-nex> function variance(arr: Array[Real]): Real do
+nex> function variance(arr: Array[Real]): Real 
+     do
        let m := mean(arr)
        result := 0.0
        across arr as x do
@@ -342,7 +363,8 @@ nex> function variance(arr: Array[Real]): Real do
        result := result / arr.length
      end
 
-nex> function std_dev(arr: Array[Real]): Real do
+nex> function std_dev(arr: Array[Real]): Real 
+     do
        result := variance(arr) ^ 0.5
      end
 ```

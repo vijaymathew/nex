@@ -367,8 +367,8 @@
   (testing "compiled mutually dependent functions across cells resolve dynamically through state"
     (let [state-loader (loader/make-loader)
           state (runtime/make-repl-state state-loader)
-          def-ast-a (p/ast "function is_odd(n: Integer): Boolean\n\nfunction is_even(n: Integer): Boolean\ndo\n  if n = 0 then\n    result := true\n  else\n    result := is_odd(n - 1)\n  end\nend")
-          def-ast-b (p/ast "function is_even(n: Integer): Boolean\n\nfunction is_odd(n: Integer): Boolean\ndo\n  if n = 0 then\n    result := false\n  else\n    result := is_even(n - 1)\n  end\nend")
+          def-ast-a (p/ast "declare function is_odd(n: Integer): Boolean\n\nfunction is_even(n: Integer): Boolean\ndo\n  if n = 0 then\n    result := true\n  else\n    result := is_odd(n - 1)\n  end\nend")
+          def-ast-b (p/ast "declare function is_even(n: Integer): Boolean\n\nfunction is_odd(n: Integer): Boolean\ndo\n  if n = 0 then\n    result := false\n  else\n    result := is_even(n - 1)\n  end\nend")
           visible-fns (vec (concat (:functions def-ast-a) (:functions def-ast-b)))
           unit-a (-> def-ast-a
                      (lower/lower-repl-cell {:name "nex/repl/Cell_0068"

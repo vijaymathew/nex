@@ -33,23 +33,23 @@ Note that `{}` is the empty map literal, just as `[]` is the empty array literal
 
 ## Adding and Updating Entries
 
-The `put` method adds a new entry or replaces an existing one:
+The `set` method adds a new entry or replaces an existing one:
 
 ```
 nex> let scores: Map[String, Integer] := {}
 
-nex> scores.put("Alice", 92)
-nex> scores.put("Bob", 78)
-nex> scores.put("Carol", 85)
+nex> scores.set("Alice", 92)
+nex> scores.set("Bob", 78)
+nex> scores.set("Carol", 85)
 nex> scores
 {"Alice": 92, "Bob": 78, "Carol": 85}
 
-nex> scores.put("Alice", 95)
+nex> scores.set("Alice", 95)
 nex> scores
 {"Alice": 95, "Bob": 78, "Carol": 85}
 ```
 
-If the key `"Alice"` already exists, `put` replaces its value. If it does not exist, `put` creates a new entry. There is no separate "insert" and "update" — `put` handles both.
+If the key `"Alice"` already exists, `set` replaces its value. If it does not exist, `set` creates a new entry. There is no separate "insert" and "update" — `set` handles both.
 
 
 
@@ -175,7 +175,7 @@ nex> across capitals.keys as country do
 
 ## Building Maps with Loops
 
-Like arrays, maps are often built programmatically. The pattern is an empty map and `put` inside a loop:
+Like arrays, maps are often built programmatically. The pattern is an empty map and `set` inside a loop:
 
 ```
 nex> let word_lengths: Map[String, Integer] := {}
@@ -183,14 +183,14 @@ nex> let word_lengths: Map[String, Integer] := {}
 nex> let words := ["apple", "fig", "banana", "kiwi"]
 
 nex> across words as w do
-       word_lengths.put(w, w.length)
+       word_lengths.set(w, w.length)
     end
 
 nex> word_lengths
 {"apple": 5, "fig": 3, "banana": 6, "kiwi": 4}
 ```
 
-This builds a map from each word to its length. The loop body calls `put` once per word; each call either adds a new entry or — if a word appeared before — replaces it.
+This builds a map from each word to its length. The loop body calls `set` once per word; each call either adds a new entry or — if a word appeared before — replaces it.
 
 
 
@@ -203,7 +203,7 @@ nex> function invert(m: Map[String, String]): Map[String, String]
      do
        result := {}
        across m as entry do
-         result.put(entry.get(1), entry.get(0))
+         result.set(entry.get(1), entry.get(0))
        end
      end
 
@@ -240,7 +240,7 @@ nex> function word_frequencies(text: String): Map[String, Integer]
        let words := text.to_lower.split(" ")
        across words as w do
          let count := result.try_get(w, 0)
-         result.put(w, count + 1)
+         result.set(w, count + 1)
        end
      end
 ```
@@ -259,7 +259,7 @@ nex> freq.get("question")
 1
 ```
 
-The key line is `result.try_get(w, 0)` — it retrieves the current count for word `w`, or `0` if the word has not been seen yet. Then `put` stores the incremented count. This try-get-then-put pattern is the standard idiom for accumulating counts in a map.
+The key line is `result.try_get(w, 0)` — it retrieves the current count for word `w`, or `0` if the word has not been seen yet. Then `set` stores the incremented count. This try-get-then-set pattern is the standard idiom for accumulating counts in a map.
 
 To find the most frequent word:
 
@@ -292,13 +292,13 @@ nex> most_frequent(freq)
 
 - A map stores key-value associations; keys are unique and each maps to exactly one value
 - Map literals use curly braces: `{"key": value,    }`; the empty map is `{}`
-- `put(key, value)` adds or replaces an entry; `get(key)` retrieves a value; `remove(key)` deletes an entry
+- `set(key, value)` adds or replaces an entry; `put(key, value)` is also accepted as an alias; `get(key)` retrieves a value; `remove(key)` deletes an entry
 - `get` and `remove` raise exceptions when the key is absent; use `contains_key` to check first, or `try_get(key, default)` to provide a fallback
 - Maps use `size` (not `length`) for the element count
 - `across map as entry do` iterates over entries; each entry is a two-element array — `entry.get(0)` is the key, `entry.get(1)` is the value; or iterate over `map.keys` or `map.values` directly
-- Build maps programmatically with an empty map and `put` inside a loop
+- Build maps programmatically with an empty map and `set` inside a loop
 - Use an array when access is positional; use a map when access is by key
-- The try-get-then-put pattern — `try_get(key, default)` followed by `put(key, new_value)` — is the standard idiom for accumulating values in a map
+- The try-get-then-set pattern — `try_get(key, default)` followed by `set(key, new_value)` — is the standard idiom for accumulating values in a map
 
 
 
@@ -306,7 +306,7 @@ nex> most_frequent(freq)
 
 **1.** Write a function `char_frequencies(s: String): Map[Char, Integer]` that returns a map from each character in `s` to the number of times it appears. Test it on `"mississippi"` — verify that `#m` maps to 1, `#i` maps to 4, `#s` maps to 4, and `#p` maps to 2.
 
-**2.** Write a function `group_by_length(words: Array[String]): Map[Integer, Array[String]]` that groups words by their length. For example, `group_by_length(["cat", "dog", "elephant", "ox", "ant"])` should return `{3: [cat, dog, ant], 8: [elephant], 2: [ox]}`. Use `try_get` with an empty array as the default, append the word to the array, and put it back.
+**2.** Write a function `group_by_length(words: Array[String]): Map[Integer, Array[String]]` that groups words by their length. For example, `group_by_length(["cat", "dog", "elephant", "ox", "ant"])` should return `{3: [cat, dog, ant], 8: [elephant], 2: [ox]}`. Use `try_get` with an empty array as the default, append the word to the array, and set it back.
 
 **3.** Write a function `histogram(freq: Map[String, Integer])` that prints a simple text histogram. For each key in sorted order, print the key followed by a bar of `#` characters equal to its frequency. For example, a map `{"a": 3, "b": 1, "c": 2}` should print:
 

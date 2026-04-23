@@ -8,7 +8,8 @@ A function can call other functions — that much we established in Chapter 6. A
 Start with a familiar computation: summing the integers from 1 to n. Chapter 5 wrote this as a loop. Here is the recursive version:
 
 ```
-nex> function sum_to(n: Integer): Integer do
+nex> function sum_to(n: Integer): Integer 
+     do
        if n = 0 then
          result := 0
        else
@@ -30,7 +31,7 @@ Every correct recursive function has exactly this structure: a *base case* that 
 
 The most effective way to understand recursion is to trace a call step by step. Here is `sum_to(4)` fully expanded:
 
-```
+```text
 sum_to(4)
 = 4 + sum_to(3)
 = 4 + (3 + sum_to(2))
@@ -61,7 +62,8 @@ For `sum_to`: the simplest version is `sum_to(0)`, which is `0`. A sum up to `n`
 For factorial — the product of all integers from 1 to n:
 
 ```
-nex> function factorial(n: Integer): Integer do
+nex> function factorial(n: Integer): Integer 
+     do
        if n = 0 then
          result := 1
        else
@@ -121,7 +123,8 @@ nex> let tab: Char := #tab
 With that in hand:
 
 ```
-nex> function count_char(s: String, ch: Char): Integer do
+nex> function count_char(s: String, ch: Char): Integer 
+     do
        if s.length = 0 then
          result := 0
        else
@@ -151,11 +154,12 @@ Notice the structure: *process the first element, then recurse on the rest*. Thi
 Two functions can be mutually recursive — each calling the other. A classic example is testing whether a number is even or odd without using `%`:
 
 ```
-nex> function is_even(n: Integer): Boolean
+nex> declare function is_even(n: Integer): Boolean
 
-nex> function is_odd(n: Integer): Boolean
+nex> declare function is_odd(n: Integer): Boolean
 
-nex> function is_even(n: Integer): Boolean do
+nex> function is_even(n: Integer): Boolean 
+     do
        if n = 0 then
          result := true
        else
@@ -163,7 +167,8 @@ nex> function is_even(n: Integer): Boolean do
        end
      end
 
-nex> function is_odd(n: Integer): Boolean do
+nex> function is_odd(n: Integer): Boolean 
+     do
        if n = 0 then
          result := false
        else
@@ -198,7 +203,8 @@ Recursion tends to be clearer when:
 **The problem is defined recursively.** Fibonacci numbers, tree traversal, and many mathematical sequences are defined in terms of smaller instances of themselves. A recursive function mirrors that definition directly:
 
 ```
-nex> function fibonacci(n: Integer): Integer do
+nex> function fibonacci(n: Integer): Integer 
+     do
        if n <= 1 then
          result := n
        else
@@ -229,7 +235,8 @@ nex> -- loop: immediately clear
 nex> from let i := 1 until i > 10 do print(i) i := i + 1 end
 
 nex> -- recursion: more thought required
-nex> function print_to(n, limit: Integer) do
+nex> function print_to(n, limit: Integer) 
+     do
        if n <= limit then
          print(n)
          print_to(n + 1, limit)
@@ -242,10 +249,13 @@ The loop is shorter and more direct. Reach for a loop when the iteration pattern
 
 **Stack depth is a concern.** Each recursive call occupies space on the call stack. For a recursion that descends thousands of levels, this stack space may be exhausted, producing a stack overflow error. A loop uses a fixed amount of space regardless of how many iterations it performs. For very deep or unbounded computations, a loop is safer:
 
-```
+```text
+nex> -- do not run this
 nex> -- this will fail for large n due to stack overflow
 nex> sum_to(10000)
+```
 
+```
 nex> -- this handles any n safely
 nex> let total := 0
 nex> from

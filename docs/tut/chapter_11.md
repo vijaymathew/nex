@@ -134,18 +134,18 @@ The outer loop iterates over days; the inner loop iterates over the classes for 
 Nested structures are often built up incrementally rather than written as literals. The gradebook example: given a list of (student, score) pairs, build a map from each student to their array of scores.
 
 ```
-nex> function build_gradebook(entries: Array[Map[String, Any]]): Map[String, Array[Integer]]
-   do
-     result := {}
-     across entries as entry do
-        if convert entry.get("name") to name: String then
+nex> function build_gradebook(entries: Array[Map[String, Any]]): Map[String, Array[Integer]] 
+     do
+       result := {}
+       across entries as entry do
+         if convert entry.get("name") to name: String then
            let current := result.try_get(name, [])
-           if convert entry.get("score") to score: Integer then
-              current.add(score)
-              result.put(name, current)
-           end
-        end
-     end
+             if convert entry.get("score") to score: Integer then
+               current.add(score)
+               result.set(name, current)
+             end
+          end
+      end
    end
 ```
 
@@ -166,7 +166,7 @@ nex> gradebook.get("Bob")
 [72, 68]
 ```
 
-The `try_get(name, [])` call retrieves the existing array for that student, or an empty array if the student has not appeared yet. Then `add` appends the new score, and `put` stores the updated array back. This try-get-modify-put sequence is the standard idiom for building maps of mutable values.
+The `try_get(name, [])` call retrieves the existing array for that student, or an empty array if the student has not appeared yet. Then `add` appends the new score, and `set` stores the updated array back. This try-get-modify-set sequence is the standard idiom for building maps of mutable values.
 
 
 
@@ -229,22 +229,22 @@ Each node is a `Map[String, Any]`: a `"name"` field (string), a `"type"` field (
 Traversing a tree — visiting every node — is a naturally recursive operation. The base case is a node with no children (a leaf). The recursive case processes the node and then recursively traverses each child.
 
 ```
-nex> function print_tree(node: Map[String, Any], indent: Integer)
-   do
-     let padding: String := ""
-     from let i := 0 until i >= indent do
-        padding := padding + "  "
-        i := i + 1
-     end
-     if convert node.get("name") to name: String then
-        print(padding + name)
-     end
-     if convert node.get("children") to children: Array[Map[String, Any]] then
-        across children as child do
+nex> function print_tree(node: Map[String, Any], indent: Integer) 
+     do
+       let padding: String := ""
+       from let i := 0 until i >= indent do
+         padding := padding + "  "
+         i := i + 1
+       end
+       if convert node.get("name") to name: String then
+         print(padding + name)
+       end
+       if convert node.get("children") to children: Array[Map[String, Any]] then
+         across children as child do
            print_tree(child, indent + 1)
-        end
+         end
+       end
      end
-   end
 ```
 
 ```
@@ -268,8 +268,8 @@ This is the recursive structure from Chapter 8 applied to a tree: process the cu
 Finding a node by name requires the same recursive structure:
 
 ```
-nex> function find_node(node: Map[String, Any], target: String): ?Map[String, Any]
-   do
+nex> function find_node(node: Map[String, Any], target: String): ?Map[String, Any] 
+     do
      if node.get("name") = target then
         result := node
      else
@@ -334,18 +334,22 @@ nex> let expenses := {
 A function that computes the total amount for a node, including all descendants:
 
 ```
-nex> function total_amount(node: Map[String, Any]): Integer
-   do
-     result := node.get("amount")
-     across node.get("children") as child do
-        result := result + total_amount(child)
-     end
+nex> function total_amount(node: Map[String, Any]): Integer 
+     do
+       result := node.get("amount")
+       across node.get("children") as child do
+         result := result + total_amount(child)
+       end
    end
 
 nex> total_amount(expenses)
-2950
+3150
 
-nex> total_amount(expenses.get("children").get(0))
+nex> when convert expenses.get("children") to children: Array[Map[String, Any]] 
+       total_amount(children.get(0)) 
+	 else 
+	   0 
+     end
 2400
 ```
 
@@ -379,7 +383,7 @@ The function is concise because the recursive structure of the data and the recu
 
 **2.** Write a function `invert_index(books: Array[Map[String, Any]]): Map[String, Array[String]]` that takes the books array and returns a map from each author to an array of their book titles. For example, if Herbert wrote two books, `result.get("Frank Herbert")` should return an array of both titles.
 
-**3.** Using the filesystem tree from Section 11.5, write a function `count_files(node: Map[String, Any]): Integer` that recursively counts the total number of file nodes (nodes whose `"type"` is `"file"`). Verify that `count_files(filesystem)` returns 3.
+**3.** Using the filesystem tree from Section 11.6, write a function `count_files(node: Map[String, Any]): Integer` that recursively counts the total number of file nodes (nodes whose `"type"` is `"file"`). Verify that `count_files(filesystem)` returns 3.
 
 **4.** Write a function `tree_depth(node: Map[String, Any]): Integer` that returns the maximum depth of the tree rooted at `node`. A leaf node (empty children) has depth 0. A node with children has depth equal to 1 plus the maximum depth of its children. Test it on the filesystem tree (expected depth: 2) and a single-node tree (expected depth: 0).
 

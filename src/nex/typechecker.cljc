@@ -580,7 +580,7 @@
       "Array" (or (first type-args) "Any")
       "Set" (or (first type-args) "Any")
       "String" "Char"
-      "Map" "Any"
+      "Map" {:base-type "Array" :type-params ["Any"]}
       "Cursor" "Any"
       "Any")))
 
@@ -4309,6 +4309,8 @@
                           1 {:params [{:name "compareFn" :type "Function"}]
                              :return-type {:base-type "Array" :type-params ["T"]}}}
            "slice"       {:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}]
+                          :return-type {:base-type "Array" :type-params ["T"]}}
+           "concat"      {:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}]
                           :return-type {:base-type "Array" :type-params ["T"]}}
            "first"       {:params [] :return-type "T"}
            "last"        {:params [] :return-type "T"}

@@ -121,6 +121,45 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-map-set-typechecks-inside-function-body
+  (testing "Map.set type-checks for typed map values inside top-level functions"
+    (let [code "function word_frequencies(text: String): Map[String, Integer]
+do
+  result := {}
+  let words := text.to_lower.split(\" \")
+  across words as w do
+    let count := result.try_get(w, 0)
+    result.set(w, count + 1)
+  end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-map-across-entry-get-typechecks
+  (testing "across over maps exposes each entry as an array-like key/value pair"
+    (let [code "function show_capitals() do
+  let capitals := {\"France\": \"Paris\", \"Japan\": \"Tokyo\", \"Brazil\": \"Brasília\"}
+  across capitals as entry do
+    print(entry.get(0) + \" -> \" + entry.get(1))
+  end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-array-concat-typechecks
+  (testing "Array.concat returns a new array with the same element type"
+    (let [code "function append_scores(a, b: Array[Integer]): Array[Integer] do
+  result := a.concat(b)
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-min-heap-constructors-typecheck
   (testing "Min_Heap.empty requires Comparable elements while from_comparator supports custom ordering"
     (let [ok-code "class Box

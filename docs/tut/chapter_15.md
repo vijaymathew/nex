@@ -177,8 +177,8 @@ nex> class Dictionary [K -> Hashable, V]
          end
        feature
          entries: Map[K, V]
-         put(key: K, value: V) do
-           entries.put(key, value)
+         set(key: K, value: V) do
+           entries.set(key, value)
          end
          get(key: K): V do
            result := entries.get(key)
@@ -199,8 +199,8 @@ nex> class Dictionary [K -> Hashable, V]
 
 ```
 nex> let dict := create Dictionary[String, Integer].make
-nex> dict.put("apples", 5)
-nex> dict.put("oranges", 3)
+nex> dict.set("apples", 5)
+nex> dict.set("oranges", 3)
 nex> dict.get("apples")
 5
 
@@ -301,7 +301,7 @@ nex> class Result [V]
 ```
 
 ```
-nex> function safe_divide(a, b: Real): Result[Real]
+nex> function safe_divide(a, b: Real): Result[Real] 
      do
        if b = 0.0 then
          result := create Result[Real].failure("division by zero")

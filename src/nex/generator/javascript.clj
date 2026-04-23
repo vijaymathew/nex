@@ -436,6 +436,7 @@
                 "Array" (case (:method expr)
                           "get" (or (first type-args) "Any")
                           ("length" "size" "index_of") "Integer"
+                          "concat" target-type
                           "is_empty" "Boolean"
                           "Any")
                 "Map" (case (:method expr)
@@ -815,6 +816,7 @@
     "add_at"    (fn [target args] (str "__nexArrayAddAt(" target ", " args ")"))
     "add"       (fn [target args] (str "__nexArrayAdd(" target ", " args ")"))
     "put"       (fn [target args] (str "__nexArrayPut(" target ", " args ")"))
+    "set"       (fn [target args] (str "__nexArrayPut(" target ", " args ")"))
     "is_empty"  (fn [target _] (str "(" target ".length === 0)"))
     "contains"  (fn [target args] (str "__nexArrayContains(" target ", " args ")"))
     "index_of"  (fn [target args] (str "__nexArrayIndexOf(" target ", " args ")"))
@@ -825,6 +827,7 @@
                     (str "__nexArraySort(" target ")")
                     (str "__nexArraySort(" target ", " args ")")))
     "slice"     (fn [target args] (str target ".slice(" args ")"))
+    "concat"    (fn [target args] (str target ".concat(" args ")"))
     "to_string" (fn [target _] (str "__nexToString(" target ")"))
     "equals"    (fn [target args] (str "__nexDeepEquals(" target ", " args ")"))
     "clone"     (fn [target _] (str "__nexDeepClone(" target ")"))
@@ -836,6 +839,7 @@
     "get"          (fn [target args] (str target ".get(" args ")"))
     "try_get"      (fn [target args] (str target ".get(" args ")"))
     "put"          (fn [target args] (str "__nexMapPut(" target ", " args ")"))
+    "set"          (fn [target args] (str "__nexMapPut(" target ", " args ")"))
     "contains_key" (fn [target args] (str "__nexMapContainsKey(" target ", " args ")"))
     "keys"         (fn [target _] (str "Array.from(" target ".keys())"))
     "values"       (fn [target _] (str "Array.from(" target ".values())"))

@@ -182,6 +182,75 @@
        :alternative {:type :nil}})
     call-node))
 
+(defn- build-function-node
+  [name rest declaration-only?]
+  (let [cleaned (remove #(#{"(" ")" "do" "end" ":"} %) rest)
+        generic-params (first (filter #(and (sequential? %)
+                                            (= :genericParams (first %)))
+                                      cleaned))
+        params (first (filter #(and (sequential? %)
+                                    (= :paramList (first %)))
+                              cleaned))
+        return-type (first (filter #(and (sequential? %)
+                                         (= :type (first %)))
+                                   cleaned))
+        note-clause (first (filter #(and (sequential? %)
+                                         (= :noteClause (first %)))
+                                   cleaned))
+        require-clause (first (filter #(and (sequential? %)
+                                            (= :requireClause (first %)))
+                                      cleaned))
+        ensure-clause (first (filter #(and (sequential? %)
+                                           (= :ensureClause (first %)))
+                                     cleaned))
+        rescue-clause (first (filter #(and (sequential? %)
+                                           (= :rescueClause (first %)))
+                                     cleaned))
+        block (first (filter #(and (sequential? %)
+                                   (= :block (first %)))
+                             cleaned))
+        declaration-only? (or declaration-only? (nil? block))
+        params-v (when params (transform-node params))
+        return-type-v (when return-type (transform-node return-type))
+        body (when block (transform-node block))
+        fn-name (token-text name)
+        class-name (str fn-name "_Function")
+        method-name (str "call" (count params-v))
+        explicit-generic-params (when generic-params (transform-node generic-params))
+        generic-params-v (or explicit-generic-params
+                             (vec (reduce (fn [acc {:keys [type]}]
+                                            (into acc (collect-implicit-generic-names type)))
+                                          (collect-implicit-generic-names return-type-v)
+                                          params-v)))
+        method-def {:type :method
+                    :name method-name
+                    :params params-v
+                    :return-type return-type-v
+                    :declaration-only? declaration-only?
+                    :note (when note-clause (transform-node note-clause))
+                    :require (when require-clause (transform-node require-clause))
+                    :body body
+                    :ensure (when ensure-clause (transform-node ensure-clause))
+                    :rescue (when rescue-clause (transform-node rescue-clause))}
+        class-def {:type :class
+                   :name class-name
+                   :generic-params generic-params-v
+                   :note nil
+                   :parents [{:parent "Function"}]
+                   :body [{:type :feature-section
+                           :visibility {:type :public}
+                           :members [method-def]}]
+                   :invariant nil}]
+    {:type :function
+     :name fn-name
+     :class-name class-name
+     :generic-params generic-params-v
+     :declaration-only? declaration-only?
+     :params params-v
+     :return-type return-type-v
+     :body body
+     :class-def class-def}))
+
 (def node-handlers
   {:program
    (fn [[_ & nodes]]
@@ -287,72 +356,11 @@
 
    :functionDecl
    (fn [[_ _function-kw name & rest]]
-     (let [cleaned (remove #(#{"(" ")" "do" "end" ":"} %) rest)
-           generic-params (first (filter #(and (sequential? %)
-                                               (= :genericParams (first %)))
-                                         cleaned))
-           params (first (filter #(and (sequential? %)
-                                       (= :paramList (first %)))
-                                 cleaned))
-           return-type (first (filter #(and (sequential? %)
-                                            (= :type (first %)))
-                                      cleaned))
-           note-clause (first (filter #(and (sequential? %)
-                                            (= :noteClause (first %)))
-                                     cleaned))
-           require-clause (first (filter #(and (sequential? %)
-                                               (= :requireClause (first %)))
-                                         cleaned))
-           ensure-clause (first (filter #(and (sequential? %)
-                                              (= :ensureClause (first %)))
-                                        cleaned))
-           rescue-clause (first (filter #(and (sequential? %)
-                                              (= :rescueClause (first %)))
-                                        cleaned))
-           block (first (filter #(and (sequential? %)
-                                      (= :block (first %)))
-                                cleaned))
-           params-v (when params (transform-node params))
-           return-type-v (when return-type (transform-node return-type))
-           declaration-only? (nil? block)
-           body (when block (transform-node block))
-           fn-name (token-text name)
-           class-name (str fn-name "_Function")
-           method-name (str "call" (count params-v))
-           explicit-generic-params (when generic-params (transform-node generic-params))
-           generic-params-v (or explicit-generic-params
-                                (vec (reduce (fn [acc {:keys [type]}]
-                                               (into acc (collect-implicit-generic-names type)))
-                                             (collect-implicit-generic-names return-type-v)
-                                             params-v)))
-           method-def {:type :method
-                       :name method-name
-                       :params params-v
-                       :return-type return-type-v
-                       :declaration-only? declaration-only?
-                       :note (when note-clause (transform-node note-clause))
-                       :require (when require-clause (transform-node require-clause))
-                       :body body
-                       :ensure (when ensure-clause (transform-node ensure-clause))
-                       :rescue (when rescue-clause (transform-node rescue-clause))}
-           class-def {:type :class
-                      :name class-name
-                      :generic-params generic-params-v
-                      :note nil
-                      :parents [{:parent "Function"}]
-                      :body [{:type :feature-section
-                              :visibility {:type :public}
-                              :members [method-def]}]
-                      :invariant nil}]
-       {:type :function
-       :name fn-name
-        :class-name class-name
-        :generic-params generic-params-v
-        :declaration-only? declaration-only?
-        :params params-v
-        :return-type return-type-v
-        :body body
-        :class-def class-def}))
+     (build-function-node name rest false))
+
+   :declareFunctionDecl
+   (fn [[_ _declare-kw _function-kw name & rest]]
+     (build-function-node name rest true))
 
    :anonymousFunction
    (fn [[_ _fn-kw & rest]]

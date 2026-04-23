@@ -144,7 +144,7 @@ nex> function word_frequencies(text: String): Map[String, Integer]
        let words := text.to_lower.split(" ")
        across words as w do
          let count := result.try_get(w, 0)
-         result.put(w, count + 1)
+         result.set(w, count + 1)
        end
      end
 ```

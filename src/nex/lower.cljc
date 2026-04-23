@@ -108,7 +108,7 @@
 (def ^:private direct-array-methods
   #{"get" "add" "push" "add_at" "at" "put" "set" "length" "size" "is_empty"
     "contains" "index_of" "remove" "reverse" "slice" "sort" "first" "last"
-    "to_string" "equals" "clone" "join" "cursor"})
+    "concat" "to_string" "equals" "clone" "join" "cursor"})
 
 (def ^:private direct-map-methods
   #{"get" "try_get" "put" "at" "set" "size" "is_empty" "contains_key"
@@ -166,7 +166,7 @@
         ("add" "push" "add_at" "at" "put" "set" "remove") "Void"
         ("length" "size" "index_of") "Integer"
         ("is_empty" "contains" "equals") "Boolean"
-        ("reverse" "slice" "sort" "clone") (or target-type (array-type-of (or a "Any")))
+        ("reverse" "slice" "sort" "clone" "concat") (or target-type (array-type-of (or a "Any")))
         ("to_string" "join") "String"
         "cursor" "Cursor"
         nil)
@@ -1554,10 +1554,13 @@
            :jvm-type (resolve-jvm-type env nex-type)}))))
 
 (defn- ensure-convert-binding
-  [env {:keys [var-name target-type]}]
-  (if-let [binding (lookup-convert-binding env var-name)]
+  [env {:keys [var-name target-type type]}]
+  (let [bound-type (or target-type type)]
+    (when-not bound-type
+      (throw (ex-info "convert binding is missing a target type"
+                      {:var-name var-name})))
+    (if-let [binding (lookup-convert-binding env var-name)]
     [env binding]
-    (let [bound-type target-type]
       (if (and (:top-level? env) (not (:scoped-locals? env)))
         (let [env' (update env :var-types assoc var-name bound-type)]
           [env' {:kind :top

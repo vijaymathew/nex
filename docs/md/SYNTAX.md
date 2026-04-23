@@ -186,8 +186,8 @@ For mutually recursive functions, declare the signatures first and define the
 bodies afterwards:
 
 ```nex
-function is_even(n: Integer): Boolean
-function is_odd(n: Integer): Boolean
+declare function is_even(n: Integer): Boolean
+declare function is_odd(n: Integer): Boolean
 
 function is_even(n: Integer): Boolean do
   if n = 0 then

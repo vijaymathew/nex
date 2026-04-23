@@ -10,7 +10,8 @@ Every function makes two implicit commitments. It assumes certain things about i
 Consider a function that computes the average of two real numbers:
 
 ```
-nex> function average(a, b: Real): Real do
+nex> function average(a, b: Real): Real 
+     do
        result := (a + b) / 2.0
      end
 ```
@@ -20,7 +21,8 @@ What does this function assume? Nothing particularly strong — any two real num
 Now consider a function that computes a percentage:
 
 ```
-nex> function percentage(part, total: Real): Real do
+nex> function percentage(part, total: Real): Real 
+     do
        result := (part / total) * 100.0
      end
 ```
@@ -70,7 +72,8 @@ No setup, no cleanup, no external dependencies. Each call is self-contained.
 Not all functions are pure. A function that prints output, reads from the console, or modifies a variable outside itself has an *effect* — an observable change to the world beyond its return value. The `greet` function from Chapter 6 is an effectful function: it prints to the output, which is a change to the outside world.
 
 ```
-nex> function greet(name: String) do
+nex> function greet(name: String) 
+     do
        print("Hello, " + name)
      end
 ```
@@ -83,7 +86,8 @@ Compare these two approaches to a temperature reporting function:
 
 ```
 nex> -- effectful throughout: harder to test
-nex> function report_temperature(c: Real) do
+nex> function report_temperature(c: Real) 
+     do
        if c < 0.0 then
          print("Freezing: " + c.to_string + " deg C")
        elseif c < 15.0 then
@@ -96,7 +100,8 @@ nex> function report_temperature(c: Real) do
 
 ```
 nex> -- pure core, thin effect: easier to test
-nex> function temperature_label(c: Real): String do
+nex> function temperature_label(c: Real): String 
+     do
        if c < 0.0 then
          result := "Freezing"
        elseif c < 15.0 then
@@ -106,7 +111,8 @@ nex> function temperature_label(c: Real): String do
        end
      end
 
-nex> function report_temperature(c: Real) do
+nex> function report_temperature(c: Real) 
+     do
        print(temperature_label(c) + ": " + c.to_string + " deg C")
      end
 ```
@@ -139,12 +145,14 @@ A function is easy to test when its behaviour is fully determined by its inputs 
 ```
 nex> -- harder to test: depends on external variable
 nex> let tax_rate := 0.20
-nex> function compute_tax(price: Real): Real do
+nex> function compute_tax(price: Real): Real 
+     do
        result := price * tax_rate
      end
 
 nex> -- easier to test: all inputs are parameters
-nex> function compute_tax(price, rate: Real): Real do
+nex> function compute_tax(price, rate: Real): Real 
+     do
        result := price * rate
      end
 ```
@@ -185,11 +193,13 @@ Each of these is a small, self-contained experiment. Together they provide evide
 A program built from well-designed functions has a particular quality: the code that assembles the pieces is readable at a high level, without requiring the reader to follow the details of every piece. Consider a program that reads a temperature, converts it, classifies it, and reports it:
 
 ```
-nex> function celsius_to_fahrenheit(c: Real): Real do
+nex> function celsius_to_fahrenheit(c: Real): Real 
+     do
        result := c * 9.0 / 5.0 + 32.0
      end
 
-nex> function temperature_label(c: Real): String do
+nex> function temperature_label(c: Real): String 
+     do
        if c < 0.0 then
          result := "Freezing"
        elseif c < 15.0 then
@@ -201,7 +211,8 @@ nex> function temperature_label(c: Real): String do
        end
      end
 
-nex> function temperature_report(c: Real): String do
+nex> function temperature_report(c: Real): String 
+     do
        let f := celsius_to_fahrenheit(c)
        let label := temperature_label(c)
        result := label + ": " + c.to_string + " deg C / " + f.to_string + " deg F"
@@ -231,7 +242,8 @@ A function that contains deeply nested conditionals or loops within loops is har
 
 ```
 nex> -- before: inner loop mixed with outer logic
-nex> function count_divisors(n: Integer): Integer do
+nex> function count_divisors(n: Integer): Integer 
+     do
        result := 0
        from
          let i := 1
@@ -246,11 +258,13 @@ nex> function count_divisors(n: Integer): Integer do
      end
 
 nex> -- after: inner check extracted
-nex> function is_divisor(n, i: Integer): Boolean do
+nex> function is_divisor(n, i: Integer): Boolean 
+     do
        result := n % i = 0
      end
 
-nex> function count_divisors(n: Integer): Integer do
+nex> function count_divisors(n: Integer): Integer 
+     do
        result := 0
        from
          let i := 1
