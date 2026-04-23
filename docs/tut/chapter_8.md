@@ -30,7 +30,7 @@ Every correct recursive function has exactly this structure: a *base case* that 
 
 The most effective way to understand recursion is to trace a call step by step. Here is `sum_to(4)` fully expanded:
 
-```
+```text
 sum_to(4)
 = 4 + sum_to(3)
 = 4 + (3 + sum_to(2))
@@ -151,9 +151,9 @@ Notice the structure: *process the first element, then recurse on the rest*. Thi
 Two functions can be mutually recursive — each calling the other. A classic example is testing whether a number is even or odd without using `%`:
 
 ```
-nex> function is_even(n: Integer): Boolean
+nex> declare function is_even(n: Integer): Boolean
 
-nex> function is_odd(n: Integer): Boolean
+nex> declare function is_odd(n: Integer): Boolean
 
 nex> function is_even(n: Integer): Boolean do
        if n = 0 then
@@ -242,10 +242,13 @@ The loop is shorter and more direct. Reach for a loop when the iteration pattern
 
 **Stack depth is a concern.** Each recursive call occupies space on the call stack. For a recursion that descends thousands of levels, this stack space may be exhausted, producing a stack overflow error. A loop uses a fixed amount of space regardless of how many iterations it performs. For very deep or unbounded computations, a loop is safer:
 
-```
+```text
+nex> -- do not run this
 nex> -- this will fail for large n due to stack overflow
 nex> sum_to(10000)
+```
 
+```
 nex> -- this handles any n safely
 nex> let total := 0
 nex> from

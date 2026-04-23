@@ -6,9 +6,9 @@
             [nex.typechecker :as tc]))
 
 (deftest declaration-only-functions-parse-and-typecheck
-  (testing "body-less function declarations support mutually recursive definitions in the same input"
-    (let [code "function is_even(n: Integer): Boolean
-function is_odd(n: Integer): Boolean
+  (testing "declare function supports mutually recursive definitions in the same input"
+    (let [code "declare function is_even(n: Integer): Boolean
+declare function is_odd(n: Integer): Boolean
 
 function is_even(n: Integer): Boolean
 do
@@ -33,14 +33,25 @@ end"
       (is (= #{"is_even" "is_odd"} (set (map :name functions))))
       (is (:success (tc/type-check ast))))))
 
+(deftest plain-function-signature-without-body-is-not-a-declaration
+  (testing "function definitions require a body; use declare function for forward declarations"
+    (is (thrown? Exception
+                 (p/ast "function is_even(n: Integer): Boolean")))))
+
+(deftest repl-input-completeness-distinguishes-declare-from-function-definition
+  (testing "a plain function header keeps reading, while declare function is complete"
+    (is (true? (repl/continue-reading? ["function f(n: Integer): Integer"])))
+    (is (false? (repl/continue-reading? ["declare function f(n: Integer): Integer"])))
+    (is (false? (repl/continue-reading? ["function f(n: Integer): Integer do result := n end"])))))
+
 (deftest repl-forward-declarations-support-mutual-recursion
   (testing "REPL can typecheck and execute mutually recursive functions once signatures are declared"
     (binding [repl/*type-checking-enabled* (atom true)
               repl/*repl-var-types* (atom {})]
       (let [ctx (repl/init-repl-context)
             output (with-out-str
-                     (repl/eval-code ctx "function is_even(n: Integer): Boolean")
-                     (repl/eval-code ctx "function is_odd(n: Integer): Boolean")
+                     (repl/eval-code ctx "declare function is_even(n: Integer): Boolean")
+                     (repl/eval-code ctx "declare function is_odd(n: Integer): Boolean")
                      (repl/eval-code ctx "function is_even(n: Integer): Boolean
 do
   if n = 0 then
@@ -80,7 +91,7 @@ end"))]
 (deftest calling-unresolved-declaration-fails-cleanly
   (testing "calling a declaration without a later definition raises a clear runtime error"
     (let [ctx (repl/init-repl-context)]
-      (repl/eval-code ctx "function missing(n: Integer): Boolean")
+      (repl/eval-code ctx "declare function missing(n: Integer): Boolean")
       (let [output (with-out-str
                      (repl/eval-code ctx "print(missing(1))"))]
         (is (str/includes? output "declared but not defined"))))))

@@ -295,7 +295,7 @@
 (defn- declaration-key
   [code]
   (when-let [[_ kind name]
-             (or (re-find #"(?m)^\s*(class|function)\s+([A-Za-z_][A-Za-z0-9_]*)" code)
+             (or (re-find #"(?m)^\s*(class|function|declare\s+function)\s+([A-Za-z_][A-Za-z0-9_]*)" code)
                  (re-find #"(?m)^\s*(type)\s+([A-Za-z_][A-Za-z0-9_]*)" code))]
     [(keyword (str/lower-case kind)) name]))
 

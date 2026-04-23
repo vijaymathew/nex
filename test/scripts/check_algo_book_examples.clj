@@ -40,7 +40,7 @@
 
 (defn- code-like? [code]
   (boolean
-   (re-find #"(?m)^\s*(intern|import|class|deferred class|function|let|feature|create|inherit|if\b|elseif\b|else$|from\b|across\b|repeat\b|print\(|result :=|invariant$|require$|ensure$|do$|end$|retry$|raise\b|select\b|spawn\(|await\(|with\b|case\b|convert\b)"
+   (re-find #"(?m)^\s*(intern|import|class|deferred class|declare function|function|let|feature|create|inherit|if\b|elseif\b|else$|from\b|across\b|repeat\b|print\(|result :=|invariant$|require$|ensure$|do$|end$|retry$|raise\b|select\b|spawn\(|await\(|with\b|case\b|convert\b)"
             code)))
 
 (defn- illustrative-block? [lang code]

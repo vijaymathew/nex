@@ -29,7 +29,7 @@
 (defonce ^:dynamic *compiled-repl-session* (atom (compiled-repl/make-session)))
 
 (def nex-keywords
-  ["class" "deferred" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
+  ["class" "deferred" "declare" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
    "when" "from" "until" "invariant" "variant" "require" "ensure"
    "let" "create" "convert" "to" "fn" "function" "and" "or" "old" "this" "note"
    "with" "import" "intern" "private" "raise" "rescue" "retry" "spawn" "select" "timeout" "repeat" "across" "case" "of"
@@ -190,9 +190,21 @@
         ;; So subtract from-count, repeat-count, and across-count from do-count to avoid double-counting
         standalone-do-count (max 0 (- do-count from-count repeat-count across-count))
         ;; Total blocks that need closing
-        open-blocks (+ class-count standalone-do-count from-count repeat-count across-count if-count case-count)]
+        open-blocks (+ class-count standalone-do-count from-count repeat-count across-count if-count case-count)
+        lines (vec (str/split-lines text))
+        bare-function-header?
+        (boolean
+         (some identity
+               (map-indexed
+                (fn [idx line]
+                  (when (and (re-find #"^\s*function\b" line)
+                             (not (re-find #"\bdo\b" line)))
+                    (not-any? #(re-find #"\bdo\b" %)
+                              (subvec lines (inc idx)))))
+                lines)))]
     ;; Continue if we have more opens than closes
-    (> open-blocks end-count)))
+    (or bare-function-header?
+        (> open-blocks end-count))))
 
 (defn read-input
   "Read potentially multi-line input from the user"
@@ -1123,6 +1135,7 @@
   "Check if input looks like a top-level declaration"
   [input]
   (or (re-find #"^\s*class\s+" input)
+      (re-find #"^\s*declare\s+function\s+" input)
       (re-find #"^\s*function\s+" input)
       (re-find #"^\s*import\s+" input)
       (re-find #"^\s*intern\s+" input)))
@@ -1252,9 +1265,7 @@
                      (seq (:statements ast)) (seq (:calls ast))))
         ;; Create an augmented AST that includes previously defined classes
         ;; so the type checker knows about them
-        (let [prev-functions (if (= :compiled @*repl-backend*)
-                               (vals @(:function-asts @*compiled-repl-session*))
-                               [])
+        (let [prev-functions (vals @(:function-asts @*compiled-repl-session*))
               synthetic-function-class-names (set (map :class-name prev-functions))
               referenced-anonymous-class-names (->> (vals @*repl-var-types*)
                                                     (filter string?)

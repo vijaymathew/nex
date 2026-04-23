@@ -217,7 +217,7 @@ nex> :typecheck on
 ```
 
 ```
-nex> function normalize_name(name: String): String
+nex> declare function normalize_name(name: String): String
 
 nex> function greet_user(name: String): String do
        result := "Hello, " + normalize_name(name)
@@ -231,7 +231,7 @@ nex> greet_user("  Vijay  ")
 "Hello, Vijay"
 ```
 
-The first line is a declaration only. It introduces the function name,
+The first line is a declaration only. The `declare function` form introduces the function name,
 parameter type, and return type. The later full definition must match that
 signature exactly.
 
@@ -277,7 +277,7 @@ A function is worth writing whenever a computation has a name, when it is used i
 
 **A computation has a name.** If you find yourself adding a comment that says "compute the shipping cost" before a block of code, that block is a function waiting to be extracted. Naming it `shipping_cost` turns the comment into an executable label. The code that calls it becomes:
 
-```
+```text
 let cost := shipping_cost(weight, distance)
 ```
 
@@ -287,13 +287,13 @@ instead of several lines of arithmetic followed by an explanatory comment.
 
 **Naming it makes the call site clearer.** Consider the expression:
 
-```
+```text
 if score >= 50 and attempts <= 3 then
 ```
 
 versus:
 
-```
+```text
 if passed(score, attempts) then
 ```
 
@@ -355,7 +355,7 @@ Each function does one thing. The code that uses them reads like a series of cle
 ## Summary
 
 - A function is defined with `function name(parameters): return_type do ... end`
-- A function signature may be declared without a body when later definitions need forward references
+- A function signature may be declared with `declare function name(parameters): return_type` when later definitions need forward references
 - Parameters are declared with their types; multiple parameters of the same type can be grouped: `(a, b: Integer)`
 - The return value is assigned to the special variable `result`; the function returns whatever `result` holds when the body finishes
 - A function with no `result` assignment returns no value and should not be used as an expression

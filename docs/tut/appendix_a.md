@@ -153,7 +153,7 @@ end
 
 ## Functions
 
-Function declaration:
+Function definition:
 
 ```nex
 function max(a, b: Integer): Integer do
@@ -176,8 +176,8 @@ end
 Mutually recursive functions must declare their signatures before their bodies:
 
 ```nex
-function is_even(n: Integer): Boolean
-function is_odd(n: Integer): Boolean
+declare function is_even(n: Integer): Boolean
+declare function is_odd(n: Integer): Boolean
 
 function is_even(n: Integer): Boolean do
   if n = 0 then

@@ -1493,9 +1493,9 @@ let f1: Function := cf()"))
               repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
       (let [ctx0 (repl/init-repl-context)
             decl1-output (with-out-str
-                           (repl/eval-code ctx0 "function is_even(n: Integer): Boolean"))
+                           (repl/eval-code ctx0 "declare function is_even(n: Integer): Boolean"))
             decl2-output (with-out-str
-                           (repl/eval-code ctx0 "function is_odd(n: Integer): Boolean"))
+                           (repl/eval-code ctx0 "declare function is_odd(n: Integer): Boolean"))
             def1-output (with-out-str
                           (repl/eval-code ctx0 "function is_even(n: Integer): Boolean
 do
