@@ -437,6 +437,17 @@ end"
       (is (str/includes? js-code "function __nexArraySort(values, compareFn = null)"))
       (is (str/includes? js-code "compareFn(a, b)")))))
 
+(deftest map-set-generation-test
+  (testing "Map.set lowers to the same JavaScript helper as Map.put"
+    (let [nex-code "class Test
+  feature
+    demo(scores: Map[String, Integer]) do
+      scores.set(\"Alice\", 95)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "__nexMapPut(scores, \"Alice\", 95)")))))
+
 (deftest select-generation-test
   (testing "select lowers to try_send/try_receive polling in JavaScript"
     (let [nex-code "class Test

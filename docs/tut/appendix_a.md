@@ -211,7 +211,7 @@ Map:
 
 ```nex
 let m: Map[String, Integer] := {"a": 1, "b": 2}
-m.put("c", 3)
+m.set("c", 3)
 print(m.get("a"))
 ```
 

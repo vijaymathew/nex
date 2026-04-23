@@ -158,7 +158,8 @@ Main methods:
 |---|---|
 | `get(key)` | Read value for key. |
 | `try_get(key, default)` | Read value or fallback. |
-| `put(key, value)` | Add or replace an entry. |
+| `set(key, value)` | Add or replace an entry. |
+| `put(key, value)` | Alias for `set`. |
 | `size` | Number of entries. |
 | `is_empty` | Check emptiness. |
 | `contains_key(key)` | Membership by key. |

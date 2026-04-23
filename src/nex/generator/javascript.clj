@@ -836,6 +836,7 @@
     "get"          (fn [target args] (str target ".get(" args ")"))
     "try_get"      (fn [target args] (str target ".get(" args ")"))
     "put"          (fn [target args] (str "__nexMapPut(" target ", " args ")"))
+    "set"          (fn [target args] (str "__nexMapPut(" target ", " args ")"))
     "contains_key" (fn [target args] (str "__nexMapContainsKey(" target ", " args ")"))
     "keys"         (fn [target _] (str "Array.from(" target ".keys())"))
     "values"       (fn [target _] (str "Array.from(" target ".values())"))

@@ -194,7 +194,7 @@ nex> function most_frequent_word(text: String): String
 
        across words as word do
          let count := freq.try_get(word, 0)
-         freq.put(word, count + 1)
+         freq.set(word, count + 1)
        end
 
        result := freq.keys.get(0)

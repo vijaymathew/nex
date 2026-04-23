@@ -134,15 +134,14 @@ The outer loop iterates over days; the inner loop iterates over the classes for 
 Nested structures are often built up incrementally rather than written as literals. The gradebook example: given a list of (student, score) pairs, build a map from each student to their array of scores.
 
 ```
-nex> function build_gradebook(entries: Array[Map[String, Any]]): Map[String, Array[Integer]]
-   do
+nex> function build_gradebook(entries: Array[Map[String, Any]]): Map[String, Array[Integer]] do
      result := {}
      across entries as entry do
         if convert entry.get("name") to name: String then
            let current := result.try_get(name, [])
            if convert entry.get("score") to score: Integer then
               current.add(score)
-              result.put(name, current)
+              result.set(name, current)
            end
         end
      end
@@ -166,7 +165,7 @@ nex> gradebook.get("Bob")
 [72, 68]
 ```
 
-The `try_get(name, [])` call retrieves the existing array for that student, or an empty array if the student has not appeared yet. Then `add` appends the new score, and `put` stores the updated array back. This try-get-modify-put sequence is the standard idiom for building maps of mutable values.
+The `try_get(name, [])` call retrieves the existing array for that student, or an empty array if the student has not appeared yet. Then `add` appends the new score, and `set` stores the updated array back. This try-get-modify-set sequence is the standard idiom for building maps of mutable values.
 
 
 
@@ -229,8 +228,7 @@ Each node is a `Map[String, Any]`: a `"name"` field (string), a `"type"` field (
 Traversing a tree — visiting every node — is a naturally recursive operation. The base case is a node with no children (a leaf). The recursive case processes the node and then recursively traverses each child.
 
 ```
-nex> function print_tree(node: Map[String, Any], indent: Integer)
-   do
+nex> function print_tree(node: Map[String, Any], indent: Integer) do
      let padding: String := ""
      from let i := 0 until i >= indent do
         padding := padding + "  "
@@ -268,8 +266,7 @@ This is the recursive structure from Chapter 8 applied to a tree: process the cu
 Finding a node by name requires the same recursive structure:
 
 ```
-nex> function find_node(node: Map[String, Any], target: String): ?Map[String, Any]
-   do
+nex> function find_node(node: Map[String, Any], target: String): ?Map[String, Any] do
      if node.get("name") = target then
         result := node
      else
@@ -334,8 +331,7 @@ nex> let expenses := {
 A function that computes the total amount for a node, including all descendants:
 
 ```
-nex> function total_amount(node: Map[String, Any]): Integer
-   do
+nex> function total_amount(node: Map[String, Any]): Integer do
      result := node.get("amount")
      across node.get("children") as child do
         result := result + total_amount(child)

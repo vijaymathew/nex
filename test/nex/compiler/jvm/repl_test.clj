@@ -72,6 +72,22 @@
         (is (not (str/includes? let-output "Any {")))
         (is (str/includes? var-output "Map[String, String]"))))))
 
+(deftest repl-map-set-updates-entry-test
+  (testing "Map.set is accepted under type checking and updates a map entry"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :interpreter)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx "let scores: Map[String, Integer] := {}"))
+            set-output (with-out-str
+                         (repl/eval-code ctx "scores.set(\"Alice\", 95)"))
+            get-output (with-out-str
+                         (repl/eval-code ctx "scores.get(\"Alice\")"))]
+        (is (not (str/includes? set-output "Error:")) set-output)
+        (is (str/includes? get-output "95"))))))
+
 (deftest repl-compiled-backend-private-field-is-not-publicly-readable-test
   (testing "compiled backend rejects top-level access to private fields while keeping public methods callable"
     (binding [repl/*type-checking-enabled* (atom false)
@@ -1007,6 +1023,24 @@ end"))
     (binding [repl/*type-checking-enabled* (atom false)
               repl/*repl-var-types* (atom {})
               repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "let capitals := {\"France\": \"Paris\", \"Japan\": \"Tokyo\", \"Brazil\": \"Brasília\"}"))
+            output (with-out-str
+                     (repl/eval-code ctx0 "across capitals as entry do
+  print(entry.get(0) + \" -> \" + entry.get(1))
+end"))]
+        (is (not (str/includes? output "Error:")))
+        (is (str/includes? output "France -> Paris"))
+        (is (str/includes? output "Japan -> Tokyo"))
+        (is (str/includes? output "Brazil -> Brasília"))))))
+
+(deftest repl-typechecked-map-across-entry-get-test
+  (testing "typechecked REPL can use get on map entries yielded by across"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :interpreter)
               repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
       (let [ctx0 (repl/init-repl-context)
             _ (with-out-str

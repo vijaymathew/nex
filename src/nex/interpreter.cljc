@@ -2907,6 +2907,7 @@
                         default
                         v)))
     "put"          (fn [m key val & _] (nex-map-put m key val))
+    "set"          (fn [m key val & _] (nex-map-put m key val))
     "size"         (fn [m & _] (nex-map-size m))
     "is_empty"     (fn [m & _] (nex-map-empty? m))
     "contains_key" (fn [m key & _] (nex-map-contains-key-value? m key))

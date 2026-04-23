@@ -67,7 +67,8 @@ create Array[String].filled(2, "x")
 |---|---|---|---|
 | `get` | `key: Any` | `Any` | Read value for key (fails if key missing). |
 | `try_get` | `key: Any, default: Any` | `Any` | Read value or default if missing. |
-| `put` | `key: Any, value: Any` | `Void` | Add/replace key-value entry. |
+| `set` | `key: Any, value: Any` | `Void` | Add/replace key-value entry. |
+| `put` | `key: Any, value: Any` | `Void` | Alias for `set`. |
 | `size` | none | `Integer` | Number of entries. |
 | `is_empty` | none | `Boolean` | True when map has no entries. |
 | `contains_key` | `key: Any` | `Boolean` | Key existence test. |
@@ -217,7 +218,7 @@ print(xs.get(2))                  -- 20
 print(xs.index_of(30))            -- 3
 
 let m: Map [String, String] := {"lang": "Nex"}
-m.put("kind", "language")
+m.set("kind", "language")
 print(m.get("lang"))              -- "Nex"
 print(m.try_get("missing", "n/a")) -- "n/a"
 print(m.contains_key("kind"))     -- true

@@ -580,7 +580,7 @@
       "Array" (or (first type-args) "Any")
       "Set" (or (first type-args) "Any")
       "String" "Char"
-      "Map" "Any"
+      "Map" {:base-type "Array" :type-params ["Any"]}
       "Cursor" "Any"
       "Any")))
 
