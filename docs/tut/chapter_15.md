@@ -83,10 +83,10 @@ nex> class Pair [F, S]
        feature
          first: F
          second: S
-         get_first(): F do
+         head: F do
            result := first
          end
-         get_second(): S do
+         tail: S do
            result := second
          end
          describe(): String do
@@ -97,10 +97,10 @@ nex> class Pair [F, S]
 
 ```
 nex> let p1 := create Pair[String, Integer].make("age", 30)
-nex> p1.get_first
+nex> p1.head
 "age"
 
-nex> p1.get_second
+nex> p1.tail
 30
 
 nex> let p2 := create Pair[Real, Boolean].make(3.14, true)
@@ -250,19 +250,53 @@ nex> s.size
 
 ## The Standard Collections as Generic Classes
 
-The built-in `Array[T]`, `Set[T]`, and `Map[K, V]` that you have been using throughout the book are generic classes. `Array[Integer]`, `Array[String]`, and `Array[Real]` are all instances of the same `Array` class with different type arguments. `Set[Integer]` and `Set[String]` are instances of `Set` with different element types. `Map[String, Integer]` and `Map[Integer, String]` are instances of `Map` with different key and value types.
+By now you have used `Array[T]` and `Map[K, V]` throughout the book. They are generic classes built into the language: `Array[Integer]`, `Array[String]`, and `Array[Real]` are all instances of the same `Array` class with different type arguments, and `Map[String, Integer]` and `Map[Integer, String]` are both instances of `Map` with different key and value types.
 
-This is why the methods work uniformly across element types: `add`, `get`, `remove`, `contains`, `sort` are defined once on `Array[T]`, and work for any `T`. Similarly, `contains`, `union`, `intersection`, and `difference` are defined once on `Set[T]`, and work for any element type `T`. The `sort` method requires `T -> Comparable`, which is why sorting an `Array[Integer]` works but sorting an `Array[Map[String, Integer]]` would not.
+Nex also provides a built-in `Set[T]` class. A set stores unique values of one element type. The literal syntax is `#{...}`:
 
-The generic mechanism also explains why `across` infers element types automatically: an `Array[Integer]` knows its element type is `Integer`, so the loop variable is inferred as `Integer` without annotation.
+```
+nex> let seen: Set[Integer] := #{1, 2, 3}
+nex> seen.contains(2)
+true
 
-Understanding that the standard collections are generic classes clarifies the entire type system: `Array[Integer]` is not a special built-in type. It is an instance of a generic class, following exactly the same rules as `Stack[Integer]` or `Sorted_List[Integer]`.
+nex> seen.union(#{3, 4})
+#{1, 2, 3, 4}
+
+nex> let empty_names: Set[String] := #{}
+nex> empty_names.is_empty
+true
+```
+
+The `#` matters. `{}` is an empty map; `#{}` is an empty set.
+
+This is the same generic pattern you have seen all chapter:
+
+- `Array[T]` has one element type parameter
+- `Set[T]` has one element type parameter
+- `Map[K, V]` has two type parameters: one for keys and one for values
+
+Because these are generic classes, their methods are defined once and then reused for any valid type arguments. `add`, `get`, `remove`, `contains`, and `sort` are defined once on `Array[T]`. `contains`, `union`, `intersection`, and `difference` are defined once on `Set[T]`. `get`, `set`, `try_get`, and `contains_key` are defined once on `Map[K, V]`.
+
+The type arguments explain why the typechecker knows what operations are valid. `sort` works on `Array[Integer]` because `Integer` is `Comparable`. It would not work on an `Array[Map[String, Integer]]`, because maps are not comparable. Similarly, map keys require `K -> Hashable`, which is why `Map[K, V]` constrains its key type.
+
+The generic mechanism also explains why `across` can infer loop variable types automatically. If `numbers` has type `Array[Integer]`, the loop variable is inferred as `Integer`. If `seen` has type `Set[Integer]`, the loop variable is also inferred as `Integer`:
+
+```
+nex> across seen as n do
+       print(n + 10)
+     end
+11
+12
+13
+```
+
+Understanding that the standard collections are generic classes clarifies the whole type system. `Array[Integer]`, `Set[String]`, and `Map[String, Real]` are not magical special cases. They are ordinary instances of generic classes, following exactly the same ideas as `Stack[Integer]`, `Pair[String, Integer]`, or `Sorted_List[Integer]`.
 
 
 
 ## A Worked Example: A Generic Result Type
 
-A common pattern in robust code is a result type that holds either a successful value or an error description — without raising an exception. This is naturally a two-parameter generic:
+A common pattern in robust code is a result type that holds either a successful value or an error description — without raising an exception. Here the success value varies, while the error is always a `String`, so a one-parameter generic is enough:
 
 ```
 nex> class Result [V]
@@ -328,7 +362,7 @@ Error: division by zero
 - Multiple type parameters are separated by commas: `class Pair [F, S]`
 - Type constraints restrict which types can fill a parameter: `[G -> Comparable]` requires `G` to implement `Comparable`; `[K -> Hashable]` requires hashability for use as a map key
 - A generic class can inherit from another generic class using the same type parameter: `class Bounded_Stack [G] inherit Stack[G]`
-- The built-in `Array[T]`, `Set[T]`, and `Map[K, V]` are generic classes; understanding this explains why element types are inferred and why collection operations work uniformly across types
+- The built-in `Array[T]`, `Set[T]`, and `Map[K, V]` are generic classes; `Set` literals use `#{...}`, and understanding these collection types explains why element types are inferred and why operations work uniformly across types
 - Generic classes provide reuse without duplication and type safety without losing flexibility
 
 

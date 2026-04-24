@@ -133,6 +133,67 @@ nex> class Bank_Account
 
 
 
+## Command-Query Separation
+
+Another useful design principle is *command-query separation*.
+
+A **command** changes an object's state. A **query** answers a question about the object. A well-designed routine should usually do one or the other, not both.
+
+Examples:
+
+- `deposit(amount)` is a command because it changes the balance
+- `get_balance()` or `is_overdrawn()` is a query because it reports information
+
+Trouble begins when one routine tries to mix the two roles:
+
+```
+nex> class Counter
+       private feature
+         value: Integer
+       feature
+         next_value(): Integer do
+           value := value + 1
+           result := value
+         end
+     end
+```
+
+The name `next_value` sounds like a question, but calling it changes the object. A reader cannot tell from the name alone whether this is safe to call repeatedly, whether it is merely observing the counter, or whether it is advancing it.
+
+The clearer design separates the two responsibilities:
+
+```
+nex> class Counter
+       private feature
+         value: Integer
+       feature
+         increment() do
+           value := value + 1
+         end
+         current(): Integer do
+           result := value
+         end
+     end
+```
+
+Now the interface says exactly what happens. `increment` is a command. `current` is a query. A caller can ask for the current value without changing the object, and can change the object without pretending to ask a question.
+
+This principle matters because mixed routines are harder to reason about:
+
+- A query that secretly changes state is surprising and error-prone
+- A command that also returns a value often invites callers to depend on two effects at once
+- Testing becomes less clear because one call both mutates the object and produces an answer
+
+The principle is not absolute. Sometimes a combined routine is convenient, and sometimes performance considerations justify it. But convenience should be treated as an exception, not the default. When in doubt, prefer separate routines with separate purposes.
+
+For class design, the practical rule is simple:
+
+- commands should be named as actions and should make state changes explicit
+- queries should answer questions and should not alter observable state
+
+That discipline makes classes easier to read, easier to trust, and easier to use correctly.
+
+
 ## Classes as Models
 
 A well-designed class is a model of something: a real-world entity, a domain concept, or an abstraction. The fields are the properties that matter. The methods are the operations the model supports. Everything else is left out.
@@ -268,6 +329,7 @@ Each class now has one responsibility. `Product` knows what a product is. `Stock
 - A class should have one responsibility: one concept to model, one piece of state to manage, one reason to change
 - A method belongs inside a class when it operates on private fields or represents an intrinsic operation; not when it introduces external dependencies or could be a free function
 - Data and the behaviour that naturally governs it belong together; the class enforces invariants by controlling what operations are possible
+- Prefer command-query separation: routines that change state should usually be distinct from routines that answer questions
 - Model only what is needed; speculative fields and methods make classes harder to understand and change
 - Data classes are centred on their fields; behaviour classes on their methods; god classes on nothing in particular
 - Class names should be nouns a domain expert would recognise; names describing what a class does rather than what it is are a warning sign
@@ -295,7 +357,7 @@ end
 
 **2.** Define a `Money` class with fields `amount: Real` and `currency: String`. Add methods `add(other: Money): Money` and `exchange(rate: Real, target_currency: String): Money`. What preconditions do these methods have? State them as comments.
 
-**3.** A `Deck` class represents a standard 52-card deck. Using `Card` from Section 13.4, define `Deck` with a `cards: Array[Card]` field and methods `make` (constructor building all 52 cards), `size(): Integer`, `draw(): Card`, and `is_empty(): Boolean`. State the precondition for `draw` as a comment.
+**3.** A `Deck` class represents a standard 52-card deck. Using `Card` from Section 13.5, define `Deck` with a `cards: Array[Card]` field and methods `make` (constructor building all 52 cards), `size(): Integer`, `draw(): Card`, and `is_empty(): Boolean`. State the precondition for `draw` as a comment.
 
 **4.** Review the `Bank_Account` in Section 13.3. Is `overdraft_limit` something all bank accounts should have, or does it belong to a subtype? Sketch two classes — a basic `Account` with no overdraft, and an `Overdraft_Account` with a limit — without worrying about inheritance syntax. Which fields and methods does each have?
 

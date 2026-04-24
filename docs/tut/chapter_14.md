@@ -19,6 +19,7 @@ nex> class Shape
          end
        feature
          colour: String
+		 area: Real do result := 0.0 end
          describe(): String do
            result := "A " + colour + " shape"
          end
@@ -59,7 +60,7 @@ nex> class Rectangle inherit Shape
      end
 ```
 
-Both `Circle` and `Rectangle` inherit the `colour` field from `Shape`. Each has its own additional fields and overrides `describe`.
+Both `Circle` and `Rectangle` inherit the `colour` field from `Shape`. Each has its own additional fields and overrides `area` and `describe`.
 
 Public class constants are inherited as well. If a parent class defines:
 
@@ -140,6 +141,8 @@ nex> across shapes as s do
 When `s.describe` is called, Nex dispatches to the correct `describe` for the actual runtime type of each object. This is *dynamic dispatch*: the method called is determined by the object's type at runtime, not by the declared type of the variable.
 
 Polymorphism means code written against the superclass type works correctly with any subclass — including subclasses not yet written. Adding a `Triangle` that inherits `Shape` and overrides `describe` would work with the loop above without changing it.
+
+This idea is closely related to the **Liskov Substitution Principle**: if a routine expects a `Shape`, it should be able to work with a `Circle` or `Rectangle` without needing special-case knowledge. In practical terms, a subclass should behave like a valid, more specific version of its superclass. It may extend behaviour, but it should not violate the expectations established by the parent type.
 
 
 
@@ -318,7 +321,7 @@ Each account type inherits `deposit` and `get_balance` from `Account`. `Savings_
 
 **2.** Add a method `perimeter(): Real` to the `Shape` class with a default return of `0.0`. Override it in `Circle` (`2 * 3.14159 * radius`) and `Rectangle` (`2 * (width + height)`). Update `describe` in `Shape` to report both area and perimeter.
 
-**3.** The `withdraw` method in `Overdraft_Account` overrides the one in `Account`. Does the override honour the Liskov Substitution Principle? Does it accept the same inputs? Does it make the same kind of promise — returning `true` on success and `false` on failure? What does a caller of `Account` need to know about `Overdraft_Account.withdraw`?
+**3.** The `withdraw` method in `Overdraft_Account` overrides the one in `Account`. Does the override honour the Liskov Substitution Principle — that is, can an `Overdraft_Account` be used anywhere an `Account` is expected without surprising the caller? Does it accept the same inputs? Does it make the same kind of promise — returning `true` on success and `false` on failure? What does a caller of `Account` need to know about `Overdraft_Account.withdraw`?
 
 **4.** Define a class `Vehicle` with fields `make: String` and `speed: Real`, and methods `fuel_type(): String` and `max_speed(): Real` with sensible defaults. Define `Electric_Car` and `Petrol_Car` overriding those methods. Add `can_reach(distance, fuel: Real): Boolean` to each — `Petrol_Car` uses 10 litres per 100 km; `Electric_Car` uses 20 kWh per 100 km.
 

@@ -174,6 +174,57 @@ end"
           output @(:output ctx)]
       (is (= ["42"] output)))))
 
+(deftest logged-box-generic-inheritance-test
+  (testing "Generic subclasses can inherit from generic parents and extend behavior"
+    (let [code "class Box [T]
+  create
+    make(v: T) do
+      value := v
+    end
+  feature
+    value: T
+
+    get(): T do
+      result := value
+    end
+
+    set(v: T) do
+      value := v
+    end
+end
+
+class Logged_Box [T] inherit Box[T]
+  create
+    make(v: T) do
+      Box.make(v)
+      change_count := 0
+    end
+  feature
+    change_count: Integer
+
+    set(v: T) do
+      Box.set(v)
+      change_count := change_count + 1
+    end
+
+    changes(): Integer do
+      result := change_count
+    end
+end
+
+let box: Logged_Box[Integer] := create Logged_Box[Integer].make(7)
+print(box.get())
+box.set(9)
+box.set(11)
+print(box.get())
+print(box.changes())"
+          ast (p/ast code)
+          typecheck-result (tc/type-check ast)
+          ctx (interp/interpret ast)
+          output @(:output ctx)]
+      (is (:success typecheck-result))
+      (is (= ["7" "11" "2"] output)))))
+
 (deftest create-generic-without-constructor-test
   (testing "Create generic class without constructor"
     (let [code "class Holder [T]
@@ -196,4 +247,3 @@ end"
       (is (= "Holder" (:class-name create-expr)))
       (is (= ["String"] (:generic-args create-expr)))
       (is (nil? (:constructor create-expr))))))
-

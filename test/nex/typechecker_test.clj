@@ -1639,6 +1639,31 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-bare-create-call-syntax-is-rejected
+  (testing "create B(...) is rejected; explicit constructor syntax is required"
+    (let [code "class Rectangle
+  create
+    make(w, h: Real) do
+      width := w
+      height := h
+    end
+  feature
+    width: Real
+    height: Real
+end
+
+class Main
+  feature
+    run() do
+      let r: Rectangle := create Rectangle(4.0, 6.0)
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"Invalid create syntax for Rectangle" %)
+                (map tc/format-type-error (:errors result)))))))
+
 (deftest test-inherited-constructor-create
   (testing "Constructor lookup in create() supports inheritance"
     (let [code "class A

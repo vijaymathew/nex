@@ -48,6 +48,13 @@
 (declare function-object-binding-type)
 (declare lower-select)
 
+(defn- invalid-bare-create-call-ex
+  [class-name]
+  (ex-info (str "Invalid create syntax for " class-name)
+           {:class-name class-name
+            :message (str "Use 'create " class-name
+                          "' or 'create " class-name ".<ctor>(...)'.")}))
+
 (defn- imported-java-qualified-name
   [env class-name]
   (some (fn [{:keys [qualified-name source]}]
@@ -2710,7 +2717,9 @@
         (if (and (map? target-expr)
                  (= :create (:type target-expr))
                  (nil? (:method expr)))
-          (lower-expression env (assoc target-expr :args (:args expr)))
+          (if (nil? (:constructor target-expr))
+            (throw (invalid-bare-create-call-ex (:class-name target-expr)))
+            (lower-expression env (assoc target-expr :args (:args expr))))
         (if (nil? target-expr)
           (cond
             (and (:this-type env)

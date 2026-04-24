@@ -1008,7 +1008,12 @@
         (cond
           (nil? method)
           (if (and (map? target) (= :create (:type target)))
-            (generate-create-expr (assoc target :args args))
+            (if (nil? (:constructor target))
+              (throw (ex-info (str "Invalid create syntax for " (:class-name target))
+                              {:class-name (:class-name target)
+                               :message (str "Use 'create " (:class-name target)
+                                             "' or 'create " (:class-name target) ".<ctor>(...)'.")}))
+              (generate-create-expr (assoc target :args args)))
             (maybe-await call-node (str target-code ".call" num-args "(" args-code ")")))
 
           (and (string? target)

@@ -1355,6 +1355,15 @@
     "Boolean"))
 
 (declare check-create)
+
+(defn- invalid-bare-create-call-error
+  [class-name]
+  (ex-info (str "Invalid create syntax for " class-name)
+           {:error (type-error
+                    (str "Invalid create syntax for " class-name
+                         ". Use 'create " class-name
+                         "' for the default constructor or 'create "
+                         class-name ".<ctor>(...)' for an explicit constructor."))}))
 (declare check-statement)
 
 (defn- maybe-update-spawn-result!
@@ -1647,7 +1656,9 @@
   "Check the type of a method call"
   [env {:keys [target method args has-parens] :as expr}]
   (if (and (map? target) (= :create (:type target)) (nil? method))
-    (check-create env (assoc target :args args))
+    (if (nil? (:constructor target))
+      (throw (invalid-bare-create-call-error (:class-name target)))
+      (check-create env (assoc target :args args)))
     (if target
       (check-target-call env expr)
       ;; Function call (built-in like print/type_of/type_is) or function object call

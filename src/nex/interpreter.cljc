@@ -3538,7 +3538,13 @@
   [ctx {:keys [target method args has-parens]}]
   (maybe-debug-pause ctx {:type :call :target target :method method :args args :has-parens has-parens})
   (if (and (map? target) (= :create (:type target)) (nil? method))
-    (eval-node ctx (assoc target :args args))
+    (if (nil? (:constructor target))
+      (throw (ex-info (str "Invalid create syntax for " (:class-name target)
+                           ". Use 'create " (:class-name target)
+                           "' or 'create " (:class-name target) ".<ctor>(...)'.")
+                      {:class-name (:class-name target)
+                       :args args}))
+      (eval-node ctx (assoc target :args args)))
     (let [arg-values (mapv #(eval-node ctx %) args)]
       (if target
       (let [target-name (when (string? target) target)
@@ -4694,7 +4700,13 @@
          (= node-type :call)
          (let [{:keys [target method args has-parens]} node]
            (if (and (map? target) (= :create (:type target)) (nil? method))
-             (eval-node-async ctx (assoc target :args args))
+             (if (nil? (:constructor target))
+               (throw (ex-info (str "Invalid create syntax for " (:class-name target)
+                                    ". Use 'create " (:class-name target)
+                                    "' or 'create " (:class-name target) ".<ctor>(...)'.")
+                               {:class-name (:class-name target)
+                                :args args}))
+               (eval-node-async ctx (assoc target :args args)))
              (.then (promise-all (map #(eval-node-async ctx %) args))
                     (fn [arg-values]
                       (if target

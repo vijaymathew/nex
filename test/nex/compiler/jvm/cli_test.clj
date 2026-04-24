@@ -77,3 +77,19 @@
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
+
+(deftest cli-run-script-type-error-diagnostics-test
+  (testing "bin/nex <file.nex> typechecks before execution"
+    (let [tmp-dir (unique-tmp-dir "nex-cli-run-script-type-error")
+          nex-file (io/file tmp-dir "bad.nex")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "let x: Integer := \"oops\"\nprint(\"should not run\")")
+        (let [{:keys [exit out]} (run-process! "." nex-bin (.getPath nex-file))]
+          (is (not= 0 exit))
+          (is (str/includes? out "Error: Type checking failed"))
+          (is (str/includes? out "Cannot assign String to variable 'x' of type Integer"))
+          (is (not (str/includes? out "should not run"))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))

@@ -435,6 +435,8 @@ nex> s.peek
 
 nex> s.pop
 30
+nex> s.pop
+20
 
 nex> s.size
 1

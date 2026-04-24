@@ -622,6 +622,29 @@ end"))
           (is (not (str/includes? count-output "Error:")))
           (is (str/includes? count-output "0")))))))
 
+(deftest repl-rejects-bare-create-call-syntax-test
+  (testing "REPL rejects create ClassName(...) and requires an explicit constructor name"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx0 "class Rectangle
+  create
+    make(w, h: Real) do
+      width := w
+      height := h
+    end
+  feature
+    width: Real
+    height: Real
+end"))
+            out (with-out-str
+                  (repl/eval-code ctx0 "let r := create Rectangle(4.0, 6.0)"))]
+        (is (str/includes? out "Invalid create syntax for Rectangle") out)
+        (is (not (str/includes? out "VerifyError")) out)))))
+
 (deftest repl-compiled-backend-inherited-field-read-test
   (testing "compiled backend reads inherited fields through the composition carrier"
     (binding [repl/*type-checking-enabled* (atom true)
