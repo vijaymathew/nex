@@ -1429,6 +1429,94 @@
                     parents))]
       (lookup-method (:parents class-def) #{}))))
 
+(defn- collect-inherited-method-contract-sources
+  [env class-def method-name arity]
+  (let [class-map (visible-class-map env)]
+    (letfn [(collect [cls seen]
+              (let [class-name (:name cls)
+                    already-seen? (and class-name (contains? seen class-name))
+                    seen' (if class-name (conj seen class-name) seen)]
+                (if already-seen?
+                  [[] seen]
+                  (let [[parent-sources seen'']
+                        (if-let [parents (:parents cls)]
+                          (reduce (fn [[acc seen-so-far] {:keys [parent]}]
+                                    (if-let [parent-def (get class-map parent)]
+                                      (let [[sources seen-next] (collect parent-def seen-so-far)]
+                                        [(into acc sources) seen-next])
+                                      [acc seen-so-far]))
+                                  [[] seen']
+                                  parents)
+                          [[] seen'])
+                        local-method (class-method-def cls method-name arity)
+                        local-source (when (and local-method
+                                                (public-member? local-method))
+                                       [{:source-class class-name
+                                         :method-def local-method}])]
+                    [(vec (concat parent-sources local-source)) seen'']))))]
+      (if-let [parents (:parents class-def)]
+        (first (reduce (fn [[acc seen] {:keys [parent]}]
+                         (if-let [parent-def (get class-map parent)]
+                           (let [[sources seen'] (collect parent-def seen)]
+                             [(into acc sources) seen'])
+                           [acc seen]))
+                       [[] #{}]
+                       parents))
+        []))))
+
+(defn- assertions->condition
+  [assertions]
+  (when (seq assertions)
+    (reduce (fn [acc {:keys [condition]}]
+              (if acc
+                {:type :binary
+                 :operator "and"
+                 :left acc
+                 :right condition}
+                condition))
+            nil
+            assertions)))
+
+(defn- combine-precondition-groups
+  [inherited-groups local-assertions]
+  (let [groups (vec (concat (keep seq inherited-groups)
+                            (when (seq local-assertions)
+                              [(vec local-assertions)])))]
+    (cond
+      (empty? groups)
+      nil
+
+      (= 1 (count groups))
+      (vec (first groups))
+
+      :else
+      [{:label "inherited_or_local_require"
+        :condition (reduce (fn [acc group]
+                             (let [group-condition (assertions->condition group)]
+                               (if acc
+                                 {:type :binary
+                                  :operator "or"
+                                  :left acc
+                                  :right group-condition}
+                                 group-condition)))
+                           nil
+                           groups)}])))
+
+(defn- effective-method-contracts
+  [env class-def method-def]
+  (let [inherited-sources (collect-inherited-method-contract-sources env
+                                                                     class-def
+                                                                     (:name method-def)
+                                                                     (count (or (:params method-def) [])))]
+    {:effective-require (combine-precondition-groups
+                         (mapv (fn [{:keys [method-def]}] (:require method-def))
+                               inherited-sources)
+                         (:require method-def))
+     :effective-ensure (vec (concat (mapcat (fn [{:keys [method-def]}]
+                                              (or (:ensure method-def) []))
+                                            inherited-sources)
+                                    (or (:ensure method-def) [])))}))
+
 (defn- method-override?
   [env class-def method-def]
   (boolean
@@ -3535,8 +3623,10 @@
                                               jvm-type)
                                (:nex-type result-local)
                                jvm-type)))
+        effective-require (or (:effective-require fn-def) (:require fn-def))
+        effective-ensure (or (:effective-ensure fn-def) (:ensure fn-def))
         [env-with-old old-snapshot-stmts old-field-locals]
-        (add-old-field-snapshots env-with-result (:ensure fn-def))
+        (add-old-field-snapshots env-with-result effective-ensure)
         env-with-old (assoc env-with-old :old-field-locals old-field-locals)
         body (vec (:body fn-def))]
     (if (or (:declaration-only? fn-def)
@@ -3587,9 +3677,9 @@
               (lower-statements env-with-old body))
             [env-after-body raw-body-stmts] body-stmts
             [env-after-rescue lowered-body] (lower-body-with-rescue env-after-body raw-body-stmts (:rescue fn-def))
-            require-stmts (mapv #(assertion-ir env-with-old :require %) (:require fn-def))
+            require-stmts (mapv #(assertion-ir env-with-old :require %) effective-require)
             ensure-env (assoc env-after-rescue :old-field-locals old-field-locals)
-            ensure-stmts (mapv #(assertion-ir ensure-env :ensure %) (:ensure fn-def))
+            ensure-stmts (mapv #(assertion-ir ensure-env :ensure %) effective-ensure)
             class-validation-stmts (if (and (:class-def fn-def)
                                             (get (:compiled-classes fn-def) current-class))
                                      [(ir/pop-node
@@ -3894,13 +3984,14 @@
                                  (lower-function (:jvm-name class-meta)
                                                  visible-functions
                                                  visible-imports
-                                                 (assoc method-def
-                                                        :class-name class-name
-                                                        :class-def class-def
-                                                        :visible-classes (:classes opts)
-                                                        :deferred? (lowered-deferred-method? class-def method-def)
-                                                        :override? (method-override? env class-def method-def)
-                                                        :compiled-classes compiled-classes)))))
+                                                 (merge method-def
+                                                        {:class-name class-name
+                                                         :class-def class-def
+                                                         :visible-classes (:classes opts)
+                                                         :deferred? (lowered-deferred-method? class-def method-def)
+                                                         :override? (method-override? env class-def method-def)
+                                                         :compiled-classes compiled-classes}
+                                                        (effective-method-contracts env class-def method-def))))))
         own-method-names (set (map (fn [m] [(:name m) (count (:params m))]) (class-methods class-def)))
         delegation-methods (->> (direct-parent-method-map env class-def)
                                 vals

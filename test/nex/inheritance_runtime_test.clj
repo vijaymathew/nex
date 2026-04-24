@@ -518,6 +518,110 @@ end"
                                             :method "g"
                                             :args []})))))))
 
+(deftest multiple-inherited-method-preconditions-use-or-test
+  (testing "Overridden feature preconditions are OR-ed across all inherited parents"
+    (let [code "class A
+feature
+  f(x: Integer): Integer
+  require
+    a_ok: x > 10
+  do
+    result := x
+  end
+end
+
+class C
+feature
+  f(x: Integer): Integer
+  require
+    c_ok: x < -10
+  do
+    result := x
+  end
+end
+
+class D inherit A, C
+feature
+  f(x: Integer): Integer
+  require
+    d_ok: x = 0
+  do
+    result := x
+  end
+end"
+          ast (p/ast code)
+          ctx (interp/make-context)]
+      (doseq [class-node (:classes ast)]
+        (interp/register-class ctx class-node))
+      (let [obj (interp/make-object "D" {})
+            env (interp/make-env (:globals ctx))
+            _ (interp/env-define env "d" obj)
+            ctx-with-d (assoc ctx :current-env env)]
+        (is (= 20 (interp/eval-node ctx-with-d {:type :call
+                                                :target "d"
+                                                :method "f"
+                                                :args [{:type :integer :value 20}]})))
+        (is (= -20 (interp/eval-node ctx-with-d {:type :call
+                                                 :target "d"
+                                                 :method "f"
+                                                 :args [{:type :integer :value -20}]})))
+        (is (= 0 (interp/eval-node ctx-with-d {:type :call
+                                               :target "d"
+                                               :method "f"
+                                               :args [{:type :integer :value 0}]})))
+        (is (thrown-with-msg?
+              Exception
+              #"Precondition violation: inherited_or_local_require"
+              (interp/eval-node ctx-with-d {:type :call
+                                            :target "d"
+                                            :method "f"
+                                            :args [{:type :integer :value 5}]})))))))
+
+(deftest multiple-inherited-method-postconditions-use-and-test
+  (testing "Overridden feature postconditions are AND-ed across all inherited parents"
+    (let [code "class A
+feature
+  g(): Integer
+  do
+    result := 5
+  ensure
+    a_ok: result = 5
+  end
+end
+
+class C
+feature
+  g(): Integer
+  do
+    result := 99
+  ensure
+    c_ok: result = 99
+  end
+end
+
+class D inherit A, C
+feature
+  g(): Integer
+  do
+    result := 5
+  end
+end"
+          ast (p/ast code)
+          ctx (interp/make-context)]
+      (doseq [class-node (:classes ast)]
+        (interp/register-class ctx class-node))
+      (let [obj (interp/make-object "D" {})
+            env (interp/make-env (:globals ctx))
+            _ (interp/env-define env "d" obj)
+            ctx-with-d (assoc ctx :current-env env)]
+        (is (thrown-with-msg?
+              Exception
+              #"Postcondition violation: c_ok"
+              (interp/eval-node ctx-with-d {:type :call
+                                            :target "d"
+                                            :method "g"
+                                            :args []})))))))
+
 (deftest inherited-constructor-create-test
   (testing "Child class can use constructor inherited from parent"
     (let [code "class A

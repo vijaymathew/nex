@@ -235,6 +235,87 @@ feature
     end
 end")
 
+(def ^:private inherited-contract-program
+  "class A
+feature
+  f(x: Integer): Integer
+    require
+      base_positive: x > 0
+    do
+      result := 5
+    ensure
+      base_result: result = 5
+    end
+end
+
+class B inherit A
+feature
+  f(x: Integer): Integer
+    require
+      local_negative: x < 0
+    do
+      result := 5
+    end
+end
+
+class C inherit A
+feature
+  f(x: Integer): Integer
+    do
+      result := 4
+    end
+end")
+
+(def ^:private multi-parent-contract-program
+  "class A
+feature
+  f(x: Integer): Integer
+    require
+      a_ok: x > 10
+    do
+      result := x
+    end
+
+  g(): Integer
+    do
+      result := 1
+    ensure
+      a_positive: result > 0
+    end
+end
+
+class C
+feature
+  f(x: Integer): Integer
+    require
+      c_ok: x < -10
+    do
+      result := x
+    end
+
+  g(): Integer
+    do
+      result := -1
+    ensure
+      c_negative: result < 0
+    end
+end
+
+class D inherit A, C
+feature
+  f(x: Integer): Integer
+    require
+      d_ok: x = 0
+    do
+      result := x
+    end
+
+  g(): Integer
+    do
+      result := 1
+    end
+end")
+
 (def ^:private old-pair-program
   "class Pair
 create
@@ -505,6 +586,67 @@ end")
       (is (= 1 (:result define-result)))
       (is (some? fail-ex))
       (is (re-find #"Postcondition violation: advanced" (str fail-ex))))))
+
+(deftest compiled-inherited-method-contracts-smoke-test
+  (testing "compiled helper composes inherited method preconditions and postconditions"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str inherited-contract-program
+                                                                     "\n\n"
+                                                                     "let b: B := create B\n"
+                                                                     "let c: C := create C\n"
+                                                                     "0")))
+          base-ok (compiled-repl/compile-and-eval! session (p/ast "b.f(1)"))
+          local-ok (compiled-repl/compile-and-eval! session (p/ast "b.f(-1)"))
+          bad-pre-ex (try
+                       (compiled-repl/compile-and-eval! session (p/ast "b.f(0)"))
+                       nil
+                       (catch Throwable t
+                         (root-cause t)))
+          bad-post-ex (try
+                        (compiled-repl/compile-and-eval! session (p/ast "c.f(1)"))
+                        nil
+                        (catch Throwable t
+                          (root-cause t)))]
+      (is (:compiled? define-result))
+      (is (= 0 (:result define-result)))
+      (is (= 5 (:result base-ok)))
+      (is (= 5 (:result local-ok)))
+      (is (some? bad-pre-ex))
+      (is (re-find #"Precondition violation: inherited_or_local_require" (str bad-pre-ex)))
+      (is (some? bad-post-ex))
+      (is (re-find #"Postcondition violation: base_result" (str bad-post-ex))))))
+
+(deftest compiled-multiple-inherited-method-contracts-smoke-test
+  (testing "compiled helper composes overridden method contracts across all inherited parents"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str multi-parent-contract-program
+                                                                     "\n\n"
+                                                                     "let d: D := create D\n"
+                                                                     "0")))
+          from-a (compiled-repl/compile-and-eval! session (p/ast "d.f(20)"))
+          from-c (compiled-repl/compile-and-eval! session (p/ast "d.f(-20)"))
+          from-local (compiled-repl/compile-and-eval! session (p/ast "d.f(0)"))
+          bad-pre-ex (try
+                       (compiled-repl/compile-and-eval! session (p/ast "d.f(5)"))
+                       nil
+                       (catch Throwable t
+                         (root-cause t)))
+          bad-post-ex (try
+                        (compiled-repl/compile-and-eval! session (p/ast "d.g()"))
+                        nil
+                        (catch Throwable t
+                          (root-cause t)))]
+      (is (:compiled? define-result))
+      (is (= 0 (:result define-result)))
+      (is (= 20 (:result from-a)))
+      (is (= -20 (:result from-c)))
+      (is (= 0 (:result from-local)))
+      (is (some? bad-pre-ex))
+      (is (re-find #"Precondition violation: inherited_or_local_require" (str bad-pre-ex)))
+      (is (some? bad-post-ex))
+      (is (re-find #"Postcondition violation: c_negative" (str bad-post-ex))))))
 
 (deftest compiled-old-field-expression-smoke-test
   (testing "compiled helper supports the full interpreter-style old model for field-based postconditions"

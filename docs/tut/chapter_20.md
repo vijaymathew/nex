@@ -156,18 +156,21 @@ Step 2: ask whether the contract is strong enough.
 
 It is not. A routine returning `"xxxxx"` for any input string of length six would satisfy `one_shorter`.
 
-Step 3: strengthen the contract.
+Step 3: strengthen the contract and then write the body that satisfies it.
 
 ```
 function without_last(s: String): String
   require
     not_empty: s.length > 0
+  do
+    result := s.substring(0, s.length - 1)
   ensure
     one_shorter: result.length = s.length - 1
+    keeps_prefix: result = s.substring(0, s.length - 1)
 end
 ```
 
-Nex does not yet give us a rich string slice notation to state the exact prefix relation elegantly, so we may decide that the current postcondition is useful but incomplete. That is still a design success. It tells us exactly where the specification is strong and where tests must carry more of the burden.
+Now the routine is implementable, and the stronger postcondition rules out the fake implementation that merely returns any string of the right length. The body is also almost forced by the contract: if the result must be exactly the original string without its last character, `substring(0, s.length - 1)` is the natural implementation.
 
 That is a realistic engineering judgment.
 
@@ -290,7 +293,7 @@ For an overridden feature, the effective postcondition is:
 
 `<base-feature-ensure> and <local-feature-ensure>`
 
-Either side may be absent. The practical meaning is that a child class may *strengthen* the postcondition, but it may not drop promises that the parent already made.
+The practical meaning is that a child class may *strengthen* the postcondition, but it may not drop promises that the parent already made. If one side is absent, the other side remains in force. In particular, omitting a local `ensure` does not remove the inherited postcondition.
 
 If a parent routine promises that `area >= 0.0`, then every child implementation must still guarantee `area >= 0.0`. A child may add a stronger fact, but not a weaker one.
 

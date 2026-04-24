@@ -1177,6 +1177,7 @@
 (declare get-parent-classes)
 (declare combine-assertions)
 (declare combine-preconditions)
+(declare combine-precondition-groups)
 (declare get-type-name)
 (declare eval-body-async)
 
@@ -1441,6 +1442,36 @@
                     (= (count (or (:params %) [])) arg-count)))
        first))
 
+(defn- collect-inherited-method-contract-sources
+  [ctx class-def method-name arg-count caller-class-name]
+  (letfn [(collect [cls seen]
+            (let [class-name (:name cls)
+                  already-seen? (and class-name (contains? seen class-name))
+                  seen' (if class-name (conj seen class-name) seen)]
+              (if already-seen?
+                [[] seen]
+                (let [[parent-sources seen'']
+                      (if-let [parents (get-parent-classes ctx cls)]
+                        (reduce (fn [[acc seen-so-far] {parent-class-def :class-def}]
+                                  (let [[sources seen-next] (collect parent-class-def seen-so-far)]
+                                    [(into acc sources) seen-next]))
+                                [[] seen']
+                                parents)
+                        [[] seen'])
+                      local-method (lookup-method-in-class cls method-name arg-count)
+                      local-source (when (and local-method
+                                              (member-visible? local-method class-name caller-class-name))
+                                     [{:method local-method
+                                       :source-class cls}])]
+                  [(vec (concat parent-sources local-source)) seen'']))))]
+    (if-let [parents (get-parent-classes ctx class-def)]
+      (first (reduce (fn [[acc seen] {parent-class-def :class-def}]
+                       (let [[sources seen'] (collect parent-class-def seen)]
+                         [(into acc sources) seen']))
+                     [[] #{}]
+                     parents))
+      [])))
+
 (defn lookup-method-with-inheritance
   "Look up a method in a class, searching parent classes if needed."
   ([ctx class-def method-name arg-count]
@@ -1450,18 +1481,19 @@
          accessible? (and method
                           (member-visible? method (:name class-def) caller-class-name))]
      (if accessible?
-       (let [base-lookup (when-let [parents (get-parent-classes ctx class-def)]
-                           (some (fn [parent-info]
-                                   (lookup-method-with-inheritance ctx
-                                                                   (:class-def parent-info)
-                                                                   method-name
-                                                                   arg-count
-                                                                   caller-class-name))
-                                 parents))
-             effective-require (combine-preconditions (:effective-require base-lookup)
-                                                      (:require method))
-             effective-ensure (combine-assertions (:effective-ensure base-lookup)
-                                                  (:ensure method))]
+       (let [inherited-sources (collect-inherited-method-contract-sources ctx
+                                                                          class-def
+                                                                          method-name
+                                                                          arg-count
+                                                                          caller-class-name)
+             effective-require (combine-precondition-groups
+                                (mapv (fn [{:keys [method]}] (:require method))
+                                      inherited-sources)
+                                (:require method))
+             effective-ensure (vec (concat (mapcat (fn [{:keys [method]}]
+                                                     (or (:ensure method) []))
+                                                   inherited-sources)
+                                           (or (:ensure method) [])))]
          {:method method
           :source-class class-def
           :effective-require effective-require
@@ -1593,28 +1625,38 @@
             nil
             assertions)))
 
+(defn combine-precondition-groups
+  "Combine inherited and local preconditions by OR-ing assertion groups, where
+   each group's assertions are AND-ed together."
+  [inherited-groups local-assertions]
+  (let [groups (vec (concat (keep seq inherited-groups)
+                            (when (seq local-assertions)
+                              [(vec local-assertions)])))]
+    (cond
+      (empty? groups)
+      nil
+
+      (= 1 (count groups))
+      (vec (first groups))
+
+      :else
+      [{:label "inherited_or_local_require"
+        :condition (reduce (fn [acc group]
+                             (let [group-condition (assertions->condition group)]
+                               (if acc
+                                 {:type :binary
+                                  :operator "or"
+                                  :left acc
+                                  :right group-condition}
+                                 group-condition)))
+                           nil
+                           groups)}])))
+
 (defn combine-preconditions
   "Combine parent and child preconditions as:
    (parent-require) OR (child-require)."
   [parent-assertions child-assertions]
-  (let [parent-assertions (seq parent-assertions)
-        child-assertions (seq child-assertions)]
-    (cond
-      (and parent-assertions child-assertions)
-      [{:label "inherited_or_local_require"
-        :condition {:type :binary
-                    :operator "or"
-                    :left (assertions->condition parent-assertions)
-                    :right (assertions->condition child-assertions)}}]
-
-      parent-assertions
-      (vec parent-assertions)
-
-      child-assertions
-      (vec child-assertions)
-
-      :else
-      nil)))
+  (combine-precondition-groups [parent-assertions] child-assertions))
 
 (defn nex-format-value [value]
   (value/nex-format-value nex-object? nex-map-str nex-array-str nex-set-str value))
