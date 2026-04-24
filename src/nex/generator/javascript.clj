@@ -1666,28 +1666,38 @@
             nil
             assertions)))
 
+(defn combine-precondition-groups
+  "Combine inherited and local preconditions by OR-ing assertion groups, where
+   each group's assertions are AND-ed together."
+  [inherited-groups local-assertions]
+  (let [groups (vec (concat (keep seq inherited-groups)
+                            (when (seq local-assertions)
+                              [(vec local-assertions)])))]
+    (cond
+      (empty? groups)
+      nil
+
+      (= 1 (count groups))
+      (vec (first groups))
+
+      :else
+      [{:label "inherited_or_local_require"
+        :condition (reduce (fn [acc group]
+                             (let [group-condition (assertions->condition group)]
+                               (if acc
+                                 {:type :binary
+                                  :operator "or"
+                                  :left acc
+                                  :right group-condition}
+                                 group-condition)))
+                           nil
+                           groups)}])))
+
 (defn combine-preconditions
   "Combine inherited and local preconditions as:
    (base-require) OR (local-require)."
   [base-assertions local-assertions]
-  (let [base-assertions (seq base-assertions)
-        local-assertions (seq local-assertions)]
-    (cond
-      (and base-assertions local-assertions)
-      [{:label "inherited_or_local_require"
-        :condition {:type :binary
-                    :operator "or"
-                    :left (assertions->condition base-assertions)
-                    :right (assertions->condition local-assertions)}}]
-
-      base-assertions
-      (vec base-assertions)
-
-      local-assertions
-      (vec local-assertions)
-
-      :else
-      nil)))
+  (combine-precondition-groups [base-assertions] local-assertions))
 
 ;;
 ;; Visibility Conversion
@@ -2062,6 +2072,41 @@
                          (indent level "}")])))
           selected))))
 
+(defn collect-inherited-method-contract-sources-js
+  [class-def method-name classes-by-name]
+  (letfn [(collect [cls seen]
+            (let [class-name (:name cls)
+                  already-seen? (and class-name (contains? seen class-name))
+                  seen' (if class-name (conj seen class-name) seen)]
+              (if already-seen?
+                [[] seen]
+                (let [[parent-sources seen'']
+                      (if-let [parents (:parents cls)]
+                        (reduce (fn [[acc seen-so-far] {:keys [parent]}]
+                                  (if-let [parent-def (get classes-by-name parent)]
+                                    (let [[sources seen-next] (collect parent-def seen-so-far)]
+                                      [(into acc sources) seen-next])
+                                    [acc seen-so-far]))
+                                [[] seen']
+                                parents)
+                        [[] seen'])
+                      {local-methods :methods} (extract-members (:body cls))
+                      local-method (first (filter #(= (:name %) method-name) local-methods))
+                      local-source (when (and local-method
+                                              (public-member? local-method))
+                                     [{:method local-method
+                                       :source-class cls}])]
+                  [(vec (concat parent-sources local-source)) seen'']))))]
+    (if-let [parents (:parents class-def)]
+      (first (reduce (fn [[acc seen] {:keys [parent]}]
+                       (if-let [parent-def (get classes-by-name parent)]
+                         (let [[sources seen'] (collect parent-def seen)]
+                           [(into acc sources) seen'])
+                         [acc seen]))
+                     [[] #{}]
+                     parents))
+      [])))
+
 (defn lookup-method-effective-contracts
   "Lookup method in class hierarchy and compute effective contracts:
    require = base OR local
@@ -2070,14 +2115,16 @@
   (let [{:keys [methods]} (extract-members (:body class-def))
         local-method (first (filter #(= (:name %) method-name) methods))]
     (if local-method
-      (let [base-lookup (when-let [parents (:parents class-def)]
-                          (some (fn [{:keys [parent]}]
-                                  (when-let [parent-def (get classes-by-name parent)]
-                                    (lookup-method-effective-contracts parent-def method-name classes-by-name)))
-                                parents))
-            effective-require (combine-preconditions (:effective-require base-lookup)
-                                                     (:require local-method))
-            effective-ensure (vec (concat (or (:effective-ensure base-lookup) [])
+      (let [inherited-sources (collect-inherited-method-contract-sources-js class-def
+                                                                            method-name
+                                                                            classes-by-name)
+            effective-require (combine-precondition-groups
+                               (mapv (fn [{:keys [method]}] (:require method))
+                                     inherited-sources)
+                               (:require local-method))
+            effective-ensure (vec (concat (mapcat (fn [{:keys [method]}]
+                                                    (or (:ensure method) []))
+                                                  inherited-sources)
                                           (or (:ensure local-method) [])))]
         {:method local-method
          :effective-require effective-require

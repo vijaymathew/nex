@@ -224,6 +224,47 @@ end"
       (is (str/includes? js-code "Postcondition violation: base_non_negative"))
       (is (str/includes? js-code "Postcondition violation: local_lt_ten")))))
 
+(deftest multiple-inherited-method-contract-composition-test
+  (testing "Overridden feature contracts compose across all inherited parents"
+    (let [nex-code "class A
+  feature
+    f(x: Integer): Integer
+      require
+        a_ok: x > 10
+      do
+        result := x
+      ensure
+        a_positive: result > 0
+      end
+end
+
+class C
+  feature
+    f(x: Integer): Integer
+      require
+        c_ok: x < -10
+      do
+        result := x
+      ensure
+        c_negative: result < 0
+      end
+end
+
+class D inherit A, C
+  feature
+    f(x: Integer): Integer
+      require
+        d_ok: x = 0
+      do
+        result := x
+      end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "Precondition violation: inherited_or_local_require"))
+      (is (>= (count (re-seq #"\|\|" js-code)) 2))
+      (is (str/includes? js-code "Postcondition violation: a_positive"))
+      (is (str/includes? js-code "Postcondition violation: c_negative")))))
+
 (deftest class-constants-test
   (testing "Class constants generate static properties and inherited public copies"
     (let [nex-code "class Frame
