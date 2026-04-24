@@ -4,19 +4,39 @@
 -- Simple generic class
 class Box [T]
   create
-    make(initial: T) do
-      value := initial
+    make(v: T) do
+      value := v
     end
 
   feature
     value: T
 
-    get() do
-      print(value)
+    get(): T do
+      result := value
     end
 
-    set(new_value: T) do
-      value := new_value
+    set(v: T) do
+      value := v
+    end
+end
+
+class Logged_Box [T] inherit Box[T]
+  create
+    make(v: T) do
+      Box.make(v)
+      change_count := 0
+    end
+
+  feature
+    change_count: Integer
+
+    set(v: T) do
+      Box.set(v)
+      change_count := change_count + 1
+    end
+
+    changes(): Integer do
+      result := change_count
     end
 end
 
