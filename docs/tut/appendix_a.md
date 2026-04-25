@@ -409,11 +409,12 @@ intern math/Calculator as Calc
 
 Resolution order is:
 
-1. the loaded file's directory
-2. the current working directory
-3. `~/.nex/deps`
+1. the loaded file's directory, when available
+2. the user working directory (`NEX_USER_DIR` / `nex.user.dir`) and the current process directory
+3. project-local `lib/<path>/...` locations, including matching `src/` variants
+4. `~/.nex/deps`, including matching `src/` variants
 
-Path-qualified classes also support `lib/<path>/Class.nex`, lowercase filenames such as `tcp_socket.nex`, and the matching `src/` variants.
+The loader also accepts lowercase filename fallbacks such as `tcp_socket.nex` for `Tcp_Socket`.
 
 Import host symbols:
 
@@ -422,13 +423,15 @@ import java.util.Scanner
 import Math from './math.js'
 ```
 
+`import java.util.Scanner` is the JVM-host form. `import Math from './math.js'` is the JavaScript-generator form.
+
 
 ## Notes
 
 - `result` is the implicit return variable in functions and query methods.
-- `old` is available in postconditions to refer to entry-state values, but it is
-  not a deep immutable snapshot. Be careful with in-place mutation of values
-  such as arrays.
+- `old` is currently supported for entry-state instance fields in method and
+  constructor postconditions. It is not a deep immutable snapshot, so be
+  careful with in-place mutation of values such as arrays.
 - `this` refers to the current object.
 - `nil` is used for detachable or absent values.
 - Arrays use `length`; maps and sets use `size`.

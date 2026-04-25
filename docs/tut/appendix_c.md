@@ -46,6 +46,7 @@ Useful operations:
 
 - `print(msg)`
 - `print_line(msg)`
+- `flush()`
 - `read_line(prompt?)`
 - `error(msg)`
 - `read_integer()`
@@ -359,6 +360,5 @@ That is why Chapter 24 matters. The standard library is enough to be productive,
 | Time and scheduling | `time/Date_Time`, `time/Duration` |
 | Text processing | `text/Regex` |
 | Networking | `net/Http_Client`, `net/Http_Server` |
-| Text processing | `text/Regex` |
 
 For exact method tables, see Appendix B and the files under `docs/ref/`.
