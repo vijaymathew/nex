@@ -912,6 +912,20 @@
               (sort (keys (:fields env)))))
     [env [] (:old-field-locals env)]))
 
+(defn- init-new-locals-stmts
+  [outer-env inner-env]
+  (let [outer-locals (:locals outer-env)
+        inner-locals (:locals inner-env)]
+    (->> inner-locals
+         vals
+         (remove #(contains? outer-locals (:name %)))
+         (sort-by :slot)
+         (mapv (fn [{:keys [slot nex-type jvm-type]}]
+                 (ir/set-local-node slot
+                                    (default-const-node nex-type jvm-type)
+                                    nex-type
+                                    jvm-type))))))
+
 (defn- old-env
   [env]
   (if (seq (:old-field-locals env))
@@ -932,25 +946,26 @@
                     {:env-keys (keys env)}))))
 
 (defn- lower-body-with-rescue
-  [env body rescue]
-  (let [[body-env lowered-body]
-        (if (every? ir/ir-node? body)
-          [env (vec body)]
-          (lower-statements env body))]
+  [pre-body-env body-env body rescue]
+  (let [lowered-body (if (every? ir/ir-node? body)
+                       (vec body)
+                       (second (lower-statements pre-body-env body)))]
     (if rescue
-      (let [[env1 throwable-slot] (alloc-temp-slot body-env)
+      (let [local-init-stmts (init-new-locals-stmts pre-body-env body-env)
+            [env1 throwable-slot] (alloc-temp-slot body-env)
             [env2 rescue-throwable-slot] (alloc-temp-slot env1)
-          env-after-body body-env
-          rescue-env0 (assoc (scoped-child-env env2) :retry-allowed? true)
-          [rescue-env1 exception-local] (env-add-local rescue-env0 "exception" "Any")
-          [rescue-env2 lowered-rescue] (lower-statements rescue-env1 rescue)
-          final-env (scoped-env env-after-body rescue-env2)]
+            env-after-body body-env
+            rescue-env0 (assoc (scoped-child-env env2) :retry-allowed? true)
+            [rescue-env1 exception-local] (env-add-local rescue-env0 "exception" "Any")
+            [rescue-env2 lowered-rescue] (lower-statements rescue-env1 rescue)
+            final-env (scoped-env env-after-body rescue-env2)]
         [final-env
-         [(ir/try-node lowered-body
-                       lowered-rescue
-                       throwable-slot
-                       rescue-throwable-slot
-                       (:slot exception-local))]])
+         (into local-init-stmts
+               [(ir/try-node lowered-body
+                             lowered-rescue
+                             throwable-slot
+                             rescue-throwable-slot
+                             (:slot exception-local))])])
       [body-env lowered-body])))
 
 (defn- lower-scoped-statements
@@ -3345,17 +3360,25 @@
             (let [[env1 throwable-slot] (alloc-temp-slot env)
                   [env2 rescue-throwable-slot] (alloc-temp-slot env1)
                   [body-env lowered-body] (lower-statements (scoped-child-env env2) (:body stmt))
+                  local-init-stmts (init-new-locals-stmts env2 body-env)
                   env-after-body (scoped-env env2 body-env)
                   rescue-env0 (assoc (scoped-child-env env-after-body) :retry-allowed? true)
                   [rescue-env1 exception-local] (env-add-local rescue-env0 "exception" "Any")
                   [rescue-env2 lowered-rescue] (lower-statements rescue-env1 rescue)
                   final-env (scoped-env env-after-body rescue-env2)]
               [final-env
-               (ir/try-node lowered-body
-                            lowered-rescue
-                            throwable-slot
-                            rescue-throwable-slot
-                            (:slot exception-local))])
+               (if (seq local-init-stmts)
+                 (ir/block-node (conj local-init-stmts
+                                      (ir/try-node lowered-body
+                                                   lowered-rescue
+                                                   throwable-slot
+                                                   rescue-throwable-slot
+                                                   (:slot exception-local))))
+                 (ir/try-node lowered-body
+                              lowered-rescue
+                              throwable-slot
+                              rescue-throwable-slot
+                              (:slot exception-local)))])
             (let [[env' lowered] (lower-scoped-statements env (:body stmt))]
               [env' (ir/block-node lowered)]))
 
@@ -3676,7 +3699,7 @@
                     (lower-statements env-with-old body))))
               (lower-statements env-with-old body))
             [env-after-body raw-body-stmts] body-stmts
-            [env-after-rescue lowered-body] (lower-body-with-rescue env-after-body raw-body-stmts (:rescue fn-def))
+            [env-after-rescue lowered-body] (lower-body-with-rescue env-with-old env-after-body raw-body-stmts (:rescue fn-def))
             require-stmts (mapv #(assertion-ir env-with-old :require %) effective-require)
             ensure-env (assoc env-after-rescue :old-field-locals old-field-locals)
             ensure-stmts (mapv #(assertion-ir ensure-env :ensure %) effective-ensure)
@@ -3806,7 +3829,7 @@
                                           class-name
                                           (ir/object-jvm-type "java/lang/Object"))]))}))
       (let [[env-after-body raw-body] (lower-statements env-with-old (vec (:body ctor-def)))
-            [env-after-rescue lowered-body] (lower-body-with-rescue env-after-body raw-body (:rescue ctor-def))]
+            [env-after-rescue lowered-body] (lower-body-with-rescue env-with-old env-after-body raw-body (:rescue ctor-def))]
         (ir/fn-node {:name (:name ctor-def)
                      :owner unit-name
                      :emitted-name (lowered-constructor-method-name ctor-def)

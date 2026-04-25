@@ -452,6 +452,30 @@ end")
       (is (integer? (:exception-slot try-ir)))
       (is (= {} (:var-types env'))))))
 
+(deftest lower-function-with-rescue-hoists-rescue-visible-local-inits-test
+  (testing "compiled lowering initializes rescue-visible locals before entering the try body"
+    (let [program (p/ast "function test_empty_stack_pop()
+  do
+    print(\"setup\")
+    let reached_unexpected_success: Boolean := false
+    raise \"empty stack\"
+    reached_unexpected_success := true
+  rescue
+    if reached_unexpected_success then
+      raise \"unexpected\"
+    else
+      print(\"ok\")
+    end
+  end")
+          fn-def (first (:functions program))
+          fn-ir (lower/lower-function "nex/repl/Expr_0001" [] [] fn-def)]
+      (is (= :set-local (-> fn-ir :body first :op)))
+      (is (= :try (-> fn-ir :body second :op)))
+      (is (= :boolean (-> fn-ir :body first :jvm-type)))
+      (is (= 3 (-> fn-ir :body first :slot)))
+      (is (= :local (-> fn-ir :body second :rescue first :test :op)))
+      (is (= 3 (-> fn-ir :body second :rescue first :test :slot))))))
+
 (deftest lower-case-statement-test
   (testing "compiled lowering lowers case statements to block plus nested if-stmt ir"
     (let [program (p/ast "case x of
