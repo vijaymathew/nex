@@ -69,6 +69,17 @@ nex> function assert_equal_integer(actual, expected: Integer, label: String)
      end
 ```
 
+You can add a boolean helper in the same style:
+
+```
+nex> function assert_true(condition: Boolean, label: String)
+     do
+       if not condition then
+         raise "test failed: " + label
+       end
+     end
+```
+
 Then:
 
 ```
@@ -91,6 +102,30 @@ Contracts and tests reinforce each other.
 Tests should include valid cases that satisfy the precondition and confirm the promised behavior.
 
 They should also include deliberate invalid calls when appropriate, to confirm that contract violations occur where expected.
+
+One direct way to test an expected failure is to use `rescue`:
+
+```
+nex> function test_empty_stack_pop()
+     do
+       let s := create Stack[Integer]
+       let reached_unexpected_success: Boolean := false
+       s.pop()
+       reached_unexpected_success := true
+       raise "test failed: empty pop should fail"
+     rescue
+       if reached_unexpected_success then
+         raise "test failed: empty pop should fail"
+       else
+         print("empty-pop test passed")
+       end
+     end
+```
+
+This pattern distinguishes the two cases:
+
+- if `pop()` raises immediately, the test passes
+- if execution reaches the explicit `raise`, then the expected contract failure did not happen
 
 For a stack:
 
@@ -183,8 +218,10 @@ nex> function word_frequencies(text: String): Map[String, Integer]
        result := {}
        let words := text.to_lower.split(" ")
        across words as w do
-         let count := result.try_get(w, 0)
-         result.set(w, count + 1)
+         if w /= "" then
+           let count := result.try_get(w, 0)
+           result.set(w, count + 1)
+         end
        end
      end
 ```
@@ -194,25 +231,27 @@ A useful test routine:
 ```
 nex> function test_word_frequencies()
      do
-       let freq := word_frequencies("to be or not to be")
-       if freq.get("to") /= 2 then
-         raise "test failed: count of to"
-       end
-       if freq.get("be") /= 2 then
-         raise "test failed: count of be"
-       end
-       if freq.get("or") /= 1 then
-         raise "test failed: count of or"
-       end
+       let freq := word_frequencies("To be or not to be")
+       assert_equal_integer(freq.get("to"), 2, "count of to")
+       assert_equal_integer(freq.get("be"), 2, "count of be")
+       assert_equal_integer(freq.get("or"), 1, "count of or")
+
+       let spaced := word_frequencies("to  be")
+       assert_equal_integer(spaced.get("to"), 1, "count of to with repeated spaces")
+       assert_equal_integer(spaced.get("be"), 1, "count of be with repeated spaces")
+       assert_equal_integer(spaced.try_get("", 0), 0, "no empty token from repeated spaces")
+
        print("word frequency tests passed")
      end
 ```
 
-This test checks several representative counts from one input. Better still would be to add:
+The `if w /= ""` guard matters. A naive `split(" ")` creates empty pieces for repeated spaces, so a good test should make that behavior explicit instead of leaving it accidental.
 
-- an all-unique case
-- a case-insensitive case
-- perhaps a case with repeated spaces, depending on the intended splitting behavior
+This test now checks several representative behaviors:
+
+- ordinary repeated words
+- case-insensitive counting
+- repeated spaces without creating an empty-string key
 
 Tests grow naturally by exploring the routine's meaning.
 

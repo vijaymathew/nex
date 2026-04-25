@@ -99,25 +99,121 @@ This is an important design point. Contracts remain in the source as specificati
 Use this option deliberately. Development builds should usually keep contracts enabled.
 
 
+## `with "java"` Blocks
+
+On the JVM, Nex also supports:
+
+```text
+with "java" do
+  ...
+end
+```
+
+This marks a block whose body may use Java interop directly. In practice, that means method calls and class names inside the block may resolve against imported Java classes and host objects rather than only against ordinary Nex classes.
+
+For example:
+
+```text
+import java.lang.System
+
+with "java" do
+  print(System.getProperty("java.version"))
+end
+```
+
+This form is JVM-specific. It is useful when a small part of the program genuinely needs host behavior, but the surrounding design should remain ordinary Nex.
+
+At present, this is primarily a compiled-JVM feature. It works well in JVM REPL sessions and on the compiled JVM path, but it is not supported by the interpreter-based file runner used by:
+
+```text
+nex some_file.nex
+```
+
+So if a file relies on `with "java"`, do not assume it will run correctly through the interpreter path. Use the compiled JVM route instead.
+
+In REPL-oriented wrapper classes, `with "java"` is often the most practical way to isolate the host boundary. A common pattern is:
+
+- keep Java calls inside `with "java"` blocks
+- expose ordinary Nex routines outside those blocks
+- if needed, store a Java-backed object in a field typed as `Any`, and only manipulate it inside `with "java"`
+
+
 ## A Small Interop-Oriented Design
 
-Suppose a program needs random numbers from the host platform. A poor design would let random generation spread everywhere in the core logic. A better design wraps it:
+In JVM REPL sessions, a practical style is to import a Java class and wrap it in a small Nex class immediately. For example, suppose we want efficient string assembly. We could expose `StringBuilder` everywhere, but a better design keeps that host type inside one Nex wrapper:
 
-```
-import Math from './math.js'
+```text
+import java.lang.StringBuilder
 
-class Die
+class Line_Buffer
+create
+  make() do
+    with "java" do
+      this.builder := create StringBuilder
+    end
+  end
+feature
+  builder: Any
+
+  append_line(s: String) do
+    with "java" do
+      builder.append(s)
+      builder.append("\n")
+    end
+  end
+
+  text(): String do
+    with "java" do
+      result := builder.toString()
+    end
+  end
+end
+
+class Greeting_Report
   feature
-    roll(): Integer do
-      -- host-backed random value would be wrapped here
-      result := 1
+    render(name: String): String do
+      let buf := create Line_Buffer.make
+      buf.append_line("Hello, " + name)
+      buf.append_line("Welcome to Nex on the JVM.")
+      result := buf.text()
     end
 end
 ```
 
-The example is schematic, but the design point is real: the interop boundary is inside `Die`, not scattered through the rest of the game or simulation.
+In a REPL session, this is convenient:
 
-Then other classes depend on `roll(): Integer`, not on the host library directly.
+```text
+nex> import java.lang.StringBuilder
+nex> class Line_Buffer
+       create
+         make() do
+           with "java" do
+             this.builder := create StringBuilder
+           end
+         end
+       feature
+         builder: Any
+         append_line(s: String) do
+           with "java" do
+             builder.append(s)
+             builder.append("\n")
+           end
+         end
+         text(): String do
+           with "java" do
+             result := builder.toString()
+           end
+         end
+     end
+nex> let b := create Line_Buffer.make
+nex> b.append_line("alpha")
+nex> b.append_line("beta")
+nex> print(b.text())
+alpha
+beta
+```
+
+The design point is the important part: `StringBuilder` is confined to `Line_Buffer`. The rest of the program depends on ordinary Nex routines such as `append_line` and `text`, not on Java library details.
 
 
 ## Portability and Contracts
@@ -135,28 +231,64 @@ This makes the platform boundary explicit and safer.
 
 ## A Worked Example: Separating Core Logic from Host Access
 
-Imagine a word-counting application that eventually reads text from a file. Its core logic should not know about files at all:
+Here is a complete JVM-oriented example. Suppose we want to print a short report about the current Java runtime. Reading system properties is host access. Formatting the report is ordinary program logic. We should separate those two concerns:
 
+```text
+import java.lang.System
+
+function line(label, value: String): String
+do
+  result := label + ": " + value
+end
+
+function render_runtime_report(version, vendor, home: String): String
+do
+  result := line("Java version", version) + "\n"
+  result := result + line("Java vendor", vendor) + "\n"
+  result := result + line("Java home", home)
+end
+
+class Java_Runtime_Info
+  feature
+    property(name: String): String
+      require
+        valid_name: name /= ""
+      do
+        let value: ?String := nil
+        with "java" do
+          value := System.getProperty(name)
+        end
+
+        if value = nil then
+          result := "<missing>"
+        else
+          result := value
+        end
+      end
+end
+
+class Runtime_Report_App
+  feature
+    run(): String do
+      let info := create Java_Runtime_Info
+      let version := info.property("java.version")
+      let vendor := info.property("java.vendor")
+      let home := info.property("java.home")
+      result := render_runtime_report(version, vendor, home)
+    end
+end
+
+let app := create Runtime_Report_App
+print(app.run())
 ```
-nex> function word_frequencies(text: String): Map[String, Integer]
-     do
-       result := {}
-       let words := text.to_lower.split(" ")
-       across words as w do
-         let count := result.try_get(w, 0)
-         result.set(w, count + 1)
-       end
-     end
-```
 
-That routine is pure Nex logic and can run anywhere.
+The design is deliberate:
 
-A separate wrapper could handle the host interaction of obtaining the text. The wrapper may use `import` or another platform mechanism, but the core counting routine remains portable and easy to test.
+- `Java_Runtime_Info.property` is the host boundary
+- `render_runtime_report` and `line` are pure Nex logic
+- `Runtime_Report_App` assembles the two
 
-This is usually the right architectural split:
-
-- platform code at the edge
-- language-idiomatic logic in the center
+This makes the program easier to test. The formatting routines can be exercised with ordinary strings, while only `Java_Runtime_Info` depends on JVM interop.
 
 
 ## Summary

@@ -105,6 +105,8 @@ print(t.is_cancelled)
 
 Cancellation is a request, not magic. It tells the runtime that the task's result is no longer wanted. The exact behavior depends on the target runtime, which we will discuss later in this chapter.
 
+If a cancelled task is later awaited, `await` raises a task-cancelled failure rather than returning a normal result.
+
 
 ## Waiting with a Timeout
 
@@ -292,6 +294,8 @@ end
 
 A `select` statement probes its clauses in order and chooses one that is ready.
 
+If several clauses are ready at the same time, the earlier clause wins. Clause order therefore expresses priority, not just layout.
+
 For channels:
 
 - `when ch.receive as x then ...` fires when a value can be received immediately
@@ -360,6 +364,8 @@ Even in this tiny example, the roles are clear:
 
 That is the kind of clarity we want in larger programs too.
 
+For a longer-running pipeline, `close` is usually part of the design as well. One stage eventually needs to signal that no more values will be sent, so downstream stages know when to stop receiving.
+
 
 ## Designing with Concurrency in Mind
 
@@ -404,6 +410,8 @@ In generated JavaScript:
 
 This is a useful example of a general Nex idea: keep the source model stable while allowing the runtime implementation to fit the host platform.
 
+What stays stable is the source-level meaning of the operations. Timing, scheduling, fairness, and timeout precision remain runtime concerns rather than guarantees of the language surface.
+
 For a fuller discussion of the semantics and implementation details, see the repository's concurrency guide in `docs/md/CONCURRENCY.md`.
 
 
@@ -430,4 +438,6 @@ For a fuller discussion of the semantics and implementation details, see the rep
 
 **4.** Write a small example that uses `await_all` to collect three independent computations.
 
-**5.\*** Design a tiny two-stage pipeline, such as "read values, transform them, collect results," using two channels and at least one worker task. Explain where blocking may happen and why.
+**5.** Extend the pipeline example so that it processes several values rather than one. Decide where `close` should happen and how the receiving side knows when to stop.
+
+**6.\*** Design a tiny two-stage pipeline, such as "read values, transform them, collect results," using two channels and at least one worker task. Explain where blocking may happen and why.

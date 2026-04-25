@@ -8,7 +8,7 @@ This appendix summarizes the interpreter-level built-ins documented in `docs/ref
 | Name | Signature | Purpose |
 |---|---|---|
 | `print` | `print(...args)` | Write values to interpreter output. |
-| `println` | `println(...args)` | Line-oriented output; currently same behavior as `print` in the interpreter. |
+| `println` | `println(...args)` | Line-oriented output. |
 | `type_of` | `type_of(value): String` | Return runtime type name. |
 | `type_is` | `type_is(type_name: String, value): Boolean` | Check runtime type compatibility. |
 
@@ -243,6 +243,7 @@ Main methods:
 - `read_line`
 - `error`
 - `new_line`
+- `flush`
 - `read_integer`
 - `read_real`
 

@@ -1241,6 +1241,34 @@ end"))
         (is (str/includes? call-output "\"theme=light%ntimeout=30\""))
         (is (not (str/includes? call-output "Error:")))))))
 
+(deftest repl-compiled-backend-rescue-can-read-locals-after-earlier-throwing-ops-test
+  (testing "compiled backend initializes rescue-visible locals before potentially throwing body statements"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            out (with-out-str
+                  (repl/eval-code ctx0 "function test_empty_stack_pop()
+  do
+    print(\"setup\")
+    let reached_unexpected_success: Boolean := false
+    raise \"empty stack\"
+    reached_unexpected_success := true
+    raise \"test failed: empty pop should fail\"
+  rescue
+    if reached_unexpected_success then
+      raise \"test failed: empty pop should fail\"
+    else
+      print(\"empty-pop test passed\")
+    end
+  end")
+                  (repl/eval-code ctx0 "test_empty_stack_pop()"))]
+        (is (not (str/includes? out "VerifyError")) out)
+        (is (not (str/includes? out "Bad local variable type")) out)
+        (is (str/includes? out "empty-pop test passed") out)
+        (is (not (str/includes? out "Error:")) out)))))
+
 (deftest repl-compiled-backend-string-split-test
   (testing "compiled backend keeps String.split on the compiled path with the compiler's Array representation"
     (binding [repl/*type-checking-enabled* (atom true)

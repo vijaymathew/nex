@@ -183,6 +183,8 @@ false
 
 The program already works. But we can still improve the interface.
 
+One detail is worth noting: with the current definition, `all_done()` returns `true` for an empty list, because `completed_count()` and `tasks.length` are both `0`. That is a reasonable design choice, but it should be understood explicitly.
+
 
 ## Raising the Level of the Interface
 
@@ -346,10 +348,18 @@ The tests operate through the public interface, which is exactly how clients wil
 
 **1.** Extend `Todo_Item` with a `description: ?String` field and a routine for setting it. Decide whether an invariant is needed.
 
-**2.** Add a routine `remaining_count(): Integer` to `Task_List` and write a postcondition for it.
+**2.** Should `Todo_Item.make(t: String)` also have a precondition `t.length > 0`, or is the invariant alone enough? Explain the difference between a constructor precondition and a class invariant.
 
-**3.** Prevent a task from being marked done twice by strengthening the interface. Decide whether this should be a precondition or simply an idempotent operation.
+**3.** Add a routine `remaining_count(): Integer` to `Task_List` and write a postcondition for it.
 
-**4.** Split the chapter's program into two or three files using `intern`.
+**4.** What should `all_done()` return on an empty `Task_List`? Keep the current definition or change it, and justify the choice.
 
-**5.\*** Replace the task manager with a different complete miniature program of your own, such as a library checkout tracker or a grade book, and follow the same process from problem statement through tests.
+**5.** Add tests for contract failures: one for `add_task("")` and one for `mark_task_done` with an invalid index.
+
+**6.** Prevent a task from being marked done twice by strengthening the interface. Decide whether this should be a precondition or simply an idempotent operation.
+
+**7.** Refactor `Task_List` so that clients do not depend directly on the `tasks` representation, if that is practical with the language features introduced so far.
+
+**8.** Split the chapter's program into two or three files using `intern`.
+
+**9.\*** Replace the task manager with a different complete miniature program of your own, such as a library checkout tracker or a grade book, and follow the same process from problem statement through tests.
