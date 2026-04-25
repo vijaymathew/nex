@@ -182,6 +182,31 @@ print(app.greet())")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-file-supports-spawn-with-captured-channels
+  (testing "compile-file handles spawn bodies that capture top-level Channel values"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-captured-channel-file-test")
+          nex-file (io/file tmp-dir "channel.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "let input: Channel[Integer] := create Channel[Integer].with_capacity(4)
+let output: Channel[Integer] := create Channel[Integer].with_capacity(4)
+
+let worker: Task := spawn do
+  let v: Integer := input.receive
+  output.send(v * v)
+end
+
+input.send(9)
+print(output.receive)
+worker.await")
+        (let [result (file/compile-file (.getPath nex-file) (.getPath out-dir) {})
+              output (str/trim (invoke-main! out-dir (:main-class result)))]
+          (is (= "81" output)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-file-supports-generic-stack-class
   (testing "compile-file handles a generic Stack class whose pop mutates after setting result"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-generic-stack-file-test")

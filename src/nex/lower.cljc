@@ -417,6 +417,9 @@
           :this
           (:this-type env)
 
+          :anonymous-function
+          "Function"
+
           :binary
           (let [op (:operator expr)]
             (cond

@@ -65,6 +65,8 @@ The key design choice is the stopping condition: stop when the answer is known, 
 
 When data is nested like a tree, recursion often gives the cleanest code because the shape of the routine mirrors the shape of the data.
 
+In this example, assume the node uses the same tree representation as Chapter 11: a map with a `"children"` entry containing an array of child nodes.
+
 ```
 nex> function count_nodes(node: Map[String, Any]): Integer
      do
@@ -105,9 +107,9 @@ Once that invariant is known, the rest of the class becomes easier:
 This is not only a contract technique. It is a design pattern for stable classes.
 
 
-## Table-Driven Dispatch
+## Table-Driven Lookup
 
-Sometimes a program chooses behavior based on a small set of known keys. A map can express that relationship more clearly than a long chain of `if` statements.
+Sometimes a program chooses among a small set of known values based on a key. A map can express that relationship more clearly than a long chain of `if` statements.
 
 Conceptually:
 
@@ -129,7 +131,7 @@ elseif item = "pear" then
 end
 ```
 
-this pattern stores the association directly as data.
+this pattern stores the association directly as data rather than spelling it out in branching code.
 
 The same idea appears in:
 
@@ -174,8 +176,29 @@ The pattern is:
 
 For example:
 
-- `File_Reader` gets text from the environment
-- `word_frequencies` counts words in plain Nex logic
+```
+nex> function word_count(text: String): Integer
+     do
+       result := 0
+       across text.split(" ") as word do
+         if word /= "" then
+           result := result + 1
+         end
+       end
+     end
+
+nex> class File_Word_Counter
+       feature
+         count_words_in(path: String): Integer
+           require
+             path_not_empty: path.length > 0
+           do
+             result := word_count(path_read_text(path))
+           end
+     end
+```
+
+Here `count_words_in` touches the outside world, but `word_count` stays plain Nex logic over a string.
 
 This keeps the unreliable world at the edge and the reasoning-heavy code at the center.
 
@@ -187,14 +210,16 @@ Here is a simple word-report routine:
 ```
 nex> function most_frequent_word(text: String): String
      require
-       not_empty: text.length > 0
+       not_blank: text.trim().length > 0
      do
        let freq: Map[String, Integer] := {}
        let words := text.to_lower.split(" ")
 
        across words as word do
-         let count := freq.try_get(word, 0)
-         freq.set(word, count + 1)
+         if word /= "" then
+           let count := freq.try_get(word, 0)
+           freq.set(word, count + 1)
+         end
        end
 
        result := freq.keys.get(0)
@@ -209,7 +234,7 @@ nex> function most_frequent_word(text: String): String
 This small routine combines several patterns:
 
 - accumulation into a map
-- table-driven counting
+- table-driven lookup for counts
 - maximum search
 - a precondition to exclude the meaningless empty case
 
@@ -223,7 +248,7 @@ Many real programs feel complicated only until you notice that they are simply a
 - Search loops stop as soon as the answer is known
 - Recursive data often calls for recursive routines
 - Good classes are organized around strong invariants
-- Tables are often clearer than long condition chains
+- Table-driven lookup is often clearer than long condition chains
 - Wrappers isolate system boundaries from core logic
 - Recognizing patterns reduces design effort and improves clarity
 

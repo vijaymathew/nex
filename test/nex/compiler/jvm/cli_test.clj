@@ -47,6 +47,35 @@
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest cli-compile-jvm-supports-spawn-with-captured-channels
+  (testing "bin/nex compile jvm handles spawn bodies that capture top-level channels"
+    (let [tmp-dir (unique-tmp-dir "nex-cli-jvm-captured-channel")
+          nex-file (io/file tmp-dir "channel.nex")
+          out-dir (io/file tmp-dir "build")
+          expected-jar (io/file out-dir "channel.jar")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "let input: Channel[Integer] := create Channel[Integer].with_capacity(4)
+let output: Channel[Integer] := create Channel[Integer].with_capacity(4)
+
+let worker: Task := spawn do
+  let v: Integer := input.receive
+  output.send(v * v)
+end
+
+input.send(9)
+print(output.receive)
+worker.await")
+        (let [{:keys [exit out]} (run-process! "." nex-bin "compile" "jvm" (.getPath nex-file) (.getPath out-dir))]
+          (is (= 0 exit) out)
+          (is (.exists expected-jar))
+          (let [{run-exit :exit run-out :out} (run-process! "." "java" "-jar" (.getPath expected-jar))]
+            (is (= 0 run-exit) run-out)
+            (is (= "81" (str/trim run-out)))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest cli-compile-jvm-type-error-diagnostics-test
   (testing "bin/nex compile jvm prints formatted type diagnostics on failure"
     (let [tmp-dir (unique-tmp-dir "nex-cli-jvm-type-error")
