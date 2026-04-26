@@ -48,6 +48,8 @@ Common breakpoint forms:
 - `field:status`
 - `Order#status`
 
+The line-qualified forms are accepted by the debugger command parser, but on the current REPL/interpreter path they are not yet reliable enough to treat as the primary workflow. In practice, the dependable breakpoint forms today are `Class.method`, field watch/write breakpoints, synthetic function breakpoints such as `name_Function.call1`, and hit-count breakpoints.
+
 List breakpoints:
 
 ```text
@@ -69,10 +71,11 @@ Enable or disable without removing:
 :disable <id>
 ```
 
-For code defined as standalone functions rather than class methods, use either:
+For code defined as standalone functions rather than class methods, the most reliable current form is the synthetic function class breakpoint:
 
-- a `file.nex:line` breakpoint when the function comes from a loaded file
-- a hit-count breakpoint such as `:break 12` during one REPL evaluation run
+- a function `square_plus_one(...)` is represented internally as `square_plus_one_Function`
+- its callable entry point is `call0`, `call1`, `call2`, and so on, depending on arity
+- so a one-argument function can be broken on with `:break square_plus_one_Function.call1`
 
 
 ## Watchpoints
@@ -148,7 +151,7 @@ The quickest way to learn the debugger is to see a few realistic sessions.
 
 ### Session 0: Debug A Standalone Function In The REPL
 
-Standalone functions do not currently have a `:break function_name` form. In REPL work, the practical approach is to use a hit-count breakpoint and then step once execution pauses.
+Standalone functions do not currently have a direct `:break function_name` form. Instead, break on the generated function class and its `callN` method.
 
 Suppose you define:
 
@@ -164,7 +167,7 @@ Then a simple debugging session looks like:
 
 ```text
 nex> :debug on
-nex> :break 2
+nex> :break square_plus_one_Function.call1
 nex> print(square_plus_one(4))
 dbg> :where
 dbg> :locals
@@ -176,9 +179,10 @@ dbg> :continue
 
 The important point here is:
 
-- hit-count breakpoints count debuggable statements in one evaluation run
-- they are useful in the REPL when there is no file-based line location to target
+- `square_plus_one_Function.call1` is the internal callable form of `square_plus_one`
 - once paused, the normal debugger commands work the same way as for methods
+- `:locals` shows function parameters such as `n`
+- after the first `:next`, locals introduced inside the function body, such as `squared`, become visible
 
 ### Session 1: Stop At A Routine And Step Through It
 
@@ -366,7 +370,7 @@ Here:
 - `:frame <n>` changes which context `:locals` and `:print` use
 - `:finish` is often faster than repeated `:next` when you only care about the return from the current routine
 
-These four sessions cover most day-to-day debugging:
+These five sessions cover most day-to-day debugging:
 
 - stop at a routine
 - inspect the active frame
@@ -375,40 +379,43 @@ These four sessions cover most day-to-day debugging:
 - watch one changing value
 - move up and down the call stack
 
-### Session 5: Break At A Specific File Line
+### Session 5: Load A File, Then Debug It
 
-For code loaded from a file, line breakpoints are useful when execution is still associated with that file's source location.
-
-Suppose `examples/math_demo.nex` contains:
+Suppose `demo.nex` contains:
 
 ```nex
-function adjust(n: Integer): Integer
-do
-  let doubled: Integer := n * 2
-  result := doubled + 3
+class Pricing
+  feature
+    discount(price: Real): Real do
+      let base: Real := price
+      result := base * 0.9
+    end
 end
 ```
 
-Then you can break by line number while evaluating that file, as long as the line is part of code that is actually executed during `:load`:
+One practical workflow is:
 
 ```text
+nex> :load demo.nex
 nex> :debug on
-nex> :break examples/math_demo.nex:3
-nex> :load examples/math_demo.nex
+nex> :break Pricing.discount
+nex> let p := create Pricing
+nex> print(p.discount(10.0))
 dbg> :where
 dbg> :locals
-dbg> :print doubled
+dbg> :print price
+dbg> :next
+dbg> :locals
 dbg> :continue
 ```
 
-Practical notes for `file.nex:line` breakpoints:
+This is often the most convenient way to debug file-based code in the REPL:
 
-- they are most useful for code loaded from files, not ad hoc multi-line REPL input
-- the path must match the debugger's recorded source path for the loaded code
-- `:load some_file.nex` executes top-level statements, but it does not execute function bodies just because they are defined in the file
-- so a breakpoint on a line inside a function body will not fire during `:load` unless the file itself also calls that function while loading
-- for a standalone function defined in a file and then called later from the REPL, a `file.nex:line` breakpoint may not fire, because the current debug source can be the REPL call site rather than the original defining file
-- use `:where` after a pause if you need to confirm the source path and line shape the debugger sees
+- `:load` brings the class or function definitions into the current session
+- the breakpoint is still set with the ordinary supported form such as `Class.method`
+- once execution pauses, the debugger works the same way as for code defined directly at the REPL
+
+The line-qualified forms `Class.method:42` and `file.nex:42` are accepted by the debugger command parser. If you experiment with them, use `:where` after any successful pause to confirm the exact source and line shape the debugger is reporting.
 
 
 ## Hit-Frequency Controls
@@ -444,8 +451,8 @@ Drive the debugger from a command file:
 ## Limits to Remember
 
 - Stepping is statement-level, not expression-level.
-- `file:line` breakpoints are most useful for code loaded from files.
-- Standalone functions do not currently have a dedicated named breakpoint form such as `:break foo`; use `file:line` or a hit-count breakpoint instead.
+- Line-specific breakpoints such as `file:line` and `Class.method:line` are accepted syntactically, but they are not yet reliable enough to be the primary REPL debugging workflow.
+- Standalone functions do not currently have a dedicated named breakpoint form such as `:break foo`; use the synthetic `name_Function.callN` form instead.
 - Breakpoints are session-local unless saved.
 - `:print <expr>` runs in the paused context and may have side effects.
 
