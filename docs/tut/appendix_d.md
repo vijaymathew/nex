@@ -211,11 +211,11 @@ nex> let c := create Counter.make
 nex> c.add(5)
 dbg> :where
 dbg> :locals
-dbg> :print this.total
+dbg> :print total
 dbg> :next
 dbg> :locals
 dbg> :next
-dbg> :print this.total
+dbg> :print total
 dbg> :continue
 ```
 
@@ -223,11 +223,13 @@ What this tells you:
 
 - `:where` confirms that you stopped in `Counter.add`
 - `:locals` shows the argument `n` and the current `this`
-- `:print this.total` before `:next` shows the old state
+- `:print total` before `:next` shows the current field binding
 - the first `:next` advances to the next statement in the routine
 - `:locals` then shows `old_total` before the assignment is applied
 - the second `:next` advances past the assignment
-- `:print this.total` now shows the updated state
+- `:print total` now shows the updated field value
+
+One subtle point: inside a paused method, bare field names such as `total` refer to the live field bindings in the method environment. By contrast, `this.total` reads from the object value itself, which is not rebuilt until the routine returns unless you explicitly assign through `this.field := ...`.
 
 This is the basic "what changed on this line?" workflow.
 
@@ -237,6 +239,11 @@ Suppose `Wallet.spend` has a precondition and an invariant:
 
 ```nex
 class Wallet
+  create
+    make(initial_money: Real) do
+      money := initial_money
+    end
+
   feature
     money: Real
 
@@ -259,21 +266,37 @@ Now enable contract breaks and trigger a failure:
 ```text
 nex> :debug on
 nex> :breakon contract on
-nex> let w := create Wallet
-nex> w.money := 10.0
+nex> let w := create Wallet.make(10.0)
 nex> w.spend(25.0)
 dbg> :where
 dbg> :locals
-dbg> :print amount
-dbg> :print money
-dbg> :print amount <= money
+dbg> :print w.money
+dbg> :print 25.0 <= w.money
 ```
 
-This is a good pattern when you already know the failure is a contract problem:
+This is a good pattern when you already know the failure is a contract problem and want to confirm the caller-side state:
 
-- `:where` shows which routine and clause failed
-- `:locals` shows the values used in the check
-- `:print <contract-expression>` lets you test the failing condition directly
+- `:where` shows the paused call site
+- `:locals` shows the caller bindings that led to the failure
+- `:print w.money` lets you inspect the receiver state directly
+- `:print 25.0 <= w.money` lets you test the failing condition from the caller context
+
+One current limitation is important here: for a precondition failure raised by a call such as `w.spend(25.0)`, the debugger pauses at the caller context, not inside `Wallet.spend`. That means names such as `amount` are not available at this pause point.
+
+If you need to inspect callee-side names before the precondition fails, combine contract breaking with a normal method breakpoint:
+
+```text
+nex> :debug on
+nex> :break Wallet.spend
+nex> :breakon contract on
+nex> let w := create Wallet.make(100.0)
+nex> w.spend(25.0)
+dbg> :print amount
+dbg> :print money
+dbg> :continue
+```
+
+This lets you inspect the method arguments and field bindings at routine entry, before the precondition violation is reported.
 
 ### Session 3: Watch A Value Across Several Calls
 
