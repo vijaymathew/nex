@@ -20,7 +20,8 @@
          :counter 0
          :selected-frame 0
          :paused nil
-         :last nil}))
+         :last nil
+         :suspend? false}))
 
 (defn enabled? []
   @*debug-enabled*)
@@ -289,7 +290,7 @@
 (defn reset-run-state! []
   (swap! *debug-state* assoc :counter 0 :mode :continue :paused nil :last nil
          :next-depth nil :finish-depth nil :selected-frame 0 :watch-values {}
-         :breakpoint-hit-counts {}))
+         :breakpoint-hit-counts {} :suspend? false))
 
 (defn snapshot-breakpoints-and-watchpoints []
   {:breakpoints (mapv second (breakpoint-entries))
@@ -530,6 +531,7 @@
     (if (str/blank? expr)
       (println "Usage: :print <expr>")
       (try
+        (swap! *debug-state* assoc :suspend? true)
         (reset! (:output ctx) [])
         (let [ast (p/ast expr)]
           (cond
@@ -545,7 +547,9 @@
                   v (interp/eval-node ctx expr-node)]
               (println (interp/nex-format-value v)))
             (catch Exception e2
-              (println "Error:" (.getMessage e2)))))))))
+              (println "Error:" (.getMessage e2)))))
+        (finally
+          (swap! *debug-state* assoc :suspend? false))))))
 
 (defn debugger-loop!
   "Interactive debug loop. Returns when execution should resume."
@@ -692,38 +696,40 @@
   [{:keys [read-line-fn wrap-expression-fn] :as opts}]
   (fn [ctx node]
     (let [depth (or (:debug-depth ctx) 0)
-          state-before @*debug-state*
-          hit (inc (:counter state-before))
-          matched-breakpoints (matching-breakpoint-entries (:breakpoints state-before) hit ctx node)
-          watch-hits (watchpoint-hits! ctx {:wrap-expression-fn wrap-expression-fn})]
-      (swap! *debug-state* assoc :counter hit :last {:ctx ctx :node node :hit hit})
-      (when (debug-should-pause? state-before hit depth ctx node opts)
-        (debugger-loop! ctx node hit opts))
-      (when (seq matched-breakpoints)
-        (doseq [[id bp] matched-breakpoints
-                :when (:temporary bp)]
-          (swap! *debug-state* update :breakpoints dissoc id)))
-      (when (seq watch-hits)
-        (pause-for-watch-hits! ctx node hit watch-hits opts)))))
+          state-before @*debug-state*]
+      (when-not (:suspend? state-before)
+        (let [hit (inc (:counter state-before))
+              matched-breakpoints (matching-breakpoint-entries (:breakpoints state-before) hit ctx node)
+              watch-hits (watchpoint-hits! ctx {:wrap-expression-fn wrap-expression-fn})]
+          (swap! *debug-state* assoc :counter hit :last {:ctx ctx :node node :hit hit})
+          (when (debug-should-pause? state-before hit depth ctx node opts)
+            (debugger-loop! ctx node hit opts))
+          (when (seq matched-breakpoints)
+            (doseq [[id bp] matched-breakpoints
+                    :when (:temporary bp)]
+              (swap! *debug-state* update :breakpoints dissoc id)))
+          (when (seq watch-hits)
+            (pause-for-watch-hits! ctx node hit watch-hits opts)))))))
 
 (defn maybe-break-on-error!
   "Enter debugger loop on error if corresponding break-on toggle is enabled."
   [fallback-ctx ex opts]
-  (let [data (ex-data ex)
-        contract? (contains? data :contract-type)
-        mode (if contract? :contract :exception)
-        enabled? (get-in @*debug-state* [:break-on mode] false)
-        filter-val (get-in @*debug-state* [:break-on-filters mode])
-        allowed? (if contract?
-                   (contract-filter-match? filter-val ex)
-                   (exception-filter-match? filter-val ex))]
-    (when (and enabled? allowed?)
-      (let [{:keys [ctx node hit]} (:last @*debug-state*)
-            pause-ctx (or ctx fallback-ctx)
-            pseudo-node (or node
-                            {:type (if contract? :contract-violation :exception)
-                             :dbg/line (:line data)})]
-        (println (if contract?
-                   "Paused on contract violation."
-                   "Paused on exception."))
-        (debugger-loop! pause-ctx pseudo-node (or hit 0) opts)))))
+  (when-not (:suspend? @*debug-state*)
+    (let [data (ex-data ex)
+          contract? (contains? data :contract-type)
+          mode (if contract? :contract :exception)
+          enabled? (get-in @*debug-state* [:break-on mode] false)
+          filter-val (get-in @*debug-state* [:break-on-filters mode])
+          allowed? (if contract?
+                     (contract-filter-match? filter-val ex)
+                     (exception-filter-match? filter-val ex))]
+      (when (and enabled? allowed?)
+        (let [{:keys [ctx node hit]} (:last @*debug-state*)
+              pause-ctx (or ctx fallback-ctx)
+              pseudo-node (or node
+                              {:type (if contract? :contract-violation :exception)
+                               :dbg/line (:line data)})]
+          (println (if contract?
+                     "Paused on contract violation."
+                     "Paused on exception."))
+          (debugger-loop! pause-ctx pseudo-node (or hit 0) opts))))))
