@@ -8,7 +8,7 @@ Nex includes an interactive debugger in the CLI REPL. This appendix condenses th
 Start the REPL:
 
 ```bash
-clojure -M:repl
+nex
 ```
 
 Enable debugging:
@@ -68,6 +68,11 @@ Enable or disable without removing:
 :enable <id>
 :disable <id>
 ```
+
+For code defined as standalone functions rather than class methods, use either:
+
+- a `file.nex:line` breakpoint when the function comes from a loaded file
+- a hit-count breakpoint such as `:break 12` during one REPL evaluation run
 
 
 ## Watchpoints
@@ -137,27 +142,246 @@ The most useful first commands at a breakpoint are usually:
 3. `:print <expr>`
 
 
-## Typical Workflow
+## Example Sessions
+
+The quickest way to learn the debugger is to see a few realistic sessions.
+
+### Session 0: Debug A Standalone Function In The REPL
+
+Standalone functions do not currently have a `:break function_name` form. In REPL work, the practical approach is to use a hit-count breakpoint and then step once execution pauses.
+
+Suppose you define:
+
+```nex
+function square_plus_one(n: Integer): Integer
+do
+  let squared: Integer := n * n
+  result := squared + 1
+end
+```
+
+Then a simple debugging session looks like:
 
 ```text
 nex> :debug on
-nex> :break Wallet.spend
-nex> :breakon contract on
-nex> :load examples/wallet.nex
-nex> run_wallet_demo()
-"dbg> :where"
-"dbg> :locals"
-"dbg> :print money"
-"dbg> :next"
-"dbg> :continue"
+nex> :break 2
+nex> print(square_plus_one(4))
+dbg> :where
+dbg> :locals
+dbg> :print n
+dbg> :next
+dbg> :locals
+dbg> :continue
 ```
 
-This is enough for most day-to-day debugging:
+The important point here is:
+
+- hit-count breakpoints count debuggable statements in one evaluation run
+- they are useful in the REPL when there is no file-based line location to target
+- once paused, the normal debugger commands work the same way as for methods
+
+### Session 1: Stop At A Routine And Step Through It
+
+Suppose you define:
+
+```nex
+class Counter
+  create
+    make() do
+      total := 0
+    end
+
+  feature
+    total: Integer
+
+    add(n: Integer) do
+      let old_total: Integer := total
+      total := old_total + n
+      let new_total: Integer := total
+    end
+end
+```
+
+Then a simple stepping session looks like:
+
+```text
+nex> :debug on
+nex> :break Counter.add
+nex> let c := create Counter.make
+nex> c.add(5)
+dbg> :where
+dbg> :locals
+dbg> :print this.total
+dbg> :next
+dbg> :locals
+dbg> :next
+dbg> :print this.total
+dbg> :continue
+```
+
+What this tells you:
+
+- `:where` confirms that you stopped in `Counter.add`
+- `:locals` shows the argument `n` and the current `this`
+- `:print this.total` before `:next` shows the old state
+- the first `:next` advances to the next statement in the routine
+- `:locals` then shows `old_total` before the assignment is applied
+- the second `:next` advances past the assignment
+- `:print this.total` now shows the updated state
+
+This is the basic "what changed on this line?" workflow.
+
+### Session 2: Stop On A Contract Failure
+
+Suppose `Wallet.spend` has a precondition and an invariant:
+
+```nex
+class Wallet
+  feature
+    money: Real
+
+    spend(amount: Real)
+      require
+        enough: amount <= money
+      do
+        money := money - amount
+      ensure
+        decreased: money = old money - amount
+      end
+
+  invariant
+    non_negative: money >= 0.0
+end
+```
+
+Now enable contract breaks and trigger a failure:
+
+```text
+nex> :debug on
+nex> :breakon contract on
+nex> let w := create Wallet
+nex> w.money := 10.0
+nex> w.spend(25.0)
+dbg> :where
+dbg> :locals
+dbg> :print amount
+dbg> :print money
+dbg> :print amount <= money
+```
+
+This is a good pattern when you already know the failure is a contract problem:
+
+- `:where` shows which routine and clause failed
+- `:locals` shows the values used in the check
+- `:print <contract-expression>` lets you test the failing condition directly
+
+### Session 3: Watch A Value Across Several Calls
+
+Watchpoints are useful when the suspicious state changes gradually rather than at a single obvious line.
+
+Using the same `Counter` class:
+
+```text
+nex> :debug on
+nex> let c := create Counter.make
+nex> :watch c.total
+nex> c.add(2)
+dbg> :print c.total
+dbg> :continue
+nex> c.add(3)
+dbg> :print c.total
+dbg> :continue
+nex> :watches
+```
+
+This is useful when:
+
+- one field changes in many places
+- you care about the moment its value changes
+- setting many separate breakpoints would be noisy
+
+### Session 4: Inspect The Stack And Move Between Frames
+
+When one routine calls another, the most useful question is often not "where am I?" but "who called me, and with what values?"
+
+Suppose:
+
+```nex
+function discount(price: Real): Real
+do
+  result := price * 0.9
+end
+
+function checkout(subtotal: Real): Real
+do
+  result := discount(subtotal)
+end
+```
+
+Then a stack-oriented session looks like:
+
+```text
+nex> :debug on
+nex> :break discount
+nex> print(checkout(80.0))
+dbg> :frames
+dbg> :locals
+dbg> :frame 1
+dbg> :locals
+dbg> :print subtotal
+dbg> :frame 0
+dbg> :print price
+dbg> :finish
+```
+
+Here:
+
+- frame `0` is the current routine
+- frame `1` is its caller
+- `:frame <n>` changes which context `:locals` and `:print` use
+- `:finish` is often faster than repeated `:next` when you only care about the return from the current routine
+
+These four sessions cover most day-to-day debugging:
 
 - stop at a routine
 - inspect the active frame
-- step through the logic
-- continue once the cause is understood
+- step through state changes
+- stop automatically on contract failures
+- watch one changing value
+- move up and down the call stack
+
+### Session 5: Break At A Specific File Line
+
+For code loaded from a file, line breakpoints are usually the most direct way to stop inside a standalone function.
+
+Suppose `examples/math_demo.nex` contains:
+
+```nex
+function adjust(n: Integer): Integer
+do
+  let doubled: Integer := n * 2
+  result := doubled + 3
+end
+```
+
+Then you can debug it by line number:
+
+```text
+nex> :debug on
+nex> :break examples/math_demo.nex:3
+nex> :load examples/math_demo.nex
+nex> print(adjust(10))
+dbg> :where
+dbg> :locals
+dbg> :print doubled
+dbg> :continue
+```
+
+Practical notes for `file.nex:line` breakpoints:
+
+- they are most useful for code loaded from files, not ad hoc multi-line REPL input
+- the path must match the debugger's recorded source path for the loaded code
+- use `:where` after a pause if you need to confirm the source path and line shape the debugger sees
 
 
 ## Hit-Frequency Controls
@@ -194,47 +418,9 @@ Drive the debugger from a command file:
 
 - Stepping is statement-level, not expression-level.
 - `file:line` breakpoints are most useful for code loaded from files.
+- Standalone functions do not currently have a dedicated named breakpoint form such as `:break foo`; use `file:line` or a hit-count breakpoint instead.
 - Breakpoints are session-local unless saved.
 - `:print <expr>` runs in the paused context and may have side effects.
-
-
-## Worked Session
-
-Suppose `Wallet.spend` has a precondition and an invariant:
-
-```nex
-class Wallet
-  feature
-    money: Real
-
-    spend(amount: Real)
-      require
-        enough: amount <= money
-      do
-        money := money - amount
-      ensure
-        decreased: money = old money - amount
-      end
-
-  invariant
-    non_negative: money >= 0.0
-end
-```
-
-If you enable:
-
-```text
-:debug on
-:breakon contract on
-```
-
-and then violate the contract, the debugger will stop at the failure point. At that moment:
-
-- `:where` shows the current routine and source location
-- `:locals` shows `amount`, `money`, and any locals
-- `:print amount <= money` checks the failing condition directly
-
-This is often faster than reading the whole routine from the top.
 
 
 ## Further Reading

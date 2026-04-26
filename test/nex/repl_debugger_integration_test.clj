@@ -214,6 +214,28 @@ s.f()")))]
       (is (.contains out "Selected frame [1]"))
       (is (.contains out "p = 7")))))
 
+(deftest debugger-print-does-not-reenter-debugger
+  (testing ":print evaluates in paused context without creating nested pauses"
+    (let [ctx (repl/init-repl-context)
+          _ (repl/eval-code ctx "class Counter
+  create
+    make() do
+      total := 0
+    end
+  feature
+    total: Integer
+    add(n: Integer) do
+      total := total + n
+    end
+end")
+          _ (dbg/add-breakpoint! {:kind :cm :class "Counter" :method "add"})
+          out (with-out-str
+                (with-redefs [repl/read-line-safe (scripted-reader [":print this.total" ":c"])]
+                  (repl/eval-code ctx "let c: Counter := create Counter.make
+c.add(5)")))]
+      (is (= 1 (count (re-seq #"Paused at statement #" out))))
+      (is (.contains out "\n0\n")))))
+
 (deftest debugger-breakon-contract-filter
   (testing "Contract break-on filter limits pauses by contract kind"
     (let [ctx (repl/init-repl-context)
