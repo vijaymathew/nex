@@ -330,14 +330,15 @@ When one routine calls another, the most useful question is often not "where am 
 Suppose:
 
 ```nex
-function discount(price: Real): Real
-do
-  result := price * 0.9
-end
+class Pricing
+  feature
+    discount(price: Real): Real do
+      result := price * 0.9
+    end
 
-function checkout(subtotal: Real): Real
-do
-  result := discount(subtotal)
+    checkout(subtotal: Real): Real do
+      result := this.discount(subtotal)
+    end
 end
 ```
 
@@ -345,8 +346,9 @@ Then a stack-oriented session looks like:
 
 ```text
 nex> :debug on
-nex> :break discount
-nex> print(checkout(80.0))
+nex> :break Pricing.discount
+nex> let p := create Pricing
+nex> print(p.checkout(80.0))
 dbg> :frames
 dbg> :locals
 dbg> :frame 1
@@ -375,7 +377,7 @@ These four sessions cover most day-to-day debugging:
 
 ### Session 5: Break At A Specific File Line
 
-For code loaded from a file, line breakpoints are usually the most direct way to stop inside a standalone function.
+For code loaded from a file, line breakpoints are useful when execution is still associated with that file's source location.
 
 Suppose `examples/math_demo.nex` contains:
 
@@ -387,13 +389,12 @@ do
 end
 ```
 
-Then you can debug it by line number:
+Then you can break by line number while evaluating that file, as long as the line is part of code that is actually executed during `:load`:
 
 ```text
 nex> :debug on
 nex> :break examples/math_demo.nex:3
 nex> :load examples/math_demo.nex
-nex> print(adjust(10))
 dbg> :where
 dbg> :locals
 dbg> :print doubled
@@ -404,6 +405,9 @@ Practical notes for `file.nex:line` breakpoints:
 
 - they are most useful for code loaded from files, not ad hoc multi-line REPL input
 - the path must match the debugger's recorded source path for the loaded code
+- `:load some_file.nex` executes top-level statements, but it does not execute function bodies just because they are defined in the file
+- so a breakpoint on a line inside a function body will not fire during `:load` unless the file itself also calls that function while loading
+- for a standalone function defined in a file and then called later from the REPL, a `file.nex:line` breakpoint may not fire, because the current debug source can be the REPL call site rather than the original defining file
 - use `:where` after a pause if you need to confirm the source path and line shape the debugger sees
 
 
