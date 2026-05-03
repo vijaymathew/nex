@@ -7,7 +7,7 @@ The previous chapter established that problems have structure, and that misident
 
 ## Models and Their Limits
 
-Every software system embeds a model of the world it operates in. The delivery robot embeds a model of the building. The knowledge engine embeds a model of what users want. The virtual world embeds a model of physical interaction. These models are not incidental — they are load-bearing. Every algorithm in the system depends on them.
+Every software system embeds a model of the world it operates in. The delivery robot embeds a model of the building. The knowledge engine embeds a model of what users want. The virtual world embeds a model of physical interaction. These models are not incidental — they support everything built on top of them. Every algorithm in the system depends on them.
 
 A model is an abstraction: it retains some features of the world and discards others. A graph of hallways retains connectivity and discards the fact that hallways are occupied by people, blocked by deliveries, and occasionally closed for maintenance. This is not a flaw — every useful model discards something. The question is whether what was discarded matters.
 

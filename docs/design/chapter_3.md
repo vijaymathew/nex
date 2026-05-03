@@ -122,7 +122,7 @@ The JavaScript generator serves a different purpose. It must preserve Nex's sema
 
 The generator is organised around the same four concerns as the JVM backend — type mapping, expression emission, statement emission, and class emission — but several target-specific areas are worth calling out.
 
-First, the generator must decide when operations should produce `await`-bearing code. This matters for task and channel semantics, where the event-loop model requires explicit async boundaries that the JVM does not.
+First, the generator must decide when operations should produce code that uses `await`. This matters for task and channel semantics, where the event-loop model requires explicit async boundaries that the JVM does not.
 
 Second, JavaScript imports are generated from Nex `import ... from ...` forms rather than from JVM-style qualified names, reflecting the ES module convention.
 

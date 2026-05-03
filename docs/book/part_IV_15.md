@@ -11,7 +11,7 @@ A list is an ordered collection: a sequence of elements in which position is mea
 
 Order gives lists their characteristic strengths. Iterating from start to finish is natural and efficient. The first element, the last element, and the next element after any given one are all immediately accessible. Lists represent timelines well, ranked outputs well, queues and logs well — any domain where the primary question is *what comes next?* or *in what order did these things occur?*
 
-Order also defines the limits of a list's usefulness. A list organizes elements by position. It has no mechanism for organizing them by content. Finding an element by a property — by its identifier, by a key — requires examining elements one at a time until the matching one is found. For a list of ten elements, this is inconsequential. For a list of ten million, it is the dominant cost of every lookup operation, and it grows linearly with the size of the collection.
+Order also defines the limits of a list's usefulness. A list organizes elements by position. It has no mechanism for organizing them by content. Finding an element by a property — by its identifier, by a key — requires examining elements one at a time until the matching one is found. For a list of ten elements, this hardly matters. For a list of ten million, it is the dominant cost of every lookup operation, and it grows linearly with the size of the collection.
 
 
 ## The Cost of What Lists Cannot Do

@@ -4,7 +4,7 @@
 
 An entity is something the system must track as a distinct thing over time.
 
-That definition sounds simple. It is one of the most consequential distinctions in software design. When a team misidentifies its entities — treating derived values as persistent things, or collapsing distinct identities into one — everything downstream suffers. Interfaces leak implementation details. Algorithms operate on the wrong units. Tests pass in isolation and fail across the system.
+That definition sounds simple. It is one of the most important distinctions in software design. When a team misidentifies its entities — treating derived values as persistent things, or collapsing distinct identities into one — everything downstream suffers. Interfaces leak implementation details. Algorithms operate on the wrong units. Tests pass in isolation and fail across the system.
 
 The question that entity modeling forces us to answer is: **what are the actual things in this system that deserve an identity of their own?**
 
@@ -149,7 +149,7 @@ Those two gaps are where entity modeling work should begin.
 ::: {.note-takeaways}
 **Takeaways**
 
-- Entities are identity-bearing things that the system must track over time. Not every value is an entity.
+- Entities are things with an identity that the system must track over time. Not every value is an entity.
 - Identity and state are distinct: identity answers *which thing is this?*, state answers *what is true about it now?*
 - Responsibilities should be assigned to entities, not diffused across global helpers and service layers.
 - Transitions and invariants are part of the entity model itself, not implementation details to be added later.

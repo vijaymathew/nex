@@ -6,7 +6,7 @@ The algorithm was correct. The problem was wrong.
 
 Buildings change. Hallways become blocked, elevators fail, doors close. The engineers had modeled the building as a fixed graph and optimized movement through it. But the actual challenge was not path-finding in a known environment — it was decision-making in an uncertain one. These are structurally different problems, requiring different solutions. No improvement to the path-finding algorithm could have fixed the system, because the algorithm was not the source of the failure.
 
-This distinction — between the problem as initially described and the problem as it actually exists — is one of the most consequential in software engineering.
+This distinction — between the problem as initially described and the problem as it actually exists — is one of the most important in software engineering.
 
 
 ## Symptoms and Problems

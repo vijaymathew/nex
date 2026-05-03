@@ -104,7 +104,7 @@ feature
 end
 ```
 
-`Topic_Node` carries two invariants worth examining. `label_present` ensures that every node in the tree has a non-empty label — a node with no label is a structural placeholder masquerading as a content-bearing element, and the invariant rejects it. `no_self_child` ensures that a node does not list itself as a child — the minimal check against a trivially cyclic structure that would cause any traversal to loop.
+`Topic_Node` carries two invariants worth examining. `label_present` ensures that every node in the tree has a non-empty label — a node with no label is a structural placeholder masquerading as an element that carries content, and the invariant rejects it. `no_self_child` ensures that a node does not list itself as a child — the minimal check against a trivially cyclic structure that would cause any traversal to loop.
 
 `find_label` demonstrates the branching search that trees make possible. The comparison at each level directs the search toward the relevant subtree. In this three-node sketch, the depth is fixed at two and the cost is constant. In a full implementation over a balanced tree with a million nodes, the same logic would require at most twenty comparisons. A linear scan over a million elements would require up to a million. The invariant is what makes that difference real: without the ordering rule, the branching decision at each node is meaningless, and the search degenerates to a scan.
 

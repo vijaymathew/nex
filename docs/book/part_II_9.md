@@ -54,7 +54,7 @@ The following requirement will serve as a worked example:
 
 Two distinct operations are embedded in this sentence: a read operation (show live status) and a write operation (reassign tasks when a robot fails). A good model must support both.
 
-**Step 1: Identify core entities.** Robot, DeliveryTask, Location. These are the identity-bearing things the system must track.
+**Step 1: Identify core entities.** Robot, DeliveryTask, Location. These are the things with an identity that the system must track.
 
 **Step 2: Define relationships.** A delivery task references its origin and destination locations. A delivery task optionally references an assigned robot — optionally, because a task exists before it is assigned and may exist again after reassignment. The cardinality of the assignment relationship is one-to-one for active tasks: a robot may hold at most one active task at a time.
 

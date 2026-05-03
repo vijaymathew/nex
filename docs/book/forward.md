@@ -82,7 +82,7 @@ The Studio chapters make this contract explicit: each presents a problem and eno
 
 ## Before the Prologue
 
-The chapter that follows introduces three systems and three failures. Those failures are not cautionary tales included for dramatic effect. They are the opening of an argument that runs through the entire book: that the most consequential engineering decisions are made before a line of code is written, that the hardest problems in software are problems of clarity rather than cleverness, and that the skills required to get those decisions right are learnable, transferable, and more important now than they have ever been.
+The chapter that follows introduces three systems and three failures. Those failures are not cautionary tales included for dramatic effect. They are the opening of an argument that runs through the entire book: that the most important engineering decisions are made before a line of code is written, that the hardest problems in software are problems of clarity rather than cleverness, and that the skills required to get those decisions right are learnable, transferable, and more important now than they have ever been.
 
 The prologue begins with a robot that will not move.
 
