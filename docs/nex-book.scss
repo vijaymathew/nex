@@ -1,225 +1,109 @@
 /*-- scss:defaults --*/
-$theme: "cosmo" !default;
-
-// Nex Branding Colors
-$nex-mint: #33d1b0;
-$nex-gold: #ffd166;
-$nex-dark-navy: #07161e;
-$nex-blue-link: #1f5f8b;
-
-// Fonts
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,700;1,400;1,700&family=Lora:ital,wght@0,400;0,700;1,400;1,700&family=Inter:wght@400;500;600&display=swap');
-
-$font-family-sans-serif: "Space Grotesk", sans-serif !default;
-$font-family-serif: "Lora", serif !default;
+$font-family-sans-serif: "Inter", system-ui, sans-serif !default;
+$font-family-serif: "Lora", Georgia, serif !default;
 $font-family-monospace: "JetBrains Mono", monospace !default;
 
-$headings-font-family: $font-family-sans-serif !default;
-$body-font-family: $font-family-serif !default;
+$body-bg: #fbfbfc !default;
+$body-color: #0a0a0b !default;
+$link-color: #d4471a !default;
+$link-hover-color: #b03a14 !default;
+$headings-font-family: $font-family-serif !default;
+$headings-font-weight: 600 !default;
+$headings-color: #0a0a0b !default;
+$code-color: #7d4500 !default;
+$code-bg: #f1f1f3 !default;
+$border-color: rgba(10, 10, 11, 0.12) !default;
 
 /*-- scss:rules --*/
-
-// Theme Variables
 :root {
-  --nex-primary: #33d1b0;
-  --nex-secondary: #ffd166;
-  --nex-heading-color: #07161e;
-  --nex-body-size: 1.1rem;
-  --nex-callout-bg: #fdfdfd;
-  --nex-callout-border: #d9dee5;
-  --nex-sidebar-bg: #fcfcfc;
-  --nex-code-bg: #f8f9fa;
-  --nex-code-color: #4a6785;
-  --nex-bg: #f8f7f4;
-  --nex-text: #1a2b34;
+  --serif: "Lora", Georgia, serif;
+  --sans: "Inter", system-ui, sans-serif;
+  --mono: "JetBrains Mono", monospace;
+
+  --ink: #0a0a0b;
+  --ink2: #3d3d40;
+  --ink3: #6b6b6f;
+  --ink4: #a8a8ac;
+
+  --paper: #fbfbfc;
+  --paper2: #f1f1f3;
+  --paper3: #e6e6ea;
+  --paper-alpha: rgba(251, 251, 252, 0.92);
+
+  --accent: #d4471a;
+  --accent2: #b03a14;
+  --accent-tint: #fbe8de;
+
+  --rule: rgba(10, 10, 11, 0.10);
+  --rule2: rgba(10, 10, 11, 0.22);
+  --rule3: rgba(10, 10, 11, 0.40);
+
+  --info-bg: #eceef2;
+  --info-text: #3d3d40;
+  --warn-bg: #f5edd8;
+  --warn-text: #7d4500;
+  --danger-bg: #f5dcd8;
+  --danger-text: #8b1a14;
+  --success-bg: #e6ede0;
+  --success-text: #1f4a1a;
+
+  --selection: rgba(212, 71, 26, 0.20);
 }
 
-// Dark Mode Overrides
-.quarto-dark {
-  --nex-heading-color: #ffd166;
-  --nex-callout-bg: #0d2230;
-  --nex-callout-border: #2f5263;
-  --nex-sidebar-bg: #07161e;
-  --nex-code-bg: #041018;
-  --nex-code-color: #8cb4d4;
-  --nex-bg: #07161e;
-  --nex-text: #e8f4ff;
+.quarto-dark,
+[data-bs-theme="dark"] {
+  --ink: #f3efe8;
+  --ink2: #d7d0c6;
+  --ink3: #aba396;
+  --ink4: #7f786d;
 
-  // Force body background and color in dark mode
-  background-color: var(--nex-bg) !important;
-  color: var(--nex-text) !important;
+  --paper: #171412;
+  --paper2: #211d1a;
+  --paper3: #2d2723;
+  --paper-alpha: rgba(23, 20, 18, 0.92);
 
-  body {
-    background-color: var(--nex-bg) !important;
-    color: var(--nex-text) !important;
-  }
+  --accent: #ef7b52;
+  --accent2: #ff9b78;
+  --accent-tint: rgba(239, 123, 82, 0.14);
 
-  #quarto-content, #quarto-sidebar, .quarto-secondary-nav {
-    background-color: var(--nex-bg) !important;
-    color: var(--nex-text) !important;
-  }
+  --rule: rgba(243, 239, 232, 0.10);
+  --rule2: rgba(243, 239, 232, 0.20);
+  --rule3: rgba(243, 239, 232, 0.38);
 
-  // Link adjustment for dark mode
-  a {
-    color: #9ddcfb !important;
-  }
-  a:hover {
-    color: var(--nex-primary) !important;
-  }
+  --info-bg: #23201d;
+  --info-text: #d7d0c6;
+  --warn-bg: #332717;
+  --warn-text: #f0c27d;
+  --danger-bg: #331c19;
+  --danger-text: #f1a59c;
+  --success-bg: #1d271c;
+  --success-text: #b9d2b2;
+
+  --selection: rgba(239, 123, 82, 0.24);
+}
+
+html,
+body,
+#quarto-content,
+#quarto-sidebar,
+#quarto-margin-sidebar {
+  background: var(--paper) !important;
+  color: var(--ink) !important;
+}
+
+.quarto-secondary-nav {
+  background: var(--paper-alpha) !important;
 }
 
 body {
-  font-size: var(--nex-body-size);
-  line-height: 1.7;
-  background-color: var(--nex-bg);
-  color: var(--nex-text);
-  // Activate OpenType features: common ligatures, old-style figures,
-  // contextual alternates — the same features the PDF gets via fontspec.
-  font-feature-settings: "liga" 1, "clig" 1, "onum" 1, "calt" 1;
+  font-family: var(--serif);
+  color: var(--ink);
+  line-height: 1.75;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
 
-h1, h2, h3, h4, h5, h6 {
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--nex-heading-color);
-}
-
-.title {
-  font-family: $font-family-sans-serif;
-  font-weight: 700;
-  font-size: 3.2rem;
-  letter-spacing: -0.03em;
-  margin-top: 2rem;
-  margin-bottom: 0.5rem;
-  color: var(--nex-heading-color);
-}
-
-// Sidebar styling
-.sidebar {
-  background-color: var(--nex-sidebar-bg);
-}
-
-.sidebar nav[role="doc-toc"] {
-  border-left: 2px solid rgba($nex-mint, 0.3);
-  padding-left: 1rem;
-}
-
-// Enhanced Callout/Note blocks
-.note-lab, .note-studio, .note-exercise, .note-takeaways {
-  border: 1px solid var(--nex-callout-border);
-  border-left: 5px solid var(--nex-primary);
-  background: var(--nex-callout-bg);
-  border-radius: 12px;
-  padding: 1.2rem 1.2rem 1.2rem 3.5rem;
-  margin: 2rem 0;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.03);
-  position: relative;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.note-lab:hover, .note-studio:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(0,0,0,0.08);
-}
-
-// Measure control: cap the content column to ~65–75 characters in Lora.
-#quarto-content .page-columns .content {
-  max-width: 38em;
-}
-
-// Paragraph rhythm: subtle first-line indent for consecutive paragraphs,
-// matching the typographic tradition the book advocates.
-.content p + p {
-  text-indent: 1.5em;
-}
-// No indent after headings, lists, code, or blockquotes (first para rule).
-.content h1 + p,
-.content h2 + p,
-.content h3 + p,
-.content h4 + p,
-.content ul + p,
-.content ol + p,
-.content pre + p,
-.content blockquote + p,
-.content .sourceCode + p,
-.content table + p {
-  text-indent: 0;
-}
-
-// Code block styling
-pre.sourceCode {
-  background-color: var(--nex-code-bg) !important;
-  border: 1px solid var(--nex-callout-border) !important;
-  border-radius: 12px;
-  padding: 1.2rem;
-}
-
-// Inline code: muted blue-grey so it sits in prose without shouting
-code {
-  color: var(--nex-code-color);
-  font-size: 0.92em;
-  padding: 0.1em 0.3em;
-  border-radius: 4px;
-  background-color: var(--nex-code-bg);
-}
-
-.sourceCode code {
-  color: inherit;
-  font-size: inherit;
-  padding: 0;
-  border-radius: 0;
-  background-color: transparent;
-}
-
-// Table styling: booktabs-inspired hairlines
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1.5rem 0;
-  font-size: 0.95rem;
-
-  thead {
-    border-top: 2px solid var(--nex-text);
-    border-bottom: 1px solid var(--nex-text);
-  }
-  tbody {
-    border-bottom: 2px solid var(--nex-text);
-  }
-  th, td {
-    padding: 0.55rem 0.75rem;
-    text-align: left;
-    border: none;
-  }
-  th {
-    font-family: $font-family-sans-serif;
-    font-weight: 600;
-    font-size: 0.9rem;
-    letter-spacing: 0.02em;
-  }
-  tbody tr:nth-child(even) {
-    background-color: rgba(0,0,0,0.02);
-  }
-}
-
-// Navbar styling for both modes
-.navbar {
-  border-bottom: 1px solid var(--nex-callout-border);
-}
-
-// Custom Scrollbar
-::-webkit-scrollbar {
-  width: 8px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba($nex-mint, 0.2);
-  border-radius: 10px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--nex-primary);
+::selection {
+  background: var(--selection);
+  color: var(--ink);
 }

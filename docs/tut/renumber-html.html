@@ -1,4 +1,24 @@
 <script>
+(function () {
+  // Workaround: Quarto sometimes emits data-mode="light" on the dark
+  // bootstrap stylesheet when both themes share an SCSS include, which
+  // breaks the color-scheme toggle. Re-derive data-mode from the href
+  // and reconcile the body class with the active stylesheet.
+  document
+    .querySelectorAll('link.quarto-color-scheme#quarto-bootstrap')
+    .forEach(function (el) {
+      if (el.classList.contains('quarto-color-scheme-extra')) return;
+      var isDark = /bootstrap-dark/.test(el.getAttribute('href') || '');
+      el.setAttribute('data-mode', isDark ? 'dark' : 'light');
+    });
+  var altActive = document.querySelector(
+    'link#quarto-bootstrap.quarto-color-scheme.quarto-color-alternate[rel="stylesheet"]'
+  );
+  if (altActive) {
+    document.body.classList.add('quarto-dark');
+    document.body.classList.remove('quarto-light');
+  }
+})();
 document.addEventListener("DOMContentLoaded", function () {
   function isNumeric(text) {
     return /^\d+$/.test(text.trim());
