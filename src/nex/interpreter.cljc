@@ -3844,6 +3844,9 @@
     (when (and class-def (lookup-class-constant ctx class-def field))
       (throw (ex-info (str "Cannot assign to constant: " field)
                       {:field field :constant? true})))
+    (when (and field-def (:once? field-def) (not (:in-constructor? ctx)))
+      (throw (ex-info (str "Cannot assign to once field outside constructor: " field)
+                      {:field field :once? true})))
     (when-not field-def
       (throw (ex-info (str "Undefined field: " field)
                       {:field field :class-name class-name})))
@@ -3880,7 +3883,11 @@
     (when-let [class-def (lookup-class-if-exists ctx current-class-name)]
       (when (lookup-class-constant ctx class-def target)
         (throw (ex-info (str "Cannot assign to constant: " target)
-                        {:target target :constant? true})))))
+                        {:target target :constant? true})))
+      (when-let [field-def (lookup-field-with-inheritance ctx class-def target current-class-name)]
+        (when (and (:once? field-def) (not (:in-constructor? ctx)))
+          (throw (ex-info (str "Cannot assign to once field outside constructor: " target)
+                          {:target target :once? true}))))))
   (let [val (eval-node ctx value)]
     ;; Assignment (without let) ONLY updates existing variables
     ;; It should fail if the variable doesn't exist
@@ -4392,6 +4399,7 @@
                                                (assoc :current-object temp-obj)
                                                (assoc :current-class-name source-class-name)
                                                (assoc :current-method-name constructor)
+                                               (assoc :in-constructor? true)
                                                (update :debug-stack (fnil conj [])
                                                        {:class source-class-name
                                                         :method (or constructor "make")

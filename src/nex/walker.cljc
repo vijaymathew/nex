@@ -472,7 +472,9 @@
 
    :fieldDecl
    (fn [[_ & tokens]]
-     (let [name (first tokens)
+     (let [once? (= "once" (token-text (first tokens)))
+           tokens (if once? (rest tokens) tokens)
+           name (first tokens)
            has-colon? (some #(= ":" %) tokens)
            eq-idx (first (keep-indexed (fn [i v] (when (= "=" v) i)) tokens))
            note-clause (first (filter #(and (sequential? %)
@@ -484,6 +486,7 @@
            {:type :field
             :name (token-text name)
             :field-type (transform-node type-node)
+            :once? once?
             :constant? (boolean value-node)
             :value (when value-node (transform-node value-node))
             :note (when note-clause (transform-node note-clause))})
@@ -491,6 +494,7 @@
            {:type :field
             :name (token-text name)
             :field-type nil
+            :once? false
             :constant? true
             :value (transform-node value-node)
             :note (when note-clause (transform-node note-clause))}))))

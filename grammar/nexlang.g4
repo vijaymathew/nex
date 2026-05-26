@@ -73,7 +73,7 @@ featureMember
     ;
 
 fieldDecl
-    : IDENTIFIER ':' type (EQUAL expression)? noteClause?
+    : ONCE? IDENTIFIER ':' type (EQUAL expression)? noteClause?
     | IDENTIFIER EQUAL expression noteClause?
     ;
 
@@ -414,6 +414,7 @@ setLiteral
 CLASS        : 'class';
 SEALED       : 'sealed';
 DEFERRED     : 'deferred';
+ONCE         : 'once';
 MATCH        : 'match';
 DECLARE      : 'declare';
 FUNCTION     : 'function';

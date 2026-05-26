@@ -3383,7 +3383,11 @@
   (when-let [current-class (env-lookup-var env "__current_class__")]
     (when (lookup-class-constant env current-class target)
       (throw (ex-info (str "Cannot assign to constant: " target)
-                      {:error (type-error (str "Cannot assign to constant: " target))}))))
+                      {:error (type-error (str "Cannot assign to constant: " target))})))
+    (when-let [field-member (lookup-class-field-member env current-class target current-class)]
+      (when (and (:once? field-member) (not (env-lookup-var env "__in_constructor__")))
+        (throw (ex-info (str "Cannot assign to once field outside constructor: " target)
+                        {:error (type-error (str "'" target "' is a once field and can only be assigned in a constructor"))})))))
   (let [var-type (env-lookup-var env target)
         val-type (if var-type
                    (check-expression-with-expected env value var-type)
@@ -3694,6 +3698,10 @@
                     (throw (ex-info (str "Cannot assign to constant: " field-name)
                                     {:error (type-error (str "Cannot assign to constant: " field-name))})))
                 field-member (lookup-class-field-member env class-name field-name current-class)
+                _ (when (and (:once? field-member)
+                             (not (env-lookup-var env "__in_constructor__")))
+                    (throw (ex-info (str "Cannot assign to once field outside constructor: " field-name)
+                                    {:error (type-error (str "'" field-name "' is a once field and can only be assigned in a constructor"))})))
                 field-type (:field-type field-member)
                 val-type (check-expression env (:value stmt))]
             (when-not field-type
@@ -3910,6 +3918,8 @@
   (let [ctor-env (make-type-env env)]
     ;; Track current class for this/super resolution
     (env-add-var ctor-env "__current_class__" class-name)
+    ;; Mark constructor context so once-field writes are permitted
+    (env-add-var ctor-env "__in_constructor__" true)
 
     ;; Validate parameter type annotations (generic constraints)
     (doseq [param params]

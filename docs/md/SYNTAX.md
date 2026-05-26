@@ -426,6 +426,42 @@ class Dog
 end
 ```
 
+## Once Fields
+
+A field declared with `once` can be set in a constructor but never reassigned afterward.
+The typechecker enforces this at compile time; the interpreter enforces it at runtime.
+
+```nex
+class Point
+  feature
+    once x: Integer
+    once y: Integer
+  create
+    make(px: Integer, py: Integer) do
+      x := px
+      y := py
+    end
+end
+
+let p: Point := create Point.make(3, 7)
+-- p.x and p.y are now permanently 3 and 7
+```
+
+Attempting to assign a `once` field outside a constructor is a compile-time error:
+
+```nex
+class Box
+  feature
+    once value: Integer
+  create
+    make(v: Integer) do value := v end
+  feature
+    overwrite(v: Integer) do
+      value := v     -- error: 'value' is a once field
+    end
+end
+```
+
 ## Design by Contract
 
 Tell Nex what must be true before, after, and always:

@@ -59,6 +59,38 @@ print(n.hash())
 
 ## Class Modifiers
 
+### `once`
+
+A field declared with `once` can be assigned in a constructor but never reassigned afterward. The typechecker enforces this at compile time.
+
+```nex
+class Point
+  feature
+    once x: Integer
+    once y: Integer
+  create
+    make(px: Integer, py: Integer) do
+      x := px
+      y := py
+    end
+end
+```
+
+Assigning a `once` field outside a constructor is a compile-time error:
+
+```nex
+class Box
+  feature
+    once value: Integer
+  create
+    make(v: Integer) do value := v end
+  feature
+    overwrite(v: Integer) do
+      value := v     -- error: 'value' is a once field
+    end
+end
+```
+
 ### `deferred`
 
 A `deferred` class cannot be instantiated directly. It defines an interface — methods that subclasses are expected to override.
