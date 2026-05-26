@@ -478,6 +478,55 @@ case direction of
 end
 ```
 
+## Sealed Classes
+
+A `sealed` modifier closes a class hierarchy. Only classes defined together with the sealed class can extend it. The typechecker knows the complete set of subclasses and can verify that every variant is handled.
+
+A sealed class is always `deferred` — it cannot be instantiated directly:
+
+```nex
+sealed deferred class Result
+end
+
+class Ok
+  inherit Result
+  feature value: Integer
+  create make(v: Integer) do value := v end
+end
+
+class Err
+  inherit Result
+  feature msg: String
+  create make(m: String) do msg := m end
+end
+```
+
+## Match Statement
+
+`match` dispatches on the runtime type of an expression. Used with a sealed parent class it becomes an exhaustive type switch — every variant must be handled or the typechecker rejects the program:
+
+```nex
+match r of
+  when Ok as ok then
+    print(ok.value)
+  when Err as err then
+    print(err.msg)
+end
+```
+
+- Each `when ClassName as var then` clause binds `var` to the matched object, typed as `ClassName`.
+- The typechecker verifies all sealed subclasses are covered. A missing variant is a compile-time error.
+- An `else` branch covers remaining cases and suppresses the exhaustiveness check:
+
+```nex
+match r of
+  when Ok as ok then
+    print(ok.value)
+  else
+    print("not ok")
+end
+```
+
 ## Scoped Blocks
 
 ```nex

@@ -56,3 +56,46 @@ let n := 42
 print(n.compare(10))               -- positive
 print(n.hash())
 ```
+
+## Class Modifiers
+
+### `deferred`
+
+A `deferred` class cannot be instantiated directly. It defines an interface — methods that subclasses are expected to override.
+
+```nex
+deferred class Shape
+  feature
+    area(): Real do end        -- overridden by each subclass
+end
+```
+
+### `sealed deferred`
+
+A `sealed deferred` class is both abstract and closed: only classes defined alongside it can inherit from it. The typechecker tracks all known subclasses and verifies exhaustive handling in `match` statements.
+
+```nex
+sealed deferred class Result
+end
+
+class Ok
+  inherit Result
+  feature value: Integer
+  create make(v: Integer) do value := v end
+end
+
+class Err
+  inherit Result
+  feature msg: String
+  create make(m: String) do msg := m end
+end
+```
+
+A `match` on a sealed type must cover every variant or supply an `else` branch — a missing variant is a compile-time error:
+
+```nex
+match r of
+  when Ok as ok then print(ok.value)
+  when Err as err then print(err.msg)
+end
+```
