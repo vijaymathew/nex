@@ -3595,6 +3595,48 @@
       (doseq [stmt else]
         (check-statement else-env stmt)))))
 
+(defn- find-sealed-subclasses
+  "Return the names of all classes in env that directly inherit from sealed-class-name."
+  [env sealed-class-name]
+  (->> (visible-class-defs env)
+       (filter (fn [class-def]
+                 (some #(= (:parent %) sealed-class-name) (:parents class-def))))
+       (map :name)
+       set))
+
+(defn check-match
+  "Type-check a match statement over a sealed type."
+  [env {:keys [expr clauses else]}]
+  (let [expr-type (check-expression env expr)
+        base-type-name (if (map? expr-type) (:base-type expr-type) expr-type)
+        class-def (env-lookup-class env base-type-name)
+        sealed? (and class-def (:sealed? class-def))]
+    (doseq [{:keys [class-name var-name body]} clauses]
+      (when-not (or (= class-name base-type-name)
+                    (class-subtype? env class-name base-type-name))
+        (throw (ex-info (str "Match clause type " class-name
+                             " is not a subclass of " base-type-name)
+                        {:error (type-error
+                                 (str class-name " is not a subclass of "
+                                      base-type-name))})))
+      (let [clause-env (make-type-env env)]
+        (env-add-var clause-env var-name class-name)
+        (env-mark-non-nil clause-env var-name)
+        (doseq [s body]
+          (check-statement clause-env s))))
+    (when else
+      (doseq [s else] (check-statement env s)))
+    (when (and sealed? (not else))
+      (let [covered (set (map :class-name clauses))
+            known (find-sealed-subclasses env base-type-name)
+            uncovered (set/difference known covered)]
+        (when (seq uncovered)
+          (throw (ex-info (str "Non-exhaustive match on sealed type " base-type-name)
+                          {:error (type-error
+                                   (str "Match on sealed type " base-type-name
+                                        " does not cover all variants. Missing: "
+                                        (str/join ", " (sort uncovered))))})))))))
+
 (defn check-statement
   "Check a statement"
   [env stmt]
@@ -3633,6 +3675,7 @@
                     (check-statement env (:body clause)))
                   (when-let [else-stmt (:else stmt)]
                     (check-statement env else-stmt)))
+          :match (check-match env stmt)
           :raise (check-expression env (:value stmt))
           :retry nil
           :member-assign
@@ -3732,6 +3775,11 @@
                            (result-definitely-assigned-in-body? else-body assigned?)
                            assigned?)]
             (every? true? (concat clause-outs [else-out])))
+    :match (let [clause-outs (map #(result-definitely-assigned-in-body? (:body %) assigned?) (:clauses stmt))
+                 else-out (if-let [else-body (:else stmt)]
+                            (result-definitely-assigned-in-body? else-body assigned?)
+                            assigned?)]
+             (every? true? (concat clause-outs [else-out])))
     assigned?))
 
 (defn- result-definitely-assigned-in-body?
@@ -3759,6 +3807,11 @@
                            (body-may-complete-normally? else-body)
                            true)]
             (some true? (concat clause-outs [else-out])))
+    :match (let [clause-outs (map #(body-may-complete-normally? (:body %)) (:clauses stmt))
+                 else-out (if-let [else-body (:else stmt)]
+                            (body-may-complete-normally? else-body)
+                            true)]
+             (some true? (concat clause-outs [else-out])))
     :scoped-block (or (body-may-complete-normally? (:body stmt))
                       (when-let [rescue-body (:rescue stmt)]
                         (body-may-complete-normally? rescue-body)))
@@ -4073,6 +4126,9 @@
             :case (reduce set/union #{}
                           (concat (map #(collect-assigned (:body %)) (:clauses stmt))
                                   (when-let [e (:else stmt)] [(collect-assigned e)])))
+            :match (reduce set/union #{}
+                           (concat (mapcat #(map collect-assigned (:body %)) (:clauses stmt))
+                                   (map collect-assigned (:else stmt))))
             #{}))]
     (when (seq required-fields)
       (when (empty? constructors)

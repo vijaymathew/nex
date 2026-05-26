@@ -1298,7 +1298,7 @@
 ;;
 
 (def ^:private debuggable-node-types
-  #{:call :member-assign :assign :let :if :case :loop :raise :retry :scoped-block})
+  #{:call :member-assign :assign :let :if :case :match :loop :raise :retry :scoped-block})
 
 (defn debuggable-node?
   "Whether this node should trigger debugger pause checks."
@@ -4012,6 +4012,26 @@
                         {:value val})))
       matched)))
 
+(defmethod eval-node :match
+  [ctx {:keys [expr clauses else]}]
+  (maybe-debug-pause ctx {:type :match :expr expr :clauses clauses :else else})
+  (let [val (eval-node ctx expr)
+        val-class (when (nex-object? val) (:class-name val))
+        matched (some (fn [{:keys [class-name var-name body]}]
+                        (when (and val-class
+                                   (or (= val-class class-name)
+                                       (is-parent? ctx val-class class-name)))
+                          (let [match-env (make-env (:current-env ctx))]
+                            (env-define match-env var-name val)
+                            [:matched (last (map #(eval-node (assoc ctx :current-env match-env) %) body))])))
+                      clauses)]
+    (if matched
+      (second matched)
+      (if else
+        (last (map #(eval-node ctx %) else))
+        (throw (ex-info "No matching clause in match"
+                        {:value val}))))))
+
 (defmethod eval-node :select
   [ctx {:keys [clauses else timeout] :as node}]
   (let [prepared (mapv #(prepare-select-clause ctx %) clauses)
@@ -5066,6 +5086,26 @@
                                          (->promise (eval-node-async ctx (:body (first clauses))))
                                          (match-clauses (rest clauses)))))))]
                     (match-clauses (:clauses node)))))
+
+         (= node-type :match)
+         (.then (->promise (eval-node-async ctx (:expr node)))
+                (fn [val]
+                  (let [val-class (when (nex-object? val) (:class-name val))]
+                    (letfn [(try-clauses [clauses]
+                              (if (empty? clauses)
+                                (if-let [else-body (:else node)]
+                                  (eval-body-async ctx else-body)
+                                  (js/Promise.reject
+                                   (ex-info "No matching clause in match" {:value val})))
+                                (let [clause (first clauses)]
+                                  (if (and val-class
+                                           (or (= val-class (:class-name clause))
+                                               (is-parent? ctx val-class (:class-name clause))))
+                                    (let [match-env (make-env (:current-env ctx))]
+                                      (env-define match-env (:var-name clause) val)
+                                      (eval-body-async (assoc ctx :current-env match-env) (:body clause)))
+                                    (try-clauses (rest clauses))))))]
+                      (try-clauses (:clauses node))))))
 
          (= node-type :select)
          (.then (promise-all (map #(prepare-select-clause-async ctx %) (:clauses node)))

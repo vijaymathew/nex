@@ -19,7 +19,7 @@ internStmt
     ;
 
 classDecl
-    : DEFERRED? CLASS IDENTIFIER genericParams?
+    : SEALED? DEFERRED? CLASS IDENTIFIER genericParams?
       noteClause?
       inheritClause?
       classBody
@@ -156,6 +156,7 @@ statement
     | raiseStatement
     | retryStatement
     | caseStatement
+    | matchStatement
     | selectStatement
     | expression
     ;
@@ -166,6 +167,14 @@ caseStatement
 
 caseClause
     : literal (',' literal)* THEN statement
+    ;
+
+matchStatement
+    : MATCH expression OF matchClause+ (ELSE block)? END
+    ;
+
+matchClause
+    : WHEN IDENTIFIER typeArgs? AS IDENTIFIER THEN block
     ;
 
 selectStatement
@@ -403,7 +412,9 @@ setLiteral
  */
 
 CLASS        : 'class';
+SEALED       : 'sealed';
 DEFERRED     : 'deferred';
+MATCH        : 'match';
 DECLARE      : 'declare';
 FUNCTION     : 'function';
 FN           : 'fn';

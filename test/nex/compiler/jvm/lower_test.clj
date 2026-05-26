@@ -563,6 +563,111 @@ end")
       (is (= :set-local (-> loop-ir :body (nth 3) :op)))
       (is (= :assert (:op (last (:body loop-ir))))))))
 
+(deftest lower-match-statement-lowers-to-block-with-if-chain-test
+  (testing "match statement lowers to block: set-local for temp + if-stmt chain"
+    (let [program (p/ast "match r of
+  when Ok as ok then
+    print(1)
+  when Err as err then
+    print(2)
+end")
+          env (lower/make-lowering-env {:top-level? true
+                                        :var-types {"r" "Result"}})
+          match-stmt (first (:statements program))
+          [_ block-ir] (lower/lower-statement env match-stmt)]
+      (is (= :block (:op block-ir)))
+      (is (= :set-local (-> block-ir :body first :op)))
+      (is (= :if-stmt (-> block-ir :body second :op))))))
+
+(deftest lower-match-convert-test-uses-clause-class-and-var-test
+  (testing "match clause lowers to :convert test with correct target-type and binding name"
+    (let [program (p/ast "match r of
+  when Ok as ok then
+    print(1)
+  when Err as err then
+    print(2)
+end")
+          env (lower/make-lowering-env {:top-level? true
+                                        :var-types {"r" "Result"}})
+          match-stmt (first (:statements program))
+          [_ block-ir] (lower/lower-statement env match-stmt)
+          if-stmt (second (:body block-ir))
+          convert-test (:test if-stmt)]
+      (is (= :convert (:op convert-test)))
+      (is (= "Ok" (:target-type convert-test)))
+      (is (= "ok" (-> convert-test :binding :name)))
+      (is (= :local (-> convert-test :binding :kind))))))
+
+(deftest lower-match-second-clause-nested-in-else-test
+  (testing "second match clause becomes a nested if-stmt in the else of the first"
+    (let [program (p/ast "match r of
+  when Ok as ok then
+    print(1)
+  when Err as err then
+    print(2)
+end")
+          env (lower/make-lowering-env {:top-level? true
+                                        :var-types {"r" "Result"}})
+          match-stmt (first (:statements program))
+          [_ block-ir] (lower/lower-statement env match-stmt)
+          outer-if (second (:body block-ir))
+          nested-if (first (:else outer-if))]
+      (is (= :if-stmt (:op nested-if)))
+      (is (= :convert (:op (:test nested-if))))
+      (is (= "Err" (:target-type (:test nested-if))))
+      (is (= "err" (-> nested-if :test :binding :name))))))
+
+(deftest lower-match-no-else-synthesizes-raise-test
+  (testing "match without else branch synthesizes a raise in the innermost else"
+    (let [program (p/ast "match r of
+  when Ok as ok then
+    print(1)
+  when Err as err then
+    print(2)
+end")
+          env (lower/make-lowering-env {:top-level? true
+                                        :var-types {"r" "Result"}})
+          match-stmt (first (:statements program))
+          [_ block-ir] (lower/lower-statement env match-stmt)
+          outer-if (second (:body block-ir))
+          inner-if (first (:else outer-if))
+          innermost-else (:else inner-if)]
+      (is (= 1 (count innermost-else)))
+      (is (= :raise (:op (first innermost-else)))))))
+
+(deftest lower-match-with-else-branch-lowers-else-body-test
+  (testing "match with else branch lowers the else body instead of synthesizing a raise"
+    (let [program (p/ast "match r of
+  when Ok as ok then
+    print(1)
+  else
+    print(0)
+end")
+          env (lower/make-lowering-env {:top-level? true
+                                        :var-types {"r" "Result"}})
+          match-stmt (first (:statements program))
+          [_ block-ir] (lower/lower-statement env match-stmt)
+          outer-if (second (:body block-ir))
+          else-body (:else outer-if)]
+      (is (seq else-body))
+      (is (not= :raise (:op (first else-body)))))))
+
+(deftest lower-match-temp-var-is-local-slot-test
+  (testing "match evaluates its expression into a fresh local slot"
+    (let [program (p/ast "match r of
+  when Ok as ok then
+    print(1)
+end")
+          env (lower/make-lowering-env {:top-level? true
+                                        :var-types {"r" "Result"}})
+          match-stmt (first (:statements program))
+          [_ block-ir] (lower/lower-statement env match-stmt)
+          tmp-init (first (:body block-ir))]
+      (is (= :set-local (:op tmp-init)))
+      (is (integer? (:slot tmp-init)))
+      ;; tmp slot is 1 (the first allocated slot in a fresh env)
+      (is (= 1 (:slot tmp-init))))))
+
 (deftest lower-convert-to-generic-parameter-uses-runtime-type-token-test
   (testing "compiled lowering resolves bare generic convert targets through hidden runtime type fields"
     (let [program (p/ast "class Box[T]
