@@ -1404,4 +1404,108 @@ end"
       (is (str/includes? binary-code "__nexBinaryFileRead("))
       (is (str/includes? binary-code "__nexBinaryFileWrite("))
       (is (str/includes? binary-code "__nexBinaryFilePosition("))
-      (is (str/includes? binary-code "__nexBinaryFileSeek(")))))
+      (is (str/includes? binary-code "__nexBinaryFileSeek("))))
+
+(def ^:private result-hierarchy-js
+  "sealed deferred class Result
+end
+
+class Ok
+  inherit Result
+  feature value: Integer
+  create make(v: Integer) do value := v end
+end
+
+class Err
+  inherit Result
+  feature msg: String
+  create make(m: String) do msg := m end
+end")
+
+(deftest match-instanceof-chain-generation-test
+  (testing "match statement emits instanceof chain for each clause"
+    (let [nex-code (str result-hierarchy-js "
+class Demo
+  feature
+    run(r: Result) do
+      match r of
+        when Ok as ok then
+          print(ok.value)
+        when Err as err then
+          print(err.msg)
+      end
+    end
+end")
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "instanceof Ok"))
+      (is (str/includes? js-code "instanceof Err"))
+      (is (str/includes? js-code "else if")))))
+
+(deftest match-clause-var-bound-to-temp-test
+  (testing "each match clause binds the clause variable to the temp expression var"
+    (let [nex-code (str result-hierarchy-js "
+class Demo
+  feature
+    run(r: Result) do
+      match r of
+        when Ok as ok then
+          print(ok.value)
+        when Err as err then
+          print(err.msg)
+      end
+    end
+end")
+          js-code (js/translate nex-code)]
+      (is (re-find #"const ok = __match_" js-code))
+      (is (re-find #"const err = __match_" js-code)))))
+
+(deftest match-temp-var-holds-expression-test
+  (testing "match evaluates its expression into a temp const before the instanceof checks"
+    (let [nex-code (str result-hierarchy-js "
+class Demo
+  feature
+    run(r: Result) do
+      match r of
+        when Ok as ok then
+          print(ok.value)
+      end
+    end
+end")
+          js-code (js/translate nex-code)]
+      (is (re-find #"const __match_.+ = r;" js-code)))))
+
+(deftest match-no-else-emits-throw-test
+  (testing "match without else branch emits a throw for the unmatched case"
+    (let [nex-code (str result-hierarchy-js "
+class Demo
+  feature
+    run(r: Result) do
+      match r of
+        when Ok as ok then
+          print(ok.value)
+        when Err as err then
+          print(err.msg)
+      end
+    end
+end")
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "throw \"No matching clause in match\"")))))
+
+(deftest match-with-else-branch-no-throw-test
+  (testing "match with else branch emits the else body and no throw"
+    (let [nex-code (str result-hierarchy-js "
+class Demo
+  feature
+    run(r: Result) do
+      match r of
+        when Ok as ok then
+          print(ok.value)
+        else
+          print(\"fallback\")
+      end
+    end
+end")
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "else {"))
+      (is (str/includes? js-code "\"fallback\""))
+      (is (not (str/includes? js-code "throw \"No matching clause in match\"")))))))

@@ -1,7 +1,10 @@
 (ns nex.inheritance-runtime-test
   (:require [clojure.test :refer [deftest is testing run-tests]]
+            [clojure.string :as str]
             [nex.parser :as p]
-            [nex.interpreter :as interp]))
+            [nex.interpreter :as interp]
+            [nex.compiler.jvm.repl :as compiled-repl]
+            [nex.repl :as repl]))
 
 (deftest self-inheritance-registration-fails-test
   (testing "register-class rejects self-inheritance instead of recursing later"
@@ -645,3 +648,106 @@ end"
                                          :args [{:type :integer :value 20}]})]
         (is (= "B" (:class-name b-obj)))
         (is (= 20 (get-in b-obj [:fields :x])))))))
+
+;; ─── Compiled backend ────────────────────────────────────────────────────────
+
+(defmacro with-compiled-repl [ctx-sym & body]
+  `(binding [repl/*type-checking-enabled* (atom true)
+             repl/*repl-var-types* (atom {})
+             repl/*repl-backend* (atom :compiled)
+             repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+     (let [~ctx-sym (repl/init-repl-context)]
+       ~@body)))
+
+(deftest compiled-three-level-chain-dispatch-test
+  (testing "compiled backend dispatches a grandparent method through a two-level inheritance chain"
+    (with-compiled-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "class A
+  feature
+    greet(): String do
+      result := \"hello from A\"
+    end
+end"))
+      (with-out-str
+        (repl/eval-code ctx "class B inherit A end"))
+      (with-out-str
+        (repl/eval-code ctx "class C inherit B end"))
+      (with-out-str
+        (repl/eval-code ctx "let c := create C"))
+      (let [output (with-out-str (repl/eval-code ctx "c.greet"))]
+        (is (not (str/includes? output "Error:")) output)
+        (is (str/includes? output "hello from A"))))))
+
+(deftest compiled-multiple-inheritance-dispatch-test
+  (testing "compiled backend dispatches methods from both parents of a multiply-inheriting class"
+    (with-compiled-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "class Flyable
+  feature
+    fly(): String do result := \"flying\" end
+end"))
+      (with-out-str
+        (repl/eval-code ctx "class Swimmable
+  feature
+    swim(): String do result := \"swimming\" end
+end"))
+      (with-out-str
+        (repl/eval-code ctx "class Duck inherit Flyable, Swimmable end"))
+      (with-out-str
+        (repl/eval-code ctx "let d := create Duck"))
+      (let [fly-out  (with-out-str (repl/eval-code ctx "d.fly"))
+            swim-out (with-out-str (repl/eval-code ctx "d.swim"))]
+        (is (str/includes? fly-out  "flying")  fly-out)
+        (is (str/includes? swim-out "swimming") swim-out)))))
+
+(deftest compiled-inherited-precondition-enforced-test
+  (testing "compiled backend enforces preconditions inherited from a parent class"
+    (with-compiled-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "class Counter
+  feature
+    value: Integer
+  create make() do value := 0 end
+end"))
+      (with-out-str
+        (repl/eval-code ctx "class Bounded_Counter inherit Counter
+  feature
+    increment(by: Integer)
+      require
+        positive_step: by > 0
+      do
+        value := value + by
+      end
+end"))
+      (with-out-str
+        (repl/eval-code ctx "let bc := create Bounded_Counter.make"))
+      (let [ok-out  (with-out-str (repl/eval-code ctx "bc.increment(1)"))
+            bad-out (with-out-str (repl/eval-code ctx "bc.increment(-1)"))]
+        (is (not (str/includes? ok-out  "Error:")) ok-out)
+        (is (str/includes? bad-out "Precondition violation") bad-out)))))
+
+(deftest compiled-super-constructor-initialises-parent-fields-test
+  (testing "compiled super constructor call populates fields defined on the parent"
+    (with-compiled-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "class Shape
+  feature
+    colour: String
+  create make(c: String) do colour := c end
+end"))
+      (with-out-str
+        (repl/eval-code ctx "class Circle inherit Shape
+  feature
+    radius: Real
+  create make(c: String, r: Real) do
+    super.make(c)
+    radius := r
+  end
+end"))
+      (with-out-str
+        (repl/eval-code ctx "let ci := create Circle.make(\"blue\", 3.0)"))
+      (let [colour-out (with-out-str (repl/eval-code ctx "ci.colour"))
+            radius-out (with-out-str (repl/eval-code ctx "ci.radius"))]
+        (is (str/includes? colour-out "blue")  colour-out)
+        (is (str/includes? radius-out "3.0")   radius-out)))))
