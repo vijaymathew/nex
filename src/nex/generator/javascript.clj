@@ -481,6 +481,9 @@
                 :case (concat (mapcat (fn [clause] (collect-from-stmt (:body clause))) (:clauses stmt))
                               (when-let [else-stmt (:else stmt)]
                                 (collect-from-stmt else-stmt)))
+                :match (concat (mapcat (fn [clause] (mapcat collect-from-stmt (:body clause))) (:clauses stmt))
+                               (when-let [else-body (:else stmt)]
+                                 (mapcat collect-from-stmt else-body)))
                 [])))]
     (let [types (remove #(or (nil? %) (= % "Void") (= % "Any"))
                         (mapcat collect-from-stmt stmts))]
@@ -513,6 +516,11 @@
                                               (extract-typed-locals [(:body clause)]))
                                             (:clauses stmt)))
                       (extract-typed-locals (when-let [else-stmt (:else stmt)] [else-stmt])))
+         :match (merge acc
+                       (reduce merge {} (map (fn [clause]
+                                               (extract-typed-locals (:body clause)))
+                                             (:clauses stmt)))
+                       (extract-typed-locals (or (:else stmt) [])))
          acc)))
    {}
    (or stmts [])))
@@ -1238,6 +1246,13 @@
                    (:clauses stmt))
            (when-let [else-stmt (:else stmt)]
              (collect-convert-bindings-stmt else-stmt)))
+    :match (concat
+            (collect-convert-bindings-expr (:expr stmt))
+            (mapcat (fn [{:keys [body]}]
+                      (collect-convert-bindings-block body))
+                    (:clauses stmt))
+            (when-let [else-body (:else stmt)]
+              (collect-convert-bindings-block else-body)))
     ;; If guard convert variables are scoped to the if-construct itself.
     :if (concat
          (collect-convert-bindings-block (:then stmt))
@@ -1487,6 +1502,32 @@
                body-stmts
                [(indent level "}")]))))))
 
+(defn generate-match
+  "Generate JavaScript code for match statement using instanceof chains."
+  [level {:keys [expr clauses else]} var-names]
+  (let [temp-name (str "__match_" (gensym) "__")
+        expr-code (generate-expression expr)
+        init (indent level (str "const " temp-name " = " expr-code ";"))
+        clause-strs (map-indexed
+                     (fn [i {:keys [class-name var-name body]}]
+                       (let [prefix (if (zero? i) "if" "else if")
+                             body-var-names (conj var-names var-name)
+                             body-code (str/join "\n" (map #(generate-statement (+ level 1) % body-var-names) body))]
+                         (str/join "\n"
+                                   [(indent level (str prefix " (" temp-name " instanceof " class-name ") {"))
+                                    (indent (+ level 1) (str "const " var-name " = " temp-name ";"))
+                                    body-code
+                                    (indent level "}")])))
+                     clauses)
+        tail (if else
+               (let [body-code (str/join "\n" (map #(generate-statement (+ level 1) % var-names) else))]
+                 (str/join "\n" [(indent level "else {") body-code (indent level "}")]))
+               (str/join "\n"
+                         [(indent level "else {")
+                          (indent (+ level 1) "throw \"No matching clause in match\";")
+                          (indent level "}")]))]
+    (str/join "\n" (concat [init] clause-strs [tail]))))
+
 (defn generate-case
   "Generate JavaScript code for case statement as switch"
   [level {:keys [expr clauses else]} var-names]
@@ -1624,6 +1665,7 @@
      :let (indent level (generate-let stmt var-names))
      :if (generate-if level stmt var-names)
      :case (generate-case level stmt var-names)
+     :match (generate-match level stmt var-names)
      :select (generate-select level stmt var-names)
      :scoped-block (generate-scoped-block level stmt var-names)
      :loop (generate-loop level stmt)

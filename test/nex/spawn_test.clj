@@ -1,9 +1,11 @@
 (ns nex.spawn-test
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [nex.interpreter :as interp]
             [nex.parser :as p]
             [nex.repl :as repl]
-            [nex.typechecker :as tc]))
+            [nex.typechecker :as tc]
+            [nex.compiler.jvm.repl :as compiled-repl]))
 
 (defn- execute-method-output [code]
   (let [ast (p/ast code)
@@ -270,3 +272,71 @@ end"
 end"
           output (execute-method-output code)]
       (is (= ["42"] output)))))
+
+;; ─── Compiled backend ────────────────────────────────────────────────────────
+
+(defmacro with-compiled-repl [ctx-sym & body]
+  `(binding [repl/*type-checking-enabled* (atom true)
+             repl/*repl-var-types* (atom {})
+             repl/*repl-backend* (atom :compiled)
+             repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+     (let [~ctx-sym (repl/init-repl-context)]
+       ~@body)))
+
+(deftest compiled-spawn-await-all-multiple-tasks-test
+  (testing "compiled backend await_all collects results from multiple tasks"
+    (with-compiled-repl ctx
+      (let [output (with-out-str
+                     (repl/eval-code ctx
+                       "let t1: Task[Integer] := spawn do result := 1 end
+let t2: Task[Integer] := spawn do result := 2 end
+let t3: Task[Integer] := spawn do result := 3 end
+let results: Array[Task[Integer]] := [t1, t2, t3]
+let all := await_all(results)
+print(all.length)"))]
+        (is (not (str/includes? output "Error:")) output)
+        (is (str/includes? output "3") output)))))
+
+(deftest compiled-task-exception-propagates-on-await-test
+  (testing "compiled backend propagates an exception from a failed task on await"
+    (with-compiled-repl ctx
+      (let [output (with-out-str
+                     (repl/eval-code ctx
+                       "let t: Task[Integer] := spawn do raise \"task boom\" end
+do
+  t.await
+rescue
+  print(\"caught\")
+end"))]
+        (is (not (str/includes? output "Error:")) output)
+        (is (str/includes? output "caught") output)))))
+
+(deftest compiled-channel-send-receive-blocking-test
+  (testing "compiled backend blocking send and receive transfer a value across tasks"
+    (with-compiled-repl ctx
+      (let [output (with-out-str
+                     (repl/eval-code ctx
+                       "let ch: Channel[Integer] := create Channel[Integer].with_capacity(0)
+let sender: Task := spawn do ch.send(99) end
+let value: Integer := ch.receive
+print(value)
+sender.await"))]
+        (is (not (str/includes? output "Error:")) output)
+        (is (str/includes? output "99") output)))))
+
+(deftest compiled-select-dispatches-ready-channel-test
+  (testing "compiled backend select statement fires the clause whose channel is ready"
+    (with-compiled-repl ctx
+      (let [output (with-out-str
+                     (repl/eval-code ctx
+                       "let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+ch.try_send(7)
+select
+  when ch.receive as v then
+    print(v)
+  timeout 10 then
+    print(\"timeout\")
+end"))]
+        (is (not (str/includes? output "Error:")) output)
+        (is (str/includes? output "7")     output)
+        (is (not (str/includes? output "timeout")) output)))))

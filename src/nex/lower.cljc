@@ -31,6 +31,8 @@
 (declare normalize-call-target)
 (declare function-return-type)
 (declare normalized-function-def)
+(declare ensure-convert-binding)
+(declare lower-convert-expression)
 (declare lookup-class-constant)
 (declare constant-nex-type)
 (declare resolve-parent-metas)
@@ -1016,6 +1018,29 @@
           test-expr (case-clause-test-expr env local (:values clause))]
       [(scoped-env env else-env)
        [(ir/if-stmt-node test-expr then-body else-body)]])
+    (lower-scoped-statements env else-stmts)))
+
+(defn- lower-match-clauses
+  "Lower match clauses as a chain of convert-based instanceof checks."
+  [env match-tmp-name clauses else-stmts]
+  (if-let [clause (first clauses)]
+    (let [{:keys [class-name var-name body generic-args]} clause
+          target-type (if generic-args
+                        {:base-type class-name :type-args generic-args}
+                        class-name)
+          synthetic-convert {:type :convert
+                             :value {:type :identifier :name match-tmp-name}
+                             :var-name var-name
+                             :target-type target-type}
+          [env1 _binding] (ensure-convert-binding env synthetic-convert)
+          [env2 lowered-body] (lower-scoped-statements env1 body)
+          [env3 else-body] (lower-match-clauses (scoped-env env env2)
+                                                match-tmp-name
+                                                (rest clauses)
+                                                else-stmts)
+          [_ convert-ir] (lower-convert-expression env1 synthetic-convert)]
+      [(scoped-env env env3)
+       [(ir/if-stmt-node convert-ir lowered-body else-body)]])
     (lower-scoped-statements env else-stmts)))
 
 (defn- select-clause-value-type
@@ -2050,6 +2075,18 @@
                            (:clauses stmt))
             :else (when (:else stmt)
                     (first (rewrite-statement-for-closures ctx local-types captures (:else stmt)))))
+     local-types]
+
+    :match
+    [(assoc stmt
+            :expr (rewrite-expression-for-closures ctx local-types captures (:expr stmt))
+            :clauses (mapv (fn [clause]
+                             (let [clause-local-types (assoc local-types (:var-name clause) (:class-name clause))]
+                               (assoc clause
+                                      :body (first (rewrite-statements-for-closures* ctx clause-local-types captures (:body clause))))))
+                           (:clauses stmt))
+            :else (when (:else stmt)
+                    (first (rewrite-statements-for-closures* ctx local-types captures (:else stmt)))))
      local-types]
 
     :loop
@@ -3397,6 +3434,23 @@
                                                             (if-let [else-stmt (:else stmt)]
                                                               [else-stmt]
                                                               []))]
+            [(scoped-env env env'')
+             (ir/block-node (into [init-local] lowered-clauses))])
+
+          (= :match (:type stmt))
+          (let [match-env (scoped-child-env env)
+                tmp-name (str "__match_tmp_" (:next-slot env) "__")
+                [env' local] (env-add-local match-env tmp-name
+                                            (infer-type env (:expr stmt)))
+                init-local (ir/set-local-node (:slot local)
+                                              (lower-expression env (:expr stmt))
+                                              (:nex-type local)
+                                              (:jvm-type local))
+                else-stmts (if-let [else-body (:else stmt)]
+                              else-body
+                              [{:type :raise
+                                :value {:type :string :value "No matching clause in match"}}])
+                [env'' lowered-clauses] (lower-match-clauses env' tmp-name (:clauses stmt) else-stmts)]
             [(scoped-env env env'')
              (ir/block-node (into [init-local] lowered-clauses))])
 

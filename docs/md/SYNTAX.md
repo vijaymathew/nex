@@ -426,6 +426,42 @@ class Dog
 end
 ```
 
+## Once Fields
+
+A field declared with `once` can be set in a constructor but never reassigned afterward.
+The typechecker enforces this at compile time; the interpreter enforces it at runtime.
+
+```nex
+class Point
+  feature
+    once x: Integer
+    once y: Integer
+  create
+    make(px: Integer, py: Integer) do
+      x := px
+      y := py
+    end
+end
+
+let p: Point := create Point.make(3, 7)
+-- p.x and p.y are now permanently 3 and 7
+```
+
+Attempting to assign a `once` field outside a constructor is a compile-time error:
+
+```nex
+class Box
+  feature
+    once value: Integer
+  create
+    make(v: Integer) do value := v end
+  feature
+    overwrite(v: Integer) do
+      value := v     -- error: 'value' is a once field
+    end
+end
+```
+
 ## Design by Contract
 
 Tell Nex what must be true before, after, and always:
@@ -475,6 +511,55 @@ case direction of
   "up"    then print("going up")
   "down"  then print("going down")
   else         print("standing still")
+end
+```
+
+## Sealed Classes
+
+A `sealed` modifier closes a class hierarchy. Only classes defined together with the sealed class can extend it. The typechecker knows the complete set of subclasses and can verify that every variant is handled.
+
+A sealed class is always `deferred` — it cannot be instantiated directly:
+
+```nex
+sealed deferred class Result
+end
+
+class Ok
+  inherit Result
+  feature value: Integer
+  create make(v: Integer) do value := v end
+end
+
+class Err
+  inherit Result
+  feature msg: String
+  create make(m: String) do msg := m end
+end
+```
+
+## Match Statement
+
+`match` dispatches on the runtime type of an expression. Used with a sealed parent class it becomes an exhaustive type switch — every variant must be handled or the typechecker rejects the program:
+
+```nex
+match r of
+  when Ok as ok then
+    print(ok.value)
+  when Err as err then
+    print(err.msg)
+end
+```
+
+- Each `when ClassName as var then` clause binds `var` to the matched object, typed as `ClassName`.
+- The typechecker verifies all sealed subclasses are covered. A missing variant is a compile-time error.
+- An `else` branch covers remaining cases and suppresses the exhaustiveness check:
+
+```nex
+match r of
+  when Ok as ok then
+    print(ok.value)
+  else
+    print("not ok")
 end
 ```
 

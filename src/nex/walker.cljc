@@ -323,10 +323,17 @@
 
    :classDecl
    (fn [[_ & tokens]]
-     (let [[deferred? _class-kw name rest]
-           (if (= "deferred" (token-text (first tokens)))
-             [true (second tokens) (nth tokens 2) (drop 3 tokens)]
-             [false (first tokens) (second tokens) (drop 2 tokens)])
+     (let [[sealed? deferred? _class-kw name rest]
+           (cond
+             (and (= "sealed" (token-text (first tokens)))
+                  (= "deferred" (token-text (second tokens))))
+             [true true (nth tokens 2) (nth tokens 3) (drop 4 tokens)]
+             (= "sealed" (token-text (first tokens)))
+             [true false (second tokens) (nth tokens 2) (drop 3 tokens)]
+             (= "deferred" (token-text (first tokens)))
+             [false true (second tokens) (nth tokens 2) (drop 3 tokens)]
+             :else
+             [false false (first tokens) (second tokens) (drop 2 tokens)])
            ;; Filter out "end" keyword
            cleaned (remove #(= "end" %) rest)
            ;; Find different clauses
@@ -348,6 +355,7 @@
        {:type :class
         :name (token-text name)
         :deferred? deferred?
+        :sealed? sealed?
         :generic-params (when generic-params (transform-node generic-params))
         :note (when note-clause (transform-node note-clause))
         :parents (when inherit-clause (transform-node inherit-clause))
@@ -464,7 +472,9 @@
 
    :fieldDecl
    (fn [[_ & tokens]]
-     (let [name (first tokens)
+     (let [once? (= "once" (token-text (first tokens)))
+           tokens (if once? (rest tokens) tokens)
+           name (first tokens)
            has-colon? (some #(= ":" %) tokens)
            eq-idx (first (keep-indexed (fn [i v] (when (= "=" v) i)) tokens))
            note-clause (first (filter #(and (sequential? %)
@@ -476,6 +486,7 @@
            {:type :field
             :name (token-text name)
             :field-type (transform-node type-node)
+            :once? once?
             :constant? (boolean value-node)
             :value (when value-node (transform-node value-node))
             :note (when note-clause (transform-node note-clause))})
@@ -483,6 +494,7 @@
            {:type :field
             :name (token-text name)
             :field-type nil
+            :once? false
             :constant? true
             :value (transform-node value-node)
             :note (when note-clause (transform-node note-clause))}))))
@@ -673,6 +685,34 @@
         :expr (transform-node expr)
        :clauses (mapv transform-node clauses)
        :else else-stmt}))
+
+   :matchStatement
+   (fn [[_ _match-kw expr _of-kw & rest]]
+     (let [tokens (vec rest)
+           clauses (filterv #(and (sequential? %) (= :matchClause (first %))) tokens)
+           has-else? (some #(= "else" %) tokens)
+           else-block (when has-else?
+                        (let [after-else (drop-while #(not= "else" %) tokens)
+                              block-node (second after-else)]
+                          (when (and (sequential? block-node) (= :block (first block-node)))
+                            (transform-node block-node))))]
+       {:type :match
+        :expr (transform-node expr)
+        :clauses (mapv transform-node clauses)
+        :else else-block}))
+
+   :matchClause
+   (fn [[_ _when-kw class-name & rest]]
+     (let [tokens (vec rest)
+           type-args-node (first (filter #(and (sequential? %) (= :typeArgs (first %))) tokens))
+           generic-args (when type-args-node (transform-node type-args-node))
+           as-idx (first (keep-indexed (fn [i v] (when (= "as" v) i)) tokens))
+           var-name (token-text (nth tokens (inc as-idx)))
+           body-node (first (filter #(and (sequential? %) (= :block (first %))) tokens))]
+       {:class-name (token-text class-name)
+        :generic-args generic-args
+        :var-name var-name
+        :body (transform-node body-node)}))
 
    :selectStatement
    (fn [[_ _select-kw & rest]]

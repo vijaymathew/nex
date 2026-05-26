@@ -3383,7 +3383,11 @@
   (when-let [current-class (env-lookup-var env "__current_class__")]
     (when (lookup-class-constant env current-class target)
       (throw (ex-info (str "Cannot assign to constant: " target)
-                      {:error (type-error (str "Cannot assign to constant: " target))}))))
+                      {:error (type-error (str "Cannot assign to constant: " target))})))
+    (when-let [field-member (lookup-class-field-member env current-class target current-class)]
+      (when (and (:once? field-member) (not (env-lookup-var env "__in_constructor__")))
+        (throw (ex-info (str "Cannot assign to once field outside constructor: " target)
+                        {:error (type-error (str "'" target "' is a once field and can only be assigned in a constructor"))})))))
   (let [var-type (env-lookup-var env target)
         val-type (if var-type
                    (check-expression-with-expected env value var-type)
@@ -3595,6 +3599,48 @@
       (doseq [stmt else]
         (check-statement else-env stmt)))))
 
+(defn- find-sealed-subclasses
+  "Return the names of all classes in env that directly inherit from sealed-class-name."
+  [env sealed-class-name]
+  (->> (visible-class-defs env)
+       (filter (fn [class-def]
+                 (some #(= (:parent %) sealed-class-name) (:parents class-def))))
+       (map :name)
+       set))
+
+(defn check-match
+  "Type-check a match statement over a sealed type."
+  [env {:keys [expr clauses else]}]
+  (let [expr-type (check-expression env expr)
+        base-type-name (if (map? expr-type) (:base-type expr-type) expr-type)
+        class-def (env-lookup-class env base-type-name)
+        sealed? (and class-def (:sealed? class-def))]
+    (doseq [{:keys [class-name var-name body]} clauses]
+      (when-not (or (= class-name base-type-name)
+                    (class-subtype? env class-name base-type-name))
+        (throw (ex-info (str "Match clause type " class-name
+                             " is not a subclass of " base-type-name)
+                        {:error (type-error
+                                 (str class-name " is not a subclass of "
+                                      base-type-name))})))
+      (let [clause-env (make-type-env env)]
+        (env-add-var clause-env var-name class-name)
+        (env-mark-non-nil clause-env var-name)
+        (doseq [s body]
+          (check-statement clause-env s))))
+    (when else
+      (doseq [s else] (check-statement env s)))
+    (when (and sealed? (not else))
+      (let [covered (set (map :class-name clauses))
+            known (find-sealed-subclasses env base-type-name)
+            uncovered (set/difference known covered)]
+        (when (seq uncovered)
+          (throw (ex-info (str "Non-exhaustive match on sealed type " base-type-name)
+                          {:error (type-error
+                                   (str "Match on sealed type " base-type-name
+                                        " does not cover all variants. Missing: "
+                                        (str/join ", " (sort uncovered))))})))))))
+
 (defn check-statement
   "Check a statement"
   [env stmt]
@@ -3633,6 +3679,7 @@
                     (check-statement env (:body clause)))
                   (when-let [else-stmt (:else stmt)]
                     (check-statement env else-stmt)))
+          :match (check-match env stmt)
           :raise (check-expression env (:value stmt))
           :retry nil
           :member-assign
@@ -3651,6 +3698,10 @@
                     (throw (ex-info (str "Cannot assign to constant: " field-name)
                                     {:error (type-error (str "Cannot assign to constant: " field-name))})))
                 field-member (lookup-class-field-member env class-name field-name current-class)
+                _ (when (and (:once? field-member)
+                             (not (env-lookup-var env "__in_constructor__")))
+                    (throw (ex-info (str "Cannot assign to once field outside constructor: " field-name)
+                                    {:error (type-error (str "'" field-name "' is a once field and can only be assigned in a constructor"))})))
                 field-type (:field-type field-member)
                 val-type (check-expression env (:value stmt))]
             (when-not field-type
@@ -3732,6 +3783,11 @@
                            (result-definitely-assigned-in-body? else-body assigned?)
                            assigned?)]
             (every? true? (concat clause-outs [else-out])))
+    :match (let [clause-outs (map #(result-definitely-assigned-in-body? (:body %) assigned?) (:clauses stmt))
+                 else-out (if-let [else-body (:else stmt)]
+                            (result-definitely-assigned-in-body? else-body assigned?)
+                            assigned?)]
+             (every? true? (concat clause-outs [else-out])))
     assigned?))
 
 (defn- result-definitely-assigned-in-body?
@@ -3759,6 +3815,11 @@
                            (body-may-complete-normally? else-body)
                            true)]
             (some true? (concat clause-outs [else-out])))
+    :match (let [clause-outs (map #(body-may-complete-normally? (:body %)) (:clauses stmt))
+                 else-out (if-let [else-body (:else stmt)]
+                            (body-may-complete-normally? else-body)
+                            true)]
+             (some true? (concat clause-outs [else-out])))
     :scoped-block (or (body-may-complete-normally? (:body stmt))
                       (when-let [rescue-body (:rescue stmt)]
                         (body-may-complete-normally? rescue-body)))
@@ -3857,6 +3918,8 @@
   (let [ctor-env (make-type-env env)]
     ;; Track current class for this/super resolution
     (env-add-var ctor-env "__current_class__" class-name)
+    ;; Mark constructor context so once-field writes are permitted
+    (env-add-var ctor-env "__in_constructor__" true)
 
     ;; Validate parameter type annotations (generic constraints)
     (doseq [param params]
@@ -4073,6 +4136,9 @@
             :case (reduce set/union #{}
                           (concat (map #(collect-assigned (:body %)) (:clauses stmt))
                                   (when-let [e (:else stmt)] [(collect-assigned e)])))
+            :match (reduce set/union #{}
+                           (concat (mapcat #(map collect-assigned (:body %)) (:clauses stmt))
+                                   (map collect-assigned (:else stmt))))
             #{}))]
     (when (seq required-fields)
       (when (empty? constructors)
