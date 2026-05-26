@@ -1,9 +1,9 @@
 ;;; nex-mode.el --- Major mode for editing Nex programming language files -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2024 Nex Contributors
+;; Copyright (C) 2026 Nex Contributors
 
 ;; Author: Nex Contributors
-;; Keywords: languages, nex, eiffel, design-by-contract
+;; Keywords: languages, nex, design-by-contract
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "24.3"))
 ;; URL: https://github.com/vijaymathew/nex
@@ -120,7 +120,7 @@
     "let" "as" "and" "or" "not" "fn" "deferred" "convert" "to"
     "old" "create" "private" "note" "with" "import" "intern" "function"
     "raise" "rescue" "retry" "repeat" "across" "case" "of"
-    "spawn" "select" "timeout" "declare")
+    "spawn" "select" "timeout" "declare" "sealed" "once")
   "Nex language keywords.")
 
 (defconst nex-types
