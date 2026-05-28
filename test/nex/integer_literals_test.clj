@@ -120,3 +120,29 @@ end")
     end
 end")]
       (is (= ["16"] output)))))
+
+(deftest negative-literal-method-call-targets-negated-value
+  (testing "-7.abs calls abs on -7, not -(7.abs)"
+    (let [ast (p/ast "class Test
+  feature
+    demo() do
+      print(-7.abs)
+      print(-3.14.to_string)
+    end
+end")
+          print-calls (-> ast :classes first :body first :members first :body)]
+      ;; -7.abs should parse as (-7).abs: a :call with a negated :integer target
+      (is (= :call (-> print-calls first :args first :type)))
+      (is (= :integer (-> print-calls first :args first :target :type)))
+      (is (= -7 (-> print-calls first :args first :target :value)))
+      (is (= "abs" (-> print-calls first :args first :method)))))
+  (testing "-7.abs returns 7 and -7.to_string returns the string for -7 at runtime"
+    (let [output (execute-method-output "class Test
+  feature
+    demo() do
+      print(-7.abs)
+      print(-7.to_string)
+    end
+end")]
+      ;; abs returns integer 7 (no quotes), to_string returns string "-7" (print shows with quotes)
+      (is (= ["7" "\"-7\""] output)))))
