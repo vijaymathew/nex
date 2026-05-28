@@ -144,6 +144,21 @@
     (:name acc)
     acc))
 
+(defn- negate-numeric-call-chain
+  "When a unary minus wraps a method call chain rooted at a numeric literal,
+  restructures so the literal is negated and the call chain is preserved.
+  Returns nil if the base is not a numeric literal (don't restructure)."
+  [node]
+  (cond
+    (#{:integer :real} (:type node))
+    (update node :value -)
+
+    (and (map? node) (= :call (:type node)) (map? (:target node)))
+    (when-let [negated-target (negate-numeric-call-chain (:target node))]
+      (assoc node :target negated-target))
+
+    :else nil))
+
 (defn- desugar-safe-call [call-node]
   (if (and (:safe? call-node)
            (:target call-node)
@@ -1052,9 +1067,13 @@
    (fn [[_ first-child & rest-children]]
      (cond
        (= first-child "-")
-       {:type :unary
-        :operator "-"
-        :expr (transform-node (first rest-children))}
+       (let [transformed (transform-node (first rest-children))]
+         (if-let [restructured (and (= :call (:type transformed))
+                                    (negate-numeric-call-chain transformed))]
+           restructured
+           {:type :unary
+            :operator "-"
+            :expr transformed}))
        (= first-child "not")
        {:type :unary
         :operator "not"
@@ -1064,9 +1083,13 @@
 
    :unaryMinus
    (fn [[_ _minus expr]]
-     {:type :unary
-      :operator "-"
-      :expr (transform-node expr)})
+     (let [transformed (transform-node expr)]
+       (if-let [restructured (and (= :call (:type transformed))
+                                  (negate-numeric-call-chain transformed))]
+         restructured
+         {:type :unary
+          :operator "-"
+          :expr transformed})))
 
    :unaryNot
    (fn [[_ _not expr]]
