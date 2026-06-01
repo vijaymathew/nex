@@ -276,17 +276,34 @@
         ;; Didn't find anything
         nil))))
 
+(defun nex-in-from-block-p ()
+  "Return t if point is between 'until' and 'do' in a from-until-do block."
+  (save-excursion
+    (beginning-of-line)
+    (catch 'result
+      (while (re-search-backward "\\b\\(until\\|do\\|end\\)\\b" nil t)
+        (let ((keyword (match-string 1)))
+          (cond
+           ((string= keyword "until")
+            (throw 'result t))
+           (t
+            (throw 'result nil)))))
+      nil)))
+
 (defun nex-should-decrease-indent ()
   "Return t if the current line should decrease indentation."
   (save-excursion
     (beginning-of-line)
     (skip-chars-forward " \t")
     (or
-     ;; 'end', 'else', 'elseif', 'rescue', 'when', and 'timeout' close/open siblings
-     (looking-at (regexp-opt '("end" "else" "elseif" "rescue" "when" "timeout") 'words))
+     ;; 'end', 'else', 'elseif', 'rescue', 'when', 'timeout', and 'until' close/open siblings
+     (looking-at (regexp-opt '("end" "else" "elseif" "rescue" "when" "timeout" "until") 'words))
      ;; 'do' aligns with require/ensure if inside contract block
      (and (looking-at "\\bdo\\b")
-          (nex-in-contract-block-p)))))
+          (nex-in-contract-block-p))
+     ;; 'do' aligns with 'from'/'until' if inside a from-until-do block
+     (and (looking-at "\\bdo\\b")
+          (nex-in-from-block-p)))))
 
 (defun nex-is-class-level-keyword ()
   "Return t if the current line starts with a class-level keyword.
