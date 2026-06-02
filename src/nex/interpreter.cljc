@@ -4023,7 +4023,8 @@
   [ctx {:keys [expr clauses else]}]
   (maybe-debug-pause ctx {:type :match :expr expr :clauses clauses :else else})
   (let [val (eval-node ctx expr)
-        val-class (when (nex-object? val) (:class-name val))
+        val-class (or (when (nex-object? val) (:class-name val))
+                      #?(:clj (compiled-runtime-class-name ctx val)))
         matched (some (fn [{:keys [class-name var-name body]}]
                         (when (and val-class
                                    (or (= val-class class-name)

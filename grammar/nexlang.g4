@@ -83,6 +83,7 @@ constructorDecl
 
 methodDecl
     : IDENTIFIER ('(' paramList? ')')? (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
+    | IDENTIFIER '(' paramList? ')' (':' type)? noteClause? DEFERRED?
     ;
 
 paramList

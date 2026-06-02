@@ -545,7 +545,7 @@
    :methodDecl
    (fn [[_ name & rest]]
      (let [;; Filter out punctuation tokens
-           cleaned (remove #(#{"(" ")" "do" "end" ":"} %) rest)
+           cleaned (remove #(#{"(" ")" "do" "end" ":" "deferred"} %) rest)
            ;; Separate params, return type, note, require, ensure, rescue, and block
            params (first (filter #(and (sequential? %)
                                        (= :paramList (first %)))
@@ -567,14 +567,18 @@
                                        cleaned))
            block (first (filter #(and (sequential? %)
                                       (= :block (first %)))
-                               cleaned))]
+                               cleaned))
+           ;; A method is deferred when no body is present (body-less syntax)
+           ;; or when the explicit 'deferred' keyword was used
+           deferred? (or (nil? block) (some #(= "deferred" %) rest))]
        {:type :method
         :name (token-text name)
         :params (when params (transform-node params))
         :return-type (when return-type (transform-node return-type))
         :note (when note-clause (transform-node note-clause))
         :require (when require-clause (transform-node require-clause))
-        :body (transform-node block)
+        :body (when-not deferred? (transform-node block))
+        :declaration-only? (boolean deferred?)
         :ensure (when ensure-clause (transform-node ensure-clause))
         :rescue (when rescue-clause (transform-node rescue-clause))}))
 

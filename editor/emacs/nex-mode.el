@@ -120,7 +120,7 @@
     "let" "as" "and" "or" "not" "fn" "deferred" "convert" "to"
     "old" "create" "private" "note" "with" "import" "intern" "function"
     "raise" "rescue" "retry" "repeat" "across" "case" "of"
-    "spawn" "select" "timeout" "declare" "sealed" "once")
+    "spawn" "select" "timeout" "declare" "sealed" "once" "match")
   "Nex language keywords.")
 
 (defconst nex-types
@@ -184,6 +184,19 @@
   "Font lock keywords for Nex mode.")
 
 ;;;; Indentation
+
+(defconst nex-method-signature-re
+  "\\b[a-z_][a-z0-9_]*\\s-*\\(([^)]*)\\)?\\s-*\\(?::\\s-*[A-Z][a-zA-Z0-9_]*\\)?\\s-*$"
+  "Regexp matching a Nex method/feature declaration line (name, optional args, optional return type).")
+
+(defconst nex-section-keyword-re
+  (regexp-opt '("class" "feature" "create" "inherit" "invariant"
+                "do" "end" "require" "ensure" "rescue" "from" "until"
+                "if" "then" "else" "elseif" "when" "select" "timeout"
+                "repeat" "across" "case" "of" "deferred" "sealed" "once"
+                "private" "note" "import" "intern" "spawn" "function" "fn")
+              'words)
+  "Regexp matching Nex keywords that cannot be method names.")
 
 (defun nex-indent-line ()
   "Indent current line as Nex code."
@@ -339,8 +352,8 @@ Returns 0 if at top level or inside a class."
         (forward-line -1))
       (end-of-line)
       (skip-chars-backward " \t")
-      ;; Method name: lowercase identifier with optional parens
-      (looking-back "\\b[a-z_][a-z0-9_]*\\s-*\\(([^)]*)\\)?\\s-*$"
+      ;; Method name: lowercase identifier with optional parens and optional return type
+      (looking-back nex-method-signature-re
                     (line-beginning-position)))))
 
 (defun nex-is-contract-after-method ()
@@ -359,12 +372,13 @@ Returns 0 if at top level or inside a class."
                         (looking-at "\\bnote\\b")
                         ;; Skip body statements (assignments, calls, etc) when looking for method
                         (and (not (looking-at "\\b\\(do\\|require\\|ensure\\|feature\\|create\\|class\\|end\\)\\b"))
-                             (not (looking-at "\\b[a-z_][a-z0-9_]*\\s-*\\(([^)]*)\\)?\\s-*$"))))))
+                             (not (looking-at nex-method-signature-re))))))
         (forward-line -1))
       ;; Check if we found a method/constructor name or another contract keyword
       (beginning-of-line)
       (skip-chars-forward " \t")
-      (or (looking-at "\\b[a-z_][a-z0-9_]*\\s-*\\(([^)]*)\\)?\\s-*$")
+      (or (and (looking-at nex-method-signature-re)
+               (not (looking-at nex-section-keyword-re)))
           (looking-at "\\b\\(do\\|require\\)\\b")))))
 
 (defun nex-find-method-indent ()
@@ -379,9 +393,10 @@ Returns 0 if at top level or inside a class."
                   (skip-chars-forward " \t")
                   (or (looking-at "^\\s-*$")
                       (looking-at "\\bnote\\b")
-                      ;; Skip body statements when looking for method indent
-                      (and (not (looking-at "\\b\\(do\\|require\\|ensure\\|feature\\|create\\|class\\|end\\)\\b"))
-                           (not (looking-at "\\b[a-z_][a-z0-9_]*\\s-*\\(([^)]*)\\)?\\s-*$"))))))
+                      ;; Skip body statements and section keywords when looking for method indent
+                      (or (looking-at nex-section-keyword-re)
+                          (and (not (looking-at nex-method-signature-re))
+                               (not (looking-at "\\b\\(do\\|require\\|ensure\\)\\b")))))))
       (forward-line -1))
     ;; Should be at method name or contract keyword line now
     (current-indentation)))

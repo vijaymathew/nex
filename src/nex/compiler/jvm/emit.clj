@@ -96,9 +96,7 @@
    :source-file (:source-file class-spec)
    :super-name "java/lang/Object"
    :interfaces []
-   :flags (if (:deferred? class-spec)
-            (+ Opcodes/ACC_PUBLIC Opcodes/ACC_ABSTRACT)
-            Opcodes/ACC_PUBLIC)
+   :flags Opcodes/ACC_PUBLIC
    :fields (vec
             (concat
              [{:name "__outer__"
@@ -154,17 +152,14 @@
                       :kind :instance-ctor-fn
                       :fn-node fn-node})
                    (:constructors class-spec))
-              (map (fn [fn-node]
-                     {:name (:emitted-name fn-node)
-                      :descriptor (repl-fn-method-descriptor)
-                      :flags (if (:deferred? fn-node)
-                               (+ Opcodes/ACC_PUBLIC Opcodes/ACC_ABSTRACT)
-                               Opcodes/ACC_PUBLIC)
-                      :kind (if (:deferred? fn-node)
-                              :abstract-instance-fn
-                              :instance-fn)
-                      :fn-node fn-node})
-                   (:methods class-spec))))})
+              (keep (fn [fn-node]
+                      (when-not (:deferred? fn-node)
+                        {:name (:emitted-name fn-node)
+                         :descriptor (repl-fn-method-descriptor)
+                         :flags Opcodes/ACC_PUBLIC
+                         :kind :instance-fn
+                         :fn-node fn-node}))
+                    (:methods class-spec))))})
 
 (defn launcher-class-spec
   [{:keys [internal-name binary-name source-file program-internal-name classes-edn imports-edn]}]
@@ -309,25 +304,21 @@
     (.visitVarInsn mv Opcodes/ALOAD 0)
     (.visitVarInsn mv Opcodes/ALOAD 0)
     (.visitFieldInsn mv Opcodes/PUTFIELD owner "__outer__" "Ljava/lang/Object;")
-    (doseq [{:keys [name jvm-type deferred?]} composition-fields]
+    (doseq [{:keys [name jvm-type]} composition-fields]
       (.visitVarInsn mv Opcodes/ALOAD 0)
-      (if deferred?
-        (.visitInsn mv Opcodes/ACONST_NULL)
-        (do
-          (.visitTypeInsn mv Opcodes/NEW (second jvm-type))
-          (.visitInsn mv Opcodes/DUP)
-          (.visitMethodInsn mv Opcodes/INVOKESPECIAL (second jvm-type) "<init>" "()V" false)))
+      (.visitTypeInsn mv Opcodes/NEW (second jvm-type))
+      (.visitInsn mv Opcodes/DUP)
+      (.visitMethodInsn mv Opcodes/INVOKESPECIAL (second jvm-type) "<init>" "()V" false)
       (.visitFieldInsn mv
                        Opcodes/PUTFIELD
                        owner
                        name
                        (desc/jvm-type->descriptor jvm-type))
       ;; Set parent.__outer__ = this (back-pointer for dynamic dispatch)
-      (when-not deferred?
-        (.visitVarInsn mv Opcodes/ALOAD 0)
-        (.visitFieldInsn mv Opcodes/GETFIELD owner name (desc/jvm-type->descriptor jvm-type))
-        (.visitVarInsn mv Opcodes/ALOAD 0)
-        (.visitFieldInsn mv Opcodes/PUTFIELD (second jvm-type) "__outer__" "Ljava/lang/Object;")))
+      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (.visitFieldInsn mv Opcodes/GETFIELD owner name (desc/jvm-type->descriptor jvm-type))
+      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (.visitFieldInsn mv Opcodes/PUTFIELD (second jvm-type) "__outer__" "Ljava/lang/Object;"))
     (doseq [{:keys [name jvm-type nex-type]} (concat runtime-type-fields fields)]
       (.visitVarInsn mv Opcodes/ALOAD 0)
       (cond

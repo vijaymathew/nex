@@ -231,6 +231,7 @@
         if-count (count (re-seq #"\bif\b" text))
         when-count (count-when-expressions text)
         case-count (count (re-seq #"\bcase\b" text))
+        match-count (count (re-seq #"\bmatch\b" text))
         select-count (count (re-seq #"\bselect\b" text))
         end-count (count (re-seq #"\bend\b" text))
         ;; In loops, 'do' is part of 'from...until...do...end', 'repeat...do...end', or 'across...do...end'
@@ -238,7 +239,7 @@
         standalone-do-count (max 0 (- do-count from-count repeat-count across-count))
         ;; Total blocks that need closing
         open-blocks (+ class-count standalone-do-count from-count repeat-count
-                       across-count if-count when-count case-count select-count)
+                       across-count if-count when-count case-count match-count select-count)
         lines (vec (str/split-lines text))
         bare-function-header?
         (boolean

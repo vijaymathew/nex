@@ -248,11 +248,12 @@ main() {
         *)
 	    if [[ -f "$command" && "$command" == *.nex ]]; then
 		cmd_run_script "$@"
+		exit $?
 	    else
 		echo "Error: Unknown command '$command'"
 		echo "Run 'nex help' for usage information."
+		exit 1
 	    fi
-            exit 1
             ;;
     esac
 }

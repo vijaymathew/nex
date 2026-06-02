@@ -398,8 +398,8 @@
       (.invoke eval-b nil (object-array [state]))
       (is (= true (.invoke eval-c nil (object-array [state])))))))
 
-(deftest compile-deferred-class-emits-abstract-jvm-members-test
-  (testing "deferred classes emit as abstract JVM classes with abstract methods"
+(deftest compile-deferred-class-emits-concrete-jvm-class-test
+  (testing "deferred classes emit as concrete JVM classes (no ACC_ABSTRACT); deferred methods are not emitted"
     (let [program (p/ast "deferred class Shape
 feature
   area(): Real do end
@@ -414,12 +414,13 @@ end")
                                                 :imports []})
           bytecode (emit/compile-user-class->bytes lowered)
           l (loader/make-loader)
-          cls (loader/define-class! l "nex.repl.Shape_0001" bytecode)
-          area (.getDeclaredMethod cls "__method_area$arity0"
-                                   (into-array Class [(class (runtime/make-repl-state l))
-                                                      (class (object-array 0))]))]
-      (is (Modifier/isAbstract (.getModifiers cls)))
-      (is (Modifier/isAbstract (.getModifiers area))))))
+          cls (loader/define-class! l "nex.repl.Shape_0001" bytecode)]
+      (is (not (Modifier/isAbstract (.getModifiers cls))))
+      (is (nil? (try
+                  (.getDeclaredMethod cls "__method_area$arity0"
+                                      (into-array Class [(class (runtime/make-repl-state l))
+                                                         (class (object-array 0))]))
+                  (catch NoSuchMethodException _ nil)))))))
 
 (deftest compile-child-class-uses-composition-parent-fields-test
   (testing "compiled child classes keep Object as JVM superclass and use composition fields for parents"
