@@ -371,7 +371,8 @@ Returns 0 if at top level or inside a class."
                     (or (looking-at "^\\s-*$")
                         (looking-at "\\bnote\\b")
                         ;; Skip body statements (assignments, calls, etc) when looking for method
-                        (and (not (looking-at "\\b\\(do\\|require\\|ensure\\|feature\\|create\\|class\\|end\\)\\b"))
+                        ;; Stop at loop-starting keywords that own their own do..end
+                        (and (not (looking-at "\\b\\(do\\|require\\|ensure\\|feature\\|create\\|class\\|end\\|across\\|from\\|repeat\\|with\\)\\b"))
                              (not (looking-at nex-method-signature-re))))))
         (forward-line -1))
       ;; Check if we found a method/constructor name or another contract keyword

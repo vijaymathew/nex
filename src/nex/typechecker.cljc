@@ -4258,7 +4258,8 @@
            "abs" {:params [] :return-type "Real"}
            "min" {:params [{:name "other" :type "Real"}] :return-type "Real"}
            "max" {:params [{:name "other" :type "Real"}] :return-type "Real"}
-           "round" {:params [] :return-type "Integer"}
+           "round"    {:params [] :return-type "Integer"}
+           "to_fixed" {:params [{:name "places" :type "Integer"}] :return-type "Real"}
            "plus" {:params [{:name "other" :type "Real"}] :return-type "Real"}
            "minus" {:params [{:name "other" :type "Real"}] :return-type "Real"}
            "times" {:params [{:name "other" :type "Real"}] :return-type "Real"}
@@ -4280,7 +4281,8 @@
            "abs" {:params [] :return-type "Decimal"}
            "min" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
            "max" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
-           "round" {:params [] :return-type "Integer"}
+           "round"    {:params [] :return-type "Integer"}
+           "to_fixed" {:params [{:name "places" :type "Integer"}] :return-type "Decimal"}
            "plus" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
            "minus" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
            "times" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
@@ -4292,6 +4294,15 @@
            "greater_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
            "greater_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}}]
     (env-add-method env "Decimal" method-name sig))
+
+  (env-add-method env "Integer" "to_char" {:params [] :return-type "Char"})
+
+  (doseq [[method-name sig]
+          {"to_string"   {:params [] :return-type "String"}
+           "to_upper"    {:params [] :return-type "String"}
+           "to_lower"    {:params [] :return-type "String"}
+           "to_integer"  {:params [] :return-type "Integer"}}]
+    (env-add-method env "Char" method-name sig))
 
   (doseq [[method-name sig]
           {"bitwise_left_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
@@ -4323,13 +4334,18 @@
            "ends_with"   {:params [{:name "suffix" :type "String"}] :return-type "Boolean"}
            "trim"        {:params [] :return-type "String"}
            "replace"     {:params [{:name "old" :type "String"} {:name "new" :type "String"}] :return-type "String"}
+           "pad_end"     {:params [{:name "pad" :type "String"} {:name "count" :type "Integer"}] :return-type "String"}
+           "pad_start"   {:params [{:name "pad" :type "String"} {:name "count" :type "Integer"}] :return-type "String"}
+           "replicate"   {:params [{:name "n" :type "Integer"}] :return-type "String"}
            "char_at"     {:params [{:name "index" :type "Integer"}] :return-type "Char"}
            "chars"       {:params [] :return-type {:base-type "Array" :type-params ["Char"]}}
            "to_bytes"    {:params [] :return-type {:base-type "Array" :type-params ["Integer"]}}
            "compare"     {:params [{:name "a" :type "Any"}] :return-type "Integer"}
            "hash"        {:params [] :return-type "Integer"}
            "split"       {:params [{:name "delimiter" :type "String"}]
-                          :return-type {:base-type "Array" :type-params ["String"]}}}]
+                          :return-type {:base-type "Array" :type-params ["String"]}}
+           "join"        {:params [{:name "parts" :type {:base-type "Array" :type-params ["String"]}}]
+                          :return-type "String"}}]
     (env-add-method env "String" method-name sig))
   (doseq [[method-name sig]
           {"print" {:params [{:name "msg" :type "String"}] :return-type "Void"}
@@ -4386,6 +4402,14 @@
                           1 {:params [{:name "compareFn" :type "Function"}]
                              :return-type {:base-type "Array" :type-params ["T"]}}}
            "slice"       {:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}]
+                          :return-type {:base-type "Array" :type-params ["T"]}}
+           "take"        {:params [{:name "n" :type "Integer"}]
+                          :return-type {:base-type "Array" :type-params ["T"]}}
+           "drop"        {:params [{:name "n" :type "Integer"}]
+                          :return-type {:base-type "Array" :type-params ["T"]}}
+           "take_last"   {:params [{:name "n" :type "Integer"}]
+                          :return-type {:base-type "Array" :type-params ["T"]}}
+           "drop_last"   {:params [{:name "n" :type "Integer"}]
                           :return-type {:base-type "Array" :type-params ["T"]}}
            "concat"      {:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}]
                           :return-type {:base-type "Array" :type-params ["T"]}}

@@ -4,7 +4,8 @@
             [clojure.string :as str]
             [nex.parser :as parser]
             [nex.interpreter :as interp]
-            [nex.typechecker :as tc]))
+            [nex.typechecker :as tc])
+  (:import [clj_antlr ParseError]))
 
 (defn- augment-ast-with-interns
   [source-id ast]
@@ -52,6 +53,11 @@
     (try
       (eval-file file)
       (System/exit 0)
+      (catch ParseError e
+        (println "Syntax error:")
+        (let [source (try (slurp file) (catch Exception _ ""))]
+          (parser/format-parse-errors e source 0))
+        (System/exit 1))
       (catch Exception e
         (println "Error:" (.getMessage e))
         (System/exit 1)))))

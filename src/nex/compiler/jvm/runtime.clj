@@ -1504,6 +1504,7 @@
 (def-builtin-method-wrapper builtin-method-integer-less-than-or-equal "less_than_or_equal")
 (def-builtin-method-wrapper builtin-method-integer-greater-than "greater_than")
 (def-builtin-method-wrapper builtin-method-integer-greater-than-or-equal "greater_than_or_equal")
+(def-builtin-method-wrapper builtin-method-integer-to-char "to_char")
 
 (def-builtin-method-wrapper builtin-method-integer64-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-integer64-to-integer "to_integer")
@@ -1535,6 +1536,7 @@
 (def-builtin-method-wrapper builtin-method-real-min "min")
 (def-builtin-method-wrapper builtin-method-real-max "max")
 (def-builtin-method-wrapper builtin-method-real-round "round")
+(def-builtin-method-wrapper builtin-method-real-to-fixed "to_fixed")
 (def-builtin-method-wrapper builtin-method-real-compare "compare")
 (def-builtin-method-wrapper builtin-method-real-hash "hash")
 (def-builtin-method-wrapper builtin-method-real-plus "plus")
@@ -1557,6 +1559,7 @@
 (def-builtin-method-wrapper builtin-method-decimal-min "min")
 (def-builtin-method-wrapper builtin-method-decimal-max "max")
 (def-builtin-method-wrapper builtin-method-decimal-round "round")
+(def-builtin-method-wrapper builtin-method-decimal-to-fixed "to_fixed")
 (def-builtin-method-wrapper builtin-method-decimal-compare "compare")
 (def-builtin-method-wrapper builtin-method-decimal-hash "hash")
 (def-builtin-method-wrapper builtin-method-decimal-plus "plus")
@@ -1573,6 +1576,7 @@
 (def-builtin-method-wrapper builtin-method-char-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-char-to-upper "to_upper")
 (def-builtin-method-wrapper builtin-method-char-to-lower "to_lower")
+(def-builtin-method-wrapper builtin-method-char-to-integer "to_integer")
 (def-builtin-method-wrapper builtin-method-char-compare "compare")
 (def-builtin-method-wrapper builtin-method-char-hash "hash")
 
@@ -1599,11 +1603,15 @@
 (def-builtin-method-wrapper builtin-method-string-ends-with "ends_with")
 (def-builtin-method-wrapper builtin-method-string-trim "trim")
 (def-builtin-method-wrapper builtin-method-string-replace "replace")
+(def-builtin-method-wrapper builtin-method-string-pad-end "pad_end")
+(def-builtin-method-wrapper builtin-method-string-pad-start "pad_start")
+(def-builtin-method-wrapper builtin-method-string-replicate "replicate")
 (def-builtin-method-wrapper builtin-method-string-char-at "char_at")
 (def-builtin-method-wrapper builtin-method-string-chars "chars")
 (def-builtin-method-wrapper builtin-method-string-to-bytes "to_bytes")
 (def-builtin-method-wrapper builtin-method-string-compare "compare")
 (def-builtin-method-wrapper builtin-method-string-hash "hash")
+(def-builtin-method-wrapper builtin-method-string-join "join")
 (defn builtin-method-string-split
   [target delim]
   (->java-array-list
@@ -1722,6 +1730,12 @@
           result
           (throw (ex-info "Comparable.compare must return Integer"
                           {:left a :right b :result result})))))))
+
+(defn array-slice [arr start end] (rt/nex-array-slice arr start end))
+(defn array-take [arr n] (rt/nex-array-take arr n))
+(defn array-drop [arr n] (rt/nex-array-drop arr n))
+(defn array-take-last [arr n] (rt/nex-array-take-last arr n))
+(defn array-drop-last [arr n] (rt/nex-array-drop-last arr n))
 
 (defn array-sort
   ([state values]

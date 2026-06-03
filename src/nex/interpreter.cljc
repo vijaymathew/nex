@@ -57,6 +57,10 @@
 (def nex-array-reverse rt/nex-array-reverse)
 (def nex-array-sort rt/nex-array-sort)
 (def nex-array-slice rt/nex-array-slice)
+(def nex-array-take rt/nex-array-take)
+(def nex-array-drop rt/nex-array-drop)
+(def nex-array-take-last rt/nex-array-take-last)
+(def nex-array-drop-last rt/nex-array-drop-last)
 (def nex-array-concat rt/nex-array-concat)
 (defn nex-array-str [arr] (rt/nex-array-str nex-format-value arr))
 
@@ -213,6 +217,12 @@
         (env-lookup parent var-name)
         (throw (ex-info (str "Undefined variable: " var-name)
                         {:var-name var-name}))))))
+
+(defn- env-contains?
+  [env var-name]
+  (or (contains? @(:bindings env) var-name)
+      (when-let [parent (:parent env)]
+        (env-contains? parent var-name))))
 
 (defn env-define
   "Define a variable in the current environment."
@@ -2765,6 +2775,9 @@
     "ends_with"   (fn [s suffix & _] (str/ends-with? s suffix))
     "trim"        (fn [s & _] (str/trim s))
     "replace"     (fn [s old new & _] (str/replace s old new))
+    "pad_end"     (fn [s pad len & _] (if (>= (count s) len) s (str s (apply str (repeat (- len (count s)) pad)))))
+    "pad_start"   (fn [s pad len & _] (if (>= (count s) len) s (str (apply str (repeat (- len (count s)) pad)) s)))
+    "replicate"   (fn [s n & _] (apply str (repeat n s)))
     "char_at"     (fn [s idx & _] (get s idx))
     "chars"       (fn [s & _]
                     (nex-array-from
@@ -2776,7 +2789,8 @@
                        :cljs (nex-array-from
                               (mapv identity
                                     (js->clj (.encode (js/TextEncoder.) s))))))
-    "split"       (fn [s delim & _] (vec (str/split s (re-pattern delim))))
+    "split"       (fn [s delim & _] (nex-array-from (str/split s (re-pattern delim))))
+    "join"        (fn [s arr & _] (str/join s arr))
     ;; String operator methods
     "plus"        (fn [s other & [ctx]]
                     (str s (if ctx
@@ -2825,6 +2839,7 @@
     "less_than_or_equal" (fn [n other & _] (<= n other))
     "greater_than"      (fn [n other & _] (> n other))
     "greater_than_or_equal" (fn [n other & _] (>= n other))
+    "to_char"           (fn [n & _] #?(:clj (char (int n)) :cljs (.fromCharCode js/String n)))
     "compare"           (fn [n other & _] (nex-compare n other))
     "hash"              (fn [n & _] (hash n))}
 
@@ -2854,6 +2869,9 @@
     "min"               (fn [n other & _] (min n other))
     "max"               (fn [n other & _] (max n other))
     "round"             (fn [n & _] (nex-round n))
+    "to_fixed"          (fn [n places & _]
+                          #?(:clj  (double (.setScale (bigdec n) (int places) java.math.RoundingMode/HALF_UP))
+                             :cljs (js/parseFloat (.toFixed n places))))
     ;; Arithmetic operator methods
     "plus"              (fn [n other & _] (+ n other))
     "minus"             (fn [n other & _] (- n other))
@@ -2875,6 +2893,9 @@
     "min"               (fn [n other & _] (min n other))
     "max"               (fn [n other & _] (max n other))
     "round"             (fn [n & _] (nex-round n))
+    "to_fixed"          (fn [n places & _]
+                          #?(:clj  (.setScale n (int places) java.math.RoundingMode/HALF_UP)
+                             :cljs nil))
     ;; Arithmetic operator methods
     "plus"              (fn [n other & _] (+ n other))
     "minus"             (fn [n other & _] (- n other))
@@ -2894,6 +2915,7 @@
    {"to_string"   (fn [c & _] (str c))
     "to_upper"    (fn [c & _] (str/upper-case (str c)))
     "to_lower"    (fn [c & _] (str/lower-case (str c)))
+    "to_integer"  (fn [c & _] #?(:clj (int c) :cljs (.charCodeAt c 0)))
     "compare"     (fn [c other & _] (nex-compare c other))
     "hash"        (fn [c & _] (hash c))}
 
@@ -2931,6 +2953,10 @@
                         (throw (ex-info "Method sort expects 0 or 1 arguments"
                                         {:target arr :method "sort" :actual (count method-args)})))))
     "slice"       (fn [arr start end & _] (nex-array-slice arr start end))
+    "take"        (fn [arr n & _] (nex-array-take arr n))
+    "drop"        (fn [arr n & _] (nex-array-drop arr n))
+    "take_last"   (fn [arr n & _] (nex-array-take-last arr n))
+    "drop_last"   (fn [arr n & _] (nex-array-drop-last arr n))
     "concat"      (fn [arr other & _] (nex-array-concat arr other))
     "to_string"   (fn [arr & _] (nex-array-str arr))
     "equals"      (fn [arr other & _] (nex-deep-equals? arr other))
@@ -3597,13 +3623,31 @@
                              (when (and cls
                                         (is-parent? ctx (:class-name (:current-object ctx)) target-name))
                                cls)))
-            obj (when-not parent-class
+            ;; Check if target is a Java host class (only when inside with "java" block)
+            java-class? (and (:with-java? ctx)
+                             target-name
+                             (not class-target)
+                             (not parent-class)
+                             (re-matches #"[A-Z][A-Za-z0-9_]*" target-name)
+                             (not (env-contains? (:current-env ctx) target-name)))
+            obj (when-not (or parent-class java-class?)
                   (if class-target
                     nil
                     (if target-name
                     (env-lookup (:current-env ctx) target-name)
                     (eval-node ctx target))))]
         (cond
+          ;; Java static method or field access inside with "java" block
+          java-class?
+          #?(:clj (let [klass (or (resolve-imported-java-class ctx target-name)
+                                  (try (Class/forName (str "java.lang." target-name)) (catch Exception _ nil))
+                                  (throw (ex-info (str "Undefined Java class: " target-name) {:class-name target-name})))]
+                    (if has-parens
+                      (clojure.lang.Reflector/invokeStaticMethod klass method (to-array arg-values))
+                      (let [^java.lang.reflect.Field field (.getField klass method)]
+                        (.get field nil))))
+             :cljs nil)
+
           ;; Class-qualified constant access: A.CONST
           (and class-target
                (false? has-parens)
@@ -4507,9 +4551,9 @@
 
 (defmethod eval-node :with
   [ctx {:keys [target body]}]
-  ;; With statements are for code generation only, skip in interpreter
-  ;; Could optionally evaluate for a specific target if needed
-  nil)
+  (when (= target "java")
+    (let [ctx' (assoc ctx :with-java? true)]
+      (doseq [stmt body] (eval-node ctx' stmt)))))
 
 (defmethod eval-node :default
   [ctx node]
@@ -5414,7 +5458,9 @@
          (js/Promise.resolve (eval-node ctx node))
 
          (= node-type :with)
-         (js/Promise.resolve nil)
+         (if (= (:target node) "javascript")
+           (eval-body-async ctx (:body node))
+           (js/Promise.resolve nil))
 
          (= node-type :default)
          (js/Promise.resolve (eval-node ctx node))

@@ -1455,14 +1455,43 @@
 
       [:array "slice"]
       (do
-        (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
-        (.visitInsn mv Opcodes/DUP)
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (emit-expr! mv (first args) state-slot)
-        (emit-expr! mv (second args) state-slot)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "subList" "(II)Ljava/util/List;" false)
-        (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
+        (emit-runtime-call! mv "array-slice"
+                            [(fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
+                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:array "take"]
+      (do
+        (emit-runtime-call! mv "array-take"
+                            [(fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:array "drop"]
+      (do
+        (emit-runtime-call! mv "array-drop"
+                            [(fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:array "take_last"]
+      (do
+        (emit-runtime-call! mv "array-take-last"
+                            [(fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
+      [:array "drop_last"]
+      (do
+        (emit-runtime-call! mv "array-drop-last"
+                            [(fn [] (emit-expr! mv target state-slot))
+                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
         jvm-type)
 
       [:array "concat"]

@@ -42,8 +42,36 @@
 (defn nex-array-reverse [arr] #?(:clj (java.util.ArrayList. (.reversed arr)) :cljs (js/Array.from (.reverse (.slice arr)))))
 (defn nex-array-sort [arr] #?(:clj (.sort arr nil) :cljs (.sort arr)))
 (defn nex-array-slice [arr start end]
-  #?(:clj (java.util.ArrayList. (.subList arr start end))
-     :cljs (.slice arr start end)))
+  (let [len #?(:clj (.size arr) :cljs (.-length arr))
+        resolve (fn [i] (-> (if (< i 0) (+ len i) i) (max 0) (min len)))
+        s (resolve start)
+        e (resolve end)]
+    #?(:clj (java.util.ArrayList. (.subList arr s e))
+       :cljs (.slice arr s e))))
+
+(defn nex-array-take [arr n]
+  (let [len #?(:clj (.size arr) :cljs (.-length arr))
+        end (-> n (max 0) (min len))]
+    #?(:clj (java.util.ArrayList. (.subList arr 0 end))
+       :cljs (.slice arr 0 end))))
+
+(defn nex-array-drop [arr n]
+  (let [len #?(:clj (.size arr) :cljs (.-length arr))
+        start (-> n (max 0) (min len))]
+    #?(:clj (java.util.ArrayList. (.subList arr start len))
+       :cljs (.slice arr start))))
+
+(defn nex-array-take-last [arr n]
+  (let [len #?(:clj (.size arr) :cljs (.-length arr))
+        start (-> len (- (max 0 n)) (max 0))]
+    #?(:clj (java.util.ArrayList. (.subList arr start len))
+       :cljs (.slice arr start))))
+
+(defn nex-array-drop-last [arr n]
+  (let [len #?(:clj (.size arr) :cljs (.-length arr))
+        end (-> len (- (max 0 n)) (max 0))]
+    #?(:clj (java.util.ArrayList. (.subList arr 0 end))
+       :cljs (.slice arr 0 end))))
 (defn nex-array-concat [arr other]
   #?(:clj (doto (java.util.ArrayList. arr)
             (.addAll other))
@@ -67,8 +95,8 @@
 (defn nex-map-size [m] #?(:clj (.size m) :cljs (.-size m)))
 (defn nex-map-empty? [m] #?(:clj (.isEmpty m) :cljs (zero? (.-size m))))
 (defn nex-map-contains-key [m key] #?(:clj (.containsKey m key) :cljs (.has m key)))
-(defn nex-map-keys [m] #?(:clj (vec (.keySet m)) :cljs (vec (es6-iterator-seq (.keys m)))))
-(defn nex-map-values [m] #?(:clj (vec (.values m)) :cljs (vec (es6-iterator-seq (.values m)))))
+(defn nex-map-keys [m] #?(:clj (nex-array-from (.keySet m)) :cljs (nex-array-from (es6-iterator-seq (.keys m)))))
+(defn nex-map-values [m] #?(:clj (nex-array-from (.values m)) :cljs (nex-array-from (es6-iterator-seq (.values m)))))
 (defn nex-map-remove [m key]
   #?(:clj (do
             (.remove m key)

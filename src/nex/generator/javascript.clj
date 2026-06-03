@@ -690,12 +690,14 @@
     "ends_with"   (fn [target args] (str target ".endsWith(" args ")"))
     "trim"        (fn [target _] (str target ".trim()"))
     "replace"     (fn [target args] (str target ".replace(" args ")"))
+    "replicate"   (fn [target args] (str target ".repeat(" args ")"))
     "char_at"     (fn [target args] (str target ".charAt(" args ")"))
     "chars"       (fn [target _] (str target ".split(\"\")"))
     "to_bytes"    (fn [target _] (str "__nexStringToBytes(" target ")"))
     "compare"     (fn [target args] (str "__nexCompare(" target ", " args ")"))
     "hash"        (fn [target _] (str "__nexHash(" target ")"))
     "split"       (fn [target args] (str target ".split(" args ")"))
+    "join"        (fn [target args] (str args ".join(" target ")"))
     "cursor"      (fn [target _] (str "__nexStringCursor(" target ")"))
     ;; String operators
     "plus"        (fn [target args] (str "__nexConcat(" target ", " args ")"))
@@ -765,6 +767,7 @@
     "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
     "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
     "round"     (fn [target _] (str "Math.round(" target ")"))
+    "to_fixed"  (fn [target args] (str "parseFloat(" target ".toFixed(" args "))"))
     ;; Arithmetic operators
     "plus"      (fn [target args] (str "(" target " + " args ")"))
     "minus"     (fn [target args] (str "(" target " - " args ")"))
@@ -835,6 +838,10 @@
                     (str "__nexArraySort(" target ")")
                     (str "__nexArraySort(" target ", " args ")")))
     "slice"     (fn [target args] (str target ".slice(" args ")"))
+    "take"      (fn [target args] (str target ".slice(0, Math.max(0, Math.min(" args ", " target ".length)))"))
+    "drop"      (fn [target args] (str target ".slice(Math.max(0, Math.min(" args ", " target ".length)))"))
+    "take_last" (fn [target args] (str target ".slice(Math.max(0, " target ".length - Math.max(0, " args ")))"))
+    "drop_last" (fn [target args] (str target ".slice(0, Math.max(0, " target ".length - Math.max(0, " args ")))"))
     "concat"    (fn [target args] (str target ".concat(" args ")"))
     "to_string" (fn [target _] (str "__nexToString(" target ")"))
     "equals"    (fn [target args] (str "__nexDeepEquals(" target ", " args ")"))
@@ -1042,6 +1049,17 @@
               (if-let [method-fn (get-in builtin-method-mappings [:Any method])]
                 (method-fn target-code args-code)
                 (maybe-await call-node (str target-code "." method "(" args-code ")")))))
+
+          (and (= method "pad_end") (= 2 (count args)))
+          (let [pad-code (generate-expression (first args))
+                len-code (generate-expression (second args))]
+            (str target-code ".padEnd(" len-code ", " pad-code ")"))
+
+          (and (= method "pad_start") (= 2 (count args)))
+          (let [pad-code (generate-expression (first args))
+                len-code (generate-expression (second args))]
+            (str target-code ".padStart(" len-code ", " pad-code ")"))
+
 
           :else
           (or
