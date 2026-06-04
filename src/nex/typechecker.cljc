@@ -4462,6 +4462,7 @@
                                    :return-type {:base-type "Set" :type-params ["T"]}}
            "size"                 {:params [] :return-type "Integer"}
            "is_empty"             {:params [] :return-type "Boolean"}
+           "to_array"             {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
            "to_string"            {:params [] :return-type "String"}
            "equals"               {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}] :return-type "Boolean"}
            "clone"                {:params [] :return-type {:base-type "Set" :type-params ["T"]}}

@@ -316,6 +316,9 @@
           (nex-in-contract-block-p))
      ;; 'do' aligns with 'from'/'until' if inside a from-until-do block
      (and (looking-at "\\bdo\\b")
+          (nex-in-from-block-p))
+     ;; loop 'variant'/'invariant' align with 'from'/'until' inside a from-until-do block
+     (and (looking-at (regexp-opt '("variant" "invariant") 'words))
           (nex-in-from-block-p)))))
 
 (defun nex-is-class-level-keyword ()
@@ -327,7 +330,10 @@ Class-level keywords should align with 'class' at column 0."
     ;; Skip 'private' if present
     (when (looking-at "\\bprivate\\s-+")
       (goto-char (match-end 0)))
-    (looking-at (regexp-opt '("feature" "create" "inherit" "invariant") 'words))))
+    (and (looking-at (regexp-opt '("feature" "create" "inherit" "invariant") 'words))
+         ;; A loop 'invariant' (inside a from-until-do block) is not class-level.
+         (not (and (looking-at "\\binvariant\\b")
+                   (nex-in-from-block-p))))))
 
 (defun nex-find-class-indent ()
   "Find the indentation level of the enclosing class.

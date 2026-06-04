@@ -208,6 +208,20 @@ end
 
 The later definition must match the earlier declaration exactly.
 
+### No default arguments
+
+Nex has no default parameter values. A call must pass exactly as many
+arguments as the function (or method) declares.
+
+Free functions cannot be overloaded either: each function name must be
+unique, so you cannot define two `greet` functions that differ only in the
+number of parameters. If you need variants, give them distinct names.
+
+Class **methods**, however, *can* be overloaded by arity (see
+[Optional arguments via method overloading](#optional-arguments-via-method-overloading)
+under Classes), which is the idiomatic way to get optional-argument
+ergonomics in Nex.
+
 ## Arrays
 
 ```nex
@@ -401,6 +415,35 @@ end
 let c: Circle := create Circle.make(5.0)
 print(c.area)                    -- 78.53975
 ```
+
+## Optional arguments via method overloading
+
+Nex has no default parameter values, but a class may define several methods
+with the **same name and different numbers of parameters**. The right one is
+chosen by the number of arguments at the call site. Have the shorter version
+forward to the longer one to supply a default:
+
+```nex
+class Greeter
+  feature
+    greet(name: String): String do
+      result := greet(name, "!")        -- forward with a chosen default
+    end
+
+    greet(name: String, punct: String): String do
+      result := "Hello, " + name + punct
+    end
+end
+
+let g: Greeter := create Greeter
+print(g.greet("Ann"))              -- "Hello, Ann!"
+print(g.greet("Bob", "."))         -- "Hello, Bob."
+```
+
+Overloads are distinguished only by the *number* of arguments, not their
+types, so you cannot have two same-name methods with the same arity that
+differ only in parameter type. (Free functions cannot be overloaded at all —
+see [Functions](#functions).)
 
 ## Inheritance
 

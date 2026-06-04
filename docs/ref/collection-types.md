@@ -103,6 +103,7 @@ Set literals use `#{...}`. The empty map literal remains `{}`.
 | `symmetric_difference` | `other: Set[T]` | `Set[T]` | Elements in exactly one of the two sets. |
 | `size` | none | `Integer` | Number of elements. |
 | `is_empty` | none | `Boolean` | True when the set has no elements. |
+| `to_array` | none | `Array[T]` | Copy the set's elements into a new array, in insertion order. |
 | `to_string` | none | `String` | Render the set and its nested values as text. |
 | `equals` | `other: Any` | `Boolean` | Deep structural equality. |
 | `clone` | none | `Set[T]` | Deep-copy the set and its nested values while preserving element type. |

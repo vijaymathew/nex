@@ -38,9 +38,10 @@
                         "print(numbers.length)\n"
                         "print(m.contains_key(\"a\"))\n"
                         "print(s.contains(2))\n"
+                        "print(s.to_array())\n"
                         "type_of(numbers.slice(0, 2).reverse)")))]
       (is (:compiled? result))
-      (is (= ["4" "true" "true"] (:output result)))
+      (is (= ["4" "true" "true" "[1, 2, 3]"] (:output result)))
       (is (= "Array" (:result result))))))
 
 (deftest compiled-legacy-calls-only-builtins-smoke-test

@@ -124,4 +124,49 @@
   (should (fboundp 'nex-eval-buffer))
   (should (fboundp 'nex-eval-region)))
 
+(defun nex-test--reindent (text)
+  "Return TEXT after stripping indentation and reindenting in nex-mode."
+  (with-temp-buffer
+    (nex-mode)
+    ;; Insert with leading whitespace removed so indentation is computed fresh.
+    (dolist (line (split-string text "\n"))
+      (insert (replace-regexp-in-string "^[ \t]+" "" line) "\n"))
+    (indent-region (point-min) (point-max))
+    (string-trim-right (buffer-string))))
+
+(ert-deftest nex-indent-from-loop-variant-invariant ()
+  "Loop 'variant'/'invariant' align with 'from'/'until', not class level."
+  (should (string=
+           (nex-test--reindent
+            "function f() do\nfrom\nlet i := 0\nuntil\ni >= steps\nvariant\ni - 1\ninvariant\nin_range: i >= 0\ndo\nprint(i)\nend\nend")
+           (string-join
+            '("function f() do"
+              "  from"
+              "    let i := 0"
+              "  until"
+              "    i >= steps"
+              "  variant"
+              "    i - 1"
+              "  invariant"
+              "    in_range: i >= 0"
+              "  do"
+              "    print(i)"
+              "  end"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-class-invariant-stays-class-level ()
+  "A class 'invariant' still aligns with the class, not a loop."
+  (should (string=
+           (nex-test--reindent
+            "class Account\nfeature\nbalance: Integer\ninvariant\nnon_negative: balance >= 0\nend")
+           (string-join
+            '("class Account"
+              "feature"
+              "  balance: Integer"
+              "invariant"
+              "  non_negative: balance >= 0"
+              "end")
+            "\n"))))
+
 ;;; test-nex-mode.el ends here

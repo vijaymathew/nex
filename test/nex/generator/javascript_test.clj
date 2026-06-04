@@ -299,6 +299,19 @@ end"
       (is (str/includes? js-code "new Set([2, 3])"))
       (is (str/includes? js-code "__nexSetUnion(s, t)")))))
 
+(deftest set-to-array-generation-test
+  (testing "Set.to_array translates to Array.from"
+    (let [nex-code "class Test
+  feature
+    demo() do
+      let s: Set[Integer] := #{1, 2, 3}
+      let a: Array[Integer] := s.to_array()
+      print(a)
+    end
+end"
+          js-code (js/translate nex-code)]
+      (is (str/includes? js-code "Array.from(s)")))))
+
 (deftest set-cursor-generation-test
   (testing "Across on sets translates via runtime set cursor helper"
     (let [nex-code "class Test

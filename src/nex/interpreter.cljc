@@ -87,6 +87,7 @@
 (def nex-set-difference rt/nex-set-difference)
 (def nex-set-intersection rt/nex-set-intersection)
 (def nex-set-symmetric-difference rt/nex-set-symmetric-difference)
+(def nex-set-to-array rt/nex-set-to-array)
 (defn nex-set-str [s] (rt/nex-set-str nex-format-value s))
 
 (def nex-bitwise-left-shift rt/nex-bitwise-left-shift)
@@ -3002,6 +3003,7 @@
     "symmetric_difference" (fn [s other & _] (nex-set-symmetric-difference s other))
     "size"                 (fn [s & _] (nex-set-size s))
     "is_empty"             (fn [s & _] (nex-set-empty? s))
+    "to_array"             (fn [s & _] (nex-set-to-array s))
     "to_string"            (fn [s & _] (nex-set-str s))
     "equals"               (fn [s other & _] (nex-deep-equals? s other))
     "clone"                (fn [s & _] (nex-clone-value s))

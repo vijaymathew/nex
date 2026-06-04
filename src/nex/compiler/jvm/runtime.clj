@@ -1801,6 +1801,10 @@
   [a b]
   (rt/nex-set-symmetric-difference a b))
 
+(defn set-to-array
+  [s]
+  (rt/nex-set-to-array s))
+
 (defn invoke-builtin
   [state name args]
   (cond

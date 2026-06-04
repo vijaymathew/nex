@@ -432,6 +432,7 @@
                         ("contains" "is_empty") "Boolean"
                         "size" "Integer"
                         ("union" "difference" "intersection" "symmetric_difference") target-type
+                        "to_array" {:base-type "Array" :type-params [(or (first type-args) "Any")]}
                         "Any")
                 "Array" (case (:method expr)
                           "get" (or (first type-args) "Any")
@@ -872,6 +873,7 @@
     "symmetric_difference" (fn [target args] (str "__nexSetSymmetricDifference(" target ", " args ")"))
     "size"                 (fn [target _] (str target ".size"))
     "is_empty"             (fn [target _] (str "(" target ".size === 0)"))
+    "to_array"             (fn [target _] (str "Array.from(" target ")"))
     "to_string"            (fn [target _] (str "__nexToString(" target ")"))
     "equals"               (fn [target args] (str "__nexDeepEquals(" target ", " args ")"))
     "clone"                (fn [target _] (str "__nexDeepClone(" target ")"))

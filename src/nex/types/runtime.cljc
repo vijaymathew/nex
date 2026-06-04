@@ -147,6 +147,9 @@
   (str "#{"
        (str/join ", " (map formatter #?(:clj (seq s) :cljs (es6-iterator-seq (.values s)))))
        "}"))
+(defn nex-set-to-array [s]
+  #?(:clj (nex-array-from s)
+     :cljs (nex-array-from (es6-iterator-seq (.values s)))))
 
 (defn- int32 [n]
   #?(:clj (int n)

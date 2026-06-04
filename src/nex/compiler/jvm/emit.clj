@@ -1747,6 +1747,13 @@
         (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL linkedhashset-internal-name "isEmpty" "()Z" false)
         :boolean)
 
+      [:set "to_array"]
+      (do
+        (emit-runtime-call! mv "set-to-array"
+                            [(fn [] (emit-expr! mv target state-slot))])
+        (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)
+
       [:set "to_string"]
       (do
         (emit-runtime-call! mv "set-to-string"

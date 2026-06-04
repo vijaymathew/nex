@@ -125,7 +125,7 @@
 
 (def ^:private direct-set-methods
   #{"contains" "union" "difference" "intersection" "symmetric_difference"
-    "size" "is_empty" "to_string" "equals" "clone" "cursor"})
+    "size" "is_empty" "to_array" "to_string" "equals" "clone" "cursor"})
 
 (def ^:private direct-task-methods
   #{"await" "cancel" "is_done" "is_cancelled"})
@@ -199,6 +199,7 @@
         "size" "Integer"
         ("union" "difference" "intersection" "symmetric_difference" "clone")
         (or target-type (set-type-of (or a "Any")))
+        "to_array" (array-type-of (or a "Any"))
         "to_string" "String"
         "cursor" "Cursor"
         nil)

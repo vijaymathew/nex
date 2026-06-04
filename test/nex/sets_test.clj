@@ -68,6 +68,21 @@ end"
           output (execute-method-output code)]
       (is (= ["#{0, 2, 5}" "true" "#{0, 2, 5, 3}" "#{1}" "#{2}" "#{1, 3}"] output)))))
 
+(deftest set-to-array-runtime
+  (testing "Set.to_array returns elements as an array in insertion order"
+    (let [code "class Test
+  feature
+    demo() do
+      let s: Set[Integer] := #{0, 2, 5}
+      let a: Array[Integer] := s.to_array()
+      print(a)
+      print(a.length())
+      print(a.get(1))
+    end
+end"
+          output (execute-method-output code)]
+      (is (= ["[0, 2, 5]" "3" "2"] output)))))
+
 (deftest set-from-array-runtime
   (testing "create Set[T].from_array builds a set"
     (let [code "class Test
