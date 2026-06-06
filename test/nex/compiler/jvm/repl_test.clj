@@ -622,6 +622,71 @@ end"))
           (is (not (str/includes? count-output "Error:")))
           (is (str/includes? count-output "0")))))))
 
+(deftest repl-redefining-class-does-not-recheck-stale-dependents-test
+  (testing "redefining a class only re-checks the new input, not previously defined dependents"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)]
+        ;; Account exposes set_balance, used by a subclass below.
+        (with-out-str
+          (repl/eval-code ctx0 "class Account
+feature
+  balance: Real
+  set_balance(new_balance: Real) do
+    balance := new_balance
+  end
+  withdraw(amount: Real)
+    require
+      enough: amount <= balance
+    do
+      set_balance(balance - amount)
+    end
+  create
+    make(balance: Real) do this.balance := balance end
+end"))
+        ;; Overdraft_Account.withdraw calls Account.set_balance.
+        (with-out-str
+          (repl/eval-code ctx0 "class Overdraft_Account
+inherit Account
+feature
+  withdraw(amount: Real)
+    require
+      within_limit: amount <= balance + overdraft_limit
+    do
+      Account.set_balance(balance - amount)
+    end
+  overdraft_limit: Real
+  create
+    make(balance, overdraft_limit: Real)
+      do
+        Account.make(balance)
+        this.overdraft_limit := overdraft_limit
+      end
+end"))
+        ;; Redefining Account without set_balance must not fail type checking
+        ;; just because the stale Overdraft_Account still references it.
+        (let [redef-output (with-out-str
+                             (repl/eval-code ctx0 "class Account
+feature
+  balance: Real
+create
+  make(b: Real) do
+    balance := b
+  end
+invariant
+  non_negative_balance: balance >= 0.0
+end"))
+              use-output (with-out-str
+                           (repl/eval-code ctx0 "let a := create Account.make(42.0)"))
+              balance-output (with-out-str
+                               (repl/eval-code ctx0 "a.balance"))]
+          (is (not (str/includes? redef-output "Error:")))
+          (is (not (str/includes? redef-output "set_balance")))
+          (is (not (str/includes? use-output "Error:")))
+          (is (str/includes? balance-output "42.0")))))))
+
 (deftest repl-rejects-bare-create-call-syntax-test
   (testing "REPL rejects create ClassName(...) and requires an explicit constructor name"
     (binding [repl/*type-checking-enabled* (atom true)
