@@ -169,4 +169,48 @@
               "end")
             "\n"))))
 
+(ert-deftest nex-indent-nested-do-rescue-block ()
+  "A nested do..rescue..end block indents one level deeper than the enclosing body."
+  (should (string=
+           (nex-test--reindent
+            "function connect_with_retry(): String\ndo\nlet attempts := 0\ndo\nattempts := attempts + 1\nif attempts < 3 then\nraise \"temporary connection error\"\nend\nresult := \"connected\"\nrescue\nif attempts < 3 then\nretry\nelse\nraise exception\nend\nend\nend")
+           (string-join
+            '("function connect_with_retry(): String"
+              "do"
+              "  let attempts := 0"
+              "  do"
+              "    attempts := attempts + 1"
+              "    if attempts < 3 then"
+              "      raise \"temporary connection error\""
+              "    end"
+              "    result := \"connected\""
+              "  rescue"
+              "    if attempts < 3 then"
+              "      retry"
+              "    else"
+              "      raise exception"
+              "    end"
+              "  end"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-method-body-do-with-contracts ()
+  "A method body do/require/ensure still align with the method, not deeper."
+  (should (string=
+           (nex-test--reindent
+            "class Account\nfeature\nwithdraw(amount: Real)\nrequire\nenough: amount <= balance\ndo\nbalance := balance - amount\nensure\ndecreased: balance = old balance - amount\nend\nend")
+           (string-join
+            '("class Account"
+              "feature"
+              "  withdraw(amount: Real)"
+              "  require"
+              "    enough: amount <= balance"
+              "  do"
+              "    balance := balance - amount"
+              "  ensure"
+              "    decreased: balance = old balance - amount"
+              "  end"
+              "end")
+            "\n"))))
+
 ;;; test-nex-mode.el ends here

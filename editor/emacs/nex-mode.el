@@ -368,25 +368,32 @@ Returns 0 if at top level or inside a class."
     (beginning-of-line)
     (skip-chars-forward " \t")
     (when (looking-at "\\b\\(require\\|ensure\\|do\\)\\b")
-      ;; Search backward for method name, skipping note, empty lines, and body statements
-      (forward-line -1)
-      (while (and (not (bobp))
-                  (progn
-                    (beginning-of-line)
-                    (skip-chars-forward " \t")
-                    (or (looking-at "^\\s-*$")
-                        (looking-at "\\bnote\\b")
-                        ;; Skip body statements (assignments, calls, etc) when looking for method
-                        ;; Stop at loop-starting keywords that own their own do..end
-                        (and (not (looking-at "\\b\\(do\\|require\\|ensure\\|feature\\|create\\|class\\|end\\|across\\|from\\|repeat\\|with\\)\\b"))
-                             (not (looking-at nex-method-signature-re))))))
-        (forward-line -1))
-      ;; Check if we found a method/constructor name or another contract keyword
-      (beginning-of-line)
-      (skip-chars-forward " \t")
-      (or (and (looking-at nex-method-signature-re)
-               (not (looking-at nex-section-keyword-re)))
-          (looking-at "\\b\\(do\\|require\\)\\b")))))
+      (let ((cur-kw (match-string 1)))
+        ;; Search backward for method name, skipping note, empty lines, and body statements
+        (forward-line -1)
+        (while (and (not (bobp))
+                    (progn
+                      (beginning-of-line)
+                      (skip-chars-forward " \t")
+                      (or (looking-at "^\\s-*$")
+                          (looking-at "\\bnote\\b")
+                          ;; Skip body statements (assignments, calls, etc) when looking for method
+                          ;; Stop at loop-starting keywords that own their own do..end
+                          (and (not (looking-at "\\b\\(do\\|require\\|ensure\\|feature\\|create\\|class\\|end\\|across\\|from\\|repeat\\|with\\)\\b"))
+                               (not (looking-at nex-method-signature-re))))))
+          (forward-line -1))
+        ;; Check if we found a method/constructor name or another contract keyword
+        (beginning-of-line)
+        (skip-chars-forward " \t")
+        (or (and (looking-at nex-method-signature-re)
+                 (not (looking-at nex-section-keyword-re)))
+            (looking-at "\\brequire\\b")
+            ;; Landing on a 'do' anchors a method body: it lines up an 'ensure'
+            ;; (or a body 'do' that follows 'require') with the method. But a 'do'
+            ;; that opens a nested scoped block follows the enclosing body 'do',
+            ;; and must indent one level deeper instead of aligning to the method.
+            (and (looking-at "\\bdo\\b")
+                 (not (string= cur-kw "do"))))))))
 
 (defun nex-find-method-indent ()
   "Find the indentation of the method that owns the current contract."
