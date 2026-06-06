@@ -1270,7 +1270,22 @@
               augmented-ast (if (seq prev-functions)
                               (update augmented-ast :functions #(vec (concat prev-functions %)))
                               augmented-ast)
-              result (tc/type-check augmented-ast {:var-types @*repl-var-types*})]
+              ;; Previously defined classes/functions are included above only so the
+              ;; type checker can resolve references from the *current* input. Their
+              ;; bodies must not be re-validated: redefining one class can legitimately
+              ;; invalidate an older, unrelated definition (e.g. a subclass that calls a
+              ;; method this redefinition removed), and that stale code should not block
+              ;; the new input. Skip body-checking for previously defined names that are
+              ;; not part of the current input.
+              current-class-names (set (concat (map :name (filter map? (:classes ast)))
+                                               (keep :class-name (filter map? (:functions ast)))))
+              skip-class-body-names (->> (concat (map :name prev-classes)
+                                                 (keep :class-name prev-functions))
+                                         (remove current-class-names)
+                                         set)
+              result (tc/type-check augmented-ast
+                                    {:var-types @*repl-var-types*
+                                     :skip-class-body-names skip-class-body-names})]
           (when-not (:success result)
             (doseq [error (:errors result)]
               (println (tc/format-type-error error)))

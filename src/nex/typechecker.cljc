@@ -3746,6 +3746,7 @@
     :else false))
 
 (declare result-definitely-assigned-in-body?)
+(declare body-may-complete-normally?)
 
 (defn- result-definitely-assigned-after-stmt
   "Whether result is definitely assigned after executing stmt, assuming assigned? before it."
@@ -3774,8 +3775,15 @@
                 assigned?))
     :scoped-block (let [body-out (result-definitely-assigned-in-body? (:body stmt) assigned?)]
                     (if-let [rescue-body (:rescue stmt)]
-                      (and body-out
-                           (result-definitely-assigned-in-body? rescue-body assigned?))
+                      ;; The block completes normally either by the body completing
+                      ;; (result assigned iff body-out) or by the rescue completing
+                      ;; normally. A rescue that always 'retry's (re-runs the body) or
+                      ;; 're-raise's never falls through, so it adds no returning path
+                      ;; and need not assign result itself.
+                      (if (body-may-complete-normally? rescue-body)
+                        (and body-out
+                             (result-definitely-assigned-in-body? rescue-body assigned?))
+                        body-out)
                       body-out))
     :with (result-definitely-assigned-in-body? (:body stmt) assigned?)
     :case (let [clause-outs (map #(result-definitely-assigned-in-body? (:body %) assigned?) (:clauses stmt))
@@ -3803,6 +3811,9 @@
   [stmt]
   (case (:type stmt)
     :raise false
+    ;; 'retry' transfers control back to the start of the protected body, so the
+    ;; rescue clause containing it does not fall through to its own end.
+    :retry false
     :if (let [branch-outs (concat
                            [(body-may-complete-normally? (:then stmt))]
                            (map #(body-may-complete-normally? (:then %)) (:elseif stmt))
@@ -4576,7 +4587,10 @@
    (let [env (make-type-env)
          normalized-functions (normalize-function-defs classes functions)
          visible-classes (class-defs-by-name-last-wins
-                          (vec (concat classes (function-class-defs normalized-functions))))]
+                          (vec (concat classes (function-class-defs normalized-functions))))
+         ;; Names whose bodies should be collected for resolution but not re-checked
+         ;; (used by the REPL to avoid re-validating previously defined code).
+         skip-body-names (or (:skip-class-body-names opts) #{})]
      (try
        ;; Register imported Java classes (as placeholders)
        (doseq [{:keys [qualified-name source]} imports]
@@ -4608,7 +4622,8 @@
 
        ;; Second pass: check class bodies, including normalized function classes.
        (doseq [class-def visible-classes]
-         (check-class env class-def))
+         (when-not (contains? skip-body-names (:name class-def))
+           (check-class env class-def)))
 
        ;; Check top-level statements in source order when available.
        ;; Fall back to legacy :calls-only programs.

@@ -754,6 +754,51 @@ end"
           result (tc/type-check ast)]
       (is (:success result) (pr-str result)))))
 
+(deftest test-rescue-with-retry-or-raise-does-not-require-result-assignment
+  (testing "A rescue that only retries or re-raises adds no returning path, so result need not be assigned there"
+    (let [code "class Test
+  feature
+    connect_with_retry(): String
+    do
+      let attempts := 0
+      do
+        attempts := attempts + 1
+        if attempts < 3 then
+          raise \"temporary connection error\"
+        end
+        result := \"connected\"
+      rescue
+        if attempts < 3 then
+          retry
+        else
+          raise exception
+        end
+      end
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str result)))))
+
+(deftest test-rescue-that-completes-normally-still-requires-result-assignment
+  (testing "A rescue that can fall through without assigning result is still rejected"
+    (let [code "class Test
+  feature
+    bad(): String
+    do
+      do
+        result := \"ok\"
+      rescue
+        let x := 1
+      end
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"does not definitely assign result on all returning paths" %)
+                (map tc/format-type-error (:errors result)))))))
+
 (deftest test-string-concatenation-typecheck
   (testing "String concatenation with + should typecheck"
     (let [code "class Test
