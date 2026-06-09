@@ -45,7 +45,7 @@ do
   result := n * 2
 end
 
-let y: Integer := when double(5) > 5 10 else 0 end
+let y: Integer := when double(5) > 5 then 10 else 0 end
 print(y)")
         (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
               {:keys [exit out err]} (run-jar! (:jar result))]

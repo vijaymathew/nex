@@ -63,7 +63,7 @@ end"
 
 (deftest repl-input-completeness-balances-when-expressions
   (testing "multi-line when expressions keep reading until else/end complete the expression"
-    (let [lines ["when convert expenses.get(\"children\") to children: Array[Map[String, Any]]"
+    (let [lines ["when convert expenses.get(\"children\") to children: Array[Map[String, Any]] then"
                  "  total_amount(children.get(0))"
                  "else"
                  "  0"

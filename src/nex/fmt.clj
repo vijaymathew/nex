@@ -66,6 +66,10 @@
                    " " (:operator expr) " "
                    (format-expression (:right expr)))
       :unary (str (:operator expr) (format-expression (:operand expr)))
+      :when (str "when " (format-expression (:condition expr))
+                 " then " (format-expression (:consequent expr))
+                 " else " (format-expression (:alternative expr))
+                 " end")
       :call (if (:target expr)
               (str (format-expression (:target expr)) "." (:method expr)
                    (when (seq (:args expr))

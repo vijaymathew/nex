@@ -79,7 +79,7 @@
 
 (deftest lower-when-expression-test
   (testing "when expressions lower to ir if nodes"
-    (let [program (p/ast "when x > 0 1 else 2 end")
+    (let [program (p/ast "when x > 0 then 1 else 2 end")
           {:keys [unit]} (lower/lower-repl-cell program {:name "nex/repl/Cell_0047"
                                                          :var-types {"x" "Integer"}})
           stmt (first (:body unit))]

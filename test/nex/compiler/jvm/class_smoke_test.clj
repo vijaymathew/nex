@@ -565,7 +565,7 @@ end")
                   session
                   (p/ast (str counter-with-constructor-program
                               "\nlet c: ?Counter := create Counter.with_value(7)\n"
-                              "when c = nil 0 else c.current() end")))]
+                              "when c = nil then 0 else c.current() end")))]
       (is (:compiled? result))
       (is (= 7 (:result result))))))
 
@@ -811,7 +811,7 @@ end"))
                   session
                   (p/ast (str "let score: Integer := 85\n"
                               "if score >= 90 then 1 elseif score >= 80 then 2 else 3 end\n"
-                              "when true 20 else 0 end")))]
+                              "when true then 20 else 0 end")))]
       (is (:compiled? result))
       (is (= 20 (:result result))))))
 
@@ -931,7 +931,7 @@ end"))
                               "let r: Integer := (6).bitwise_and(3)\n"
                               "let s: Integer := (0).bitwise_not\n"
                               "let t: Boolean := not false\n"
-                              "when t x + m + p + q + r + s else 0 end")))
+                              "when t then x + m + p + q + r + s else 0 end")))
           real-power (compiled-repl/compile-and-eval! session (p/ast "2.0 ^ 3"))]
       (is (:compiled? result))
       (is (:compiled? real-power))

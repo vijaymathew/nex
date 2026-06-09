@@ -321,7 +321,7 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let x := when true 1 else 2 end
+      let x := when true then 1 else 2 end
       print(x)
     end
 end"
@@ -333,7 +333,7 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let x := when false 1 else 2 end
+      let x := when false then 1 else 2 end
       print(x)
     end
 end"
@@ -345,7 +345,7 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let s := when 1 < 5 \"hello\" else \"bye\" end
+      let s := when 1 < 5 then \"hello\" else \"bye\" end
       print(s)
     end
 end"
@@ -357,7 +357,7 @@ end"
     (let [code "class Test
   feature
     demo() do
-      print(when 1 < 5 1 else 2 end)
+      print(when 1 < 5 then 1 else 2 end)
     end
 end"
           output (execute-method code)]
@@ -370,7 +370,7 @@ end"
     demo() do
       let a := 10
       let b := 20
-      let result := when a > b a * 2 else b * 2 end
+      let result := when a > b then a * 2 else b * 2 end
       print(result)
     end
 end"
@@ -382,7 +382,7 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let x: Integer := when 1 < 5 1 else 2 end
+      let x: Integer := when 1 < 5 then 1 else 2 end
     end
 end"
           ast (p/ast code)

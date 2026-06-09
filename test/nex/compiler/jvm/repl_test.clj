@@ -2477,7 +2477,7 @@ end"
   result := 2400
 end"
             setup-expenses "let expenses: Map[String, Any] := {\"children\": [{\"amount\": 2400}]}"
-            code "when convert expenses.get(\"children\") to children: Array[Map[String, Any]]
+            code "when convert expenses.get(\"children\") to children: Array[Map[String, Any]] then
   total_amount(children.get(0))
 else
   0

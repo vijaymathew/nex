@@ -1328,7 +1328,7 @@
       :expr (transform-node expr)})
 
    :whenExpression
-   (fn [[_ _when-kw condition consequent _else-kw alternative _end-kw]]
+   (fn [[_ _when-kw condition _then-kw consequent _else-kw alternative _end-kw]]
      {:type :when
       :condition (transform-node condition)
       :consequent (transform-node consequent)

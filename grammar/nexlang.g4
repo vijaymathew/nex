@@ -327,7 +327,7 @@ convertExpression
     ;
 
 whenExpression
-    : WHEN expression expression ELSE expression END
+    : WHEN expression THEN expression ELSE expression END
     ;
 
 anonymousFunction

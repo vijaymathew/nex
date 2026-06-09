@@ -193,20 +193,56 @@
         text (->> lines
                   (map sanitize-line)
                   (str/join "\n"))
+        ;; A `when` is either a value-producing when-expression
+        ;; (`when c then x else y end`, which opens its own `end`-terminated
+        ;; block) or a clause of `match`/`select` (`when p then block`, which
+        ;; does not). Since both now share the `then` keyword, they are told
+        ;; apart by context: a `when` is a clause when its innermost enclosing
+        ;; construct is a `match`/`select` guard. Only when-expressions count
+        ;; toward the open-block balance.
         count-when-expressions
         (fn [text]
-          (let [tokens (re-seq #"\bwhen\b|\bthen\b|\belse\b|\bend\b" text)]
+          (let [tokens (re-seq #"\bclass\b|\bdo\b|\bfrom\b|\brepeat\b|\bacross\b|\bif\b|\bcase\b|\bmatch\b|\bselect\b|\bwhen\b|\bthen\b|\belse\b|\bend\b" text)]
             (loop [tokens tokens
+                   stack '()
                    count 0]
               (if-let [token (first tokens)]
-                (if (= token "when")
-                  (let [tail (rest tokens)
-                        before-boundary (take-while #(not (#{"else" "end" "when"} %)) tail)]
-                    (recur tail
-                           (if (some #{"then"} before-boundary)
-                             count
-                             (inc count))))
-                  (recur (rest tokens) count))
+                (let [top (peek stack)]
+                  (case token
+                    ("class" "do" "from" "repeat" "across" "if" "case")
+                    (recur (rest tokens) (conj stack :block) count)
+
+                    ("match" "select")
+                    (recur (rest tokens) (conj stack :guard) count)
+
+                    "when"
+                    ;; A sibling clause closes the previous clause body first.
+                    (let [stack (if (= top :clausebody) (pop stack) stack)]
+                      (if (= (peek stack) :guard)
+                        (recur (rest tokens) (conj stack :clause) count)
+                        (recur (rest tokens) (conj stack :when) (inc count))))
+
+                    "then"
+                    ;; `then` after a clause's pattern opens that clause's body.
+                    (recur (rest tokens)
+                           (if (= top :clause) (conj (pop stack) :clausebody) stack)
+                           count)
+
+                    "else"
+                    ;; A trailing `else` closes the guard's last clause body.
+                    (recur (rest tokens)
+                           (if (= top :clausebody) (pop stack) stack)
+                           count)
+
+                    "end"
+                    (recur (rest tokens)
+                           (cond
+                             (= top :clausebody) (pop (pop stack)) ;; clause body + its guard
+                             (seq stack) (pop stack)
+                             :else stack)
+                           count)
+
+                    (recur (rest tokens) stack count)))
                 count))))
         delimiter-balance
         (reduce (fn [balance ch]

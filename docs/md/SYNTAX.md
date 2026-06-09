@@ -112,7 +112,7 @@ end
 ## Inline Choice: when
 
 ```nex
-let label: String := when age >= 18 "adult" else "minor" end
+let label: String := when age >= 18 then "adult" else "minor" end
 ```
 
 ## Loops: from / until
@@ -678,7 +678,7 @@ Multiple generic parameters are allowed:
 
 ```nex
 function pick_or_default[K, V](present: Boolean, value: V, fallback: V): V do
-  result := when present value else fallback end
+  result := when present then value else fallback end
 end
 ```
 

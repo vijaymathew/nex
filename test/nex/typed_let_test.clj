@@ -195,7 +195,7 @@ end"
           output (try
                    (reset! repl/*type-checking-enabled* true)
                    (with-out-str
-                     (repl/eval-code ctx "when 1 > 2 12 else \"hello\" end"))
+                     (repl/eval-code ctx "when 1 > 2 then 12 else \"hello\" end"))
                    (finally
                      (reset! repl/*type-checking-enabled* false)
                      (reset! repl/*repl-var-types* {})))]

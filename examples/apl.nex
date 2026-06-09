@@ -11,7 +11,7 @@ function zip[T](a: Array[T], b: Array[T], f: Function): Array[T] do
 end
 
 function is[T](a: T, b: T): String do
-  result := (when a = b "✅" else "❌" end)
+  result := (when a = b then "✅" else "❌" end)
 end
 
 let console := create Console

@@ -94,7 +94,7 @@ end
 `when` is an expression, so it can appear on the right-hand side:
 
 ```nex
-let category := when age >= 18 "adult" else "minor" end
+let category := when age >= 18 then "adult" else "minor" end
 ```
 
 ### 4.3 Case analysis

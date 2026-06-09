@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking:** the `when` expression now requires `then` before the consequent,
+  matching the `when ... then` shape used by `match`/`select` clauses.
+  Write `when cond then a else b end` instead of `when cond a else b end`.
+
 ## 0.1.1-beta - 2026-03-23
 
 - Made the JVM-compiled backend the default REPL backend.
