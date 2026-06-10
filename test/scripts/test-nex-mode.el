@@ -213,4 +213,32 @@
               "end")
             "\n"))))
 
+(ert-deftest nex-indent-ensure-after-nested-end ()
+  "An 'ensure' that follows nested block 'end's still aligns with the method,
+so its closing 'end' lines up with the routine 'do'."
+  (should (string=
+           (nex-test--reindent
+            "class Delivery\nfeature\nnext_stop(destination: String): String\nrequire\ndestination_non_empty: destination /= \"\"\ndo\nif current_location.title = destination then\nresult := current_location.title\nelse\nif loc /= nil then\nresult := current_location.title\nelse\nresult := \"UNREACHABLE\"\nend\nend\nensure\ndecision_returned: result /= \"\"\nend\nend")
+           (string-join
+            '("class Delivery"
+              "feature"
+              "  next_stop(destination: String): String"
+              "  require"
+              "    destination_non_empty: destination /= \"\""
+              "  do"
+              "    if current_location.title = destination then"
+              "      result := current_location.title"
+              "    else"
+              "      if loc /= nil then"
+              "        result := current_location.title"
+              "      else"
+              "        result := \"UNREACHABLE\""
+              "      end"
+              "    end"
+              "  ensure"
+              "    decision_returned: result /= \"\""
+              "  end"
+              "end")
+            "\n"))))
+
 ;;; test-nex-mode.el ends here
