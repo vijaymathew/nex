@@ -1,0 +1,135 @@
+-- ============================================================================
+-- Delivery Model V2  (Beyond Code — Studio 2, Level 1)
+--
+-- Redesigned from the Studio 1 flat model `Delivery_Tiny`, a stateless function
+-- that mapped (current, destination) -> next stop over a hardcoded A->B->C map
+-- and "reported" failure by returning the magic string "UNREACHABLE".
+--
+-- Defects of the flat model and how V2 fixes them:
+--   1. No identity .......... Delivery_Task has a stable identity: task_id.
+--   2. No state / lifecycle . `status` is an explicit state machine; `current`
+--                             tracks progress along the route.
+--   3. Implicit relations ... the carrier robot and the map are now first-class:
+--                             `robot_id` (assignment) and `Route` (topology).
+--   4. Invalid states easy .. invalid states are forbidden by invariants, not by
+--                             sentinel return values a caller can ignore.
+--
+-- Note on Route (closes the tradeoff that an earlier draft left open): the flat
+-- model hardcoded the map in an if/elseif. Rather than re-hardcode it, the map
+-- is modeled as a `Route` entity. `advance()` therefore takes NO untrusted hop
+-- argument — it derives the next stop from the route, so an off-route move is
+-- not merely rejected at runtime, it is unrepresentable in the API.
+-- ============================================================================
+
+-- The map a delivery follows: an ordered path of stops, e.g. ["A","B","C"].
+class Route
+feature
+  route_id: String
+  stops: Array [String]
+
+  contains(s: String): Boolean do
+    result := stops.contains(s)
+  end
+
+  -- The stop immediately after `s`, or "" if `s` is the last stop or absent.
+  next_after(s: String): String do
+    let i: Integer := stops.index_of(s)
+    let j: Integer := i + 1
+    if i < 0 or j >= stops.length then
+      result := ""
+    else
+      result := stops.get(j)
+    end
+  end
+
+  origin(): String do
+    result := stops.get(0)
+  end
+
+  destination(): String do
+    result := stops.get(stops.length - 1)
+  end
+create
+  make(rid: String, path: Array [String]) do
+    this.route_id := rid
+    this.stops := path
+  end
+invariant
+  id_present: route_id /= ""
+  has_path: stops.length >= 2
+  distinct_endpoints: stops.get(0) /= stops.get(stops.length - 1)
+end
+
+-- A single delivery moving along a Route, carried by a robot.
+class Delivery_Task
+feature
+  task_id: String        -- identity (immutable after creation)
+  route: Route           -- relationship: the path this delivery follows
+  current: String        -- where the package physically is right now
+  status: String         -- PENDING | IN_TRANSIT | DELIVERED | FAILED
+  robot_id: String       -- relationship: carrier; "" when unassigned
+
+  -- Transition: PENDING/FAILED -> IN_TRANSIT (pick up, or resume after failure).
+  assign(rid: String)
+    require
+      robot_present: rid /= ""
+      can_assign: status = "PENDING" or status = "FAILED"
+    do
+      robot_id := rid
+      status := "IN_TRANSIT"
+    ensure
+      assigned: robot_id = rid and status = "IN_TRANSIT"
+    end
+
+  -- Transition: move one legal hop along the route. The next stop comes from the
+  -- Route, never from the caller, so a delivery cannot jump off its path.
+  advance()
+    require
+      moving: status = "IN_TRANSIT"
+      not_arrived: current /= route.destination()
+    do
+      current := route.next_after(current)
+    ensure
+      progressed: current /= old current
+    end
+
+  -- Transition: IN_TRANSIT -> DELIVERED, but ONLY once actually at destination.
+  -- A rule the flat model could not express at all.
+  complete()
+    require
+      in_transit: status = "IN_TRANSIT"
+      at_destination: current = route.destination()
+    do
+      status := "DELIVERED"
+    ensure
+      delivered: status = "DELIVERED"
+    end
+
+  -- Transition: anything-but-DELIVERED -> FAILED.
+  fail(reason: String)
+    require
+      reason_present: reason /= ""
+      not_delivered: status /= "DELIVERED"
+    do
+      status := "FAILED"
+    ensure
+      failed: status = "FAILED"
+    end
+create
+  pending(tid: String, r: Route) do
+    this.task_id := tid
+    this.route := r
+    this.current := r.origin()   -- a fresh delivery sits at its origin
+    this.status := "PENDING"
+    this.robot_id := ""
+  end
+invariant
+  id_present: task_id /= ""
+  valid_status:
+    status = "PENDING" or status = "IN_TRANSIT" or status = "DELIVERED" or status = "FAILED"
+  -- cross-field rules that make whole classes of invalid state unrepresentable:
+  transit_has_robot: status /= "IN_TRANSIT" or robot_id /= ""
+  pending_at_origin: status /= "PENDING" or current = route.origin()
+  delivered_at_destination: status /= "DELIVERED" or current = route.destination()
+  on_route: route.contains(current)   -- the package is always at a real stop
+end

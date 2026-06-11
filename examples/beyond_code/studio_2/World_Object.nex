@@ -1,0 +1,61 @@
+-- ============================================================================
+-- Virtual World Model V2  (Beyond Code — Studio 2, Level 2)
+--
+-- Redesigned from the Studio 1 flat model `World_Tiny`, whose only operation was
+--   step(position, velocity, max_x) -> new position
+-- a pure function over loose integers.
+--
+-- Flat model defects and their fixes:
+--   1. No identity ........ nothing owned the state; position/velocity were
+--                           passed in every call. Here a `World_Object` owns its
+--                           state and has identity: object_id.
+--   2. State not held ..... bounds were re-supplied each call, so two calls could
+--                           use different max_x. Here `max_x` is part of the
+--                           object; the bound cannot drift between steps.
+--   3. Invalid input masked  the flat `require` only checked max_x > 0, so an
+--                           already-out-of-bounds position (e.g. -5) was accepted
+--                           and silently clamped, hiding the bug. Here the
+--                           constructor`s `start_in_bounds` makes an out-of-bounds
+--                           object impossible to create, and the invariant keeps
+--                           it in bounds for its whole life — not just after step.
+-- ============================================================================
+
+class World_Object
+feature
+  object_id: String    -- identity (immutable after creation)
+  x: Integer
+  vx: Integer
+  max_x: Integer       -- the bound is owned by the object, not a call argument
+
+  -- Transition: one deterministic, bounded position update.
+  step()
+    do
+      let next: Integer := x + vx
+      if next < 0 then
+        x := 0
+      elseif next > max_x then
+        x := max_x
+      else
+        x := next
+      end
+    ensure
+      bounded_after_step: x >= 0 and x <= max_x
+    end
+create
+  make(id: String, start_x: Integer, v: Integer, bound: Integer)
+    require
+      valid_bound: bound >= 0
+      start_in_bounds: start_x >= 0 and start_x <= bound
+    do
+      object_id := id
+      x := start_x
+      vx := v
+      max_x := bound
+    ensure
+      placed: x = start_x and max_x = bound
+    end
+invariant
+  id_present: object_id /= ""
+  valid_bound: max_x >= 0
+  bounded: x >= 0 and x <= max_x   -- ALWAYS true, not merely after a step
+end

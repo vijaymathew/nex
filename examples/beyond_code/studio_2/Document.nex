@@ -1,0 +1,92 @@
+-- ============================================================================
+-- Knowledge Model V2  (Beyond Code — Studio 2, Level 2)
+--
+-- Redesigned from the Studio 1 flat model `Notes_Tiny`, whose only operation was
+--   find_by_tag(tag) -> note id, hardcoded in if/elseif, returning "NOT_FOUND".
+--
+-- Flat model defects and their fixes:
+--   1. No identity ........ there was no note entity, just a tag->id table.
+--                           Here `Document` has a stable identity: doc_id.
+--   2. No lifecycle ....... a note could not be drafted/published/archived.
+--                           Here `status` is an explicit state machine.
+--   3. Implicit relations . links between notes did not exist; a reference would
+--                           have been an id stuffed in a free-text field. Here a
+--                           link is a first-class entity, `Doc_Link`, with a type.
+--   4. In-band failure .... "NOT_FOUND" is a String indistinguishable from a real
+--                           id. Here absence is the absence of an object, and
+--                           link validity is a Boolean query, not a sentinel.
+-- ============================================================================
+
+class Document
+feature
+  doc_id: String       -- identity (immutable after creation)
+  title: String
+  status: String       -- DRAFT | PUBLISHED | ARCHIVED
+
+  -- Transition: DRAFT -> PUBLISHED
+  publish()
+    require
+      has_title: title /= ""
+      is_draft: status = "DRAFT"
+    do
+      status := "PUBLISHED"
+    ensure
+      published: status = "PUBLISHED"
+    end
+
+  -- Transition: PUBLISHED -> ARCHIVED
+  archive()
+    require
+      is_published: status = "PUBLISHED"
+    do
+      status := "ARCHIVED"
+    ensure
+      archived: status = "ARCHIVED"
+    end
+create
+  draft(id: String, t: String) do
+    this.doc_id := id
+    this.title := t
+    this.status := "DRAFT"
+  end
+invariant
+  id_present: doc_id /= ""
+  title_present: title /= ""
+  valid_status: status = "DRAFT" or status = "PUBLISHED" or status = "ARCHIVED"
+end
+
+-- Relationship as a first-class entity: a typed, directed link between two
+-- documents. Cardinality: many-to-many (any document may link to many others).
+class Doc_Link
+feature
+  from_doc_id: String
+  to_doc_id: String
+  link_type: String    -- references | related | contradicts
+
+  is_valid(): Boolean do
+    result :=
+      from_doc_id /= "" and to_doc_id /= "" and
+      from_doc_id /= to_doc_id and
+      (link_type = "references" or link_type = "related" or link_type = "contradicts")
+  end
+create
+  -- Contracts block invalid links at construction — a self-link or unknown
+  -- link type cannot be built, so it can never enter the model.
+  make(f: String, t: String, lt: String)
+    require
+      endpoints_present: f /= "" and t /= ""
+      no_self_link: f /= t
+      known_type: lt = "references" or lt = "related" or lt = "contradicts"
+    do
+      from_doc_id := f
+      to_doc_id := t
+      link_type := lt
+    ensure
+      built: from_doc_id = f and to_doc_id = t and link_type = lt
+    end
+invariant
+  endpoints_present: from_doc_id /= "" and to_doc_id /= ""
+  no_self_link: from_doc_id /= to_doc_id
+  valid_link_type:
+    link_type = "references" or link_type = "related" or link_type = "contradicts"
+end

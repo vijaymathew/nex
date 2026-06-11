@@ -1,0 +1,72 @@
+-- ============================================================================
+-- Studio 2, Level 3 — Exploration: delivery reassignment, STATE-CENTRIC variant
+--
+-- Reassignment is not a concept here. To move a delivery from one robot to
+-- another, the dispatcher drives the existing state machine: fail the current
+-- attempt, then assign the new robot. The task stores only the CURRENT robot;
+-- who carried it before, and why it changed, are not part of the model.
+--
+-- Run from this directory:  nex level3_state_centric.nex
+-- ============================================================================
+
+class SC_Task
+feature
+  task_id: String
+  robot_id: String
+  status: String        -- PENDING | IN_TRANSIT | FAILED | DELIVERED
+
+  assign(rid: String)
+    require
+      robot_present: rid /= ""
+      can_assign: status = "PENDING" or status = "FAILED"
+    do
+      robot_id := rid
+      status := "IN_TRANSIT"
+    ensure
+      assigned: robot_id = rid and status = "IN_TRANSIT"
+    end
+
+  fail(reason: String)
+    require
+      reason_present: reason /= ""
+      not_delivered: status /= "DELIVERED"
+    do
+      status := "FAILED"
+    ensure
+      failed: status = "FAILED"
+    end
+create
+  pending(tid: String) do
+    this.task_id := tid
+    this.robot_id := ""
+    this.status := "PENDING"
+  end
+invariant
+  id_present: task_id /= ""
+  valid_status:
+    status = "PENDING" or status = "IN_TRANSIT" or status = "FAILED" or status = "DELIVERED"
+  transit_has_robot: status /= "IN_TRANSIT" or robot_id /= ""
+end
+
+function main() do
+  let t: SC_Task := create SC_Task.pending("T001")
+  t.assign("R7")
+  print("assigned to " + t.robot_id + " (" + t.status + ")")
+
+  -- Reassignment = two state transitions driven by the caller.
+  t.fail("reassigning")        -- IN_TRANSIT -> FAILED  (reason is transient)
+  t.assign("R9")               -- FAILED -> IN_TRANSIT
+  print("now carried by " + t.robot_id + " (" + t.status + ")")
+
+  -- What the model cannot answer afterwards:
+  --   * who carried it before R9?        (overwritten)
+  --   * why was it reassigned?           (the fail reason is gone)
+  --   * how many times was it reassigned? (never counted)
+  print("history available: none (only the current robot is stored)")
+
+  -- And nothing checks that the reassignment started from the robot the
+  -- dispatcher THOUGHT was carrying it: a second dispatcher could fail+assign
+  -- from a stale assumption and the lost update is invisible.
+end
+
+main()

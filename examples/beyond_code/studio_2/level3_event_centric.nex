@@ -1,0 +1,117 @@
+-- ============================================================================
+-- Studio 2, Level 3 — Exploration: delivery reassignment, EVENT-CENTRIC variant
+--
+-- Reassignment is a first-class entity: a `Reassign_Event` that records what
+-- changed (task, from-robot, to-robot, reason). The task APPLIES events; a single
+-- `apply_reassign` contract is the one place that defines when a reassignment is
+-- legal, and the task accumulates an auditable history (count + last reason).
+--
+-- Run from this directory:  nex level3_event_centric.nex
+-- ============================================================================
+
+-- The reassignment, as data: inspectable and testable on its own.
+class Reassign_Event
+feature
+  task_id: String
+  from_robot: String
+  to_robot: String
+  reason: String
+create
+  make(tid: String, frm: String, dst: String, why: String)
+    require
+      to_present: dst /= ""
+      actually_changes: frm /= dst
+      reason_present: why /= ""
+    do
+      task_id := tid
+      from_robot := frm
+      to_robot := dst
+      reason := why
+    ensure
+      built: task_id = tid and from_robot = frm and to_robot = dst and reason = why
+    end
+invariant
+  to_present: to_robot /= ""
+  distinct_robots: from_robot /= to_robot
+  reason_present: reason /= ""
+end
+
+class EC_Task
+feature
+  task_id: String
+  robot_id: String
+  status: String
+  reassign_count: Integer
+  last_reason: String
+
+  assign(rid: String)
+    require
+      robot_present: rid /= ""
+      can_assign: status = "PENDING" or status = "FAILED"
+    do
+      robot_id := rid
+      status := "IN_TRANSIT"
+    ensure
+      assigned: robot_id = rid and status = "IN_TRANSIT"
+    end
+
+  -- One contract captures the whole legality of a reassignment, including the
+  -- optimistic check `from_matches`: the event must start from the robot the
+  -- task is ACTUALLY on, so a stale/conflicting reassignment is rejected.
+  apply_reassign(ev: Reassign_Event)
+    require
+      same_task: ev.task_id = task_id
+      moving: status = "IN_TRANSIT"
+      from_matches: ev.from_robot = robot_id
+    do
+      robot_id := ev.to_robot
+      reassign_count := reassign_count + 1
+      last_reason := ev.reason
+    ensure
+      switched: robot_id = ev.to_robot
+      counted: reassign_count = old reassign_count + 1
+    end
+create
+  pending(tid: String) do
+    this.task_id := tid
+    this.robot_id := ""
+    this.status := "PENDING"
+    this.reassign_count := 0
+    this.last_reason := ""
+  end
+invariant
+  id_present: task_id /= ""
+  valid_status:
+    status = "PENDING" or status = "IN_TRANSIT" or status = "FAILED" or status = "DELIVERED"
+  transit_has_robot: status /= "IN_TRANSIT" or robot_id /= ""
+  non_negative_count: reassign_count >= 0
+end
+
+function main() do
+  let t: EC_Task := create EC_Task.pending("T001")
+  t.assign("R7")
+  print("assigned to " + t.robot_id + " (" + t.status + ")")
+
+  -- A legitimate reassignment, applied as an event.
+  let ev1: Reassign_Event := create Reassign_Event.make("T001", "R7", "R9", "battery_low")
+  t.apply_reassign(ev1)
+  print("now carried by " + t.robot_id + ", reassigned " + t.reassign_count
+        + " time(s), last reason: " + t.last_reason)
+
+  -- Auditable + testable: the event stands alone as an assertable value.
+  print("event record: task " + ev1.task_id + " " + ev1.from_robot + "->" + ev1.to_robot)
+
+  -- Failure-mode clarity: a STALE reassignment (a dispatcher who still thinks
+  -- the task is on R7) is rejected by `from_matches` — the lost update that the
+  -- state-centric variant cannot even detect.
+  let stale: Reassign_Event := create Reassign_Event.make("T001", "R7", "R5", "manual")
+  do
+    t.apply_reassign(stale)
+    print("BUG: applied a stale reassignment")
+  rescue
+    print("blocked stale reassignment: " + exception
+          + " (task is on " + t.robot_id + ", event assumed R7)")
+  end
+end
+
+main()
