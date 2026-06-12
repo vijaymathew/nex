@@ -90,16 +90,17 @@ end
 function main() do
   let t: EC_Task := create EC_Task.pending("T001")
   t.assign("R7")
-  print("assigned to " + t.robot_id + " (" + t.status + ")")
+  let console: Console := create Console
+  console.print_line("assigned to " + t.robot_id + " (" + t.status + ")")
 
   -- A legitimate reassignment, applied as an event.
   let ev1: Reassign_Event := create Reassign_Event.make("T001", "R7", "R9", "battery_low")
   t.apply_reassign(ev1)
-  print("now carried by " + t.robot_id + ", reassigned " + t.reassign_count
+  console.print_line("now carried by " + t.robot_id + ", reassigned " + t.reassign_count
         + " time(s), last reason: " + t.last_reason)
 
   -- Auditable + testable: the event stands alone as an assertable value.
-  print("event record: task " + ev1.task_id + " " + ev1.from_robot + "->" + ev1.to_robot)
+  console.print_line("event record: task " + ev1.task_id + " " + ev1.from_robot + "->" + ev1.to_robot)
 
   -- Failure-mode clarity: a STALE reassignment (a dispatcher who still thinks
   -- the task is on R7) is rejected by `from_matches` — the lost update that the
@@ -107,9 +108,9 @@ function main() do
   let stale: Reassign_Event := create Reassign_Event.make("T001", "R7", "R5", "manual")
   do
     t.apply_reassign(stale)
-    print("BUG: applied a stale reassignment")
+    console.print_line("BUG: applied a stale reassignment")
   rescue
-    print("blocked stale reassignment: " + exception
+    console.print_line("blocked stale reassignment: " + exception
           + " (task is on " + t.robot_id + ", event assumed R7)")
   end
 end

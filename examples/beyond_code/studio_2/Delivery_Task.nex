@@ -24,7 +24,7 @@
 -- The map a delivery follows: an ordered path of stops, e.g. ["A","B","C"].
 class Route
 feature
-  route_id: String
+  once route_id: String
   stops: Array [String]
 
   contains(s: String): Boolean do
@@ -63,7 +63,7 @@ end
 -- A single delivery moving along a Route, carried by a robot.
 class Delivery_Task
 feature
-  task_id: String        -- identity (immutable after creation)
+  once task_id: String        -- identity (immutable after creation)
   route: Route           -- relationship: the path this delivery follows
   current: String        -- where the package physically is right now
   status: String         -- PENDING | IN_TRANSIT | DELIVERED | FAILED

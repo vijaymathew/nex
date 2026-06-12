@@ -51,18 +51,19 @@ end
 function main() do
   let t: SC_Task := create SC_Task.pending("T001")
   t.assign("R7")
-  print("assigned to " + t.robot_id + " (" + t.status + ")")
+  let console: Console := create Console
+  console.print_line("assigned to " + t.robot_id + " (" + t.status + ")")
 
   -- Reassignment = two state transitions driven by the caller.
   t.fail("reassigning")        -- IN_TRANSIT -> FAILED  (reason is transient)
   t.assign("R9")               -- FAILED -> IN_TRANSIT
-  print("now carried by " + t.robot_id + " (" + t.status + ")")
+  console.print_line("now carried by " + t.robot_id + " (" + t.status + ")")
 
   -- What the model cannot answer afterwards:
   --   * who carried it before R9?        (overwritten)
   --   * why was it reassigned?           (the fail reason is gone)
   --   * how many times was it reassigned? (never counted)
-  print("history available: none (only the current robot is stored)")
+  console.print_line("history available: none (only the current robot is stored)")
 
   -- And nothing checks that the reassignment started from the robot the
   -- dispatcher THOUGHT was carrying it: a second dispatcher could fail+assign

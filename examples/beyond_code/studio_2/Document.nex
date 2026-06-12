@@ -19,7 +19,7 @@
 
 class Document
 feature
-  doc_id: String       -- identity (immutable after creation)
+  once doc_id: String       -- identity (immutable after creation)
   title: String
   status: String       -- DRAFT | PUBLISHED | ARCHIVED
 

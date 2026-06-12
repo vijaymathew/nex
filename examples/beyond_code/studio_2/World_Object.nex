@@ -22,7 +22,7 @@
 
 class World_Object
 feature
-  object_id: String    -- identity (immutable after creation)
+  once object_id: String    -- identity (immutable after creation)
   x: Integer
   vx: Integer
   max_x: Integer       -- the bound is owned by the object, not a call argument

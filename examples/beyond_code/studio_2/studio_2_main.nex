@@ -15,40 +15,41 @@ intern Delivery_Task
 
 function main() do
   let r: Route := create Route.make("RT-AC", ["A", "B", "C"])
-
+  let console: Console := create Console
+  
   -- ---------- NOMINAL: A -> B -> C, delivered ----------
-  print("== nominal: pending -> assign -> advance -> advance -> complete ==")
+  console.print_line("== nominal: pending -> assign -> advance -> advance -> complete ==")
   let t: Delivery_Task := create Delivery_Task.pending("T001", r)
-  print(t.status + " @ " + t.current)        -- PENDING @ A
+  console.print_line(t.status + " @ " + t.current)        -- PENDING @ A
   t.assign("R7")
   t.advance()                                 -- A -> B
   t.advance()                                 -- B -> C
-  print(t.status + " @ " + t.current)         -- IN_TRANSIT @ C
+  console.print_line(t.status + " @ " + t.current)         -- IN_TRANSIT @ C
   t.complete()
-  print(t.status + " @ " + t.current)         -- DELIVERED @ C
+  console.print_line(t.status + " @ " + t.current)         -- DELIVERED @ C
 
   -- ---------- EDGE 1: deliver before arriving (flat model could not catch) ----
-  print("== edge 1: complete() while still en route — must be blocked ==")
+  console.print_line("== edge 1: complete() while still en route — must be blocked ==")
   let e1: Delivery_Task := create Delivery_Task.pending("T002", r)
   e1.assign("R8")
   e1.advance()                                -- at B, not yet at destination C
   do
     e1.complete()
-    print("BUG: delivered without reaching destination")
+    console.print_line("BUG: delivered without reaching destination")
   rescue
-    print("blocked: " + exception)
-    print("status stayed " + e1.status + " @ " + e1.current)
+    console.print_line("blocked: " + exception)
+    console.print_line("status stayed " + e1.status + " @ " + e1.current)
   end
 
   -- ---------- EDGE 2: move an unassigned delivery (no robot) — must be blocked -
-  print("== edge 2: advance() a PENDING (unassigned) task — must be blocked ==")
+  console.print_line("== edge 2: advance() a PENDING (unassigned) task — must be blocked ==")
   let e2: Delivery_Task := create Delivery_Task.pending("T003", r)
   do
     e2.advance()
-    print("BUG: package moved with no robot carrying it")
+    console.print_line("BUG: package moved with no robot carrying it")
   rescue
-    print("blocked: " + exception)
-    print("status stayed " + e2.status + " @ " + e2.current)
+    console.print_line("blocked: " + exception)
+    console.print_line("status stayed " + e2.status + " @ " + e2.current)
   end
 end
 
