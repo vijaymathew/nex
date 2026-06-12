@@ -1,0 +1,63 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 24: Interoperability
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+--
+-- Files:
+--   pure_greeter.nex  -- platform-independent Nex logic (interned)
+--   host_system.nex   -- all host calls isolated behind a contract (interned)
+-- Discussion answers are in comments.
+-- ============================================================================
+
+intern Pure_Greeter
+intern Host_System
+import java.lang.System
+
+function main() do
+  let c: Console := create Console
+
+  -- 1. An example with BOTH `intern` and `import`, and the roles they play:
+  --    * `intern Pure_Greeter` loads another NEX source module — your own code,
+  --      written in Nex. It is a Nex-to-Nex link.
+  --    * `import java.lang.System` brings in a HOST platform library (here the
+  --      JVM's), usable only inside a `with "java"` block. It is the Nex-to-host
+  --      boundary. intern composes your program; import reaches outside it.
+  let g: Pure_Greeter := create Pure_Greeter.make()
+  c.print_line("1. interned Nex module says: " + g.greet("Ada"))
+  with "java" do
+    c.print_line("1. imported host library says: java.version = " +
+                 System.getProperty("java.version"))
+  end
+
+  -- 2. For a program that greets a user by name read from the console:
+  --    PURE NEX LOGIC (no host needed): building the greeting string, validating
+  --      that the name is non-empty, formatting the message.
+  --    HOST BOUNDARY: reading the line from the console, printing to it, and
+  --      reading the system clock or environment. Console itself is the wrapper
+  --      Nex provides over that boundary. Keep the pure part large and the host
+  --      part a thin shell, so the logic is testable without a real console.
+  c.print_line("2. pure: build/validate/format the greeting; host: console I/O" +
+               " and clock/env access (kept behind a thin wrapper).")
+
+  -- 3 & 5. Host_System (host_system.nex) is the wrapper for a host service: its
+  --    property(name) routine has a platform-INDEPENDENT contract (require a
+  --    non-empty name, ensure a non-empty result) while its body is the only
+  --    host-specific code. Everything else stays platform-independent.
+  let host: Host_System := create Host_System.make()
+  c.print_line("3. Host_System.property('os.name') = " + host.property("os.name"))
+  c.print_line("5. only host_system.nex contains the with-'java' block; the rest" +
+               " of the program is portable Nex behind its contract.")
+
+  -- 4. When is {:skip-contracts true} reasonable, and when risky?
+  --    REASONABLE: in a release build of code whose contracts were exercised and
+  --      trusted during development/testing, where the checks add measurable
+  --      overhead on a hot path and you accept removing the safety net.
+  --    RISKY: anywhere the program still meets UNTRUSTED input or rare states —
+  --      stripping contracts removes exactly the guardrails that would have
+  --      caught a violation, so a latent bug now corrupts silently instead of
+  --      failing loudly. Never skip contracts to "make a failing program pass";
+  --      that hides the defect rather than fixing it.
+  c.print_line("4. {:skip-contracts true}: fine for a trusted, perf-critical" +
+               " release build; risky wherever untrusted input or latent bugs remain.")
+end
+
+main()

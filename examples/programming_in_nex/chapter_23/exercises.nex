@@ -1,0 +1,71 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 23: Modules and Files
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+--
+-- This chapter is about splitting code across FILES, so the solution is a small
+-- set of files in this directory, pulled together here with `intern`:
+--   temperature.nex                 (Ex 1: one class in its own file)
+--   contact.nex / address_book.nex / csv_exporter.nex
+--                                   (Ex 2: one over-broad idea split into three)
+--   long_descriptive_module_name.nex(Ex 3: aliased on import)
+-- Exercises 4 and 5 are design sketches, answered in comments below.
+-- ============================================================================
+
+intern Temperature
+intern Address_Book
+intern Csv_Exporter
+intern Contact
+intern Long_Descriptive_Module_Name as Shorty
+
+function main() do
+  let c: Console := create Console
+
+  -- 1. A class defined in temperature.nex, used here via `intern Temperature`.
+  let t: Temperature := create Temperature.make(25.0)
+  c.print_line("1. Temperature (from temperature.nex): 25C = " +
+               t.fahrenheit.to_string + "F")                               -- 77.0F
+
+  -- 2. The over-broad "contact manager" split across three files: Contact (data),
+  --    Address_Book (collection), Csv_Exporter (format). Each is interned above.
+  let book: Address_Book := create Address_Book.make()
+  book.add(create Contact.make("Ada", "ada@example.com"))
+  book.add(create Contact.make("Alan", "alan@example.com"))
+  c.print_line("2. Address_Book size = " + book.size.to_string)           -- 2
+  c.print_line("2. find('Ada') = " + book.find("Ada"))                    -- Ada <...>
+  let exporter: Csv_Exporter := create Csv_Exporter.make()
+  c.print_line("2. CSV export:")
+  c.print_line(exporter.export(book.contacts))
+
+  -- 3. `intern Long_Descriptive_Module_Name as Shorty` lets a verbose class be
+  --    referred to briefly at the use site. The alias helps when the descriptive
+  --    name is good documentation in its own file but noisy when repeated in
+  --    client code (or when two interned modules would otherwise clash on a name).
+  let s: Shorty := create Shorty.make()
+  c.print_line("3. aliased class: Shorty.shout('hi') = " + s.shout("hi"))  -- HI!
+
+  -- 4. Directory layout for a small address-book program:
+  --      address_book/
+  --        main.nex            -- entry point; wires the pieces together
+  --        contact.nex         -- Contact: a single person's data
+  --        address_book.nex    -- Address_Book: holds and searches Contacts
+  --        csv_exporter.nex    -- Csv_Exporter: renders Contacts as CSV
+  --    Each file is one class with one reason to change; main.nex interns the
+  --    other three. (This exercise's files mirror that layout.)
+  c.print_line("4. layout: main.nex + contact.nex + address_book.nex + csv_exporter.nex")
+
+  -- 5.* A chapter-26-sized program of my own — a "library checkout tracker":
+  --      library/
+  --        main.nex            -- run the scenario / CLI loop
+  --        book.nex            -- Book: title, author, copies (the catalogue item)
+  --        member.nex          -- Member: who can borrow
+  --        loan.nex            -- Loan: ties a Book to a Member with a due date
+  --        catalogue.nex       -- Catalogue: the set of Books and availability
+  --        checkout_service.nex-- Checkout_Service: borrow/return rules + contracts
+  --    Justification, one line each: keep DATA (book, member, loan) separate from
+  --    the COLLECTION (catalogue) and the POLICY (checkout_service); main only
+  --    orchestrates. Each file changes for exactly one reason.
+  c.print_line("5. my program: a library checkout tracker, one class per file" +
+               " (book/member/loan/catalogue/checkout_service + main).")
+end
+
+main()

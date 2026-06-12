@@ -1,0 +1,149 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 15: Generic Classes
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+-- 1. Stack[G] with explicit emptiness preconditions on pop and peek.
+class Stack [G]
+  create
+    make() do items := [] end
+  feature
+    items: Array[G]
+    push(value: G) do items.add(value) end
+    -- Precondition: the stack must be non-empty.
+    pop(): G
+      require
+        not_empty: items.length > 0
+      do
+        result := items.get(items.length - 1)
+        items.remove(items.length - 1)
+      end
+    -- Precondition: the stack must be non-empty.
+    peek(): G
+      require
+        not_empty: items.length > 0
+      do
+        result := items.get(items.length - 1)
+      end
+    is_empty(): Boolean do result := items.length = 0 end
+    size(): Integer do result := items.length end
+end
+
+-- 2. Box[T] and a Logged_Box[T] that counts how often set is called.
+class Box [T]
+  create
+    make(v: T) do value := v end
+  feature
+    value: T
+    get(): T do result := value end
+    set(v: T) do value := v end
+end
+
+class Logged_Box [T] inherit Box[T]
+  create
+    make(v: T) do Box.make(v)  change_count := 0 end
+  feature
+    change_count: Integer
+    set(v: T) do
+      value := v
+      change_count := change_count + 1
+    end
+    changes(): Integer do result := change_count end
+end
+
+-- 3. Range[G -> Comparable].
+class Range [G -> Comparable]
+  create
+    make(l, h: G) do low := l  high := h end
+  feature
+    low: G
+    high: G
+    contains(value: G): Boolean do
+      result := low <= value and value <= high
+    end
+    overlaps(other: Range[G]): Boolean do
+      result := low <= other.high and other.low <= high
+    end
+end
+
+-- 5.* Queue[G] and Priority_Queue[G] that keeps elements sorted on insert.
+class Queue [G]
+  create
+    make() do items := [] end
+  feature
+    items: Array[G]
+    enqueue(value: G) do items.add(value) end
+    dequeue(): G do
+      result := items.get(0)
+      items.remove(0)
+    end
+    front(): G do result := items.get(0) end
+    is_empty(): Boolean do result := items.length = 0 end
+    size(): Integer do result := items.length end
+end
+
+class Priority_Queue [G -> Comparable] inherit Queue[G]
+  create
+    make() do items := [] end
+  feature
+    -- Insert so that items stays sorted ascending (smallest at the front),
+    -- so dequeue (which removes the front) yields elements in priority order.
+    enqueue(value: G) do
+      items.add(value)
+      items := items.sort
+    end
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1. Happy path; pop on an empty stack would trip `not_empty` (a precondition
+  --    violation that halts the program) — the contract turns a silent bad
+  --    index into a loud, located failure. We exercise only the valid path here.
+  let s: Stack[Integer] := create Stack[Integer].make()
+  s.push(10)
+  s.push(20)
+  c.print_line("1. pop=" + s.pop.to_string + " then peek=" + s.peek.to_string)  -- 20, 10
+  c.print_line("1. (pop on an empty stack would violate not_empty and halt.)")
+
+  -- 2.
+  let lb: Logged_Box[String] := create Logged_Box[String].make("a")
+  lb.set("b")
+  lb.set("c")
+  c.print_line("2. Logged_Box value=" + lb.get + " changes=" + lb.changes.to_string)  -- c, 2
+
+  -- 3.
+  let ri: Range[Integer] := create Range[Integer].make(1, 10)
+  c.print_line("3. int range [1,10] contains 5? " + ri.contains(5).to_string +
+               " contains 11? " + ri.contains(11).to_string)              -- true false
+  let rr: Range[Real] := create Range[Real].make(0.0, 1.0)
+  c.print_line("3. real range [0,1] contains 0.5? " + rr.contains(0.5).to_string)  -- true
+  let ri2: Range[Integer] := create Range[Integer].make(8, 12)
+  c.print_line("3. [1,10] overlaps [8,12]? " + ri.overlaps(ri2).to_string)  -- true
+
+  -- 4. Why ?V in Result[V] (discussion):
+  --    The failure constructor builds a Result with NO value — there is nothing
+  --    to put in `value`. If the field were plain `V`, it would have to hold a
+  --    valid V even on failure, which is impossible for an arbitrary type (there
+  --    is no universal default). Making it `?V` (detachable) lets the field be
+  --    `nil` in the failure case; the success case attaches a real V. Callers
+  --    are then forced to check before use, which is the point.
+  c.print_line("4. Result.value is ?V so the failure case can hold nil; a plain" +
+               " V would demand a value that failure does not have.")
+
+  -- 5.*
+  let pq: Priority_Queue[Integer] := create Priority_Queue[Integer].make()
+  across [5, 2, 8, 1, 9] as n do
+    pq.enqueue(n)
+  end
+  c.print("5. dequeue from Priority_Queue (expect ascending): ")
+  from
+  until
+    pq.is_empty
+  do
+    c.print(pq.dequeue.to_string + " ")
+  end
+  c.new_line
+end
+
+main()

@@ -1,0 +1,172 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 25: Testing Your Programs
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+--
+-- A tiny test harness (Tester) tallies pass/fail; every exercise's tests run
+-- through it and the file ends with a summary line.
+-- ============================================================================
+
+-- 1. A tiny assertion routine, generalised into a small Tester.
+class Tester
+  create
+    make() do passed := 0  total := 0  console := create Console end
+  feature
+    passed: Integer
+    total: Integer
+    console: Console
+    -- the "tiny assertion routine for strings" the exercise asks for:
+    assert_equal_string(label, expected, actual: String) do
+      total := total + 1
+      if actual = expected then
+        passed := passed + 1
+        console.print_line("  [ok]   " + label)
+      else
+        console.print_line("  [FAIL] " + label + " expected '" + expected +
+                           "' got '" + actual + "'")
+      end
+    end
+    assert_equal_int(label: String, expected, actual: Integer) do
+      assert_equal_string(label, expected.to_string, actual.to_string)
+    end
+    assert_true(label: String, cond: Boolean) do
+      assert_equal_string(label, "true", cond.to_string)
+    end
+end
+
+function reverse(s: String): String do
+  result := ""
+  across s as ch do
+    result := ch.to_string + result
+  end
+end
+
+-- 2. The class under test: a generic Stack with an empty-stack precondition.
+class Stack [G]
+  create
+    make() do items := [] end
+  feature
+    items: Array[G]
+    push(value: G) do items.add(value) end
+    pop(): G
+      require not_empty: items.length > 0
+      do result := items.get(items.length - 1)  items.remove(items.length - 1) end
+    peek(): G
+      require not_empty: items.length > 0
+      do result := items.get(items.length - 1) end
+    is_empty(): Boolean do result := items.length = 0 end
+end
+
+-- 3. The class under test: a Bank_Account.
+class Bank_Account
+  create
+    make(initial: Real) do balance := initial end
+  feature
+    balance: Real
+    deposit(amount: Real)
+      require positive: amount > 0.0
+      do balance := balance + amount end
+    withdraw(amount: Real): Boolean do
+      if amount > 0.0 and amount <= balance then
+        balance := balance - amount
+        result := true
+      else
+        result := false
+      end
+    end
+end
+
+-- 4. word_frequencies (Chapter 10), with extra tests below.
+function word_frequencies(text: String): Map[String, Integer] do
+  result := {}
+  let words: Array[String] := text.to_lower.split(" ")
+  across words as w do
+    let count: Integer := result.try_get(w, 0)
+    result.set(w, count + 1)
+  end
+end
+
+-- 5.* A routine whose CONTRACT is weaker than its true intent. The postcondition
+--     only promises a non-negative result, which a buggy `result := 0` would
+--     also satisfy — so the contract alone cannot catch that bug. Targeted tests
+--     pin the EXACT values and would fail such an implementation.
+function absolute_value(x: Integer): Integer
+  do
+    if x < 0 then result := -x else result := x end
+  ensure
+    weak_promise: result >= 0   -- intentionally weaker than the real intent
+  end
+
+function main() do
+  let t: Tester := create Tester.make()
+  let c: Console := t.console
+
+  -- 1.
+  c.print_line("1. reverse tests:")
+  t.assert_equal_string("reverse('hello')", "olleh", reverse("hello"))
+  t.assert_equal_string("reverse('') = ''", "", reverse(""))
+  t.assert_equal_string("reverse('a')", "a", reverse("a"))
+
+  -- 2. push / pop / peek, plus the empty-stack precondition.
+  c.print_line("2. Stack tests:")
+  let s: Stack[Integer] := create Stack[Integer].make()
+  s.push(1)
+  s.push(2)
+  t.assert_equal_int("peek after push 1,2", 2, s.peek)
+  t.assert_equal_int("pop returns top", 2, s.pop)
+  t.assert_equal_int("pop returns next", 1, s.pop)
+  t.assert_true("empty after popping all", s.is_empty)
+  -- the empty-stack precondition: pop must REFUSE (violation caught here).
+  let refused: Boolean := false
+  do
+    let bad: Integer := s.pop
+  rescue
+    refused := true
+  end
+  t.assert_true("pop on empty stack violates not_empty", refused)
+
+  -- 3. Bank_Account: deposit, withdrawal, and one invalid call.
+  c.print_line("3. Bank_Account tests:")
+  let acct: Bank_Account := create Bank_Account.make(100.0)
+  acct.deposit(50.0)
+  t.assert_equal_string("balance after deposit", "150.0", acct.balance.to_string)
+  t.assert_true("withdraw within balance succeeds", acct.withdraw(70.0))
+  t.assert_equal_string("balance after withdraw", "80.0", acct.balance.to_string)
+  t.assert_true("over-withdraw is refused", not acct.withdraw(1000.0))
+  -- the invalid call: a non-positive deposit violates the precondition.
+  let dep_refused: Boolean := false
+  do
+    acct.deposit(-10.0)
+  rescue
+    dep_refused := true
+  end
+  t.assert_true("deposit(-10) violates positive precondition", dep_refused)
+
+  -- 4. word_frequencies with two additional boundary/formatting cases.
+  c.print_line("4. word_frequencies tests:")
+  let f: Map[String, Integer] := word_frequencies("the cat the dog the")
+  t.assert_equal_int("'the' counted 3", 3, f.get("the"))
+  t.assert_equal_int("'cat' counted 1", 1, f.get("cat"))
+  -- extra case A (formatting): case is folded, so 'The' and 'the' are the same.
+  let f2: Map[String, Integer] := word_frequencies("The THE the")
+  t.assert_equal_int("case-folded 'the' counted 3", 3, f2.get("the"))
+  -- extra case B (boundary): a single word yields a count of exactly 1.
+  let f3: Map[String, Integer] := word_frequencies("solo")
+  t.assert_equal_int("single word counts 1", 1, f3.get("solo"))
+
+  -- 5.* Tests that catch a wrong implementation the weak contract would not.
+  c.print_line("5. absolute_value tests (stronger than its postcondition):")
+  t.assert_equal_int("abs(-7) = 7", 7, absolute_value(-7))
+  t.assert_equal_int("abs(7) = 7", 7, absolute_value(7))
+  t.assert_equal_int("abs(0) = 0", 0, absolute_value(0))
+  -- (A bug like `result := 0` satisfies result >= 0 but fails abs(-7)=7 above.)
+
+  -- Summary.
+  c.print_line("")
+  if t.passed = t.total then
+    c.print_line("TEST SUMMARY: PASS (" + t.passed.to_string + "/" + t.total.to_string + ")")
+  else
+    c.print_line("TEST SUMMARY: FAIL (" + t.passed.to_string + "/" + t.total.to_string + ")")
+  end
+end
+
+main()

@@ -1,0 +1,25 @@
+-- ----------------------------------------------------------------------------
+-- Chapter 24, Exercises 3 & 5 — all host-specific work isolated in ONE class.
+-- The `with "java"` block is the only platform-dependent code; the rest of the
+-- program talks to Host_System through a normal, contracted Nex interface and
+-- never sees the host directly. Swapping backends means rewriting only this file.
+-- ----------------------------------------------------------------------------
+import java.lang.System
+
+class Host_System
+  create
+    make() do end
+  feature
+    -- Contract of the main routine (platform-independent, even though the body
+    -- is host-specific): given a non-empty property name, return its value.
+    property(name: String): String
+      require
+        valid_name: name /= ""
+      do
+        with "java" do
+          result := System.getProperty(name)
+        end
+      ensure
+        produced: result /= ""
+      end
+end

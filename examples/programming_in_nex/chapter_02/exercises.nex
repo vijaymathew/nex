@@ -1,0 +1,54 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 2: Values, Types, and Variables
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+function main() do
+  let c: Console := create Console
+
+  -- --------------------------------------------------------------------------
+  -- 1. Right triangle 3, 4, 5:  a*a + b*b = c*c ?
+  -- --------------------------------------------------------------------------
+  let a: Integer := 3
+  let b: Integer := 4
+  let h: Integer := 5
+  let is_right: Boolean := a * a + b * b = h * h
+  c.print_line("1. 3,4,5 is a right triangle? " + is_right.to_string)   -- true
+
+  -- --------------------------------------------------------------------------
+  -- 2. Integer.pick: random integer in [0, n). A random integer in [1, 10]
+  --    inclusive is therefore  10.pick + 1  (0..9 shifted up by one).
+  --    (We print a few sample draws; values vary run to run, but each is 1..10.)
+  -- --------------------------------------------------------------------------
+  c.print("2. three draws of 10.pick + 1 in [1,10]: ")
+  c.print((10.pick + 1).to_string + " ")
+  c.print((10.pick + 1).to_string + " ")
+  c.print_line((10.pick + 1).to_string)
+
+  -- --------------------------------------------------------------------------
+  -- 3. Celsius -> Fahrenheit from console input:  F = C * 9.0 / 5.0 + 32.0
+  --    The book reads with con.read_line (a String) and converts with
+  --    .to_real before the arithmetic. So the conversion logic doesn't depend
+  --    on interactive input, it is factored into a function and called with
+  --    test strings, exactly as a typed-in line would arrive.
+  -- --------------------------------------------------------------------------
+  c.print_line("3. " + celsius_string_to_fahrenheit("100") + " (boiling)")  -- 212.0
+  c.print_line("3. " + celsius_string_to_fahrenheit("37"))                  -- 98.6
+  c.print_line("3. " + celsius_string_to_fahrenheit("0"))                   -- 32.0
+
+  -- --------------------------------------------------------------------------
+  -- 4. Worked out by hand:  "  Hello, Nex  ".trim  -> "Hello, Nex" (length 10),
+  --    .to_lower -> "hello, nex", .length -> 10.  Chaining verifies it.
+  -- --------------------------------------------------------------------------
+  let len: Integer := "  Hello, Nex  ".trim.to_lower.length
+  c.print_line("4. length of trimmed-lowered string: " + len.to_string)     -- 10
+end
+
+-- Mimics: read a Celsius line from the console, convert, return the message.
+function celsius_string_to_fahrenheit(line: String): String do
+  let celsius: Real := line.to_real
+  let fahrenheit: Real := celsius * 9.0 / 5.0 + 32.0
+  result := celsius.to_string + " deg C = " + fahrenheit.to_string + " deg F"
+end
+
+main()

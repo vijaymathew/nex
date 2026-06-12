@@ -1,0 +1,32 @@
+-- ----------------------------------------------------------------------------
+-- Chapter 26, Exercise 9* — a DIFFERENT complete miniature program of my own: a
+-- grade book. Same process as the task manager: a small class with contracts,
+-- exercised and tested in exercises.nex.
+--   Problem statement: record scores per student and report each student's
+--   average; reject anonymous students and out-of-range scores.
+-- ----------------------------------------------------------------------------
+class Grade_Book
+  create
+    make() do scores := {} end
+  feature
+    scores: Map[String, Array[Integer]]
+    add_score(student: String, score: Integer)
+      require
+        named: student.length > 0
+        valid_score: score >= 0 and score <= 100
+      do
+        let bucket: Array[Integer] := scores.try_get(student, [])
+        bucket.add(score)
+        scores.set(student, bucket)
+      end
+    average(student: String): Real
+      require known: scores.contains_key(student)
+      do
+        let bucket: Array[Integer] := scores.get(student)
+        let total: Real := 0.0
+        across bucket as s do total := total + s end
+        result := total / bucket.length
+      ensure in_range: result >= 0.0 and result <= 100.0 end
+    has(student: String): Boolean do result := scores.contains_key(student) end
+    students(): Array[String] do result := scores.keys end
+end

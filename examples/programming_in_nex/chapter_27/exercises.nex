@@ -1,0 +1,103 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 27: Common Patterns
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+--
+-- The chapter's patterns: Accumulator Loop, Search Through a Sequence, Recursive
+-- Structure Matches Recursive Data, Build a Class Around an Invariant,
+-- Table-Driven Lookup, Result Objects Instead of Exceptions, Wrapper at the
+-- Boundary.
+-- ============================================================================
+
+-- 2. A long if/elseif chain rewritten as a TABLE-DRIVEN LOOKUP.
+--    (Before: if code = 200 then "OK" elseif code = 404 then ... — one branch
+--     per case. After: the cases ARE data in a map; adding one edits the table.)
+function status_message(code: Integer): String do
+  let table: Map[Integer, String] :=
+    {200: "OK", 301: "Moved", 404: "Not Found", 500: "Server Error"}
+  result := table.try_get(code, "Unknown")
+end
+
+-- 3. A class built AROUND AN INVARIANT: a counter pinned to [0, max]. Every
+--    method is written so the invariant 0 <= value <= max survives the call.
+class Bounded_Counter
+  create
+    make(m: Integer)
+      require positive_max: m > 0
+      do value := 0  max := m end
+  feature
+    value: Integer
+    max: Integer
+    increment()
+      require room_to_grow: value < max
+      do value := value + 1 end
+    decrement()
+      require room_to_shrink: value > 0
+      do value := value - 1 end
+  invariant
+    in_bounds: value >= 0 and value <= max
+end
+
+-- 4. Count how many strings begin with a given prefix.
+--    PATTERN: an Accumulator Loop (a running count) whose test is a small Search
+--    Through a Sequence — i.e. a filter-and-count. It accumulates one number
+--    while scanning, exactly the accumulator shape.
+function starts_with(s, prefix: String): Boolean do
+  -- `and` short-circuits, so the length guard protects the substring call.
+  result := s.length >= prefix.length and s.substring(0, prefix.length) = prefix
+end
+
+function count_with_prefix(items: Array[String], prefix: String): Integer do
+  result := 0
+  across items as s do
+    if starts_with(s, prefix) then
+      result := result + 1
+    end
+  end
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1. Which pattern best describes each routine:
+  --      max_of          -> Accumulator Loop (carries the best-so-far)
+  --      contains        -> Search Through a Sequence (scan until found)
+  --      word_frequencies-> Accumulator Loop (accumulates counts into a map)
+  --      count_nodes     -> Recursive Structure Matches Recursive Data
+  --                         (the routine's recursion mirrors the tree's shape)
+  c.print_line("1. max_of=Accumulator, contains=Search, word_frequencies=" +
+               "Accumulator(into a map), count_nodes=Recursive-structure.")
+
+  -- 2.
+  c.print_line("2. status_message(200)=" + status_message(200) +
+               " (404)=" + status_message(404) +
+               " (999)=" + status_message(999))   -- OK, Not Found, Unknown
+
+  -- 3.
+  let counter: Bounded_Counter := create Bounded_Counter.make(2)
+  counter.increment()
+  counter.increment()
+  c.print_line("3. counter at max=" + counter.value.to_string +
+               " (further increment would violate room_to_grow, protecting" +
+               " the 0<=value<=max invariant)")   -- 2
+  counter.decrement()
+  c.print_line("3. after decrement=" + counter.value.to_string)   -- 1
+
+  -- 4.
+  let names: Array[String] := ["apple", "apricot", "banana", "avocado", "app"]
+  c.print_line("4. count_with_prefix(..., 'ap') = " +
+               count_with_prefix(names, "ap").to_string +
+               " (pattern: accumulator loop with a search test)")   -- 3 (apple, apricot, app)
+
+  -- 5.* A larger problem — a grade book / inventory report — would COMBINE:
+  --     * Build a Class Around an Invariant: an Inventory whose item counts can
+  --       never go negative (the core data structure, kept always-valid).
+  --     * Accumulator Loop: to total stock value or count low-stock items in one
+  --       pass over the entries.
+  --     * Table-Driven Lookup: to map a category code to a label or reorder
+  --       threshold without a sprawling if/elseif chain.
+  --     (and optionally Result Objects at the edges where a lookup may miss.)
+  c.print_line("5. for a grade book/inventory: combine Class-Around-an-Invariant" +
+               " (valid core) + Accumulator Loop (reports) + Table-Driven Lookup.")
+end
+
+main()

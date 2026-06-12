@@ -1,0 +1,96 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 4: Making Decisions
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+function main() do
+  let c: Console := create Console
+
+  -- --------------------------------------------------------------------------
+  -- 1. if/elseif: "positive" / "negative" / "zero".
+  -- --------------------------------------------------------------------------
+  c.print_line("1. sign(5)  = " + sign_word(5))     -- positive
+  c.print_line("1. sign(-3) = " + sign_word(-3))    -- negative
+  c.print_line("1. sign(0)  = " + sign_word(0))     -- zero
+
+  -- --------------------------------------------------------------------------
+  -- 2. The weekday/weekend if-chain rewritten as a `case`.
+  -- --------------------------------------------------------------------------
+  c.print_line("2. Mon -> " + day_kind("Mon"))      -- weekday
+  c.print_line("2. Sun -> " + day_kind("Sun"))      -- weekend
+
+  -- --------------------------------------------------------------------------
+  -- 3. `when` expression assigning "even"/"odd".
+  -- --------------------------------------------------------------------------
+  let n3: Integer := 7
+  let parity: String := when n3 % 2 = 0 then "even" else "odd" end
+  c.print_line("3. parity of " + n3.to_string + " = " + parity)   -- odd
+
+  -- --------------------------------------------------------------------------
+  -- 4. Fizz-Buzz.
+  -- --------------------------------------------------------------------------
+  c.print_line("4. 15 -> " + fizzbuzz(15))   -- FizzBuzz
+  c.print_line("4. 9  -> " + fizzbuzz(9))    -- Fizz
+  c.print_line("4. 10 -> " + fizzbuzz(10))   -- Buzz
+  c.print_line("4. 7  -> " + fizzbuzz(7))    -- 7
+
+  -- --------------------------------------------------------------------------
+  -- 5.* Shipping cost. The book reads a weight from the console; the rule is a
+  --     pure function here, called with the three test weights. By hand:
+  --       5.0 kg  -> tier < 10 :  5.0 * 5.0  = 25.0
+  --       25.0 kg -> tier 10-50:  4.0 * 25.0 = 100.0
+  --       75.0 kg -> tier > 50 :  3.0 * 75.0 = 225.0
+  -- --------------------------------------------------------------------------
+  shipping_report(c, 5.0)    -- 25.0
+  shipping_report(c, 25.0)   -- 100.0
+  shipping_report(c, 75.0)   -- 225.0
+end
+
+function sign_word(n: Integer): String do
+  if n > 0 then
+    result := "positive"
+  elseif n < 0 then
+    result := "negative"
+  else
+    result := "zero"
+  end
+end
+
+-- if day = "Mon" or ... or "Fri" then weekday else weekend  -- as a `case`.
+function day_kind(day: String): String do
+  result := "weekend"
+  case day of
+    "Mon", "Tue", "Wed", "Thu", "Fri" then result := "weekday"
+    else result := "weekend"
+  end
+end
+
+function fizzbuzz(n: Integer): String do
+  if n % 3 = 0 and n % 5 = 0 then
+    result := "FizzBuzz"
+  elseif n % 3 = 0 then
+    result := "Fizz"
+  elseif n % 5 = 0 then
+    result := "Buzz"
+  else
+    result := n.to_string
+  end
+end
+
+-- Per-kg rate by weight tier, total cost = rate * weight.
+function shipping_cost(weight: Real): Real do
+  if weight < 10.0 then
+    result := 5.0 * weight
+  elseif weight <= 50.0 then
+    result := 4.0 * weight
+  else
+    result := 3.0 * weight
+  end
+end
+
+function shipping_report(c: Console, weight: Real) do
+  c.print_line("5. Weight: " + weight.to_string + " kg, Cost: " +
+               shipping_cost(weight).to_string)
+end
+
+main()

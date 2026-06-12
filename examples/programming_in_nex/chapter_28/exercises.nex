@@ -1,0 +1,115 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 28: Concurrency with Tasks and Channels
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+function main() do
+  let c: Console := create Console
+
+  -- 1. A task that sums 1..100, returns through `result`, printed via await.
+  let summer: Task[Integer] := spawn do
+    let total: Integer := 0
+    from let i: Integer := 1 until i > 100 do
+      total := total + i
+      i := i + 1
+    end
+    result := total
+  end
+  c.print_line("1. sum 1..100 = " + summer.await.to_string)   -- 5050
+
+  -- 2. A buffered Channel[String] of capacity 3: send three, print size, then
+  --    receive them back in order (FIFO).
+  let words: Channel[String] := create Channel[String].with_capacity(3)
+  words.send("alpha")
+  words.send("beta")
+  words.send("gamma")
+  c.print_line("2. channel size after three sends = " + words.size.to_string)   -- 3
+  c.print("2. received in order: ")
+  c.print(words.receive + " ")
+  c.print(words.receive + " ")
+  c.print_line(words.receive)                                                   -- alpha beta gamma
+
+  -- 3. Two tasks each send a message; `select` takes whichever is ready first.
+  --    (Both are ready almost at once; select commits to exactly one branch.)
+  let ch_a: Channel[String] := create Channel[String].with_capacity(1)
+  let ch_b: Channel[String] := create Channel[String].with_capacity(1)
+  let sender_a: Task := spawn do ch_a.send("from A") end
+  let sender_b: Task := spawn do ch_b.send("from B") end
+  select
+    when ch_a.receive as msg then
+      c.print_line("3. select received: " + msg)
+    when ch_b.receive as msg then
+      c.print_line("3. select received: " + msg)
+  end
+  sender_a.await
+  sender_b.await
+
+  -- 4. await_all collects three independent computations into one array.
+  let a: Task[Integer] := spawn do result := 2 * 2 end
+  let b: Task[Integer] := spawn do result := 3 * 3 end
+  let d: Task[Integer] := spawn do result := 4 * 4 end
+  let results: Array[Integer] := await_all([a, b, d])
+  c.print_line("4. await_all = " + results.get(0).to_string + ", " +
+               results.get(1).to_string + ", " + results.get(2).to_string)   -- 4, 9, 16
+
+  -- 5. A pipeline that processes SEVERAL values. The producer sends each value
+  --    then CLOSES the channel; the consumer loops on receive until the channel
+  --    is closed AND drained. Closing is how the receiving side knows to stop:
+  --    we close once, on the producer, after the last value.
+  let pipe: Channel[Integer] := create Channel[Integer].with_capacity(4)
+  let producer: Task := spawn do
+    from let i: Integer := 1 until i > 5 do
+      pipe.send(i * 10)
+      i := i + 1
+    end
+    pipe.close          -- signal: no more values are coming
+  end
+  c.print("5. consumed until closed: ")
+  -- Only receive when a value is buffered; this avoids blocking on an empty
+  -- channel and racing the producer's close. We stop once it is closed AND
+  -- drained.
+  from until pipe.is_closed and pipe.size = 0 do
+    if pipe.size > 0 then
+      c.print(pipe.receive.to_string + " ")
+    end
+  end
+  c.new_line
+  producer.await
+
+  -- 6.* A two-stage pipeline: read -> transform -> collect, with two channels
+  --     and a worker task. Stage 1 (this routine) feeds raw values into `input`;
+  --     the WORKER reads from `input`, squares each, and writes to `output`;
+  --     stage 3 (this routine) collects from `output`.
+  --     WHERE BLOCKING HAPPENS: send blocks when a channel's buffer is full, and
+  --     receive blocks when a channel is empty — that back-pressure is what keeps
+  --     the stages in step. The worker stops when `input` is closed and drained,
+  --     then closes `output` so the collector likewise knows when to stop.
+  let input: Channel[Integer] := create Channel[Integer].with_capacity(2)
+  let output: Channel[Integer] := create Channel[Integer].with_capacity(2)
+  let worker: Task := spawn do
+    from until input.is_closed and input.size = 0 do
+      if input.size > 0 then
+        let v: Integer := input.receive
+        output.send(v * v)
+      end
+    end
+    output.close
+  end
+  let feeder: Task := spawn do
+    across [1, 2, 3, 4] as n do
+      input.send(n)
+    end
+    input.close
+  end
+  c.print("6. transformed (squares): ")
+  from until output.is_closed and output.size = 0 do
+    if output.size > 0 then
+      c.print(output.receive.to_string + " ")
+    end
+  end
+  c.new_line
+  feeder.await
+  worker.await
+end
+
+main()

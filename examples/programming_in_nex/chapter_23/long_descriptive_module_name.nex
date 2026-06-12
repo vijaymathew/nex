@@ -1,0 +1,10 @@
+-- ----------------------------------------------------------------------------
+-- Chapter 23, Exercise 3 — a deliberately verbose class name. At the use site
+-- it is aliased to something short with `intern ... as ...`.
+-- ----------------------------------------------------------------------------
+class Long_Descriptive_Module_Name
+  create
+    make() do end
+  feature
+    shout(s: String): String do result := s.to_upper + "!" end
+end

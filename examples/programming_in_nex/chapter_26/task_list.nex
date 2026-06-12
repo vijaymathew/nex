@@ -1,0 +1,52 @@
+-- ----------------------------------------------------------------------------
+-- Chapter 26 — Task_List, in its own file (Exercise 8). Interns Todo_Item.
+--
+-- Exercise 3: remaining_count() with a postcondition bounding its result.
+-- Exercise 4: all_done() on an EMPTY list returns true — completed_count (0)
+--   equals size (0), so the claim "every task is done" is VACUOUSLY true. We
+--   keep that definition: "all done" is most naturally read as "none left
+--   undone", which an empty list satisfies; callers that want to distinguish
+--   "empty" from "all complete" should test size() first.
+-- Exercise 7: clients use title_at / is_done_at instead of reaching into the
+--   `tasks` array, so the storage representation stays private to this class.
+-- ----------------------------------------------------------------------------
+intern Todo_Item
+
+class Task_List
+  create
+    make() do tasks := [] end
+  feature
+    tasks: Array[Todo_Item]
+    add_task(title: String)
+      require title_not_empty: title.length > 0
+      do tasks.add(create Todo_Item.make(title))
+      ensure added_title_visible: tasks.get(tasks.length - 1).title = title end
+    task_at(index: Integer): Todo_Item
+      require index_in_range: index >= 0 and index < tasks.length
+      do result := tasks.get(index) end
+    mark_task_done(index: Integer)
+      require index_in_range: index >= 0 and index < tasks.length
+      do this.task_at(index).mark_done()
+      ensure selected_done: tasks.get(index).done end
+    completed_count(): Integer
+      do
+        result := 0
+        across tasks as task do
+          if task.is_done() then result := result + 1 end
+        end
+      ensure count_in_range: result >= 0 and result <= tasks.length end
+    remaining_count(): Integer
+      do result := tasks.length - this.completed_count
+      ensure in_range: result >= 0 and result <= tasks.length end
+    all_done(): Boolean do result := this.completed_count = tasks.length end
+    size(): Integer do result := tasks.length end
+    -- representation-independent accessors (Exercise 7):
+    title_at(index: Integer): String
+      require index_in_range: index >= 0 and index < tasks.length
+      do result := tasks.get(index).title end
+    is_done_at(index: Integer): Boolean
+      require index_in_range: index >= 0 and index < tasks.length
+      do result := tasks.get(index).is_done end
+  invariant
+    storage_exists: tasks /= nil
+end

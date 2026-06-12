@@ -1,0 +1,84 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 3: Expressions
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+function main() do
+  let c: Console := create Console
+
+  -- --------------------------------------------------------------------------
+  -- 1. Predicted by hand, then verified:
+  --      2 + 3 * 4 - 1      = 2 + 12 - 1      = 13   (* before + -)
+  --      (2 + 3) * (4 - 1)  = 5 * 3           = 15
+  --      10 / 3 + 10 % 3    = 3 + 1           = 4    (integer / and %)
+  --      2 ^ 2 ^ 3          = (2 ^ 2) ^ 3 = 4 ^ 3 = 64  (^ left-associative)
+  -- --------------------------------------------------------------------------
+  c.print_line("1a. 2 + 3 * 4 - 1     = " + (2 + 3 * 4 - 1).to_string)       -- 13
+  c.print_line("1b. (2+3) * (4-1)     = " + ((2 + 3) * (4 - 1)).to_string)   -- 15
+  c.print_line("1c. 10 / 3 + 10 % 3   = " + (10 / 3 + 10 % 3).to_string)     -- 4
+  c.print_line("1d. 2 ^ 2 ^ 3         = " + (2 ^ 2 ^ 3).to_string)           -- 64.0
+
+  -- --------------------------------------------------------------------------
+  -- 2. One boolean: n is positive AND even.
+  -- --------------------------------------------------------------------------
+  show_pos_even(c, 4)     -- true
+  show_pos_even(c, 7)     -- false (odd)
+  show_pos_even(c, -2)    -- false (not positive)
+  show_pos_even(c, 0)     -- false (not positive)
+
+  -- --------------------------------------------------------------------------
+  -- 3. Quadratic roots for a=1, b=-5, c=6  ->  3.0 and 2.0
+  -- --------------------------------------------------------------------------
+  let qa: Real := 1.0
+  let qb: Real := -5.0
+  let qc: Real := 6.0
+  let disc: Real := (qb * qb - 4.0 * qa * qc) ^ 0.5
+  let root1: Real := (-qb + disc) / (2.0 * qa)
+  let root2: Real := (-qb - disc) / (2.0 * qa)
+  c.print_line("3. roots: " + root1.to_string + " and " + root2.to_string)  -- 3.0, 2.0
+
+  -- --------------------------------------------------------------------------
+  -- 4. Capitalize:  trim, first char upper, rest lower.
+  -- --------------------------------------------------------------------------
+  c.print_line("4. capitalize('  hELLO wORLD  ') = '" +
+               capitalize("  hELLO wORLD  ") + "'")                          -- 'Hello world'
+
+  -- --------------------------------------------------------------------------
+  -- 5.* Exclusive or:  a and not b or not a and b, over all four inputs.
+  --     Precedence: `and` binds tighter than `or`, so it reads as
+  --       (a and not b) or (not a and b)  -- parenthesized form below agrees.
+  -- --------------------------------------------------------------------------
+  c.print_line("5. xor truth table (bare vs parenthesized):")
+  check_xor(c, false, false)   -- false
+  check_xor(c, false, true)    -- true
+  check_xor(c, true,  false)   -- true
+  check_xor(c, true,  true)    -- false
+end
+
+function show_pos_even(c: Console, n: Integer) do
+  let ok: Boolean := n > 0 and n % 2 = 0
+  c.print_line("2. " + n.to_string + " is positive and even? " + ok.to_string)
+end
+
+-- Trim, uppercase the first character, lowercase the remainder, recombine.
+function capitalize(s: String): String do
+  let t: String := s.trim
+  if t.length = 0 then
+    result := t
+  else
+    let head: String := t.substring(0, 1).to_upper
+    let tail: String := t.substring(1, t.length).to_lower
+    result := head + tail
+  end
+end
+
+-- Confirm the bare-precedence form equals the explicitly parenthesized form.
+function check_xor(c: Console, a: Boolean, b: Boolean) do
+  let bare: Boolean := a and not b or not a and b
+  let paren: Boolean := (a and not b) or (not a and b)
+  c.print_line("5. a=" + a.to_string + " b=" + b.to_string +
+               " -> " + bare.to_string + " (paren agrees: " +
+               (bare = paren).to_string + ")")
+end
+
+main()

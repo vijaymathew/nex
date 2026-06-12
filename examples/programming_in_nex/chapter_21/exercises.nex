@@ -1,0 +1,133 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 21: Errors and Exceptions
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+-- 2. safe_reciprocal raises on zero.
+function safe_reciprocal(x: Real): Real do
+  if x = 0.0 then
+    raise "reciprocal of zero is undefined"
+  end
+  result := 1.0 / x
+end
+
+-- 3. A routine that distinguishes a CONTRACT VIOLATION (caller bug) from an
+--    EXCEPTION (an environmental / input failure to be handled):
+--      * the precondition `text.length > 0` is a CONTRACT — passing "" is a
+--        programming mistake the caller must fix, not something to recover from.
+--      * non-numeric or non-positive text is an EXPECTED runtime failure (it
+--        comes from outside the program), so it is signalled with `raise` and
+--        is meant to be caught.
+function parse_positive(text: String): Integer
+  require
+    not_empty: text.length > 0
+  do
+    let value: Integer := text.to_integer
+    if value <= 0 then
+      raise "number must be positive: " + text
+    end
+    result := value
+  end
+
+-- 4. connect_with_retry, now printing the attempt number on each try.
+function connect_with_retry(c: Console): String do
+  let attempts: Integer := 0
+  do
+    attempts := attempts + 1
+    c.print_line("   connect attempt " + attempts.to_string)
+    if attempts < 3 then
+      raise "temporary connection error"
+    end
+    result := "connected"
+  rescue
+    if attempts < 3 then
+      retry
+    else
+      raise exception
+    end
+  end
+end
+
+-- 5.* File_Cache: memory first, then disk, then a built-in default on a miss.
+--     PRECONDITION: path.length > 0 — the caller must name a file; an empty
+--       path is a caller mistake, so it is a contract, not a recoverable error.
+--     EXCEPTION: a missing file on disk is an ENVIRONMENTAL failure (the file
+--       may or may not exist at run time, outside the program's control), so it
+--       is raised by read_disk and recovered in the rescue clause.
+--     WHY the split: the caller can always guarantee a non-empty path before
+--       calling, but cannot guarantee the file exists — that is decided by the
+--       world, so it belongs to error handling, not the contract.
+class File_Cache
+  create
+    make() do memory := {} end
+  feature
+    memory: Map[String, String]
+    load(path: String): String
+      require
+        path_non_empty: path.length > 0
+      do
+        if memory.contains_key(path) then
+          result := memory.get(path)            -- 1) memory
+        else
+          result := this.read_disk(path)        -- 2) disk (may raise)
+          memory.set(path, result)
+        end
+      rescue
+        result := "DEFAULT-CONTENT"              -- 3) recover from a missing file
+      end
+    read_disk(path: String): String do
+      result := ""
+      if path = "known.txt" then
+        result := "disk-contents-of-known"
+      else
+        raise "file not found: " + path
+      end
+    end
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1. Raise "too small" until a counter reaches 5, then print "ok"; via retry.
+  c.print_line("1. counting up with retry:")
+  let counter: Integer := 0
+  do
+    counter := counter + 1
+    if counter < 5 then
+      raise "too small"
+    end
+    c.print_line("   ok (reached " + counter.to_string + ")")
+  rescue
+    c.print_line("   too small (counter=" + counter.to_string + "), retrying")
+    retry
+  end
+
+  -- 2.
+  do
+    c.print_line("2. safe_reciprocal(4.0) = " + safe_reciprocal(4.0).to_string)   -- 0.25
+    c.print_line("2. safe_reciprocal(0.0) = " + safe_reciprocal(0.0).to_string)   -- raises
+  rescue
+    c.print_line("2. fallback: " + exception.to_string)
+  end
+
+  -- 3.
+  do
+    c.print_line("3. parse_positive('42') = " + parse_positive("42").to_string)   -- 42
+    c.print_line("3. parse_positive('-5') = " + parse_positive("-5").to_string)   -- raises
+  rescue
+    c.print_line("3. handled runtime failure: " + exception.to_string)
+  end
+  c.print_line("3. (parse_positive('') would instead VIOLATE the not_empty" +
+               " contract — a caller bug, not a handled exception.)")
+
+  -- 4.
+  c.print_line("4. result: " + connect_with_retry(c))   -- connected on attempt 3
+
+  -- 5.*
+  let cache: File_Cache := create File_Cache.make()
+  c.print_line("5. load('known.txt')   = " + cache.load("known.txt"))     -- disk contents
+  c.print_line("5. load('missing.txt') = " + cache.load("missing.txt"))   -- DEFAULT-CONTENT
+  c.print_line("5. load('known.txt')   = " + cache.load("known.txt") + " (now from memory)")
+end
+
+main()

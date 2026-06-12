@@ -1,0 +1,70 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 1: Getting Started
+-- Solutions to the end-of-chapter exercises.
+--
+-- The book's exercises are posed at the REPL; here they are gathered into one
+-- runnable program so the whole set can be checked at once:  nex exercises.nex
+-- ============================================================================
+
+function main() do
+  let c: Console := create Console
+
+  -- --------------------------------------------------------------------------
+  -- 1. Seconds in a week, built up from named parts.
+  -- --------------------------------------------------------------------------
+  let seconds_per_minute: Integer := 60
+  let minutes_per_hour: Integer := 60
+  let hours_per_day: Integer := 24
+  let days_per_week: Integer := 7
+  let seconds_per_week: Integer :=
+    seconds_per_minute * minutes_per_hour * hours_per_day * days_per_week
+  c.print_line("1. Seconds in a week: " + seconds_per_week.to_string)   -- 604800
+
+  -- --------------------------------------------------------------------------
+  -- 2. Area of a circle, radius 5.0.
+  -- --------------------------------------------------------------------------
+  let radius: Real := 5.0
+  let pi: Real := 3.14159
+  let area: Real := pi * radius * radius
+  c.print_line("2. Area of circle (r=5.0): " + area.to_string)          -- 78.53975
+
+  -- --------------------------------------------------------------------------
+  -- 3. Greeting from two string variables.
+  -- --------------------------------------------------------------------------
+  let first_name: String := "Ada"
+  let last_name: String := "Lovelace"
+  c.print_line("3. Hello, " + first_name + " " + last_name)
+  -- At the REPL, :vars would then show first_name and last_name in the session.
+
+  -- --------------------------------------------------------------------------
+  -- 4. `let x := 10` then `let x := 20`.
+  --    A second `let` in the SAME scope re-DECLARES the name: it introduces a
+  --    fresh binding that shadows the first, rather than mutating it. To UPDATE
+  --    an existing variable you use assignment (`:=`) without `let`. Shown here
+  --    with two differently named variables, since re-`let`-ing one name in a
+  --    single function body is a redeclaration error in compiled code:
+  -- --------------------------------------------------------------------------
+  let x_first: Integer := 10        -- like the first  `let x := 10`
+  let x_second: Integer := 20       -- like the second `let x := 20` (new binding)
+  c.print_line("4. first let -> " + x_first.to_string +
+               ", second let -> " + x_second.to_string +
+               "  (the second `let` introduces a new variable)")
+  let counter: Integer := 10
+  counter := 20                     -- THIS is an update of the same variable
+  c.print_line("   plain `:=` updates in place -> " + counter.to_string)
+
+  -- --------------------------------------------------------------------------
+  -- 5.* Fahrenheit -> Celsius:  C = (F - 32) * 5 / 9
+  --     Verified at the two reference temperatures.
+  -- --------------------------------------------------------------------------
+  report_f_to_c(c, 32.0)            -- freezing point of water  -> 0.0 C
+  report_f_to_c(c, 98.6)            -- body temperature         -> 37.0 C
+end
+
+-- Convert one Fahrenheit reading to Celsius and print both, readably.
+function report_f_to_c(c: Console, f: Real) do
+  let celsius: Real := (f - 32.0) * 5.0 / 9.0
+  c.print_line("5. " + f.to_string + " deg F = " + celsius.to_string + " deg C")
+end
+
+main()

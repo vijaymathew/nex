@@ -1,0 +1,108 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 26: A Complete Program
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+--
+-- The chapter's task-manager program is split across files (Exercise 8):
+--   todo_item.nex   -- Todo_Item  (Exercises 1, 2, 6 — see comments there)
+--   task_list.nex   -- Task_List  (Exercises 3, 4, 7 — see comments there)
+--   grade_book.nex  -- Grade_Book (Exercise 9* — a program of my own)
+-- This driver exercises them and runs the contract-failure tests (Exercise 5).
+-- ============================================================================
+
+intern Todo_Item
+intern Task_List
+intern Grade_Book
+
+function main() do
+  let c: Console := create Console
+  let passed: Integer := 0
+  let total: Integer := 0
+
+  -- Normal run of the task manager.
+  let list: Task_List := create Task_List.make()
+  list.add_task("write chapter")
+  list.add_task("review draft")
+  list.add_task("publish")
+  c.print_line("Task list (" + list.size.to_string + " tasks):")
+  list.mark_task_done(0)
+  list.mark_task_done(2)
+  from let i: Integer := 0 until i >= list.size do
+    let mark: String := when list.is_done_at(i) then "[x]" else "[ ]" end
+    c.print_line("  " + mark + " " + list.title_at(i))   -- via Ex-7 accessors
+    i := i + 1
+  end
+
+  -- 1. description field on Todo_Item.
+  let item: Todo_Item := create Todo_Item.make("buy milk")
+  c.print_line("1. new item has_description=" + item.has_description.to_string)   -- false
+  item.set_description("2 litres, semi-skimmed")
+  c.print_line("1. after set_description has_description=" + item.has_description.to_string)  -- true
+
+  -- 3. remaining_count.
+  c.print_line("3. completed=" + list.completed_count.to_string +
+               " remaining=" + list.remaining_count.to_string)   -- 2 remaining, 1
+
+  -- 4. all_done on an empty list is vacuously true.
+  let empty: Task_List := create Task_List.make()
+  c.print_line("4. empty list all_done=" + empty.all_done.to_string +
+               " (vacuously true; size=" + empty.size.to_string + ")")   -- true, 0
+
+  -- 5. Contract-failure tests: add_task("") and mark_task_done(bad index).
+  c.print_line("5. contract-failure tests:")
+  total := total + 1
+  let empty_refused: Boolean := false
+  do
+    list.add_task("")
+  rescue
+    empty_refused := true
+  end
+  if empty_refused then passed := passed + 1  c.print_line("  [ok]   add_task('') is refused")
+  else c.print_line("  [FAIL] add_task('') was allowed") end
+
+  total := total + 1
+  let bad_index_refused: Boolean := false
+  do
+    list.mark_task_done(999)
+  rescue
+    bad_index_refused := true
+  end
+  if bad_index_refused then passed := passed + 1  c.print_line("  [ok]   mark_task_done(999) is refused")
+  else c.print_line("  [FAIL] mark_task_done(999) was allowed") end
+
+  -- 6. mark_done twice is refused (precondition not_yet_done).
+  total := total + 1
+  let double_refused: Boolean := false
+  do
+    list.mark_task_done(0)   -- task 0 is already done
+  rescue
+    double_refused := true
+  end
+  if double_refused then passed := passed + 1  c.print_line("  [ok]   marking an already-done task twice is refused")
+  else c.print_line("  [FAIL] double mark_done was allowed") end
+
+  -- 9.* Grade_Book program.
+  let gb: Grade_Book := create Grade_Book.make()
+  gb.add_score("Ada", 90)
+  gb.add_score("Ada", 80)
+  gb.add_score("Alan", 70)
+  c.print_line("9. Ada average = " + gb.average("Ada").to_string +
+               ", Alan average = " + gb.average("Alan").to_string)   -- 85.0, 70.0
+  total := total + 1
+  let invalid_score_refused: Boolean := false
+  do
+    gb.add_score("Ada", 150)   -- out of range
+  rescue
+    invalid_score_refused := true
+  end
+  if invalid_score_refused then passed := passed + 1  c.print_line("9. [ok] out-of-range score is refused")
+  else c.print_line("9. [FAIL] out-of-range score was allowed") end
+
+  c.print_line("")
+  if passed = total then
+    c.print_line("CHAPTER_26_TESTS: PASS (" + passed.to_string + "/" + total.to_string + ")")
+  else
+    c.print_line("CHAPTER_26_TESTS: FAIL (" + passed.to_string + "/" + total.to_string + ")")
+  end
+end
+
+main()

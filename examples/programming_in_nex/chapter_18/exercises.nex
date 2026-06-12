@@ -1,0 +1,158 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 18: Invariants
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+-- 1. Stack[G] with an invariant that items is never nil.
+--    Is it strong enough? No. "items /= nil" only says the backing array EXISTS;
+--    it says nothing about a valid stack's real rules (size never negative, the
+--    top is the last element, push/pop change size by exactly one). It rules out
+--    one bad state (a missing array) but admits many others. It is a necessary
+--    floor, not a sufficient description of validity.
+class Stack [G]
+  create
+    make() do items := [] end
+  feature
+    items: Array[G]
+    push(value: G) do items.add(value) end
+    pop(): G
+      require not_empty: items.length > 0
+      do result := items.get(items.length - 1)  items.remove(items.length - 1) end
+    size(): Integer do result := items.length end
+  invariant
+    items_exist: items /= nil
+    size_non_negative: items.length >= 0
+end
+
+-- 2. Rectangle whose invariants forbid impossible (non-positive) sides.
+class Rectangle
+  create
+    make(w, h: Real)
+      require positive_sides: w > 0.0 and h > 0.0
+      do width := w  height := h end
+  feature
+    width: Real
+    height: Real
+    area(): Real do result := width * height end
+  invariant
+    width_positive: width > 0.0
+    height_positive: height > 0.0
+end
+
+-- 3. Student_Record with invariants describing a valid record.
+class Student_Record
+  create
+    make(n: String)
+      require named: n.length > 0
+      do name := n  scores := [] end
+  feature
+    name: String
+    scores: Array[Integer]
+    add_score(s: Integer)
+      require in_range: s >= 0 and s <= 100
+      do scores.add(s) end
+    average(): Real
+      require has_scores: scores.length > 0
+      do
+        let total: Real := 0.0
+        across scores as s do total := total + s end
+        result := total / scores.length
+      end
+  invariant
+    name_present: name.length > 0
+    scores_exist: scores /= nil
+    -- (Every score is kept in 0..100 by the add_score precondition, the single
+    --  gate through which scores enter — so the per-element range need not be
+    --  re-stated as an invariant.)
+end
+
+-- 4. Time_Of_Day with invariants guaranteeing a legal time, and a setter that
+--    preserves them.
+class Time_Of_Day
+  create
+    make(h, m, s: Integer)
+      require
+        legal_hour: h >= 0 and h <= 23
+        legal_minute: m >= 0 and m <= 59
+        legal_second: s >= 0 and s <= 59
+      do hour := h  minute := m  second := s end
+  feature
+    hour: Integer
+    minute: Integer
+    second: Integer
+    set_hour(h: Integer)
+      require legal: h >= 0 and h <= 23
+      do hour := h end
+    label(): String do
+      result := hour.to_string + ":" + minute.to_string + ":" + second.to_string
+    end
+  invariant
+    hour_ok: hour >= 0 and hour <= 23
+    minute_ok: minute >= 0 and minute <= 59
+    second_ok: second >= 0 and second <= 59
+end
+
+-- 5.* Interval with the invariant start <= finish.
+--     How the invariant changes the design of every mutating method: any method
+--     that EXTENDS, SHRINKS, or MERGES intervals must leave start <= finish, so
+--     each gets a precondition or internal clamp guarding it. shrink() cannot
+--     pull finish below start; merge() must take min of the starts and max of
+--     the finishes (which preserves the order automatically); extend() must move
+--     finish forward, never behind start. The invariant turns "is this interval
+--     still legal?" from a per-method worry into a single class-wide promise the
+--     compiler re-checks after every call.
+class Interval
+  create
+    make(s, f: Integer)
+      require ordered: s <= f
+      do low := s  high := f end
+  feature
+    low: Integer
+    high: Integer
+    length(): Integer do result := high - low end
+    extend(by: Integer)
+      require forward: by >= 0
+      do high := high + by end
+    merge(other: Interval): Interval do
+      let lo: Integer := when low <= other.low then low else other.low end
+      let hi: Integer := when high >= other.high then high else other.high end
+      result := create Interval.make(lo, hi)
+    end
+  invariant
+    well_ordered: low <= high
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1.
+  let st: Stack[Integer] := create Stack[Integer].make()
+  st.push(1)  st.push(2)
+  c.print_line("1. stack size=" + st.size.to_string +
+               " (invariant items/=nil holds; see comment on why it is weak)")
+
+  -- 2.
+  let r: Rectangle := create Rectangle.make(3.0, 4.0)
+  c.print_line("2. rectangle 3x4 area=" + r.area.to_string +
+               " (make(0,..) would violate positive_sides)")
+
+  -- 3.
+  let sr: Student_Record := create Student_Record.make("Ada")
+  sr.add_score(80)
+  sr.add_score(90)
+  c.print_line("3. " + sr.name + " average=" + sr.average.to_string)   -- 85.0
+
+  -- 4.
+  let t: Time_Of_Day := create Time_Of_Day.make(9, 30, 0)
+  t.set_hour(14)
+  c.print_line("4. time = " + t.label + " (set_hour(24) would violate hour_ok)")
+
+  -- 5.*
+  let i1: Interval := create Interval.make(2, 5)
+  let i2: Interval := create Interval.make(4, 9)
+  let m: Interval := i1.merge(i2)
+  c.print_line("5. [2,5] merge [4,9] = [" + m.low.to_string + "," +
+               m.high.to_string + "], length " + m.length.to_string)   -- [2,9], 7
+end
+
+main()

@@ -1,0 +1,129 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 19: Loop Contracts
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+-- 1. Product of 1..n, with a loop invariant.
+--    INVARIANT (in words): on entry to each iteration, `result` holds the
+--    product of all integers from 1 to i-1 (and result = 1 when i = 1).
+--    VARIANT: n - i + 1 strictly decreases and stays >= 0, so the loop ends.
+function product_to(n: Integer): Integer
+  require
+    non_negative: n >= 0
+  do
+    from
+      let i: Integer := 1
+      result := 1
+    invariant
+      index_in_range: 1 <= i and i <= n + 1
+    variant
+      n - i + 1
+    until
+      i > n
+    do
+      result := result * i
+      i := i + 1
+    end
+  end
+
+-- 2 & 3. Linear search returning the FIRST index of target, or -1.
+--        INVARIANT (stronger, stated plainly): every element examined so far —
+--        the prefix items[0 .. i-1] — is different from target; the moment the
+--        scan finds a match it records that index in `result` and the guard
+--        `result >= 0` stops the loop, so `result` is the FIRST matching index.
+--        VARIANT: items.length - i strictly decreases -> termination.
+function index_of(items: Array[String], target: String): Integer
+  do
+    from
+      let i: Integer := 0
+      result := -1
+    invariant
+      index_in_range: 0 <= i and i <= items.length
+    variant
+      items.length - i
+    until
+      i >= items.length or result >= 0
+    do
+      if items.get(i) = target then
+        result := i
+      end
+      i := i + 1
+    end
+  end
+
+-- 4. A loop that scans an array RIGHT TO LEFT (here: the LAST index of target).
+--    NATURAL VARIANT: i + 1. As i runs length-1, length-2, ... down toward -1,
+--    i + 1 strictly decreases on every step and never goes below 0 while the
+--    loop is still running, so it is a valid (bounded, decreasing) variant and
+--    guarantees the loop terminates.
+function last_index_of(items: Array[String], target: String): Integer
+  do
+    from
+      let i: Integer := items.length - 1
+      result := -1
+    invariant
+      index_in_range: -1 <= i and i <= items.length - 1
+    variant
+      i + 1
+    until
+      i < 0 or result >= 0
+    do
+      if items.get(i) = target then
+        result := i
+      end
+      i := i - 1
+    end
+  end
+
+-- 5.* Remove duplicates from a SORTED array, classic two-index algorithm.
+--     One index (the `across` reader) walks the input; `result` is the unique
+--     prefix built so far.
+--     LOOP INVARIANT: `result` always holds, in their original order and with
+--     NO duplicates, exactly the distinct values among the input elements read
+--     so far. Because the input is sorted, any duplicate of a value sits
+--     adjacent to it, so a new element is a duplicate iff it equals the LAST
+--     element already in `result`; that single comparison maintains the
+--     invariant. When the read reaches the end, `result` is the whole input
+--     de-duplicated.
+function dedup_sorted(items: Array[Integer]): Array[Integer]
+  do
+    result := []
+    -- `or` short-circuits, so the empty-prefix check guards the get safely.
+    across items as x do
+      if result.length = 0 or result.get(result.length - 1) /= x then
+        result.add(x)
+      end
+    end
+  end
+
+function show(arr: Array[Integer]): String do
+  result := "["
+  from let i: Integer := 0 until i >= arr.length do
+    if i > 0 then result := result + ", " end
+    result := result + arr.get(i).to_string
+    i := i + 1
+  end
+  result := result + "]"
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1.
+  c.print_line("1. product_to(5) = " + product_to(5).to_string +
+               ", product_to(0) = " + product_to(0).to_string)   -- 120, 1
+
+  -- 2 & 3.
+  let words: Array[String] := ["a", "b", "c", "b", "d"]
+  c.print_line("2/3. index_of(...,'b') = " + index_of(words, "b").to_string +
+               ", index_of(...,'z') = " + index_of(words, "z").to_string)   -- 1, -1
+
+  -- 4.
+  c.print_line("4. last_index_of(...,'b') = " + last_index_of(words, "b").to_string)  -- 3
+
+  -- 5.*
+  c.print_line("5. dedup_sorted([1,1,2,3,3,3,5]) = " +
+               show(dedup_sorted([1, 1, 2, 3, 3, 3, 5])))   -- [1, 2, 3, 5]
+end
+
+main()

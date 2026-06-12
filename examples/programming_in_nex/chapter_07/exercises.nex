@@ -1,0 +1,119 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 7: Thinking with Functions
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+-- 1. safe_percentage: 0.0 when total is zero, otherwise (part/total)*100.
+function safe_percentage(part, total: Real): Real do
+  if total = 0.0 then
+    result := 0.0
+  else
+    result := (part / total) * 100.0
+  end
+end
+
+-- 2. Pure core extracted from greet_by_time; the wrapper does the printing.
+function greeting_for_hour(hour: Integer): String do
+  if hour < 12 then
+    result := "Good morning!"
+  elseif hour < 18 then
+    result := "Good afternoon!"
+  else
+    result := "Good evening!"
+  end
+end
+
+function greet_by_time(c: Console, hour: Integer) do
+  c.print_line(greeting_for_hour(hour))   -- thin effectful wrapper
+end
+
+-- 3. is_prime, written with is_divisor as a helper (from Section 7.6).
+function is_divisor(n, i: Integer): Boolean do
+  result := n % i = 0
+end
+
+function is_prime(n: Integer): Boolean do
+  if n < 2 then
+    result := false
+  else
+    result := true
+    from
+      let i: Integer := 2
+    until
+      i * i > n or not result
+    do
+      if is_divisor(n, i) then
+        result := false
+      end
+      i := i + 1
+    end
+  end
+end
+
+-- 4. count_vowels via `across` and an is_vowel helper.
+function is_vowel(ch: Char): Boolean do
+  let l: String := ch.to_string.to_lower
+  result := l = "a" or l = "e" or l = "i" or l = "o" or l = "u"
+end
+
+function count_vowels(s: String): Integer do
+  result := 0
+  across s as ch do
+    if is_vowel(ch) then
+      result := result + 1
+    end
+  end
+end
+
+-- 5.* collatz_length: number of steps to reach 1.
+function collatz_length(n: Integer): Integer do
+  result := 0
+  from
+    let m: Integer := n
+  until
+    m = 1
+  do
+    if m % 2 = 0 then
+      m := m / 2
+    else
+      m := 3 * m + 1
+    end
+    result := result + 1
+  end
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1.
+  c.print_line("1. safe_percentage(50,200) = " + safe_percentage(50.0, 200.0).to_string)  -- 25.0
+  c.print_line("1. safe_percentage(0,100)  = " + safe_percentage(0.0, 100.0).to_string)   -- 0.0
+  c.print_line("1. safe_percentage(10,0)   = " + safe_percentage(10.0, 0.0).to_string)    -- 0.0
+
+  -- 2.
+  c.print("2. ")
+  greet_by_time(c, 9)
+  c.print("2. ")
+  greet_by_time(c, 14)
+  c.print("2. ")
+  greet_by_time(c, 20)
+  c.print_line("2. pure: greeting_for_hour(9)='" + greeting_for_hour(9) + "'")
+
+  -- 3.
+  c.print_line("3. is_prime(2)=" + is_prime(2).to_string +
+               " is_prime(9)=" + is_prime(9).to_string +
+               " is_prime(17)=" + is_prime(17).to_string +
+               " is_prime(1)=" + is_prime(1).to_string)   -- true false true false
+
+  -- 4.
+  c.print_line("4. count_vowels('Hello')=" + count_vowels("Hello").to_string +
+               " 'rhythm'=" + count_vowels("rhythm").to_string +
+               " 'aeiou'=" + count_vowels("aeiou").to_string)   -- 2 0 5
+
+  -- 5.*
+  c.print_line("5. collatz_length(6)=" + collatz_length(6).to_string +
+               " (27)=" + collatz_length(27).to_string +
+               " (1)=" + collatz_length(1).to_string)   -- 8 111 0
+end
+
+main()

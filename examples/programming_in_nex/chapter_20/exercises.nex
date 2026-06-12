@@ -1,0 +1,151 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 20: Contracts as Design
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+--
+-- This chapter is about designing the CONTRACT first. Discussion answers are in
+-- comments; runnable contract-first code is provided where it applies.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1. Contract for append_line(path: String, text: String) (design, no body).
+--    PRECONDITION — what the CALLER must guarantee, checkable up front:
+--      * path.length > 0         (a path must be named)
+--    NOT preconditions — these are runtime conditions the caller cannot know or
+--    control, so they belong in ERROR HANDLING (exceptions), not the contract:
+--      * the file/directory exists and is writable
+--      * the disk is not full; no I/O error mid-write
+--    Rule of thumb: a precondition is a promise the caller can inspect and keep
+--    before calling. Anything depending on the state of the world at run time is
+--    an environmental failure -> handle with rescue, don't require it.
+-- ----------------------------------------------------------------------------
+
+-- A minimal Queue[String] so exercise 2 has something to contract against.
+class Queue
+  create
+    make() do items := [] end
+  feature
+    items: Array[String]
+    enqueue(v: String) do items.add(v) end
+    size(): Integer do result := items.length end
+end
+
+-- 2. Contract-first front(queue): the first element, without removing it.
+function front(queue: Queue): String
+  require
+    not_empty: queue.size > 0
+  do
+    result := queue.items.get(0)
+  ensure
+    is_first_element: result = queue.items.get(0)
+    -- (front only reads, so it leaves the queue unchanged; `old` cannot be used
+    --  on a parameter here — it applies to object fields — so the no-change
+    --  promise is documented rather than asserted.)
+  end
+
+-- 3. Timer contracts. Ticks are passed in (no real-clock dependency), so the
+--    routines are pure and the contracts are the whole point.
+--    Desired contracts, designed before any body:
+--      start : require not running ; ensure running
+--      stop  : require running     ; ensure not running
+--      elapsed: require stopped (a finished interval) ; result >= 0
+class Timer
+  create
+    make() do running := false  start_tick := 0  stop_tick := 0 end
+  feature
+    running: Boolean
+    start_tick: Integer
+    stop_tick: Integer
+    start(now: Integer)
+      require not_already_running: not running
+      do start_tick := now  running := true
+      ensure now_running: running end
+    stop(now: Integer)
+      require
+        currently_running: running
+        not_before_start: now >= start_tick
+      do stop_tick := now  running := false
+      ensure now_stopped: not running end
+    elapsed(): Integer
+      require finished: not running
+      do result := stop_tick - start_tick
+      ensure non_negative: result >= 0 end
+end
+
+-- 4. Word_Set with a strengthened add: a postcondition about size.
+--    WHY it must cover both cases: add is idempotent — it only stores a word it
+--    does not already hold. So size grows by exactly one for a NEW word but stays
+--    the SAME for one already present. A postcondition `size = old size + 1`
+--    would be FALSE on a duplicate add; the correct, honest statement bounds it:
+--      old size <= size <= old size + 1
+--    (We track size in a `count` field, because `old items.length` would re-read
+--     the live array and miss the change — see chapter 17.)
+class Word_Set
+  create
+    make() do items := []  count := 0 end
+  feature
+    items: Array[String]
+    count: Integer
+    has(word: String): Boolean do result := items.contains(word) end
+    add(word: String)
+      require not_empty: word.length > 0
+      do
+        if not has(word) then
+          items.add(word)
+          count := count + 1
+        end
+      ensure
+        word_present: has(word)
+        size_grows_by_at_most_one: count >= old count and count <= old count + 1
+      end
+    size(): Integer do result := count end
+  invariant
+    storage_exists: items /= nil
+end
+
+-- 5.* Redesign of an earlier routine, contract-first.
+--    OLD IDEA (Chapter 7): percentage(part, total) := (part / total) * 100.0,
+--    written with no contract. The vague spot the old version left implicit was
+--    "what if total is zero?" — it would simply divide by zero at run time.
+--    NEW CONTRACT, designed first:
+--      require  positive_total: total > 0.0          -- divisor must be valid
+--      ensure   non_negative_when_part_non_neg: ...  -- result tracks the inputs
+--    Writing the precondition is exactly what surfaced the zero-total case the
+--    earlier design had glossed over: it is now the caller's stated obligation.
+function percentage(part, total: Real): Real
+  require
+    positive_total: total > 0.0
+    non_negative_part: part >= 0.0
+  do
+    result := (part / total) * 100.0
+  ensure
+    non_negative: result >= 0.0
+  end
+
+function main() do
+  let c: Console := create Console
+
+  -- 2.
+  let q: Queue := create Queue.make()
+  q.enqueue("first")
+  q.enqueue("second")
+  c.print_line("2. front = " + front(q) + " (queue still size " + q.size.to_string + ")")  -- first, 2
+
+  -- 3.
+  let timer: Timer := create Timer.make()
+  timer.start(100)
+  timer.stop(175)
+  c.print_line("3. elapsed = " + timer.elapsed.to_string + " ticks")   -- 75
+
+  -- 4.
+  let ws: Word_Set := create Word_Set.make()
+  ws.add("alpha")
+  ws.add("beta")
+  ws.add("alpha")          -- duplicate: size must NOT grow
+  c.print_line("4. Word_Set size after add(alpha,beta,alpha) = " + ws.size.to_string)  -- 2
+
+  -- 5.*
+  c.print_line("5. percentage(50, 200) = " + percentage(50.0, 200.0).to_string +
+               " (the contract makes total>0 the caller's stated obligation)")   -- 25.0
+end
+
+main()

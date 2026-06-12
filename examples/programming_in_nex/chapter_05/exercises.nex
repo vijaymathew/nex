@@ -1,0 +1,111 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 5: Repetition
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+function main() do
+  let c: Console := create Console
+
+  -- --------------------------------------------------------------------------
+  -- 1. Squares of 1..10.
+  -- --------------------------------------------------------------------------
+  c.print("1. squares: ")
+  from
+    let i: Integer := 1
+  until
+    i > 10
+  do
+    c.print((i * i).to_string + " ")
+    i := i + 1
+  end
+  c.new_line
+
+  -- --------------------------------------------------------------------------
+  -- 2. Sum of even integers 2..100 inclusive -> 2550.
+  -- --------------------------------------------------------------------------
+  let sum: Integer := 0
+  from
+    let k: Integer := 2
+  until
+    k > 100
+  do
+    sum := sum + k
+    k := k + 2
+  end
+  c.print_line("2. sum of evens 2..100 = " + sum.to_string)   -- 2550
+
+  -- --------------------------------------------------------------------------
+  -- 3. Count positives / negatives until a 0 sentinel. The book reads from the
+  --    console until the user enters 0; the counting loop is the same over any
+  --    sequence, so it is run here over a fixed test array ending in 0.
+  -- --------------------------------------------------------------------------
+  let input: Array[Integer] := [4, -1, 7, -3, -8, 9, 0]
+  count_signs(c, input)        -- positives: 3, negatives: 3
+
+  -- --------------------------------------------------------------------------
+  -- 4. First 15 Fibonacci terms (1, 1, 2, 3, ...).
+  -- --------------------------------------------------------------------------
+  c.print("4. fib: ")
+  let prev: Integer := 1
+  let curr: Integer := 1
+  c.print(prev.to_string + " " + curr.to_string + " ")
+  from
+    let n: Integer := 3
+  until
+    n > 15
+  do
+    let next: Integer := prev + curr
+    c.print(next.to_string + " ")
+    prev := curr
+    curr := next
+    n := n + 1
+  end
+  c.new_line
+
+  -- --------------------------------------------------------------------------
+  -- 5.* Multiplication table 1..5, tab-separated, via nested loops.
+  -- --------------------------------------------------------------------------
+  c.print_line("5. multiplication table 1..5:")
+  from
+    let row: Integer := 1
+  until
+    row > 5
+  do
+    from
+      let col: Integer := 1
+    until
+      col > 5
+    do
+      c.print((row * col).to_string)
+      if col < 5 then
+        c.print(#tab.to_string)
+      end
+      col := col + 1
+    end
+    c.new_line
+    row := row + 1
+  end
+end
+
+-- Scan a sentinel-terminated sequence, counting positives and negatives,
+-- stopping at (and not counting) the first 0.
+function count_signs(c: Console, xs: Array[Integer]) do
+  let positives: Integer := 0
+  let negatives: Integer := 0
+  from
+    let i: Integer := 0
+  until
+    i >= xs.length or xs.get(i) = 0
+  do
+    if xs.get(i) > 0 then
+      positives := positives + 1
+    else
+      negatives := negatives + 1
+    end
+    i := i + 1
+  end
+  c.print_line("3. positives: " + positives.to_string +
+               ", negatives: " + negatives.to_string)
+end
+
+main()

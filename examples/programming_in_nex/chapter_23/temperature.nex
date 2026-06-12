@@ -1,0 +1,13 @@
+-- ----------------------------------------------------------------------------
+-- Module file for Chapter 23, Exercise 1.
+-- One focused class per file. Loaded elsewhere with `intern Temperature`.
+-- Class-only: no top-level call, so interning it has no side effects.
+-- ----------------------------------------------------------------------------
+class Temperature
+  create
+    make(c: Real) do celsius := c end
+  feature
+    celsius: Real
+    fahrenheit(): Real do result := celsius * 9.0 / 5.0 + 32.0 end
+    kelvin(): Real do result := celsius + 273.15 end
+end

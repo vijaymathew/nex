@@ -1,0 +1,157 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 12: Classes
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+-- 1. Rectangle with derived measurements.
+class Rectangle
+  create
+    make(w, h: Real) do
+      width := w
+      height := h
+    end
+  feature
+    width: Real
+    height: Real
+    area(): Real do result := width * height end
+    perimeter(): Real do result := 2.0 * (width + height) end
+    is_square(): Boolean do result := width = height end
+end
+
+-- 2. Temperature: one stored field, everything else computed.
+class Temperature
+  create
+    make(c: Real) do celsius := c end
+  feature
+    celsius: Real
+    fahrenheit(): Real do result := celsius * 9.0 / 5.0 + 32.0 end
+    kelvin(): Real do result := celsius + 273.15 end
+    describe(): String do
+      if celsius < 0.0 then
+        result := "freezing"
+      elseif celsius < 10.0 then
+        result := "cold"
+      elseif celsius < 25.0 then
+        result := "mild"
+      else
+        result := "warm"
+      end
+    end
+end
+
+-- 3. A Stack specialised to String values.
+class String_Stack
+  create
+    make() do items := [] end
+  feature
+    items: Array[String]
+    push(value: String) do items.add(value) end
+    pop(): String do
+      result := items.get(items.length - 1)
+      items.remove(items.length - 1)
+    end
+    is_empty(): Boolean do result := items.length = 0 end
+    size(): Integer do result := items.length end
+end
+
+-- 4. Accumulator of Real values.
+class Accumulator
+  create
+    make() do
+      total := 0.0
+      count := 0
+    end
+  feature
+    total: Real
+    count: Integer
+    add(value: Real) do
+      total := total + value
+      count := count + 1
+    end
+    reset() do
+      total := 0.0
+      count := 0
+    end
+    -- Precondition: count > 0 (there must be at least one value to average).
+    average(): Real do result := total / count end
+end
+
+-- 5.* FIFO Queue of Integers, backed by an Array.
+class Queue
+  create
+    make() do items := [] end
+  feature
+    items: Array[Integer]
+    enqueue(value: Integer) do items.add(value) end
+    dequeue(): Integer do
+      result := items.get(0)
+      items.remove(0)
+    end
+    front(): Integer do result := items.get(0) end
+    is_empty(): Boolean do result := items.length = 0 end
+    size(): Integer do result := items.length end
+end
+
+-- Reverse a string by pushing each character then popping them all.
+function reverse_with_stack(s: String): String do
+  let st: String_Stack := create String_Stack.make()
+  across s as ch do
+    st.push(ch.to_string)
+  end
+  result := ""
+  from
+  until
+    st.is_empty
+  do
+    result := result + st.pop
+  end
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1.
+  let r: Rectangle := create Rectangle.make(4.0, 6.0)
+  let sq: Rectangle := create Rectangle.make(5.0, 5.0)
+  c.print_line("1. 4x6: area=" + r.area.to_string + " perimeter=" + r.perimeter.to_string +
+               " is_square=" + r.is_square.to_string)                     -- 24.0 20.0 false
+  c.print_line("1. 5x5: is_square=" + sq.is_square.to_string)             -- true
+
+  -- 2.
+  let t: Temperature := create Temperature.make(20.0)
+  c.print_line("2. 20C: F=" + t.fahrenheit.to_string + " K=" + t.kelvin.to_string +
+               " describe=" + t.describe)                                 -- 68.0 293.15 mild
+
+  -- 3.
+  c.print_line("3. reverse 'classes' = '" + reverse_with_stack("classes") + "'")  -- sessalc
+
+  -- 4.
+  let acc: Accumulator := create Accumulator.make()
+  acc.add(10.0)
+  acc.add(20.0)
+  acc.add(30.0)
+  c.print_line("4. average of 10,20,30 = " + acc.average.to_string)       -- 20.0
+  acc.reset()
+  c.print_line("4. after reset: count=" + acc.count.to_string)            -- 0
+
+  -- 5.*
+  let q: Queue := create Queue.make()
+  from
+    let i: Integer := 1
+  until
+    i > 5
+  do
+    q.enqueue(i)
+    i := i + 1
+  end
+  c.print("5. dequeue order (expect 1..5 FIFO): ")
+  from
+  until
+    q.is_empty
+  do
+    c.print(q.dequeue.to_string + " ")
+  end
+  c.new_line
+end
+
+main()

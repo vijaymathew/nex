@@ -1,0 +1,115 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 9: Arrays
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+-- 1. Smallest element of a non-empty array.
+function min_element(arr: Array[Integer]): Integer do
+  result := arr.get(0)
+  across arr as x do
+    if x < result then
+      result := x
+    end
+  end
+end
+
+-- 2. Count of elements strictly greater than threshold.
+function count_above(arr: Array[Integer], threshold: Integer): Integer do
+  result := 0
+  across arr as x do
+    if x > threshold then
+      result := result + 1
+    end
+  end
+end
+
+-- 3. running_totals: each output element is the prefix sum up to that index.
+function running_totals(arr: Array[Integer]): Array[Integer] do
+  result := []
+  let acc: Integer := 0
+  across arr as x do
+    acc := acc + x
+    result.add(acc)
+  end
+end
+
+-- 4. is_sorted: non-decreasing order (empty / single-element are sorted).
+function is_sorted(arr: Array[Integer]): Boolean do
+  result := true
+  from
+    let i: Integer := 1
+  until
+    i >= arr.length
+  do
+    if arr.get(i) < arr.get(i - 1) then
+      result := false
+    end
+    i := i + 1
+  end
+end
+
+-- 5.* merge two ascending arrays into one ascending array (the merge step of
+--     merge sort): two indices walk both inputs, smaller element added first.
+function merge(a, b: Array[Integer]): Array[Integer] do
+  result := []
+  let i: Integer := 0
+  let j: Integer := 0
+  from
+  until
+    i >= a.length or j >= b.length
+  do
+    if a.get(i) <= b.get(j) then
+      result.add(a.get(i))
+      i := i + 1
+    else
+      result.add(b.get(j))
+      j := j + 1
+    end
+  end
+  -- drain whichever array still has elements
+  from until i >= a.length do result.add(a.get(i)) i := i + 1 end
+  from until j >= b.length do result.add(b.get(j)) j := j + 1 end
+end
+
+-- Render an Array[Integer] as "[a, b, c]" for printing.
+function show(arr: Array[Integer]): String do
+  result := "["
+  from
+    let i: Integer := 0
+  until
+    i >= arr.length
+  do
+    if i > 0 then result := result + ", " end
+    result := result + arr.get(i).to_string
+    i := i + 1
+  end
+  result := result + "]"
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1.
+  c.print_line("1. min_element([3,7,1,9,4]) = " +
+               min_element([3, 7, 1, 9, 4]).to_string)   -- 1
+  c.print_line("1. min_element([42]) = " + min_element([42]).to_string)   -- 42
+
+  -- 2.
+  c.print_line("2. count_above([85,92,78,95,60], 80) = " +
+               count_above([85, 92, 78, 95, 60], 80).to_string)   -- 3
+
+  -- 3.
+  c.print_line("3. running_totals([1,2,3,4]) = " +
+               show(running_totals([1, 2, 3, 4])))   -- [1, 3, 6, 10]
+
+  -- 4.
+  c.print_line("4. is_sorted([1,2,3,4])=" + is_sorted([1, 2, 3, 4]).to_string +
+               " [1,3,2,4]=" + is_sorted([1, 3, 2, 4]).to_string +
+               " []=" + is_sorted([]).to_string)   -- true false true
+
+  -- 5.*
+  c.print_line("5. merge([1,3,5],[2,4,6]) = " +
+               show(merge([1, 3, 5], [2, 4, 6])))   -- [1, 2, 3, 4, 5, 6]
+end
+
+main()

@@ -1,0 +1,233 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 13: Designing Classes Well
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+--
+-- This chapter's exercises are mostly about DESIGN. Where an exercise asks for a
+-- discussion, the answer is written as a comment; where it admits runnable code,
+-- the code is provided and exercised in main(). Discussion answers are kept just
+-- above the relevant class.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1. Library_Book mixes THREE responsibilities:
+--      (a) bibliographic identity   : isbn, title, author
+--      (b) loan / circulation state : is_checked_out, due_date, late_fee_per_day
+--      (c) borrower identity        : borrower_name, borrower_email
+--    Redesign: split into `Book` (a), `Loan` (b, referencing a Book and a
+--    Member), and `Member` (c). A Book then knows nothing about who holds it;
+--    a Loan ties one Book to one Member for a period. Sketch below.
+-- ----------------------------------------------------------------------------
+class Book
+  create
+    make(i, t, a: String) do isbn := i  title := t  author := a end
+  feature
+    isbn: String
+    title: String
+    author: String
+    label(): String do result := title + " by " + author end
+end
+
+class Member
+  create
+    make(n, e: String) do name := n  email := e end
+  feature
+    name: String
+    email: String
+end
+
+class Loan
+  create
+    make(b: Book, m: Member, due: String, fee: Real) do
+      book := b  borrower := m  due_date := due  late_fee_per_day := fee
+    end
+  feature
+    book: Book
+    borrower: Member
+    due_date: String
+    late_fee_per_day: Real
+end
+
+-- ----------------------------------------------------------------------------
+-- 2. Money. Preconditions stated as comments.
+-- ----------------------------------------------------------------------------
+class Money
+  create
+    make(a: Real, cur: String) do amount := a  currency := cur end
+  feature
+    amount: Real
+    currency: String
+    -- Precondition: other.currency = currency  (can only add like currencies).
+    add(other: Money): Money do
+      result := create Money.make(amount + other.amount, currency)
+    end
+    -- Precondition: rate > 0.0  (an exchange rate must be positive).
+    exchange(rate: Real, target_currency: String): Money do
+      result := create Money.make(amount * rate, target_currency)
+    end
+    label(): String do result := amount.to_string + " " + currency end
+end
+
+-- ----------------------------------------------------------------------------
+-- 3. Deck of 52 cards (Card from Section 13.5: ranks 2..14, four suits).
+-- ----------------------------------------------------------------------------
+class Card
+  create
+    make(r: Integer, s: String) do rank := r  suit := s end
+  feature
+    rank: Integer
+    suit: String
+    name(): String do
+      let rank_names: Array[String] := ["2","3","4","5","6","7","8","9","10","J","Q","K","A"]
+      result := rank_names.get(rank - 2) + " of " + suit
+    end
+end
+
+class Deck
+  create
+    make() do
+      cards := []
+      let suits: Array[String] := ["Clubs", "Diamonds", "Hearts", "Spades"]
+      across suits as s do
+        from
+          let r: Integer := 2
+        until
+          r > 14
+        do
+          cards.add(create Card.make(r, s))
+          r := r + 1
+        end
+      end
+    end
+  feature
+    cards: Array[Card]
+    size(): Integer do result := cards.length end
+    is_empty(): Boolean do result := cards.length = 0 end
+    -- Precondition: not is_empty  (cannot draw from an empty deck).
+    draw(): Card do
+      result := cards.get(cards.length - 1)
+      cards.remove(cards.length - 1)
+    end
+end
+
+-- ----------------------------------------------------------------------------
+-- 4. Does overdraft_limit belong to all accounts? No. In the book's
+--    Bank_Account it is hard-set to 0.0 for everyone — dead weight on accounts
+--    that never overdraw. It belongs to a SUBTYPE. Sketch:
+--      Account            : owner, balance; deposit, withdraw (reject below 0).
+--      Overdraft_Account  : adds overdraft_limit; withdraw allowed down to
+--                           -overdraft_limit.
+--    The two classes below show the split (no inheritance syntax, as asked).
+-- ----------------------------------------------------------------------------
+class Account
+  create
+    make(name: String, initial: Real) do owner := name  balance := initial end
+  feature
+    owner: String
+    balance: Real
+    deposit(amount: Real) do balance := balance + amount end
+    withdraw(amount: Real): Boolean do
+      if balance - amount >= 0.0 then
+        balance := balance - amount
+        result := true
+      else
+        result := false
+      end
+    end
+end
+
+class Overdraft_Account
+  create
+    make(name: String, initial, limit: Real) do
+      owner := name  balance := initial  overdraft_limit := limit
+    end
+  feature
+    owner: String
+    balance: Real
+    overdraft_limit: Real
+    deposit(amount: Real) do balance := balance + amount end
+    withdraw(amount: Real): Boolean do
+      if balance - amount >= -overdraft_limit then
+        balance := balance - amount
+        result := true
+      else
+        result := false
+      end
+    end
+end
+
+-- ----------------------------------------------------------------------------
+-- 5.* Stack of Integer, of String, of Real — written out three times. The ONLY
+--     thing that differs between them is the element TYPE (Integer / String /
+--     Real); push/pop/size are byte-for-byte identical. That duplication is the
+--     motivation for generic types (Chapter 14/15): write Stack[G] once.
+-- ----------------------------------------------------------------------------
+class Int_Stack
+  create
+    make() do items := [] end
+  feature
+    items: Array[Integer]
+    push(v: Integer) do items.add(v) end
+    pop(): Integer do result := items.get(items.length - 1)  items.remove(items.length - 1) end
+    size(): Integer do result := items.length end
+end
+
+class Str_Stack
+  create
+    make() do items := [] end
+  feature
+    items: Array[String]
+    push(v: String) do items.add(v) end
+    pop(): String do result := items.get(items.length - 1)  items.remove(items.length - 1) end
+    size(): Integer do result := items.length end
+end
+
+class Real_Stack
+  create
+    make() do items := [] end
+  feature
+    items: Array[Real]
+    push(v: Real) do items.add(v) end
+    pop(): Real do result := items.get(items.length - 1)  items.remove(items.length - 1) end
+    size(): Integer do result := items.length end
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1.
+  let bk: Book := create Book.make("978-0441013593", "Dune", "Frank Herbert")
+  let me: Member := create Member.make("Ada", "ada@example.com")
+  let ln: Loan := create Loan.make(bk, me, "2026-07-01", 0.25)
+  c.print_line("1. Loan: '" + ln.book.label + "' to " + ln.borrower.name +
+               ", due " + ln.due_date)
+
+  -- 2.
+  let a: Money := create Money.make(10.0, "USD")
+  let b: Money := create Money.make(5.5, "USD")
+  c.print_line("2. add: " + a.add(b).label)                          -- 15.5 USD
+  c.print_line("2. exchange: " + a.exchange(0.92, "EUR").label)      -- 9.2 EUR
+
+  -- 3.
+  let deck: Deck := create Deck.make()
+  c.print_line("3. fresh deck size = " + deck.size.to_string)        -- 52
+  let drawn: Card := deck.draw
+  c.print_line("3. drew " + drawn.name + ", now size = " + deck.size.to_string)  -- 51
+
+  -- 4.
+  let basic: Account := create Account.make("Basic", 100.0)
+  let over: Overdraft_Account := create Overdraft_Account.make("Over", 100.0, 50.0)
+  c.print_line("4. basic.withdraw(120)=" + basic.withdraw(120.0).to_string +
+               " (no overdraft), over.withdraw(120)=" + over.withdraw(120.0).to_string +
+               " (within -50 limit)")                                -- false, true
+
+  -- 5.*
+  let s1: Int_Stack := create Int_Stack.make()
+  let s2: Str_Stack := create Str_Stack.make()
+  let s3: Real_Stack := create Real_Stack.make()
+  s1.push(7)  s2.push("x")  s3.push(1.5)
+  c.print_line("5. three near-identical stacks (sizes " + s1.size.to_string +
+               "," + s2.size.to_string + "," + s3.size.to_string +
+               "); only the element type differs -> motivates Stack[G].")
+end
+
+main()

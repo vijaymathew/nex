@@ -1,0 +1,128 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 22: Writing Robust Code
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+--
+-- A discussion-heavy chapter: the analysis lives in comments, with runnable code
+-- where an exercise admits it.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1. Classify the failures of ONE routine — take average(items): Real:
+--      CALLER MISTAKES (-> preconditions): passing an empty array (no mean
+--        exists). The caller must guarantee items.length > 0.
+--      ROUTINE BUGS (-> fix the code, not contracts): an off-by-one in the sum,
+--        or dividing by length+1. These are defects, caught by tests, never
+--        "handled".
+--      ENVIRONMENTAL FAILURES (-> exceptions): none for a pure in-memory sum;
+--        they would appear only if the data came from a file or network read
+--        before averaging.
+-- ----------------------------------------------------------------------------
+function average(items: Array[Real]): Real
+  require
+    not_empty: items.length > 0
+  do
+    let total: Real := 0.0
+    across items as x do total := total + x end
+    result := total / items.length
+  end
+
+-- ----------------------------------------------------------------------------
+-- 2. safe_divide two ways.
+--    (a) precondition form: a zero divisor is a CALLER ERROR; fail loud.
+--    (b) result-object form: a zero divisor is an EXPECTED outcome to report.
+--    WHICH IS BETTER depends on context: use the PRECONDITION when the caller
+--    can and should guarantee b /= 0 (a zero divisor would be a bug). Use the
+--    RESULT OBJECT when b comes from untrusted/runtime data and "cannot divide"
+--    is a normal answer the caller must branch on, not a crash.
+-- ----------------------------------------------------------------------------
+function safe_divide_pre(a, b: Real): Real
+  require
+    non_zero_divisor: b /= 0.0
+  do
+    result := a / b
+  end
+
+class Div_Result
+  create
+    make(o: Boolean, v: Real) do ok := o  value := v end
+  feature
+    ok: Boolean
+    value: Real
+end
+
+function safe_divide_result(a, b: Real): Div_Result do
+  if b = 0.0 then
+    result := create Div_Result.make(false, 0.0)
+  else
+    result := create Div_Result.make(true, a / b)
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- 3. load_score(text): accept user input, validate, return a positive score.
+--    WHERE VALIDATION ENDS AND CONTRACTS BEGIN: text comes from a user, so its
+--    shape is NOT something a caller can promise — parsing and range-checking it
+--    is VALIDATION (handled with rescue/raise at the boundary). Once a valid
+--    positive Integer has been produced, downstream routines may legitimately
+--    have a precondition like score > 0: that is a CONTRACT, because by then the
+--    value is trusted. The boundary is exactly the point where untrusted text
+--    becomes a trusted value.
+-- ----------------------------------------------------------------------------
+function load_score(text: String): Integer
+  do
+    let value: Integer := text.to_integer
+    if value <= 0 then
+      raise "score must be positive"
+    end
+    result := value
+  rescue
+    raise "invalid score input: '" + text + "'"
+  end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1.
+  c.print_line("1. average([3.0,4.0,5.0]) = " + average([3.0, 4.0, 5.0]).to_string +
+               "  (empty array = caller mistake -> precondition)")          -- 4.0
+
+  -- 2.
+  c.print_line("2a. safe_divide_pre(10,2) = " + safe_divide_pre(10.0, 2.0).to_string)  -- 5.0
+  let dr: Div_Result := safe_divide_result(10.0, 0.0)
+  c.print_line("2b. safe_divide_result(10,0): ok=" + dr.ok.to_string +
+               " (a reportable outcome, not a crash)")                       -- false
+
+  -- 3.
+  do
+    c.print_line("3. load_score('87') = " + load_score("87").to_string)     -- 87
+    c.print_line("3. load_score('abc') = " + load_score("abc").to_string)   -- raises
+  rescue
+    c.print_line("3. validation caught: " + exception.to_string)
+  end
+
+  -- 4. WHY a silent fallback can be more dangerous than a visible failure:
+  --    a visible failure stops the program at the point of trouble, with a
+  --    message pointing at the cause — it is loud, located, and fixable. A
+  --    silent fallback (returning 0, "", or a default) lets the program keep
+  --    running on WRONG data; the corruption spreads far from its origin and may
+  --    surface much later as an inexplicable result — or never be noticed at
+  --    all, which is worse. Failing visibly trades a small, immediate cost for
+  --    avoiding a large, hidden one.
+  c.print_line("4. silent fallbacks hide bad data and let errors propagate far" +
+               " from their cause; a visible failure stops at the source.")
+
+  -- 5.* Two files that must stay in sync — robust design sketch:
+  --     CONTRACTS guard the in-memory operation: require both target paths
+  --       non-empty and the new content well-formed before attempting anything.
+  --     EXCEPTIONS handle the world: each individual write can fail (disk full,
+  --       permissions), so wrap the pair in do/rescue.
+  --     REDUCE the inconsistency window: write both to TEMPORARY files first,
+  --       and only once BOTH succeed, atomically rename them into place; if the
+  --       second temp write fails, neither real file was touched, so they stay
+  --       consistent. (A full solution would add a write-ahead marker so a crash
+  --       between the two renames is recoverable.)
+  c.print_line("5. keep two files in sync: contracts on inputs, exceptions on" +
+               " each write, stage to temp files and commit only if both succeed.")
+end
+
+main()

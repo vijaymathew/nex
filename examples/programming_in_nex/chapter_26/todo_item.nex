@@ -1,0 +1,36 @@
+-- ----------------------------------------------------------------------------
+-- Chapter 26 — Todo_Item, in its own file (Exercise 8: split with intern).
+--
+-- Exercise 1: a `description: ?String` (detachable) field plus a setter. No new
+--   invariant is needed — a missing description (nil) is a perfectly valid state
+--   for a task, so there is nothing to constrain.
+-- Exercise 2: make(t) carries the precondition `t.length > 0`. A CONSTRUCTOR
+--   PRECONDITION guards the moment of creation (you cannot build a bad object);
+--   the CLASS INVARIANT guards every moment after (no method may leave the
+--   object titleless). Both are needed: the precondition refuses a bad birth,
+--   the invariant keeps the object honest for the rest of its life.
+-- Exercise 6: mark_done requires `not done`, so a task cannot be marked done
+--   twice — the interface itself forbids it. (The alternative is to make
+--   mark_done idempotent; a precondition is the stricter "strengthen the
+--   interface" choice the exercise asks for, and turns a double-mark into a
+--   loud, located error instead of a silent no-op.)
+-- ----------------------------------------------------------------------------
+class Todo_Item
+  create
+    make(t: String)
+      require title_not_empty: t.length > 0
+      do title := t  done := false  description := nil end
+  feature
+    title: String
+    done: Boolean
+    description: ?String
+    set_description(d: String) do description := d end
+    has_description(): Boolean do result := description /= nil end
+    mark_done()
+      require not_yet_done: not done
+      do done := true
+      ensure now_done: done end
+    is_done(): Boolean do result := done end
+  invariant
+    title_not_empty: title.length > 0
+end

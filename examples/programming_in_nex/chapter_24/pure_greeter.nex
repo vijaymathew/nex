@@ -1,0 +1,12 @@
+-- ----------------------------------------------------------------------------
+-- Chapter 24 — the PLATFORM-INDEPENDENT half. Pure Nex logic, no host calls;
+-- it would run identically on the JVM or JS backends. Loaded with `intern`.
+-- ----------------------------------------------------------------------------
+class Pure_Greeter
+  create
+    make() do end
+  feature
+    greet(name: String): String
+      require named: name.length > 0
+      do result := "Hello, " + name + "!" end
+end

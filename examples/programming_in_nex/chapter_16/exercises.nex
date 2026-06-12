@@ -1,0 +1,115 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 16: Preconditions
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+-- 1. average with a non-empty precondition.
+function average(items: Array[Real]): Real
+  require
+    not_empty: items.length > 0
+  do
+    let total: Real := 0.0
+    across items as x do
+      total := total + x
+    end
+    result := total / items.length
+  end
+
+-- 2. Temperature_Log: latest() requires a non-empty log.
+class Temperature_Log
+  create
+    make() do readings := [] end
+  feature
+    readings: Array[Real]
+    record(value: Real) do readings.add(value) end
+    -- Precondition: the log must hold at least one reading.
+    latest(): Real
+      require
+        not_empty: readings.length > 0
+      do
+        result := readings.get(readings.length - 1)
+      end
+end
+
+-- 3. Queue[G] where dequeue and front each REQUIRE non-empty; the body no
+--    longer re-checks emptiness, because the precondition guarantees it.
+class Queue [G]
+  create
+    make() do items := [] end
+  feature
+    items: Array[G]
+    enqueue(value: G) do items.add(value) end
+    dequeue(): G
+      require
+        not_empty: items.length > 0
+      do
+        result := items.get(0)
+        items.remove(0)
+      end
+    front(): G
+      require
+        not_empty: items.length > 0
+      do
+        result := items.get(0)
+      end
+    is_empty(): Boolean do result := items.length = 0 end
+    size(): Integer do result := items.length end
+end
+
+-- 4. substring(s, start, finish): a half-open slice [start, finish).
+--    Plausible preconditions, each the CALLER's responsibility because the
+--    routine cannot produce a sensible result otherwise and should not guess:
+--      * start >= 0           -- an index cannot be negative
+--      * finish <= s.length   -- cannot read past the end of the string
+--      * start <= finish      -- the slice must be well-formed (non-negative length)
+--    These are the caller's job: only the caller knows the intended bounds, and
+--    silently clamping them would hide the caller's bug instead of exposing it.
+function my_substring(s: String, start, finish: Integer): String
+  require
+    start_non_negative: start >= 0
+    finish_in_range: finish <= s.length
+    well_formed: start <= finish
+  do
+    result := s.substring(start, finish)
+  end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1.
+  c.print_line("1. average([2.0,4.0,9.0]) = " + average([2.0, 4.0, 9.0]).to_string)  -- 5.0
+  c.print_line("1. (average([]) would violate not_empty and halt the program.)")
+
+  -- 2.
+  let log: Temperature_Log := create Temperature_Log.make()
+  log.record(19.5)
+  log.record(21.0)
+  c.print_line("2. latest reading = " + log.latest.to_string)   -- 21.0
+
+  -- 3.
+  let q: Queue[String] := create Queue[String].make()
+  q.enqueue("a")
+  q.enqueue("b")
+  c.print_line("3. front=" + q.front + " dequeue=" + q.dequeue +
+               " size now " + q.size.to_string)                  -- a, a, 1
+
+  -- 4.
+  c.print_line("4. my_substring('contracts', 0, 4) = '" +
+               my_substring("contracts", 0, 4) + "'")            -- 'cont'
+
+  -- 5. transfer_to: is `other /= this` a necessary precondition? (discussion)
+  --    AGAINST: a self-transfer is harmless — subtract amount, add it straight
+  --    back, leaving the balance unchanged; treating it as an allowed no-op
+  --    keeps the contract minimal and tolerant.
+  --    FOR: a self-transfer is almost always a CALLER MISTAKE (a confused
+  --    reference), and a no-op hides that bug while doing pointless work; a
+  --    precondition `other /= this` surfaces it immediately.
+  --    DECISION: make it a precondition. transfer_to already speaks in
+  --    preconditions (amount > 0, amount <= balance); a self-transfer is the
+  --    same class of caller error, so it belongs with them rather than being
+  --    silently absorbed.
+  c.print_line("5. transfer_to: prefer `other /= this` as a precondition — a" +
+               " self-transfer is a caller mistake, not a meaningful operation.")
+end
+
+main()

@@ -1,0 +1,109 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 8: Recursion
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+-- 1. Recursive power(base, exp) for exp >= 0, without `^`.
+function power(base, exp: Integer): Integer do
+  if exp = 0 then
+    result := 1
+  else
+    result := base * power(base, exp - 1)
+  end
+end
+
+-- 2. reverse_string via head-and-tail: reverse(tail) + head.
+function reverse_string(s: String): String do
+  if s.length = 0 then
+    result := ""
+  else
+    let head: String := s.substring(0, 1)
+    let tail: String := s.substring(1, s.length)
+    result := reverse_string(tail) + head
+  end
+end
+
+-- 3. Euclid's GCD.
+function gcd(a, b: Integer): Integer do
+  if b = 0 then
+    result := a
+  else
+    result := gcd(b, a % b)
+  end
+end
+
+-- 4. count_digits of a positive integer; base case is a single digit.
+function count_digits(n: Integer): Integer do
+  if n < 10 then
+    result := 1
+  else
+    result := 1 + count_digits(n / 10)
+  end
+end
+
+-- 5.* Iterative Fibonacci with two accumulators (a = F(i), b = F(i+1)).
+function fibonacci_fast(n: Integer): Integer do
+  let a: Integer := 0
+  let b: Integer := 1
+  from
+    let i: Integer := 0
+  until
+    i >= n
+  do
+    let next: Integer := a + b
+    a := b
+    b := next
+    i := i + 1
+  end
+  result := a
+end
+
+-- Naive recursive Fibonacci (Section 8.6), to compare results against.
+function fibonacci(n: Integer): Integer do
+  if n < 2 then
+    result := n
+  else
+    result := fibonacci(n - 1) + fibonacci(n - 2)
+  end
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1.
+  c.print_line("1. power(2,10)=" + power(2, 10).to_string +
+               " power(5,0)=" + power(5, 0).to_string)   -- 1024 1
+
+  -- 2.
+  c.print_line("2. reverse_string('hello')='" + reverse_string("hello") +
+               "' reverse_string('')='" + reverse_string("") + "'")   -- olleh, (empty)
+
+  -- 3.
+  c.print_line("3. gcd(48,18)=" + gcd(48, 18).to_string +
+               " gcd(100,75)=" + gcd(100, 75).to_string)   -- 6 25
+
+  -- 4.
+  c.print_line("4. count_digits(1)=" + count_digits(1).to_string +
+               " (42)=" + count_digits(42).to_string +
+               " (10000)=" + count_digits(10000).to_string)   -- 1 2 5
+
+  -- 5.* Same results as the recursive version for n = 0..10.
+  c.print("5. fibonacci_fast vs recursive agree for n=0..10: ")
+  let agree: Boolean := true
+  from
+    let n: Integer := 0
+  until
+    n > 10
+  do
+    if fibonacci_fast(n) /= fibonacci(n) then
+      agree := false
+    end
+    n := n + 1
+  end
+  c.print_line(agree.to_string)   -- true
+  c.print_line("5. fibonacci_fast(35) = " + fibonacci_fast(35).to_string +
+               "  (the iterative form returns instantly; the naive recursive")
+  c.print_line("   version recomputes sub-problems and is exponentially slower).")
+end
+
+main()

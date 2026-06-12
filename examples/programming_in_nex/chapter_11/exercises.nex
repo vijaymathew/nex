@@ -1,0 +1,158 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 11: Nested and Composite Structures
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+--
+-- Uses the `books` array (Section 11.1) and the `filesystem` tree (Section 11.6).
+-- ============================================================================
+
+-- 1. All books by a given author.
+function books_by_author(books: Array[Map[String, Any]], author: String): Array[Map[String, Any]] do
+  result := []
+  across books as book do
+    if book.get("author") = author then
+      result.add(book)
+    end
+  end
+end
+
+-- 2. Author -> array of that author's titles.
+function invert_index(books: Array[Map[String, Any]]): Map[String, Array[String]] do
+  result := {}
+  across books as book do
+    if convert book.get("author") to author: String then
+      if convert book.get("title") to title: String then
+        let titles: Array[String] := result.try_get(author, [])
+        titles.add(title)
+        result.set(author, titles)
+      end
+    end
+  end
+end
+
+-- 3. Recursively count file nodes (type = "file").
+function count_files(node: Map[String, Any]): Integer do
+  result := 0
+  if node.get("type") = "file" then
+    result := 1
+  end
+  if convert node.get("children") to children: Array[Map[String, Any]] then
+    across children as child do
+      result := result + count_files(child)
+    end
+  end
+end
+
+-- 4. Maximum depth: a leaf (no children) has depth 0; otherwise 1 + max child depth.
+function tree_depth(node: Map[String, Any]): Integer do
+  result := 0
+  if convert node.get("children") to children: Array[Map[String, Any]] then
+    across children as child do
+      let d: Integer := 1 + tree_depth(child)
+      if d > result then
+        result := d
+      end
+    end
+  end
+end
+
+-- 5.* Names in depth-first order (a node before its children).
+function flatten(node: Map[String, Any]): Array[String] do
+  result := []
+  if convert node.get("name") to name: String then
+    result.add(name)
+  end
+  if convert node.get("children") to children: Array[Map[String, Any]] then
+    across children as child do
+      across flatten(child) as n do
+        result.add(n)
+      end
+    end
+  end
+end
+
+-- 5.* Only the leaf (file) names, depth-first.
+function flatten_leaves(node: Map[String, Any]): Array[String] do
+  result := []
+  if node.get("type") = "file" then
+    if convert node.get("name") to name: String then
+      result.add(name)
+    end
+  end
+  if convert node.get("children") to children: Array[Map[String, Any]] then
+    across children as child do
+      across flatten_leaves(child) as n do
+        result.add(n)
+      end
+    end
+  end
+end
+
+function show(arr: Array[String]): String do
+  result := "["
+  from
+    let i: Integer := 0
+  until
+    i >= arr.length
+  do
+    if i > 0 then result := result + ", " end
+    result := result + arr.get(i)
+    i := i + 1
+  end
+  result := result + "]"
+end
+
+function main() do
+  let c: Console := create Console
+
+  let books: Array[Map[String, Any]] := [
+    {"title": "Dune", "author": "Frank Herbert", "year": 1965},
+    {"title": "Dune Messiah", "author": "Frank Herbert", "year": 1969},
+    {"title": "Neuromancer", "author": "William Gibson", "year": 1984},
+    {"title": "Foundation", "author": "Isaac Asimov", "year": 1951}
+  ]
+
+  let filesystem: Map[String, Any] := {
+    "name": "root",
+    "type": "dir",
+    "children": [
+      {
+        "name": "documents",
+        "type": "dir",
+        "children": [
+          {"name": "report.txt", "type": "file", "children": []},
+          {"name": "notes.txt", "type": "file", "children": []}
+        ]
+      },
+      {
+        "name": "pictures",
+        "type": "dir",
+        "children": [
+          {"name": "photo.jpg", "type": "file", "children": []}
+        ]
+      }
+    ]
+  }
+  let single: Map[String, Any] := {"name": "lonely", "type": "file", "children": []}
+
+  -- 1.
+  let herbert: Array[Map[String, Any]] := books_by_author(books, "Frank Herbert")
+  c.print_line("1. Frank Herbert wrote " + herbert.length.to_string + " of the listed books")  -- 2
+
+  -- 2.
+  let idx: Map[String, Array[String]] := invert_index(books)
+  c.print_line("2. Frank Herbert titles -> " + show(idx.get("Frank Herbert")))
+  c.print_line("2. Isaac Asimov titles  -> " + show(idx.get("Isaac Asimov")))
+
+  -- 3.
+  c.print_line("3. count_files(filesystem) = " + count_files(filesystem).to_string)   -- 3
+
+  -- 4.
+  c.print_line("4. tree_depth(filesystem) = " + tree_depth(filesystem).to_string +
+               ", tree_depth(single) = " + tree_depth(single).to_string)              -- 2, 0
+
+  -- 5.*
+  c.print_line("5. flatten        = " + show(flatten(filesystem)))
+  c.print_line("5. flatten_leaves = " + show(flatten_leaves(filesystem)))
+end
+
+main()

@@ -1,0 +1,22 @@
+-- ----------------------------------------------------------------------------
+-- Chapter 23, Exercise 2 — the COLLECTION responsibility, in its own file.
+-- Pulls in Contact with `intern`; manages a set of contacts and lookups.
+-- ----------------------------------------------------------------------------
+intern Contact
+
+class Address_Book
+  create
+    make() do contacts := [] end
+  feature
+    contacts: Array[Contact]
+    add(ct: Contact) do contacts.add(ct) end
+    size(): Integer do result := contacts.length end
+    find(name: String): String do
+      result := "NOT FOUND"
+      across contacts as ct do
+        if ct.name = name then
+          result := ct.label
+        end
+      end
+    end
+end

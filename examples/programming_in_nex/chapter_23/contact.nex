@@ -1,0 +1,15 @@
+-- ----------------------------------------------------------------------------
+-- Chapter 23, Exercise 2 — one responsibility: a Contact is just DATA about a
+-- person. It does not know how to be stored, searched, or exported; those jobs
+-- live in Address_Book and Csv_Exporter. That boundary is better because each
+-- file now changes for one reason only (the data shape, the collection policy,
+-- or the export format), instead of one big class changing for all three.
+-- ----------------------------------------------------------------------------
+class Contact
+  create
+    make(n, e: String) do name := n  email := e end
+  feature
+    name: String
+    email: String
+    label(): String do result := name + " <" + email + ">" end
+end

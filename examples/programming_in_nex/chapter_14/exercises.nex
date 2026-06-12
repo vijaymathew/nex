@@ -1,0 +1,187 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 14: Inheritance and Polymorphism
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+-- 1. Animal hierarchy with an overridable sound().
+class Animal
+  create
+    make(n: String) do name := n end
+  feature
+    name: String
+    sound(): String do result := "..." end
+end
+
+class Dog inherit Animal
+  create
+    make(n: String) do Animal.make(n) end
+  feature
+    sound(): String do result := "Woof" end
+end
+
+class Cat inherit Animal
+  create
+    make(n: String) do Animal.make(n) end
+  feature
+    sound(): String do result := "Meow" end
+end
+
+class Cow inherit Animal
+  create
+    make(n: String) do Animal.make(n) end
+  feature
+    sound(): String do result := "Moo" end
+end
+
+-- 2. Shape with area AND perimeter; describe reports both.
+class Shape
+  create
+    make(c: String) do colour := c end
+  feature
+    colour: String
+    area(): Real do result := 0.0 end
+    perimeter(): Real do result := 0.0 end
+    describe(): String do
+      result := "A " + colour + " shape with area " + this.area.to_string +
+                " and perimeter " + this.perimeter.to_string
+    end
+end
+
+class Circle inherit Shape
+  create
+    make(c: String, r: Real) do Shape.make(c)  radius := r end
+  feature
+    radius: Real
+    area(): Real do result := 3.14159 * radius * radius end
+    perimeter(): Real do result := 2.0 * 3.14159 * radius end
+end
+
+class Rect inherit Shape
+  create
+    make(c: String, w, h: Real) do Shape.make(c)  width := w  height := h end
+  feature
+    width: Real
+    height: Real
+    area(): Real do result := width * height end
+    perimeter(): Real do result := 2.0 * (width + height) end
+end
+
+-- 4. Vehicle hierarchy with fuel-aware reachability.
+class Vehicle
+  create
+    make(m: String, s: Real) do make_str := m  speed := s end
+  feature
+    make_str: String
+    speed: Real
+    fuel_type(): String do result := "unknown" end
+    max_speed(): Real do result := 0.0 end
+    can_reach(distance, fuel: Real): Boolean do result := false end
+end
+
+class Petrol_Car inherit Vehicle
+  create
+    make(m: String, s: Real) do Vehicle.make(m, s) end
+  feature
+    fuel_type(): String do result := "petrol" end
+    max_speed(): Real do result := 200.0 end
+    -- 10 litres per 100 km  ->  range = fuel / 10 * 100 km
+    can_reach(distance, fuel: Real): Boolean do
+      result := distance <= fuel / 10.0 * 100.0
+    end
+end
+
+class Electric_Car inherit Vehicle
+  create
+    make(m: String, s: Real) do Vehicle.make(m, s) end
+  feature
+    fuel_type(): String do result := "electric" end
+    max_speed(): Real do result := 250.0 end
+    -- 20 kWh per 100 km  ->  range = fuel / 20 * 100 km
+    can_reach(distance, fuel: Real): Boolean do
+      result := distance <= fuel / 20.0 * 100.0
+    end
+end
+
+-- 5.* Logger hierarchy: same interface, swappable behaviour.
+class Logger
+  create
+    make() do end
+  feature
+    log(message: String) do
+      let c: Console := create Console
+      c.print_line("[LOG] " + message)
+    end
+end
+
+class File_Logger inherit Logger
+  create
+    make() do log_history := "" end
+  feature
+    log_history: String
+    log(message: String) do
+      let c: Console := create Console
+      c.print_line("[FILE] " + message)
+      log_history := log_history + message + "; "
+    end
+end
+
+class Silent_Logger inherit Logger
+  create
+    make() do end
+  feature
+    log(message: String) do end   -- discards everything
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1. Polymorphic dispatch through an Array[Animal].
+  let zoo: Array[Animal] := []
+  zoo.add(create Dog.make("Rex"))
+  zoo.add(create Cat.make("Felix"))
+  zoo.add(create Cow.make("Bessie"))
+  across zoo as a do
+    c.print_line("1. " + a.name + " says " + a.sound)
+  end
+
+  -- 2.
+  let shapes: Array[Shape] := []
+  shapes.add(create Circle.make("red", 5.0))
+  shapes.add(create Rect.make("blue", 4.0, 6.0))
+  across shapes as s do
+    c.print_line("2. " + s.describe)
+  end
+
+  -- 3. LSP for Overdraft_Account.withdraw (discussion):
+  --    An Overdraft_Account CAN stand in for an Account. It accepts the same
+  --    input (a Real amount) and keeps the same promise shape: return true on
+  --    success, false on failure. What changes is only WHEN it returns false —
+  --    it succeeds for some withdrawals a plain Account would refuse (down to
+  --    -overdraft_limit instead of 0). That WEAKENS the precondition / widens
+  --    success, which is Liskov-safe: no caller written against Account is
+  --    surprised, because every withdrawal Account would have allowed is still
+  --    allowed. A caller need know nothing extra; substitution is transparent.
+  c.print_line("3. LSP: Overdraft_Account.withdraw honours the Account promise" +
+               " (true=success/false=failure); it only succeeds MORE often. Safe.")
+
+  -- 4.
+  let p: Petrol_Car := create Petrol_Car.make("Saloon", 180.0)
+  let e: Electric_Car := create Electric_Car.make("Hatch", 160.0)
+  c.print_line("4. petrol(" + p.fuel_type + "): 250km on 30L? " +
+               p.can_reach(250.0, 30.0).to_string)                    -- true (range 300)
+  c.print_line("4. electric(" + e.fuel_type + "): 250km on 40kWh? " +
+               e.can_reach(250.0, 40.0).to_string)                    -- false (range 200)
+
+  -- 5.* One loop, three behaviours.
+  let loggers: Array[Logger] := []
+  loggers.add(create Logger.make())
+  loggers.add(create File_Logger.make())
+  loggers.add(create Silent_Logger.make())
+  across loggers as lg do
+    lg.log("test")
+  end
+  c.print_line("5. -> the same log('test') call dispatches to three different" +
+               " implementations; the loop never names a concrete logger.")
+end
+
+main()

@@ -1,0 +1,18 @@
+-- ----------------------------------------------------------------------------
+-- Chapter 23, Exercise 2 — the EXPORT responsibility, in its own file.
+-- Knows the CSV format and nothing about how contacts are stored.
+-- ----------------------------------------------------------------------------
+intern Contact
+
+class Csv_Exporter
+  create
+    make() do end
+  feature
+    export(contacts: Array[Contact]): String do
+      let nl: Char := #newline
+      result := "name,email"
+      across contacts as ct do
+        result := result + nl.to_string + ct.name + "," + ct.email
+      end
+    end
+end

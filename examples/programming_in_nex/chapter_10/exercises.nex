@@ -1,0 +1,134 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 10: Maps
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+-- 1. char_frequencies: each character -> number of occurrences.
+function char_frequencies(s: String): Map[Char, Integer] do
+  result := {}
+  across s as ch do
+    let count: Integer := result.try_get(ch, 0)
+    result.set(ch, count + 1)
+  end
+end
+
+-- 2. group_by_length: words grouped by their length.
+function group_by_length(words: Array[String]): Map[Integer, Array[String]] do
+  result := {}
+  across words as w do
+    let bucket: Array[String] := result.try_get(w.length, [])
+    bucket.add(w)
+    result.set(w.length, bucket)
+  end
+end
+
+-- 3. histogram: each key (sorted) followed by a bar of '#' of its frequency.
+function histogram(c: Console, freq: Map[String, Integer]) do
+  let keys: Array[String] := freq.keys.sort
+  across keys as k do
+    let bar: String := ""
+    from
+      let i: Integer := 0
+    until
+      i >= freq.get(k)
+    do
+      bar := bar + "#"
+      i := i + 1
+    end
+    c.print_line(k + ": " + bar)
+  end
+end
+
+-- 4. merge_maps: union of entries; shared keys have their values summed.
+function merge_maps(a, b: Map[String, Integer]): Map[String, Integer] do
+  result := {}
+  across a.keys as k do
+    result.set(k, a.get(k))
+  end
+  across b.keys as k do
+    result.set(k, result.try_get(k, 0) + b.get(k))
+  end
+end
+
+-- 5.* is_anagram: same characters with same frequencies, ignoring case and
+--     spaces. Built on char_frequencies.
+function strip_spaces(s: String): String do
+  result := ""
+  across s as ch do
+    if ch.to_string /= " " then
+      result := result + ch.to_string
+    end
+  end
+end
+
+function is_anagram(s, t: String): Boolean do
+  let fs: Map[Char, Integer] := char_frequencies(strip_spaces(s.to_lower))
+  let ft: Map[Char, Integer] := char_frequencies(strip_spaces(t.to_lower))
+  if fs.size /= ft.size then
+    result := false
+  else
+    result := true
+    across fs.keys as k do
+      if ft.try_get(k, 0) /= fs.get(k) then
+        result := false
+      end
+    end
+  end
+end
+
+-- Render an Array[String] as "[a, b, c]" for printing.
+function show(arr: Array[String]): String do
+  result := "["
+  from
+    let i: Integer := 0
+  until
+    i >= arr.length
+  do
+    if i > 0 then result := result + ", " end
+    result := result + arr.get(i)
+    i := i + 1
+  end
+  result := result + "]"
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1.
+  let mf: Map[Char, Integer] := char_frequencies("mississippi")
+  c.print_line("1. mississippi: m=" + mf.get(#m).to_string +
+               " i=" + mf.get(#i).to_string +
+               " s=" + mf.get(#s).to_string +
+               " p=" + mf.get(#p).to_string)   -- 1 4 4 2
+
+  -- 2. (Verified by iterating the map's own keys. NB: a literal lookup such as
+  --     g.get(3) currently MISSES keys produced by String.length — they box as
+  --     a wider integer type than an int literal — so we read via g.keys, which
+  --     is the idiomatic way to walk a map anyway.)
+  let g: Map[Integer, Array[String]] := group_by_length(["cat", "dog", "elephant", "ox", "ant"])
+  across g.keys.sort as len do
+    c.print_line("2. length " + len.to_string + " -> " +
+                 g.get(len).length.to_string + " words " + show(g.get(len)))
+  end                                              -- 2->1, 3->3, 8->1
+
+  -- 3.
+  c.print_line("3. histogram of {a:3, b:1, c:2}:")
+  let h: Map[String, Integer] := {"a": 3, "b": 1, "c": 2}
+  histogram(c, h)
+
+  -- 4.
+  let m: Map[String, Integer] := merge_maps({"a": 1, "b": 2}, {"b": 3, "c": 4})
+  c.print_line("4. merge_maps: a=" + m.get("a").to_string +
+               " b=" + m.get("b").to_string +
+               " c=" + m.get("c").to_string)   -- 1 5 4
+
+  -- 5.*
+  c.print_line("5. is_anagram('listen','silent') = " +
+               is_anagram("listen", "silent").to_string)            -- true
+  c.print_line("5. is_anagram('hello','world')   = " +
+               is_anagram("hello", "world").to_string)              -- false
+  c.print_line("5. is_anagram('Astronomer','Moon starer') = " +
+               is_anagram("Astronomer", "Moon starer").to_string)   -- true
+end
+
+main()

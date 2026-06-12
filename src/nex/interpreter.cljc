@@ -4160,13 +4160,26 @@
 
 (defmethod eval-node :binary
   [ctx {:keys [operator left right]}]
-  (let [left-val (eval-node ctx left)
-        right-val (eval-node ctx right)]
-    (if (and (= operator "+")
-             (or (string? left-val) (string? right-val)))
-      (str (concat-string-value ctx left-val)
-           (concat-string-value ctx right-val))
-      (apply-binary-op operator left-val right-val))))
+  (cond
+    ;; Short-circuit logical operators: the right operand is evaluated only
+    ;; when the left does not already determine the result (matches the JVM
+    ;; compiler's `emit-boolean-short-circuit!`).
+    (= operator "and")
+    (let [left-val (eval-node ctx left)]
+      (if left-val (eval-node ctx right) left-val))
+
+    (= operator "or")
+    (let [left-val (eval-node ctx left)]
+      (if left-val left-val (eval-node ctx right)))
+
+    :else
+    (let [left-val (eval-node ctx left)
+          right-val (eval-node ctx right)]
+      (if (and (= operator "+")
+               (or (string? left-val) (string? right-val)))
+        (str (concat-string-value ctx left-val)
+             (concat-string-value ctx right-val))
+        (apply-binary-op operator left-val right-val)))))
 
 (defmethod eval-node :unary
   [ctx {:keys [operator expr]}]
@@ -5232,16 +5245,30 @@
          (eval-node-async ctx (:node node))
 
          (= node-type :binary)
-         (.then (promise-all [(eval-node-async ctx (:left node))
-                              (eval-node-async ctx (:right node))])
-                (fn [[left-val right-val]]
-                  (if (and (= (:operator node) "+")
-                           (or (string? left-val) (string? right-val)))
-                    (.then (promise-all [(concat-string-value-async ctx left-val)
-                                         (concat-string-value-async ctx right-val)])
-                           (fn [[left-str right-str]]
-                             (str left-str right-str)))
-                    (apply-binary-op (:operator node) left-val right-val))))
+         (cond
+           ;; Short-circuit logical operators: defer the right operand until
+           ;; the left is known not to determine the result.
+           (= (:operator node) "and")
+           (.then (->promise (eval-node-async ctx (:left node)))
+                  (fn [left-val]
+                    (if left-val (eval-node-async ctx (:right node)) left-val)))
+
+           (= (:operator node) "or")
+           (.then (->promise (eval-node-async ctx (:left node)))
+                  (fn [left-val]
+                    (if left-val left-val (eval-node-async ctx (:right node)))))
+
+           :else
+           (.then (promise-all [(eval-node-async ctx (:left node))
+                                (eval-node-async ctx (:right node))])
+                  (fn [[left-val right-val]]
+                    (if (and (= (:operator node) "+")
+                             (or (string? left-val) (string? right-val)))
+                      (.then (promise-all [(concat-string-value-async ctx left-val)
+                                           (concat-string-value-async ctx right-val)])
+                             (fn [[left-str right-str]]
+                               (str left-str right-str)))
+                      (apply-binary-op (:operator node) left-val right-val)))))
 
          (= node-type :unary)
          (.then (->promise (eval-node-async ctx (:expr node)))

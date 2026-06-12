@@ -1,0 +1,117 @@
+-- ============================================================================
+-- Programming with Nex — Chapter 17: Postconditions
+-- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
+-- ============================================================================
+
+-- 1. average with a postcondition relating the result to the input: for a
+--    non-empty array the mean always lies between the smallest and largest
+--    element. (lo and hi are locals, referenced in the ensure clause.)
+function average(items: Array[Real]): Real
+  require
+    not_empty: items.length > 0
+  do
+    let total: Real := 0.0
+    let lo: Real := items.get(0)
+    let hi: Real := items.get(0)
+    across items as x do
+      total := total + x
+      if x < lo then lo := x end
+      if x > hi then hi := x end
+    end
+    result := total / items.length
+  ensure
+    within_bounds: result >= lo and result <= hi
+  end
+
+-- 2. Lamp: each switch states its effect as a postcondition.
+class Lamp
+  create
+    make() do is_on := false end
+  feature
+    is_on: Boolean
+    switch_on()
+      do is_on := true
+      ensure turned_on: is_on = true end
+    switch_off()
+      do is_on := false
+      ensure turned_off: is_on = false end
+end
+
+-- 3. absolute_value: the postcondition rules out both result := x (fails for
+--    x < 0) and result := -x (fails for x > 0) as universally correct.
+function absolute_value(x: Integer): Integer
+  do
+    if x < 0 then
+      result := -x
+    else
+      result := x
+    end
+  ensure
+    non_negative: result >= 0
+    same_magnitude: result = x or result = -x
+  end
+
+-- 4. Queue[G] whose enqueue states the new size and the value now at the back.
+--    NB: `old items.length` does NOT snapshot the size here — `old` on a mutable
+--    array re-reads the live reference at exit, so it would already see the
+--    grown length. `old` DOES snapshot value-typed fields, so we track the size
+--    in an integer field `count` and phrase the growth postcondition on that.
+class Queue [G]
+  create
+    make() do items := []  count := 0 end
+  feature
+    items: Array[G]
+    count: Integer
+    enqueue(value: G)
+      do
+        items.add(value)
+        count := count + 1
+      ensure
+        grew: count = old count + 1
+        at_back: items.get(count - 1) = value
+      end
+    size(): Integer do result := count end
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1.
+  c.print_line("1. average([2.0,4.0,9.0]) = " + average([2.0, 4.0, 9.0]).to_string +
+               " (within [2.0, 9.0])")                                   -- 5.0
+
+  -- 2.
+  let lamp: Lamp := create Lamp.make()
+  c.print_line("2. fresh lamp is_on=" + lamp.is_on.to_string)            -- false
+  lamp.switch_on()
+  c.print_line("2. after switch_on is_on=" + lamp.is_on.to_string)       -- true
+  lamp.switch_off()
+  c.print_line("2. after switch_off is_on=" + lamp.is_on.to_string)      -- false
+
+  -- 3.
+  c.print_line("3. absolute_value(-7)=" + absolute_value(-7).to_string +
+               " absolute_value(7)=" + absolute_value(7).to_string +
+               " absolute_value(0)=" + absolute_value(0).to_string)      -- 7 7 0
+
+  -- 4.
+  let q: Queue[Integer] := create Queue[Integer].make()
+  q.enqueue(10)
+  q.enqueue(20)
+  c.print_line("4. after two enqueues size=" + q.size.to_string +
+               " back=" + q.items.get(q.size - 1).to_string)             -- 2, 20
+
+  -- 5.* Specifying sort(items): Array[Integer]: Array[Integer] (no body needed).
+  --     Three postconditions:
+  --       1) LENGTH:       result.length = items.length
+  --       2) ORDER:        for every i, result.get(i) <= result.get(i+1)
+  --                        (the result is non-decreasing)
+  --       3) PRESERVATION: result is a permutation of items — every value
+  --                        occurs the same number of times in both (so sorting
+  --                        neither invents nor drops elements). Order alone is
+  --                        not enough: returning [0, 0, ... 0] of the right
+  --                        length is ordered but violates preservation.
+  c.print_line("5. sort spec: (1) same length, (2) non-decreasing, " +
+               "(3) a permutation of the input (same multiset of elements).")
+end
+
+main()
