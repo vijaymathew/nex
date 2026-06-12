@@ -1,0 +1,164 @@
+-- ============================================================================
+-- Knowledge — Architecture refactor  (Beyond Code — Studio 4)
+--
+-- Before (Studio 3): `Knowledge_Model_V3` owned BOTH the index (has_doc) AND the
+--   link-validation workflow (validate_link did the from/to orchestration). That
+--   mixes a storage concern with a use-case rule.
+-- After (Studio 4): the rule moves OUT of storage into a service that depends
+--   only on a membership port:
+--
+--     Link_Validation_Service ----> Doc_Query_Port <|---- Doc_Query_Adapter ----> Knowledge_Model_V3
+--          (use case / rule)           (port)                (adapter)               (Studio 3 V3)
+--
+--   The service composes two `has_doc` calls into VALID / MISSING_FROM /
+--   MISSING_TO — the same vocabulary Studio 3 produced, now reusable against any
+--   Doc_Query_Port (a different store, a test stub, a remote index).
+--
+-- Class-only module; loaded with `intern Knowledge_Arch_Refactor`.
+-- ============================================================================
+
+intern Measure_Result
+intern Architecture_Ports
+
+class Knowledge_Arch_Refactor
+create
+  make() do end
+feature
+  -- Wire the validation use case over a seed of documents.
+  wire(docs: Array [Document]): Link_Validation_Service do
+    let model: Knowledge_Model_V3 := create Knowledge_Model_V3.make(docs)
+    let adapter: Doc_Query_Adapter := create Doc_Query_Adapter.make(model)
+    result := create Link_Validation_Service.make(adapter)
+  end
+  model_of(docs: Array [Document]): Knowledge_Model_V3 do
+    result := create Knowledge_Model_V3.make(docs)
+  end
+end
+
+-- ----- Studio 2 models (unchanged) ------------------------------------------
+class Document
+feature
+  once doc_id: String
+  title: String
+  body: String
+create
+  make(doc_id: String, title: String, body: String) do
+    this.doc_id := doc_id
+    this.title := title
+    this.body := body
+  end
+invariant
+  id_present: doc_id /= ""
+end
+
+class Doc_Link
+feature
+  from_doc_id: String
+  to_doc_id: String
+  link_type: String
+create
+  make(from_doc_id: String, to_doc_id: String, link_type: String) do
+    this.from_doc_id := from_doc_id
+    this.to_doc_id := to_doc_id
+    this.link_type := link_type
+  end
+invariant
+  endpoints_present: from_doc_id /= "" and to_doc_id /= ""
+end
+
+-- ----- Studio 3 V3 index path (UNCHANGED) -----------------------------------
+-- The Studio 3 model still offers BOTH has_doc and validate_link; Studio 4
+-- consumes only has_doc through the port, and re-homes the validate rule in a
+-- service. validate_link stays here for the before/after parity check.
+class Knowledge_Model_V3
+feature
+  index: Map [String, Document]
+create
+  make(docs: Array [Document])
+    require
+      non_empty: docs.length >= 1
+    do
+      let m: Map [String, Document] := {}
+      let i: Integer := 0
+      from i := 0 until i >= docs.length do
+        let d: Document := docs.get(i)
+        m.put(d.doc_id, d)
+        i := i + 1
+      end
+      this.index := m
+    ensure
+      complete_index: index.size() = docs.length
+    end
+feature
+  has_doc(doc_id: String): Boolean
+    do
+      result := index.contains_key(doc_id)
+    ensure
+      bool_result: result = true or result = false
+    end
+
+  -- Studio 3's in-store validation (the "before" for parity).
+  validate_link(link: Doc_Link): Measure_Result
+    do
+      let value: String := "VALID"
+      if not has_doc(link.from_doc_id) then
+        value := "MISSING_FROM"
+      elseif not has_doc(link.to_doc_id) then
+        value := "MISSING_TO"
+      end
+      result := create Measure_Result.make(value, 2)
+    ensure
+      status_known:
+        result.value = "VALID" or
+        result.value = "MISSING_FROM" or
+        result.value = "MISSING_TO"
+    end
+end
+
+-- ----- Adapter: concrete model -> membership port ---------------------------
+class Doc_Query_Adapter
+inherit Doc_Query_Port
+feature
+  model: Knowledge_Model_V3
+create
+  make(model: Knowledge_Model_V3) do
+    this.model := model
+  end
+feature
+  has_doc(doc_id: String): Boolean
+    require
+      id_present: doc_id /= ""
+    do
+      result := model.has_doc(doc_id)
+    ensure
+      bool_result: result = true or result = false
+    end
+end
+
+-- ----- Service: the validation rule, depends on the PORT only ---------------
+class Link_Validation_Service
+feature
+  docs: Doc_Query_Port           -- the seam: a membership port, not a model
+create
+  make(docs: Doc_Query_Port) do
+    this.docs := docs
+  end
+feature
+  validate(from_id: String, to_id: String): String
+    require
+      ids_present: from_id /= "" and to_id /= ""
+    do
+      if not docs.has_doc(from_id) then
+        result := "MISSING_FROM"
+      elseif not docs.has_doc(to_id) then
+        result := "MISSING_TO"
+      else
+        result := "VALID"
+      end
+    ensure
+      known_result:
+        result = "VALID" or
+        result = "MISSING_FROM" or
+        result = "MISSING_TO"
+    end
+end

@@ -78,7 +78,12 @@
 
 (defvar nex-mode-syntax-table
   (let ((table (make-syntax-table)))
-    ;; Comments
+    ;; Comments.  `-' is punctuation (class ".") that also carries the comment
+    ;; flags "12": it is both the first and second character of the "--" two-char
+    ;; comment opener.  Do NOT re-modify ?- below as a plain operator (".") — that
+    ;; strips these flags, leaving "--" unrecognized as a comment, so the string
+    ;; scanner then treats a " or ' inside a comment as opening a string and
+    ;; mis-highlights everything after it.
     (modify-syntax-entry ?- ". 12" table)  ;; -- starts and continues comment
     (modify-syntax-entry ?\n ">" table)    ;; newline ends comment
 
@@ -88,7 +93,9 @@
 
     ;; Operators
     (modify-syntax-entry ?+ "." table)
-    (modify-syntax-entry ?- "." table)
+    ;; NB: ?- is deliberately NOT set here; its comment-aware ". 12" entry above
+    ;; already gives it punctuation class.  Re-setting it to "." would break "--"
+    ;; comment parsing (see the comment block above).
     (modify-syntax-entry ?* "." table)
     (modify-syntax-entry ?/ "." table)
     (modify-syntax-entry ?= "." table)
@@ -139,8 +146,10 @@
 
 (defvar nex-font-lock-keywords
   `(
-    ;; Comments (must come first for proper precedence)
-    ("--.*$" . 'nex-comment-face)
+    ;; NB: comments are fontified syntactically (see the syntax table and the
+    ;; buffer-local `font-lock-comment-face' set in `nex-mode'), NOT by a keyword
+    ;; here.  A keyword regexp like "--.*$" cannot tell a real comment from "--"
+    ;; inside a string, and would also fight the syntactic pass.
 
     ;; Contract labels (e.g., "positive:" in require clause)
     ("\\b\\([a-z_][a-z0-9_]*\\):" 1 font-lock-constant-face)
@@ -198,6 +207,24 @@
               'words)
   "Regexp matching Nex keywords that cannot be method names.")
 
+(defun nex-bracket-continuation-indent ()
+  "Indentation column when point's line continues a multi-line bracket literal.
+Return the column to indent to when the start of the current line is inside an
+unclosed \"[\", \"{\", or \"(\" (array/map literals, multi-line argument lists),
+otherwise nil.  Contents indent one level past the line that opened the bracket;
+a line that itself begins with the matching close bracket aligns with that
+opening line.  Uses the syntax parser, so brackets inside strings and comments
+are correctly ignored."
+  (save-excursion
+    (beginning-of-line)
+    (let ((open (nth 1 (syntax-ppss (point)))))
+      (when open
+        (let ((open-line-indent
+               (save-excursion (goto-char open) (current-indentation))))
+          (if (looking-at "[ \t]*[]})]")
+              open-line-indent
+            (+ open-line-indent nex-indent-offset)))))))
+
 (defun nex-indent-line ()
   "Indent current line as Nex code."
   (interactive)
@@ -205,33 +232,41 @@
         (current-indent (current-indentation)))
     (save-excursion
       (beginning-of-line)
-      (if (bobp)
-          (setq indent-col 0)
-        (let ((prev-indent (nex-previous-line-indent))
-              (should-increase (nex-should-increase-indent))
-              (should-decrease (nex-should-decrease-indent))
-              (is-class-level (nex-is-class-level-keyword))
-              (is-note-after-method (nex-is-note-after-method))
-              (is-contract-after-method (nex-is-contract-after-method)))
-          (setq indent-col
-                (cond
-                 ;; Class-level keywords: align with class (usually 0)
-                 (is-class-level
-                  (nex-find-class-indent))
-                 ;; 'note' after method name: indent extra level
-                 (is-note-after-method
-                  (+ prev-indent nex-indent-offset))
-                 ;; require/ensure/do after method: align with method
-                 (is-contract-after-method
-                  (nex-find-method-indent))
-                 ;; Closing keywords: decrease indent
-                 (should-decrease
-                  (max 0 (- prev-indent nex-indent-offset)))
-                 ;; Opening keywords on previous line: increase indent
-                 (should-increase
-                  (+ prev-indent nex-indent-offset))
-                 ;; Default: same as previous line
-                 (t prev-indent))))))
+      (let ((bracket-indent (and (not (bobp)) (nex-bracket-continuation-indent))))
+        (cond
+         ((bobp)
+          (setq indent-col 0))
+         ;; Inside a multi-line [ ], { }, or ( ): indent relative to the line
+         ;; that opened the bracket. Takes precedence over keyword rules so
+         ;; array/map literal elements line up correctly.
+         (bracket-indent
+          (setq indent-col bracket-indent))
+         (t
+          (let ((prev-indent (nex-previous-line-indent))
+                (should-increase (nex-should-increase-indent))
+                (should-decrease (nex-should-decrease-indent))
+                (is-class-level (nex-is-class-level-keyword))
+                (is-note-after-method (nex-is-note-after-method))
+                (is-contract-after-method (nex-is-contract-after-method)))
+            (setq indent-col
+                  (cond
+                   ;; Class-level keywords: align with class (usually 0)
+                   (is-class-level
+                    (nex-find-class-indent))
+                   ;; 'note' after method name: indent extra level
+                   (is-note-after-method
+                    (+ prev-indent nex-indent-offset))
+                   ;; require/ensure/do after method: align with method
+                   (is-contract-after-method
+                    (nex-find-method-indent))
+                   ;; Closing keywords: decrease indent
+                   (should-decrease
+                    (max 0 (- prev-indent nex-indent-offset)))
+                   ;; Opening keywords on previous line: increase indent
+                   (should-increase
+                    (+ prev-indent nex-indent-offset))
+                   ;; Default: same as previous line
+                   (t prev-indent))))))))
 
     ;; Indent the line
     (indent-line-to indent-col)
@@ -564,6 +599,11 @@ Nex is an Eiffel-inspired language with Design by Contract features.
   (setq-local comment-start "-- ")
   (setq-local comment-end "")
   (setq-local comment-start-skip "--+\\s-*")
+
+  ;; Render syntactic comments (and their "--" delimiter) in the custom gray
+  ;; `nex-comment-face' rather than the theme's default comment color.
+  (setq-local font-lock-comment-face 'nex-comment-face)
+  (setq-local font-lock-comment-delimiter-face 'nex-comment-face)
 
   ;; Indentation
   (setq-local indent-line-function 'nex-indent-line)

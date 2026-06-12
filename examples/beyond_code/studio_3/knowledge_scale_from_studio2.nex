@@ -1,0 +1,212 @@
+-- ============================================================================
+-- Knowledge — Scaling refactor  (Beyond Code — Studio 3, Level 2)
+--
+-- Continues Studio 2\'s knowledge model UNCHANGED (Document + Doc_Link). The
+-- bottleneck at scale is link validation: \"does this Doc_Link point at two
+-- documents that actually exist?\" Each link checks two endpoints, and in the
+-- Studio 2 usage pattern each endpoint check scans the document collection.
+--
+--   Before (V2): Knowledge_Model_V2 — Array [Document]; validating one link does
+--                up to two scans (from-endpoint, then to-endpoint). O(n) per
+--                endpoint; validating a batch of m links is O(m * n).
+--   After  (V3): Knowledge_Model_V3 — same Document objects, plus a derived
+--                Map [doc_id -> Document]. Each endpoint check is one key
+--                access via `has_doc`; a link validates in 2 steps regardless
+--                of how many documents exist.
+--
+-- Failure is reported with explicit statuses, never a sentinel that shares a
+-- type with a real answer: VALID | MISSING_FROM | MISSING_TO. The `status_known`
+-- postcondition pins the result to that set in BOTH versions, so the refactor
+-- cannot quietly change the contract.
+--
+-- Class-only module; pulled in by `studio_3_main.nex`.
+-- ============================================================================
+
+intern Measure_Result
+
+-- Module façade (entry class for `intern`); builds the before/after pair.
+class Knowledge_Scale_From_Studio2
+create
+  make() do end
+feature
+  baseline(docs: Array [Document]): Knowledge_Model_V2 do
+    result := create Knowledge_Model_V2.make(docs)
+  end
+  indexed(docs: Array [Document]): Knowledge_Model_V3 do
+    result := create Knowledge_Model_V3.make(docs)
+  end
+end
+
+-- ----- Reused Studio 2 models (unchanged) -----------------------------------
+class Document
+feature
+  once doc_id: String           -- identity (immutable)
+  title: String
+  body: String
+create
+  make(doc_id: String, title: String, body: String)
+    do
+      this.doc_id := doc_id
+      this.title := title
+      this.body := body
+    end
+invariant
+  id_present: doc_id /= ""
+end
+
+class Doc_Link
+feature
+  from_doc_id: String
+  to_doc_id: String
+  link_type: String
+create
+  make(from_doc_id: String, to_doc_id: String, link_type: String)
+    do
+      this.from_doc_id := from_doc_id
+      this.to_doc_id := to_doc_id
+      this.link_type := link_type
+    end
+invariant
+  endpoints_present: from_doc_id /= "" and to_doc_id /= ""
+end
+
+-- ----- BEFORE: each endpoint check is a scan (O(n) per endpoint) ------------
+class Knowledge_Model_V2
+feature
+  docs: Array [Document]
+create
+  make(docs: Array [Document])
+    require
+      non_empty: docs.length >= 1
+    do
+      this.docs := docs
+    end
+feature
+  -- Linear membership test over the document collection.
+  has_doc(doc_id: String): Boolean
+    do
+      result := false
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i >= docs.length
+      do
+        if docs.get(i).doc_id = doc_id then
+          result := true
+          i := docs.length
+        else
+          i := i + 1
+        end
+      end
+    ensure
+      bool_result: result = true or result = false
+    end
+
+  -- Validate a link: scan for the from-endpoint, then for the to-endpoint.
+  -- `steps` counts document comparisons across BOTH scans.
+  validate_link(link: Doc_Link): Measure_Result
+    do
+      let steps: Integer := 0
+      let value: String := "VALID"
+
+      -- from-endpoint scan
+      let found_from: Boolean := false
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i >= docs.length
+      do
+        steps := steps + 1
+        if docs.get(i).doc_id = link.from_doc_id then
+          found_from := true
+          i := docs.length
+        else
+          i := i + 1
+        end
+      end
+
+      if not found_from then
+        value := "MISSING_FROM"
+      else
+        -- to-endpoint scan
+        let found_to: Boolean := false
+        let j: Integer := 0
+        from
+          j := 0
+        until
+          j >= docs.length
+        do
+          steps := steps + 1
+          if docs.get(j).doc_id = link.to_doc_id then
+            found_to := true
+            j := docs.length
+          else
+            j := j + 1
+          end
+        end
+        if not found_to then
+          value := "MISSING_TO"
+        end
+      end
+
+      result := create Measure_Result.make(value, steps)
+    ensure
+      status_known:
+        result.value = "VALID" or
+        result.value = "MISSING_FROM" or
+        result.value = "MISSING_TO"
+    end
+end
+
+-- ----- AFTER: indexed membership (2 key accesses per link) ------------------
+class Knowledge_Model_V3
+feature
+  index: Map [String, Document]   -- doc_id -> the SAME Document object
+create
+  make(docs: Array [Document])
+    require
+      non_empty: docs.length >= 1
+    do
+      let m: Map [String, Document] := {}
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i >= docs.length
+      do
+        let d: Document := docs.get(i)
+        m.put(d.doc_id, d)
+        i := i + 1
+      end
+      this.index := m
+    ensure
+      complete_index: index.size() = docs.length
+    end
+feature
+  has_doc(doc_id: String): Boolean
+    do
+      result := index.contains_key(doc_id)
+    ensure
+      bool_result: result = true or result = false
+    end
+
+  -- Two key accesses, independent of document count.
+  validate_link(link: Doc_Link): Measure_Result
+    do
+      let value: String := "VALID"
+      if not has_doc(link.from_doc_id) then
+        value := "MISSING_FROM"
+      elseif not has_doc(link.to_doc_id) then
+        value := "MISSING_TO"
+      end
+      result := create Measure_Result.make(value, 2)
+    ensure
+      constant_step: result.steps = 2
+      status_known:
+        result.value = "VALID" or
+        result.value = "MISSING_FROM" or
+        result.value = "MISSING_TO"
+    end
+end

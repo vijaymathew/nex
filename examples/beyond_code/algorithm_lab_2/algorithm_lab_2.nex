@@ -1,0 +1,320 @@
+-- ============================================================================
+-- Algorithm Lab 2 — When Algorithms Compete  (Beyond Code)
+--
+-- One problem, two competitors: "find a path from A to G in an unweighted,
+-- directed graph." DFS-style search finds *a* path (not guaranteed shortest by
+-- hops); BFS-style search guarantees *minimum hops*. Both carry explicit
+-- counters so we judge by evidence: which wins for a given workload, and where
+-- each breaks down.
+--
+-- The chapter sketches the graph as boolean edge flags (a_b, a_c, ...) with the
+-- two candidate paths hand-written into if/elseif. This lab implements the SAME
+-- competition honestly: a real adjacency-map graph and real DFS/BFS traversals,
+-- so paths, hop counts, and step counts are computed — not pre-baked — and the
+-- graph can actually be reshaped for the workload experiments.
+--
+-- Counters (the metric for the competition):
+--   steps    = node expansions (one per node popped/dequeued from the frontier).
+--   frontier = the peak size of the frontier (BFS queue / DFS stack) during the
+--              run — a proxy for memory pressure.
+--   hops     = edges in the returned path (path quality for shortest-path).
+--
+-- On the chapter's default graph this reproduces the book's outcome exactly:
+--   DFS -> A->B->D->E->G (4 hops),  BFS -> A->C->F->G (3 hops).
+-- and additionally MEASURES the tradeoff the book only asserts: BFS buys the
+-- shorter path with more node expansions (7 vs 5) and a wider frontier.
+--
+-- Class-only module (no top-level run); pulled in by `algorithm_lab_2_main.nex`
+-- with `intern Algorithm_Lab_2` (the entry class below; loading it registers
+-- every class in this file).
+-- ============================================================================
+
+-- Module façade + `intern` entry point. Factory for the competitors and a
+-- builder for the named graph fixtures used across the experiments.
+class Algorithm_Lab_2
+create
+  make() do end
+feature
+  dfs(): DFS_Competitor do result := create DFS_Competitor end
+  bfs(): BFS_Competitor do result := create BFS_Competitor end
+
+  -- Named fixtures (each a fresh immutable graph built from an edge list).
+  -- Keeping them as separate graphs — rather than mutating one — sidesteps any
+  -- shared-state surprises and makes each experiment reproducible in isolation.
+  default_graph(): Graph do
+    result := create Graph.from_edges([
+      ["A","B"], ["A","C"], ["B","D"], ["D","E"], ["E","G"], ["C","F"], ["F","G"]
+    ])
+  end
+
+  -- Task B: remove the short branch's shortcut edge C->F. Now the only route to
+  -- G is the long one (A->B->D->E->G).
+  no_shortcut_graph(): Graph do
+    result := create Graph.from_edges([
+      ["A","B"], ["A","C"], ["B","D"], ["D","E"], ["E","G"], ["F","G"]
+    ])
+  end
+
+  -- Task B: default + a distracting dead-end branch off B (B->X->Y, no exit).
+  -- DFS prefers B first, so it wanders into the dead end before backtracking.
+  distractor_graph(): Graph do
+    result := create Graph.from_edges([
+      ["A","B"], ["A","C"], ["B","X"], ["X","Y"], ["B","D"], ["D","E"],
+      ["E","G"], ["C","F"], ["F","G"]
+    ])
+  end
+
+  -- Task C: a wide, bushy graph with DISTINCT children at each level (a small
+  -- tree). A -> B1..B3, each Bi -> two private C's, every C -> G. BFS holds a
+  -- whole layer of distinct nodes at once; DFS descends one branch and holds
+  -- only per-level siblings, so their frontiers diverge.
+  wide_graph(): Graph do
+    result := create Graph.from_edges([
+      ["A","B1"], ["A","B2"], ["A","B3"],
+      ["B1","C1"], ["B1","C2"], ["B2","C3"], ["B2","C4"], ["B3","C5"], ["B3","C6"],
+      ["C1","G"], ["C2","G"], ["C3","G"], ["C4","G"], ["C5","G"], ["C6","G"]
+    ])
+  end
+
+  -- Task C: a single deep chain A->N1->...->N5->G (6 hops). Used to trip a DFS
+  -- depth cap that is smaller than the only path's length.
+  deep_graph(): Graph do
+    result := create Graph.from_edges([
+      ["A","N1"], ["N1","N2"], ["N2","N3"], ["N3","N4"], ["N4","N5"], ["N5","G"]
+    ])
+  end
+end
+
+-- The shared, comparable outcome of one competition run.
+class Path_Run_Result
+feature
+  strategy: String     -- "DFS" | "BFS"
+  status: String       -- "FOUND" | "UNREACHABLE" | "DEPTH_CAPPED"
+  path: String         -- e.g. "A->C->F->G", or "" when not found
+  hops: Integer        -- edges in the path (0 when not found)
+  steps: Integer       -- node expansions
+  frontier: Integer    -- peak frontier size during the run
+create
+  make(strategy: String, status: String, path: String,
+       hops: Integer, steps: Integer, frontier: Integer)
+    do
+      this.strategy := strategy
+      this.status := status
+      this.path := path
+      this.hops := hops
+      this.steps := steps
+      this.frontier := frontier
+    end
+invariant
+  strategy_present: strategy /= ""
+  status_present: status /= ""
+  hops_non_negative: hops >= 0
+  steps_non_negative: steps >= 0
+  frontier_non_negative: frontier >= 0
+end
+
+-- Small path utilities shared by both competitors (a path is an Array[String]).
+class Path_Tools
+feature
+  -- A fresh copy, so extending one frontier entry never mutates another.
+  clone(p: Array [String]): Array [String] do
+    let c: Array [String] := []
+    let i: Integer := 0
+    from i := 0 until i >= p.length do
+      c.add(p.get(i))
+      i := i + 1
+    end
+    result := c
+  end
+
+  -- "A->B->C"
+  render(p: Array [String]): String do
+    result := p.get(0)
+    let i: Integer := 1
+    from i := 1 until i >= p.length do
+      result := result + "->" + p.get(i)
+      i := i + 1
+    end
+  end
+end
+
+-- A directed, unweighted graph as an adjacency map: node -> ordered neighbors.
+-- Built once from an edge list; neighbor order follows edge-insertion order,
+-- which fixes DFS's deterministic branch preference.
+class Graph
+feature
+  adj: Map [String, Array [String]]
+create
+  from_edges(edges: Array [Array [String]])
+    do
+      let m: Map [String, Array [String]] := {}
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i >= edges.length
+      do
+        let e: Array [String] := edges.get(i)
+        let f: String := e.get(0)
+        let t: String := e.get(1)
+        let nbrs: Array [String] := []
+        if m.contains_key(f) then
+          nbrs := m.get(f)
+        end
+        nbrs.add(t)
+        m.put(f, nbrs)
+        i := i + 1
+      end
+      this.adj := m
+    end
+feature
+  -- Out-neighbors of `node` in insertion order; empty if none.
+  neighbors(node: String): Array [String] do
+    if adj.contains_key(node) then
+      result := adj.get(node)
+    else
+      result := []
+    end
+  end
+end
+
+-- ----- DFS competitor: depth-first, finds A path (not always the shortest) ---
+-- Iterative, with an explicit stack of partial paths. Deterministic: the first
+-- neighbor (by insertion order) is explored first. A non-negative `cap` bounds
+-- the search by hops; cap < 0 means unlimited.
+class DFS_Competitor
+feature
+  -- Uncapped search.
+  run(g: Graph, start: String, goal: String): Path_Run_Result do
+    result := run_capped(g, start, goal, -1)
+  end
+
+  run_capped(g: Graph, start: String, goal: String, cap: Integer): Path_Run_Result
+    require
+      endpoints_present: start /= "" and goal /= ""
+    do
+      let pt: Path_Tools := create Path_Tools
+      let stack: Array [Array [String]] := []
+      stack.add([start])
+      let steps: Integer := 0
+      let frontier: Integer := 1
+      let status: String := "UNREACHABLE"
+      let path: String := ""
+      let hops: Integer := 0
+      let cut: Boolean := false      -- did the cap stop us extending a branch?
+
+      from
+      until
+        stack.length = 0 or status = "FOUND"
+      do
+        let cur: Array [String] := stack.get(stack.length - 1)
+        stack.remove(stack.length - 1)
+        steps := steps + 1
+        let node: String := cur.get(cur.length - 1)
+        if node = goal then
+          status := "FOUND"
+          path := pt.render(cur)
+          hops := cur.length - 1
+        elseif cap >= 0 and (cur.length - 1) >= cap then
+          cut := true                -- extending would exceed the depth cap
+        else
+          let nbrs: Array [String] := g.neighbors(node)
+          -- Push in reverse so the FIRST neighbor is popped (explored) first.
+          let k: Integer := nbrs.length - 1
+          from
+            k := nbrs.length - 1
+          until
+            k < 0
+          do
+            let nx: String := nbrs.get(k)
+            if not cur.contains(nx) then     -- avoid cycles
+              let np: Array [String] := pt.clone(cur)
+              np.add(nx)
+              stack.add(np)
+            end
+            k := k - 1
+          end
+          if stack.length > frontier then
+            frontier := stack.length
+          end
+        end
+      end
+
+      if status /= "FOUND" and cut then
+        status := "DEPTH_CAPPED"
+      end
+      result := create Path_Run_Result.make("DFS", status, path, hops, steps, frontier)
+    ensure
+      known_status:
+        result.status = "FOUND" or
+        result.status = "UNREACHABLE" or
+        result.status = "DEPTH_CAPPED"
+      found_has_path: result.status /= "FOUND" or result.hops >= 1
+    end
+end
+
+-- ----- BFS competitor: breadth-first, guarantees minimum hops --------------
+-- Iterative, queue of partial paths, nodes marked visited on enqueue (so each
+-- node is expanded once). The first time `goal` is dequeued, its path is a
+-- minimum-hop path.
+class BFS_Competitor
+feature
+  run(g: Graph, start: String, goal: String): Path_Run_Result
+    require
+      endpoints_present: start /= "" and goal /= ""
+    do
+      let pt: Path_Tools := create Path_Tools
+      let queue: Array [Array [String]] := []
+      let visited: Array [String] := []
+      queue.add([start])
+      visited.add(start)
+      let head: Integer := 0           -- dequeue pointer (avoids array removal)
+      let steps: Integer := 0
+      let frontier: Integer := 1
+      let status: String := "UNREACHABLE"
+      let path: String := ""
+      let hops: Integer := 0
+
+      from
+      until
+        head >= queue.length or status = "FOUND"
+      do
+        let cur: Array [String] := queue.get(head)
+        head := head + 1
+        steps := steps + 1
+        let node: String := cur.get(cur.length - 1)
+        if node = goal then
+          status := "FOUND"
+          path := pt.render(cur)
+          hops := cur.length - 1
+        else
+          let nbrs: Array [String] := g.neighbors(node)
+          let k: Integer := 0
+          from
+            k := 0
+          until
+            k >= nbrs.length
+          do
+            let nx: String := nbrs.get(k)
+            if not visited.contains(nx) then
+              visited.add(nx)
+              let np: Array [String] := pt.clone(cur)
+              np.add(nx)
+              queue.add(np)
+            end
+            k := k + 1
+          end
+          -- Live frontier = enqueued but not yet dequeued.
+          if queue.length - head > frontier then
+            frontier := queue.length - head
+          end
+        end
+      end
+
+      result := create Path_Run_Result.make("BFS", status, path, hops, steps, frontier)
+    ensure
+      known_status:
+        result.status = "FOUND" or result.status = "UNREACHABLE"
+      found_has_path: result.status /= "FOUND" or result.hops >= 1
+    end
+end

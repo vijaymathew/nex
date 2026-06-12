@@ -1,0 +1,159 @@
+-- ============================================================================
+-- Algorithm Lab 2 — Driver: run competitions  (Tasks A, B, C)
+--
+--   Task A — Nominal competition on the default graph.
+--   Task B — Workload variation: remove a shortcut; add a dead-end distractor.
+--   Task C — Constraint stress: DFS depth cap; BFS frontier growth.
+-- Plus an experiment table across graph variants and a correctness check
+-- (BFS is never longer than DFS; both report valid endpoints).
+--
+-- Run from this directory:  nex algorithm_lab_2_main.nex
+-- ============================================================================
+
+intern Algorithm_Lab_2
+
+class Lab2_Report
+feature
+  console: Console
+create
+  make() do this.console := create Console end
+feature
+  line(s: String) do console.print_line(s) end
+
+  -- "  DFS  FOUND        A->B->D->E->G   hops=4 steps=5 frontier=2"
+  row(r: Path_Run_Result) do
+    console.print_line("  " + pad(r.strategy, 5)
+      + pad(r.status, 13)
+      + pad(show_path(r.path), 26) + " "
+      + "hops=" + pad(r.hops + "", 3)
+      + "steps=" + pad(r.steps + "", 3)
+      + "frontier=" + r.frontier)
+  end
+
+  show_path(p: String): String do
+    if p = "" then result := "(none)" else result := p end
+  end
+
+  pad(s: String, w: Integer): String do
+    result := s
+    from until result.length >= w do result := result + " " end
+  end
+end
+
+function main() do
+  let lab: Algorithm_Lab_2 := create Algorithm_Lab_2.make()
+  let rep: Lab2_Report := create Lab2_Report.make()
+  let dfs: DFS_Competitor := lab.dfs()
+  let bfs: BFS_Competitor := lab.bfs()
+
+  -- ========================================================================
+  -- TASK A — Nominal competition on the default graph.
+  -- ========================================================================
+  rep.line("### Task A — nominal competition (A -> G, default graph) ###")
+  rep.line("edges: A->B A->C B->D D->E E->G C->F F->G")
+  let g: Graph := lab.default_graph()
+  rep.row(dfs.run(g, "A", "G"))
+  rep.row(bfs.run(g, "A", "G"))
+  rep.line("BFS returns the minimum-hop route (3); DFS returns a valid but")
+  rep.line("longer route (4) because it commits to A->B first. BFS pays for the")
+  rep.line("shorter path with more node expansions and a wider frontier.")
+  rep.line("")
+
+  -- ========================================================================
+  -- TASK B — Workload variation across graph shapes.
+  -- ========================================================================
+  rep.line("### Task B — workload variation ###")
+  rep.line("(1) remove shortcut edge C->F  (only the long route survives):")
+  let g_ns: Graph := lab.no_shortcut_graph()
+  rep.row(dfs.run(g_ns, "A", "G"))
+  rep.row(bfs.run(g_ns, "A", "G"))
+  rep.line("(2) add dead-end distractor B->X->Y (default + a trap off B):")
+  let g_dx: Graph := lab.distractor_graph()
+  rep.row(dfs.run(g_dx, "A", "G"))
+  rep.row(bfs.run(g_dx, "A", "G"))
+  rep.line("Sensitivity: DFS is sensitive to the DEAD-END (it wanders into X->Y")
+  rep.line("before backtracking, inflating steps); its path quality already")
+  rep.line("trailed BFS. BFS is unmoved by the dead end (it never goes deep) but")
+  rep.line("is sensitive to losing the shortcut: its hop count rises 3 -> 4.")
+  rep.line("")
+
+  -- ========================================================================
+  -- TASK C — Constraint stress.
+  -- ========================================================================
+  rep.line("### Task C — constraint stress ###")
+  rep.line("(1) DFS depth cap on the deep chain A->N1->...->N5->G (needs 6 hops):")
+  let g_deep: Graph := lab.deep_graph()
+  rep.line("    cap=3 (too shallow):")
+  rep.row(dfs.run_capped(g_deep, "A", "G", 3))
+  rep.line("    cap=6 (just enough):")
+  rep.row(dfs.run_capped(g_deep, "A", "G", 6))
+  rep.line("    A DEPTH_CAPPED status means a path may exist beyond the bound —")
+  rep.line("    an explicit signal, not a silent 'unreachable'.")
+  rep.line("(2) BFS frontier growth on a wide tree (A->B1..B3, each Bi->2 C's->G):")
+  let g_wide: Graph := lab.wide_graph()
+  rep.row(dfs.run(g_wide, "A", "G"))
+  rep.row(bfs.run(g_wide, "A", "G"))
+  rep.line("    BFS holds a whole layer of distinct nodes at once (frontier peaks")
+  rep.line("    at the layer width); DFS descends one branch and holds only the")
+  rep.line("    per-level siblings, so its frontier stays smaller. The gap widens")
+  rep.line("    with bushiness: BFS frontier ~ branching^depth, DFS ~ branching*depth.")
+  rep.line("")
+
+  -- ========================================================================
+  -- Experiment table (compact) + correctness check.
+  -- ========================================================================
+  rep.line("### experiment table (DFS vs BFS across variants) ###")
+  table_row(rep, dfs, bfs, lab.default_graph(),     "default    ")
+  table_row(rep, dfs, bfs, lab.no_shortcut_graph(), "no-shortcut")
+  table_row(rep, dfs, bfs, lab.distractor_graph(),  "distractor ")
+  table_row(rep, dfs, bfs, lab.wide_graph(),        "wide       ")
+  table_row(rep, dfs, bfs, lab.deep_graph(),        "deep       ")
+  rep.line("")
+
+  rep.line("### correctness check ###")
+  let fails: Integer := check_all(dfs, bfs, lab)
+  if fails = 0 then
+    rep.line("  on every reachable variant: both FOUND, and BFS hops <= DFS hops: PASS")
+  else
+    rep.line("  VIOLATIONS: " + fails)
+  end
+end
+
+-- One compact comparison line per graph variant.
+function table_row(rep: Lab2_Report, dfs: DFS_Competitor, bfs: BFS_Competitor,
+                   g: Graph, name: String) do
+  let d: Path_Run_Result := dfs.run(g, "A", "G")
+  let b: Path_Run_Result := bfs.run(g, "A", "G")
+  rep.line("  " + name
+    + " | DFS " + rep.pad(d.status, 12) + "h" + rep.pad(d.hops + "", 2)
+    + " s" + rep.pad(d.steps + "", 3) + " f" + rep.pad(d.frontier + "", 2)
+    + " | BFS " + rep.pad(b.status, 12) + "h" + rep.pad(b.hops + "", 2)
+    + " s" + rep.pad(b.steps + "", 3) + " f" + b.frontier)
+end
+
+-- Evidence for BFS's guarantee: on every variant where both find a path, BFS's
+-- hop count must be <= DFS's (BFS is shortest by hops; DFS need not be).
+function check_all(dfs: DFS_Competitor, bfs: BFS_Competitor,
+                   lab: Algorithm_Lab_2): Integer do
+  let fails: Integer := 0
+  fails := fails + check_one(dfs.run(lab.default_graph(),     "A", "G"),
+                             bfs.run(lab.default_graph(),     "A", "G"))
+  fails := fails + check_one(dfs.run(lab.no_shortcut_graph(), "A", "G"),
+                             bfs.run(lab.no_shortcut_graph(), "A", "G"))
+  fails := fails + check_one(dfs.run(lab.distractor_graph(),  "A", "G"),
+                             bfs.run(lab.distractor_graph(),  "A", "G"))
+  fails := fails + check_one(dfs.run(lab.wide_graph(),        "A", "G"),
+                             bfs.run(lab.wide_graph(),        "A", "G"))
+  result := fails
+end
+
+-- 0 if both FOUND and BFS hops <= DFS hops, else 1.
+function check_one(d: Path_Run_Result, b: Path_Run_Result): Integer do
+  if d.status = "FOUND" and b.status = "FOUND" and b.hops <= d.hops then
+    result := 0
+  else
+    result := 1
+  end
+end
+
+main()

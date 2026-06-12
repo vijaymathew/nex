@@ -1,0 +1,101 @@
+-- ============================================================================
+-- World Reliability — Invariant-Preserving Recovery  (Studio 5)
+--
+-- Continues the Studio 4 world update service. The position update is a PORT (a
+-- Studio 4 seam) whose `move` clamps to [0, max_x] and holds that bound as a
+-- class invariant — so even an extreme delta cannot corrupt the object.
+--
+-- The service distinguishes a clean update from a RECOVERED one (the requested
+-- delta would have left bounds and was clamped), so over-range input is a
+-- visible, contracted recovery — not a silent correction.
+--
+-- Class-only module; loaded with `intern World_Reliability`.
+-- ============================================================================
+
+intern Reliability_Types
+
+class World_Reliability
+create
+  make() do end
+feature
+  service(port: World_Move_Port, log: Reliability_Log): World_Reliability_Service do
+    result := create World_Reliability_Service.make(port, log)
+  end
+  port(object_id: String, x: Integer, max_x: Integer): World_Move_Port do
+    result := create World_Move_Port.make(object_id, x, max_x)
+  end
+end
+
+-- ----- World move port (seam) -----------------------------------------------
+-- The bound is owned by the object; `bounded` holds for its whole life, not just
+-- after a move, so the object is never observable in an out-of-range state.
+class World_Move_Port
+feature
+  object_id: String
+  x: Integer
+  max_x: Integer
+create
+  make(object_id: String, x: Integer, max_x: Integer)
+    require
+      id_present: object_id /= ""
+      valid_bound: max_x >= 0
+      start_in_bounds: x >= 0 and x <= max_x
+    do
+      this.object_id := object_id
+      this.x := x
+      this.max_x := max_x
+    end
+feature
+  -- One bounded position update; clamps to [0, max_x].
+  move(delta: Integer): String
+    do
+      let next: Integer := x + delta
+      if next < 0 then
+        x := 0
+      elseif next > max_x then
+        x := max_x
+      else
+        x := next
+      end
+      result := "UPDATED"
+    ensure
+      bounded: x >= 0 and x <= max_x
+      non_empty: result /= ""
+    end
+invariant
+  id_present: object_id /= ""
+  valid_bound: max_x >= 0
+  bounded: x >= 0 and x <= max_x
+end
+
+-- ----- Reliability service --------------------------------------------------
+class World_Reliability_Service
+feature
+  port: World_Move_Port
+  log: Reliability_Log
+create
+  make(port: World_Move_Port, log: Reliability_Log) do
+    this.port := port
+    this.log := log
+  end
+feature
+  safe_step(delta: Integer): Op_Result
+    do
+      let before: Integer := port.x
+      let would_be: Integer := before + delta       -- the unclamped target
+      let status: String := port.move(delta)
+      let after: Integer := port.x
+      log.record("world step delta=" + delta + " x:" + before + "->" + after)
+
+      -- RECOVERED iff the requested move would have left bounds (it was clamped).
+      if would_be < 0 or would_be > port.max_x then
+        result := create Op_Result.make("RECOVERED", "CLAMPED@" + after, 1)
+      else
+        result := create Op_Result.make("OK", "UPDATED@" + after, 1)
+      end
+    ensure
+      known_status: result.status = "OK" or result.status = "RECOVERED"
+      -- Whatever happened, the object is in bounds (the invariant held).
+      in_bounds: port.x >= 0 and port.x <= port.max_x
+    end
+end

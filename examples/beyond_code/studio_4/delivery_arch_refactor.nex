@@ -1,0 +1,146 @@
+-- ============================================================================
+-- Delivery — Architecture refactor  (Beyond Code — Studio 4)
+--
+-- Before (Studio 3): callers used the concrete `Delivery_Store_V3` directly —
+--   orchestration ("what does a dispatcher see?") was tangled with storage
+--   ("how is a status looked up?").
+-- After (Studio 4): three components with one dependency direction:
+--
+--     Delivery_Workflow ----> Task_Query_Port <|---- Delivery_Task_Adapter ----> Delivery_Store_V3
+--        (use case)              (port)                  (adapter)                  (Studio 3 V3)
+--
+--   * Delivery_Store_V3  — the Studio 3 index path, UNCHANGED (Map by task_id,
+--                          find_status returns a Measure_Result).
+--   * Delivery_Task_Adapter — `inherit`s Task_Query_Port; turns the store's
+--                          Measure_Result into the port's plain String contract.
+--   * Delivery_Workflow  — the use case; depends ONLY on Task_Query_Port. It
+--                          never names a storage class, so the concrete store is
+--                          substitutable behind the seam.
+--
+-- Class-only module; loaded with `intern Delivery_Arch_Refactor`.
+-- ============================================================================
+
+intern Measure_Result
+intern Architecture_Ports
+
+-- Composition root + `intern` entry class. Wires concrete -> adapter -> workflow
+-- in ONE place; everything it returns is typed by the port/use case, not storage.
+class Delivery_Arch_Refactor
+create
+  make() do end
+feature
+  -- Build the full delivery use case from a seed of tasks.
+  wire(rows: Array [Delivery_Task]): Delivery_Workflow do
+    let store: Delivery_Store_V3 := create Delivery_Store_V3.make(rows)
+    let adapter: Delivery_Task_Adapter := create Delivery_Task_Adapter.make(store)
+    result := create Delivery_Workflow.make(adapter)
+  end
+  -- Expose the concrete store too, for before/after parity checks.
+  store_of(rows: Array [Delivery_Task]): Delivery_Store_V3 do
+    result := create Delivery_Store_V3.make(rows)
+  end
+end
+
+-- ----- Studio 2 model (unchanged) -------------------------------------------
+class Delivery_Task
+feature
+  once task_id: String
+  origin: String
+  destination: String
+  status: String
+  assigned_robot_id: String
+create
+  make(task_id: String, origin: String, destination: String,
+       status: String, assigned_robot_id: String)
+    do
+      this.task_id := task_id
+      this.origin := origin
+      this.destination := destination
+      this.status := status
+      this.assigned_robot_id := assigned_robot_id
+    end
+invariant
+  id_present: task_id /= ""
+end
+
+-- ----- Studio 3 V3 index path (UNCHANGED) -----------------------------------
+class Delivery_Store_V3
+feature
+  index: Map [String, Delivery_Task]
+create
+  make(rows: Array [Delivery_Task])
+    require
+      non_empty: rows.length >= 1
+    do
+      let m: Map [String, Delivery_Task] := {}
+      let i: Integer := 0
+      from i := 0 until i >= rows.length do
+        let t: Delivery_Task := rows.get(i)
+        m.put(t.task_id, t)
+        i := i + 1
+      end
+      this.index := m
+    ensure
+      complete_index: index.size() = rows.length
+    end
+feature
+  find_status(task_id: String): Measure_Result
+    require
+      id_present: task_id /= ""
+    do
+      let value: String := "NOT_FOUND"
+      if index.contains_key(task_id) then
+        value := index.get(task_id).status
+      end
+      result := create Measure_Result.make(value, 1)
+    ensure
+      constant_step: result.steps = 1
+    end
+end
+
+-- ----- Adapter: concrete store -> port contract -----------------------------
+-- IS-A Task_Query_Port (so it is substitutable wherever the port is expected),
+-- HAS-A Delivery_Store_V3 (the thing it adapts). The only adaptation work is
+-- reading `.value` off the store's Measure_Result.
+class Delivery_Task_Adapter
+inherit Task_Query_Port
+feature
+  store: Delivery_Store_V3
+create
+  make(store: Delivery_Store_V3) do
+    this.store := store
+  end
+feature
+  status_of(task_id: String): String
+    require
+      id_present: task_id /= ""
+    do
+      result := store.find_status(task_id).value
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+-- ----- Workflow: the use case, depends on the PORT only ---------------------
+class Delivery_Workflow
+feature
+  tasks: Task_Query_Port          -- the seam: a port, not a store
+create
+  make(tasks: Task_Query_Port) do
+    this.tasks := tasks
+  end
+feature
+  dispatch_view(task_id: String): String
+    require
+      id_present: task_id /= ""
+    do
+      let st: String := tasks.status_of(task_id)
+      if st = "NOT_FOUND" then
+        result := "UNKNOWN_TASK"
+      else
+        result := "TASK_STATUS:" + st
+      end
+    ensure
+      non_empty: result /= ""
+    end
+end

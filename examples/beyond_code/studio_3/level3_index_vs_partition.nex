@@ -1,0 +1,211 @@
+-- ============================================================================
+-- Studio 3, Level 3 — Competing Strategies (delivery domain)
+--
+-- Two refactors of the SAME Studio 2 Delivery_Task collection, each optimizing a
+-- different query shape. The point is not "which is faster" but "each wins a
+-- DIFFERENT workload" — so the choice depends on what you actually ask.
+--
+--   Strategy A — INDEX-HEAVY (Id_Index_Strategy)
+--     Map [task_id -> Delivery_Task]. Built for POINT lookups by identity.
+--       * find_status(id)      -> O(1): one key access.
+--       * count_status(status) -> O(n): the id index gives no help; it must
+--                                  visit every task to tally a category.
+--
+--   Strategy B — PARTITION (Status_Partition_Strategy)
+--     Map [status -> Array [Delivery_Task]]. Built for GROUP/BULK queries by
+--     category. Tasks are bucketed by status up front.
+--       * count_status(status) -> O(1): fetch one bucket, read its size; the
+--                                  other partitions are never touched.
+--       * find_status(id)      -> O(n): identity is not the partition key, so a
+--                                  point lookup degrades to scanning buckets.
+--
+-- Reuses the Studio 2 model unchanged via `intern` (brings in Delivery_Task and
+-- Measure_Result). Neither strategy alters the model; they are two ORGANIZATIONS
+-- of the same objects.
+--
+-- Run from this directory:  nex level3_index_vs_partition.nex
+-- ============================================================================
+
+intern Delivery_Scale_From_Studio2
+
+-- ----- Strategy A: one identity index, great for point lookups --------------
+class Id_Index_Strategy
+feature
+  index: Map [String, Delivery_Task]
+create
+  make(rows: Array [Delivery_Task])
+    require
+      non_empty: rows.length >= 1
+    do
+      let m: Map [String, Delivery_Task] := {}
+      let i: Integer := 0
+      from i := 0 until i >= rows.length do
+        let t: Delivery_Task := rows.get(i)
+        m.put(t.task_id, t)
+        i := i + 1
+      end
+      this.index := m
+    end
+feature
+  -- Point lookup by identity: the index's home turf — one access.
+  find_status(task_id: String): Measure_Result
+    require
+      id_present: task_id /= ""
+    do
+      let value: String := "NOT_FOUND"
+      if index.contains_key(task_id) then
+        value := index.get(task_id).status
+      end
+      result := create Measure_Result.make(value, 1)
+    ensure
+      constant_step: result.steps = 1
+    end
+
+  -- Category tally: the id index is useless here, so we visit every task.
+  count_status(status: String): Measure_Result
+    require
+      status_present: status /= ""
+    do
+      let vals: Array [Delivery_Task] := index.values()
+      let steps: Integer := 0
+      let n: Integer := 0
+      let i: Integer := 0
+      from i := 0 until i >= vals.length do
+        steps := steps + 1
+        if vals.get(i).status = status then
+          n := n + 1
+        end
+        i := i + 1
+      end
+      result := create Measure_Result.make("count=" + n, steps)
+    ensure
+      visited_all: result.steps = index.size()
+    end
+end
+
+-- ----- Strategy B: partition by status, great for group queries -------------
+class Status_Partition_Strategy
+feature
+  buckets: Map [String, Array [Delivery_Task]]   -- status -> tasks in that status
+create
+  make(rows: Array [Delivery_Task])
+    require
+      non_empty: rows.length >= 1
+    do
+      -- Four known lifecycle statuses; one scan fills the buckets.
+      let pending:    Array [Delivery_Task] := []
+      let in_transit: Array [Delivery_Task] := []
+      let failed:     Array [Delivery_Task] := []
+      let delivered:  Array [Delivery_Task] := []
+      let i: Integer := 0
+      from i := 0 until i >= rows.length do
+        let t: Delivery_Task := rows.get(i)
+        if t.status = "PENDING" then
+          pending.add(t)
+        elseif t.status = "IN_TRANSIT" then
+          in_transit.add(t)
+        elseif t.status = "FAILED" then
+          failed.add(t)
+        elseif t.status = "DELIVERED" then
+          delivered.add(t)
+        end
+        i := i + 1
+      end
+      let m: Map [String, Array [Delivery_Task]] := {}
+      m.put("PENDING", pending)
+      m.put("IN_TRANSIT", in_transit)
+      m.put("FAILED", failed)
+      m.put("DELIVERED", delivered)
+      this.buckets := m
+    end
+feature
+  -- Category tally: fetch one bucket, read its size. Other buckets untouched.
+  count_status(status: String): Measure_Result
+    require
+      status_present: status /= ""
+    do
+      let n: Integer := 0
+      if buckets.contains_key(status) then
+        n := buckets.get(status).length
+      end
+      result := create Measure_Result.make("count=" + n, 1)
+    ensure
+      constant_step: result.steps = 1
+    end
+
+  -- Point lookup by identity: id is not the partition key, so scan the buckets.
+  find_status(task_id: String): Measure_Result
+    require
+      id_present: task_id /= ""
+    do
+      let value: String := "NOT_FOUND"
+      let steps: Integer := 0
+      let names: Array [String] := ["PENDING", "IN_TRANSIT", "FAILED", "DELIVERED"]
+      let b: Integer := 0
+      from b := 0 until b >= names.length do
+        let bucket: Array [Delivery_Task] := buckets.get(names.get(b))
+        let i: Integer := 0
+        from i := 0 until i >= bucket.length do
+          steps := steps + 1
+          if bucket.get(i).task_id = task_id then
+            value := bucket.get(i).status
+            i := bucket.length
+            b := names.length        -- found: stop both loops
+          else
+            i := i + 1
+          end
+        end
+        b := b + 1
+      end
+      result := create Measure_Result.make(value, steps)
+    end
+end
+
+function build_tasks(): Array [Delivery_Task] do
+  result := [
+    create Delivery_Task.make("T-01", "Hub-A", "Zone-1",  "PENDING",    "R-1"),
+    create Delivery_Task.make("T-02", "Hub-A", "Zone-2",  "IN_TRANSIT", "R-2"),
+    create Delivery_Task.make("T-03", "Hub-B", "Zone-3",  "FAILED",     "R-3"),
+    create Delivery_Task.make("T-04", "Hub-B", "Zone-4",  "DELIVERED",  "R-4"),
+    create Delivery_Task.make("T-05", "Hub-C", "Zone-5",  "PENDING",    "R-5"),
+    create Delivery_Task.make("T-06", "Hub-C", "Zone-6",  "IN_TRANSIT", "R-6"),
+    create Delivery_Task.make("T-07", "Hub-A", "Zone-7",  "PENDING",    "R-7"),
+    create Delivery_Task.make("T-08", "Hub-B", "Zone-8",  "IN_TRANSIT", "R-8"),
+    create Delivery_Task.make("T-09", "Hub-C", "Zone-9",  "FAILED",     "R-9"),
+    create Delivery_Task.make("T-10", "Hub-A", "Zone-10", "DELIVERED",  "R-10"),
+    create Delivery_Task.make("T-11", "Hub-B", "Zone-11", "PENDING",    "R-11"),
+    create Delivery_Task.make("T-12", "Hub-C", "Zone-12", "IN_TRANSIT", "R-12")
+  ]
+end
+
+function main() do
+  let console: Console := create Console
+  let rows: Array [Delivery_Task] := build_tasks()
+  let idx: Id_Index_Strategy := create Id_Index_Strategy.make(rows)
+  let par: Status_Partition_Strategy := create Status_Partition_Strategy.make(rows)
+
+  console.print_line("== Level 3: index-heavy vs partition (12 tasks) ==")
+
+  -- Workload 1 — POINT lookup by task_id (the last task).
+  let qi: Measure_Result := idx.find_status("T-12")
+  let qp: Measure_Result := par.find_status("T-12")
+  console.print_line("point find_status(T-12):")
+  console.print_line("  index     -> " + qi.value + " in " + qi.steps + " step(s)")
+  console.print_line("  partition -> " + qp.value + " in " + qp.steps + " step(s)   <- pays to locate the bucket")
+
+  -- Workload 2 — GROUP tally by status.
+  let ci: Measure_Result := idx.count_status("PENDING")
+  let cp: Measure_Result := par.count_status("PENDING")
+  console.print_line("group count_status(PENDING):")
+  console.print_line("  index     -> " + ci.value + " in " + ci.steps + " step(s)   <- must visit every task")
+  console.print_line("  partition -> " + cp.value + " in " + cp.steps + " step(s)")
+
+  console.print_line("")
+  console.print_line("Verdict:")
+  console.print_line("  * point lookup by identity  -> INDEX wins  (O(1) vs O(n) bucket scan)")
+  console.print_line("  * group/bulk query by status-> PARTITION wins (O(1) bucket vs O(n) full visit)")
+  console.print_line("  Pick the structure whose key matches the query you run most;")
+  console.print_line("  serving both cheaply means keeping BOTH (more memory + sync on every write).")
+end
+
+main()

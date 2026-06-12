@@ -1,0 +1,146 @@
+-- ============================================================================
+-- Studio 3 driver — The Scaling Crisis  (Levels 1 & 2)
+--
+-- Studio 2 made the models CORRECT. Studio 3 makes the hot paths FAST without
+-- touching domain meaning. For each of the three domains we run the same query
+-- two ways over the SAME Studio 2 model objects:
+--
+--   V2 = the Studio 2 usage pattern: a linear scan (O(n)).
+--   V3 = the same objects plus an index derived from model identity (O(1)).
+--
+-- Every access path returns a `Measure_Result` carrying an operation count, so
+-- the improvement is measured, not asserted. We probe a HIT and a MISS — the
+-- miss is the scan's true worst case (it must touch every record to be sure).
+--
+-- Level 1 (one refactor) is the DELIVERY section below; Level 2 (three-domain)
+-- is all three sections together. Level 3 lives in level3_index_vs_partition.nex.
+--
+-- Run from this directory:  nex studio_3_main.nex
+-- ============================================================================
+
+-- Each module's entry class is named so `intern` resolves the matching
+-- `*_scale_from_studio2.nex` file (the lowercased class name = the filename),
+-- and loading it brings in that domain's model + V2 (scan) + V3 (index) classes.
+intern Delivery_Scale_From_Studio2
+intern Knowledge_Scale_From_Studio2
+intern World_Scale_From_Studio2
+
+-- A small helper so the report lines stay uniform across domains.
+class Report
+feature
+  console: Console
+create
+  make() do
+    this.console := create Console
+  end
+feature
+  line(s: String) do console.print_line(s) end
+
+  -- "<label> V2(scan): <value> in N steps | V3(index): <value> in M step(s)"
+  compare(label: String, v2: Measure_Result, v3: Measure_Result) do
+    console.print_line("  " + label
+      + "  V2(scan): " + v2.value + " in " + v2.steps + " steps"
+      + "  |  V3(index): " + v3.value + " in " + v3.steps + " step(s)")
+  end
+end
+
+function main() do
+  let r: Report := create Report.make()
+
+  -- ========================================================================
+  -- DELIVERY  (Level 1 focus): find a task's status by task_id.
+  --   bottleneck = scan over Delivery_Task collection.
+  --   index derived from identity: task_id -> Delivery_Task.
+  -- ========================================================================
+  r.line("### DELIVERY — find_status by task_id (12 tasks) ###")
+  let tasks: Array [Delivery_Task] := [
+    create Delivery_Task.make("T-01", "Hub-A", "Zone-1",  "PENDING",    "R-1"),
+    create Delivery_Task.make("T-02", "Hub-A", "Zone-2",  "IN_TRANSIT", "R-2"),
+    create Delivery_Task.make("T-03", "Hub-B", "Zone-3",  "FAILED",     "R-3"),
+    create Delivery_Task.make("T-04", "Hub-B", "Zone-4",  "DELIVERED",  "R-4"),
+    create Delivery_Task.make("T-05", "Hub-C", "Zone-5",  "PENDING",    "R-5"),
+    create Delivery_Task.make("T-06", "Hub-C", "Zone-6",  "IN_TRANSIT", "R-6"),
+    create Delivery_Task.make("T-07", "Hub-A", "Zone-7",  "PENDING",    "R-7"),
+    create Delivery_Task.make("T-08", "Hub-B", "Zone-8",  "IN_TRANSIT", "R-8"),
+    create Delivery_Task.make("T-09", "Hub-C", "Zone-9",  "FAILED",     "R-9"),
+    create Delivery_Task.make("T-10", "Hub-A", "Zone-10", "DELIVERED",  "R-10"),
+    create Delivery_Task.make("T-11", "Hub-B", "Zone-11", "PENDING",    "R-11"),
+    create Delivery_Task.make("T-12", "Hub-C", "Zone-12", "IN_TRANSIT", "R-12")
+  ]
+  let delivery: Delivery_Scale_From_Studio2 := create Delivery_Scale_From_Studio2.make()
+  let d2: Delivery_Store_V2 := delivery.baseline(tasks)
+  let d3: Delivery_Store_V3 := delivery.indexed(tasks)
+  -- HIT near the end (worst-ish for the scan); MISS (scan's true worst case).
+  r.compare("hit  T-12", d2.find_status("T-12"), d3.find_status("T-12"))
+  r.compare("miss T-99", d2.find_status("T-99"), d3.find_status("T-99"))
+
+  -- ========================================================================
+  -- KNOWLEDGE: validate a Doc_Link's two endpoints against the document set.
+  --   bottleneck = a scan PER endpoint (so up to 2n per link).
+  --   index derived from identity: doc_id -> Document.
+  -- ========================================================================
+  r.line("### KNOWLEDGE — validate_link endpoints (8 docs) ###")
+  let docs: Array [Document] := [
+    create Document.make("D-1", "Graphs",   "Graph notes"),
+    create Document.make("D-2", "Trees",    "Tree notes"),
+    create Document.make("D-3", "Maps",     "Map notes"),
+    create Document.make("D-4", "Queues",   "Queue notes"),
+    create Document.make("D-5", "Stacks",   "Stack notes"),
+    create Document.make("D-6", "Hashing",  "Hash notes"),
+    create Document.make("D-7", "Sorting",  "Sort notes"),
+    create Document.make("D-8", "Searching","Search notes")
+  ]
+  let knowledge: Knowledge_Scale_From_Studio2 := create Knowledge_Scale_From_Studio2.make()
+  let k2: Knowledge_Model_V2 := knowledge.baseline(docs)
+  let k3: Knowledge_Model_V3 := knowledge.indexed(docs)
+  -- VALID: both endpoints exist but the to-endpoint is late in the list.
+  let good: Doc_Link := create Doc_Link.make("D-1", "D-8", "references")
+  r.compare("valid  D-1->D-8", k2.validate_link(good), k3.validate_link(good))
+  -- MISSING_TO: from exists, to does not — the scan still pays for two passes.
+  let dangling: Doc_Link := create Doc_Link.make("D-1", "D-99", "references")
+  r.compare("dangling D-1->D-99", k2.validate_link(dangling), k3.validate_link(dangling))
+
+  -- ========================================================================
+  -- WORLD: move the object with a given id by delta (targeted update).
+  --   bottleneck = scan to LOCATE the target before the (unchanged) shift.
+  --   index derived from identity: object_id -> World_Object.
+  -- Each model owns its own objects, so we read the result back through the
+  -- same model that performed the move.
+  -- ========================================================================
+  r.line("### WORLD — move_by_id targeted update (10 objects) ###")
+  let v2_objs: Array [World_Object] := build_objects()
+  let v3_objs: Array [World_Object] := build_objects()
+  let world: World_Scale_From_Studio2 := create World_Scale_From_Studio2.make()
+  let w2: World_Model_V2 := world.baseline(v2_objs)
+  let w3: World_Model_V3 := world.indexed(v3_objs)
+  -- HIT: the LAST object, +5 — the scan walks the whole array to reach it.
+  r.compare("move E-10 +5", w2.move_by_id("E-10", 5), w3.move_by_id("E-10", 5))
+  -- MISS: unknown id — scan touches every object only to report NOT_FOUND.
+  r.compare("move E-99 +5", w2.move_by_id("E-99", 5), w3.move_by_id("E-99", 5))
+
+  -- ========================================================================
+  -- Takeaway: identical answers (and identical update semantics in WORLD),
+  -- step counts collapse from O(n) to O(1). The scan's cost GROWS with the
+  -- collection; the index's does not — and the miss case shows the scan paying
+  -- full price for "not here," which the index answers in one step.
+  -- ========================================================================
+  r.line("V2 step counts scale with collection size; V3 step counts are constant.")
+end
+
+-- Ten world objects at x = 1..10, all at rest (vx = 0); ids E-1 .. E-10.
+function build_objects(): Array [World_Object] do
+  result := [
+    create World_Object.make("E-1",  1,  0),
+    create World_Object.make("E-2",  2,  0),
+    create World_Object.make("E-3",  3,  0),
+    create World_Object.make("E-4",  4,  0),
+    create World_Object.make("E-5",  5,  0),
+    create World_Object.make("E-6",  6,  0),
+    create World_Object.make("E-7",  7,  0),
+    create World_Object.make("E-8",  8,  0),
+    create World_Object.make("E-9",  9,  0),
+    create World_Object.make("E-10", 10, 0)
+  ]
+end
+
+main()

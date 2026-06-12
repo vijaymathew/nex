@@ -1,0 +1,91 @@
+-- ============================================================================
+-- Studio 1, Level 3 — Exploration
+--
+-- Replace ONE design choice in the delivery slice and compare outcomes.
+--
+--   Baseline  (Delivery_Tiny): the map is HARDCODED in if/elseif, with each
+--             (current, destination) goal spelled out. It only really knows how
+--             to reach "C".
+--   Alternative (Delivery_Map): the map is DATA — an ordered list of stops
+--             ["A","B","C"]. next_stop steps toward the destination by index.
+--
+-- We run both over the same queries and record what changed in COMPLEXITY and
+-- FAILURE BEHAVIOR. (This is the seed of Studio 2's `Route` entity.)
+--
+-- Run from this directory:  nex level3_exploration.nex
+-- ============================================================================
+
+intern Delivery_Tiny
+
+-- ----- Alternative: data-driven ordered path --------------------------------
+class Delivery_Map
+feature
+  stops: Array [String]            -- the map, as data: an ordered path
+create
+  make() do
+    this.stops := ["A", "B", "C"]
+  end
+feature
+  next_stop(current: String, destination: String): String
+    require
+      current_non_empty: current /= ""
+      destination_non_empty: destination /= ""
+    do
+      let ci: Integer := stops.index_of(current)
+      let di: Integer := stops.index_of(destination)
+      if current = destination then
+        result := current
+      elseif ci < 0 or di < 0 then
+        result := "UNREACHABLE"        -- a stop that is not on the map
+      elseif ci < di then
+        result := stops.get(ci + 1)    -- one hop toward the destination
+      else
+        result := "UNREACHABLE"        -- destination is behind us
+      end
+    ensure
+      decision_returned: result /= ""
+    end
+end
+
+function row(c: Console, label: String, a: String, b: String) do
+  let verdict: String := "agree"
+  if a /= b then
+    verdict := "DIVERGE"
+  end
+  c.print_line("  " + label + "  hardcoded=" + a + "  data-driven=" + b + "   (" + verdict + ")")
+end
+
+function main() do
+  let c: Console := create Console
+  let tiny: Delivery_Tiny := create Delivery_Tiny
+  let mapd: Delivery_Map := create Delivery_Map.make()
+
+  c.print_line("### Exploration — hardcoded map vs data-driven path ###")
+  c.print_line("query (current -> destination):  baseline vs alternative")
+  -- In-scope queries: identical behavior.
+  row(c, "A->C", tiny.next_stop("A", "C"), mapd.next_stop("A", "C"))
+  row(c, "B->C", tiny.next_stop("B", "C"), mapd.next_stop("B", "C"))
+  row(c, "C->C", tiny.next_stop("C", "C"), mapd.next_stop("C", "C"))
+  row(c, "X->C", tiny.next_stop("X", "C"), mapd.next_stop("X", "C"))
+  -- The revealing cases: goals the hardcoded version never enumerated.
+  row(c, "A->B", tiny.next_stop("A", "B"), mapd.next_stop("A", "B"))  -- diverge
+  row(c, "B->A", tiny.next_stop("B", "A"), mapd.next_stop("B", "A"))  -- both unreachable
+  c.print_line("")
+
+  c.print_line("### what changed ###")
+  c.print_line("COMPLEXITY:")
+  c.print_line("  baseline    : N hardcoded branches; one per (current,destination) GOAL.")
+  c.print_line("                adding a stop or a goal = editing code.")
+  c.print_line("  data-driven : one array + two index lookups; the path is DATA.")
+  c.print_line("                adding a stop = changing the list, no new branches.")
+  c.print_line("FAILURE BEHAVIOR:")
+  c.print_line("  baseline    : only the enumerated goals work; A->B returns a FALSE")
+  c.print_line("                'UNREACHABLE' because that goal was never coded.")
+  c.print_line("  data-driven : routes any forward pair on the path (A->B works), and")
+  c.print_line("                UNREACHABLE now means a real condition: off-map or backward.")
+  c.print_line("  both        : still report failure with the same in-band sentinel string")
+  c.print_line("                — the deeper defect (a String for failure) survives the swap,")
+  c.print_line("                and is what Studio 2 fixes with a real Route + contracts.")
+end
+
+main()

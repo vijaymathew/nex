@@ -1,0 +1,148 @@
+-- ============================================================================
+-- Delivery — Scaling refactor  (Beyond Code — Studio 3, Level 1 / Level 2)
+--
+-- Continues Studio 2`s delivery model UNCHANGED. The bottleneck at scale is
+-- \"find a task\'s status by task_id\": with thousands of tasks the Studio 2 usage
+-- pattern is a linear scan of the task collection.
+--
+--   Before (V2): Delivery_Store_V2 — Array [Delivery_Task], scanned start to end.
+--                Cost grows with the collection: O(n). A miss costs the full n.
+--   After  (V3): Delivery_Store_V3 — same Delivery_Task objects, plus a derived
+--                Map [task_id -> Delivery_Task]. A lookup is one key access: O(1),
+--                hit or miss.
+--
+-- The model class (Delivery_Task) is NOT touched: identity, fields, and its
+-- invariant are exactly as in Studio 2. Only the ACCESS PATH around it changes.
+-- The index key is derived from model identity (task_id), so the index cannot
+-- disagree with the objects it points at.
+--
+-- Class-only module (no top-level run); pulled in by `studio_3_main.nex` and
+-- `level3_index_vs_partition.nex` with `intern delivery_scale_from_studio2`.
+-- ============================================================================
+
+intern Measure_Result
+
+-- Module façade. Interning this entry class loads every class in the file
+-- (the model + both stores). It also gives the driver a tidy way to build the
+-- before/after pair from one seed, so seeding is written once.
+class Delivery_Scale_From_Studio2
+create
+  make() do end
+feature
+  baseline(rows: Array [Delivery_Task]): Delivery_Store_V2 do
+    result := create Delivery_Store_V2.make(rows)
+  end
+  indexed(rows: Array [Delivery_Task]): Delivery_Store_V3 do
+    result := create Delivery_Store_V3.make(rows)
+  end
+end
+
+-- ----- Reused Studio 2 model (unchanged) ------------------------------------
+class Delivery_Task
+feature
+  once task_id: String          -- identity (immutable)
+  origin: String
+  destination: String
+  status: String
+  assigned_robot_id: String
+create
+  make(task_id: String, origin: String, destination: String,
+       status: String, assigned_robot_id: String)
+    do
+      this.task_id := task_id
+      this.origin := origin
+      this.destination := destination
+      this.status := status
+      this.assigned_robot_id := assigned_robot_id
+    end
+invariant
+  id_present: task_id /= ""
+end
+
+-- ----- BEFORE: scan-heavy access path (O(n)) --------------------------------
+-- Keeps the Studio 2 objects verbatim in an Array and walks them in order.
+-- `steps` is the number of tasks compared, so the cost is visible in the result.
+class Delivery_Store_V2
+feature
+  rows: Array [Delivery_Task]
+create
+  make(rows: Array [Delivery_Task])
+    require
+      non_empty: rows.length >= 1
+    do
+      this.rows := rows
+    end
+feature
+  -- Linear scan: compare task_id against each row until found or exhausted.
+  find_status(task_id: String): Measure_Result
+    require
+      id_present: task_id /= ""
+    do
+      let steps: Integer := 0
+      let value: String := "NOT_FOUND"
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i >= rows.length
+      do
+        steps := steps + 1
+        let t: Delivery_Task := rows.get(i)
+        if t.task_id = task_id then
+          value := t.status
+          i := rows.length          -- early exit on hit
+        else
+          i := i + 1
+        end
+      end
+      result := create Measure_Result.make(value, steps)
+    ensure
+      -- The honest bound: anywhere from 1 (first row) to n (miss / last row).
+      bounded_steps: result.steps >= 1 and result.steps <= rows.length
+    end
+end
+
+-- ----- AFTER: indexed access path (O(1)) ------------------------------------
+-- Same Delivery_Task objects, now also reachable through a Map keyed by the
+-- model\'s own identity field. Built once at construction; queried in one step.
+class Delivery_Store_V3
+feature
+  index: Map [String, Delivery_Task]   -- task_id -> the SAME Delivery_Task object
+create
+  make(rows: Array [Delivery_Task])
+    require
+      non_empty: rows.length >= 1
+    do
+      -- Derive the index from model identity (task_id). The Delivery_Task records
+      -- are unchanged — only the way we REACH them does.
+      let m: Map [String, Delivery_Task] := {}
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i >= rows.length
+      do
+        let t: Delivery_Task := rows.get(i)
+        m.put(t.task_id, t)
+        i := i + 1
+      end
+      this.index := m
+    ensure
+      complete_index: index.size() = rows.length    -- task_ids are unique
+    end
+feature
+  -- One key access. Constant cost whether the id is present or absent.
+  find_status(task_id: String): Measure_Result
+    require
+      id_present: task_id /= ""
+    do
+      let value: String := "NOT_FOUND"
+      if index.contains_key(task_id) then
+        let t: Delivery_Task := index.get(task_id)
+        value := t.status
+      end
+      result := create Measure_Result.make(value, 1)
+    ensure
+      constant_step: result.steps = 1
+    end
+end

@@ -1,0 +1,120 @@
+-- ============================================================================
+-- World Evolution — Feature-Flagged Rule Extension  (Studio 6)
+--
+-- Continues the Studio 5 safe world-step behavior. V2 adds a damping rule
+-- (clamp the per-step delta to +/-3 for safer high-velocity transitions) behind
+-- a stable `World_Rules` contract, selected by Rollout_Config.
+--
+-- Crucially, the Studio 5 RELIABILITY guarantee is preserved across the version
+-- change: BOTH versions keep the `bounded: 0 <= result <= max_x` postcondition.
+-- Evolution does not get to weaken a safety contract.
+--
+--   * V1: clamp position to [0, max_x].
+--   * V2: damp delta to [-3, 3] first, THEN clamp position to [0, max_x].
+--
+-- Class-only module; loaded with `intern World_Evolution`.
+-- ============================================================================
+
+intern Evolution_Types
+
+class World_Evolution
+create
+  make() do end
+feature
+  service(config: Rollout_Config): World_Evolution_Service do
+    result := create World_Evolution_Service.make(
+      create World_Rules_V1, create World_Rules_V2, config)
+  end
+end
+
+-- ----- Stable contract (the seam) -------------------------------------------
+class World_Rules
+feature
+  apply(x: Integer, delta: Integer, max_x: Integer): Integer
+    require
+      max_valid: max_x >= 0
+      start_in_bounds: x >= 0 and x <= max_x
+    do
+      result := x                  -- safe default: no-op move stays in bounds
+    ensure
+      bounded: result >= 0 and result <= max_x
+    end
+end
+
+-- ----- V1: clamp position to bounds. ----------------------------------------
+class World_Rules_V1
+inherit World_Rules
+feature
+  apply(x: Integer, delta: Integer, max_x: Integer): Integer
+    require
+      max_valid: max_x >= 0
+      start_in_bounds: x >= 0 and x <= max_x
+    do
+      let next: Integer := x + delta
+      if next < 0 then
+        result := 0
+      elseif next > max_x then
+        result := max_x
+      else
+        result := next
+      end
+    ensure
+      bounded: result >= 0 and result <= max_x
+    end
+end
+
+-- ----- V2: damp the delta to [-3, 3], then clamp position. -------------------
+class World_Rules_V2
+inherit World_Rules
+feature
+  apply(x: Integer, delta: Integer, max_x: Integer): Integer
+    require
+      max_valid: max_x >= 0
+      start_in_bounds: x >= 0 and x <= max_x
+    do
+      let effective_delta: Integer := delta
+      if delta > 3 then
+        effective_delta := 3
+      elseif delta < -3 then
+        effective_delta := -3
+      end
+      let next: Integer := x + effective_delta
+      if next < 0 then
+        result := 0
+      elseif next > max_x then
+        result := max_x
+      else
+        result := next
+      end
+    ensure
+      bounded: result >= 0 and result <= max_x
+    end
+end
+
+-- ----- Service: stable external contract, version chosen by config ----------
+class World_Evolution_Service
+feature
+  v1: World_Rules
+  v2: World_Rules
+  config: Rollout_Config
+create
+  make(v1: World_Rules, v2: World_Rules, config: Rollout_Config) do
+    this.v1 := v1
+    this.v2 := v2
+    this.config := config
+  end
+feature
+  step(x: Integer, delta: Integer, max_x: Integer): Evolution_Result
+    require
+      max_valid: max_x >= 0
+      start_in_bounds: x >= 0 and x <= max_x
+    do
+      if config.use_v2 then
+        result := create Evolution_Result.make("OK", "X=" + v2.apply(x, delta, max_x), "V2")
+      else
+        result := create Evolution_Result.make("OK", "X=" + v1.apply(x, delta, max_x), "V1")
+      end
+    ensure
+      ok_status: result.status = "OK"
+    end
+end

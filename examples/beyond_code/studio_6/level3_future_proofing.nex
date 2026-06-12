@@ -1,0 +1,160 @@
+-- ============================================================================
+-- Studio 6, Level 3 — Future-Proofing Drill
+--
+-- Simulate two FUTURE changes to delivery and evaluate whether the existing
+-- strategy seam (the stable `Delivery_Policy` contract) absorbs them cleanly.
+--
+--   Change 1 — new decision LOGIC, same signature & same outcome vocabulary
+--              (V3: tighter risk thresholds). EXPECT: absorbed for free — a new
+--              subclass drops into the same seam with zero plumbing changes.
+--
+--   Change 2 — a new OUTCOME value (PRIORITY_TRACK for a VIP tier). EXPECT: you
+--              CANNOT add it by subclassing — Nex enforces the inherited base
+--              postcondition (LSP: a subclass may not widen a postcondition), so
+--              an outcome outside the contract's known_result is rejected. The
+--              governed fix is a NEW, additive CONTRACT VERSION (`Delivery_Policy_C2`)
+--              that admits PRIORITY_TRACK; old-contract clients are untouched.
+--
+-- Conclusion: the seam absorbs new logic within the existing contract for free;
+-- a new outcome vocabulary is a governed contract version, not a silent edit.
+--
+-- Run from this directory:  nex level3_future_proofing.nex
+-- ============================================================================
+
+intern Delivery_Evolution
+
+-- ----- Change 1: new logic, SAME contract (absorbed) ------------------------
+-- Tighter thresholds; still only FAST_TRACK / SAFE_TRACK / STANDARD_TRACK.
+class Delivery_Policy_V3
+inherit Delivery_Policy
+feature
+  decide(tier: String, risk_score: Integer): String
+    require
+      tier_present: tier /= ""
+      risk_non_negative: risk_score >= 0
+    do
+      if tier = "PREMIUM" and risk_score < 30 then
+        result := "FAST_TRACK"
+      elseif tier = "PREMIUM" then
+        result := "SAFE_TRACK"
+      else
+        result := "STANDARD_TRACK"
+      end
+    ensure
+      known_result:
+        result = "FAST_TRACK" or result = "SAFE_TRACK" or result = "STANDARD_TRACK"
+    end
+end
+
+-- ----- Change 2a: new outcome via a subclass of the OLD contract (rejected) --
+-- It returns PRIORITY_TRACK, but the INHERITED `Delivery_Policy` postcondition
+-- (known_result over the old vocabulary) still applies and fires. A subclass
+-- cannot widen the contract.
+class Delivery_Policy_Priority_Ungoverned
+inherit Delivery_Policy
+feature
+  decide(tier: String, risk_score: Integer): String
+    require
+      tier_present: tier /= ""
+      risk_non_negative: risk_score >= 0
+    do
+      if tier = "VIP" then
+        result := "PRIORITY_TRACK"
+      else
+        result := "STANDARD_TRACK"
+      end
+    ensure
+      -- Even widening THIS clause cannot help: the base clause is also enforced.
+      known_result:
+        result = "FAST_TRACK" or result = "SAFE_TRACK" or
+        result = "STANDARD_TRACK" or result = "PRIORITY_TRACK"
+    end
+end
+
+-- ----- Change 2b: the GOVERNED, additive CONTRACT VERSION (accepted) ---------
+-- A new contract whose known_result admits PRIORITY_TRACK. It does NOT inherit
+-- the old contract, so it is free of the old postcondition; old-contract clients
+-- and implementations are entirely unaffected.
+class Delivery_Policy_C2
+feature
+  decide(tier: String, risk_score: Integer): String
+    require
+      tier_present: tier /= ""
+      risk_non_negative: risk_score >= 0
+    do
+      result := "STANDARD_TRACK"
+    ensure
+      known_result:
+        result = "FAST_TRACK" or result = "SAFE_TRACK" or
+        result = "STANDARD_TRACK" or result = "PRIORITY_TRACK"
+    end
+end
+
+class Delivery_Policy_C2_Priority
+inherit Delivery_Policy_C2
+feature
+  decide(tier: String, risk_score: Integer): String
+    require
+      tier_present: tier /= ""
+      risk_non_negative: risk_score >= 0
+    do
+      if tier = "VIP" then
+        result := "PRIORITY_TRACK"
+      else
+        result := "STANDARD_TRACK"
+      end
+    ensure
+      known_result:
+        result = "FAST_TRACK" or result = "SAFE_TRACK" or
+        result = "STANDARD_TRACK" or result = "PRIORITY_TRACK"
+    end
+end
+
+-- Generic routing over each STABLE contract: proof the seam absorbs new versions.
+function route_v1(policy: Delivery_Policy, tier: String, risk: Integer, tag: String): Evolution_Result do
+  result := create Evolution_Result.make("OK", policy.decide(tier, risk), tag)
+end
+function route_c2(policy: Delivery_Policy_C2, tier: String, risk: Integer, tag: String): Evolution_Result do
+  result := create Evolution_Result.make("OK", policy.decide(tier, risk), tag)
+end
+
+function main() do
+  let c: Console := create Console
+
+  c.print_line("### Change 1 — new logic, same contract (expect: absorbed) ###")
+  -- The SAME route_v1() serves V1, V2, and the brand-new V3 unchanged.
+  let v1: Delivery_Policy := create Delivery_Policy_V1
+  let v2: Delivery_Policy := create Delivery_Policy_V2
+  let v3: Delivery_Policy := create Delivery_Policy_V3
+  c.print_line("PREMIUM risk=40  V1=" + route_v1(v1, "PREMIUM", 40, "V1").value
+    + " V2=" + route_v1(v2, "PREMIUM", 40, "V2").value
+    + " V3=" + route_v1(v3, "PREMIUM", 40, "V3").value)
+  c.print_line("  -> V3 slotted into the same seam with no service/contract change: ABSORBED")
+  c.print_line("")
+
+  c.print_line("### Change 2 — new outcome value (expect: old contract rejects it) ###")
+  let bad: Delivery_Policy := create Delivery_Policy_Priority_Ungoverned
+  do
+    let r: Evolution_Result := route_v1(bad, "VIP", 0, "V_PRIO")
+    c.print_line("  BUG: a subclass widened the outcome set: " + r.value)
+  rescue
+    c.print_line("  old contract rejected new outcome -> " + exception)
+    c.print_line("  (LSP: a subclass cannot widen a postcondition; the base clause still fires)")
+  end
+  -- The governed fix: a NEW contract version that admits PRIORITY_TRACK.
+  let good: Delivery_Policy_C2 := create Delivery_Policy_C2_Priority
+  let gr: Evolution_Result := route_c2(good, "VIP", 0, "C2")
+  c.print_line("  governed contract C2, VIP -> " + gr.value + " : ACCEPTED")
+  c.print_line("  governed C2, STANDARD risk=10 -> " + route_c2(good, "STANDARD", 10, "C2").value
+    + " (old vocabulary still served)")
+  c.print_line("")
+
+  c.print_line("### evaluation ###")
+  c.print_line("  absorbed : new decision LOGIC within the existing outcome set (Change 1).")
+  c.print_line("  guarded  : a new OUTCOME cannot enter via subclassing (Change 2a) -> it needs a")
+  c.print_line("             new, additive CONTRACT VERSION (Change 2b), which old clients ignore.")
+  c.print_line("  input side: a new INPUT shape (cf. knowledge V2 'intent') needs a compatibility")
+  c.print_line("             adapter, not just a new strategy. Same governance lesson, input side.")
+end
+
+main()

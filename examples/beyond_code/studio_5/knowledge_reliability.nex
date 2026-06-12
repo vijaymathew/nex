@@ -1,0 +1,98 @@
+-- ============================================================================
+-- Knowledge Reliability — Safe Query with Degraded Fallback  (Studio 5)
+--
+-- Continues the Studio 4 query/validation services. The upstream index is a PORT
+-- (a Studio 4 seam) that may be UNAVAILABLE. The service turns an outage into a
+-- contract-defined DEGRADED mode rather than an error or a blank result:
+--
+--   * available   -> status OK,       value = the real top document.
+--   * unavailable -> status DEGRADED, value = a cached fallback, logged.
+--
+-- Degraded mode is INTENTIONAL and bounded: it returns a clearly-labelled cached
+-- answer (never a fabricated fresh one), and `known_status` pins the result to
+-- OK or DEGRADED so a caller can branch on it.
+--
+-- Class-only module; loaded with `intern Knowledge_Reliability`.
+-- ============================================================================
+
+intern Reliability_Types
+
+class Knowledge_Reliability
+create
+  make() do end
+feature
+  service(port: Knowledge_Query_Port, log: Reliability_Log): Knowledge_Reliability_Service do
+    result := create Knowledge_Reliability_Service.make(port, log)
+  end
+  available(): Available_Query_Port do result := create Available_Query_Port end
+  unavailable(): Unavailable_Query_Port do result := create Unavailable_Query_Port end
+end
+
+-- ----- Query port (seam) + injectable availability --------------------------
+-- Base "fails to unavailable": an unwired query degrades, never pretends success.
+class Knowledge_Query_Port
+feature
+  fetch_top(query: String): String
+    require
+      query_present: query /= ""
+    do
+      result := "UNAVAILABLE"
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+class Available_Query_Port
+inherit Knowledge_Query_Port
+feature
+  fetch_top(query: String): String
+    require
+      query_present: query /= ""
+    do
+      result := "DOC:K-101"
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+class Unavailable_Query_Port
+inherit Knowledge_Query_Port
+feature
+  fetch_top(query: String): String
+    require
+      query_present: query /= ""
+    do
+      result := "UNAVAILABLE"
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+-- ----- Reliability service --------------------------------------------------
+class Knowledge_Reliability_Service
+feature
+  port: Knowledge_Query_Port
+  log: Reliability_Log
+create
+  make(port: Knowledge_Query_Port, log: Reliability_Log) do
+    this.port := port
+    this.log := log
+  end
+feature
+  safe_query(query: String): Op_Result
+    require
+      query_present: query /= ""
+    do
+      let raw: String := port.fetch_top(query)
+      if raw = "UNAVAILABLE" then
+        log.record("knowledge fallback-used query=" + query)
+        result := create Op_Result.make("DEGRADED", "DOC:CACHED-001", 1)
+      else
+        result := create Op_Result.make("OK", raw, 1)
+      end
+    ensure
+      known_status: result.status = "OK" or result.status = "DEGRADED"
+      -- A degraded answer must be the labelled cache, never a fabricated fresh hit.
+      degraded_is_cache: result.status /= "DEGRADED" or result.value = "DOC:CACHED-001"
+    end
+end

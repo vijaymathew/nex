@@ -1,0 +1,157 @@
+-- ============================================================================
+-- Studio 5, Level 3 — Incident Drills
+--
+-- One simulated production incident per domain. For each: REPRO (the failure as
+-- observed), PATCH (fixed at the service/port boundary), REGRESSION (an
+-- assertion that locks the fix in). The patches all live at the Studio 4 seams,
+-- so no domain logic changed.
+--
+-- Run from this directory:  nex level3_incident_drills.nex
+-- ============================================================================
+
+intern Delivery_Reliability
+intern Knowledge_Reliability
+intern World_Reliability
+
+-- A dispatch port that counts how many times it was called AND always fails
+-- permanently — used to MEASURE the retry-storm incident.
+class Counting_Broken_Port
+inherit Dispatch_Port
+feature
+  calls: Integer
+create
+  make() do this.calls := 0 end
+feature
+  send_dispatch(task_id: String, attempt: Integer): String
+    require
+      id_present: task_id /= ""
+      attempt_valid: attempt >= 1
+    do
+      this.calls := calls + 1
+      result := "PERMANENT_FAILURE"
+    ensure
+      known_result:
+        result = "SENT" or result = "TRANSIENT_FAILURE" or result = "PERMANENT_FAILURE"
+    end
+end
+
+-- The OLD (buggy) retry: loops to the bound regardless of failure kind. This is
+-- the pre-incident behavior we are reproducing — it retries a permanent fault.
+function naive_retry(port: Dispatch_Port, task_id: String, max_attempts: Integer): Integer do
+  let a: Integer := 0
+  let status: String := "TRANSIENT_FAILURE"
+  from a := 0 until a >= max_attempts or status = "SENT" do
+    a := a + 1
+    status := port.send_dispatch(task_id, a)
+  end
+  result := a
+end
+
+function main() do
+  let c: Console := create Console
+  let pass: Integer := 0
+  let total: Integer := 0
+
+  -- ========================================================================
+  -- INCIDENT A (Delivery) — "Retry storm on a dead carrier."
+  --   Symptom: a permanently-rejected task was retried to the bound on every
+  --   request, multiplying load against a carrier that could never accept it.
+  -- ========================================================================
+  c.print_line("### INCIDENT A — delivery retry storm on permanent fault ###")
+  let delivery: Delivery_Reliability := create Delivery_Reliability.make()
+  let log: Reliability_Log := create Reliability_Log.make("incident-A")
+
+  -- REPRO: naive retry hammers the dead carrier max_attempts times.
+  let p_old: Counting_Broken_Port := create Counting_Broken_Port.make()
+  let old_attempts: Integer := naive_retry(p_old, "T-DEAD", 3)
+  c.print_line("  REPRO  (naive): port called " + p_old.calls + " times for one dead task")
+
+  -- PATCH: the service consults Retry_Policy.retryable; permanent => stop at 1.
+  let p_new: Counting_Broken_Port := create Counting_Broken_Port.make()
+  let svc: Delivery_Reliability_Service := delivery.service(p_new, log)
+  let res: Op_Result := svc.dispatch_with_retry("T-DEAD", create Retry_Policy.make(3))
+  c.print_line("  PATCH  (service): status=" + res.status + " attempts=" + res.attempts
+    + " port called " + p_new.calls + " time(s)")
+
+  -- REGRESSION: a permanent fault is attempted exactly once.
+  total := total + 1
+  if res.status = "FAILED" and res.attempts = 1 and p_new.calls = 1 and p_old.calls = 3 then
+    pass := pass + 1
+    c.print_line("  REGRESSION: permanent fault not retried -> PASS")
+  else
+    c.print_line("  REGRESSION: FAIL")
+  end
+  c.print_line("")
+
+  -- ========================================================================
+  -- INCIDENT B (Knowledge) — "Outage leaked UNAVAILABLE to callers."
+  --   Symptom: when the index was down, the raw token "UNAVAILABLE" surfaced as
+  --   a search result, corrupting downstream rendering.
+  -- ========================================================================
+  c.print_line("### INCIDENT B — knowledge outage leaks raw token ###")
+  let knowledge: Knowledge_Reliability := create Knowledge_Reliability.make()
+  let down: Unavailable_Query_Port := knowledge.unavailable()
+
+  -- REPRO: talking to the port directly returns the raw outage token.
+  c.print_line("  REPRO  (raw port): fetch_top = " + down.fetch_top("contracts"))
+
+  -- PATCH: safe_query degrades to a labelled cache and logs it.
+  let klog: Reliability_Log := create Reliability_Log.make("incident-B")
+  let ksvc: Knowledge_Reliability_Service := knowledge.service(down, klog)
+  let kres: Op_Result := ksvc.safe_query("contracts")
+  c.print_line("  PATCH  (service): status=" + kres.status + " value=" + kres.value)
+
+  -- REGRESSION: callers never see the raw token; degraded mode is the cache.
+  total := total + 1
+  if kres.status = "DEGRADED" and kres.value = "DOC:CACHED-001"
+     and kres.value /= "UNAVAILABLE" and klog.contains_event("fallback-used") then
+    pass := pass + 1
+    c.print_line("  REGRESSION: outage degrades to cache, no raw leak -> PASS")
+  else
+    c.print_line("  REGRESSION: FAIL")
+  end
+  c.print_line("")
+
+  -- ========================================================================
+  -- INCIDENT C (World) — "Bad input drove an object out of bounds."
+  --   Symptom: an oversized delta from a buggy client pushed position past the
+  --   bound, corrupting world state that later reads trusted.
+  -- ========================================================================
+  c.print_line("### INCIDENT C — world out-of-bounds from extreme delta ###")
+  let world: World_Reliability := create World_Reliability.make()
+
+  -- REPRO: an already-out-of-bounds object cannot even be constructed (the
+  -- invariant makes the corrupt state unrepresentable) — caught at the seam.
+  do
+    let bad: World_Move_Port := world.port("E-X", -5, 10)
+    c.print_line("  REPRO  : BUG — built an out-of-bounds object")
+  rescue
+    c.print_line("  REPRO  : construction blocked -> " + exception)
+  end
+
+  -- PATCH: route updates through safe_step; an extreme delta is clamped and
+  -- reported as RECOVERED, and the invariant holds throughout.
+  let wlog: Reliability_Log := create Reliability_Log.make("incident-C")
+  let wport: World_Move_Port := world.port("E-1", 5, 10)
+  let wsvc: World_Reliability_Service := world.service(wport, wlog)
+  let big: Op_Result := wsvc.safe_step(1000)     -- 5 + 1000 -> clamp to 10
+  let small: Op_Result := wsvc.safe_step(-1000)  -- 10 - 1000 -> clamp to 0
+  c.print_line("  PATCH  (service): +1000 -> " + big.status + " " + big.value
+    + " ; -1000 -> " + small.status + " " + small.value)
+
+  -- REGRESSION: extreme deltas recover within bounds; invariant never broken.
+  total := total + 1
+  if big.status = "RECOVERED" and small.status = "RECOVERED"
+     and wport.x >= 0 and wport.x <= wport.max_x and wport.x = 0 then
+    pass := pass + 1
+    c.print_line("  REGRESSION: extreme input clamped, invariant held -> PASS")
+  else
+    c.print_line("  REGRESSION: FAIL")
+  end
+  c.print_line("")
+
+  c.print_line("### incident regression summary ###")
+  c.print_line("  " + pass + "/" + total + " incident regressions pass")
+end
+
+main()

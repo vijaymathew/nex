@@ -1,0 +1,124 @@
+-- ============================================================================
+-- Knowledge Evolution — Compatibility Adapter  (Studio 6)
+--
+-- Continues the Studio 5 safe-query flow. V2 changes the request SHAPE: it adds
+-- an `intent` argument (`fast` / `deep`). Old clients only know the V1 shape
+-- (query, no intent). Rather than break them, a COMPATIBILITY ADAPTER lets the
+-- old shape run on the new engine during the migration window.
+--
+--   * V1            : run(query)            -> legacy doc.
+--   * V2            : run(query, intent)    -> fast/deep doc.
+--   * Compat adapter: run_v1_shape(query)   -> V2.run(query, "fast")  (old shape,
+--                     new engine — the gradual-migration path).
+--
+-- The service picks one of three serving modes from Rollout_Config:
+--   V1         (use_v2 = false)                  -> legacy engine.
+--   V2_COMPAT  (use_v2 + compatibility_mode)     -> new engine via the adapter.
+--   V2_NATIVE  (use_v2, no compatibility_mode)   -> new engine, native deep query.
+--
+-- NB: V2_NATIVE calls the real V2 engine (`v2.run(query, "deep")`) — not a baked
+-- constant — so the path is genuinely exercised.
+--
+-- Class-only module; loaded with `intern Knowledge_Evolution`.
+-- ============================================================================
+
+intern Evolution_Types
+
+class Knowledge_Evolution
+create
+  make() do end
+feature
+  service(config: Rollout_Config): Knowledge_Evolution_Service do
+    let v2: Knowledge_Query_V2 := create Knowledge_Query_V2
+    result := create Knowledge_Evolution_Service.make(
+      create Knowledge_Query_V1,
+      v2,
+      create Knowledge_Compatibility_Adapter.make(v2),
+      config)
+  end
+end
+
+-- ----- Legacy engine (V1 shape) ---------------------------------------------
+class Knowledge_Query_V1
+feature
+  run(query: String): String
+    require
+      query_present: query /= ""
+    do
+      result := "DOC:K-LEGACY"
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+-- ----- New engine (V2 shape: adds intent) -----------------------------------
+class Knowledge_Query_V2
+feature
+  run(query: String, intent: String): String
+    require
+      query_present: query /= ""
+      intent_present: intent /= ""
+    do
+      if intent = "deep" then
+        result := "DOC:K-DEEP"
+      else
+        result := "DOC:K-FAST"
+      end
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+-- ----- Compatibility adapter: old shape -> new engine -----------------------
+-- Old clients call the V1 shape; the adapter supplies the safe default intent
+-- ("fast"), so they keep working on the new engine without code changes.
+class Knowledge_Compatibility_Adapter
+feature
+  v2: Knowledge_Query_V2
+create
+  make(v2: Knowledge_Query_V2) do
+    this.v2 := v2
+  end
+feature
+  run_v1_shape(query: String): String
+    require
+      query_present: query /= ""
+    do
+      result := v2.run(query, "fast")
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+-- ----- Service: three serving modes behind one stable contract --------------
+class Knowledge_Evolution_Service
+feature
+  v1: Knowledge_Query_V1
+  v2: Knowledge_Query_V2
+  v1_on_v2: Knowledge_Compatibility_Adapter
+  config: Rollout_Config
+create
+  make(v1: Knowledge_Query_V1, v2: Knowledge_Query_V2,
+       v1_on_v2: Knowledge_Compatibility_Adapter, config: Rollout_Config) do
+    this.v1 := v1
+    this.v2 := v2
+    this.v1_on_v2 := v1_on_v2
+    this.config := config
+  end
+feature
+  query(q: String): Evolution_Result
+    require
+      query_present: q /= ""
+    do
+      if config.use_v2 and not config.compatibility_mode then
+        result := create Evolution_Result.make("OK", v2.run(q, "deep"), "V2_NATIVE")
+      elseif config.use_v2 then
+        result := create Evolution_Result.make("OK", v1_on_v2.run_v1_shape(q), "V2_COMPAT")
+      else
+        result := create Evolution_Result.make("OK", v1.run(q), "V1")
+      end
+    ensure
+      ok_status: result.status = "OK"
+      mode_matches_config: result.mode = config.serving_mode()
+    end
+end

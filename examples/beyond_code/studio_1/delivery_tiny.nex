@@ -1,0 +1,34 @@
+-- ============================================================================
+-- Delivery Tiny  (Beyond Code — Studio 1)
+--
+-- The smallest working slice of the delivery scheduler: a single robot on a
+-- tiny, hardcoded map (A -> B -> C). One core operation, one contract.
+--
+-- This is a DELIBERATELY FLAT model — "prefer clarity over generality, keep
+-- architecture deliberately small." Its limits (no identity, no state, a magic
+-- "UNREACHABLE" string for failure) are the very things Studio 2 redesigns.
+--
+-- Operation: next_stop(current, destination) -> the next hop, or "UNREACHABLE".
+-- Class-only module; loaded with `intern Delivery_Tiny`.
+-- ============================================================================
+
+class Delivery_Tiny
+feature
+  next_stop(current: String, destination: String): String
+    require
+      current_non_empty: current /= ""
+      destination_non_empty: destination /= ""
+    do
+      if current = destination then
+        result := current
+      elseif current = "A" and destination = "C" then
+        result := "B"
+      elseif current = "B" and destination = "C" then
+        result := "C"
+      else
+        result := "UNREACHABLE"
+      end
+    ensure
+      decision_returned: result /= ""
+    end
+end

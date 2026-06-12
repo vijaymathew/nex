@@ -1,0 +1,137 @@
+-- ============================================================================
+-- Delivery Evolution — Policy V1 -> V2 behind a stable contract  (Studio 6)
+--
+-- Continues the Studio 5 delivery flow. The new business rule (V2 weighs a
+-- risk_score) must coexist with legacy V1 behavior. We isolate the difference
+-- behind a STRATEGY SEAM: a stable `Delivery_Policy` contract that BOTH versions
+-- satisfy, selected by a Rollout_Config.
+--
+--   stable contract:  Delivery_Policy.decide(tier, risk_score): String
+--     * V1 ignores risk_score (additive, superset signature) -> legacy result.
+--     * V2 uses risk_score -> adds the SAFE_TRACK outcome for risky premiums.
+--
+-- The service's external contract `route_mode(tier, risk)` is STABLE regardless
+-- of which version runs underneath; clients never see the seam. The service also
+-- offers `canary_compare`, which runs both versions and reports divergence — the
+-- signal a rollout gates on.
+--
+-- Class-only module; loaded with `intern Delivery_Evolution`.
+-- ============================================================================
+
+intern Evolution_Types
+
+class Delivery_Evolution
+create
+  make() do end
+feature
+  service(config: Rollout_Config): Delivery_Evolution_Service do
+    result := create Delivery_Evolution_Service.make(
+      create Delivery_Policy_V1, create Delivery_Policy_V2, config)
+  end
+end
+
+-- ----- Stable contract (the seam) -------------------------------------------
+-- The superset signature: takes risk_score so V2 can use it and V1 can ignore
+-- it. Default "fails closed" to a safe legacy-ish track if ever called directly.
+class Delivery_Policy
+feature
+  decide(tier: String, risk_score: Integer): String
+    require
+      tier_present: tier /= ""
+      risk_non_negative: risk_score >= 0
+    do
+      result := "STANDARD_TRACK"
+    ensure
+      known_result:
+        result = "FAST_TRACK" or result = "SAFE_TRACK" or result = "STANDARD_TRACK"
+    end
+end
+
+-- ----- V1 (legacy): premium => fast, else standard. Ignores risk. -----------
+class Delivery_Policy_V1
+inherit Delivery_Policy
+feature
+  decide(tier: String, risk_score: Integer): String
+    require
+      tier_present: tier /= ""
+      risk_non_negative: risk_score >= 0
+    do
+      if tier = "PREMIUM" then
+        result := "FAST_TRACK"
+      else
+        result := "STANDARD_TRACK"
+      end
+    ensure
+      known_result:
+        result = "FAST_TRACK" or result = "SAFE_TRACK" or result = "STANDARD_TRACK"
+    end
+end
+
+-- ----- V2 (new rule): risky premiums go SAFE_TRACK instead of FAST_TRACK. ----
+class Delivery_Policy_V2
+inherit Delivery_Policy
+feature
+  decide(tier: String, risk_score: Integer): String
+    require
+      tier_present: tier /= ""
+      risk_non_negative: risk_score >= 0
+    do
+      if tier = "PREMIUM" and risk_score < 50 then
+        result := "FAST_TRACK"
+      elseif tier = "PREMIUM" then
+        result := "SAFE_TRACK"
+      else
+        result := "STANDARD_TRACK"
+      end
+    ensure
+      known_result:
+        result = "FAST_TRACK" or result = "SAFE_TRACK" or result = "STANDARD_TRACK"
+    end
+end
+
+-- ----- Service: stable external contract, version chosen by config ----------
+class Delivery_Evolution_Service
+feature
+  v1: Delivery_Policy            -- both held (for routing AND canary compare),
+  v2: Delivery_Policy            -- typed by the stable contract.
+  config: Rollout_Config
+create
+  make(v1: Delivery_Policy, v2: Delivery_Policy, config: Rollout_Config) do
+    this.v1 := v1
+    this.v2 := v2
+    this.config := config
+  end
+feature
+  -- Stable client-facing operation. The version is an internal detail.
+  route_mode(tier: String, risk_score: Integer): Evolution_Result
+    require
+      tier_present: tier /= ""
+      risk_non_negative: risk_score >= 0
+    do
+      if config.use_v2 then
+        result := create Evolution_Result.make("OK", v2.decide(tier, risk_score), "V2")
+      else
+        result := create Evolution_Result.make("OK", v1.decide(tier, risk_score), "V1")
+      end
+    ensure
+      ok_status: result.status = "OK"
+    end
+
+  -- Canary signal: do V1 and V2 agree for this input? Divergence is where the
+  -- new rule changes behavior — exactly what a rollout must watch.
+  canary_compare(tier: String, risk_score: Integer): String
+    require
+      tier_present: tier /= ""
+      risk_non_negative: risk_score >= 0
+    do
+      let a: String := v1.decide(tier, risk_score)
+      let b: String := v2.decide(tier, risk_score)
+      if a = b then
+        result := "AGREE:" + a
+      else
+        result := "DIVERGE:" + a + "->" + b
+      end
+    ensure
+      non_empty: result /= ""
+    end
+end

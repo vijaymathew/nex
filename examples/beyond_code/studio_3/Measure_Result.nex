@@ -1,0 +1,34 @@
+-- ============================================================================
+-- Measure_Result  (Beyond Code — Studio 3, shared)
+--
+-- The unit of evidence for this studio. Every refactored access path returns a
+-- `Measure_Result` carrying both the answer (`value`) and the cost it took to
+-- reach it (`steps`, an operation count). Studio 3 is about scale, and the
+-- engineering brief demands "measured evidence, not intuition" — so the cost is
+-- a first-class return value, not a comment.
+--
+-- `steps` is a domain-independent operation count: for a linear scan it is the
+-- number of records compared; for an index lookup it is the number of key
+-- accesses. Comparing V2 (scan) against V3 (index) is then just comparing two
+-- `Measure_Result.steps` on the same query — on a hit AND on a miss.
+-- ============================================================================
+
+class Measure_Result
+feature
+  value: String       -- the answer, or an explicit failure status (NOT_FOUND, ...)
+  steps: Integer      -- operation count it took to produce `value`
+create
+  make(v: String, s: Integer)
+    require
+      value_present: v /= ""
+      non_negative_steps: s >= 0
+    do
+      value := v
+      steps := s
+    ensure
+      recorded: value = v and steps = s
+    end
+invariant
+  value_present: value /= ""           -- absence is an explicit status, never ""
+  non_negative_steps: steps >= 0       -- a cost is never negative
+end

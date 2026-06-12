@@ -1,0 +1,321 @@
+-- ============================================================================
+-- Algorithm Lab 1 — The First Experiments  (Beyond Code)
+--
+-- One task, several strategies: "find a target value in a sorted sequence."
+-- Each strategy carries an explicit STEP COUNTER so we observe behavior directly
+-- (operation counts, not wall-clock time) and compare algorithm choices under
+-- the same correctness criteria.
+--
+-- The chapter sketches each search over a fixed eight-argument list (a1..a8).
+-- This lab implements the SAME experiments honestly over a real `Array`, with
+-- real loops and a real step count, so the comparison scales to any input size
+-- and every strategy reports a genuine cost.
+--
+--   step = one comparison of an array element against the target. (For the
+--   sorted check it is one comparison of adjacent elements.) This is the metric
+--   the chapter's hand-unrolled code counts too: binary search of the sample
+--   array for 30 costs 4 probes here, exactly as in the chapter.
+--
+-- Strategies (all return the SAME `Search_Result`, so logs stay comparable):
+--   * Linear_Search        — scan left to right.            no input assumption
+--   * Binary_Search        — halve the range each probe.    requires sorted
+--   * Jump_Search          — block hops of size √n + scan.  requires sorted
+--   * Interpolation_Search — probe where the value *should* be. requires sorted
+--
+-- Class-only module (no top-level run); pulled in by `algorithm_lab_1_main.nex`
+-- with `intern Algorithm_Lab_1` (the entry class below; loading it registers
+-- every class in this file).
+-- ============================================================================
+
+-- Module façade + `intern` entry point. Also a tidy factory so the driver names
+-- a strategy instead of repeating `create`.
+class Algorithm_Lab_1
+create
+  make() do end
+feature
+  linear(): Linear_Search do result := create Linear_Search end
+  binary(): Binary_Search do result := create Binary_Search end
+  jump(): Jump_Search do result := create Jump_Search end
+  interpolation(): Interpolation_Search do result := create Interpolation_Search end
+end
+
+-- The shared, comparable outcome of a search: did we find it, where, and at what
+-- cost. `confirms` lets every strategy's postcondition assert its own
+-- correctness against the array — the contract checks the answer, not just its
+-- shape. (A plain `or` cannot guard the a.get(index) access because Nex does not
+-- short-circuit, so the guard lives in this `if`.)
+class Search_Result
+feature
+  found: Boolean
+  index: Integer
+  steps: Integer
+
+  -- True when this result is self-consistent AND, if it claims a hit, the
+  -- element at `index` really equals `target`.
+  confirms(a: Array [Integer], target: Integer): Boolean do
+    if found then
+      result := index >= 0 and index < a.length and a.get(index) = target
+    else
+      result := index = -1
+    end
+  end
+create
+  make(found: Boolean, index: Integer, steps: Integer) do
+    this.found := found
+    this.index := index
+    this.steps := steps
+  end
+invariant
+  index_valid: index >= -1
+  steps_non_negative: steps >= 0
+end
+
+-- ----- Strategy 1: linear scan ----------------------------------------------
+-- No assumption on the data. Worst case visits every element: O(n).
+class Linear_Search
+feature
+  find(a: Array [Integer], target: Integer): Search_Result
+    require
+      non_empty: a.length >= 1
+    do
+      let found: Boolean := false
+      let idx: Integer := -1
+      let steps: Integer := 0
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i >= a.length or found
+      do
+        steps := steps + 1
+        if a.get(i) = target then
+          found := true
+          idx := i
+        else
+          i := i + 1
+        end
+      end
+      result := create Search_Result.make(found, idx, steps)
+    ensure
+      verified: result.confirms(a, target)
+      steps_bounded: result.steps >= 1 and result.steps <= a.length
+    end
+end
+
+-- ----- Strategy 2: binary search --------------------------------------------
+-- Requires sorted input. Halves the search range each probe: O(log n).
+class Binary_Search
+feature
+  -- A contract helper, also reused by the precondition. O(n), but only paid when
+  -- contracts are enabled (production builds can strip them — see NOTES).
+  is_sorted(a: Array [Integer]): Boolean do
+    result := true
+    let i: Integer := 1
+    from
+      i := 1
+    until
+      i >= a.length
+    do
+      if a.get(i - 1) > a.get(i) then
+        result := false
+        i := a.length
+      else
+        i := i + 1
+      end
+    end
+  end
+
+  find(a: Array [Integer], target: Integer): Search_Result
+    require
+      non_empty: a.length >= 1
+      sorted_input: is_sorted(a)
+    do
+      let lo: Integer := 0
+      let hi: Integer := a.length - 1
+      let found: Boolean := false
+      let idx: Integer := -1
+      let steps: Integer := 0
+      from
+      until
+        lo > hi or found
+      do
+        let mid: Integer := (lo + hi) / 2
+        steps := steps + 1
+        let v: Integer := a.get(mid)
+        if v = target then
+          found := true
+          idx := mid
+        elseif v < target then
+          lo := mid + 1
+        else
+          hi := mid - 1
+        end
+      end
+      result := create Search_Result.make(found, idx, steps)
+    ensure
+      verified: result.confirms(a, target)
+      steps_positive: result.steps >= 1
+    end
+end
+
+-- ----- Strategy 3 (extension): jump search ----------------------------------
+-- Requires sorted input. Hops forward in blocks of size √n until it passes the
+-- target, then scans one block linearly: O(√n).
+class Jump_Search
+feature
+  is_sorted(a: Array [Integer]): Boolean do
+    result := true
+    let i: Integer := 1
+    from
+      i := 1
+    until
+      i >= a.length
+    do
+      if a.get(i - 1) > a.get(i) then
+        result := false
+        i := a.length
+      else
+        i := i + 1
+      end
+    end
+  end
+
+  -- Largest k with k*k <= n (integer floor of the square root), at least 1.
+  isqrt(n: Integer): Integer do
+    let k: Integer := 1
+    from
+    until
+      (k + 1) * (k + 1) > n
+    do
+      k := k + 1
+    end
+    result := k
+  end
+
+  find(a: Array [Integer], target: Integer): Search_Result
+    require
+      non_empty: a.length >= 1
+      sorted_input: is_sorted(a)
+    do
+      let n: Integer := a.length
+      let block: Integer := isqrt(n)
+      let steps: Integer := 0
+
+      -- Phase 1: hop block by block until the block's last element reaches the
+      -- target (or we run out of blocks). `lo`..`hi` is the candidate block.
+      let lo: Integer := 0
+      let hi: Integer := block - 1
+      if hi > n - 1 then
+        hi := n - 1
+      end
+      let settled: Boolean := false
+      from
+      until
+        settled
+      do
+        steps := steps + 1
+        if a.get(hi) >= target then
+          settled := true            -- target, if present, is within lo..hi
+        elseif hi >= n - 1 then
+          settled := true            -- target is past the last element
+        else
+          lo := hi + 1
+          hi := hi + block
+          if hi > n - 1 then
+            hi := n - 1
+          end
+        end
+      end
+
+      -- Phase 2: linear scan within the located block.
+      let found: Boolean := false
+      let idx: Integer := -1
+      let i: Integer := lo
+      from
+        i := lo
+      until
+        i > hi or found
+      do
+        steps := steps + 1
+        if a.get(i) = target then
+          found := true
+          idx := i
+        else
+          i := i + 1
+        end
+      end
+      result := create Search_Result.make(found, idx, steps)
+    ensure
+      verified: result.confirms(a, target)
+      steps_positive: result.steps >= 1
+    end
+end
+
+-- ----- Strategy 4 (extension): interpolation-inspired search ----------------
+-- Requires sorted input. Instead of always probing the middle, it probes where
+-- the target *should* be if values were evenly spread. On near-uniform data
+-- this approaches O(log log n); on skewed data it degrades toward O(n).
+class Interpolation_Search
+feature
+  is_sorted(a: Array [Integer]): Boolean do
+    result := true
+    let i: Integer := 1
+    from
+      i := 1
+    until
+      i >= a.length
+    do
+      if a.get(i - 1) > a.get(i) then
+        result := false
+        i := a.length
+      else
+        i := i + 1
+      end
+    end
+  end
+
+  find(a: Array [Integer], target: Integer): Search_Result
+    require
+      non_empty: a.length >= 1
+      sorted_input: is_sorted(a)
+    do
+      let lo: Integer := 0
+      let hi: Integer := a.length - 1
+      let found: Boolean := false
+      let idx: Integer := -1
+      let steps: Integer := 0
+      -- Stop if the range closes, we find it, or the target falls outside the
+      -- current [lo, hi] value window (which also keeps the probe in range).
+      from
+      until
+        lo > hi or found or target < a.get(lo) or target > a.get(hi)
+      do
+        -- Interpolate the probe position; fall back to `lo` on a flat window
+        -- (equal endpoints) to avoid a divide-by-zero.
+        let pos: Integer := lo
+        if a.get(hi) /= a.get(lo) then
+          pos := lo + ((target - a.get(lo)) * (hi - lo)) / (a.get(hi) - a.get(lo))
+        end
+        steps := steps + 1
+        let v: Integer := a.get(pos)
+        if v = target then
+          found := true
+          idx := pos
+        elseif v < target then
+          lo := pos + 1
+        else
+          hi := pos - 1
+        end
+      end
+      -- A target outside the [a[lo], a[hi]] window is rejected by the loop guard
+      -- without a probe; that decision still cost one endpoint comparison, so
+      -- count it (keeps the step metric honest and comparable across strategies).
+      if steps = 0 then
+        steps := 1
+      end
+      result := create Search_Result.make(found, idx, steps)
+    ensure
+      verified: result.confirms(a, target)
+      steps_positive: result.steps >= 1
+    end
+end

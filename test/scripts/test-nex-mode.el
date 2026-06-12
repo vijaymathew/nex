@@ -241,4 +241,95 @@ so its closing 'end' lines up with the routine 'do'."
               "end")
             "\n"))))
 
+(ert-deftest nex-comment-quotes-are-not-strings ()
+  "A \" or ' inside a -- comment must be parsed as comment text, not as the
+start of a string.  Regression: re-setting ?- to plain punctuation stripped the
+comment-start flags, so the string scanner mis-read quotes in comments."
+  (with-temp-buffer
+    (nex-mode)
+    (insert "-- find a task's \"status\" by id\n")
+    (insert "let s: String := \"real string\"\n")
+    (font-lock-ensure)
+    ;; Just past the apostrophe, inside the comment.
+    (goto-char (point-min))
+    (search-forward "task's")
+    (should (nth 4 (syntax-ppss (point))))        ; in comment
+    (should-not (nth 3 (syntax-ppss (point))))    ; not in string
+    ;; Just past the embedded double quote, still inside the comment.
+    (goto-char (point-min))
+    (search-forward "\"status")
+    (should (nth 4 (syntax-ppss (point))))        ; in comment
+    (should-not (nth 3 (syntax-ppss (point))))    ; not in string
+    ;; A genuine string literal still parses as a string.
+    (goto-char (point-min))
+    (search-forward "real str")
+    (should (nth 3 (syntax-ppss (point))))        ; in string
+    (should-not (nth 4 (syntax-ppss (point))))))  ; not in comment
+
+(ert-deftest nex-indent-multiline-array-literal ()
+  "Elements of a multi-line array literal indent one level past the line that
+opens \"[\"; the closing \"]\" aligns with that line; lines after return to the
+block level."
+  (should (string=
+           (nex-test--reindent
+            "function main() do\nlet xs: Array [Integer] := [\n1,\n2,\n3\n]\nprint(xs)\nend")
+           (string-join
+            '("function main() do"
+              "  let xs: Array [Integer] := ["
+              "    1,"
+              "    2,"
+              "    3"
+              "  ]"
+              "  print(xs)"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-multiline-map-literal ()
+  "Entries of a multi-line map literal indent one level past the line that
+opens \"{\"; the closing \"}\" aligns with that line."
+  (should (string=
+           (nex-test--reindent
+            "function main() do\nlet m: Map [String, Integer] := {\n\"a\": 1,\n\"b\": 2\n}\nprint(m)\nend")
+           (string-join
+            '("function main() do"
+              "  let m: Map [String, Integer] := {"
+              "    \"a\": 1,"
+              "    \"b\": 2"
+              "  }"
+              "  print(m)"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-multiline-nested-array ()
+  "A nested array literal inside a multi-line call indents relative to its own
+opening \"[\"."
+  (should (string=
+           (nex-test--reindent
+            "function build() do\nresult := create Graph.from_edges([\n[\"A\",\"B\"],\n[\"B\",\"C\"]\n])\nend")
+           (string-join
+            '("function build() do"
+              "  result := create Graph.from_edges(["
+              "    [\"A\",\"B\"],"
+              "    [\"B\",\"C\"]"
+              "  ])"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-multiline-set-literal ()
+  "Members of a multi-line set literal (#{ ... }) indent one level past the line
+that opens it; the closing \"}\" aligns with that line. The \"#\" prefix does not
+interfere with brace detection."
+  (should (string=
+           (nex-test--reindent
+            "function main() do\nlet s: Set [String] := #{\n\"a\",\n\"b\"\n}\nprint(s)\nend")
+           (string-join
+            '("function main() do"
+              "  let s: Set [String] := #{"
+              "    \"a\","
+              "    \"b\""
+              "  }"
+              "  print(s)"
+              "end")
+            "\n"))))
+
 ;;; test-nex-mode.el ends here

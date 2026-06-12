@@ -1,0 +1,33 @@
+-- ============================================================================
+-- World Tiny  (Beyond Code — Studio 1)
+--
+-- The smallest working slice of the virtual world: one entity, one deterministic
+-- update step, position clamped to [0, max_x]. One core operation, one contract.
+--
+-- Deliberately flat: state (position, velocity, bound) is passed in on every
+-- call rather than owned by an entity, so two calls could use different bounds.
+-- The `bounded` postcondition is the one real guarantee — it holds AFTER a step.
+-- Studio 2 gives the bound an owner and makes "in bounds" an always-true invariant.
+--
+-- Operation: step(position, velocity, max_x) -> the next position, in [0, max_x].
+-- Class-only module; loaded with `intern World_Tiny`.
+-- ============================================================================
+
+class World_Tiny
+feature
+  step(position: Integer, velocity: Integer, max_x: Integer): Integer
+    require
+      max_positive: max_x > 0
+    do
+      let next: Integer := position + velocity
+      if next < 0 then
+        result := 0
+      elseif next > max_x then
+        result := max_x
+      else
+        result := next
+      end
+    ensure
+      bounded: result >= 0 and result <= max_x
+    end
+end

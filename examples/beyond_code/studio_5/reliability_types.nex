@@ -1,0 +1,131 @@
+-- ============================================================================
+-- Reliability Types  (Beyond Code — Studio 5)
+--
+-- Shared vocabulary for reliability work layered on the Studio 4 architecture:
+--   * Op_Result    — the explicit outcome of a guarded operation (status, value,
+--                    attempts). Failure is a first-class, contracted value.
+--   * Retry_Policy  — an explicit, testable retry policy: how many attempts, and
+--                    WHICH failures are retryable (transient yes, permanent no).
+--   * Reliability_Log — a minimal observability hook: an append-only event trace
+--                    you can dump and assert on when reproducing an incident.
+--
+-- Class-only module; loaded with `intern Reliability_Types`.
+-- ============================================================================
+
+-- Entry class for `intern` + small factories.
+class Reliability_Types
+create
+  make() do end
+feature
+  log(initial: String): Reliability_Log do result := create Reliability_Log.make(initial) end
+  policy(max_attempts: Integer): Retry_Policy do result := create Retry_Policy.make(max_attempts) end
+end
+
+-- The outcome of a guarded operation. `status` is the reliability verdict
+-- (OK / FAILED / IDEMPOTENT_OK / DEGRADED / RECOVERED), `value` the payload or
+-- failure reason, `attempts` how many tries it took (0 when short-circuited).
+class Op_Result
+feature
+  status: String
+  value: String
+  attempts: Integer
+create
+  make(status: String, value: String, attempts: Integer)
+    require
+      status_present: status /= ""
+      value_present: value /= ""
+      attempts_non_negative: attempts >= 0
+    do
+      this.status := status
+      this.value := value
+      this.attempts := attempts
+    end
+invariant
+  status_present: status /= ""
+  value_present: value /= ""
+  attempts_non_negative: attempts >= 0
+end
+
+-- An explicit retry policy. `max_attempts` bounds the loop; `retryable` is the
+-- single source of truth for which failures may be retried. Permanent failures
+-- are never retryable — retrying them only duplicates work and side effects.
+class Retry_Policy
+feature
+  max_attempts: Integer
+create
+  make(max_attempts: Integer)
+    require
+      at_least_one: max_attempts >= 1
+    do
+      this.max_attempts := max_attempts
+    end
+feature
+  -- Only transient failures are retryable. SENT/PERMANENT_FAILURE are terminal.
+  retryable(status: String): Boolean do
+    result := status = "TRANSIENT_FAILURE"
+  ensure
+    bool_result: result = true or result = false
+  end
+invariant
+  bounded: max_attempts >= 1
+end
+
+-- Append-only event trace for diagnosis. Keeps the full history (not just the
+-- last event), so an incident drill can reproduce and assert on the sequence.
+class Reliability_Log
+feature
+  events: Array [String]
+  last_event: String
+create
+  make(initial_event: String)
+    require
+      event_present: initial_event /= ""
+    do
+      this.events := [initial_event]
+      this.last_event := initial_event
+    end
+feature
+  record(event: String)
+    require
+      event_present: event /= ""
+    do
+      -- Append to a local then reassign: a collection field read returns a copy,
+      -- so `events.add(..)` alone would not stick.
+      let xs: Array [String] := events
+      xs.add(event)
+      this.events := xs
+      this.last_event := event
+    ensure
+      persisted: last_event = event
+    end
+
+  count(): Integer do
+    result := events.length
+  ensure
+    non_negative: result >= 0
+  end
+
+  -- True if any recorded event contains `sub` (used by regression checks).
+  contains_event(sub: String): Boolean do
+    result := false
+    let i: Integer := 0
+    from i := 0 until i >= events.length do
+      if events.get(i).contains(sub) then
+        result := true
+        i := events.length
+      else
+        i := i + 1
+      end
+    end
+  end
+
+  -- Render the whole trace for a run log.
+  dump(): String do
+    result := events.get(0)
+    let i: Integer := 1
+    from i := 1 until i >= events.length do
+      result := result + " | " + events.get(i)
+      i := i + 1
+    end
+  end
+end

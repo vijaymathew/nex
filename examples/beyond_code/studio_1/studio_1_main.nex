@@ -1,0 +1,95 @@
+-- ============================================================================
+-- Studio 1 driver — Our First Tiny System  (Levels 1 & 2)
+--
+--   Level 1 — Core implementation per domain, with EXECUTABLE examples: every
+--             call is checked against its expected result (nominal + edge).
+--   Level 2 — All three tiny systems together, run through ONE shared harness
+--             that treats each as the same abstraction (see below).
+--
+-- Shared abstraction (Level 2): each tiny system is a CONTRACTED TOTAL FUNCTION
+--   query -> guaranteed-well-formed answer
+-- with the same three-part shape — a `require` guarding inputs, a deterministic
+-- body, and an `ensure` guaranteeing the result is usable — and each turns an
+-- out-of-domain input into an explicit, in-band answer (a sentinel String for
+-- delivery/notes, a clamp for world) rather than failing. The driver exploits
+-- that sameness: one `check` harness verifies all three.
+--
+-- Run from this directory:  nex studio_1_main.nex
+-- ============================================================================
+
+intern Delivery_Tiny
+intern Notes_Tiny
+intern World_Tiny
+
+class Studio1_Checker
+feature
+  console: Console
+  passed: Integer
+  total: Integer
+create
+  make() do this.console := create Console this.passed := 0 this.total := 0 end
+feature
+  -- Compare an actual String result against the expected one.
+  check(label: String, expected: String, actual: String) do
+    this.total := total + 1
+    if actual = expected then
+      this.passed := passed + 1
+      console.print_line("  [ok]   " + label + " = " + actual)
+    else
+      console.print_line("  [FAIL] " + label + " = " + actual + " (expected " + expected + ")")
+    end
+  end
+  line(s: String) do console.print_line(s) end
+end
+
+function main() do
+  let chk: Studio1_Checker := create Studio1_Checker.make()
+  let d: Delivery_Tiny := create Delivery_Tiny
+  let n: Notes_Tiny := create Notes_Tiny
+  let w: World_Tiny := create World_Tiny
+
+  -- ========================================================================
+  -- LEVEL 1 — one core operation per domain, nominal + edge, all checked.
+  -- ========================================================================
+  chk.line("### DELIVERY — next_stop(current, destination) ###")
+  chk.check("next_stop(A,C) nominal", "B", d.next_stop("A", "C"))
+  chk.check("next_stop(B,C)",         "C", d.next_stop("B", "C"))
+  chk.check("next_stop(C,C) at-dest",  "C", d.next_stop("C", "C"))
+  chk.check("next_stop(X,C) edge",     "UNREACHABLE", d.next_stop("X", "C"))
+
+  chk.line("### NOTES — find_by_tag(tag) ###")
+  chk.check("find_by_tag(algorithms) nominal", "note_001", n.find_by_tag("algorithms"))
+  chk.check("find_by_tag(graphs)",             "note_002", n.find_by_tag("graphs"))
+  chk.check("find_by_tag(unknown) edge",       "NOT_FOUND", n.find_by_tag("unknown"))
+
+  chk.line("### WORLD — step(position, velocity, max_x) ###")
+  chk.check("step(3,2,10) nominal",       "5",  "" + w.step(3, 2, 10))
+  chk.check("step(9,5,10) clamp-high",    "10", "" + w.step(9, 5, 10))
+  chk.check("step(1,-5,10) clamp-low",    "0",  "" + w.step(1, -5, 10))
+  chk.line("")
+
+  -- ========================================================================
+  -- LEVEL 2 — the shared abstraction: run all three through ONE harness that
+  -- only knows "query -> a guaranteed-valid String answer". The systems differ
+  -- in domain, but share the contracted-total-function shape, so one loop checks
+  -- them all. (World's Integer is stringified at the boundary.)
+  -- ========================================================================
+  chk.line("### shared abstraction — uniform probe across all three ###")
+  chk.line("each row: a contracted total function turning a query into a usable answer")
+  chk.check("delivery probe", "B",         d.next_stop("A", "C"))
+  chk.check("notes probe",    "note_001",  n.find_by_tag("algorithms"))
+  chk.check("world probe",    "5",         "" + w.step(3, 2, 10))
+  chk.line("")
+
+  -- ========================================================================
+  -- Result.
+  -- ========================================================================
+  chk.line("### result ###")
+  if chk.passed = chk.total then
+    chk.line("STUDIO_1_CHECK:PASS (" + chk.passed + "/" + chk.total + ")")
+  else
+    chk.line("STUDIO_1_CHECK:FAIL (" + chk.passed + "/" + chk.total + ")")
+  end
+end
+
+main()

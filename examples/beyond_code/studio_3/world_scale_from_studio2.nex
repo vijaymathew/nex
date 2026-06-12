@@ -1,0 +1,141 @@
+-- ============================================================================
+-- Virtual World — Scaling refactor  (Beyond Code — Studio 3, Level 2)
+--
+-- Continues Studio 2's World_Object model UNCHANGED. The bottleneck at scale is
+-- the targeted update "move the object with this id by delta": the Studio 2
+-- usage pattern scans every object to find the one target before applying the
+-- (unchanged) position update.
+--
+--   Before (V2): World_Model_V2 — Array [World_Object], scanned to locate the
+--                target, then `shift(delta)`. O(n) to find a single target.
+--   After  (V3): World_Model_V3 — same World_Object objects, plus a derived
+--                Map [object_id -> World_Object]. The target is selected in one
+--                key access, then the IDENTICAL `shift(delta)` runs. O(1).
+--
+-- The update SEMANTICS are untouched: both versions call the model's own
+-- `shift`, so position changes are identical; only target SELECTION got faster.
+-- The index is derived from model identity (object_id) and owns its World_Object
+-- records, so a move applied through the index is read back through the index;
+-- the V2 array and the V3 index are independent organizations of the same model.
+--
+-- Class-only module; pulled in by `studio_3_main.nex`.
+-- ============================================================================
+
+intern Measure_Result
+
+-- Module façade (entry class for `intern`); builds the before/after pair.
+class World_Scale_From_Studio2
+create
+  make() do end
+feature
+  baseline(objs: Array [World_Object]): World_Model_V2 do
+    result := create World_Model_V2.make(objs)
+  end
+  indexed(objs: Array [World_Object]): World_Model_V3 do
+    result := create World_Model_V3.make(objs)
+  end
+end
+
+-- ----- Reused Studio 2 model (unchanged) ------------------------------------
+class World_Object
+feature
+  once object_id: String        -- identity (immutable)
+  x: Integer
+  vx: Integer
+create
+  make(object_id: String, x: Integer, vx: Integer)
+    do
+      this.object_id := object_id
+      this.x := x
+      this.vx := vx
+    end
+feature
+  -- The model's own update; the refactor must not change what this does.
+  shift(delta: Integer)
+    do
+      x := x + delta
+    end
+invariant
+  id_present: object_id /= ""
+end
+
+-- ----- BEFORE: scan to find the target (O(n)) -------------------------------
+class World_Model_V2
+feature
+  objs: Array [World_Object]
+create
+  make(objs: Array [World_Object])
+    require
+      non_empty: objs.length >= 1
+    do
+      this.objs := objs
+    end
+feature
+  move_by_id(object_id: String, delta: Integer): Measure_Result
+    require
+      id_present: object_id /= ""
+    do
+      let steps: Integer := 0
+      let value: String := "NOT_FOUND"
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i >= objs.length
+      do
+        steps := steps + 1
+        let o: World_Object := objs.get(i)
+        if o.object_id = object_id then
+          o.shift(delta)
+          value := "UPDATED"
+          i := objs.length
+        else
+          i := i + 1
+        end
+      end
+      result := create Measure_Result.make(value, steps)
+    ensure
+      bounded_steps: result.steps >= 1 and result.steps <= objs.length
+    end
+end
+
+-- ----- AFTER: indexed target selection (O(1)) -------------------------------
+class World_Model_V3
+feature
+  index: Map [String, World_Object]   -- object_id -> the SAME World_Object
+create
+  make(objs: Array [World_Object])
+    require
+      non_empty: objs.length >= 1
+    do
+      let m: Map [String, World_Object] := {}
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i >= objs.length
+      do
+        let o: World_Object := objs.get(i)
+        m.put(o.object_id, o)
+        i := i + 1
+      end
+      this.index := m
+    ensure
+      complete_index: index.size() = objs.length
+    end
+feature
+  move_by_id(object_id: String, delta: Integer): Measure_Result
+    require
+      id_present: object_id /= ""
+    do
+      let value: String := "NOT_FOUND"
+      if index.contains_key(object_id) then
+        let o: World_Object := index.get(object_id)
+        o.shift(delta)              -- same update semantics as V2
+        value := "UPDATED"
+      end
+      result := create Measure_Result.make(value, 1)
+    ensure
+      constant_step: result.steps = 1
+    end
+end

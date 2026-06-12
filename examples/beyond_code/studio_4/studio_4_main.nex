@@ -1,0 +1,132 @@
+-- ============================================================================
+-- Studio 4 driver — The Architecture Refactor  (Levels 1 & 2)
+--
+-- Proves behavior parity with Studio 3 while moving every use case behind a
+-- port. For each domain it runs the call BOTH ways:
+--   before = straight through the Studio 3 V3 store/model (concrete dependency)
+--   after  = through the Studio 4 workflow/service (depends on a port only)
+-- and asserts the underlying answers match.
+--
+-- Level 1 (one seam) is the DELIVERY section; Level 2 (three-domain pass) is all
+-- three. Level 3 (alternative architecture) is in level3_feature_modules.nex.
+--
+-- Run from this directory:  nex studio_4_main.nex
+-- ============================================================================
+
+intern Delivery_Arch_Refactor
+intern Knowledge_Arch_Refactor
+intern World_Arch_Refactor
+
+class Studio4_Report
+feature
+  console: Console
+  failures: Integer
+create
+  make() do this.console := create Console this.failures := 0 end
+feature
+  line(s: String) do console.print_line(s) end
+
+  -- Assert two strings are equal; record + flag a failure if not.
+  parity(label: String, before: String, after: String) do
+    if before = after then
+      console.print_line("  [parity OK] " + label + ": before=" + before + " after=" + after)
+    else
+      this.failures := failures + 1
+      console.print_line("  [PARITY FAIL] " + label + ": before=" + before + " after=" + after)
+    end
+  end
+end
+
+function main() do
+  let rep: Studio4_Report := create Studio4_Report.make()
+
+  -- ========================================================================
+  -- DELIVERY  (Level 1 seam): Delivery_Workflow -> Task_Query_Port -> store.
+  -- ========================================================================
+  rep.line("### DELIVERY — workflow over Task_Query_Port ###")
+  let dmod: Delivery_Arch_Refactor := create Delivery_Arch_Refactor.make()
+  let tasks: Array [Delivery_Task] := [
+    create Delivery_Task.make("T-1", "Hub-A", "Zone-1", "PENDING",    "R-1"),
+    create Delivery_Task.make("T-2", "Hub-A", "Zone-2", "IN_TRANSIT", "R-2"),
+    create Delivery_Task.make("T-3", "Hub-B", "Zone-3", "DELIVERED",  "R-3")
+  ]
+  let dstore: Delivery_Store_V3 := dmod.store_of(tasks)   -- before (concrete)
+  let dwf: Delivery_Workflow := dmod.wire(tasks)          -- after  (via port)
+  rep.line("after:  dispatch_view(T-2) = " + dwf.dispatch_view("T-2"))   -- TASK_STATUS:IN_TRANSIT
+  rep.line("after:  dispatch_view(T-9) = " + dwf.dispatch_view("T-9"))   -- UNKNOWN_TASK
+  -- Parity: the workflow's view is exactly the store's status, dressed up.
+  rep.parity("status T-2", "TASK_STATUS:" + dstore.find_status("T-2").value, dwf.dispatch_view("T-2"))
+  rep.parity("missing T-9", "UNKNOWN_TASK",
+             view_of(dstore.find_status("T-9").value))   -- map NOT_FOUND -> UNKNOWN_TASK
+  rep.line("")
+
+  -- ========================================================================
+  -- KNOWLEDGE: validation rule moved OUT of storage into a service.
+  -- ========================================================================
+  rep.line("### KNOWLEDGE — Link_Validation_Service over Doc_Query_Port ###")
+  let kmod: Knowledge_Arch_Refactor := create Knowledge_Arch_Refactor.make()
+  let docs: Array [Document] := [
+    create Document.make("D-1", "Graphs", "g"),
+    create Document.make("D-2", "Trees",  "t"),
+    create Document.make("D-3", "Maps",   "m")
+  ]
+  let kmodel: Knowledge_Model_V3 := kmod.model_of(docs)    -- before (in-store rule)
+  let ksvc: Link_Validation_Service := kmod.wire(docs)     -- after  (service via port)
+  rep.line("after:  validate(D-1, D-3) = " + ksvc.validate("D-1", "D-3"))   -- VALID
+  rep.line("after:  validate(D-9, D-3) = " + ksvc.validate("D-9", "D-3"))   -- MISSING_FROM
+  -- Parity: same vocabulary as Studio 3's in-store validate_link.
+  rep.parity("valid D1->D3",
+             kmodel.validate_link(create Doc_Link.make("D-1", "D-3", "references")).value,
+             ksvc.validate("D-1", "D-3"))
+  rep.parity("missing D9->D3",
+             kmodel.validate_link(create Doc_Link.make("D-9", "D-3", "references")).value,
+             ksvc.validate("D-9", "D-3"))
+  rep.line("")
+
+  -- ========================================================================
+  -- WORLD: update mediated by a use-case service through an update port.
+  -- ========================================================================
+  rep.line("### WORLD — World_Step_Service over World_Update_Port ###")
+  let wmod: World_Arch_Refactor := create World_Arch_Refactor.make()
+  -- Separate object seeds for before/after so the mutating move isn't double-applied.
+  let wbefore: World_Model_V3 := wmod.model_of(make_objects())
+  let wsvc: World_Step_Service := wmod.wire(make_objects())
+  rep.line("after:  apply_player_input(E-1, 2) = " + wsvc.apply_player_input("E-1", 2))   -- UPDATED
+  rep.line("after:  apply_player_input(E-9, 2) = " + wsvc.apply_player_input("E-9", 2))   -- NOT_FOUND
+  -- Parity: service outcome equals the store's outcome vocabulary.
+  rep.parity("move E-2",  wbefore.move_by_id("E-2", 5).value, wsvc.apply_player_input("E-2", 5))
+  rep.parity("move E-9",  wbefore.move_by_id("E-9", 5).value, wsvc.apply_player_input("E-9", 5))
+  rep.line("")
+
+  -- ========================================================================
+  -- Verdict.
+  -- ========================================================================
+  rep.line("### behavior parity ###")
+  if rep.failures = 0 then
+    rep.line("  all domains: Studio 4 (via ports) matches Studio 3 (direct): PASS")
+  else
+    rep.line("  PARITY FAILURES: " + rep.failures)
+  end
+  rep.line("Dependency direction now: use case -> port <- adapter -> V3 store.")
+  rep.line("No workflow/service names a concrete storage class.")
+end
+
+-- Map a raw store status to the delivery workflow's view vocabulary (mirrors
+-- Delivery_Workflow.dispatch_view, used only to compute the 'before' side).
+function view_of(status: String): String do
+  if status = "NOT_FOUND" then
+    result := "UNKNOWN_TASK"
+  else
+    result := "TASK_STATUS:" + status
+  end
+end
+
+function make_objects(): Array [World_Object] do
+  result := [
+    create World_Object.make("E-1", 10, 0),
+    create World_Object.make("E-2", 20, 0),
+    create World_Object.make("E-3", 30, 0)
+  ]
+end
+
+main()

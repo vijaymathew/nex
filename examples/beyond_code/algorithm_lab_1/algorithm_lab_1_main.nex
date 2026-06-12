@@ -1,0 +1,175 @@
+-- ============================================================================
+-- Algorithm Lab 1 — Driver: compare behaviors  (Tasks A, B, C)
+--
+-- Runs the controlled experiments over one sorted sample sequence:
+--   Task A — Correctness check: first / middle / last / absent targets.
+--   Task B — Constraint violation: binary & interpolation on UNSORTED input.
+--   Task C — Extension: all four strategies side by side (hit & miss costs).
+-- Plus an automated correctness sweep that cross-checks every strategy against
+-- linear-search truth, so "both algorithms are correct" is evidence, not a claim.
+--
+-- Run from this directory:  nex algorithm_lab_1_main.nex
+-- ============================================================================
+
+intern Algorithm_Lab_1
+
+-- Small reporting helper so every result row is formatted the same way.
+class Lab_Report
+feature
+  console: Console
+create
+  make() do this.console := create Console end
+feature
+  line(s: String) do console.print_line(s) end
+
+  -- "  <name>  found=.. index=.. steps=.."
+  row(name: String, r: Search_Result) do
+    console.print_line("  " + pad(name, 14)
+      + "found=" + pad(bool_str(r.found), 6)
+      + "index=" + pad(r.index + "", 4)
+      + "steps=" + r.steps)
+  end
+
+  bool_str(b: Boolean): String do
+    if b then result := "true" else result := "false" end
+  end
+
+  -- Left-pad-to-width with trailing spaces (small, for tidy columns).
+  pad(s: String, w: Integer): String do
+    result := s
+    from
+    until
+      result.length >= w
+    do
+      result := result + " "
+    end
+  end
+end
+
+function main() do
+  let lab: Algorithm_Lab_1 := create Algorithm_Lab_1.make()
+  let rep: Lab_Report := create Lab_Report.make()
+
+  let lin: Linear_Search := lab.linear()
+  let bin: Binary_Search := lab.binary()
+  let jmp: Jump_Search := lab.jump()
+  let itp: Interpolation_Search := lab.interpolation()
+
+  -- One sorted sample sequence (the chapter's), length 8, indices 0..7.
+  let a: Array [Integer] := [3, 7, 10, 14, 19, 21, 25, 30]
+  rep.line("sample (sorted, n=" + a.length + "): [3, 7, 10, 14, 19, 21, 25, 30]")
+  rep.line("")
+
+  -- ========================================================================
+  -- TASK A — Correctness check at four positions.
+  -- ========================================================================
+  rep.line("### Task A — correctness check (found / index / steps) ###")
+  probe_all(rep, lin, bin, jmp, itp, a, 3,  "first  (a[0]=3)")
+  probe_all(rep, lin, bin, jmp, itp, a, 14, "middle (a[3]=14)")
+  probe_all(rep, lin, bin, jmp, itp, a, 30, "last   (a[7]=30)")
+  probe_all(rep, lin, bin, jmp, itp, a, 11, "absent (11)")
+
+  -- ========================================================================
+  -- TASK B — Constraint violation: the sorted precondition fires on bad input.
+  -- ========================================================================
+  rep.line("### Task B — constraint violation on UNSORTED input ###")
+  let bad: Array [Integer] := [3, 30, 10, 14, 7, 21, 25, 19]
+  rep.line("unsorted input: [3, 30, 10, 14, 7, 21, 25, 19]")
+  do
+    let r: Search_Result := bin.find(bad, 14)
+    rep.line("  binary: BUG — returned a result on unsorted input")
+  rescue
+    rep.line("  binary:        blocked -> " + exception)
+  end
+  do
+    let r: Search_Result := itp.find(bad, 14)
+    rep.line("  interpolation: BUG — returned a result on unsorted input")
+  rescue
+    rep.line("  interpolation: blocked -> " + exception)
+  end
+  rep.line("  linear:        runs (no order assumption) -> found="
+    + rep.bool_str(lin.find(bad, 14).found))
+  rep.line("  Failure signal is a precondition violation at the CALL, naming the")
+  rep.line("  broken assumption (sorted_input) — not a silent wrong index later.")
+  rep.line("")
+
+  -- ========================================================================
+  -- TASK C — Extension: all four strategies, hit vs miss step counts.
+  -- ========================================================================
+  rep.line("### Task C — strategy comparison: step counts ###")
+  rep.line("target 30 (last, a hit):")
+  rep.row("linear", lin.find(a, 30))
+  rep.row("binary", bin.find(a, 30))
+  rep.row("jump", jmp.find(a, 30))
+  rep.row("interpolation", itp.find(a, 30))
+  rep.line("target 11 (a miss):")
+  rep.row("linear", lin.find(a, 11))
+  rep.row("binary", bin.find(a, 11))
+  rep.row("jump", jmp.find(a, 11))
+  rep.row("interpolation", itp.find(a, 11))
+  rep.line("")
+
+  -- ========================================================================
+  -- Evidence: automated correctness sweep vs linear-search truth.
+  -- ========================================================================
+  rep.line("### correctness sweep (every position + misses, vs linear truth) ###")
+  let fails: Integer := sweep(lin, bin, jmp, itp, a)
+  if fails = 0 then
+    rep.line("  all strategies agree with linear truth on every case: PASS")
+  else
+    rep.line("  MISMATCHES: " + fails)
+  end
+end
+
+-- Run all four strategies on one target and print a labeled block.
+function probe_all(rep: Lab_Report,
+                   lin: Linear_Search, bin: Binary_Search,
+                   jmp: Jump_Search, itp: Interpolation_Search,
+                   a: Array [Integer], target: Integer, label: String) do
+  rep.line("target " + label + ":")
+  rep.row("linear", lin.find(a, target))
+  rep.row("binary", bin.find(a, target))
+  rep.row("jump", jmp.find(a, target))
+  rep.row("interpolation", itp.find(a, target))
+end
+
+-- Cross-check every strategy against linear-search truth for all hits + a set of
+-- misses (below / between / above). Returns the number of mismatches.
+function sweep(lin: Linear_Search, bin: Binary_Search,
+               jmp: Jump_Search, itp: Interpolation_Search,
+               a: Array [Integer]): Integer do
+  let fails: Integer := 0
+  -- Hits: every element at its own index.
+  let i: Integer := 0
+  from i := 0 until i >= a.length do
+    let t: Integer := a.get(i)
+    let truth: Search_Result := lin.find(a, t)
+    fails := fails + disagree(truth, bin.find(a, t))
+    fails := fails + disagree(truth, jmp.find(a, t))
+    fails := fails + disagree(truth, itp.find(a, t))
+    i := i + 1
+  end
+  -- Misses: values not present, including below, between, and above the range.
+  let misses: Array [Integer] := [0, 1, 4, 11, 20, 31, 99]
+  let m: Integer := 0
+  from m := 0 until m >= misses.length do
+    let t: Integer := misses.get(m)
+    let truth: Search_Result := lin.find(a, t)
+    fails := fails + disagree(truth, bin.find(a, t))
+    fails := fails + disagree(truth, jmp.find(a, t))
+    fails := fails + disagree(truth, itp.find(a, t))
+    m := m + 1
+  end
+  result := fails
+end
+
+-- 0 if two results agree on found+index, else 1.
+function disagree(x: Search_Result, y: Search_Result): Integer do
+  if x.found = y.found and x.index = y.index then
+    result := 0
+  else
+    result := 1
+  end
+end
+
+main()

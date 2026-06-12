@@ -1,0 +1,61 @@
+-- ============================================================================
+-- Architecture Ports  (Beyond Code — Studio 4)
+--
+-- Ports are interfaces-by-contract: small base classes that state WHAT a
+-- collaboration needs, with a contracted-but-unimplemented default. Concrete
+-- adapters `inherit` a port and override the operation to delegate to a Studio 3
+-- V3 store/index. Services and workflows then depend on the PORT type, never on
+-- a concrete storage class — so the dependency arrow points at domain intent,
+-- and any V3 implementation can be substituted behind the seam.
+--
+-- The default bodies keep the contracts honest if a port is ever used directly
+-- (they return a loud sentinel, never a plausible answer). Adapters replace them.
+--
+-- Class-only module; loaded with `intern Architecture_Ports`.
+-- ============================================================================
+
+-- Entry class for `intern` (its lowercased name matches the filename) and a
+-- marker for "this module defines the shared ports."
+class Architecture_Ports
+create
+  make() do end
+end
+
+-- Delivery: "given a task id, tell me its status."
+class Task_Query_Port
+feature
+  status_of(task_id: String): String
+    require
+      id_present: task_id /= ""
+    do
+      result := "NOT_IMPLEMENTED"
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+-- Knowledge: "does a document with this id exist?"
+class Doc_Query_Port
+feature
+  has_doc(doc_id: String): Boolean
+    require
+      id_present: doc_id /= ""
+    do
+      result := false
+    ensure
+      bool_result: result = true or result = false
+    end
+end
+
+-- World: "move the object with this id by delta; report the outcome."
+class World_Update_Port
+feature
+  move_by_id(object_id: String, delta: Integer): String
+    require
+      id_present: object_id /= ""
+    do
+      result := "NOT_IMPLEMENTED"
+    ensure
+      non_empty: result /= ""
+    end
+end

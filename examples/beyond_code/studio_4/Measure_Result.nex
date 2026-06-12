@@ -1,0 +1,29 @@
+-- ============================================================================
+-- Measure_Result  (Beyond Code — carried forward from Studio 3)
+--
+-- Studio 4 keeps the Studio 3 V3 stores intact (semantics + performance intent),
+-- and those stores return a `Measure_Result` (answer + operation count). The new
+-- architecture layers do NOT change that — the adapters simply read the `.value`
+-- off the result to satisfy the simpler port contracts. Preserving this type is
+-- part of "preserve Studio 3 semantics."
+-- ============================================================================
+
+class Measure_Result
+feature
+  value: String       -- the answer, or an explicit status (NOT_FOUND, ...)
+  steps: Integer      -- operation count it took to produce `value`
+create
+  make(v: String, s: Integer)
+    require
+      value_present: v /= ""
+      non_negative_steps: s >= 0
+    do
+      value := v
+      steps := s
+    ensure
+      recorded: value = v and steps = s
+    end
+invariant
+  value_present: value /= ""
+  non_negative_steps: steps >= 0
+end

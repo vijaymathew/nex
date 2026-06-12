@@ -1,0 +1,100 @@
+-- ============================================================================
+-- Studio 6 driver — Evolution  (Levels 1 & 2)
+--
+--   Level 1 — evolve one service (delivery) V1 -> V2 behind a stable contract,
+--             show compatibility (V1 config) keeps old clients working.
+--   Level 2 — coordinated V2 across delivery, knowledge, world under ONE shared
+--             Rollout_Config; canary/rollback run log via Migration_Runner.
+-- A regression block asserts that old behavior is preserved and new behavior is
+-- correct, plus that the Studio 5 reliability invariant (world bounded) holds.
+--
+-- Run from this directory:  nex studio_6_main.nex
+-- ============================================================================
+
+intern Delivery_Evolution
+intern Knowledge_Evolution
+intern World_Evolution
+intern Migration_Runner
+
+function main() do
+  let c: Console := create Console
+  let types: Evolution_Types := create Evolution_Types.make()
+
+  -- ========================================================================
+  -- LEVEL 1 — Delivery V1 -> V2 behind the stable route_mode contract.
+  -- ========================================================================
+  c.print_line("### Level 1 — Delivery evolution behind a stable contract ###")
+  let delivery: Delivery_Evolution := create Delivery_Evolution.make()
+  let d_v1: Delivery_Evolution_Service := delivery.service(types.config(false, false))
+  let d_v2: Delivery_Evolution_Service := delivery.service(types.config(true, false))
+
+  -- Old-client (V1) behavior is unchanged: PREMIUM -> FAST_TRACK, risk ignored.
+  let dv1: Evolution_Result := d_v1.route_mode("PREMIUM", 70)
+  c.print_line("PREMIUM risk=70  V1: mode=" + dv1.mode + " value=" + dv1.value)
+  -- New rule (V2): a risky premium is downgraded to SAFE_TRACK.
+  let dv2: Evolution_Result := d_v2.route_mode("PREMIUM", 70)
+  c.print_line("PREMIUM risk=70  V2: mode=" + dv2.mode + " value=" + dv2.value)
+  -- Canary signal: where do the versions diverge?
+  c.print_line("canary PREMIUM risk=70 : " + d_v2.canary_compare("PREMIUM", 70))
+  c.print_line("canary PREMIUM risk=10 : " + d_v2.canary_compare("PREMIUM", 10))
+  c.print_line("canary STANDARD risk=10: " + d_v2.canary_compare("STANDARD", 10))
+  c.print_line("")
+
+  -- ========================================================================
+  -- LEVEL 2 — One shared rollout policy across all three domains.
+  -- ========================================================================
+  c.print_line("### Level 2 — coordinated multi-domain rollout ###")
+  let shared: Rollout_Config := types.config(true, true)    -- V2 on, compatibility on
+  c.print_line("shared rollout serving_mode = " + shared.serving_mode())
+
+  let dsvc: Delivery_Evolution_Service := delivery.service(shared)
+  let ksvc: Knowledge_Evolution_Service := (create Knowledge_Evolution.make()).service(shared)
+  let wsvc: World_Evolution_Service := (create World_Evolution.make()).service(shared)
+
+  let dr: Evolution_Result := dsvc.route_mode("PREMIUM", 70)
+  let kr: Evolution_Result := ksvc.query("contracts")
+  let wr: Evolution_Result := wsvc.step(2, 6, 10)     -- V2 damps 6->3: 2+3=5
+  c.print_line("delivery : mode=" + dr.mode + " value=" + dr.value)
+  c.print_line("knowledge: mode=" + kr.mode + " value=" + kr.value + "  (old shape on new engine)")
+  c.print_line("world    : mode=" + wr.mode + " value=" + wr.value + "  (V2 damping vs V1 X=8)")
+
+  -- Flip compatibility off => native V2 deep query.
+  let native: Rollout_Config := types.config(true, false)
+  let kr_native: Evolution_Result := (create Knowledge_Evolution.make()).service(native).query("contracts")
+  c.print_line("knowledge (native): mode=" + kr_native.mode + " value=" + kr_native.value)
+  c.print_line("")
+
+  -- ---- Canary + rollback run log (migration as code) ----
+  c.print_line("### migration canary/rollback run log ###")
+  let m: Migration_Runner := create Migration_Runner.make(0)
+  c.print_line("batch 1 (canary pass): " + m.run_batch(100, true) + "  count=" + m.migrated_count)
+  c.print_line("batch 2 (canary pass): " + m.run_batch(100, true) + "  count=" + m.migrated_count)
+  c.print_line("batch 3 (canary FAIL): " + m.run_batch(100, false) + "  count=" + m.migrated_count + " (reverted to checkpoint)")
+  c.print_line("batch 4 (canary pass): " + m.run_batch(100, true) + "  count=" + m.migrated_count)
+  c.print_line("committed batches=" + m.batches + " final count=" + m.migrated_count)
+  c.print_line("")
+
+  -- ========================================================================
+  -- Regression gate: old preserved, new correct, reliability intact.
+  -- ========================================================================
+  c.print_line("### evolution regression checks ###")
+  -- World reliability invariant (Studio 5) preserved under BOTH versions.
+  let w_extreme_v1: Evolution_Result := (create World_Evolution.make()).service(types.config(false, false)).step(2, 999, 10)
+  let w_extreme_v2: Evolution_Result := wsvc.step(2, 999, 10)
+  let ok: Boolean :=
+    dv1.value = "FAST_TRACK" and dv1.mode = "V1" and        -- old client unbroken
+    dv2.value = "SAFE_TRACK" and dv2.mode = "V2" and        -- new rule applied
+    dr.value = "SAFE_TRACK" and                              -- shared rollout uses V2
+    kr.mode = "V2_COMPAT" and kr.value = "DOC:K-FAST" and    -- compat: old shape, new engine
+    kr_native.mode = "V2_NATIVE" and kr_native.value = "DOC:K-DEEP" and
+    wr.value = "X=5" and                                     -- V2 damping changed the result
+    w_extreme_v1.value = "X=10" and w_extreme_v2.value = "X=5" and  -- both bounded; V2 damped
+    m.migrated_count = 300 and m.batches = 3                  -- rollback reverted exactly one batch
+  if ok then
+    c.print_line("EVOLUTION_CHECK:PASS")
+  else
+    c.print_line("EVOLUTION_CHECK:FAIL")
+  end
+end
+
+main()

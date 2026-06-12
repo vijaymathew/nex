@@ -1,0 +1,32 @@
+-- ============================================================================
+-- Notes Tiny  (Beyond Code — Studio 1)
+--
+-- The smallest working slice of the note organizer: a fixed, hardcoded tag ->
+-- note lookup over a tiny collection. One core operation, one contract.
+--
+-- Deliberately flat: failure is the in-band sentinel "NOT_FOUND" (a String
+-- indistinguishable in type from a real note id) and tags are matched by a
+-- hardcoded if/elseif. Studio 1's job is only to prove the slice runs; Studio 3
+-- replaces the fixed matching with an indexed structure (see level3_exploration).
+--
+-- Operation: find_by_tag(tag) -> a note id, or "NOT_FOUND".
+-- Class-only module; loaded with `intern Notes_Tiny`.
+-- ============================================================================
+
+class Notes_Tiny
+feature
+  find_by_tag(tag: String): String
+    require
+      tag_non_empty: tag /= ""
+    do
+      if tag = "algorithms" then
+        result := "note_001"
+      elseif tag = "graphs" then
+        result := "note_002"
+      else
+        result := "NOT_FOUND"
+      end
+    ensure
+      response_non_empty: result /= ""
+    end
+end

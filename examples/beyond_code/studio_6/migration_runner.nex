@@ -1,0 +1,74 @@
+-- ============================================================================
+-- Migration Runner + Rollback Trigger  (Studio 6)
+--
+-- Migration treated as CODE, not informal ops notes: a batched, REVERSIBLE
+-- migration gated by a canary signal.
+--
+--   run_batch(size, canary_passed):
+--     * optimistically apply the batch (advance migrated_count),
+--     * if the canary passed -> COMMIT (keep it, advance the checkpoint),
+--     * if the canary failed -> ROLLBACK (revert to the checkpoint).
+--
+-- The checkpoint is the last committed safe count, so a failed batch leaves the
+-- system exactly where the previous commit left it — rollback is executable and
+-- exact, not best-effort.
+--
+-- Class-only module; loaded with `intern Migration_Runner`.
+-- ============================================================================
+
+class Migration_Runner
+feature
+  migrated_count: Integer        -- live count of migrated records
+  checkpoint: Integer            -- last COMMITTED safe count
+  status: String                 -- IN_PROGRESS | ROLLED_BACK
+  batches: Integer               -- committed batches so far
+create
+  make(initial_count: Integer)
+    require
+      non_negative: initial_count >= 0
+    do
+      this.migrated_count := initial_count
+      this.checkpoint := initial_count
+      this.status := "IN_PROGRESS"
+      this.batches := 0
+    end
+feature
+  -- Apply one batch, then commit or roll back based on the canary.
+  run_batch(size: Integer, canary_passed: Boolean): String
+    require
+      positive_batch: size >= 1
+    do
+      migrated_count := migrated_count + size        -- optimistic apply
+      if canary_passed then
+        checkpoint := migrated_count                 -- commit: new safe point
+        batches := batches + 1
+        status := "IN_PROGRESS"                       -- resume (clears a prior rollback)
+        result := "MIGRATION_CONTINUE"
+      else
+        migrated_count := checkpoint                 -- rollback: revert the batch
+        status := "ROLLED_BACK"
+        result := "ROLLBACK"
+      end
+    ensure
+      known_result: result = "MIGRATION_CONTINUE" or result = "ROLLBACK"
+      -- After a rollback the live count is exactly the last committed checkpoint.
+      reverts_on_rollback: result /= "ROLLBACK" or migrated_count = checkpoint
+      -- A commit never sits below its checkpoint.
+      committed_consistent: result /= "MIGRATION_CONTINUE" or migrated_count = checkpoint
+    end
+
+  -- Explicit manual rollback trigger (e.g. an operator pulls the cord).
+  rollback(): String
+    do
+      migrated_count := checkpoint
+      status := "ROLLED_BACK"
+      result := "ROLLBACK_DONE"
+    ensure
+      reverted: migrated_count = checkpoint
+      marked: status = "ROLLED_BACK"
+    end
+invariant
+  non_negative_count: migrated_count >= 0
+  checkpoint_non_negative: checkpoint >= 0
+  valid_status: status = "IN_PROGRESS" or status = "ROLLED_BACK"
+end

@@ -1,0 +1,164 @@
+-- ============================================================================
+-- Delivery Reliability — Retry + Idempotent Dispatch  (Beyond Code — Studio 5)
+--
+-- Continues the Studio 4 Delivery_Workflow idea. The dispatch collaborator is a
+-- PORT (a Studio 4 seam), so we can inject different failure modes through it
+-- without touching the service. The service adds two reliability mechanisms:
+--
+--   * Bounded retry — retry ONLY transient failures, up to Retry_Policy's limit.
+--     Permanent failures are not retried (retrying would duplicate side effects).
+--   * Idempotency — a task dispatched once is never dispatched again; a repeat
+--     request returns IDEMPOTENT_OK without contacting the port.
+--
+-- Failure semantics are explicit: every send returns SENT / TRANSIENT_FAILURE /
+-- PERMANENT_FAILURE, and every dispatch returns an Op_Result with OK / FAILED /
+-- IDEMPOTENT_OK. Every attempt is logged for diagnosis.
+--
+-- Class-only module; loaded with `intern Delivery_Reliability`.
+-- ============================================================================
+
+intern Reliability_Types
+
+class Delivery_Reliability
+create
+  make() do end
+feature
+  service(port: Dispatch_Port, log: Reliability_Log): Delivery_Reliability_Service do
+    result := create Delivery_Reliability_Service.make(port, log)
+  end
+  healthy(): Healthy_Dispatch_Port do result := create Healthy_Dispatch_Port end
+  flaky(fail_until: Integer): Flaky_Dispatch_Port do result := create Flaky_Dispatch_Port.make(fail_until) end
+  broken(): Broken_Dispatch_Port do result := create Broken_Dispatch_Port end
+end
+
+-- ----- Dispatch port (seam) + injectable failure modes ----------------------
+-- Base port "fails closed": an unimplemented dispatch must not look successful.
+class Dispatch_Port
+feature
+  send_dispatch(task_id: String, attempt: Integer): String
+    require
+      id_present: task_id /= ""
+      attempt_valid: attempt >= 1
+    do
+      result := "PERMANENT_FAILURE"
+    ensure
+      known_result:
+        result = "SENT" or result = "TRANSIENT_FAILURE" or result = "PERMANENT_FAILURE"
+    end
+end
+
+-- Always succeeds.
+class Healthy_Dispatch_Port
+inherit Dispatch_Port
+feature
+  send_dispatch(task_id: String, attempt: Integer): String
+    require
+      id_present: task_id /= ""
+      attempt_valid: attempt >= 1
+    do
+      result := "SENT"
+    ensure
+      known_result:
+        result = "SENT" or result = "TRANSIENT_FAILURE" or result = "PERMANENT_FAILURE"
+    end
+end
+
+-- Transient failures for the first `fail_until_attempt` tries, then succeeds.
+class Flaky_Dispatch_Port
+inherit Dispatch_Port
+feature
+  fail_until_attempt: Integer
+create
+  make(fail_until: Integer)
+    require
+      non_negative: fail_until >= 0
+    do
+      this.fail_until_attempt := fail_until
+    end
+feature
+  send_dispatch(task_id: String, attempt: Integer): String
+    require
+      id_present: task_id /= ""
+      attempt_valid: attempt >= 1
+    do
+      if attempt <= fail_until_attempt then
+        result := "TRANSIENT_FAILURE"
+      else
+        result := "SENT"
+      end
+    ensure
+      known_result:
+        result = "SENT" or result = "TRANSIENT_FAILURE" or result = "PERMANENT_FAILURE"
+    end
+end
+
+-- A permanent fault: never recovers (e.g. malformed task / rejected by carrier).
+class Broken_Dispatch_Port
+inherit Dispatch_Port
+feature
+  send_dispatch(task_id: String, attempt: Integer): String
+    require
+      id_present: task_id /= ""
+      attempt_valid: attempt >= 1
+    do
+      result := "PERMANENT_FAILURE"
+    ensure
+      known_result:
+        result = "SENT" or result = "TRANSIENT_FAILURE" or result = "PERMANENT_FAILURE"
+    end
+end
+
+-- ----- Reliability service --------------------------------------------------
+class Delivery_Reliability_Service
+feature
+  port: Dispatch_Port
+  log: Reliability_Log
+  dispatched: Map [String, String]    -- idempotency store: task_id -> "SENT"
+create
+  make(port: Dispatch_Port, log: Reliability_Log) do
+    this.port := port
+    this.log := log
+    this.dispatched := {}
+  end
+feature
+  -- True once `task_id` has been successfully dispatched.
+  already_dispatched(task_id: String): Boolean do
+    result := dispatched.contains_key(task_id)
+  end
+
+  dispatch_with_retry(task_id: String, policy: Retry_Policy): Op_Result
+    require
+      id_present: task_id /= ""
+    do
+      if dispatched.contains_key(task_id) then
+        -- Idempotency: never send the same task twice.
+        log.record("delivery idempotent-skip task=" + task_id)
+        result := create Op_Result.make("IDEMPOTENT_OK", "ALREADY_SENT", 0)
+      else
+        let a: Integer := 0
+        let status: String := "TRANSIENT_FAILURE"   -- prime the loop guard
+        from
+        until
+          a >= policy.max_attempts or status = "SENT" or not policy.retryable(status)
+        do
+          a := a + 1
+          status := port.send_dispatch(task_id, a)
+          log.record("delivery task=" + task_id + " attempt=" + a + " -> " + status)
+        end
+
+        if status = "SENT" then
+          -- Record success so a repeat is idempotent.
+          let m: Map [String, String] := dispatched
+          m.put(task_id, "SENT")
+          this.dispatched := m
+          result := create Op_Result.make("OK", "SENT", a)
+        else
+          result := create Op_Result.make("FAILED", status, a)
+        end
+      end
+    ensure
+      known_status:
+        result.status = "OK" or result.status = "FAILED" or result.status = "IDEMPOTENT_OK"
+      bounded_attempts: result.attempts <= policy.max_attempts
+    end
+end

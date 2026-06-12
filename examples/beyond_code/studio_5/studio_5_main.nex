@@ -1,0 +1,108 @@
+-- ============================================================================
+-- Studio 5 driver — Reliability  (Levels 1 & 2)
+--
+--   Level 1 — one reliability mechanism on one service (delivery retry +
+--             idempotency), with regression checks under failure.
+--   Level 2 — one mechanism per domain (delivery retry/idempotency, knowledge
+--             degraded fallback, world invariant-preserving recovery), with
+--             failure-path run logs.
+-- A regression block asserts the reliability behaviors, mirroring the chapter's
+-- RELIABILITY_CHECK:PASS gate.
+--
+-- Run from this directory:  nex studio_5_main.nex
+-- ============================================================================
+
+intern Delivery_Reliability
+intern Knowledge_Reliability
+intern World_Reliability
+
+function main() do
+  let c: Console := create Console
+  let types: Reliability_Types := create Reliability_Types.make()
+  let log: Reliability_Log := types.log("studio5-start")
+
+  -- ========================================================================
+  -- DELIVERY (Level 1): transient failures recover within a bounded retry;
+  -- a repeat dispatch is idempotent; a permanent fault is not retried.
+  -- ========================================================================
+  c.print_line("### DELIVERY — retry + idempotency ###")
+  let delivery: Delivery_Reliability := create Delivery_Reliability.make()
+  let policy3: Retry_Policy := types.policy(3)
+
+  -- Flaky port: fails attempts 1..2 (transient), succeeds on attempt 3.
+  let flaky: Flaky_Dispatch_Port := delivery.flaky(2)
+  let dsvc: Delivery_Reliability_Service := delivery.service(flaky, log)
+
+  let d1: Op_Result := dsvc.dispatch_with_retry("T-7", policy3)
+  c.print_line("dispatch T-7 (flaky):   status=" + d1.status + " value=" + d1.value + " attempts=" + d1.attempts)
+  let d2: Op_Result := dsvc.dispatch_with_retry("T-7", policy3)
+  c.print_line("dispatch T-7 (repeat):  status=" + d2.status + " value=" + d2.value + " attempts=" + d2.attempts)
+
+  -- Failure path 1: transient that never clears within the bound -> FAILED.
+  let stubborn: Flaky_Dispatch_Port := delivery.flaky(9)   -- fails past max_attempts
+  let dsvc2: Delivery_Reliability_Service := delivery.service(stubborn, log)
+  let d3: Op_Result := dsvc2.dispatch_with_retry("T-8", types.policy(3))
+  c.print_line("dispatch T-8 (stubborn):status=" + d3.status + " value=" + d3.value + " attempts=" + d3.attempts)
+
+  -- Failure path 2: permanent fault -> NOT retried (attempts = 1).
+  let broken: Broken_Dispatch_Port := delivery.broken()
+  let dsvc3: Delivery_Reliability_Service := delivery.service(broken, log)
+  let d4: Op_Result := dsvc3.dispatch_with_retry("T-9", types.policy(3))
+  c.print_line("dispatch T-9 (broken):  status=" + d4.status + " value=" + d4.value + " attempts=" + d4.attempts)
+  c.print_line("")
+
+  -- ========================================================================
+  -- KNOWLEDGE (Level 2): an unavailable index degrades to a cached answer.
+  -- ========================================================================
+  c.print_line("### KNOWLEDGE — degraded fallback ###")
+  let knowledge: Knowledge_Reliability := create Knowledge_Reliability.make()
+  let kok: Knowledge_Reliability_Service := knowledge.service(knowledge.available(), log)
+  let kdeg: Knowledge_Reliability_Service := knowledge.service(knowledge.unavailable(), log)
+  let k1: Op_Result := kok.safe_query("contracts")
+  c.print_line("query (available):   status=" + k1.status + " value=" + k1.value)
+  let k2: Op_Result := kdeg.safe_query("contracts")
+  c.print_line("query (unavailable): status=" + k2.status + " value=" + k2.value)
+  c.print_line("")
+
+  -- ========================================================================
+  -- WORLD (Level 2): an extreme delta is clamped; invariant preserved.
+  -- ========================================================================
+  c.print_line("### WORLD — invariant-preserving recovery ###")
+  let world: World_Reliability := create World_Reliability.make()
+  let wport: World_Move_Port := world.port("E-1", 9, 10)
+  let wsvc: World_Reliability_Service := world.service(wport, log)
+  let w1: Op_Result := wsvc.safe_step(5)    -- 9 + 5 = 14 -> clamped to 10
+  c.print_line("step +5 from x=9:    status=" + w1.status + " value=" + w1.value + " x=" + wport.x)
+  let w2: Op_Result := wsvc.safe_step(-3)   -- 10 - 3 = 7, in bounds
+  c.print_line("step -3 from x=10:   status=" + w2.status + " value=" + w2.value + " x=" + wport.x)
+  c.print_line("")
+
+  -- ========================================================================
+  -- Failure-path run log (observability).
+  -- ========================================================================
+  c.print_line("### run log (" + log.count() + " events) ###")
+  c.print_line(log.dump())
+  c.print_line("")
+
+  -- ========================================================================
+  -- Regression checks (the reliability gate).
+  -- ========================================================================
+  c.print_line("### regression checks ###")
+  let ok: Boolean :=
+    d1.status = "OK" and d1.attempts = 3 and          -- transient recovered within bound
+    d2.status = "IDEMPOTENT_OK" and d2.attempts = 0 and -- repeat deduped, no send
+    d3.status = "FAILED" and d3.attempts = 3 and       -- bounded: stopped at max_attempts
+    d4.status = "FAILED" and d4.attempts = 1 and       -- permanent NOT retried
+    k1.status = "OK" and k2.status = "DEGRADED" and k2.value = "DOC:CACHED-001" and
+    w1.status = "RECOVERED" and w1.value = "CLAMPED@10" and  -- +5 clamped to the bound
+    w2.status = "OK" and wport.x = 7 and                -- then -3 within bounds
+    log.contains_event("fallback-used") and            -- diagnosis trail present
+    log.contains_event("attempt=3")
+  if ok then
+    c.print_line("RELIABILITY_CHECK:PASS")
+  else
+    c.print_line("RELIABILITY_CHECK:FAIL")
+  end
+end
+
+main()

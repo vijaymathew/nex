@@ -1,0 +1,74 @@
+-- ============================================================================
+-- Evolution Types  (Beyond Code — Studio 6)
+--
+-- Shared vocabulary for evolving the reliable Studio 5 system without breaking
+-- existing clients:
+--   * Evolution_Result — the contracted outcome of a versioned operation, tagged
+--                        with the `mode` (V1 / V2 / V2_COMPAT / ...) that served
+--                        it, so behavior version is observable, never hidden.
+--   * Rollout_Config    — the feature flag that selects behavior: roll v2 out,
+--                        and serve old clients in compatibility mode meanwhile.
+--
+-- Class-only module; loaded with `intern Evolution_Types`.
+-- ============================================================================
+
+class Evolution_Types
+create
+  make() do end
+feature
+  config(use_v2: Boolean, compatibility_mode: Boolean): Rollout_Config do
+    result := create Rollout_Config.make(use_v2, compatibility_mode)
+  end
+end
+
+-- The outcome of a versioned operation. `mode` records which behavior version
+-- actually served the request — the single most useful field during a rollout.
+class Evolution_Result
+feature
+  status: String       -- OK (reserved: DEGRADED/etc. if reliability wraps this)
+  value: String        -- the payload the chosen version produced
+  mode: String         -- V1 | V2 | V2_NATIVE | V2_COMPAT | ...
+create
+  make(status: String, value: String, mode: String)
+    require
+      status_present: status /= ""
+      value_present: value /= ""
+      mode_present: mode /= ""
+    do
+      this.status := status
+      this.value := value
+      this.mode := mode
+    end
+invariant
+  status_present: status /= ""
+  value_present: value /= ""
+  mode_present: mode /= ""
+end
+
+-- The rollout flag. `use_v2` turns the new behavior on; `compatibility_mode`
+-- keeps old-client request shapes working against the new engine during the
+-- migration window. The two combine into a small, explicit state machine
+-- (see `serving_mode`).
+class Rollout_Config
+feature
+  use_v2: Boolean
+  compatibility_mode: Boolean
+create
+  make(use_v2: Boolean, compatibility_mode: Boolean) do
+    this.use_v2 := use_v2
+    this.compatibility_mode := compatibility_mode
+  end
+feature
+  -- Human-readable rollout state, for run logs.
+  serving_mode(): String do
+    if not use_v2 then
+      result := "V1"
+    elseif compatibility_mode then
+      result := "V2_COMPAT"
+    else
+      result := "V2_NATIVE"
+    end
+  ensure
+    known: result = "V1" or result = "V2_COMPAT" or result = "V2_NATIVE"
+  end
+end

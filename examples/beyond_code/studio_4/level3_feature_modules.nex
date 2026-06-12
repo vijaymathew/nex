@@ -1,0 +1,121 @@
+-- ============================================================================
+-- Studio 4, Level 3 — Alternative Architecture Experiment (delivery domain)
+--
+-- Two architectures for the SAME delivery use case, identical behavior, compared
+-- on maintainability and migration cost.
+--
+--   Style A — PORT/ADAPTER + THIN SERVICE  (the studio_4 main approach)
+--     Delivery_Workflow -> Task_Query_Port <|- Delivery_Task_Adapter -> Store
+--     The use case depends on a shared PORT; the concrete store sits behind a
+--     seam and is substitutable (incl. by a test stub).
+--
+--   Style B — FEATURE MODULE WITH INTERNAL ADAPTER
+--     Delivery_Feature_Module  (owns the store; folds the adapter step inside;
+--     exposes dispatch_view directly). One cohesive component, no shared port.
+--
+-- Evidence collected below:
+--   1. Behavior parity: both produce identical dispatch_view output.
+--   2. Testability: Style A runs the workflow against a STUB port with NO real
+--      storage; Style B cannot, without editing the module.
+--   3. Coupling / ceremony counts (see the printed summary + NOTES).
+--
+-- Run from this directory:  nex level3_feature_modules.nex
+-- ============================================================================
+
+intern Delivery_Arch_Refactor      -- brings Delivery_Task, Delivery_Store_V3,
+                                    -- Delivery_Task_Adapter, Delivery_Workflow,
+                                    -- and (transitively) Task_Query_Port.
+
+-- ----- Style B: a self-contained feature module -----------------------------
+-- It OWNS its store and internalizes the adapter step (read `.value`). Callers
+-- depend on this one component; there is no shared port to depend on instead.
+class Delivery_Feature_Module
+feature
+  store: Delivery_Store_V3
+create
+  make(rows: Array [Delivery_Task]) do
+    this.store := create Delivery_Store_V3.make(rows)
+  end
+feature
+  -- internal adapter step (no separate class, no port)
+  status_of(task_id: String): String
+    require id_present: task_id /= ""
+    do result := store.find_status(task_id).value
+    ensure non_empty: result /= "" end
+
+  dispatch_view(task_id: String): String
+    require id_present: task_id /= ""
+    do
+      let st: String := status_of(task_id)
+      if st = "NOT_FOUND" then
+        result := "UNKNOWN_TASK"
+      else
+        result := "TASK_STATUS:" + st
+      end
+    ensure non_empty: result /= "" end
+end
+
+-- ----- A test stub for Style A's port (only possible because of the seam) ----
+-- Substitutes for a real store: canned answers, zero storage. The SAME
+-- Delivery_Workflow runs against it unchanged.
+class Stub_Task_Port
+inherit Task_Query_Port
+feature
+  status_of(task_id: String): String
+    require id_present: task_id /= ""
+    do
+      if task_id = "T-2" then
+        result := "IN_TRANSIT"
+      else
+        result := "NOT_FOUND"
+      end
+    ensure non_empty: result /= "" end
+end
+
+function main() do
+  let c: Console := create Console
+  let rows: Array [Delivery_Task] := [
+    create Delivery_Task.make("T-1", "Hub-A", "Zone-1", "PENDING",    "R-1"),
+    create Delivery_Task.make("T-2", "Hub-A", "Zone-2", "IN_TRANSIT", "R-2")
+  ]
+
+  -- Style A: layered (port/adapter + thin service).
+  let dmod: Delivery_Arch_Refactor := create Delivery_Arch_Refactor.make()
+  let a_wf: Delivery_Workflow := dmod.wire(rows)
+
+  -- Style B: feature module.
+  let b_mod: Delivery_Feature_Module := create Delivery_Feature_Module.make(rows)
+
+  c.print_line("== Level 3: port/adapter+service (A) vs feature module (B) ==")
+  c.print_line("A dispatch_view(T-2) = " + a_wf.dispatch_view("T-2"))
+  c.print_line("B dispatch_view(T-2) = " + b_mod.dispatch_view("T-2"))
+  c.print_line("A dispatch_view(T-9) = " + a_wf.dispatch_view("T-9"))
+  c.print_line("B dispatch_view(T-9) = " + b_mod.dispatch_view("T-9"))
+
+  -- 1. Behavior parity.
+  let parity_ok: Boolean :=
+    a_wf.dispatch_view("T-2") = b_mod.dispatch_view("T-2") and
+    a_wf.dispatch_view("T-9") = b_mod.dispatch_view("T-9")
+  c.print_line("behavior parity A vs B: " + bool_str(parity_ok))
+
+  -- 2. Testability: Style A's workflow runs over a STUB port, no real storage.
+  let stub: Stub_Task_Port := create Stub_Task_Port
+  let a_wf_stub: Delivery_Workflow := create Delivery_Workflow.make(stub)
+  c.print_line("A over STUB port, dispatch_view(T-2) = " + a_wf_stub.dispatch_view("T-2"))
+  c.print_line("  ^ Style A: the use case is tested with zero storage, via the seam.")
+  c.print_line("  Style B cannot do this: its store is internal, no port to substitute.")
+
+  -- 3. Coupling / ceremony.
+  c.print_line("")
+  c.print_line("Tradeoff:")
+  c.print_line("  A: more classes (port+adapter+service) but a substitution seam ->")
+  c.print_line("     swappable storage, isolated unit tests; pays off as the system grows.")
+  c.print_line("  B: one cohesive class, less ceremony -> faster to write/read now, but")
+  c.print_line("     opening it up later (extracting the port) is the migration cost.")
+end
+
+function bool_str(b: Boolean): String do
+  if b then result := "PASS" else result := "FAIL" end
+end
+
+main()

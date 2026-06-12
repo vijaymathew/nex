@@ -1,0 +1,131 @@
+-- ============================================================================
+-- Virtual World — Architecture refactor  (Beyond Code — Studio 4)
+--
+-- Before (Studio 3): callers drove `World_Model_V3.move_by_id` directly.
+-- After (Studio 4): a use-case service mediates the update through a port:
+--
+--     World_Step_Service ----> World_Update_Port <|---- World_Update_Adapter ----> World_Model_V3
+--        (use case)               (port)                  (adapter)                  (Studio 3 V3)
+--
+--   * World_Model_V3 — the Studio 3 index path, UNCHANGED (Map by object_id;
+--                      move_by_id locates in one step, applies the same shift,
+--                      returns a Measure_Result).
+--   * World_Update_Adapter — `inherit`s World_Update_Port; reads `.value`.
+--   * World_Step_Service — names the use case ("apply player input") and depends
+--                      only on the port. Its postcondition pins the outcome
+--                      vocabulary (UPDATED / NOT_FOUND).
+--
+-- Class-only module; loaded with `intern World_Arch_Refactor`.
+-- ============================================================================
+
+intern Measure_Result
+intern Architecture_Ports
+
+class World_Arch_Refactor
+create
+  make() do end
+feature
+  wire(objs: Array [World_Object]): World_Step_Service do
+    let model: World_Model_V3 := create World_Model_V3.make(objs)
+    let adapter: World_Update_Adapter := create World_Update_Adapter.make(model)
+    result := create World_Step_Service.make(adapter)
+  end
+  model_of(objs: Array [World_Object]): World_Model_V3 do
+    result := create World_Model_V3.make(objs)
+  end
+end
+
+-- ----- Studio 2 model (unchanged) -------------------------------------------
+class World_Object
+feature
+  once object_id: String
+  x: Integer
+  vx: Integer
+create
+  make(object_id: String, x: Integer, vx: Integer) do
+    this.object_id := object_id
+    this.x := x
+    this.vx := vx
+  end
+feature
+  shift(delta: Integer) do
+    x := x + delta
+  end
+invariant
+  id_present: object_id /= ""
+end
+
+-- ----- Studio 3 V3 index path (UNCHANGED) -----------------------------------
+class World_Model_V3
+feature
+  index: Map [String, World_Object]
+create
+  make(objs: Array [World_Object])
+    require
+      non_empty: objs.length >= 1
+    do
+      let m: Map [String, World_Object] := {}
+      let i: Integer := 0
+      from i := 0 until i >= objs.length do
+        let o: World_Object := objs.get(i)
+        m.put(o.object_id, o)
+        i := i + 1
+      end
+      this.index := m
+    ensure
+      complete_index: index.size() = objs.length
+    end
+feature
+  move_by_id(object_id: String, delta: Integer): Measure_Result
+    require
+      id_present: object_id /= ""
+    do
+      let value: String := "NOT_FOUND"
+      if index.contains_key(object_id) then
+        index.get(object_id).shift(delta)
+        value := "UPDATED"
+      end
+      result := create Measure_Result.make(value, 1)
+    ensure
+      constant_step: result.steps = 1
+    end
+end
+
+-- ----- Adapter: concrete model -> update port -------------------------------
+class World_Update_Adapter
+inherit World_Update_Port
+feature
+  model: World_Model_V3
+create
+  make(model: World_Model_V3) do
+    this.model := model
+  end
+feature
+  move_by_id(object_id: String, delta: Integer): String
+    require
+      id_present: object_id /= ""
+    do
+      result := model.move_by_id(object_id, delta).value
+    ensure
+      non_empty: result /= ""
+    end
+end
+
+-- ----- Service: the use case, depends on the PORT only ----------------------
+class World_Step_Service
+feature
+  updater: World_Update_Port     -- the seam: an update port, not a model
+create
+  make(updater: World_Update_Port) do
+    this.updater := updater
+  end
+feature
+  apply_player_input(object_id: String, delta: Integer): String
+    require
+      id_present: object_id /= ""
+    do
+      result := updater.move_by_id(object_id, delta)
+    ensure
+      known_result: result = "UPDATED" or result = "NOT_FOUND"
+    end
+end
