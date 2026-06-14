@@ -1,7 +1,7 @@
 -- APL-like abstractions. For more context, see https://schemer.in/explainers/array-programming.html.
 
 -- Primitives
-function zip[T](a: Array[T], b: Array[T], f: Function): Array[T] do
+function zip[T](a: Array[T], b: Array[T], f: Function(T, T): T): Array[T] do
   let i := 0
   result := []
   across a as elem do
@@ -18,7 +18,7 @@ let console := create Console
 let r1 := zip([1, 2, 3], [4, 5, 6], fn(a, b: Integer): Integer do result := a + b end)
 console.print_line("zip([1, 2, 3], [4, 5, 6], a+b) = " + r1 + " " + is(r1, [5, 7, 9]))
 
-function each[T](a: Array[T], f: Function): Array[T] do
+function each[T](a: Array[T], f: Function(T): T): Array[T] do
   result := []
   across a as elem do
     result.add(f(elem))
@@ -28,7 +28,7 @@ end
 let r2 := each([1, 2, 3, 4, 5], fn(x: Integer): Integer do result := x + 10 end)
 console.print_line("each([1, 2, 3, 4, 5]) = " + r2 + " " + is(r2, [11, 12, 13, 14, 15]))
 
-function reduce[T](a: Array[T], f: Function, init: T): T do
+function reduce[T](a: Array[T], f: Function(T, T): T, init: T): T do
   result := init
   across a as elem do
     result := f(result, elem)

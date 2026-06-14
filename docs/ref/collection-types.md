@@ -41,7 +41,7 @@ create Array[String].filled(2, "x")
 | `reverse` | none | `Array[Any]` | Return reversed array. |
 | `set` | `index: Integer, value: Any` | `Void` | Replace element at index. |
 | `sort` | none | `Array[Any]` | Return a new array sorted by built-in order or `Comparable.compare`. |
-| `sort` | `compareFn: Function` | `Array[Any]` | Return a new array sorted using `compareFn(a, b) -> Integer`. |
+| `sort` | `compareFn: Function(a: Any, b: Any): Integer` | `Array[Any]` | Return a new array sorted using `compareFn(a, b) -> Integer`. |
 | `slice` | `start: Integer, end: Integer` | `Array[Any]` | Subrange from `start` to `end`. |
 | `concat` | `other: Array[T]` | `Array[T]` | Return a new array containing this array followed by `other`. |
 | `to_string` | none | `String` | Render the array and its nested values as text. |
@@ -123,8 +123,7 @@ create Min_Heap[Box].from_comparator(compare_boxes)
 - `empty()` is intended for element types that already support ordering:
   built-in sortable scalars or classes implementing `Comparable`.
 - For non-`Comparable` element types, use `from_comparator(...)`.
-- `from_comparator(compare)` expects a function that takes two values and
-  returns an `Integer` comparison result:
+- `from_comparator(compare)` expects a `Function(a: T, b: T): Integer` comparator:
   negative when the first value is smaller, positive when larger, `0` when equal.
 
 ### Methods

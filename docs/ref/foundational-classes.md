@@ -13,7 +13,55 @@ write `inherit Any`.
 
 ## `Function`
 
-Built-in base class with deferred call-style methods.
+Built-in base class for all function values. Functions are first-class values
+that can be stored in variables, passed as arguments, and returned from other
+functions.
+
+### Type signatures
+
+A function-typed variable or parameter may carry a full signature annotation:
+
+```nex
+let add: Function(a: Integer, b: Integer): Integer :=
+  fn (a, b: Integer): Integer do result := a + b end
+```
+
+Parameters names in the signature are optional; the positional-only form is
+also valid:
+
+```nex
+let compare: Function(Integer, Integer): Integer :=
+  fn (x, y: Integer): Integer do result := x - y end
+```
+
+Bare `Function` remains valid and is compatible with any typed function value
+— it behaves like an unconstrained function type:
+
+```nex
+let f: Function := fn (n: Integer): Integer do result := n * 2 end
+```
+
+Subtype compatibility: a `Function(a: B)` value satisfies a `Function(a: A)`
+parameter when `B` is a subclass of `A`. Return types follow the same rule.
+
+### Type aliases
+
+Use `declare type` to name a function signature (or any type) for reuse:
+
+```nex
+declare type Transformer = Function(n: Integer): Integer
+declare type Comparator  = Function(a: Integer, b: Integer): Integer
+
+let double: Transformer := fn (n: Integer): Integer do result := n * 2 end
+```
+
+`declare type` can alias any type expression, not just function types:
+
+```nex
+declare type IntPair = Array[Integer]
+```
+
+### Protocol methods
 
 | Method | Arguments | Returns | Description |
 |---|---|---|---|

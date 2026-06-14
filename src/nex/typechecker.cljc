@@ -15,6 +15,7 @@
     :vars (atom {})
     :methods (atom {})
     :classes (atom {})
+    :type-aliases (atom {})
     :non-nil-vars (atom #{})
     :across-cursors (atom {})}))
 
@@ -78,6 +79,17 @@
   "Add a class definition to the environment"
   [env class-name class-def]
   (swap! (:classes env) assoc class-name class-def))
+
+(defn env-add-type-alias
+  [env name type-expr]
+  (swap! (:type-aliases env) assoc name type-expr))
+
+(defn env-lookup-type-alias
+  [env name]
+  (if-let [t (get @(:type-aliases env) name)]
+    t
+    (when (:parent env)
+      (env-lookup-type-alias (:parent env) name))))
 
 (declare normalize-type type-name-string)
 
@@ -288,14 +300,29 @@
   [type-val]
   (cond
     (string? type-val) type-val
-    (map? type-val) (let [base (:base-type type-val)
-                          params (or (:type-params type-val) (:type-args type-val))
-                          core (if (seq params)
-                                 (str base "[" (clojure.string/join ", " (map display-type params)) "]")
-                                 base)]
-                     (if (:detachable type-val)
-                       (str "?" core)
-                       core))
+    (map? type-val)
+    (let [base (:base-type type-val)
+          param-types (:param-types type-val)
+          return-type (:return-type type-val)
+          params (or (:type-params type-val) (:type-args type-val))
+          core (cond
+                 param-types
+                 (let [params-str (clojure.string/join ", "
+                                    (map (fn [p]
+                                           (if (:name p)
+                                             (str (:name p) ": " (display-type (:type p)))
+                                             (display-type (:type p))))
+                                         param-types))
+                       sig (str "Function(" params-str ")")]
+                   (if return-type
+                     (str sig ": " (display-type return-type))
+                     sig))
+                 (seq params)
+                 (str base "[" (clojure.string/join ", " (map display-type params)) "]")
+                 :else base)]
+      (if (:detachable type-val)
+        (str "?" core)
+        core))
     :else (str type-val)))
 
 ;;
@@ -311,13 +338,23 @@
   (cond
     (string? type-expr) type-expr
     (map? type-expr)
-    (if (:base-type type-expr)
+    (cond
+      (:param-types type-expr)
+      ;; Function type with explicit signature
+      (cond-> {:base-type "Function"
+               :param-types (mapv (fn [p] {:name (:name p) :type (normalize-type (:type p))})
+                                  (:param-types type-expr))}
+        (:return-type type-expr) (assoc :return-type (normalize-type (:return-type type-expr)))
+        (:detachable type-expr) (assoc :detachable true))
+
+      (:base-type type-expr)
       (let [params (or (:type-params type-expr) (:type-args type-expr))
             detachable? (true? (:detachable type-expr))]
         (cond-> {:base-type (:base-type type-expr)}
           params (assoc :type-params (mapv normalize-type params))
           detachable? (assoc :detachable true)))
-      (str type-expr))
+
+      :else (str type-expr))
     :else (str type-expr)))
 
 (defn detachable-type?
@@ -331,8 +368,42 @@
   (let [n (normalize-type t)]
     (if (map? n)
       (cond-> (dissoc n :detachable)
-        (:type-params n) (update :type-params #(mapv attachable-type %)))
+        (:type-params n) (update :type-params #(mapv attachable-type %))
+        (:param-types n) (update :param-types #(mapv (fn [p] (update p :type attachable-type)) %))
+        (:return-type n) (update :return-type attachable-type))
       n)))
+
+(defn expand-type-aliases
+  "Recursively expand declared type aliases in a type expression."
+  [env type-expr]
+  (cond
+    (string? type-expr)
+    (if-let [expanded (env-lookup-type-alias env type-expr)]
+      (expand-type-aliases env expanded)
+      type-expr)
+
+    (map? type-expr)
+    (cond
+      (:param-types type-expr)
+      (cond-> type-expr
+        true (update :param-types #(mapv (fn [p] (update p :type (partial expand-type-aliases env))) %))
+        (:return-type type-expr) (update :return-type (partial expand-type-aliases env)))
+
+      (:base-type type-expr)
+      (let [expanded-base (if-let [a (env-lookup-type-alias env (:base-type type-expr))]
+                            (expand-type-aliases env a)
+                            type-expr)]
+        (if (not= expanded-base type-expr)
+          expanded-base
+          (cond-> type-expr
+            (:type-params type-expr)
+            (update :type-params #(mapv (partial expand-type-aliases env) %))
+            (:type-args type-expr)
+            (update :type-args #(mapv (partial expand-type-aliases env) %)))))
+
+      :else type-expr)
+
+    :else type-expr))
 
 (defn reference-like-type?
   "Whether type is a reference-like (potentially detachable) object type."
@@ -474,7 +545,9 @@
 (defn types-compatible?
   "Check if two types are compatible (including inheritance)."
   [env type1 type2]
-  (let [t1 (normalize-type type1) ;; source type
+  (let [type1 (expand-type-aliases env type1)
+        type2 (expand-type-aliases env type2)
+        t1 (normalize-type type1) ;; source type
         t2 (normalize-type type2) ;; target type
         d1 (detachable-type? t1)
         d2 (detachable-type? t2)
@@ -510,6 +583,19 @@
                (or (= (:type-params a1) ["__EmptySetElement"])
                    (= (:type-params a2) ["__EmptySetElement"])))
           (types-equal? env a1 a2)
+          ;; Function type with signature is compatible with bare Function
+          (and (map? a1) (= (:base-type a1) "Function") (:param-types a1) (= a2 "Function"))
+          ;; Two function signatures: check param count + covariant param/return types
+          (and (map? a1) (map? a2)
+               (= (:base-type a1) "Function") (= (:base-type a2) "Function")
+               (:param-types a1) (:param-types a2)
+               (= (count (:param-types a1)) (count (:param-types a2)))
+               (every? true?
+                       (map (fn [p1 p2]
+                              (types-compatible? env (:type p1) (:type p2)))
+                            (:param-types a1) (:param-types a2)))
+               (or (nil? (:return-type a1)) (nil? (:return-type a2))
+                   (types-compatible? env (:return-type a1) (:return-type a2))))
           (and (string? a1) (string? a2) (class-subtype? env a1 a2))
           (and (map? a1) (string? a2) (class-subtype? env (:base-type a1) a2))
           (and (map? a1) (map? a2)
@@ -2758,7 +2844,7 @@
                             {:error (type-error
                                      (str "http_server_get path argument must be String, got "
                                           (display-type path-type)))})))
-          (when-not (= (attachable-type handler-type) "Function")
+          (when-not (types-compatible? env handler-type "Function")
             (throw (ex-info "http_server_get handler argument must be Function"
                             {:error (type-error
                                      (str "http_server_get handler argument must be Function, got "
@@ -2779,7 +2865,7 @@
                             {:error (type-error
                                      (str "http_server_post path argument must be String, got "
                                           (display-type path-type)))})))
-          (when-not (= (attachable-type handler-type) "Function")
+          (when-not (types-compatible? env handler-type "Function")
             (throw (ex-info "http_server_post handler argument must be Function"
                             {:error (type-error
                                      (str "http_server_post handler argument must be Function, got "
@@ -2800,7 +2886,7 @@
                             {:error (type-error
                                      (str "http_server_put path argument must be String, got "
                                           (display-type path-type)))})))
-          (when-not (= (attachable-type handler-type) "Function")
+          (when-not (types-compatible? env handler-type "Function")
             (throw (ex-info "http_server_put handler argument must be Function"
                             {:error (type-error
                                      (str "http_server_put handler argument must be Function, got "
@@ -2821,7 +2907,7 @@
                             {:error (type-error
                                      (str "http_server_delete path argument must be String, got "
                                           (display-type path-type)))})))
-          (when-not (= (attachable-type handler-type) "Function")
+          (when-not (types-compatible? env handler-type "Function")
             (throw (ex-info "http_server_delete handler argument must be Function"
                             {:error (type-error
                                      (str "http_server_delete handler argument must be Function, got "
@@ -4583,7 +4669,7 @@
   "Type check a complete program.
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([program] (check-program program {}))
-  ([{:keys [classes calls statements imports functions] :as program} opts]
+  ([{:keys [classes calls statements imports functions type-aliases] :as program} opts]
    (let [env (make-type-env)
          normalized-functions (normalize-function-defs classes functions)
          visible-classes (class-defs-by-name-last-wins
@@ -4599,6 +4685,10 @@
              (env-add-class env simple-name {:name simple-name :body [] :import qualified-name}))))
 
        (register-builtin-methods env)
+
+       ;; Register type aliases first so they are available throughout the program.
+       (doseq [{:keys [name type-expr]} (or type-aliases [])]
+         (env-add-type-alias env name type-expr))
 
        ;; First pass: collect all class definitions, allowing user classes to
        ;; override builtin placeholder names such as Task or Channel.

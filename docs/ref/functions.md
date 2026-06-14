@@ -124,7 +124,7 @@ Creates an opaque HTTP server handle used by `lib/net/http_server.nex`.
 ## `http_server_get`
 
 ```nex
-http_server_get(handle, path: String, handler: Function)
+http_server_get(handle, path: String, handler: Function(req: Http_Request): Http_Server_Response)
 ```
 
 Registers a GET route on an opaque server handle.
@@ -132,7 +132,7 @@ Registers a GET route on an opaque server handle.
 ## `http_server_post`
 
 ```nex
-http_server_post(handle, path: String, handler: Function)
+http_server_post(handle, path: String, handler: Function(req: Http_Request): Http_Server_Response)
 ```
 
 Registers a POST route on an opaque server handle.
@@ -140,7 +140,7 @@ Registers a POST route on an opaque server handle.
 ## `http_server_put`
 
 ```nex
-http_server_put(handle, path: String, handler: Function)
+http_server_put(handle, path: String, handler: Function(req: Http_Request): Http_Server_Response)
 ```
 
 Registers a PUT route on an opaque server handle.
@@ -148,7 +148,7 @@ Registers a PUT route on an opaque server handle.
 ## `http_server_delete`
 
 ```nex
-http_server_delete(handle, path: String, handler: Function)
+http_server_delete(handle, path: String, handler: Function(req: Http_Request): Http_Server_Response)
 ```
 
 Registers a DELETE route on an opaque server handle.

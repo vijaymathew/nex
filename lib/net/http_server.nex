@@ -115,7 +115,7 @@ feature
   handle: Any
 
 feature
-  get(path: String, handler: Function)
+  get(path: String, handler: Function(req: Http_Request): Http_Server_Response)
     require
       path_not_empty: path /= ""
       handler_attached: handler /= nil
@@ -123,7 +123,7 @@ feature
       http_server_get(this.handle, path, handler)
     end
 
-  post(path: String, handler: Function)
+  post(path: String, handler: Function(req: Http_Request): Http_Server_Response)
     require
       path_not_empty: path /= ""
       handler_attached: handler /= nil
@@ -131,7 +131,7 @@ feature
       http_server_post(this.handle, path, handler)
     end
 
-  put(path: String, handler: Function)
+  put(path: String, handler: Function(req: Http_Request): Http_Server_Response)
     require
       path_not_empty: path /= ""
       handler_attached: handler /= nil
@@ -139,7 +139,7 @@ feature
       http_server_put(this.handle, path, handler)
     end
 
-  delete(path: String, handler: Function)
+  delete(path: String, handler: Function(req: Http_Request): Http_Server_Response)
     require
       path_not_empty: path /= ""
       handler_attached: handler /= nil

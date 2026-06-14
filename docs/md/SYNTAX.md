@@ -645,8 +645,33 @@ end
 ## Anonymous Functions
 
 ```nex
-let add: Function := fn (a, b: Integer): Integer do result := a + b end
+let add: Function(a: Integer, b: Integer): Integer :=
+  fn (a, b: Integer): Integer do result := a + b end
 print(add(3, 4))                -- 7
+```
+
+Bare `Function` is still valid and compatible with any typed function value:
+
+```nex
+let f: Function := fn (n: Integer): Integer do result := n * 2 end
+```
+
+## Type Aliases
+
+`declare type` binds a name to any type expression — most commonly used to
+name a function signature for reuse:
+
+```nex
+declare type Transformer = Function(n: Integer): Integer
+
+let double: Transformer := fn (n: Integer): Integer do result := n * 2 end
+let square: Transformer := fn (n: Integer): Integer do result := n * n end
+```
+
+Any type can be aliased, not just function types:
+
+```nex
+declare type Matrix = Array[Array[Real]]
 ```
 
 ## Generics
