@@ -71,7 +71,7 @@ function main() do
   --     whatever function the variable currently holds. First doubling, then,
   --     after reassignment, squaring — same inputs, different behaviour.
   -- --------------------------------------------------------------------------
-  let transform: Function := fn (n: Integer): Integer do result := n * 2 end
+  let transform: Function(n: Integer): Integer := fn (n: Integer): Integer do result := n * 2 end
   c.print_line("5. doubling: " + transform(3).to_string + " " +
                transform(5).to_string + " " + transform(8).to_string)   -- 6 10 16
   transform := fn (n: Integer): Integer do result := n * n end

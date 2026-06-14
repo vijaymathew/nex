@@ -128,10 +128,10 @@ Route handlers receive `Http_Request` and return `Http_Server_Response`.
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
 | `make` | `port: Integer` | `Http_Server` | Create a server wrapper. `0` requests an ephemeral port. |
-| `get` | `path: String, handler: Function` | `nil` | Register a GET route handler. |
-| `post` | `path: String, handler: Function` | `nil` | Register a POST route handler. |
-| `put` | `path: String, handler: Function` | `nil` | Register a PUT route handler. |
-| `delete` | `path: String, handler: Function` | `nil` | Register a DELETE route handler. |
+| `get` | `path: String, handler: Function(req: Http_Request): Http_Server_Response` | `nil` | Register a GET route handler. |
+| `post` | `path: String, handler: Function(req: Http_Request): Http_Server_Response` | `nil` | Register a POST route handler. |
+| `put` | `path: String, handler: Function(req: Http_Request): Http_Server_Response` | `nil` | Register a PUT route handler. |
+| `delete` | `path: String, handler: Function(req: Http_Request): Http_Server_Response` | `nil` | Register a DELETE route handler. |
 | `start` | none | `nil` | Start listening. Updates `port` when the OS assigns an ephemeral port. |
 | `stop` | none | `nil` | Stop the server. |
 | `is_running` | none | `Boolean` | Return true when the server is listening. |

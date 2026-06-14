@@ -54,7 +54,9 @@
 
               (map? t)
               (vec (concat (collect* (:base-type t))
-                           (mapcat collect* (or (:type-args t) (:type-params t)))))
+                           (mapcat collect* (or (:type-args t) (:type-params t) []))
+                           (mapcat #(collect* (:type %)) (or (:param-types t) []))
+                           (when-let [rt (:return-type t)] (collect* rt))))
 
               :else
               []))]
@@ -279,13 +281,15 @@
                           vec)
            interns (filter #(= :intern (:type %)) transformed)
            imports (filter #(= :import (:type %)) transformed)
-           statements (filter #(not (#{:class :function :intern :import} (:type %))) transformed)
+           type-aliases (filter #(= :type-alias (:type %)) transformed)
+           statements (filter #(not (#{:class :function :intern :import :type-alias} (:type %))) transformed)
            calls (filter #(= :call (:type %)) statements)
            function-classes (mapv :class-def functions)
            all-classes (vec (concat classes function-classes))]
        {:type :program
         :imports (vec imports)
         :interns (vec interns)
+        :type-aliases (vec type-aliases)
         :classes all-classes
         :functions (vec functions)
         :statements (vec statements)
@@ -443,12 +447,19 @@
                         (= :inheritEntry (first %))))
           (mapv transform-node)))
 
+   :typeName
+   (fn [[_ name]]
+     name)
+
    :inheritEntry
    (fn [[_ parent-name & rest]]
      (let [generic-args-node (first (filter #(and (sequential? %)
                                                   (= :typeArgs (first %)))
-                                            rest))]
-       (cond-> {:parent (token-text parent-name)}
+                                            rest))
+           parent (if (sequential? parent-name)
+                    (transform-node parent-name)
+                    (token-text parent-name))]
+       (cond-> {:parent parent}
          generic-args-node (assoc :generic-args (transform-node generic-args-node)))))
 
    :visibilityModifier
@@ -648,13 +659,20 @@
 
    :type
    (fn [[_ first-node & rest]]
-     ;; detachable type: ?T
-     (if (= "?" first-node)
+     (cond
+       ;; detachable type: ?T
+       (= "?" first-node)
        (let [inner (transform-node (first rest))]
          (if (map? inner)
            (assoc inner :detachable true)
            {:base-type inner :detachable true}))
-       ;; regular type, optionally parameterized
+
+       ;; function type with signature: Function(...): T
+       (and (sequential? first-node) (= :functionType (first first-node)))
+       (transform-node first-node)
+
+       ;; regular named type, optionally parameterized
+       :else
        (let [type-name first-node
              type-args-node (first (filter #(and (sequential? %)
                                                  (= :typeArgs (first %)))
@@ -663,6 +681,41 @@
            {:base-type (token-text type-name)
             :type-args (transform-node type-args-node)}
            (token-text type-name)))))
+
+   :functionType
+   (fn [[_ & tokens]]
+     ;; tokens: "Function" optionally "(" functionTypeParams? ")" (":" type)?
+     (let [has-sig? (some #(= "(" %) tokens)
+           params-node (first (filter #(and (sequential? %) (= :functionTypeParams (first %))) tokens))
+           return-type-node (first (filter #(and (sequential? %) (= :type (first %))) tokens))]
+       (if has-sig?
+         {:base-type "Function"
+          :param-types (if params-node (transform-node params-node) [])
+          :return-type (when return-type-node (transform-node return-type-node))}
+         "Function")))
+
+   :functionTypeParams
+   (fn [[_ & tokens]]
+     (->> tokens
+          (remove #(= "," %))
+          (filter #(and (sequential? %) (= :functionTypeParam (first %))))
+          (mapv transform-node)))
+
+   :functionTypeParam
+   (fn [[_ & parts]]
+     ;; Named: IDENTIFIER ":" type  →  {:name "a" :type "Integer"}
+     ;; Positional: type             →  {:name nil :type "Integer"}
+     (let [has-colon? (some #(= ":" %) parts)
+           type-node (first (filter #(and (sequential? %) (= :type (first %))) parts))
+           param-name (when has-colon? (first (filter string? parts)))]
+       {:name param-name
+        :type (when type-node (transform-node type-node))}))
+
+   :declareTypeDecl
+   (fn [[_ _declare-kw _type-kw name _eq type-node]]
+     {:type :type-alias
+      :name (token-text name)
+      :type-expr (transform-node type-node)})
 
    :typeArgs
    (fn [[_ _open-bracket & args]]
@@ -727,8 +780,11 @@
            generic-args (when type-args-node (transform-node type-args-node))
            as-idx (first (keep-indexed (fn [i v] (when (= "as" v) i)) tokens))
            var-name (token-text (nth tokens (inc as-idx)))
-           body-node (first (filter #(and (sequential? %) (= :block (first %))) tokens))]
-       {:class-name (token-text class-name)
+           body-node (first (filter #(and (sequential? %) (= :block (first %))) tokens))
+           resolved-class-name (if (sequential? class-name)
+                                 (transform-node class-name)
+                                 (token-text class-name))]
+       {:class-name resolved-class-name
         :generic-args generic-args
         :var-name var-name
         :body (transform-node body-node)}))

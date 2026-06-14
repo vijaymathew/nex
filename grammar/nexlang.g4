@@ -7,7 +7,7 @@ grammar nexlang;
  */
 
 program
-    : (importStmt | internStmt | classDecl | declareFunctionDecl | functionDecl | statement)* EOF
+    : (importStmt | internStmt | classDecl | declareTypeDecl | declareFunctionDecl | functionDecl | statement)* EOF
     ;
 
 importStmt
@@ -35,6 +35,10 @@ declareFunctionDecl
     : DECLARE FUNCTION IDENTIFIER genericParams? '(' paramList? ')' (':' type)? noteClause?
     ;
 
+declareTypeDecl
+    : DECLARE TYPE_KW IDENTIFIER EQUAL type
+    ;
+
 genericParams
     : '[' genericParam (',' genericParam)* ']'
     ;
@@ -52,7 +56,12 @@ inheritClause
     ;
 
 inheritEntry
-    : IDENTIFIER typeArgs?
+    : typeName typeArgs?
+    ;
+
+typeName
+    : IDENTIFIER
+    | FUNCTION_TYPE
     ;
 
 featureSection
@@ -103,7 +112,21 @@ type
     | CHAR_TYPE
     | BOOLEAN_TYPE
     | STRING_TYPE
+    | functionType
     | IDENTIFIER typeArgs?
+    ;
+
+functionType
+    : FUNCTION_TYPE ('(' functionTypeParams? ')' (':' type)?)?
+    ;
+
+functionTypeParams
+    : functionTypeParam (',' functionTypeParam)*
+    ;
+
+functionTypeParam
+    : IDENTIFIER ':' type
+    | type
     ;
 
 typeArgs
@@ -175,7 +198,7 @@ matchStatement
     ;
 
 matchClause
-    : WHEN IDENTIFIER typeArgs? AS IDENTIFIER THEN block
+    : WHEN typeName typeArgs? AS IDENTIFIER THEN block
     ;
 
 selectStatement
@@ -460,6 +483,9 @@ TIMEOUT      : 'timeout';
 AND          : 'and';
 OR           : 'or';
 NOT          : 'not';
+
+TYPE_KW        : 'type';
+FUNCTION_TYPE  : 'Function';
 
 // Type keywords
 INTEGER_TYPE   : 'Integer';
