@@ -162,3 +162,25 @@ end
 ")
           result (typecheck src)]
       (is (not (:success result))))))
+
+(deftest sealed-class-must-be-deferred
+  (testing "a sealed class declared without 'deferred' is rejected"
+    (let [src "
+sealed class Shape
+  feature area(): Integer do result := 0 end
+end
+
+class Circle
+  inherit Shape
+  feature r: Integer
+  create make(v: Integer) do r := v end
+end
+"
+          result (typecheck src)]
+      (is (not (:success result)))
+      (is (some #(re-find #"must be declared 'sealed deferred'"
+                          (:message %))
+                (:errors result)))))
+  (testing "a sealed deferred class is accepted"
+    (let [result (typecheck result-hierarchy)]
+      (is (:success result)))))

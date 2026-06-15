@@ -4184,6 +4184,16 @@
   (env-add-var class-env "__current_class__" name)
   (register-generic-param-classes! class-env generic-params)
   (bind-visible-class-fields! class-env env name)
+  ;; A sealed class must be deferred. If it could be instantiated, a value of
+  ;; the bare parent type would slip past an exhaustive `match` over its
+  ;; subclasses (the very guarantee `sealed` exists to provide), failing at
+  ;; runtime with no compile-time warning.
+  (when (and (:sealed? class-def) (not (:deferred? class-def)))
+    (throw (ex-info (str "Sealed class " name " must be deferred")
+                    {:error (type-error
+                             (str "Sealed class '" name "' must be declared 'sealed deferred'. "
+                                  "A sealed class cannot be instantiated; otherwise an exhaustive "
+                                  "match over its subclasses would not cover a bare " name " value."))})))
   ;; Check inheritance
   (when parents
     (check-inheritance env name parents))

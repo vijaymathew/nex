@@ -561,7 +561,7 @@ end
 
 A `sealed` modifier closes a class hierarchy. Only classes defined together with the sealed class can extend it. The typechecker knows the complete set of subclasses and can verify that every variant is handled.
 
-A sealed class is always `deferred` — it cannot be instantiated directly:
+A sealed class must be declared `deferred` — it cannot be instantiated directly, and the typechecker rejects a `sealed` class that is not also `deferred`. (Otherwise a bare instance of the parent would be a runtime value that an exhaustive `match` over its subclasses does not cover.)
 
 ```nex
 sealed deferred class Result
