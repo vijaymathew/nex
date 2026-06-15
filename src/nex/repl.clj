@@ -25,6 +25,9 @@
 (defonce ^:dynamic *repl-context* nil)
 (defonce ^:dynamic *type-checking-enabled* (atom false))
 (defonce ^:dynamic *repl-var-types* (atom {}))
+;; Type aliases (`declare type Name = ...`) declared in earlier inputs, kept by
+;; name so later lines and the type checker can resolve them.
+(defonce ^:dynamic *repl-type-aliases* (atom {}))
 (defonce ^:dynamic *repl-backend* (atom :compiled))
 (defonce ^:dynamic *compiled-repl-session* (atom (compiled-repl/make-session)))
 
@@ -93,6 +96,7 @@
   "Initialize or reset the REPL context"
   []
   (reset! *repl-var-types* {})
+  (reset! *repl-type-aliases* {})
   (reset! *compiled-repl-session* (compiled-repl/make-session))
   (interp/make-context))
 
@@ -190,6 +194,7 @@
                     :else
                     (do (.append out ch)
                         (recur (inc i) false false out))))))))
+        raw-text (str/join "\n" lines)
         text (->> lines
                   (map sanitize-line)
                   (str/join "\n"))
@@ -286,10 +291,22 @@
                              (not (re-find #"\bdo\b" line)))
                     (not-any? #(re-find #"\bdo\b" %)
                               (subvec lines (inc idx)))))
-                lines)))]
+                lines)))
+        ;; A line ending on a dangling binary operator (e.g. `:=`, `+`, `and`)
+        ;; needs a right-hand side, so keep reading. String and char literals
+        ;; are collapsed to a placeholder first so that a literal ending in an
+        ;; operator (e.g. `let s := "x :="`) is not mistaken for a dangling one.
+        trailing-operator?
+        (let [masked (-> raw-text
+                         (str/replace #"\"(?:[^\"\\]|\\.)*\"" "0")
+                         (str/replace #"#\w+" "0"))]
+          (boolean
+           (re-find #"(?::=|/=|<=|>=|\+|-|\*|/|%|\^|=|<|>|,|\band\b|\bor\b)$"
+                    (str/trimr masked))))]
     ;; Continue if we have more opens than closes
     (or bare-function-header?
         open-delimiters?
+        trailing-operator?
         (> open-blocks end-count))))
 
 (defn read-input
@@ -479,6 +496,7 @@
       (do
         (println "Context cleared.")
         (reset! *repl-var-types* {})
+        (reset! *repl-type-aliases* {})
         (reset! *compiled-repl-session* (compiled-repl/reset-session))
         (dbg/reset-run-state!)
         (init-repl-context))
@@ -1069,18 +1087,53 @@
       (and binding-type
            (not (contains? compiled-function-names function-name))))))
 
+(defn- type-expr-type-names
+  "Every type name referenced by a type annotation, which may be a bare string
+  (`\"Integer\"`) or a structured type (`{:base-type .. :type-args .. :param-types
+  .. :return-type ..}`)."
+  [t]
+  (cond
+    (string? t) [t]
+    (map? t) (concat (when-let [b (:base-type t)] [b])
+                     (mapcat type-expr-type-names (:type-args t))
+                     (mapcat (comp type-expr-type-names :type) (:param-types t))
+                     (type-expr-type-names (:return-type t)))
+    :else nil))
+
+(defn- references-type-alias?
+  "True when any type annotation in `ast` names one of `alias-names`. Used to
+  steer alias-typed inputs to the interpreter, which ignores type annotations,
+  since the compiled backend's lowering cannot resolve declared aliases."
+  [alias-names ast]
+  (and (seq alias-names)
+       (let [annotation-keys [:var-type :target-type :return-type
+                              :element-type :value-type :key-type]]
+         (boolean
+          (some (fn [node]
+                  (when (map? node)
+                    (let [from-keys (mapcat #(type-expr-type-names (get node %))
+                                            annotation-keys)
+                          ;; a parameter's `:type` is a type, but a node's `:type`
+                          ;; is its kind keyword — only the former is a string/map.
+                          from-param (let [t (:type node)]
+                                       (when (or (string? t) (and (map? t) (:base-type t)))
+                                         (type-expr-type-names t)))]
+                      (some alias-names (concat from-keys from-param)))))
+                (tree-seq coll? seq ast))))))
+
 (defn- ast-needs-interpreter-fallback?
   [ctx ast]
-  (let [top-nodes (concat (:statements ast)
-                          (:calls ast)
-                          (:functions ast))
-        nodes (tree-seq coll? seq top-nodes)]
-    (boolean
-     (some (fn [node]
-             (or (string-ordered-comparison? ctx node)
-                 (nonbuiltin-array-sort? ctx node)
-                 (uncompiled-user-function-call? node)))
-           nodes))))
+  (or (references-type-alias? (set (keys @*repl-type-aliases*)) ast)
+      (let [top-nodes (concat (:statements ast)
+                              (:calls ast)
+                              (:functions ast))
+            nodes (tree-seq coll? seq top-nodes)]
+        (boolean
+         (some (fn [node]
+                 (or (string-ordered-comparison? ctx node)
+                     (nonbuiltin-array-sort? ctx node)
+                     (uncompiled-user-function-call? node)))
+               nodes)))))
 
 (defn- fallback-eligible-compiled-error?
   [^clojure.lang.ExceptionInfo e]
@@ -1253,6 +1306,10 @@
                                 (throw e)))))
                         (throw e))))))]
         (sync-compiled-session-into-interpreter! exec-ctx)
+        ;; Persist any type aliases declared in this input so later REPL lines
+        ;; (and the type checker) can resolve them by name.
+        (doseq [alias (:type-aliases ast)]
+          (swap! *repl-type-aliases* assoc (:name alias) alias))
         ;; Type check if enabled
         (when (and @*type-checking-enabled*
                  (= (:type ast) :program)
@@ -1306,6 +1363,10 @@
               augmented-ast (if (seq prev-functions)
                               (update augmented-ast :functions #(vec (concat prev-functions %)))
                               augmented-ast)
+              ;; Make every type alias declared so far in the session visible to
+              ;; the checker, not just any declared in the current input.
+              augmented-ast (assoc augmented-ast
+                                   :type-aliases (vec (vals @*repl-type-aliases*)))
               ;; Previously defined classes/functions are included above only so the
               ;; type checker can resolve references from the *current* input. Their
               ;; bodies must not be re-validated: redefining one class can legitimately

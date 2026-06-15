@@ -61,6 +61,23 @@ end"
     (is (true? (repl/continue-reading? ["print("])))
     (is (false? (repl/continue-reading? ["print(" "  42)"])))))
 
+(deftest repl-input-completeness-continues-on-dangling-operator
+  (testing "a line ending on a binary operator keeps reading for its right-hand side"
+    (is (true? (repl/continue-reading? ["let double: Function(n: Integer): Integer :="])))
+    (is (true? (repl/continue-reading? ["let x := 1 +"])))
+    (is (true? (repl/continue-reading? ["let y := a and"])))
+    (is (true? (repl/continue-reading? ["foo,"]))))
+  (testing "the binding completes once the right-hand side arrives"
+    (is (false? (repl/continue-reading?
+                 ["let double: Function(n: Integer): Integer :="
+                  "  fn (n: Integer): Integer do result := n * 2 end"]))))
+  (testing "operators inside string and char literals are not mistaken for dangling ones"
+    (is (false? (repl/continue-reading? ["let s := \"ends with :=\""])))
+    (is (false? (repl/continue-reading? ["let msg := \"hi\""])))
+    (is (false? (repl/continue-reading? ["let c := #newline"])))
+    (is (false? (repl/continue-reading? ["let z := 5"])))
+    (is (false? (repl/continue-reading? ["a - b"])))))
+
 (deftest repl-input-completeness-balances-when-expressions
   (testing "multi-line when expressions keep reading until else/end complete the expression"
     (let [lines ["when convert expenses.get(\"children\") to children: Array[Map[String, Any]] then"

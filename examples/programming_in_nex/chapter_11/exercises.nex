@@ -87,6 +87,80 @@ function flatten_leaves(node: Map[String, Any]): Array[String] do
   end
 end
 
+-- Section 11.10 "Iterating Over Your Own Types": a user-defined iterable.
+-- An Interval generates an inclusive range on demand; it stores no array.
+class Interval_Cursor
+  create
+    make(lo, hi: Integer) do current := lo  last := hi end
+  feature
+    current: Integer
+    last: Integer
+    start() do end
+    item(): Integer do result := current end
+    next() do current := current + 1 end
+    at_end(): Boolean do result := current > last end
+end
+
+class Interval
+  create
+    make(lo, hi: Integer)
+      require ordered: lo <= hi
+      do low := lo  high := hi end
+  feature
+    low: Integer
+    high: Integer
+    cursor(): Interval_Cursor
+      do result := create Interval_Cursor.make(low, high) end
+end
+
+-- Exercise 6: Countdown yields n, n-1, ..., 1 when iterated.
+class Countdown_Cursor
+  create
+    make(start_at: Integer) do current := start_at end
+  feature
+    current: Integer
+    start() do end
+    item(): Integer do result := current end
+    next() do current := current - 1 end
+    at_end(): Boolean do result := current < 1 end
+end
+
+class Countdown
+  create
+    make(n: Integer)
+      require positive: n > 0
+      do top := n end
+  feature
+    top: Integer
+    cursor(): Countdown_Cursor
+      do result := create Countdown_Cursor.make(top) end
+end
+
+-- Exercise 7*: a Stack[G] (on top of Array[G]) made iterable top-to-bottom
+-- WITHOUT exposing its underlying array. The cursor is the only window in.
+class Stack_Cursor[G]
+  create
+    make(data: Array[G]) do items := data  pos := data.length - 1 end
+  feature
+    items: Array[G]
+    pos: Integer
+    start() do end
+    item(): G do result := items.get(pos) end
+    next() do pos := pos - 1 end
+    at_end(): Boolean do result := pos < 0 end
+end
+
+class Stack[G]
+  create
+    make() do items := [] end
+  feature
+    items: Array[G]
+    push(value: G) do items.add(value) end
+    size(): Integer do result := items.length end
+    cursor(): Stack_Cursor[G]
+      do result := create Stack_Cursor[G].make(items) end
+end
+
 function show(arr: Array[String]): String do
   result := "["
   from
@@ -153,6 +227,47 @@ function main() do
   -- 5.*
   c.print_line("5. flatten        = " + show(flatten(filesystem)))
   c.print_line("5. flatten_leaves = " + show(flatten_leaves(filesystem)))
+
+  -- Section 11.10: a user-defined type used as the source for `across`.
+  -- The loop variable arrives as Any (a custom cursor may yield any type), so a
+  -- plain print works directly but arithmetic narrows it with `convert`.
+  let week: Interval := create Interval.make(1, 7)
+  let days: String := ""
+  across week as day do
+    days := days + day.to_string + " "
+  end
+  c.print_line("11.10 Interval(1..7)  = " + days.trim)              -- 1 2 3 4 5 6 7
+
+  let total: Integer := 0
+  across (create Interval.make(1, 100)) as n do
+    if convert n to value: Integer then
+      total := total + value
+    end
+  end
+  c.print_line("11.10 sum 1..100      = " + total.to_string)        -- 5050
+
+  -- 6. Countdown, iterated twice to show each `cursor` call is independent.
+  let cd: Countdown := create Countdown.make(5)
+  let first: String := ""
+  across cd as k do first := first + k.to_string + " " end
+  let again: String := ""
+  across cd as k do again := again + k.to_string + " " end
+  c.print_line("6. Countdown(5) twice = " + first.trim + " | " + again.trim)  -- 5 4 3 2 1 | 5 4 3 2 1
+
+  -- 7.* Iterate a Stack[Integer] top-to-bottom and total it via `convert`.
+  let st: Stack[Integer] := create Stack[Integer].make()
+  st.push(10)
+  st.push(20)
+  st.push(30)
+  let order: String := ""
+  let sum: Integer := 0
+  across st as e do
+    order := order + e.to_string + " "
+    if convert e to v: Integer then
+      sum := sum + v
+    end
+  end
+  c.print_line("7. Stack top->bottom  = " + order.trim + " (sum " + sum.to_string + ")")  -- 30 20 10 (sum 60)
 end
 
 main()

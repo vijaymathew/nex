@@ -1952,3 +1952,67 @@ end"
           result (tc/type-check (p/ast code))]
       (is (:success result))
       (is (empty? (:errors result))))))
+
+(deftest test-type-alias-resolves-across-repl-inputs
+  (testing "a variable declared with an alias type resolves its methods when the
+            alias is supplied via :type-aliases and the var via :var-types, as the
+            REPL does across separate inputs"
+    (let [alias-ast (p/ast "declare type Matrix = Array[Array[Real]]")
+          use-ast (assoc (p/ast "m.get(0).get(1)")
+                         :type-aliases (:type-aliases alias-ast))
+          result (tc/type-check use-ast {:var-types {"m" "Matrix"}})]
+      (is (:success result))
+      (is (empty? (:errors result)))))
+  (testing "a function-typed alias variable can be invoked across inputs"
+    (let [alias-ast (p/ast "declare type Transformer = Function(n: Integer): Integer")
+          use-ast (assoc (p/ast "double.call1(21)")
+                         :type-aliases (:type-aliases alias-ast))
+          result (tc/type-check use-ast {:var-types {"double" "Transformer"}})]
+      (is (:success result))))
+  (testing "assigning an incompatible value to an alias-typed variable still fails"
+    (let [code "declare type Transformer = Function(n: Integer): Integer
+                let bad: Transformer := 5"
+          result (tc/type-check (p/ast code))]
+      (is (not (:success result)))
+      (is (seq (:errors result))))))
+
+(deftest test-function-value-call-uses-declared-return-type
+  (testing "calling a Function value with an explicit signature yields its
+            declared return type, not the generic Any"
+    (let [ftype (:type-expr (first (:type-aliases
+                                    (p/ast "declare type T = Function(n: Integer): Integer"))))
+          opts {:classes [] :imports [] :var-types {"double" ftype}}]
+      (is (= "Integer"
+             (tc/infer-expression-type
+              (first (:statements (p/ast "double.call1(10)"))) opts)))
+      (is (= "Integer"
+             (tc/infer-expression-type
+              (first (:statements (p/ast "double(10)"))) opts)))))
+  (testing "a bare Function (no signature) still yields Any from a callN"
+    (let [opts {:classes [] :imports [] :var-types {"g" "Function"}}]
+      (is (= "Any"
+             (tc/infer-expression-type
+              (first (:statements (p/ast "g.call1(10)"))) opts))))))
+
+(deftest test-type-alias-function-parameter
+  (testing "a parameter declared with a Function-alias type can be invoked, and
+            the function can be called with a matching argument"
+    (let [code "declare type Transformer = Function(n: Integer): Integer
+                function apply_twice(f: Transformer, n: Integer): Integer do
+                  result := f(f(n))
+                end
+                let d: Transformer := fn (n: Integer): Integer do result := n * 2 end
+                apply_twice(d, 3)"
+          result (tc/type-check (p/ast code))]
+      (is (:success result))
+      (is (empty? (:errors result)))))
+  (testing "an alias-typed parameter is not mistaken for a generic type parameter;
+            passing an incompatible argument is rejected"
+    (let [code "declare type Transformer = Function(n: Integer): Integer
+                function apply_twice(f: Transformer, n: Integer): Integer do
+                  result := f(f(n))
+                end
+                apply_twice(5, 3)"
+          result (tc/type-check (p/ast code))]
+      (is (not (:success result)))
+      (is (seq (:errors result))))))

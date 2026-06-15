@@ -435,7 +435,9 @@
      (and (string? t)
           (re-matches #"[A-Z][A-Za-z0-9_]*" t)
           (not (env-lookup-class env t))
-          (not (builtin-type? t))))))
+          (not (builtin-type? t))
+          ;; A declared type alias names a concrete type, not a generic param.
+          (not (env-lookup-type-alias env t))))))
 
 (declare visible-class-defs)
 
@@ -1704,6 +1706,18 @@
             (throw (ex-info "Method sort expects 0 or 1 arguments"
                             {:error (type-error
                                      (str "Method sort expects 0 or 1 arguments, got " (count args)))})))))
+
+      ;; Invoking a Function value that carries an explicit signature (e.g.
+      ;; `f.call1(x)` where `f: Function(n: Integer): Integer`): the declared
+      ;; return type is more precise than the generic callN result (Any).
+      (and (= base-type "Function")
+           (map? target-type)
+           (:return-type target-type)
+           (re-matches #"call\d+" (str method)))
+      (do
+        (doseq [arg args]
+          (check-expression env arg))
+        (:return-type target-type))
 
       :else
       (let [class-def (env-lookup-class env base-type)]
@@ -2984,7 +2998,13 @@
                 (throw (ex-info (str "Argument type mismatch for method " call-name)
                                 {:error (type-error
                                          (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
-          (resolve-generic-type (:return-type method-sig) type-map)))
+          ;; A Function value carrying an explicit signature knows its own return
+          ;; type; prefer it over the generic callN result (which is Any).
+          (if (and (map? var-type)
+                   (= "Function" (:base-type var-type))
+                   (:return-type var-type))
+            (:return-type var-type)
+            (resolve-generic-type (:return-type method-sig) type-map))))
         (if-let [current-class (env-lookup-var env "__current_class__")]
           (if-let [method-sig (lookup-class-method env current-class method (count args) current-class)]
             (do
@@ -3957,14 +3977,17 @@
     ;; Track current class for this/super resolution
     (env-add-var method-env "__current_class__" class-name)
 
-    ;; Add parameters to method environment
+    ;; Add parameters to method environment. Expand type aliases so a parameter
+    ;; declared with an alias type (e.g. `f: Transformer`) resolves its methods.
     (doseq [param params]
-      (env-add-var method-env (:name param) (or (:type param) "Any")))
+      (env-add-var method-env (:name param)
+                   (expand-type-aliases env (or (:type param) "Any"))))
 
     ;; Add Result variable for return type
     (when return-type
-      (env-add-var method-env "Result" return-type)
-      (env-add-var method-env "result" return-type))
+      (let [rt (expand-type-aliases env return-type)]
+        (env-add-var method-env "Result" rt)
+        (env-add-var method-env "result" rt)))
 
     ;; Check preconditions
     (doseq [assertion require]
@@ -4695,9 +4718,11 @@
        (doseq [class-def visible-classes]
          (collect-class-info env class-def))
 
-       ;; Inject pre-existing variable types (e.g., from REPL)
+       ;; Inject pre-existing variable types (e.g., from REPL). Expand any type
+       ;; aliases so a variable declared with an alias type (e.g. a REPL `let m:
+       ;; Matrix := ...`) resolves its methods on later inputs.
        (doseq [[var-name var-type] (:var-types opts)]
-         (env-add-var env var-name var-type))
+         (env-add-var env var-name (expand-type-aliases env var-type)))
 
        ;; Register function variables (name -> generated class)
        (doseq [fn-def normalized-functions]
