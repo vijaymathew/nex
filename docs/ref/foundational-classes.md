@@ -41,8 +41,13 @@ Bare `Function` remains valid and is compatible with any typed function value
 let f: Function := fn (n: Integer): Integer do result := n * 2 end
 ```
 
-Subtype compatibility: a `Function(a: B)` value satisfies a `Function(a: A)`
-parameter when `B` is a subclass of `A`. Return types follow the same rule.
+Subtype compatibility: a function value conforms to a function-typed slot when it
+accepts *at least* the arguments the slot supplies and returns *at most* what the
+slot promises. **Parameters are contravariant** and the **return type is
+covariant**. So a `Function(a: A)` value satisfies a `Function(a: B)` parameter
+when `B` is a subclass of `A` (a handler for the wider type can stand in for one
+of the narrower type), and a function returning a subclass satisfies a slot
+expecting the superclass. The reverse directions are rejected.
 
 ### Type aliases
 

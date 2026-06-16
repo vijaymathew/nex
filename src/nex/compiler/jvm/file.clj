@@ -45,7 +45,8 @@
 (defn- augment-ast-with-interns
   [source-id ast]
   (let [intern-classes (interp/resolve-interned-classes source-id ast)
-        merged-imports (merge-import-like-nodes [] (:imports ast))]
+        intern-imports (interp/resolve-interned-imports source-id ast)
+        merged-imports (merge-import-like-nodes intern-imports (:imports ast))]
     (assoc ast
            :imports merged-imports
            :classes (vec (concat intern-classes (:classes ast))))))

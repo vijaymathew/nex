@@ -1,10 +1,34 @@
+-- Self-contained HTTP client/server demo: start a server in-process on an
+-- ephemeral port, exercise it with the HTTP client, then shut it down.
+intern net/Http_Server
 intern net/Http_Client
 
+let server: Http_Server := create Http_Server.make(0)
+
+server.get("/hello/:name", fn(req: Http_Request): Http_Server_Response do
+  result := create Http_Server_Response.text("hello " + req.param("name"))
+end)
+
+server.get("/files/*", fn(req: Http_Request): Http_Server_Response do
+  result := create Http_Server_Response.text("wildcard=" + req.wildcard())
+end)
+
+server.get("/search", fn(req: Http_Request): Http_Server_Response do
+  result := create Http_Server_Response.text("q=" + req.query_param("q"))
+end)
+
+server.post("/echo", fn(req: Http_Request): Http_Server_Response do
+  result := create Http_Server_Response.text(req.body())
+end)
+
+server.start()
+
 let client: Http_Client := create Http_Client.make()
-let base: String := "http://127.0.0.1:8080"
+let base: String := "http://127.0.0.1:" + server.port
 
 print(client.get(base + "/hello/nex").body())
 print(client.get(base + "/files/css/site.css").body())
 print(client.get(base + "/search?q=design").body())
 print(client.post(base + "/echo", "payload").body())
-print("PUT and DELETE can be exercised with curl against /items/42.")
+
+server.stop()

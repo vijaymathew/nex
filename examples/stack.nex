@@ -44,7 +44,7 @@ class Stack [G]
       require
         not_empty: top_index >= 0
       do
-        result := items.at(top_index)
+        result := items.get(top_index)
       end
 
     push(item: G)
@@ -52,7 +52,7 @@ class Stack [G]
         not_full: top_index < max_size - 1
       do
         top_index := top_index + 1
-        items := items.set(top_index, item)
+        items.add(item)
       ensure
         size_increased: top_index = old top_index + 1
       end
@@ -61,7 +61,8 @@ class Stack [G]
       require
         not_empty: top_index >= 0
       do
-        result := items.at(top_index)
+        result := items.get(top_index)
+        items.remove(top_index)
         top_index := top_index - 1
       ensure
         size_decreased: top_index = old top_index - 1

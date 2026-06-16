@@ -11,7 +11,9 @@
   [source-id ast]
   (assoc ast
          :classes (vec (concat (interp/resolve-interned-classes source-id ast)
-                               (:classes ast)))))
+                               (:classes ast)))
+         :imports (vec (concat (interp/resolve-interned-imports source-id ast)
+                               (:imports ast)))))
 
 (defn- type-check-ast!
   [source-id ast]

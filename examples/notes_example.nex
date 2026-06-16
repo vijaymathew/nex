@@ -8,7 +8,7 @@ feature
   get_balance(): Integer
     note "Returns the current balance"
   do
-      balance
+      result := balance
   end
 
   deposit(amount: Integer)

@@ -508,8 +508,19 @@
              (and env (is-generic-type-param? env t2))
              (and (nil? env) (is-generic-type-param? t1))
              (and (nil? env) (is-generic-type-param? t2)))
-         ;; Handle parameterized types
+         ;; Function types are equal iff they have the same parameter types and
+         ;; the same return type (parameter names are irrelevant). Their
+         ;; conformance under subtyping -- contravariant parameters, covariant
+         ;; return -- is handled separately by types-compatible?,
+         ;; so two differing signatures must NOT be reported equal here on the
+         ;; strength of a shared (empty) :type-params list.
          (and (map? t1) (map? t2)
+              (= (:base-type t1) "Function") (= (:base-type t2) "Function")
+              (= (mapv :type (:param-types t1)) (mapv :type (:param-types t2)))
+              (= (:return-type t1) (:return-type t2)))
+         ;; Handle other parameterized types
+         (and (map? t1) (map? t2)
+              (not= (:base-type t1) "Function")
               (= (:base-type t1) (:base-type t2))
               (= (:type-params t1) (:type-params t2)))
          ;; Allow base class name to match parameterized type (e.g., "Box" matches {:base-type "Box", ...})
@@ -587,23 +598,35 @@
           (types-equal? env a1 a2)
           ;; Function type with signature is compatible with bare Function
           (and (map? a1) (= (:base-type a1) "Function") (:param-types a1) (= a2 "Function"))
-          ;; Two function signatures: check param count + covariant param/return types
+          ;; Two function signatures: parameters CONTRAVARIANT, return COVARIANT.
+          ;; a1 is the source (value) type; a2 the target (expected) type. The
+          ;; value conforms when it accepts at least what the target promises to
+          ;; pass (params contravariant) and returns at most what the target
+          ;; promises to deliver (return covariant).
           (and (map? a1) (map? a2)
                (= (:base-type a1) "Function") (= (:base-type a2) "Function")
                (:param-types a1) (:param-types a2)
                (= (count (:param-types a1)) (count (:param-types a2)))
                (every? true?
                        (map (fn [p1 p2]
-                              (types-compatible? env (:type p1) (:type p2)))
+                              ;; contravariant: target param must conform to source param
+                              (types-compatible? env (:type p2) (:type p1)))
                             (:param-types a1) (:param-types a2)))
                (or (nil? (:return-type a1)) (nil? (:return-type a2))
+                   ;; covariant: source return must conform to target return
                    (types-compatible? env (:return-type a1) (:return-type a2))))
           (and (string? a1) (string? a2) (class-subtype? env a1 a2))
           (and (map? a1) (string? a2) (class-subtype? env (:base-type a1) a2))
+          ;; Generic class conformance. Function types are excluded here: their
+          ;; conformance is decided solely by the function-signature branch above
+          ;; (contravariant params, covariant return), so two distinct function
+          ;; signatures are NOT silently accepted as a no-type-params class match.
           (and (map? a1) (map? a2)
+               (not= (:base-type a1) "Function") (not= (:base-type a2) "Function")
                (class-subtype? env (:base-type a1) (:base-type a2))
                (= (:type-params a1) (:type-params a2)))
           (and (map? a1) (map? a2)
+               (not= (:base-type a1) "Function") (not= (:base-type a2) "Function")
                (= (:base-type a1) (:base-type a2))
                (= (count (:type-params a1)) (count (:type-params a2)))
                (every? true? (map (fn [p1 p2]
@@ -3860,11 +3883,17 @@
   (case (:type stmt)
     :assign (if (#{"result" "Result"} (:target stmt)) true assigned?)
     :let (if (#{"result" "Result"} (:name stmt)) true assigned?)
-    :if (let [branch-outs (concat
-                           [(result-definitely-assigned-in-body? (:then stmt) assigned?)]
-                           (map #(result-definitely-assigned-in-body? (:then %) assigned?) (:elseif stmt))
+    :if (let [;; A branch that cannot complete normally (it always raises or
+              ;; retries) contributes no path that falls through to the rest of
+              ;; the routine, so it need not assign result itself.
+              branch-out (fn [body]
+                           (or (not (body-may-complete-normally? body))
+                               (result-definitely-assigned-in-body? body assigned?)))
+              branch-outs (concat
+                           [(branch-out (:then stmt))]
+                           (map #(branch-out (:then %)) (:elseif stmt))
                            [(if (:else stmt)
-                              (result-definitely-assigned-in-body? (:else stmt) assigned?)
+                              (branch-out (:else stmt))
                               assigned?)])]
           (every? true? branch-outs))
     :loop (result-definitely-assigned-in-body? (:init stmt) assigned?)
@@ -4173,6 +4202,96 @@
                                (str "Cyclic inheritance detected: "
                                     (str/join " -> " path)))}))))))
 
+(defn- substitute-method-types
+  "Apply a generic substitution map to a method member's parameter and return
+   types, so an inherited routine's signature is expressed in the heir's type
+   context."
+  [member subst]
+  (if (empty? subst)
+    member
+    (-> member
+        (update :params (fn [ps]
+                          (mapv (fn [p]
+                                  (if (:type p)
+                                    (update p :type #(resolve-generic-type % subst))
+                                    p))
+                                ps)))
+        (update :return-type #(when % (resolve-generic-type % subst))))))
+
+(defn- inherited-method-member
+  "Walk the parent chain and return the nearest ancestor's method member (a
+   feature-member map) whose name and arity match, with its parameter and return
+   types substituted into the heir's type context by resolving the generic type
+   arguments supplied on each `inherit` clause. Returns nil if the routine is not
+   inherited. This is the routine an override redefines."
+  [env parents method-name arity]
+  (letfn [(search [parent-entry subst visited]
+            (let [cn (:parent parent-entry)]
+              (when (and (string? cn) (not (contains? visited cn)))
+                (let [class-def (env-lookup-class env cn)
+                      ;; Map this class's own generic params to heir-context types,
+                      ;; resolving the inherit-clause arguments through the
+                      ;; substitution accumulated from classes below it.
+                      args (mapv #(resolve-generic-type % subst)
+                                 (or (:generic-args parent-entry) []))
+                      subst' (or (build-generic-type-map env {:base-type cn :type-args args}) {})
+                      visited' (conj visited cn)
+                      own (when class-def
+                            (some (fn [member]
+                                    (when (and (= (:type member) :method)
+                                               (= (:name member) method-name)
+                                               (= (count (or (:params member) [])) arity))
+                                      member))
+                                  (feature-members class-def)))]
+                  (or (when own (substitute-method-types own subst'))
+                      (when class-def
+                        (some (fn [pe] (search pe subst' visited'))
+                              (:parents class-def))))))))]
+    (some (fn [pe] (search pe {} #{})) parents)))
+
+(defn- check-override-conformance
+  "Enforce CONTRAVARIANT parameters and COVARIANT return for a method that
+   overrides an inherited routine of the same name and arity. The inherited
+   signature is first substituted into the heir's type context (so a method
+   inherited from, say, Container[Integer] is compared with T resolved to
+   Integer). A comparison is skipped only when, after that substitution, a type
+   is still an unresolved generic parameter of the heir itself."
+  [env class-name parents member]
+  (when (and (= (:type member) :method) (seq parents))
+    (let [m-name (:name member)
+          m-params (or (:params member) [])
+          arity (count m-params)
+          parent-m (inherited-method-member env parents m-name arity)
+          concrete? (fn [t] (and t (not (is-generic-type-param? env t))))]
+      (when parent-m
+        ;; Parameters are contravariant: each inherited parameter type must
+        ;; conform to the overriding parameter type (the override must accept at
+        ;; least what the inherited routine accepted).
+        (doseq [[idx pp cp] (map vector (range) (or (:params parent-m) []) m-params)]
+          (let [pt (:type pp) ct (:type cp)]
+            (when (and pt ct (concrete? pt) (concrete? ct)
+                       (not (types-compatible? env pt ct)))
+              (throw (ex-info (str "Invalid override of '" m-name "'")
+                              {:error (type-error
+                                       (str "Override of '" m-name "' in class '" class-name
+                                            "' narrows parameter " (inc idx) " from "
+                                            (display-type pt) " to " (display-type ct)
+                                            ". Parameters are contravariant: an overriding routine must "
+                                            "accept at least what the inherited one accepts. Keep the wider "
+                                            "type and narrow inside with convert/match, or use generics."))})))))
+        ;; Return is covariant: the overriding return type must conform to the
+        ;; inherited return type.
+        (let [pr (:return-type parent-m) cr (:return-type member)]
+          (when (and pr cr (concrete? pr) (concrete? cr)
+                     (not (types-compatible? env cr pr)))
+            (throw (ex-info (str "Invalid override of '" m-name "'")
+                            {:error (type-error
+                                     (str "Override of '" m-name "' in class '" class-name
+                                          "' changes the return type from " (display-type pr)
+                                          " to " (display-type cr) ", which does not conform. "
+                                          "Returns are covariant: the overriding return type must "
+                                          "conform to the inherited one."))}))))))))
+
 (defn check-class
   "Check a class definition"
   [env {:keys [name body invariant parents generic-params] :as class-def}]
@@ -4214,8 +4333,10 @@
       (doseq [member (:members section)]
         (cond
           (= (:type member) :method)
-          (when-not (:declaration-only? member)
-            (check-method class-env name member))
+          (do
+            (check-override-conformance env name parents member)
+            (when-not (:declaration-only? member)
+              (check-method class-env name member)))
           (= (:type member) :field)
           (when-not (:constant? member)
             (validate-type-annotation class-env (:field-type member)))))
