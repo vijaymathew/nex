@@ -53,8 +53,8 @@ feature
       end
     end
 
-  accept(timeout_ms: Integer): Tcp_Socket
-    note "Wait up to timeout_ms milliseconds for a client connection. Raises on timeout or accept failure."
+  accept(timeout_ms: Integer): ?Tcp_Socket
+    note "Wait up to timeout_ms milliseconds for a client connection. Returns nil on timeout or accept failure."
     require
       listening: server_socket /= nil
       valid_timeout: timeout_ms >= 0
@@ -68,10 +68,10 @@ feature
           if server_socket /= nil then
             server_socket.setSoTimeout(0)
           end
-          raise "accept timed out or failed"
+          result := nil
         end
       else
-        raise "server socket is not listening"
+        result := nil
       end
     end
 

@@ -9,12 +9,14 @@ create
     server.open()
     print("Listening on port " + server.port)
 
-    let client: Tcp_Socket := server.accept(30000)
-    let line: ?String := client.read_line()
-    if line /= nil then
-      client.send_line("echo: " + line)
+    let client: ?Tcp_Socket := server.accept(30000)
+    if client /= nil then
+      let line: ?String := client.read_line()
+      if line /= nil then
+        client.send_line("echo: " + line)
+      end
+      client.close()
     end
-    client.close()
 
     server.close()
   end
