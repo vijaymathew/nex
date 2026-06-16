@@ -3395,6 +3395,39 @@
                     {:path path :class-name class-name :alias alias}))))
 
 #?(:clj
+   (defn- resolve-interned*
+     "Traverse intern declarations recursively and collect both the class
+      definitions and the import declarations they bring into scope for static
+      analysis. Returns {:classes [...] :imports [...] :seen #{...}}. Aliased
+      interns add an extra class entry under the alias name. Imports are carried
+      through so that an interned module's host-class imports (e.g.
+      `import java.net.ServerSocket`) are visible to the typechecker that
+      elaborates the merged program."
+     [source-id program seen-files]
+     (letfn [(resolve* [current-source current-program seen]
+               (let [ctx (assoc (make-context) :debug-source current-source)]
+                 (reduce
+                  (fn [{:keys [classes imports seen]} {:keys [path class-name alias]}]
+                    (let [file-path (find-intern-file ctx path class-name)
+                          canonical (.getCanonicalPath (clojure.java.io/file file-path))]
+                      (if (contains? seen canonical)
+                        {:classes classes :imports imports :seen seen}
+                        (let [file-ast (parser/ast (slurp file-path))
+                              nested (resolve* canonical file-ast (conj seen canonical))
+                              direct-classes (:classes file-ast)
+                              all-file-classes (concat direct-classes (:classes nested))
+                              all-file-imports (concat (:imports file-ast) (:imports nested))
+                              aliased-class (when alias
+                                              (when-let [class-def (some #(when (= (:name %) class-name) %) all-file-classes)]
+                                                [(assoc class-def :name alias)]))]
+                          {:classes (into classes (concat all-file-classes aliased-class))
+                           :imports (into imports all-file-imports)
+                           :seen (:seen nested)}))))
+                  {:classes [] :imports [] :seen seen}
+                  (:interns current-program))))]
+       (resolve* source-id program seen-files))))
+
+#?(:clj
    (defn resolve-interned-classes
      "Resolve intern declarations to the class ASTs they bring into scope for static analysis.
       Returns a flat sequence of class definitions, including recursively interned classes.
@@ -3402,28 +3435,23 @@
      ([source-id program]
       (resolve-interned-classes source-id program #{}))
      ([source-id program seen-files]
-      (letfn [(resolve* [current-source current-program seen]
-                (let [ctx (assoc (make-context) :debug-source current-source)]
-                  (reduce
-                   (fn [{:keys [classes seen]} {:keys [path class-name alias]}]
-                     (let [file-path (find-intern-file ctx path class-name)
-                           canonical (.getCanonicalPath (clojure.java.io/file file-path))]
-                       (if (contains? seen canonical)
-                         {:classes classes :seen seen}
-                         (let [file-ast (parser/ast (slurp file-path))
-                               nested (resolve* canonical file-ast (conj seen canonical))
-                               direct-classes (:classes file-ast)
-                               all-file-classes (concat direct-classes (:classes nested))
-                               aliased-class (when alias
-                                               (when-let [class-def (some #(when (= (:name %) class-name) %) all-file-classes)]
-                                                 [(assoc class-def :name alias)]))]
-                           {:classes (into classes (concat all-file-classes aliased-class))
-                            :seen (:seen nested)}))))
-                   {:classes [] :seen seen}
-                   (:interns current-program))))]
-        (:classes (resolve* source-id program seen-files)))))
+      (:classes (resolve-interned* source-id program seen-files))))
    :cljs
    (defn resolve-interned-classes
+     [& _]
+     []))
+
+#?(:clj
+   (defn resolve-interned-imports
+     "Resolve intern declarations to the import declarations they bring into scope
+      for static analysis (recursively, deduplicated). These let the typechecker
+      see the host-class imports declared inside interned modules."
+     ([source-id program]
+      (resolve-interned-imports source-id program #{}))
+     ([source-id program seen-files]
+      (distinct (:imports (resolve-interned* source-id program seen-files)))))
+   :cljs
+   (defn resolve-interned-imports
      [& _]
      []))
 

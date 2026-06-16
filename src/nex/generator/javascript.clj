@@ -30,10 +30,11 @@
 
 (defn- augment-ast-with-interns
   [source-id ast]
-  (let [intern-classes (interp/resolve-interned-classes source-id ast)]
-    (if (seq intern-classes)
-      (update ast :classes #(vec (concat intern-classes %)))
-      ast)))
+  (let [intern-classes (interp/resolve-interned-classes source-id ast)
+        intern-imports (interp/resolve-interned-imports source-id ast)]
+    (cond-> ast
+      (seq intern-classes) (update :classes #(vec (concat intern-classes %)))
+      (seq intern-imports) (update :imports #(vec (concat intern-imports %))))))
 
 (defn class-name-to-local
   "Convert a class name to a local variable name (e.g., 'Point' -> 'point')"
