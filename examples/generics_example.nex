@@ -91,8 +91,6 @@ class Sorted_List [G -> Comparable]
     count: Integer
 
     insert(new_item: G)
-      require
-        not_null: new_item /= 0
       do
         item := new_item
         count := count + 1
@@ -141,8 +139,6 @@ class Dictionary [K -> Hashable, V]
     size: Integer
 
     put(k: K, v: V)
-      require
-        valid_key: k /= 0
       do
         key := k
         value := v

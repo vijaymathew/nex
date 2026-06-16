@@ -5,14 +5,13 @@ feature
   current_time_millis(): Integer64
     note "Get current time in milliseconds"
   do
-      let result := 0
+      result := 0
       with "java" do
-        let result := 42
+        result := 42
       end
       with "javascript" do
-        let result := 99
+        result := 99
       end
-      result
   end
 
   print_platform() do
@@ -25,13 +24,12 @@ feature
   end
 
   get_random(): Integer do
-      let result := 0
+      result := 0
       with "java" do
-        let result := 1
+        result := 1
       end
       with "javascript" do
-        let result := 2
+        result := 2
       end
-      result
   end
 end

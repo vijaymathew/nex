@@ -112,27 +112,27 @@ end
 
 class Calculator
   feature
-    result: Integer
+    value: Integer
 
   feature
     clear() do
-      result := 0
+      value := 0
     end
 
     show() do
-      print("result: ")
-      print(result)
+      print("value: ")
+      print(value)
     end
 
     add(x: Integer) do
-      result := result + x
+      value := value + x
     end
 
     subtract(x: Integer) do
-      result := result - x
+      value := value - x
     end
 
     multiply(x: Integer) do
-      result := result * x
+      value := value * x
     end
 end

@@ -5,32 +5,29 @@ feature
   items: Array [T] note "Internal storage for stack items"
   capacity: Integer note "Maximum number of items"
 
+  count(): Integer
+    note "Return the number of items in the stack"
+  do
+      result := items.length
+  end
+
   push(item: T)
     note "Add an item to the top of the stack"
     require
-      not_full: count() < capacity
+      not_full: items.length < capacity
     do
-      print("push")
-    ensure
-      added: count() = old count() + 1
+      items.add(item)
     end
 
   pop(): T
     note "Remove and return the top item"
     require
-      not_empty: count() > 0
+      not_empty: items.length > 0
     do
-      let result := items
-    ensure
-      removed: count() = old count() - 1
+      let last := items.length - 1
+      result := items.get(last)
+      items.remove(last)
     end
-
-  count(): Integer
-    note "Return the number of items in the stack"
-  do
-      let result := 0
-      result
-  end
 
 private feature
   internal_capacity: Integer note "Internal capacity tracker"
@@ -41,7 +38,7 @@ private feature
       print("resize")
   end
 
--> StackDebugger feature
+feature
   debug_info: String note "Debug information for stack"
 
   dump_state()
@@ -55,12 +52,12 @@ create
     require
       positive_size: max_size > 0
     do
-      let capacity := max_size
+      items := []
+      capacity := max_size
     ensure
       capacity_set: capacity = max_size
     end
 
 invariant
   valid_capacity: capacity > 0
-  items_within_capacity: count() <= capacity
 end

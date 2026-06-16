@@ -12,11 +12,11 @@ class NumberList
 
   feature
     get_first() do
-      print(numbers[0])
+      print(numbers.get(0))
     end
 
     get_at(index: Integer) do
-      print(numbers[index])
+      print(numbers.get(index))
     end
 
     show_all() do
@@ -26,7 +26,7 @@ class NumberList
       until
         i >= 5
       do
-        print(numbers[i])
+        print(numbers.get(i))
         i := i + 1
       end
     end
@@ -47,16 +47,16 @@ class PriceList
 
   feature
     get_price(item: String) do
-      print(prices[item])
+      print(prices.get(item))
     end
 
     show_all() do
       print("Apple: ")
-      print(prices["apple"])
+      print(prices.get("apple"))
       print("Banana: ")
-      print(prices["banana"])
+      print(prices.get("banana"))
       print("Orange: ")
-      print(prices["orange"])
+      print(prices.get("orange"))
     end
 end
 
@@ -81,9 +81,9 @@ class Store
       until
         i >= 3
       do
-        let item := items[i]
-        let price := prices[item]
-        let count := inventory[item]
+        let item := items.get(i)
+        let price := prices.get(item)
+        let count := inventory.get(item)
         print(item)
         print(": $")
         print(price)
@@ -102,9 +102,9 @@ class Store
       until
         i >= 3
       do
-        let item := items[i]
-        let price := prices[item]
-        let count := inventory[item]
+        let item := items.get(i)
+        let price := prices.get(item)
+        let count := inventory.get(item)
         total := total + (price * count)
         i := i + 1
       end
@@ -128,13 +128,13 @@ class Grid
 
   feature
     get_cell(row, col: Integer) do
-      print(matrix[row][col])
+      print(matrix.get(row).get(col))
     end
 
     show_row(row: Integer) do
-      print(matrix[row][0])
-      print(matrix[row][1])
-      print(matrix[row][2])
+      print(matrix.get(row).get(0))
+      print(matrix.get(row).get(1))
+      print(matrix.get(row).get(2))
     end
 end
 
@@ -153,18 +153,18 @@ class StudentGrades
 
   feature
     get_grade(student: String, test: Integer) do
-      print(grades[student][test])
+      print(grades.get(student).get(test))
     end
 
     show_student(student: String) do
-      let tests := grades[student]
+      let tests := grades.get(student)
       print(student)
       print(": ")
-      print(tests[0])
+      print(tests.get(0))
       print(", ")
-      print(tests[1])
+      print(tests.get(1))
       print(", ")
-      print(tests[2])
+      print(tests.get(2))
     end
 end
 
@@ -183,16 +183,16 @@ class Categories
 
   feature
     get_category(name: String) do
-      let category := items[name]
+      let category := items.get(name)
       print(category)
     end
 
     get_item(category: String, index: Integer) do
-      print(items[category][index])
+      print(items.get(category).get(index))
     end
 
     show_category(name: String) do
-      let category := items[name]
+      let category := items.get(name)
       let i := 0
       print(name)
       print(": ")
@@ -201,7 +201,7 @@ class Categories
       until
         i >= 3
       do
-        print(category[i])
+        print(category.get(i))
         if i < 2 then
           print(", ")
         else
