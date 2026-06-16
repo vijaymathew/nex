@@ -3316,7 +3316,15 @@
                        (concat
                         (map #(str (System/getProperty "user.home") "/.nex/deps/" %) filenames)
                         (map #(str (System/getProperty "user.home") "/.nex/deps/src/" %) filenames)))
-           locations (vec (concat current-dir local-direct local-lib home-deps))
+           ;; A path-qualified intern (e.g. `intern net/Http_Server`) names a
+           ;; module under that path, so the path-qualified locations (./lib/<path>
+           ;; and the dependency cache) must be searched BEFORE the unqualified
+           ;; same-directory locations. Otherwise a source file that merely shares
+           ;; the module's bare filename (e.g. examples/http_server.nex) would
+           ;; shadow the real library module.
+           locations (vec (if (seq path)
+                            (concat local-lib home-deps current-dir local-direct)
+                            (concat current-dir local-direct home-deps)))
            found (first (filter #(-> % clojure.java.io/file .exists) locations))]
        (if found
          found

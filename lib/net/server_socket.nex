@@ -48,6 +48,8 @@ feature
     do
       if server_socket /= nil then
         result := create Tcp_Socket.from_socket(server_socket.accept())
+      else
+        raise "server socket is not listening"
       end
     end
 
@@ -66,8 +68,10 @@ feature
           if server_socket /= nil then
             server_socket.setSoTimeout(0)
           end
-          result := nil
+          raise "accept timed out or failed"
         end
+      else
+        raise "server socket is not listening"
       end
     end
 

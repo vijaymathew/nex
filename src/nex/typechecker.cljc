@@ -3883,11 +3883,17 @@
   (case (:type stmt)
     :assign (if (#{"result" "Result"} (:target stmt)) true assigned?)
     :let (if (#{"result" "Result"} (:name stmt)) true assigned?)
-    :if (let [branch-outs (concat
-                           [(result-definitely-assigned-in-body? (:then stmt) assigned?)]
-                           (map #(result-definitely-assigned-in-body? (:then %) assigned?) (:elseif stmt))
+    :if (let [;; A branch that cannot complete normally (it always raises or
+              ;; retries) contributes no path that falls through to the rest of
+              ;; the routine, so it need not assign result itself.
+              branch-out (fn [body]
+                           (or (not (body-may-complete-normally? body))
+                               (result-definitely-assigned-in-body? body assigned?)))
+              branch-outs (concat
+                           [(branch-out (:then stmt))]
+                           (map #(branch-out (:then %)) (:elseif stmt))
                            [(if (:else stmt)
-                              (result-definitely-assigned-in-body? (:else stmt) assigned?)
+                              (branch-out (:else stmt))
                               assigned?)])]
           (every? true? branch-outs))
     :loop (result-definitely-assigned-in-body? (:init stmt) assigned?)
