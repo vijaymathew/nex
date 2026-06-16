@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Breaking:** function and method parameters are now **contravariant** and
+  return types **covariant** (previously parameters were covariant). A function
+  value or overriding routine may *widen* a parameter and *narrow* a return, but
+  not the reverse — making conformance a sound, local check. Override conformance
+  is now enforced at the definition site (an override that narrows a parameter or
+  returns a non-conforming type is rejected there, naming the routine and
+  position), which also closes a case where a non-conforming return override was
+  previously accepted. Function-value assignment now enforces the same rule
+  (it was previously checked too leniently). Generic signatures are resolved
+  through inheritance before the check, so an override of a method inherited from
+  e.g. `Container[Integer]` is verified with the type parameter substituted.
+  To keep a covariant-style override, retain the wider parameter type and narrow
+  inside the body with `convert`/`match`, or use generics. See
+  `docs/md/VARIANCE.md`.
 - **Breaking:** the `when` expression now requires `then` before the consequent,
   matching the `when ... then` shape used by `match`/`select` clauses.
   Write `when cond then a else b end` instead of `when cond a else b end`.
