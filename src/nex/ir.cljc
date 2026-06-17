@@ -26,19 +26,8 @@
        (= :object (first x))
        (string? (second x))))
 
-(defn valid-jvm-type?
-  [x]
-  (or (contains? primitive-jvm-types x)
-      (object-jvm-type? x)))
-
 (defn scalar-type [name]
   {:tag :scalar :name name})
-
-(defn class-type [name]
-  {:tag :class :name name})
-
-(defn generic-instance-type [base args]
-  {:tag :generic-instance :base base :args (vec args)})
 
 (defn detachable-type [inner]
   {:tag :detachable :inner inner})
@@ -140,16 +129,6 @@
    :test test
    :then (vec then)
    :else (vec else)
-   :nex-type nex-type
-   :jvm-type jvm-type})
-
-(defn call-static-node
-  [class method descriptor args nex-type jvm-type]
-  {:op :call-static
-   :class class
-   :method method
-   :descriptor descriptor
-   :args (vec args)
    :nex-type nex-type
    :jvm-type jvm-type})
 
@@ -278,14 +257,6 @@
    :nex-type nex-type
    :jvm-type to})
 
-(defn unbox-node [from to expr nex-type]
-  {:op :unbox
-   :from from
-   :to to
-   :expr expr
-   :nex-type nex-type
-   :jvm-type to})
-
 (defn return-node [expr nex-type jvm-type]
   {:op :return
    :expr expr
@@ -346,9 +317,3 @@
 (defn pop-node [expr]
   {:op :pop
    :expr expr})
-
-(defn pretty-op
-  "Return a short human-readable label for an IR node."
-  [node]
-  (when (ir-node? node)
-    (-> (:op node) name (str/replace "-" " "))))

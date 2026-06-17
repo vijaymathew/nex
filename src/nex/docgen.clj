@@ -4,17 +4,6 @@
             [clojure.string :as str])
   (:gen-class))
 
-(defn escape-markdown
-  "Escape special Markdown characters"
-  [text]
-  (when text
-    (-> text
-        (str/replace #"\|" "\\|")
-        (str/replace #"\*" "\\*")
-        (str/replace #"_" "\\_")
-        (str/replace #"\[" "\\[")
-        (str/replace #"\]" "\\]"))))
-
 (defn format-type
   "Format a type for display"
   [type-expr]
@@ -171,17 +160,6 @@
     {:fields fields
      :methods methods
      :constructors constructors}))
-
-(defn group-by-visibility
-  "Group members by their visibility"
-  [members]
-  (group-by (fn [member]
-              (let [vis (:visibility member)]
-                (case (:type vis)
-                  :private :private
-                  :selective :selective
-                  :public)))
-            members))
 
 (defn format-generic-params
   "Format generic parameters"

@@ -1227,14 +1227,6 @@
   [input]
   (re-matches #"^\s*[a-zA-Z_][a-zA-Z0-9_]*\s*$" input))
 
-(defn looks-like-expression?
-  "Check if input looks like a simple expression (not a statement)"
-  [input]
-  (not (or (looks-like-statement? input)
-           (looks-like-class? input)
-           (re-find #"^\s*print\(" input)
-           (re-find #"^\s*create\s+" input))))
-
 (defn eval-code
   ([ctx input]
    (eval-code ctx input "<repl>"))

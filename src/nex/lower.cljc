@@ -492,10 +492,6 @@
         (throw (ex-info "Unable to infer expression type during lowering"
                         {:expr expr})))))
 
-(defn- expr-jvm-type
-  [env expr]
-  (resolve-jvm-type env (infer-type env expr)))
-
 (defn- infer-target-call-type
   [env expr class-target-name across-item-type target-expr]
   (if (and (= :identifier (:type target-expr))

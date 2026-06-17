@@ -99,12 +99,6 @@
          (transform-node left)
          (partition 2 rest))))))
 
-(defn make-simple-container-handler
-  "Creates a handler that wraps children in a typed map."
-  [type-keyword children-key]
-  (fn [[_ & children]]
-    {type-keyword (mapv transform-node children)}))
-
 (def ^:private special-char-codes
   {"nul" "\0"
    "space" " "

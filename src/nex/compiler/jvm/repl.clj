@@ -730,21 +730,6 @@
                      lowered-classes)))))
   session)
 
-(defn- replace-metadata-atoms!
-  [session metadata]
-  (reset! (:function-asts session) (:functions metadata))
-  (reset! (:class-asts session) (:classes metadata))
-  (reset! (:import-asts session) (:imports metadata))
-  (reset! (:intern-asts session) (:interns metadata))
-  session)
-
-(defn session-metadata
-  [session]
-  {:functions @(:function-asts session)
-   :classes @(:class-asts session)
-   :imports @(:import-asts session)
-   :interns @(:intern-asts session)})
-
 (defn session-var-types
   [session]
   (into {} @(:types (:state session))))

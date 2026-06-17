@@ -281,11 +281,6 @@
       (str prefix name " -> " constraint)
       (str prefix name))))
 
-(defn format-inherit-entry
-  "Format an inherit entry"
-  [{:keys [parent]} _level]
-  parent)
-
 (defn format-class
   "Format a class declaration"
   [{:keys [name generic-params note parents body invariant]}]
