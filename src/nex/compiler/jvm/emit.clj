@@ -694,6 +694,82 @@
     :else
     nil))
 
+(defn- runtime-helper-emitters
+  "Build the ordered emitter list for a direct runtime-helper call from a
+   compact spec (see direct-runtime-helper-specs)."
+  [^MethodVisitor mv args state-slot spec]
+  (vec (mapcat
+         (fn [tok]
+           (case tok
+             :state      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))]
+             :e0         [(fn [] (emit-expr! mv (first args) state-slot))]
+             :b0         [(fn [] (emit-boxed-expr! mv (first args) state-slot))]
+             :b1         [(fn [] (emit-boxed-expr! mv (second args) state-slot))]
+             :b2         [(fn [] (emit-boxed-expr! mv (nth args 2) state-slot))]
+             :args       [(fn [] (emit-boxed-arg-array! mv args state-slot))]
+             :args-drop2 [(fn [] (emit-boxed-arg-array! mv (vec (drop 2 args)) state-slot))]
+             :bvar       (mapv (fn [arg] (fn [] (emit-boxed-expr! mv arg state-slot))) args)))
+         spec)))
+
+(def ^:private direct-runtime-helper-specs
+  "helper key -> [runtime-fn-name arg-emitter-spec]. Spec tokens (read by
+   runtime-helper-emitters): :state loads the repl state; :e<n>/:b<n> emit the
+   nth arg raw/boxed; :args / :args-drop2 pass all args / args after the first
+   two as a boxed array; :bvar splices each arg boxed."
+  {"builtin-method:Cursor:start"             ["builtin-cursor-start" [:state :e0]]
+   "builtin-method:Cursor:cursor"            ["builtin-cursor-cursor" [:state :e0]]
+   "builtin-method:Cursor:item"              ["builtin-cursor-item" [:state :e0]]
+   "builtin-method:Cursor:next"              ["builtin-cursor-next" [:state :e0]]
+   "builtin-method:Cursor:at_end"            ["builtin-cursor-at-end" [:state :e0]]
+   "builtin-method:Min_Heap:insert"          ["min-heap-insert-method" [:state :b0 :b1]]
+   "builtin-method:Min_Heap:extract_min"     ["min-heap-extract-min-method" [:state :b0]]
+   "builtin-method:Min_Heap:try_extract_min" ["min-heap-try-extract-min-method" [:state :b0]]
+   "builtin-method:Min_Heap:peek"            ["min-heap-peek-method" [:state :b0]]
+   "builtin-method:Min_Heap:try_peek"        ["min-heap-try-peek-method" [:state :b0]]
+   "builtin-method:Min_Heap:size"            ["min-heap-size-method" [:state :b0]]
+   "builtin-method:Min_Heap:is_empty"        ["min-heap-is-empty-method" [:state :b0]]
+   "print"                                   ["builtin-print!" [:state :args]]
+   "println"                                 ["builtin-println!" [:state :args]]
+   "type_of"                                 ["builtin-type-of" [:state :b0]]
+   "type_is"                                 ["builtin-type-is" [:state :b0 :b1]]
+   "sleep"                                   ["builtin-sleep!" [:b0]]
+   "hint_spin"                               ["builtin-hint-spin!" []]
+   "http_get"                                ["builtin-http-get" [:state :bvar]]
+   "http_post"                               ["builtin-http-post" [:state :bvar]]
+   "json_parse"                              ["builtin-json-parse" [:state :b0]]
+   "json_stringify"                          ["builtin-json-stringify" [:state :b0]]
+   "http_server_create"                      ["builtin-http-server-create" [:b0]]
+   "http_server_get"                         ["builtin-http-server-get!" [:b0 :b1 :b2]]
+   "http_server_post"                        ["builtin-http-server-post!" [:b0 :b1 :b2]]
+   "http_server_put"                         ["builtin-http-server-put!" [:b0 :b1 :b2]]
+   "http_server_delete"                      ["builtin-http-server-delete!" [:b0 :b1 :b2]]
+   "http_server_start"                       ["builtin-http-server-start!" [:state :b0]]
+   "http_server_stop"                        ["builtin-http-server-stop!" [:b0]]
+   "http_server_is_running"                  ["builtin-http-server-is-running" [:b0]]
+   "java-call-static"                        ["java-call-static" [:state :b0 :b1 :args-drop2]]
+   "java-get-static-field"                   ["java-get-static-field" [:state :b0 :b1]]
+   "validate-object-state"                   ["validate-object-state" [:state :b0 :b1]]
+   "op:string-concat"                        ["string-concat" [:state :args]]
+   "op:pow-int"                              ["pow-int" [:b0 :b1]]
+   "op:pow-long"                             ["pow-long" [:b0 :b1]]
+   "op:pow-double"                           ["pow-double" [:b0 :b1]]
+   "spawn-function-object"                   ["spawn-function-object" [:state :b0]]
+   "create-channel"                          ["create-channel" [:bvar]]
+   "create-array"                            ["create-array" []]
+   "create-array-filled"                     ["create-array-filled" [:bvar]]
+   "create-min-heap-empty"                   ["create-min-heap-empty" []]
+   "create-min-heap-from-comparator"         ["create-min-heap-from-comparator" [:bvar]]
+   "create-atomic-integer"                   ["create-atomic-integer" [:b0]]
+   "create-atomic-integer64"                 ["create-atomic-integer64" [:b0]]
+   "create-atomic-boolean"                   ["create-atomic-boolean" [:b0]]
+   "create-atomic-reference"                 ["create-atomic-reference" [:b0]]
+   "op:await-all"                            ["task-await-all" [:b0]]
+   "op:await-any"                            ["task-await-any" [:b0]]
+   "select-deadline"                         ["select-deadline" [:b0]]
+   "deadline-expired?"                       ["deadline-expired?" [:b0]]
+   "select-sleep-step"                       ["select-sleep-step!" []]
+   "datetime_make"                           ["builtin-datetime-make-from-array" [:args]]})
+
 (defn- emit-direct-runtime-helper-call!
   [^MethodVisitor mv expr state-slot]
   (let [helper (:helper expr)
@@ -703,375 +779,10 @@
                         (do (.visitInsn mv Opcodes/POP) :void)
                         (do (emit-unbox-or-cast! mv jvm-type)
                             jvm-type)))]
-    (case helper
-      "builtin-method:Cursor:start"
+    (if-let [[runtime-fn spec] (get direct-runtime-helper-specs helper)]
       (do
-        (emit-runtime-call! mv "builtin-cursor-start"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-expr! mv (first args) state-slot))])
+        (emit-runtime-call! mv runtime-fn (runtime-helper-emitters mv args state-slot spec))
         (emit-return (:jvm-type expr)))
-
-      "builtin-method:Cursor:cursor"
-      (do
-        (emit-runtime-call! mv "builtin-cursor-cursor"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "builtin-method:Cursor:item"
-      (do
-        (emit-runtime-call! mv "builtin-cursor-item"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "builtin-method:Cursor:next"
-      (do
-        (emit-runtime-call! mv "builtin-cursor-next"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "builtin-method:Cursor:at_end"
-      (do
-        (emit-runtime-call! mv "builtin-cursor-at-end"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "builtin-method:Min_Heap:insert"
-      (do
-        (emit-runtime-call! mv "min-heap-insert-method"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "builtin-method:Min_Heap:extract_min"
-      (do
-        (emit-runtime-call! mv "min-heap-extract-min-method"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "builtin-method:Min_Heap:try_extract_min"
-      (do
-        (emit-runtime-call! mv "min-heap-try-extract-min-method"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "builtin-method:Min_Heap:peek"
-      (do
-        (emit-runtime-call! mv "min-heap-peek-method"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "builtin-method:Min_Heap:try_peek"
-      (do
-        (emit-runtime-call! mv "min-heap-try-peek-method"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "builtin-method:Min_Heap:size"
-      (do
-        (emit-runtime-call! mv "min-heap-size-method"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "builtin-method:Min_Heap:is_empty"
-      (do
-        (emit-runtime-call! mv "min-heap-is-empty-method"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "print"
-      (do
-        (emit-runtime-call! mv "builtin-print!"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-arg-array! mv args state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "println"
-      (do
-        (emit-runtime-call! mv "builtin-println!"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-arg-array! mv args state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "type_of"
-      (do
-        (emit-runtime-call! mv "builtin-type-of"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "type_is"
-      (do
-        (emit-runtime-call! mv "builtin-type-is"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "sleep"
-      (do
-        (emit-runtime-call! mv "builtin-sleep!"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "hint_spin"
-      (do
-        (emit-runtime-call! mv "builtin-hint-spin!" [])
-        (emit-return (:jvm-type expr)))
-
-      "http_get"
-      (do
-        (emit-runtime-call! mv "builtin-http-get"
-                            (into [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))]
-                                  (mapv (fn [arg]
-                                          (fn [] (emit-boxed-expr! mv arg state-slot)))
-                                        args)))
-        (emit-return (:jvm-type expr)))
-
-      "http_post"
-      (do
-        (emit-runtime-call! mv "builtin-http-post"
-                            (into [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))]
-                                  (mapv (fn [arg]
-                                          (fn [] (emit-boxed-expr! mv arg state-slot)))
-                                        args)))
-        (emit-return (:jvm-type expr)))
-
-      "json_parse"
-      (do
-        (emit-runtime-call! mv "builtin-json-parse"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "json_stringify"
-      (do
-        (emit-runtime-call! mv "builtin-json-stringify"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "http_server_create"
-      (do
-        (emit-runtime-call! mv "builtin-http-server-create"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "http_server_get"
-      (do
-        (emit-runtime-call! mv "builtin-http-server-get!"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (second args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (nth args 2) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "http_server_post"
-      (do
-        (emit-runtime-call! mv "builtin-http-server-post!"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (second args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (nth args 2) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "http_server_put"
-      (do
-        (emit-runtime-call! mv "builtin-http-server-put!"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (second args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (nth args 2) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "http_server_delete"
-      (do
-        (emit-runtime-call! mv "builtin-http-server-delete!"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (second args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (nth args 2) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "http_server_start"
-      (do
-        (emit-runtime-call! mv "builtin-http-server-start!"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "http_server_stop"
-      (do
-        (emit-runtime-call! mv "builtin-http-server-stop!"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "http_server_is_running"
-      (do
-        (emit-runtime-call! mv "builtin-http-server-is-running"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "java-call-static"
-      (do
-        (emit-runtime-call! mv "java-call-static"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (second args) state-slot))
-                             (fn [] (emit-boxed-arg-array! mv (vec (drop 2 args)) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "java-get-static-field"
-      (do
-        (emit-runtime-call! mv "java-get-static-field"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "validate-object-state"
-      (do
-        (emit-runtime-call! mv "validate-object-state"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "op:string-concat"
-      (do
-        (emit-runtime-call! mv "string-concat"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-arg-array! mv args state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "op:pow-int"
-      (do
-        (emit-runtime-call! mv "pow-int"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "op:pow-long"
-      (do
-        (emit-runtime-call! mv "pow-long"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "op:pow-double"
-      (do
-        (emit-runtime-call! mv "pow-double"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "spawn-function-object"
-      (do
-        (emit-runtime-call! mv "spawn-function-object"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "create-channel"
-      (do
-        (emit-runtime-call! mv "create-channel"
-                            (mapv (fn [arg]
-                                    (fn [] (emit-boxed-expr! mv arg state-slot)))
-                                  args))
-        (emit-return (:jvm-type expr)))
-
-      "create-array"
-      (do
-        (emit-runtime-call! mv "create-array" [])
-        (emit-return (:jvm-type expr)))
-
-      "create-array-filled"
-      (do
-        (emit-runtime-call! mv "create-array-filled"
-                            (mapv (fn [arg]
-                                    (fn [] (emit-boxed-expr! mv arg state-slot)))
-                                  args))
-        (emit-return (:jvm-type expr)))
-
-      "create-min-heap-empty"
-      (do
-        (emit-runtime-call! mv "create-min-heap-empty" [])
-        (emit-return (:jvm-type expr)))
-
-      "create-min-heap-from-comparator"
-      (do
-        (emit-runtime-call! mv "create-min-heap-from-comparator"
-                            (mapv (fn [arg]
-                                    (fn [] (emit-boxed-expr! mv arg state-slot)))
-                                  args))
-        (emit-return (:jvm-type expr)))
-
-      "create-atomic-integer"
-      (do
-        (emit-runtime-call! mv "create-atomic-integer"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "create-atomic-integer64"
-      (do
-        (emit-runtime-call! mv "create-atomic-integer64"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "create-atomic-boolean"
-      (do
-        (emit-runtime-call! mv "create-atomic-boolean"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "create-atomic-reference"
-      (do
-        (emit-runtime-call! mv "create-atomic-reference"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "op:await-all"
-      (do
-        (emit-runtime-call! mv "task-await-all"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "op:await-any"
-      (do
-        (emit-runtime-call! mv "task-await-any"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "select-deadline"
-      (do
-        (emit-runtime-call! mv "select-deadline"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "deadline-expired?"
-      (do
-        (emit-runtime-call! mv "deadline-expired?"
-                            [(fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return (:jvm-type expr)))
-
-      "select-sleep-step"
-      (do
-        (emit-runtime-call! mv "select-sleep-step!"
-                            [])
-        (emit-return (:jvm-type expr)))
-
-      "datetime_make"
-      (do
-        (emit-runtime-call! mv "builtin-datetime-make-from-array"
-                            [(fn [] (emit-boxed-arg-array! mv args state-slot))])
-        (emit-return (:jvm-type expr)))
-
       (when-let [derived-helper (direct-derived-builtin-helper-name helper)]
         (do
           (emit-runtime-call! mv derived-helper
