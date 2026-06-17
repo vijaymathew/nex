@@ -1,0 +1,4 @@
+let a: Integer := 3
+let b: Integer := 4
+a := a + b
+print(a * b)

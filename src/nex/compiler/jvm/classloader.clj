@@ -11,10 +11,6 @@
   [^DynamicClassLoader loader class-name ^bytes bytecode]
   (.defineClass loader class-name bytecode nil))
 
-(defn load-defined-class
-  [^DynamicClassLoader loader class-name]
-  (.loadClass loader class-name))
-
 (defn resolve-class
   [^DynamicClassLoader loader class-name]
   (try

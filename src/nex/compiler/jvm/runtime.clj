@@ -128,19 +128,6 @@
     (catch InvocationTargetException e
       (throw (or (.getCause e) e)))))
 
-(defn invoke-repl-fn
-  [state name args]
-  (let [{:keys [owner method]} (state-get-fn state name)]
-    (when-not (and owner method)
-      (throw (ex-info (str "Undefined compiled REPL function: " name)
-                      {:name name})))
-    (let [^Class owner-class (resolve-owner-class state owner)
-          ^Method target-method (.getDeclaredMethod owner-class
-                                                    method
-                                                    (into-array Class [nex.compiler.jvm.runtime.NexReplState
-                                                                       (class (object-array 0))]))]
-      (invoke-reflective! target-method nil (object-array [state (object-array args)])))))
-
 (defn invoke-function-object
   [state target args]
   (when-not target

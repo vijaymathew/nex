@@ -158,11 +158,6 @@
   (let [spaces (str/join (repeat (* 2 level) " "))]
     (str spaces code)))
 
-(defn indent-lines
-  "Add indentation to multiple lines"
-  [level lines]
-  (str/join "\n" (map #(indent level %) lines)))
-
 (defn generate-jsdoc
   "Generate JSDoc comment for a note"
   [level note]

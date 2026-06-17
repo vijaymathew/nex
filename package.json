@@ -11,7 +11,8 @@
   "scripts": {
     "test": "npm run test:cljs && npm run test:wrapper",
     "test:cljs": "node test/js/test_cljs.js",
-    "test:wrapper": "node test/js/test_wrapper.js"
+    "test:wrapper": "node test/js/test_wrapper.js",
+    "test:platform-diff": "clojure -M:test test/scripts/gen_platform_corpus.clj && npx shadow-cljs compile platform-diff && node target/platform_diff.js"
   },
   "keywords": ["nex", "programming-language", "design-by-contract"],
   "author": "",
