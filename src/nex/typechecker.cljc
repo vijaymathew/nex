@@ -3995,7 +3995,7 @@
   "Type check a complete program.
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([program] (check-program program {}))
-  ([{:keys [classes calls statements imports functions type-aliases] :as program} opts]
+  ([{:keys [classes calls statements imports functions type-aliases duplicate-functions] :as program} opts]
    (let [env (make-type-env)
          normalized-functions (normalize-function-defs classes functions)
          visible-classes (class-defs-by-name-last-wins
@@ -4004,6 +4004,17 @@
          ;; (used by the REPL to avoid re-validating previously defined code).
          skip-body-names (or (:skip-class-body-names opts) #{})]
      (try
+       ;; Reject duplicate free-function definitions before they are collapsed
+       ;; last-wins (which would otherwise make the earlier definition silently
+       ;; vanish and surface later as an obscure "Method not found: callN").
+       (when-let [dup (first duplicate-functions)]
+         (throw (ex-info (str "Duplicate function definition: " dup)
+                         {:error (type-error
+                                  (str "Function '" dup "' is defined more than once. "
+                                       "Free-function names must be unique within a program; "
+                                       "a later definition would silently replace the earlier one. "
+                                       "Rename or remove the duplicate."))})))
+
        ;; Register imported Java classes (as placeholders)
        (doseq [{:keys [qualified-name source]} imports]
          (when (nil? source)

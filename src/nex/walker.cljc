@@ -268,8 +268,20 @@
      (let [cleaned-nodes (remove string? nodes) ; Filter out "<EOF>" token
            transformed (mapv transform-node cleaned-nodes)
            classes (filter #(= :class (:type %)) transformed)
-           functions (->> transformed
-                          (filter #(= :function (:type %)))
+           fn-nodes (filter #(= :function (:type %)) transformed)
+           ;; Forward declarations (`declare function`) intentionally repeat a
+           ;; name that a later definition fulfils, so only count real
+           ;; definitions when looking for duplicates.
+           defined-fn-names (->> fn-nodes (remove :declaration-only?) (map :name))
+           defined-fn-freq (frequencies defined-fn-names)
+           ;; Free-function names are collapsed last-wins below; record any name
+           ;; defined more than once so the type checker can reject it instead of
+           ;; letting the earlier definition vanish silently.
+           duplicate-functions (->> defined-fn-names
+                                    distinct
+                                    (filter #(> (defined-fn-freq %) 1))
+                                    vec)
+           functions (->> fn-nodes
                           (reduce (fn [m f] (assoc m (:name f) f)) {})
                           vals
                           vec)
@@ -286,6 +298,7 @@
         :type-aliases (vec type-aliases)
         :classes all-classes
         :functions (vec functions)
+        :duplicate-functions duplicate-functions
         :statements (vec statements)
         :calls (vec calls)}))
 
