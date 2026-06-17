@@ -4702,6 +4702,37 @@
                                   (async-free-node? value)))
                            (:entries node))
       :statement (async-free-node? (:node node))
+      ;; Control-flow / binding nodes are async-free when *every* sub-expression
+      ;; they evaluate is itself async-free. The recursion bottoms out at the
+      ;; pure leaves above, so a node classified here provably contains no
+      ;; suspension point (spawn / await* / channel / select / sleep) anywhere in
+      ;; its subtree, and can be evaluated synchronously even on the JS runtime.
+      ;; Child slots mirror the corresponding `eval-node` defmethods exactly.
+      :assign (async-free-node? (:value node))
+      :let (async-free-node? (:value node))
+      :convert (async-free-node? (:value node))
+      :when (and (async-free-node? (:condition node))
+                 (async-free-node? (:consequent node))
+                 (async-free-node? (:alternative node)))
+      :scoped-block (and (every? async-free-node? (:body node))
+                         (every? async-free-node? (:rescue node)))
+      :if (and (async-free-node? (:condition node))
+               (every? async-free-node? (:then node))
+               (every? (fn [clause]
+                         (and (async-free-node? (:condition clause))
+                              (every? async-free-node? (:then clause))))
+                       (:elseif node))
+               (every? async-free-node? (:else node)))
+      :case (and (async-free-node? (:expr node))
+                 (every? (fn [clause]
+                           (and (every? async-free-node? (:values clause))
+                                (async-free-node? (:body clause))))
+                         (:clauses node))
+                 (async-free-node? (:else node)))
+      :match (and (async-free-node? (:expr node))
+                  (every? (fn [clause] (every? async-free-node? (:body clause)))
+                          (:clauses node))
+                  (every? async-free-node? (:else node)))
       false)))
 
 (defn- eval-body-with-rescue-async [ctx body rescue]
