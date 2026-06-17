@@ -1,0 +1,7 @@
+let t: Boolean := true
+let f: Boolean := false
+if t and (f or t) then
+  print("yes")
+else
+  print("no")
+end

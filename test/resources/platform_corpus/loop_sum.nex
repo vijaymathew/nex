@@ -1,0 +1,11 @@
+let total: Integer := 0
+let i: Integer := 0
+from
+  i := 0
+until
+  i >= 5
+do
+  total := total + i
+  i := i + 1
+end
+print(total)

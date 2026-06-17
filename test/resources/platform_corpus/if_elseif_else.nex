@@ -1,0 +1,8 @@
+let x: Integer := 7
+if x > 10 then
+  print("big")
+elseif x > 5 then
+  print("medium")
+else
+  print("small")
+end
