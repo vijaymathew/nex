@@ -1,0 +1,6 @@
+let s: String := "hello world"
+print(s.length)
+print(s.index_of("world"))
+print(s.substring(0, 5))
+let n: Integer := 255
+print(n.to_string)

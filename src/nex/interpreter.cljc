@@ -104,6 +104,20 @@
 (def nex-abs rt/nex-abs)
 (def nex-round rt/nex-round)
 (def nex-int-pow rt/nex-int-pow)
+(def nex-integer? rt/nex-integer?)
+(def ->nex-integer rt/->nex-integer)
+(def nex-int->number rt/nex-int->number)
+(def ->nex-real rt/->nex-real)
+(def nex-numeric? rt/nex-numeric?)
+(def nex-int-add rt/nex-int-add)
+(def nex-int-sub rt/nex-int-sub)
+(def nex-int-mul rt/nex-int-mul)
+(def nex-int-neg rt/nex-int-neg)
+(def nex-int-quot rt/nex-int-quot)
+(def nex-int-mod rt/nex-int-mod)
+(def nex-int-zero? rt/nex-int-zero?)
+(def nex-numeric-compare rt/nex-numeric-compare)
+(def nex-numeric-equals? rt/nex-numeric-equals?)
 
 (def nex-console-print rt/nex-console-print)
 (def nex-console-println rt/nex-console-println)
@@ -1606,7 +1620,7 @@
   [v]
   (or (nil? v)
       (string? v)
-      (number? v)
+      (nex-numeric? v)
       (boolean? v)
       (char? v)))
 
@@ -2494,6 +2508,10 @@
 
 (defn- nex-ordering-compare [x y]
   (cond
+    ;; Numbers first: Clojure `compare` throws on BigInt (JS Integer), and the
+    ;; string fallback below would misorder them ("10" < "9"). nex-numeric-compare
+    ;; handles Integer/Real in both representations.
+    (and (nex-numeric? x) (nex-numeric? y)) (nex-numeric-compare x y)
     (= x y) 0
     :else
     (try
@@ -2514,13 +2532,16 @@
   [v]
   (or (nil? v)
       (string? v)
-      (number? v)
+      (nex-numeric? v)
       (boolean? v)
       (char? v)))
 
 (defn- nex-identity-equals?
   [a b]
   (cond
+    (and (nex-numeric? a) (nex-numeric? b))
+    (nex-numeric-equals? a b)
+
     (and (scalar-identity-value? a)
          (scalar-identity-value? b))
     (= a b)
@@ -2532,38 +2553,50 @@
   "Apply a binary operator to two values."
   [op left right]
   (case op
-    "+" (if (and (not (string? left)) (not (string? right)))
-          (+ left right)
+    ;; Arithmetic dispatches on representation: Integer op Integer stays Integer
+    ;; (64-bit checked — Clojure long on the JVM, BigInt on JS); any Real operand
+    ;; promotes both to Real. On JS, BigInt and number cannot be mixed in a raw
+    ;; operator, so the promotion is explicit (->nex-real).
+    "+" (cond
+          (or (string? left) (string? right))
           (throw (ex-info "String concatenation requires evaluation context"
-                          {:operator op :left left :right right})))
-    "-" (- left right)
-    "*" (* left right)
+                          {:operator op :left left :right right}))
+          (and (nex-integer? left) (nex-integer? right)) (nex-int-add left right)
+          :else (+ (->nex-real left) (->nex-real right)))
+    "-" (if (and (nex-integer? left) (nex-integer? right))
+          (nex-int-sub left right)
+          (- (->nex-real left) (->nex-real right)))
+    "*" (if (and (nex-integer? left) (nex-integer? right))
+          (nex-int-mul left right)
+          (* (->nex-real left) (->nex-real right)))
     ;; Integer division by zero raises (there is no integer result); Real
     ;; division follows IEEE-754: x/0.0 -> +/-Infinity, 0.0/0.0 -> NaN.
-    ;; NOTE: clojure.core// on *boxed* doubles (as these args always are) routes
-    ;; through Numbers.divide, which raises on a zero divisor — it only yields
-    ;; IEEE Inf/NaN for primitive doubles. Coerce to primitive to get honest IEEE.
-    "/" (if (and (integer? left) (integer? right))
-          (if (zero? right)
+    ;; NOTE (JVM): clojure.core// on *boxed* doubles routes through Numbers.divide,
+    ;; which raises on a zero divisor — only primitive doubles yield IEEE Inf/NaN,
+    ;; so the :clj Real branch divides primitives.
+    "/" (if (and (nex-integer? left) (nex-integer? right))
+          (if (nex-int-zero? right)
             (throw (ex-info "Division by zero" {:left left :right right}))
-            #?(:clj (quot left right)
-               :cljs (js/Math.trunc (/ left right))))
+            (nex-int-quot left right))
           #?(:clj (/ (double left) (double right))
-             :cljs (/ left right)))
-    "^" (if (and (integer? left) (integer? right))
+             :cljs (/ (->nex-real left) (->nex-real right))))
+    "^" (if (and (nex-integer? left) (nex-integer? right))
           (nex-int-pow left right)
-          (Math/pow left right))
+          (Math/pow (->nex-real left) (->nex-real right)))
     ;; Same asymmetry for remainder: integral % 0 raises, Real % 0.0 is IEEE NaN.
-    ;; (Clojure's mod/rem raise on a zero divisor, so produce NaN directly.)
     "%" (cond
-          (and (integer? left) (integer? right))
-          (if (zero? right)
+          (and (nex-integer? left) (nex-integer? right))
+          (if (nex-int-zero? right)
             (throw (ex-info "Division by zero" {:left left :right right}))
-            (mod left right))
-          (zero? right) #?(:clj Double/NaN :cljs js/NaN)
-          :else (mod left right))
-    "=" (= left right)
-    "/=" (not= left right)
+            (nex-int-mod left right))
+          (zero? (->nex-real right)) #?(:clj Double/NaN :cljs js/NaN)
+          :else (mod (->nex-real left) (->nex-real right)))
+    "=" (if (and (nex-numeric? left) (nex-numeric? right))
+          (nex-numeric-equals? left right)
+          (= left right))
+    "/=" (not (if (and (nex-numeric? left) (nex-numeric? right))
+                (nex-numeric-equals? left right)
+                (= left right)))
     "==" (nex-identity-equals? left right)
     "!=" (not (nex-identity-equals? left right))
     "<" (neg? (nex-ordering-compare left right))
@@ -2633,8 +2666,8 @@
     ;; Handle simple types
     (string? field-type)
     (case field-type
-      "Integer" 0
-      "Integer64" 0
+      "Integer" (->nex-integer 0)
+      "Integer64" (->nex-integer 0)
       "Real" 0.0
       "Decimal" 0.0
       "Char" \0
@@ -2665,11 +2698,11 @@
     "clone"       (fn [v & _] (nex-clone-value v))}
 
    :String
-   {"length"      (fn [s & _] (count s))
+   {"length"      (fn [s & _] (->nex-integer (count s)))
     "index_of"    (fn [s ch & _]
                     (let [idx (str/index-of s (str ch))]
-                      (if idx idx -1)))
-    "substring"   (fn [s start end & _] (subs s start end))
+                      (->nex-integer (if idx idx -1))))
+    "substring"   (fn [s start end & _] (subs s (nex-int->number start) (nex-int->number end)))
     "to_upper"    (fn [s & _] (str/upper-case s))
     "to_lower"    (fn [s & _] (str/lower-case s))
     "to_integer"  (fn [s & _] (nex-parse-integer s))
@@ -2683,19 +2716,19 @@
     "ends_with"   (fn [s suffix & _] (str/ends-with? s suffix))
     "trim"        (fn [s & _] (str/trim s))
     "replace"     (fn [s old new & _] (str/replace s old new))
-    "pad_end"     (fn [s pad len & _] (if (>= (count s) len) s (str s (apply str (repeat (- len (count s)) pad)))))
-    "pad_start"   (fn [s pad len & _] (if (>= (count s) len) s (str (apply str (repeat (- len (count s)) pad)) s)))
-    "replicate"   (fn [s n & _] (apply str (repeat n s)))
-    "char_at"     (fn [s idx & _] (get s idx))
+    "pad_end"     (fn [s pad len & _] (let [len (nex-int->number len)] (if (>= (count s) len) s (str s (apply str (repeat (- len (count s)) pad))))))
+    "pad_start"   (fn [s pad len & _] (let [len (nex-int->number len)] (if (>= (count s) len) s (str (apply str (repeat (- len (count s)) pad)) s))))
+    "replicate"   (fn [s n & _] (apply str (repeat (nex-int->number n) s)))
+    "char_at"     (fn [s idx & _] (get s (nex-int->number idx)))
     "chars"       (fn [s & _]
                     (nex-array-from
                      (mapv #(get s %) (range (count s)))))
     "to_bytes"    (fn [s & _]
                     #?(:clj (nex-array-from
-                             (mapv #(bit-and (int %) 0xFF)
+                             (mapv #(->nex-integer (bit-and (int %) 0xFF))
                                    (.getBytes ^String s StandardCharsets/UTF_8)))
                        :cljs (nex-array-from
-                              (mapv identity
+                              (mapv ->nex-integer
                                     (js->clj (.encode (js/TextEncoder.) s))))))
     "split"       (fn [s delim & _] (nex-array-from (str/split s (re-pattern delim))))
     "join"        (fn [s arr & _] (str/join s arr))
@@ -2719,10 +2752,10 @@
 
    :Integer
    {"to_string"         (fn [n & _] (str n))
-    "abs"               (fn [n & _] (nex-abs n))
-    "min"               (fn [n other & _] (min n other))
-    "max"               (fn [n other & _] (max n other))
-    "pick"              (fn [n & _] (rand-int n))
+    "abs"               (fn [n & _] (if (neg? n) (nex-int-neg n) n))
+    "min"               (fn [n other & _] (if (pos? (nex-numeric-compare n other)) other n))
+    "max"               (fn [n other & _] (if (neg? (nex-numeric-compare n other)) other n))
+    "pick"              (fn [n & _] (->nex-integer (rand-int (nex-int->number n))))
     "bitwise_left_shift" (fn [n shift & _] (nex-bitwise-left-shift n shift))
     "bitwise_right_shift" (fn [n shift & _] (nex-bitwise-right-shift n shift))
     "bitwise_logical_right_shift" (fn [n shift & _] (nex-bitwise-logical-right-shift n shift))
@@ -2735,51 +2768,55 @@
     "bitwise_or"        (fn [n other & _] (nex-bitwise-or n other))
     "bitwise_xor"       (fn [n other & _] (nex-bitwise-xor n other))
     "bitwise_not"       (fn [n & _] (nex-bitwise-not n))
-    ;; Arithmetic operator methods
-    "plus"              (fn [n other & _] (+ n other))
-    "minus"             (fn [n other & _] (- n other))
-    "times"             (fn [n other & _] (* n other))
-    "divided_by"        (fn [n other & _] (/ n other))
+    ;; Arithmetic operator methods (64-bit checked, matching the operators)
+    "plus"              (fn [n other & _] (nex-int-add n other))
+    "minus"             (fn [n other & _] (nex-int-sub n other))
+    "times"             (fn [n other & _] (nex-int-mul n other))
+    ;; divided_by is typed to return Real, so it is real division on both hosts.
+    "divided_by"        (fn [n other & _] #?(:clj (/ (double n) (double other))
+                                             :cljs (/ (->nex-real n) (->nex-real other))))
     ;; Comparison operator methods
-    "equals"            (fn [n other & _] (= n other))
-    "not_equals"        (fn [n other & _] (not= n other))
-    "less_than"         (fn [n other & _] (< n other))
-    "less_than_or_equal" (fn [n other & _] (<= n other))
-    "greater_than"      (fn [n other & _] (> n other))
-    "greater_than_or_equal" (fn [n other & _] (>= n other))
-    "to_char"           (fn [n & _] #?(:clj (char (int n)) :cljs (.fromCharCode js/String n)))
+    "equals"            (fn [n other & _] (nex-numeric-equals? n other))
+    "not_equals"        (fn [n other & _] (not (nex-numeric-equals? n other)))
+    "less_than"         (fn [n other & _] (neg? (nex-numeric-compare n other)))
+    "less_than_or_equal" (fn [n other & _] (not (pos? (nex-numeric-compare n other))))
+    "greater_than"      (fn [n other & _] (pos? (nex-numeric-compare n other)))
+    "greater_than_or_equal" (fn [n other & _] (not (neg? (nex-numeric-compare n other))))
+    "to_char"           (fn [n & _] #?(:clj (char (int n)) :cljs (.fromCharCode js/String (nex-int->number n))))
     "compare"           (fn [n other & _] (nex-compare n other))
     "hash"              (fn [n & _] (hash n))}
 
    :Integer64
    {"to_string"         (fn [n & _] (str n))
-    "abs"               (fn [n & _] (nex-abs n))
-    "min"               (fn [n other & _] (min n other))
-    "max"               (fn [n other & _] (max n other))
-    ;; Arithmetic operator methods
-    "plus"              (fn [n other & _] (+ n other))
-    "minus"             (fn [n other & _] (- n other))
-    "times"             (fn [n other & _] (* n other))
-    "divided_by"        (fn [n other & _] (/ n other))
+    "abs"               (fn [n & _] (if (neg? n) (nex-int-neg n) n))
+    "min"               (fn [n other & _] (if (pos? (nex-numeric-compare n other)) other n))
+    "max"               (fn [n other & _] (if (neg? (nex-numeric-compare n other)) other n))
+    ;; Arithmetic operator methods (64-bit checked)
+    "plus"              (fn [n other & _] (nex-int-add n other))
+    "minus"             (fn [n other & _] (nex-int-sub n other))
+    "times"             (fn [n other & _] (nex-int-mul n other))
+    "divided_by"        (fn [n other & _] #?(:clj (/ (double n) (double other))
+                                             :cljs (/ (->nex-real n) (->nex-real other))))
     ;; Comparison operator methods
-    "equals"            (fn [n other & _] (= n other))
-    "not_equals"        (fn [n other & _] (not= n other))
-    "less_than"         (fn [n other & _] (< n other))
-    "less_than_or_equal" (fn [n other & _] (<= n other))
-    "greater_than"      (fn [n other & _] (> n other))
-    "greater_than_or_equal" (fn [n other & _] (>= n other))
+    "equals"            (fn [n other & _] (nex-numeric-equals? n other))
+    "not_equals"        (fn [n other & _] (not (nex-numeric-equals? n other)))
+    "less_than"         (fn [n other & _] (neg? (nex-numeric-compare n other)))
+    "less_than_or_equal" (fn [n other & _] (not (pos? (nex-numeric-compare n other))))
+    "greater_than"      (fn [n other & _] (pos? (nex-numeric-compare n other)))
+    "greater_than_or_equal" (fn [n other & _] (not (neg? (nex-numeric-compare n other))))
     "compare"           (fn [n other & _] (nex-compare n other))
     "hash"              (fn [n & _] (hash n))}
 
    :Real
    {"to_string"         (fn [n & _] (str n))
     "abs"               (fn [n & _] (nex-abs n))
-    "min"               (fn [n other & _] (min n other))
-    "max"               (fn [n other & _] (max n other))
-    "round"             (fn [n & _] (nex-round n))
+    "min"               (fn [n other & _] (min (->nex-real n) (->nex-real other)))
+    "max"               (fn [n other & _] (max (->nex-real n) (->nex-real other)))
+    "round"             (fn [n & _] (->nex-integer (nex-round n)))
     "to_fixed"          (fn [n places & _]
-                          #?(:clj  (double (.setScale (bigdec n) (int places) java.math.RoundingMode/HALF_UP))
-                             :cljs (js/parseFloat (.toFixed n places))))
+                          (let [places (nex-int->number places)]
+                            #?(:clj  (double (.setScale (bigdec n) (int places) java.math.RoundingMode/HALF_UP))
+                               :cljs (js/parseFloat (.toFixed n places)))))
     ;; IEEE-754 inspection: with Real division now honestly IEEE, these let
     ;; callers detect the special values it can produce (see NUMERIC_TOWER.md).
     "is_nan"            (fn [n & _] #?(:clj (Double/isNaN (double n))
@@ -2812,10 +2849,11 @@
     "abs"               (fn [n & _] (nex-abs n))
     "min"               (fn [n other & _] (min n other))
     "max"               (fn [n other & _] (max n other))
-    "round"             (fn [n & _] (nex-round n))
+    "round"             (fn [n & _] (->nex-integer (nex-round n)))
     "to_fixed"          (fn [n places & _]
-                          #?(:clj  (.setScale n (int places) java.math.RoundingMode/HALF_UP)
-                             :cljs nil))
+                          (let [places (nex-int->number places)]
+                            #?(:clj  (.setScale n (int places) java.math.RoundingMode/HALF_UP)
+                               :cljs nil)))
     "is_nan"            (fn [n & _] #?(:clj (Double/isNaN (double n))
                                        :cljs (js/Number.isNaN n)))
     "is_infinite"       (fn [n & _] #?(:clj (Double/isInfinite (double n))
@@ -2845,7 +2883,7 @@
    {"to_string"   (fn [c & _] (str c))
     "to_upper"    (fn [c & _] (str/upper-case (str c)))
     "to_lower"    (fn [c & _] (str/lower-case (str c)))
-    "to_integer"  (fn [c & _] #?(:clj (int c) :cljs (.charCodeAt c 0)))
+    "to_integer"  (fn [c & _] (->nex-integer #?(:clj (int c) :cljs (.charCodeAt c 0))))
     "compare"     (fn [c other & _] (nex-compare c other))
     "hash"        (fn [c & _] (hash c))}
 
@@ -2866,12 +2904,12 @@
     "add_at"      (fn [arr index value & _] (nex-array-add-at arr index value))
     "put"         (fn [arr index value & _] (nex-array-set arr index value))
     "set"         (fn [arr index value & _] (nex-array-set arr index value))
-    "length"      (fn [arr & _] (nex-array-size arr))
+    "length"      (fn [arr & _] (->nex-integer (nex-array-size arr)))
     "is_empty"    (fn [arr & _] (nex-array-empty? arr))
     "contains"    (fn [arr elem & _] (nex-array-contains-value? arr elem))
     "index_of"    (fn [arr elem & _]
                     (let [idx (nex-array-index-of-value arr elem)]
-                      (if (>= idx 0) idx -1)))
+                      (->nex-integer (if (>= idx 0) idx -1))))
     "remove"      (fn [arr idx & _] (nex-array-remove arr idx))
     "reverse"     (fn [arr & _] (nex-array-reverse arr))
     "sort"        (fn [arr & args]
@@ -2909,7 +2947,7 @@
                         v)))
     "put"          (fn [m key val & _] (nex-map-put m key val))
     "set"          (fn [m key val & _] (nex-map-put m key val))
-    "size"         (fn [m & _] (nex-map-size m))
+    "size"         (fn [m & _] (->nex-integer (nex-map-size m)))
     "is_empty"     (fn [m & _] (nex-map-empty? m))
     "contains_key" (fn [m key & _] (nex-map-contains-key-value? m key))
     "keys"         (fn [m & _] (nex-map-keys m))
@@ -2930,7 +2968,7 @@
     "difference"           (fn [s other & _] (nex-set-difference s other))
     "intersection"         (fn [s other & _] (nex-set-intersection s other))
     "symmetric_difference" (fn [s other & _] (nex-set-symmetric-difference s other))
-    "size"                 (fn [s & _] (nex-set-size s))
+    "size"                 (fn [s & _] (->nex-integer (nex-set-size s)))
     "is_empty"             (fn [s & _] (nex-set-empty? s))
     "to_array"             (fn [s & _] (nex-set-to-array s))
     "to_string"            (fn [s & _] (nex-set-str s))
@@ -2952,7 +2990,7 @@
                         (or (heap-peek heap)
                             (throw (ex-info "Min_Heap is empty" {:heap heap}))))
     "try_peek"        (fn [heap & _] (heap-peek heap))
-    "size"            (fn [heap & _] (count @(:data heap)))
+    "size"            (fn [heap & _] (->nex-integer (count @(:data heap))))
     "is_empty"        (fn [heap & _] (empty? @(:data heap)))}
 
    :Atomic_Integer
@@ -4152,8 +4190,11 @@
     (apply-unary-op operator val)))
 
 (defmethod eval-node :integer
-  [_ctx {:keys [value]}]
-  value)
+  [_ctx {:keys [value] :as node}]
+  ;; Prefer the exact decimal string when present: the AST is parsed on the JVM
+  ;; and may be transferred to JS, where a literal above 2^53 would lose precision
+  ;; as a `number`. `:value-str` round-trips the full 64-bit value into a BigInt.
+  (->nex-integer (or (:value-str node) value)))
 
 (defmethod eval-node :real
   [_ctx {:keys [value]}]

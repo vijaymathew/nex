@@ -1,0 +1,9 @@
+let m: Map[Integer, String] := create Map[Integer, String]
+m.put(1, "one")
+m.put(2, "two")
+m.put(3, "three")
+print(m.size)
+print(m.get(2))
+print(m.contains_key(3))
+m.put(4, "four")
+print(m.size)

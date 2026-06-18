@@ -28,8 +28,19 @@
     #?(:clj (ratio? value) :cljs false)
     (str (double value))
 
-    (number? value)
+    ;; Nex Integer (a BigInt on JS, which `number?` does not recognize). `str`
+    ;; renders it cleanly ("28"); the generic :else would emit "#object[BigInt 28]".
+    (rt/nex-integer? value)
     (str value)
+
+    ;; Real. On JS every remaining `number` is a Real; an integer-valued one
+    ;; stringifies as "9", but the JVM renders the double as "9.0" — match it so
+    ;; the two backends print identically.
+    (number? value)
+    #?(:clj (str value)
+       :cljs (if (and (js/Number.isFinite value) (js/Number.isInteger value))
+               (str value ".0")
+               (str value)))
 
     (boolean? value)
     (str value)

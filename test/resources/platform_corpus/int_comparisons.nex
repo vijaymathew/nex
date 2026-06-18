@@ -1,0 +1,9 @@
+print(10 < 9)
+print(10 > 9)
+print(1000000000000 > 999999999999)
+print(5 = 5)
+print(5 /= 6)
+let x: Integer := 42
+print(x.max(100))
+print(x.min(100))
+print(x.abs)

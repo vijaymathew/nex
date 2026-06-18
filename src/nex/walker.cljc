@@ -147,7 +147,12 @@
   [node]
   (cond
     (#{:integer :real} (:type node))
-    (update node :value -)
+    (let [negated (update node :value -)]
+      ;; Keep the transfer-safe :value-str (added for integer literals) in sync
+      ;; with the negated :value, or eval would read the stale positive string.
+      (if (:value-str negated)
+        (assoc negated :value-str (str (:value negated)))
+        negated))
 
     (and (map? node) (= :call (:type node)) (map? (:target node)))
     (when-let [negated-target (negate-numeric-call-chain (:target node))]
@@ -1259,8 +1264,12 @@
    ;; Literals
    :integerLiteral
    (fn [[_ value]]
-     {:type :integer
-      :value (parse-integer-literal value)})
+     (let [v (parse-integer-literal value)]
+       {:type :integer
+        :value v
+        ;; Exact decimal string so the literal survives a JVM->JS AST transfer
+        ;; without precision loss (see eval-node :integer, NUMERIC_TOWER.md).
+        :value-str (str v)}))
 
    :realLiteral
    (fn [[_ value]]

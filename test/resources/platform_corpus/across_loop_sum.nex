@@ -1,0 +1,6 @@
+let xs: Array[Integer] := [1, 2, 3, 4, 5]
+let total: Integer := 0
+across xs as x do
+  total := total + x
+end
+print(total)
