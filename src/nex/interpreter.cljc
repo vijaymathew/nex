@@ -119,6 +119,37 @@
 (def nex-numeric-compare rt/nex-numeric-compare)
 (def nex-numeric-equals? rt/nex-numeric-equals?)
 
+(defn nex-error-message
+  "A clean, Nex-level message for a Throwable raised during evaluation. Host
+   (Clojure/JVM or JS) exceptions whose own messages would leak interpreter
+   internals — integer overflow (\"long overflow\"), number parsing (\"For input
+   string\"), type casts (\"class java.lang.String cannot be cast to ...\"),
+   arity — are translated to Nex-facing wording; messages from the interpreter's
+   own ex-info (already user-level: contract violations, \"Method not found\",
+   \"Division by zero\", etc.) pass through unchanged."
+  [e]
+  (let [raw (or (ex-message e) "")]
+    #?(:clj
+       (cond
+         (instance? java.lang.ArithmeticException e)
+         (cond
+           (re-find #"(?i)overflow" raw)                 "Arithmetic overflow"
+           (re-find #"(?i)divide by zero|/ by zero" raw) "Division by zero"
+           :else raw)
+         (instance? java.lang.NumberFormatException e)     "Not a valid number"
+         (instance? java.lang.ClassCastException e)        "Type error: a value was not of the expected type"
+         (instance? clojure.lang.ArityException e)         "Wrong number of arguments"
+         (instance? java.lang.NullPointerException e)      "Used a value that is void (nil)"
+         (instance? java.lang.IndexOutOfBoundsException e) (if (seq raw) raw "Index out of bounds")
+         :else (if (seq raw) raw (str e)))
+       :cljs
+       (cond
+         (re-find #"(?i)overflow" raw)                          "Arithmetic overflow"
+         (re-find #"(?i)division by zero|divide by zero" raw)   "Division by zero"
+         (re-find #"(?i)cannot mix bigint|cannot convert .*bigint" raw) "Type error: a value was not of the expected type"
+         (re-find #"(?i)cannot convert|not a (valid|finite) number|invalid (number|bigint)" raw) "Not a valid number"
+         :else (if (seq raw) raw (str e))))))
+
 (def nex-console-print rt/nex-console-print)
 (def nex-console-println rt/nex-console-println)
 (def nex-console-error rt/nex-console-error)
@@ -3941,7 +3972,7 @@
             (let [exc-value (if (and (instance? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) e)
                                     (= :nex-exception (:type (ex-data e))))
                               (:value (ex-data e))
-                              #?(:clj (.getMessage e) :cljs (.-message e)))
+                              (nex-error-message e))
                   rescue-env (make-env (:current-env ctx))
                   _ (env-define rescue-env "exception" exc-value)
                   rescue-ctx (assoc ctx :current-env rescue-env)]

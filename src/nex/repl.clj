@@ -1596,7 +1596,7 @@
     (catch clojure.lang.ExceptionInfo e
       (let [e (unwrap-user-visible-exception e)]
         (flush-compiled-output-on-error!)
-        (println "Error:" (.getMessage e))
+        (println "Error:" (interp/nex-error-message e))
         (when-let [data (ex-data e)]
           (when (contains? data :line)
             (println "  at line" (:line data))))
@@ -1609,7 +1609,7 @@
         (flush-compiled-output-on-error!)
         (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
                                                  :wrap-expression-fn wrap-expression})
-        (println "Error:" (.getMessage e))
+        (println "Error:" (interp/nex-error-message e))
         ctx))))))
 
 ;;
