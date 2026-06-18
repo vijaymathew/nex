@@ -484,7 +484,6 @@ nex/
 | [Emacs Support](docs/md/EMACS.md) | Emacs mode setup and key bindings |
 | [Development Notes](docs/md/DEVELOPMENT.md) | Architecture and contribution notes |
 | [JVM Bytecode Translation Reference](docs/design/chapter_5.md) | How the current JVM backend lowers and emits Nex programs |
-| [Compiled REPL Status](docs/md/COMPILED_REPL_STATUS.md) | Current shape and limits of the compiled REPL backend |
 
 ### Library Reference
 
