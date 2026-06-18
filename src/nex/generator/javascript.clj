@@ -765,6 +765,10 @@
     "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
     "round"     (fn [target _] (str "Math.round(" target ")"))
     "to_fixed"  (fn [target args] (str "parseFloat(" target ".toFixed(" args "))"))
+    ;; IEEE-754 inspection (see NUMERIC_TOWER.md)
+    "is_nan"      (fn [target _] (str "Number.isNaN(" target ")"))
+    "is_infinite" (fn [target _] (str "(!Number.isFinite(" target ") && !Number.isNaN(" target "))"))
+    "is_finite"   (fn [target _] (str "Number.isFinite(" target ")"))
     ;; Arithmetic operators
     "plus"      (fn [target args] (str "(" target " + " args ")"))
     "minus"     (fn [target args] (str "(" target " - " args ")"))
@@ -786,6 +790,9 @@
     "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
     "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
     "round"     (fn [target _] (str "Math.round(" target ")"))
+    "is_nan"      (fn [target _] (str "Number.isNaN(" target ")"))
+    "is_infinite" (fn [target _] (str "(!Number.isFinite(" target ") && !Number.isNaN(" target "))"))
+    "is_finite"   (fn [target _] (str "Number.isFinite(" target ")"))
     ;; Arithmetic operators
     "plus"      (fn [target args] (str "(" target " + " args ")"))
     "minus"     (fn [target args] (str "(" target " - " args ")"))

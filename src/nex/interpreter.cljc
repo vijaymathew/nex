@@ -2538,18 +2538,30 @@
                           {:operator op :left left :right right})))
     "-" (- left right)
     "*" (* left right)
-    "/" (if (zero? right)
-          (throw (ex-info "Division by zero" {:left left :right right}))
-          (if (and (integer? left) (integer? right))
+    ;; Integer division by zero raises (there is no integer result); Real
+    ;; division follows IEEE-754: x/0.0 -> +/-Infinity, 0.0/0.0 -> NaN.
+    ;; NOTE: clojure.core// on *boxed* doubles (as these args always are) routes
+    ;; through Numbers.divide, which raises on a zero divisor — it only yields
+    ;; IEEE Inf/NaN for primitive doubles. Coerce to primitive to get honest IEEE.
+    "/" (if (and (integer? left) (integer? right))
+          (if (zero? right)
+            (throw (ex-info "Division by zero" {:left left :right right}))
             #?(:clj (quot left right)
-               :cljs (js/Math.trunc (/ left right)))
-            (/ left right)))
+               :cljs (js/Math.trunc (/ left right))))
+          #?(:clj (/ (double left) (double right))
+             :cljs (/ left right)))
     "^" (if (and (integer? left) (integer? right))
           (nex-int-pow left right)
           (Math/pow left right))
-    "%" (if (zero? right)
-          (throw (ex-info "Division by zero" {:left left :right right}))
-          (mod left right))
+    ;; Same asymmetry for remainder: integral % 0 raises, Real % 0.0 is IEEE NaN.
+    ;; (Clojure's mod/rem raise on a zero divisor, so produce NaN directly.)
+    "%" (cond
+          (and (integer? left) (integer? right))
+          (if (zero? right)
+            (throw (ex-info "Division by zero" {:left left :right right}))
+            (mod left right))
+          (zero? right) #?(:clj Double/NaN :cljs js/NaN)
+          :else (mod left right))
     "=" (= left right)
     "/=" (not= left right)
     "==" (nex-identity-equals? left right)
@@ -2768,11 +2780,23 @@
     "to_fixed"          (fn [n places & _]
                           #?(:clj  (double (.setScale (bigdec n) (int places) java.math.RoundingMode/HALF_UP))
                              :cljs (js/parseFloat (.toFixed n places))))
+    ;; IEEE-754 inspection: with Real division now honestly IEEE, these let
+    ;; callers detect the special values it can produce (see NUMERIC_TOWER.md).
+    "is_nan"            (fn [n & _] #?(:clj (Double/isNaN (double n))
+                                       :cljs (js/Number.isNaN n)))
+    "is_infinite"       (fn [n & _] #?(:clj (Double/isInfinite (double n))
+                                       :cljs (and (not (js/Number.isFinite n))
+                                                  (not (js/Number.isNaN n)))))
+    "is_finite"         (fn [n & _] #?(:clj (and (not (Double/isNaN (double n)))
+                                                 (not (Double/isInfinite (double n))))
+                                       :cljs (js/Number.isFinite n)))
     ;; Arithmetic operator methods
     "plus"              (fn [n other & _] (+ n other))
     "minus"             (fn [n other & _] (- n other))
     "times"             (fn [n other & _] (* n other))
-    "divided_by"        (fn [n other & _] (/ n other))
+    ;; IEEE division (see the boxed-double note on the "/" operator).
+    "divided_by"        (fn [n other & _] #?(:clj (/ (double n) (double other))
+                                             :cljs (/ n other)))
     ;; Comparison operator methods
     "equals"            (fn [n other & _] (= n other))
     "not_equals"        (fn [n other & _] (not= n other))
@@ -2792,11 +2816,21 @@
     "to_fixed"          (fn [n places & _]
                           #?(:clj  (.setScale n (int places) java.math.RoundingMode/HALF_UP)
                              :cljs nil))
+    "is_nan"            (fn [n & _] #?(:clj (Double/isNaN (double n))
+                                       :cljs (js/Number.isNaN n)))
+    "is_infinite"       (fn [n & _] #?(:clj (Double/isInfinite (double n))
+                                       :cljs (and (not (js/Number.isFinite n))
+                                                  (not (js/Number.isNaN n)))))
+    "is_finite"         (fn [n & _] #?(:clj (and (not (Double/isNaN (double n)))
+                                                 (not (Double/isInfinite (double n))))
+                                       :cljs (js/Number.isFinite n)))
     ;; Arithmetic operator methods
     "plus"              (fn [n other & _] (+ n other))
     "minus"             (fn [n other & _] (- n other))
     "times"             (fn [n other & _] (* n other))
-    "divided_by"        (fn [n other & _] (/ n other))
+    ;; IEEE division (see the boxed-double note on the "/" operator).
+    "divided_by"        (fn [n other & _] #?(:clj (/ (double n) (double other))
+                                             :cljs (/ n other)))
     ;; Comparison operator methods
     "equals"            (fn [n other & _] (= n other))
     "not_equals"        (fn [n other & _] (not= n other))

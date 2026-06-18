@@ -3683,6 +3683,9 @@
            "max" {:params [{:name "other" :type "Real"}] :return-type "Real"}
            "round"    {:params [] :return-type "Integer"}
            "to_fixed" {:params [{:name "places" :type "Integer"}] :return-type "Real"}
+           "is_nan" {:params [] :return-type "Boolean"}
+           "is_infinite" {:params [] :return-type "Boolean"}
+           "is_finite" {:params [] :return-type "Boolean"}
            "plus" {:params [{:name "other" :type "Real"}] :return-type "Real"}
            "minus" {:params [{:name "other" :type "Real"}] :return-type "Real"}
            "times" {:params [{:name "other" :type "Real"}] :return-type "Real"}
@@ -3706,6 +3709,9 @@
            "max" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
            "round"    {:params [] :return-type "Integer"}
            "to_fixed" {:params [{:name "places" :type "Integer"}] :return-type "Decimal"}
+           "is_nan" {:params [] :return-type "Boolean"}
+           "is_infinite" {:params [] :return-type "Boolean"}
+           "is_finite" {:params [] :return-type "Boolean"}
            "plus" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
            "minus" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
            "times" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
