@@ -69,8 +69,8 @@
           (re-find #"^[A-Za-z_][A-Za-z0-9_]* #<.+ object>$" trimmed))
       "<object>"
 
-      (re-find #"^(Any|Integer|Integer64|Real|Decimal|Boolean|Char|String)\s+.+$" trimmed)
-      (second (re-find #"^(?:Any|Integer|Integer64|Real|Decimal|Boolean|Char|String)\s+(.+)$" trimmed))
+      (re-find #"^(Any|Integer|Real|Boolean|Char|String)\s+.+$" trimmed)
+      (second (re-find #"^(?:Any|Integer|Real|Boolean|Char|String)\s+(.+)$" trimmed))
 
       :else
       trimmed)))

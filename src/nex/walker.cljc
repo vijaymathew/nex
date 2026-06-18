@@ -37,7 +37,7 @@
     ast-node))
 
 (def ^:private implicit-generic-builtins
-  #{"Any" "Void" "Nil" "Boolean" "Integer" "Integer64" "Real" "Decimal"
+  #{"Any" "Void" "Nil" "Boolean" "Integer" "Real"
     "String" "Char" "Array" "Map" "Set" "Function" "Console" "Process"
     "Cursor" "Task" "Channel" "Min_Heap" "Atomic_Integer" "Atomic_Integer64"
     "Atomic_Boolean" "Atomic_Reference"})

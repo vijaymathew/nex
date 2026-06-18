@@ -99,7 +99,7 @@
   (set (keys interp/builtins)))
 
 (def ^:private builtin-runtime-receiver-types
-  #{"Any" "Comparable" "Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
+  #{"Any" "Comparable" "Integer" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Cursor" "Task" "Channel" "Console" "Process"})
 
@@ -608,7 +608,7 @@
          "type_of" "String"
          "type_is" "Boolean"
          "path_exists" "Boolean"
-         "datetime_now" "Integer64"
+         "datetime_now" "Integer"
          nil)
        (when-let [fn-def (some (fn [fn-def]
                                  (when (and (= (:name fn-def) (:method expr))
@@ -1183,7 +1183,7 @@
   [env stmt]
   (let [[env1 done-local] (env-add-local env "__select_done" "Boolean")
         [env2 deadline-local] (if-let [_timeout (:timeout stmt)]
-                                (env-add-local env1 "__select_deadline" "Integer64")
+                                (env-add-local env1 "__select_deadline" "Integer")
                                 [env1 nil])
         init-stmts (vec (concat
                          [(ir/set-local-node (:slot done-local)
@@ -1194,9 +1194,9 @@
                            [(ir/set-local-node (:slot deadline-local)
                                                (ir/call-runtime-node "select-deadline"
                                                                      [(lower-expression env2 (:duration timeout))]
-                                                                     "Integer64"
+                                                                     "Integer"
                                                                      :long)
-                                               "Integer64"
+                                               "Integer"
                                                :long)])))
         [env3 clause-stmts] (reduce (fn [[e acc] clause]
                                      (let [[e' stmt'] (lower-select-clause e done-local clause)]
@@ -1228,7 +1228,7 @@
                                                            (ir/call-runtime-node "deadline-expired?"
                                                                                  [(ir/local-node "__select_deadline"
                                                                                                  (:slot deadline-local)
-                                                                                                 "Integer64"
+                                                                                                 "Integer"
                                                                                                  :long)]
                                                                                  "Boolean"
                                                                                  :boolean)

@@ -26,7 +26,7 @@
       let a: Integer := 0b1010
       let b: Integer := 0o755
       let c: Integer := 0xFF
-      let d: Integer64 := 1_000_000
+      let d: Integer := 1_000_000
     end
 end")
           lets (-> ast :classes first :body first :members first :body)]
@@ -61,7 +61,7 @@ end")]
     demo() do
       let mask: Integer := 0b1111_0000
       let perms: Integer := 0o644
-      let color: Integer64 := 0x7fff_ffff
+      let color: Integer := 0x7fff_ffff
     end
 end")
           result (tc/type-check ast)]
@@ -87,7 +87,7 @@ end")]
     demo() do
       let mask: Integer := 0b1010
       let perms: Integer := 0o10
-      let color: Integer64 := 0xFF
+      let color: Integer := 0xFF
     end
 end")]
       (is (str/includes? js-code "let mask = 10;"))

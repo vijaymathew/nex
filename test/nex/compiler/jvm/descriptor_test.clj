@@ -7,7 +7,6 @@
   (testing "basic Nex type mappings"
     ;; Integer is 64-bit (Int64), matching the interpreter (NUMERIC_TOWER.md).
     (is (= :long (d/nex-type->jvm-type "Integer")))
-    (is (= :long (d/nex-type->jvm-type "Integer64")))
     (is (= :double (d/nex-type->jvm-type "Real")))
     (is (= (ir/object-jvm-type "java/lang/String")
            (d/nex-type->jvm-type "String")))

@@ -227,7 +227,7 @@ end")
   "class Store
   feature
     items: Array [String]
-    prices: Map [String, Decimal]
+    prices: Map [String, Real]
 
   create
     make() do

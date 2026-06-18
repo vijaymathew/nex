@@ -2,7 +2,7 @@ class PlatformUtils
   note "Utility class with platform-specific implementations"
 
 feature
-  current_time_millis(): Integer64
+  current_time_millis(): Integer
     note "Get current time in milliseconds"
   do
       result := 0

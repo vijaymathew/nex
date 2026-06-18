@@ -153,16 +153,14 @@ end"
     (let [code "class Test
   feature
     demo() do
-      let d: Decimal := \"-5.5\".to_decimal()
       print((-5).abs())
       print(type_of((-5).abs()))
       print((-5.5).abs())
       print(type_of((-5.5).abs()))
-      print(type_of(d.abs()))
     end
 end"
           output (execute-method-output code)]
-      (is (= ["5" "\"Integer\"" "5.5" "\"Real\"" "\"Decimal\""] output)))))
+      (is (= ["5" "\"Integer\"" "5.5" "\"Real\""] output)))))
 
 (deftest string-integer-conversions-accept-base-prefixes
   (testing "String to_integer and to_integer64 accept binary, octal, hex, and separators"

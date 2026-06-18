@@ -359,7 +359,7 @@
       (register-class ctx (build-cursor-base-class))
       (register-class ctx (build-comparable-base-class))
       (register-class ctx (build-hashable-base-class))
-      (doseq [scalar ["String" "Integer" "Integer64" "Real" "Decimal" "Boolean" "Char"]]
+      (doseq [scalar ["String" "Integer" "Real" "Boolean" "Char"]]
         (register-class ctx (build-builtin-scalar-class scalar)))
       ctx)))
 
@@ -1725,9 +1725,11 @@
 
 (defn- make-atomic-integer
   [initial]
+  ;; 64-bit, matching Nex Integer (Int64). Previously AtomicInteger, which
+  ;; silently truncated values above 2^31 (see NUMERIC_TOWER.md).
   {:nex-builtin-type :AtomicInteger
-   :state #?(:clj (AtomicInteger. (int initial))
-             :cljs (atom initial))})
+   :state #?(:clj (AtomicLong. (long initial))
+             :cljs (atom (->nex-integer initial)))})
 
 (defn- make-atomic-integer64
   [initial]
@@ -2667,9 +2669,7 @@
     (string? field-type)
     (case field-type
       "Integer" (->nex-integer 0)
-      "Integer64" (->nex-integer 0)
       "Real" 0.0
-      "Decimal" 0.0
       "Char" \0
       "Boolean" false
       "String" ""
@@ -2708,8 +2708,6 @@
     "to_integer"  (fn [s & _] (nex-parse-integer s))
     "to_integer64" (fn [s & _] (nex-parse-integer64-string s))
     "to_real"     (fn [s & _] #?(:clj (Double/parseDouble (str/trim s))
-                                 :cljs (js/parseFloat (str/trim s))))
-    "to_decimal"  (fn [s & _] #?(:clj (bigdec (str/trim s))
                                  :cljs (js/parseFloat (str/trim s))))
     "contains"    (fn [s substr & _] (str/includes? s substr))
     "starts_with" (fn [s prefix & _] (str/starts-with? s prefix))
@@ -2786,27 +2784,6 @@
     "compare"           (fn [n other & _] (nex-compare n other))
     "hash"              (fn [n & _] (hash n))}
 
-   :Integer64
-   {"to_string"         (fn [n & _] (str n))
-    "abs"               (fn [n & _] (if (neg? n) (nex-int-neg n) n))
-    "min"               (fn [n other & _] (if (pos? (nex-numeric-compare n other)) other n))
-    "max"               (fn [n other & _] (if (neg? (nex-numeric-compare n other)) other n))
-    ;; Arithmetic operator methods (64-bit checked)
-    "plus"              (fn [n other & _] (nex-int-add n other))
-    "minus"             (fn [n other & _] (nex-int-sub n other))
-    "times"             (fn [n other & _] (nex-int-mul n other))
-    "divided_by"        (fn [n other & _] #?(:clj (/ (double n) (double other))
-                                             :cljs (/ (->nex-real n) (->nex-real other))))
-    ;; Comparison operator methods
-    "equals"            (fn [n other & _] (nex-numeric-equals? n other))
-    "not_equals"        (fn [n other & _] (not (nex-numeric-equals? n other)))
-    "less_than"         (fn [n other & _] (neg? (nex-numeric-compare n other)))
-    "less_than_or_equal" (fn [n other & _] (not (pos? (nex-numeric-compare n other))))
-    "greater_than"      (fn [n other & _] (pos? (nex-numeric-compare n other)))
-    "greater_than_or_equal" (fn [n other & _] (not (neg? (nex-numeric-compare n other))))
-    "compare"           (fn [n other & _] (nex-compare n other))
-    "hash"              (fn [n & _] (hash n))}
-
    :Real
    {"to_string"         (fn [n & _] (str n))
     "abs"               (fn [n & _] (nex-abs n))
@@ -2819,41 +2796,6 @@
                                :cljs (js/parseFloat (.toFixed n places)))))
     ;; IEEE-754 inspection: with Real division now honestly IEEE, these let
     ;; callers detect the special values it can produce (see NUMERIC_TOWER.md).
-    "is_nan"            (fn [n & _] #?(:clj (Double/isNaN (double n))
-                                       :cljs (js/Number.isNaN n)))
-    "is_infinite"       (fn [n & _] #?(:clj (Double/isInfinite (double n))
-                                       :cljs (and (not (js/Number.isFinite n))
-                                                  (not (js/Number.isNaN n)))))
-    "is_finite"         (fn [n & _] #?(:clj (and (not (Double/isNaN (double n)))
-                                                 (not (Double/isInfinite (double n))))
-                                       :cljs (js/Number.isFinite n)))
-    ;; Arithmetic operator methods
-    "plus"              (fn [n other & _] (+ n other))
-    "minus"             (fn [n other & _] (- n other))
-    "times"             (fn [n other & _] (* n other))
-    ;; IEEE division (see the boxed-double note on the "/" operator).
-    "divided_by"        (fn [n other & _] #?(:clj (/ (double n) (double other))
-                                             :cljs (/ n other)))
-    ;; Comparison operator methods
-    "equals"            (fn [n other & _] (= n other))
-    "not_equals"        (fn [n other & _] (not= n other))
-    "less_than"         (fn [n other & _] (< n other))
-    "less_than_or_equal" (fn [n other & _] (<= n other))
-    "greater_than"      (fn [n other & _] (> n other))
-    "greater_than_or_equal" (fn [n other & _] (>= n other))
-    "compare"           (fn [n other & _] (nex-compare n other))
-    "hash"              (fn [n & _] (hash n))}
-
-   :Decimal
-   {"to_string"         (fn [n & _] (str n))
-    "abs"               (fn [n & _] (nex-abs n))
-    "min"               (fn [n other & _] (min n other))
-    "max"               (fn [n other & _] (max n other))
-    "round"             (fn [n & _] (->nex-integer (nex-round n)))
-    "to_fixed"          (fn [n places & _]
-                          (let [places (nex-int->number places)]
-                            #?(:clj  (.setScale n (int places) java.math.RoundingMode/HALF_UP)
-                               :cljs nil)))
     "is_nan"            (fn [n & _] #?(:clj (Double/isNaN (double n))
                                        :cljs (js/Number.isNaN n)))
     "is_infinite"       (fn [n & _] #?(:clj (Double/isInfinite (double n))
@@ -2993,39 +2935,16 @@
     "size"            (fn [heap & _] (->nex-integer (count @(:data heap))))
     "is_empty"        (fn [heap & _] (empty? @(:data heap)))}
 
+   ;; Atomic_Integer and Atomic_Integer64 are both 64-bit (AtomicLong on the JVM,
+   ;; a BigInt-holding atom on JS). On JS, Integer is a BigInt, so increment/add
+   ;; must use the BigInt-safe primitives — `inc`/`dec`/`+` mix BigInt and number
+   ;; and throw.
    :Atomic_Integer
-   {"load"            (fn [atomic & _] #?(:clj (.get ^AtomicInteger (:state atomic))
-                                          :cljs @(:state atomic)))
-    "store"           (fn [atomic value & _]
-                        #?(:clj (.set ^AtomicInteger (:state atomic) (int value))
-                           :cljs (reset! (:state atomic) value))
-                        nil)
-    "compare_and_set" (fn [atomic expected update & _]
-                        #?(:clj (.compareAndSet ^AtomicInteger (:state atomic) (int expected) (int update))
-                           :cljs (if (= @(:state atomic) expected)
-                                   (do (reset! (:state atomic) update) true)
-                                   false)))
-    "get_and_add"     (fn [atomic delta & _]
-                        #?(:clj (.getAndAdd ^AtomicInteger (:state atomic) (int delta))
-                           :cljs (let [current @(:state atomic)]
-                                   (swap! (:state atomic) + delta)
-                                   current)))
-    "add_and_get"     (fn [atomic delta & _]
-                        #?(:clj (.addAndGet ^AtomicInteger (:state atomic) (int delta))
-                           :cljs (swap! (:state atomic) + delta)))
-    "increment"       (fn [atomic & _]
-                        #?(:clj (.incrementAndGet ^AtomicInteger (:state atomic))
-                           :cljs (swap! (:state atomic) inc)))
-    "decrement"       (fn [atomic & _]
-                        #?(:clj (.decrementAndGet ^AtomicInteger (:state atomic))
-                           :cljs (swap! (:state atomic) dec)))}
-
-   :Atomic_Integer64
    {"load"            (fn [atomic & _] #?(:clj (.get ^AtomicLong (:state atomic))
                                           :cljs @(:state atomic)))
     "store"           (fn [atomic value & _]
                         #?(:clj (.set ^AtomicLong (:state atomic) (long value))
-                           :cljs (reset! (:state atomic) value))
+                           :cljs (reset! (:state atomic) (->nex-integer value)))
                         nil)
     "compare_and_set" (fn [atomic expected update & _]
                         #?(:clj (.compareAndSet ^AtomicLong (:state atomic) (long expected) (long update))
@@ -3035,17 +2954,44 @@
     "get_and_add"     (fn [atomic delta & _]
                         #?(:clj (.getAndAdd ^AtomicLong (:state atomic) (long delta))
                            :cljs (let [current @(:state atomic)]
-                                   (swap! (:state atomic) + delta)
+                                   (swap! (:state atomic) nex-int-add delta)
                                    current)))
     "add_and_get"     (fn [atomic delta & _]
                         #?(:clj (.addAndGet ^AtomicLong (:state atomic) (long delta))
-                           :cljs (swap! (:state atomic) + delta)))
+                           :cljs (swap! (:state atomic) nex-int-add delta)))
     "increment"       (fn [atomic & _]
                         #?(:clj (.incrementAndGet ^AtomicLong (:state atomic))
-                           :cljs (swap! (:state atomic) inc)))
+                           :cljs (swap! (:state atomic) nex-int-add (->nex-integer 1))))
     "decrement"       (fn [atomic & _]
                         #?(:clj (.decrementAndGet ^AtomicLong (:state atomic))
-                           :cljs (swap! (:state atomic) dec)))}
+                           :cljs (swap! (:state atomic) nex-int-sub (->nex-integer 1))))}
+
+   :Atomic_Integer64
+   {"load"            (fn [atomic & _] #?(:clj (.get ^AtomicLong (:state atomic))
+                                          :cljs @(:state atomic)))
+    "store"           (fn [atomic value & _]
+                        #?(:clj (.set ^AtomicLong (:state atomic) (long value))
+                           :cljs (reset! (:state atomic) (->nex-integer value)))
+                        nil)
+    "compare_and_set" (fn [atomic expected update & _]
+                        #?(:clj (.compareAndSet ^AtomicLong (:state atomic) (long expected) (long update))
+                           :cljs (if (= @(:state atomic) expected)
+                                   (do (reset! (:state atomic) update) true)
+                                   false)))
+    "get_and_add"     (fn [atomic delta & _]
+                        #?(:clj (.getAndAdd ^AtomicLong (:state atomic) (long delta))
+                           :cljs (let [current @(:state atomic)]
+                                   (swap! (:state atomic) nex-int-add delta)
+                                   current)))
+    "add_and_get"     (fn [atomic delta & _]
+                        #?(:clj (.addAndGet ^AtomicLong (:state atomic) (long delta))
+                           :cljs (swap! (:state atomic) nex-int-add delta)))
+    "increment"       (fn [atomic & _]
+                        #?(:clj (.incrementAndGet ^AtomicLong (:state atomic))
+                           :cljs (swap! (:state atomic) nex-int-add (->nex-integer 1))))
+    "decrement"       (fn [atomic & _]
+                        #?(:clj (.decrementAndGet ^AtomicLong (:state atomic))
+                           :cljs (swap! (:state atomic) nex-int-sub (->nex-integer 1))))}
 
    :Atomic_Boolean
    {"load"            (fn [atomic & _] #?(:clj (.get ^AtomicBoolean (:state atomic))
