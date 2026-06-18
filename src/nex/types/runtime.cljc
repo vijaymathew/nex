@@ -219,9 +219,15 @@
          e exponent]
     (if (zero? e)
       acc
-      (recur (if (odd? e) (* acc b) acc)
-             (* b b)
-             (quot e 2)))))
+      ;; Square `b` only when another iteration will consume it. Squaring
+      ;; unconditionally overflows the next power of `b` even when that value is
+      ;; discarded (e.g. 2^40 computed (2^32)^2 and raised although 2^40 fits),
+      ;; so the running product `acc` is the sole source of genuine overflow.
+      (let [acc' (if (odd? e) (* acc b) acc)
+            e' (quot e 2)]
+        (if (zero? e')
+          acc'
+          (recur acc' (* b b) e'))))))
 
 (defn nex-console-print [msg] #?(:clj (print msg) :cljs (.write js/process.stdout (str msg))))
 (defn nex-console-println [msg] #?(:clj (println msg) :cljs (js/console.log msg)))
