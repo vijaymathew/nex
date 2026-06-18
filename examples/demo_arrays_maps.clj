@@ -84,7 +84,7 @@ end")
 (def example4
   "class Store
   feature
-    prices: Map [String, Decimal]
+    prices: Map [String, Real]
     inventory: Map [String, Integer]
 end")
 
@@ -153,7 +153,7 @@ end")
   "class Store
   feature
     items: Array [String]
-    prices: Map [String, Decimal]
+    prices: Map [String, Real]
 
   create
     make() do

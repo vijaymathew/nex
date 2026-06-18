@@ -39,10 +39,10 @@
 
     (string? nex-type)
     (case nex-type
-      "Integer" :int
-      "Integer64" :long
+      ;; Integer is 64-bit (Int64), matching the interpreter and the numeric-tower
+      ;; model (NUMERIC_TOWER.md).
+      "Integer" :long
       "Real" :double
-      "Decimal" :double
       "Boolean" :boolean
       "Char" :char
       "Void" :void

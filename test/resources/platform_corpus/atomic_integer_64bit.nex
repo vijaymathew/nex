@@ -1,0 +1,8 @@
+let a: Atomic_Integer := create Atomic_Integer.make(5000000000)
+print(a.load)
+a.increment
+print(a.load)
+print(a.add_and_get(1000000000000))
+let b: Atomic_Integer64 := create Atomic_Integer64.make(0)
+b.store(9000000000000000000)
+print(b.load)

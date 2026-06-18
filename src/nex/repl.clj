@@ -41,7 +41,7 @@
    "result"])
 
 (def nex-types
-  ["Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
+  ["Integer" "Real" "Char" "Boolean" "String"
    "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
    "Task" "Channel" "Function" "Cursor" "Console" "Process"])
 
@@ -1060,7 +1060,7 @@
   #{"<" "<=" ">" ">="})
 
 (def builtin-sortable-types
-  #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"})
+  #{"Integer" "Real" "Char" "Boolean" "String"})
 
 (defn- normalized-type-params
   [t]
@@ -1596,7 +1596,7 @@
     (catch clojure.lang.ExceptionInfo e
       (let [e (unwrap-user-visible-exception e)]
         (flush-compiled-output-on-error!)
-        (println "Error:" (.getMessage e))
+        (println "Error:" (interp/nex-error-message e))
         (when-let [data (ex-data e)]
           (when (contains? data :line)
             (println "  at line" (:line data))))
@@ -1609,7 +1609,7 @@
         (flush-compiled-output-on-error!)
         (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
                                                  :wrap-expression-fn wrap-expression})
-        (println "Error:" (.getMessage e))
+        (println "Error:" (interp/nex-error-message e))
         ctx))))))
 
 ;;

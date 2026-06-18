@@ -1,0 +1,6 @@
+let n: Integer := 7
+let r: Real := 2.0
+print(n + r)
+print(n / 2)
+print(10 / 4)
+print(3.5 * 2)

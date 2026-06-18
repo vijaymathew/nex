@@ -18,9 +18,13 @@
 (def ^:private corpus-dir "test/resources/platform_corpus")
 
 (defn- run [ast]
+  ;; A program that raises (e.g. integer overflow, division by zero) records the
+  ;; ::raised marker instead of output, so the harness can assert both hosts raise.
   (let [ctx (interp/make-context)]
-    (interp/eval-node ctx ast)
-    (vec @(:output ctx))))
+    (try
+      (interp/eval-node ctx ast)
+      (vec @(:output ctx))
+      (catch Throwable _ ::raised))))
 
 (defn -main [& _]
   (let [files (->> (.listFiles (io/file corpus-dir))

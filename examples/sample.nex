@@ -3,19 +3,19 @@
 
 class Account
 feature
-  balance: Decimal
+  balance: Real
   account_number: String
   is_active: Boolean
 
 create
-  make(b: Decimal, number: String) do
+  make(b: Real, number: String) do
     balance := b
     account_number := number
     is_active := true
   end
 
 feature
-  deposit(amount: Decimal)
+  deposit(amount: Real)
     require
       positive_amount: amount > 0.0
       active_account: is_active
@@ -25,7 +25,7 @@ feature
       increased: balance = old balance + amount
     end
 
-  withdraw(amount: Decimal)
+  withdraw(amount: Real)
     require
       positive_amount: amount > 0.0
       enough: balance >= amount
@@ -58,7 +58,7 @@ feature
   interest_rate: Real
 
 create
-  make(b: Decimal, number: String, i: Real) do
+  make(b: Real, number: String, i: Real) do
     Account.make(b, number)
     interest_rate := i
   end
@@ -68,7 +68,7 @@ feature
     balance := balance + (balance * interest_rate)
   end
 
-  withdraw(amount: Decimal)
+  withdraw(amount: Real)
     require
       active_account: is_active
     do

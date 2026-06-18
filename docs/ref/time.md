@@ -24,14 +24,14 @@ intern time/Date_Time
 ```nex
 class Duration
 create
-  milliseconds(ms: Integer64)
+  milliseconds(ms: Integer)
   seconds(n: Integer)
   minutes(n: Integer)
   hours(n: Integer)
   days(n: Integer)
   weeks(n: Integer)
 feature
-  total_milliseconds(): Integer64
+  total_milliseconds(): Integer
   total_seconds(): Real
   plus(other: Duration): Duration
   minus(other: Duration): Duration
@@ -57,7 +57,7 @@ print(a.plus(b).total_seconds())
 class Date_Time
 create
   now()
-  from_epoch_millis(ms: Integer64)
+  from_epoch_millis(ms: Integer)
   parse_iso(text: String)
   make(year, month, day, hour, minute, second: Integer)
 feature
@@ -71,7 +71,7 @@ feature
   hour(): Integer
   minute(): Integer
   second(): Integer
-  epoch_millis(): Integer64
+  epoch_millis(): Integer
   add(duration: Duration): Date_Time
   subtract(duration: Duration): Date_Time
   difference(other: Date_Time): Duration

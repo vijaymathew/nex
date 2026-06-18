@@ -225,7 +225,7 @@ end")
     real_list: List [Real]
     bool_list: List [Boolean]
     char_list: List [Char]
-    decimal_list: List [Decimal]
+    decimal_list: List [Real]
 end")
 
 (println "NEX CODE:")

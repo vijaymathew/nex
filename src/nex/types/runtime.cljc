@@ -1,12 +1,14 @@
 (ns nex.types.runtime
   (:require [clojure.string :as str]))
 
-(declare nex-set?)
+(declare nex-set? nex-integer? ->nex-integer nex-int->number)
 
 (defn nex-array [] #?(:clj (java.util.ArrayList.) :cljs #js []))
 (defn nex-array-from [coll] #?(:clj (java.util.ArrayList. (vec coll)) :cljs (js/Array.from (to-array coll))))
 (defn nex-array? [v] #?(:clj (instance? java.util.ArrayList v) :cljs (array? v)))
-(defn nex-array-get [arr idx] #?(:clj (.get arr idx) :cljs (aget arr idx)))
+;; Nex Integer indices are BigInt on JS; convert to a plain number for the host
+;; collection. nex-int->number is identity on the JVM (a long index works as-is).
+(defn nex-array-get [arr idx] (let [idx (nex-int->number idx)] #?(:clj (.get arr idx) :cljs (aget arr idx))))
 (defn nex-array-add [arr val]
   #?(:clj (do
             (.add arr val)
@@ -15,34 +17,39 @@
              (.push arr val)
              nil)))
 (defn nex-array-add-at [arr idx val]
-  #?(:clj (do
-            (.add arr idx val)
-            nil)
-     :cljs (do
-             (.splice arr idx 0 val)
-             nil)))
+  (let [idx (nex-int->number idx)]
+    #?(:clj (do
+              (.add arr idx val)
+              nil)
+       :cljs (do
+               (.splice arr idx 0 val)
+               nil))))
 (defn nex-array-set [arr idx val]
-  #?(:clj (do
-            (.set arr idx val)
-            nil)
-     :cljs (do
-             (aset arr idx val)
-             nil)))
+  (let [idx (nex-int->number idx)]
+    #?(:clj (do
+              (.set arr idx val)
+              nil)
+       :cljs (do
+               (aset arr idx val)
+               nil))))
 (defn nex-array-size [arr] #?(:clj (.size arr) :cljs (.-length arr)))
 (defn nex-array-empty? [arr] #?(:clj (.isEmpty arr) :cljs (zero? (.-length arr))))
 (defn nex-array-contains [arr elem] #?(:clj (.contains arr elem) :cljs (.includes arr elem)))
 (defn nex-array-index-of [arr elem] #?(:clj (.indexOf arr elem) :cljs (.indexOf arr elem)))
 (defn nex-array-remove [arr idx]
-  #?(:clj (do
-            (.remove ^java.util.ArrayList arr ^int (int idx))
-            nil)
-     :cljs (do
-             (.splice arr idx 1)
-             nil)))
+  (let [idx (nex-int->number idx)]
+    #?(:clj (do
+              (.remove ^java.util.ArrayList arr ^int (int idx))
+              nil)
+       :cljs (do
+               (.splice arr idx 1)
+               nil))))
 (defn nex-array-reverse [arr] #?(:clj (java.util.ArrayList. (.reversed arr)) :cljs (js/Array.from (.reverse (.slice arr)))))
 (defn nex-array-sort [arr] #?(:clj (.sort arr nil) :cljs (.sort arr)))
 (defn nex-array-slice [arr start end]
-  (let [len #?(:clj (.size arr) :cljs (.-length arr))
+  (let [start (nex-int->number start)
+        end (nex-int->number end)
+        len #?(:clj (.size arr) :cljs (.-length arr))
         resolve (fn [i] (-> (if (< i 0) (+ len i) i) (max 0) (min len)))
         s (resolve start)
         e (resolve end)]
@@ -50,25 +57,29 @@
        :cljs (.slice arr s e))))
 
 (defn nex-array-take [arr n]
-  (let [len #?(:clj (.size arr) :cljs (.-length arr))
+  (let [n (nex-int->number n)
+        len #?(:clj (.size arr) :cljs (.-length arr))
         end (-> n (max 0) (min len))]
     #?(:clj (java.util.ArrayList. (.subList arr 0 end))
        :cljs (.slice arr 0 end))))
 
 (defn nex-array-drop [arr n]
-  (let [len #?(:clj (.size arr) :cljs (.-length arr))
+  (let [n (nex-int->number n)
+        len #?(:clj (.size arr) :cljs (.-length arr))
         start (-> n (max 0) (min len))]
     #?(:clj (java.util.ArrayList. (.subList arr start len))
        :cljs (.slice arr start))))
 
 (defn nex-array-take-last [arr n]
-  (let [len #?(:clj (.size arr) :cljs (.-length arr))
+  (let [n (nex-int->number n)
+        len #?(:clj (.size arr) :cljs (.-length arr))
         start (-> len (- (max 0 n)) (max 0))]
     #?(:clj (java.util.ArrayList. (.subList arr start len))
        :cljs (.slice arr start))))
 
 (defn nex-array-drop-last [arr n]
-  (let [len #?(:clj (.size arr) :cljs (.-length arr))
+  (let [n (nex-int->number n)
+        len #?(:clj (.size arr) :cljs (.-length arr))
         end (-> len (- (max 0 n)) (max 0))]
     #?(:clj (java.util.ArrayList. (.subList arr 0 end))
        :cljs (.slice arr 0 end))))
@@ -151,77 +162,182 @@
   #?(:clj (nex-array-from s)
      :cljs (nex-array-from (es6-iterator-seq (.values s)))))
 
+;; Bitwise operators are a 32-bit island: they mask operands to int32 and the
+;; interpreter/compiler agree on that. On JS a Nex Integer is a BigInt, which
+;; cannot be mixed with `number` in a bit op, so int32/bit-index convert through
+;; `js/Number` on the way in, and `i32->int` lifts the int32 result back to the
+;; Nex Integer representation on the way out.
 (defn- int32 [n]
   #?(:clj (int n)
-     :cljs (bit-or n 0)))
+     :cljs (bit-or (js/Number n) 0)))
 
 (defn- bit-index [n]
   #?(:clj (bit-and (int n) 31)
-     :cljs (bit-and n 31)))
+     :cljs (bit-and (js/Number n) 31)))
+
+(defn- i32->int [v] (->nex-integer v))
 
 (defn nex-bitwise-left-shift [n shift]
-  (int32 (bit-shift-left (int32 n) (bit-index shift))))
+  (i32->int (int32 (bit-shift-left (int32 n) (bit-index shift)))))
 
 (defn nex-bitwise-right-shift [n shift]
-  (int32 (bit-shift-right (int32 n) (bit-index shift))))
+  (i32->int (int32 (bit-shift-right (int32 n) (bit-index shift)))))
 
 (defn nex-bitwise-logical-right-shift [n shift]
-  #?(:clj (long (bit-shift-right (bit-and 0xFFFFFFFF (long (int32 n)))
-                                 (bit-index shift)))
-     :cljs (js* "(~{} >>> ~{})" (int32 n) (bit-index shift))))
+  (i32->int
+    #?(:clj (long (bit-shift-right (bit-and 0xFFFFFFFF (long (int32 n)))
+                                   (bit-index shift)))
+       :cljs (js* "(~{} >>> ~{})" (int32 n) (bit-index shift)))))
 
 (defn nex-bitwise-rotate-left [n shift]
-  #?(:clj (Integer/rotateLeft (int32 n) (bit-index shift))
-     :cljs (let [x (int32 n)
-                 s (bit-index shift)]
-             (int32 (bit-or (bit-shift-left x s)
-                            (js* "(~{} >>> ~{})" x (- 32 s)))))))
+  (i32->int
+    #?(:clj (Integer/rotateLeft (int32 n) (bit-index shift))
+       :cljs (let [x (int32 n)
+                   s (bit-index shift)]
+               (int32 (bit-or (bit-shift-left x s)
+                              (js* "(~{} >>> ~{})" x (- 32 s))))))))
 
 (defn nex-bitwise-rotate-right [n shift]
-  #?(:clj (Integer/rotateRight (int32 n) (bit-index shift))
-     :cljs (let [x (int32 n)
-                 s (bit-index shift)]
-             (int32 (bit-or (js* "(~{} >>> ~{})" x s)
-                            (bit-shift-left x (- 32 s)))))))
+  (i32->int
+    #?(:clj (Integer/rotateRight (int32 n) (bit-index shift))
+       :cljs (let [x (int32 n)
+                   s (bit-index shift)]
+               (int32 (bit-or (js* "(~{} >>> ~{})" x s)
+                              (bit-shift-left x (- 32 s))))))))
 
 (defn nex-bitwise-and [n other]
-  (int32 (bit-and (int32 n) (int32 other))))
+  (i32->int (int32 (bit-and (int32 n) (int32 other)))))
 
 (defn nex-bitwise-or [n other]
-  (int32 (bit-or (int32 n) (int32 other))))
+  (i32->int (int32 (bit-or (int32 n) (int32 other)))))
 
 (defn nex-bitwise-xor [n other]
-  (int32 (bit-xor (int32 n) (int32 other))))
+  (i32->int (int32 (bit-xor (int32 n) (int32 other)))))
 
 (defn nex-bitwise-not [n]
-  (int32 (bit-not (int32 n))))
+  (i32->int (int32 (bit-not (int32 n)))))
 
 (defn nex-bitwise-is-set [n idx]
   (not (zero? (bit-and (int32 n) (bit-shift-left 1 (bit-index idx))))))
 
 (defn nex-bitwise-set [n idx]
-  (int32 (bit-or (int32 n) (bit-shift-left 1 (bit-index idx)))))
+  (i32->int (int32 (bit-or (int32 n) (bit-shift-left 1 (bit-index idx))))))
 
 (defn nex-bitwise-unset [n idx]
-  (int32 (bit-and (int32 n) (bit-not (bit-shift-left 1 (bit-index idx))))))
+  (i32->int (int32 (bit-and (int32 n) (bit-not (bit-shift-left 1 (bit-index idx)))))))
 
 (defn nex-abs [n]
   (if (neg? n) (- n) n))
 
 (defn nex-round [n] #?(:clj (Math/round (double n)) :cljs (js/Math.round n)))
 
+;; ---------------------------------------------------------------------------
+;; Integer (Int64) representation
+;;
+;; On the JVM a Nex Integer is a Clojure `long` — 64-bit, and Clojure's +/-/*
+;; already raise on overflow. On JavaScript a Nex Integer is a `BigInt`, so the
+;; full signed 64-bit range is exact and overflow is detectable; a plain JS
+;; `number` (IEEE binary64) would silently lose precision past 2^53. These
+;; helpers centralize the representation so the shared interpreter and runtime
+;; stay backend-agnostic. (See docs/md/NUMERIC_TOWER.md, Phase 4.)
+;;
+;; cljs facts these rely on (probed): native + - * / % < > <= >= = bit-* work on
+;; BigInt; `js/BigInt.asIntN` wraps to 64 bits; `min`/`max`/`compare`/`quot`/
+;; `rem`/`even?`/`odd?` and any BigInt<->number mix do NOT — hence the helpers.
+
+(defn nex-integer?
+  "True when v is a Nex Integer value in this host's representation."
+  [v]
+  #?(:clj (integer? v)
+     :cljs (js* "typeof ~{} === 'bigint'" v)))
+
+(defn ->nex-integer
+  "Coerce a number, numeric string, or Integer to the host Integer representation."
+  [v]
+  #?(:clj (if (string? v) (Long/parseLong v) (long v))
+     :cljs (js/BigInt v)))
+
+(defn nex-int->number
+  "Convert a Nex Integer to a plain host number — for JS array indices, char
+   codepoints, and other positions that require a 32/53-bit number."
+  [v]
+  #?(:clj v :cljs (js/Number v)))
+
+(defn ->nex-real
+  "Coerce a Nex numeric (Integer or Real) to the host Real (floating) value."
+  [v]
+  #?(:clj (double v)
+     :cljs (if (nex-integer? v) (js/Number v) v)))
+
+(defn nex-numeric?
+  "True for any Nex number — Integer or Real — in this host's representation."
+  [v]
+  #?(:clj (number? v)
+     :cljs (or (number? v) (nex-integer? v))))
+
+#?(:cljs
+   (defn- check-int64!
+     "Raise if v has escaped the signed 64-bit range (BigInt arithmetic is
+      unbounded); otherwise return v. Mirrors the JVM's checked long arithmetic."
+     [v]
+     (if (js* "~{} === ~{}" v (js/BigInt.asIntN 64 v))
+       v
+       (throw (ex-info "integer overflow" {:value (str v)})))))
+
+;; cljs `zero?` tests `=== 0` against a *number*, so it is always false for a
+;; BigInt; compare against a BigInt zero instead. (`<`/`>`/`neg?`/`pos?` are fine —
+;; JS allows BigInt/number ordering — only `zero?`, `even?`, `odd?` need help.)
+(defn nex-int-zero? [a] #?(:clj (zero? a) :cljs (js* "~{} === 0n" a)))
+
+(defn nex-int-add [a b] #?(:clj (+ a b)    :cljs (check-int64! (+ a b))))
+(defn nex-int-sub [a b] #?(:clj (- a b)    :cljs (check-int64! (- a b))))
+(defn nex-int-mul [a b] #?(:clj (* a b)    :cljs (check-int64! (* a b))))
+(defn nex-int-neg [a]   #?(:clj (- a)      :cljs (check-int64! (- a))))
+;; Truncating integer division (toward zero), like quot / BigInt `/`.
+(defn nex-int-quot [a b] #?(:clj (quot a b) :cljs (js* "~{} / ~{}" a b)))
+;; Floored modulo, matching Clojure `mod` on both hosts.
+(defn nex-int-mod [a b]
+  #?(:clj (mod a b)
+     :cljs (let [m (js* "~{} % ~{}" a b)]
+             (if (or (nex-int-zero? m) (= (neg? m) (neg? b))) m (+ m b)))))
+(defn nex-int-odd? [a]
+  #?(:clj (odd? a) :cljs (js* "(~{} & 1n) === 1n" a)))
+
+(defn nex-numeric-compare
+  "Three-way compare of two Nex numbers. Integers compare in their own
+   representation; a mixed Integer/Real pair is compared as Reals."
+  [x y]
+  (let [[a b] (if (and (nex-integer? x) (nex-integer? y))
+                [x y]
+                [(->nex-real x) (->nex-real y)])]
+    (cond (< a b) -1 (> a b) 1 :else 0)))
+
+(defn nex-numeric-equals?
+  "Numeric equality with the JVM's kind-sensitive rule: 5 and 5.0 are not equal."
+  [x y]
+  (cond
+    (and (nex-integer? x) (nex-integer? y)) (= x y)
+    (and (number? x) (number? y)) (== x y)
+    :else false))
+
 (defn nex-int-pow [base exponent]
   (when (neg? exponent)
     (throw (ex-info "Integral exponentiation requires a non-negative exponent"
                     {:base base :exponent exponent})))
-  (loop [acc 1
+  (loop [acc (->nex-integer 1)
          b base
          e exponent]
-    (if (zero? e)
+    (if (nex-int-zero? e)
       acc
-      (recur (if (odd? e) (* acc b) acc)
-             (* b b)
-             (quot e 2)))))
+      ;; Square `b` only when another iteration will consume it. Squaring
+      ;; unconditionally overflows the next power of `b` even when that value is
+      ;; discarded (e.g. 2^40 computed (2^32)^2 and raised although 2^40 fits),
+      ;; so the running product `acc` is the sole source of genuine overflow.
+      (let [acc' (if (nex-int-odd? e) (nex-int-mul acc b) acc)
+            e' (nex-int-quot e (->nex-integer 2))]
+        (if (nex-int-zero? e')
+          acc'
+          (recur acc' (nex-int-mul b b) e'))))))
 
 (defn nex-console-print [msg] #?(:clj (print msg) :cljs (.write js/process.stdout (str msg))))
 (defn nex-console-println [msg] #?(:clj (println msg) :cljs (js/console.log msg)))
@@ -244,12 +360,14 @@
                          (str/starts-with? normalized "0o") [8 (subs normalized 2)]
                          (str/starts-with? normalized "0x") [16 (subs normalized 2)]
                          :else [10 normalized])
-        parsed #?(:clj (Long/parseLong digits radix)
-                  :cljs (js/parseInt digits radix))]
+        ;; cljs parses via js/BigInt (which understands 0x/0o/0b prefixes) so
+        ;; values above 2^53 are exact — js/parseInt would round through a double.
+        parsed #?(:clj (->nex-integer (Long/parseLong digits radix))
+                  :cljs (js/BigInt normalized))]
     (if negative? (- parsed) parsed)))
 
-(defn nex-parse-integer [s] #?(:clj (int (nex-parse-integer64-string s))
-                               :cljs (nex-parse-integer64-string s)))
+;; Integer is 64-bit, so to_integer no longer truncates to 32 bits.
+(defn nex-parse-integer [s] (nex-parse-integer64-string s))
 (defn nex-parse-real [s] #?(:clj (Double/parseDouble (.trim s)) :cljs (js/parseFloat s)))
 
 (defn nex-file-read [path] #?(:clj (slurp path) :cljs (.toString (.readFileSync (js/require "fs") path "utf8"))))

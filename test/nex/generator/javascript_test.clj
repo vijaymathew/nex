@@ -721,9 +721,7 @@ end"
 (deftest type-mapping-test
   (testing "Type mapping from Nex to JavaScript"
     (is (= "number" (js/nex-type-to-js "Integer")))
-    (is (= "number" (js/nex-type-to-js "Integer64")))
     (is (= "number" (js/nex-type-to-js "Real")))
-    (is (= "number" (js/nex-type-to-js "Decimal")))
     (is (= "string" (js/nex-type-to-js "Char")))
     (is (= "boolean" (js/nex-type-to-js "Boolean")))
     (is (= "string" (js/nex-type-to-js "String")))))
@@ -785,7 +783,7 @@ end"
   feature
     parse_values() do
       let i: Integer := \"0xFF\".to_integer()
-      let i64: Integer64 := \"0b1010\".to_integer64()
+      let i64: Integer := \"0b1010\".to_integer64()
     end
 end"
           js-code (js/translate nex-code)]
@@ -1110,9 +1108,7 @@ end"
 (deftest default-values-test
   (testing "Default values for different types"
     (is (= "0" (js/default-value "Integer")))
-    (is (= "0" (js/default-value "Integer64")))
     (is (= "0.0" (js/default-value "Real")))
-    (is (= "0.0" (js/default-value "Decimal")))
     (is (= "false" (js/default-value "Boolean")))
     (is (= "\"\"" (js/default-value "String")))
     (is (= "[]" (js/default-value "Array")))

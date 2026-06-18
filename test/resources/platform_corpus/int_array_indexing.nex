@@ -1,0 +1,8 @@
+let xs: Array[Integer] := [10, 20, 30, 40]
+print(xs.length)
+print(xs.get(0))
+print(xs.get(3))
+print(xs.index_of(30))
+xs.add(50)
+print(xs.length)
+print(xs.get(4))

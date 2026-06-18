@@ -38,8 +38,8 @@ feature
   name_without_extension(): String
   absolute(): Path
   normalize(): Path
-  size(): Integer64
-  modified_time(): Integer64
+  size(): Integer
+  modified_time(): Integer
   parent(): ?Path
   child(name: String): Path
   create_file()

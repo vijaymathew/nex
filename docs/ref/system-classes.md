@@ -131,13 +131,13 @@ create Atomic_Integer64.make(0)
 
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
-| `load` | none | `Integer64` | Read the current value. |
-| `store` | `value: Integer64` | `Void` | Replace the current value. |
-| `compare_and_set` | `expected: Integer64, update: Integer64` | `Boolean` | Replace the value only if it currently matches `expected`. |
-| `get_and_add` | `delta: Integer64` | `Integer64` | Return the old value, then add `delta`. |
-| `add_and_get` | `delta: Integer64` | `Integer64` | Add `delta`, then return the new value. |
-| `increment` | none | `Integer64` | Increment by 1 and return the new value. |
-| `decrement` | none | `Integer64` | Decrement by 1 and return the new value. |
+| `load` | none | `Integer` | Read the current value. |
+| `store` | `value: Integer` | `Void` | Replace the current value. |
+| `compare_and_set` | `expected: Integer, update: Integer` | `Boolean` | Replace the value only if it currently matches `expected`. |
+| `get_and_add` | `delta: Integer` | `Integer` | Return the old value, then add `delta`. |
+| `add_and_get` | `delta: Integer` | `Integer` | Add `delta`, then return the new value. |
+| `increment` | none | `Integer` | Increment by 1 and return the new value. |
+| `decrement` | none | `Integer` | Decrement by 1 and return the new value. |
 
 ## `Atomic_Boolean`
 

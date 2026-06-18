@@ -1,0 +1,5 @@
+print((5).bitwise_left_shift(2))
+print((12).bitwise_and(10))
+print((12).bitwise_or(3))
+print((0).bitwise_not)
+print((5).bitwise_is_set(0))

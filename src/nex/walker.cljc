@@ -37,7 +37,7 @@
     ast-node))
 
 (def ^:private implicit-generic-builtins
-  #{"Any" "Void" "Nil" "Boolean" "Integer" "Integer64" "Real" "Decimal"
+  #{"Any" "Void" "Nil" "Boolean" "Integer" "Real"
     "String" "Char" "Array" "Map" "Set" "Function" "Console" "Process"
     "Cursor" "Task" "Channel" "Min_Heap" "Atomic_Integer" "Atomic_Integer64"
     "Atomic_Boolean" "Atomic_Reference"})
@@ -121,6 +121,63 @@
     #?(:clj (Long/parseLong digits radix)
        :cljs (js/parseInt digits radix))))
 
+(defn- codepoint->string [cp]
+  #?(:clj (String/valueOf (Character/toChars cp))
+     :cljs (js/String.fromCodePoint cp)))
+
+(defn- parse-hex [s]
+  #?(:clj (Integer/parseInt s 16) :cljs (js/parseInt s 16)))
+
+(defn- interpret-string-escapes
+  "Interpret the backslash escapes of a double-quoted string's content. The
+   recognised escapes are \\n \\t \\r \\0 \\\\ \\\" and \\u{HHHH} (a Unicode
+   code point in hexadecimal); any other backslash sequence is an error, so a
+   literal backslash is written either as \\\\ or in a raw single-quoted string."
+  [content]
+  (let [n (count content)]
+    (loop [i 0, out []]
+      (if (>= i n)
+        (apply str out)
+        (let [c (nth content i)]
+          (if (not= c \\)
+            (recur (inc i) (conj out c))
+            (let [e (when (< (inc i) n) (nth content (inc i)))]
+              (case e
+                \n (recur (+ i 2) (conj out \newline))
+                \t (recur (+ i 2) (conj out \tab))
+                \r (recur (+ i 2) (conj out \return))
+                \0 (recur (+ i 2) (conj out (char 0)))
+                \\ (recur (+ i 2) (conj out \\))
+                \" (recur (+ i 2) (conj out \"))
+                \u (let [open (+ i 2)]
+                     (if (and (< open n) (= (nth content open) \{))
+                       (if-let [close (str/index-of content "}" (inc open))]
+                         (recur (inc close)
+                                (conj out (codepoint->string
+                                           (parse-hex (subs content (inc open) close)))))
+                         (throw (ex-info "Unterminated \\u{...} escape in string literal"
+                                         {:string content})))
+                       (throw (ex-info "Invalid \\u escape; expected \\u{HHHH} in string literal"
+                                       {:string content}))))
+                (throw (ex-info (str "Invalid escape sequence \\" e " in string literal; "
+                                     "write \\\\ for a literal backslash, or use a single-quoted raw string")
+                                {:string content :escape e}))))))))))
+
+(defn- string-literal-token?
+  "True for a STRING token's text: it begins with a double or single quote."
+  [s]
+  (and (string? s) (pos? (count s))
+       (let [q (nth s 0)] (or (= q \") (= q \')))))
+
+(defn- string-literal-value
+  "The value denoted by a STRING literal token. A double-quoted literal
+   interprets the standard escapes; a single-quoted literal is raw."
+  [token]
+  (let [content (subs token 1 (dec (count token)))]
+    (if (= (nth token 0) \")
+      (interpret-string-escapes content)
+      content)))
+
 ;;
 ;; Node handlers map (data-driven transformations)
 ;;
@@ -147,7 +204,12 @@
   [node]
   (cond
     (#{:integer :real} (:type node))
-    (update node :value -)
+    (let [negated (update node :value -)]
+      ;; Keep the transfer-safe :value-str (added for integer literals) in sync
+      ;; with the negated :value, or eval would read the stale positive string.
+      (if (:value-str negated)
+        (assoc negated :value-str (str (:value negated)))
+        negated))
 
     (and (map? node) (= :call (:type node)) (map? (:target node)))
     (when-let [negated-target (negate-numeric-call-chain (:target node))]
@@ -958,9 +1020,7 @@
 
    :withStatement
    (fn [[_ _with-kw target-string _do-kw body-block _end-kw]]
-     (let [;; Extract target string, removing quotes
-           target (let [s (token-text target-string)]
-                   (subs s 1 (dec (count s))))]
+     (let [target (string-literal-value (token-text target-string))]
        {:type :with
         :target target
         :body (transform-node body-block)}))
@@ -995,9 +1055,7 @@
 
    :noteClause
    (fn [[_ _note-kw string-literal]]
-     ;; Extract the string content, removing quotes
-     (let [s (token-text string-literal)]
-       (subs s 1 (dec (count s)))))
+     (string-literal-value (token-text string-literal)))
 
    :assertion
    (fn [[_ label _colon expr]]
@@ -1259,8 +1317,12 @@
    ;; Literals
    :integerLiteral
    (fn [[_ value]]
-     {:type :integer
-      :value (parse-integer-literal value)})
+     (let [v (parse-integer-literal value)]
+       {:type :integer
+        :value v
+        ;; Exact decimal string so the literal survives a JVM->JS AST transfer
+        ;; without precision loss (see eval-node :integer, NUMERIC_TOWER.md).
+        :value-str (str v)}))
 
    :realLiteral
    (fn [[_ value]]
@@ -1317,9 +1379,9 @@
    :mapEntry
    (fn [[_ key _colon value]]
      {:key (if (string? key)
-            ;; String or identifier key
-            (if (.startsWith key "\"")
-              {:type :string :value (subs key 1 (dec (count key)))}
+            ;; String literal key (double- or single-quoted) or identifier key
+            (if (string-literal-token? key)
+              {:type :string :value (string-literal-value key)}
               {:type :string :value key})
             (transform-node key))
       :value (transform-node value)})
@@ -1327,10 +1389,10 @@
    :literal
    (fn [[_ lit]]
      (if (string? lit)
-       ;; Handle string literals directly (they start with ")
-       (if (.startsWith lit "\"")
+       ;; String literals (double- or single-quoted) reach here as token text
+       (if (string-literal-token? lit)
          {:type :string
-          :value (subs lit 1 (dec (count lit)))} ; Remove quotes
+          :value (string-literal-value lit)}
          (transform-node lit))
        (transform-node lit)))
 

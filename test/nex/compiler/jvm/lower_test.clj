@@ -25,7 +25,7 @@
       (is (= :top-set (:op stmt)))
       (is (= "x" (:name stmt)))
       (is (= "Integer" (:nex-type stmt)))
-      (is (= :int (:jvm-type stmt)))
+      (is (= :long (:jvm-type stmt)))
       (is (= :binary (-> stmt :expr :op)))
       (is (= :add (-> stmt :expr :operator)))
       (is (= :const (-> stmt :expr :left :op)))
@@ -46,7 +46,7 @@
       (is (= :return (:op stmt)))
       (is (= :const (-> stmt :expr :op)))
       (is (= 42 (-> stmt :expr :value)))
-      (is (= :int (-> stmt :expr :jvm-type)))
+      (is (= :long (-> stmt :expr :jvm-type)))
       (is (= (ir/object-jvm-type "java/lang/Object") (:jvm-type stmt))))))
 
 (deftest lower-if-expression-to-return-test
@@ -109,7 +109,7 @@
       (is (= :top-get (:op lowered)))
       (is (= "score" (:name lowered)))
       (is (= "Integer" (:nex-type lowered)))
-      (is (= :int (:jvm-type lowered))))))
+      (is (= :long (:jvm-type lowered))))))
 
 (deftest lower-top-level-function-call-test
   (testing "top-level function calls lower to call-repl-fn nodes"
@@ -234,11 +234,13 @@ end")
           block (first (:body unit))
           if-stmt (second (:body block))
           binding (get-in if-stmt [:test :binding])]
-      (is (= 2 (:next-slot env)))
+      ;; The Integer local is a 64-bit :long, which occupies two JVM slots, so the
+      ;; next free slot is 3 (slot 0 is the receiver, the long takes slots 1-2).
+      (is (= 3 (:next-slot env)))
       (is (= :local (:kind binding)))
       (is (= "Integer" (:nex-type binding)))
-      (is (= :int (:jvm-type binding)))
-      (is (= :int (get-in if-stmt [:then 0 :expr :args 0 :left :jvm-type]))))))
+      (is (= :long (:jvm-type binding)))
+      (is (= :long (get-in if-stmt [:then 0 :expr :args 0 :left :jvm-type]))))))
 
 (deftest lower-operators-to-explicit-ir-test
   (testing "unary, concat, modulo, and bitwise operators lower to explicit operator-aware IR"

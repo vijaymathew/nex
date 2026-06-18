@@ -5,12 +5,12 @@
   [value]
   (cond
     (string? value) :String
-    #?(:clj (instance? java.math.BigDecimal value)
-       :cljs false) :Decimal
-    #?(:clj (or (double? value) (float? value))
-       :cljs (and (number? value) (not (integer? value)))) :Real
-    #?(:clj (ratio? value) :cljs false) :Real
-    (integer? value) :Integer
+    ;; Integer is a long on the JVM and a BigInt on JS; check it before Real so
+    ;; that on JS every remaining `number` classifies as Real (Integers are
+    ;; BigInt now, so an integer-valued `number` is a Real value).
+    (rt/nex-integer? value) :Integer
+    #?(:clj (or (double? value) (float? value) (ratio? value))
+       :cljs (number? value)) :Real
     (rt/nex-char? value) :Char
     (boolean? value) :Boolean
     (rt/nex-array? value) :Array
@@ -40,12 +40,8 @@
 
 (defn numeric-subtype-runtime?
   [runtime-type target-type]
-  (or (and (= runtime-type "Integer")
-           (#{"Integer64" "Real" "Decimal"} target-type))
-      (and (= runtime-type "Integer64")
-           (#{"Real" "Decimal"} target-type))
-      (and (= runtime-type "Real")
-           (= target-type "Decimal"))))
+  (and (= runtime-type "Integer")
+       (= target-type "Real")))
 
 (defn cursor-subtype-runtime?
   [runtime-type target-type]

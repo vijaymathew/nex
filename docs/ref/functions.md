@@ -97,7 +97,7 @@ Returned value mapping:
 
 - object -> `Map[String, Any]`
 - array -> `Array[Any]`
-- integer -> `Integer` or `Integer64`
+- integer -> `Integer`
 - decimal/exponent -> `Real`
 - `null` -> `nil`
 

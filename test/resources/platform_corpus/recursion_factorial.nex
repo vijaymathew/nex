@@ -1,0 +1,13 @@
+class Calc
+  feature
+    fact(n: Integer): Integer do
+      if n <= 1 then
+        result := 1
+      else
+        result := n * fact(n - 1)
+      end
+    end
+end
+let c: Calc := create Calc
+print(c.fact(10))
+print(c.fact(20))

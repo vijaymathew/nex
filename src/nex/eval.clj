@@ -61,5 +61,5 @@
           (parser/format-parse-errors e source 0))
         (System/exit 1))
       (catch Exception e
-        (println "Error:" (.getMessage e))
+        (println "Error:" (interp/nex-error-message e))
         (System/exit 1)))))

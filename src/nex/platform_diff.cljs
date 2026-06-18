@@ -20,8 +20,9 @@
     (let [ctx (interp/make-context)]
       (interp/eval-node ctx (:ast entry))
       {:name (:name entry) :got (vec @(:output ctx)) :expected (:output entry)})
-    (catch :default e
-      {:name (:name entry) :got (str "<error: " e ">") :expected (:output entry)})))
+    (catch :default _
+      ;; Match the JVM generator's ::raised marker so "both hosts raise" passes.
+      {:name (:name entry) :got :gen-platform-corpus/raised :expected (:output entry)})))
 
 (defn -main [& _]
   (let [fs (js/require "fs")

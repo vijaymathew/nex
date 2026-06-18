@@ -848,8 +848,8 @@ end"
                     demo() do
                       let r1: Real := 10 + 3.5
                       let r2: Real := 10 * 3.5
-                      let j: Integer64 := \"3\".to_integer64()
-                      let i64: Integer64 := 10 + j
+                      let j: Integer := \"3\".to_integer64()
+                      let i64: Integer := 10 + j
                     end
                   end"
           ast (p/ast code)
@@ -1285,9 +1285,8 @@ end"]
   feature
     parse_values() do
       let i: Integer := \"123\".to_integer()
-      let i64: Integer64 := \"123\".to_integer64()
+      let i64: Integer := \"123\".to_integer64()
       let r: Real := \"3.14\".to_real()
-      let d: Decimal := \"42.5\".to_decimal()
     end
 end"
           ast (p/ast code)

@@ -1,0 +1,4 @@
+let s: Set[Integer] := #{10, 20, 30}
+print(s.size)
+print(s.contains(20))
+print(s.contains(99))

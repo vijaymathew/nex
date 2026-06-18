@@ -79,9 +79,7 @@
     (string? nex-type)
     (case nex-type
       "Integer" "number"
-      "Integer64" "number"
       "Real" "number"
-      "Decimal" "number"
       "Char" "string"
       "Boolean" "boolean"
       "String" "string"
@@ -126,9 +124,7 @@
     (string? nex-type)
     (case nex-type
       "Integer" "0"
-      "Integer64" "0"
       "Real" "0.0"
-      "Decimal" "0.0"
       "Char" "'\\0'"
       "Boolean" "false"
       "String" "\"\""
@@ -239,15 +235,13 @@
 
 (defn integral-dispatch-type?
   [t]
-  (contains? #{"Integer" "Integer64"} t))
+  (= t "Integer"))
 
 (defn division-dispatch-type
   [left-type right-type]
   (if (and (integral-dispatch-type? left-type)
            (integral-dispatch-type? right-type))
-    (if (or (= left-type "Integer64") (= right-type "Integer64"))
-      "Integer64"
-      "Integer")
+    "Integer"
     "Real"))
 
 (defn power-dispatch-type
@@ -307,10 +301,10 @@
                   "regex_find_all" {:base-type "Array" :type-params ["String"]}
                   "regex_replace" "String"
                   "regex_split" {:base-type "Array" :type-params ["String"]}
-                  "datetime_now" "Integer64"
-                  "datetime_from_epoch_millis" "Integer64"
-                  "datetime_parse_iso" "Integer64"
-                  "datetime_make" "Integer64"
+                  "datetime_now" "Integer"
+                  "datetime_from_epoch_millis" "Integer"
+                  "datetime_parse_iso" "Integer"
+                  "datetime_make" "Integer"
                   "datetime_year" "Integer"
                   "datetime_month" "Integer"
                   "datetime_day" "Integer"
@@ -319,11 +313,11 @@
                   "datetime_hour" "Integer"
                   "datetime_minute" "Integer"
                   "datetime_second" "Integer"
-                  "datetime_epoch_millis" "Integer64"
-                  "datetime_add_millis" "Integer64"
-                  "datetime_diff_millis" "Integer64"
-                  "datetime_truncate_to_day" "Integer64"
-                  "datetime_truncate_to_hour" "Integer64"
+                  "datetime_epoch_millis" "Integer"
+                  "datetime_add_millis" "Integer"
+                  "datetime_diff_millis" "Integer"
+                  "datetime_truncate_to_day" "Integer"
+                  "datetime_truncate_to_hour" "Integer"
                   "datetime_format_iso" "String"
                   "path_exists" "Boolean"
                   "path_is_file" "Boolean"
@@ -333,8 +327,8 @@
                   "path_name_without_extension" "String"
                   "path_absolute" "String"
                   "path_normalize" "String"
-                  "path_size" "Integer64"
-                  "path_modified_time" "Integer64"
+                  "path_size" "Integer"
+                  "path_modified_time" "Integer"
                   "path_parent" {:base-type "String" :detachable true}
                   "path_child" "String"
                   "path_create_file" "Void"
@@ -410,7 +404,7 @@
                                    "compare_and_set" "Boolean"
                                    "Any")
                 "Atomic_Integer64" (case (:method expr)
-                                     ("load" "get_and_add" "add_and_get" "increment" "decrement") "Integer64"
+                                     ("load" "get_and_add" "add_and_get" "increment" "decrement") "Integer"
                                      "store" "Void"
                                      "compare_and_set" "Boolean"
                                      "Any")
@@ -681,7 +675,6 @@
     "to_integer"  (fn [target _] (str "__nexParseInt(" target ")"))
     "to_integer64" (fn [target _] (str "__nexParseLong(" target ")"))
     "to_real"     (fn [target _] (str "parseFloat(" target ".trim())"))
-    "to_decimal"  (fn [target _] (str "parseFloat(" target ".trim())"))
     "contains"    (fn [target args] (str target ".includes(" args ")"))
     "starts_with" (fn [target args] (str target ".startsWith(" args ")"))
     "ends_with"   (fn [target args] (str target ".endsWith(" args ")"))
@@ -738,26 +731,6 @@
     "compare"   (fn [target args] (str "__nexCompare(" target ", " args ")"))
     "hash"      (fn [target _] (str "__nexHash(" target ")"))}
 
-   :Integer64
-   {"to_string" (fn [target _] (str target ".toString()"))
-    "abs"       (fn [target _] (str "Math.abs(" target ")"))
-    "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
-    "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
-    ;; Arithmetic operators
-    "plus"      (fn [target args] (str "(" target " + " args ")"))
-    "minus"     (fn [target args] (str "(" target " - " args ")"))
-    "times"     (fn [target args] (str "(" target " * " args ")"))
-    "divided_by" (fn [target args] (str "(" target " / " args ")"))
-    ;; Comparison operators
-    "equals"    (fn [target args] (str "(" target " === " args ")"))
-    "not_equals" (fn [target args] (str "(" target " !== " args ")"))
-    "less_than" (fn [target args] (str "(" target " < " args ")"))
-    "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
-    "greater_than" (fn [target args] (str "(" target " > " args ")"))
-    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))
-    "compare"   (fn [target args] (str "__nexCompare(" target ", " args ")"))
-    "hash"      (fn [target _] (str "__nexHash(" target ")"))}
-
    :Real
    {"to_string" (fn [target _] (str target ".toString()"))
     "abs"       (fn [target _] (str "Math.abs(" target ")"))
@@ -765,27 +738,10 @@
     "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
     "round"     (fn [target _] (str "Math.round(" target ")"))
     "to_fixed"  (fn [target args] (str "parseFloat(" target ".toFixed(" args "))"))
-    ;; Arithmetic operators
-    "plus"      (fn [target args] (str "(" target " + " args ")"))
-    "minus"     (fn [target args] (str "(" target " - " args ")"))
-    "times"     (fn [target args] (str "(" target " * " args ")"))
-    "divided_by" (fn [target args] (str "(" target " / " args ")"))
-    ;; Comparison operators
-    "equals"    (fn [target args] (str "(" target " === " args ")"))
-    "not_equals" (fn [target args] (str "(" target " !== " args ")"))
-    "less_than" (fn [target args] (str "(" target " < " args ")"))
-    "less_than_or_equal" (fn [target args] (str "(" target " <= " args ")"))
-    "greater_than" (fn [target args] (str "(" target " > " args ")"))
-    "greater_than_or_equal" (fn [target args] (str "(" target " >= " args ")"))
-    "compare"   (fn [target args] (str "__nexCompare(" target ", " args ")"))
-    "hash"      (fn [target _] (str "__nexHash(" target ")"))}
-
-   :Decimal
-   {"to_string" (fn [target _] (str target ".toString()"))
-    "abs"       (fn [target _] (str "Math.abs(" target ")"))
-    "min"       (fn [target args] (str "Math.min(" target ", " args ")"))
-    "max"       (fn [target args] (str "Math.max(" target ", " args ")"))
-    "round"     (fn [target _] (str "Math.round(" target ")"))
+    ;; IEEE-754 inspection (see NUMERIC_TOWER.md)
+    "is_nan"      (fn [target _] (str "Number.isNaN(" target ")"))
+    "is_infinite" (fn [target _] (str "(!Number.isFinite(" target ") && !Number.isNaN(" target "))"))
+    "is_finite"   (fn [target _] (str "Number.isFinite(" target ")"))
     ;; Arithmetic operators
     "plus"      (fn [target args] (str "(" target " + " args ")"))
     "minus"     (fn [target args] (str "(" target " - " args ")"))
@@ -1065,11 +1021,7 @@
              (method-fn target-code args-code))
            (when-let [method-fn (get-in builtin-method-mappings [:Integer method])]
              (method-fn target-code args-code))
-           (when-let [method-fn (get-in builtin-method-mappings [:Integer64 method])]
-             (method-fn target-code args-code))
            (when-let [method-fn (get-in builtin-method-mappings [:Real method])]
-             (method-fn target-code args-code))
-           (when-let [method-fn (get-in builtin-method-mappings [:Decimal method])]
              (method-fn target-code args-code))
            (when-let [method-fn (get-in builtin-method-mappings [:String method])]
              (method-fn target-code args-code))
@@ -1303,9 +1255,7 @@
     (case target-type
       "Any" "true"
       "Integer" (str "(typeof " temp-name " === \"number\")")
-      "Integer64" (str "(typeof " temp-name " === \"number\")")
       "Real" (str "(typeof " temp-name " === \"number\")")
-      "Decimal" (str "(typeof " temp-name " === \"number\")")
       "String" (str "(typeof " temp-name " === \"string\")")
       "Boolean" (str "(typeof " temp-name " === \"boolean\")")
       "Char" (str "((typeof " temp-name " === \"string\") && " temp-name ".length === 1)")
@@ -2561,9 +2511,7 @@
        "  const runtime = __nexTypeOf(v);\n"
        "  if (typeName === 'Any') return true;\n"
        "  if (runtime === typeName) return true;\n"
-       "  if (runtime === 'Integer' && (typeName === 'Integer64' || typeName === 'Real' || typeName === 'Decimal')) return true;\n"
-       "  if (runtime === 'Integer64' && (typeName === 'Real' || typeName === 'Decimal')) return true;\n"
-       "  if (runtime === 'Real' && typeName === 'Decimal') return true;\n"
+       "  if (runtime === 'Integer' && typeName === 'Real') return true;\n"
        "  if ((runtime === 'ArrayCursor' || runtime === 'StringCursor' || runtime === 'MapCursor' || runtime === 'SetCursor') && typeName === 'Cursor') return true;\n"
        "  let cur = v;\n"
        "  while (cur) {\n"

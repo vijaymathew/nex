@@ -106,9 +106,7 @@ param
 type
     : QMARK type
     | INTEGER_TYPE
-    | INTEGER64_TYPE
     | REAL_TYPE
-    | DECIMAL_TYPE
     | CHAR_TYPE
     | BOOLEAN_TYPE
     | STRING_TYPE
@@ -489,9 +487,7 @@ FUNCTION_TYPE  : 'Function';
 
 // Type keywords
 INTEGER_TYPE   : 'Integer';
-INTEGER64_TYPE : 'Integer64';
 REAL_TYPE      : 'Real';
-DECIMAL_TYPE   : 'Decimal';
 CHAR_TYPE      : 'Char';
 BOOLEAN_TYPE   : 'Boolean';
 STRING_TYPE    : 'String';

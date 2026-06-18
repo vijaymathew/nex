@@ -232,7 +232,7 @@
 ;;
 
 (def builtin-types
-  #{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean" "String"
+  #{"Integer" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Task" "Channel" "Any" "Void" "Nil" "Console" "Process" "Function"
     "Cursor"})
@@ -414,7 +414,7 @@
                (map? n) (:base-type n)
                :else nil)]
     (and (string? base)
-         (not (#{"Integer" "Integer64" "Real" "Decimal" "Char" "Boolean"} base)))))
+         (not (#{"Integer" "Real" "Char" "Boolean"} base)))))
 
 (defn- attached-non-scalar-type?
   "Whether a type is an attached, non-scalar return type that must not
@@ -497,12 +497,6 @@
      (or (= t1 t2)
          ;; Any is compatible with all types
          (or (= t1 "Any") (= t2 "Any"))
-         ;; Integer and Integer64 are compatible
-         (and (or (= t1 "Integer") (= t1 "Integer64"))
-              (or (= t2 "Integer") (= t2 "Integer64")))
-         ;; Real and Decimal are compatible
-         (and (or (= t1 "Real") (= t1 "Decimal"))
-              (or (= t2 "Real") (= t2 "Decimal")))
          ;; Generic type parameters are compatible with any type (only when not a class)
          (or (and env (is-generic-type-param? env t1))
              (and env (is-generic-type-param? env t2))
@@ -668,9 +662,7 @@
   [type]
   (let [t (normalize-type type)]
     (or (= t "Integer")
-        (= t "Integer64")
-        (= t "Real")
-        (= t "Decimal"))))
+        (= t "Real"))))
 
 (defn sortable-array-element-type?
   [env elem-type]
@@ -754,35 +746,24 @@
 (defn integral-type?
   "Check if a type is an integral numeric type."
   [type]
-  (let [t (normalize-type type)]
-    (or (= t "Integer")
-        (= t "Integer64"))))
+  (= (normalize-type type) "Integer"))
 
 (defn division-result-type
   "Infer the result type of division.
    Integral / integral stays integral; any non-integral operand yields Real."
   [left-type right-type]
-  (cond
-    (and (integral-type? left-type) (integral-type? right-type))
-    (if (or (= (normalize-type left-type) "Integer64")
-            (= (normalize-type right-type) "Integer64"))
-      "Integer64"
-      "Integer")
-
-    :else
+  (if (and (integral-type? left-type) (integral-type? right-type))
+    "Integer"
     "Real"))
 
 (defn numeric-result-type
   "Infer a common numeric type for non-division arithmetic.
-   Real wins over Decimal, Decimal wins over integral types, Integer64 wins
-   over Integer."
+   Real wins over the integral types."
   [left-type right-type]
   (let [left (normalize-type left-type)
         right (normalize-type right-type)]
     (cond
       (or (= left "Real") (= right "Real")) "Real"
-      (or (= left "Decimal") (= right "Decimal")) "Decimal"
-      (or (= left "Integer64") (= right "Integer64")) "Integer64"
       :else "Integer")))
 
 (defn power-result-type
@@ -937,15 +918,13 @@
 
        (or (= klass Long/TYPE)
            (= klass java.lang.Long))
-       "Integer64"
+       "Integer"
 
        (or (= klass Float/TYPE)
            (= klass java.lang.Float)
            (= klass Double/TYPE)
            (= klass java.lang.Double))
        "Real"
-
-       (= klass java.math.BigDecimal) "Decimal"
 
        (or (= klass Boolean/TYPE)
            (= klass java.lang.Boolean))
@@ -1604,16 +1583,16 @@
 
     "Atomic_Integer64"
     (case method
-      "load" (when (= argc 0) {:params [] :return-type "Integer64"})
-      "store" (when (= argc 1) {:params [{:name "value" :type "Integer64"}] :return-type "Void"})
+      "load" (when (= argc 0) {:params [] :return-type "Integer"})
+      "store" (when (= argc 1) {:params [{:name "value" :type "Integer"}] :return-type "Void"})
       "compare_and_set" (when (= argc 2)
-                          {:params [{:name "expected" :type "Integer64"}
-                                    {:name "update" :type "Integer64"}]
+                          {:params [{:name "expected" :type "Integer"}
+                                    {:name "update" :type "Integer"}]
                            :return-type "Boolean"})
-      "get_and_add" (when (= argc 1) {:params [{:name "delta" :type "Integer64"}] :return-type "Integer64"})
-      "add_and_get" (when (= argc 1) {:params [{:name "delta" :type "Integer64"}] :return-type "Integer64"})
-      "increment" (when (= argc 0) {:params [] :return-type "Integer64"})
-      "decrement" (when (= argc 0) {:params [] :return-type "Integer64"})
+      "get_and_add" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
+      "add_and_get" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
+      "increment" (when (= argc 0) {:params [] :return-type "Integer"})
+      "decrement" (when (= argc 0) {:params [] :return-type "Integer"})
       nil)
 
     "Atomic_Boolean"
@@ -1819,7 +1798,7 @@
   (fn [env args]
     (assert-builtin-arity! name 1 args)
     (let [t (check-expression env (first args))]
-      (when-not (= (attachable-type t) arg-type)
+      (when-not (= (attachable-type t) (attachable-type arg-type))
         (throw (ex-info (str name " argument must be " arg-type)
                         {:error (type-error
                                  (str name " argument must be " arg-type
@@ -1834,7 +1813,7 @@
     (assert-builtin-arity! name n args)
     (doseq [arg args]
       (let [t (check-expression env arg)]
-        (when-not (= (attachable-type t) arg-type)
+        (when-not (= (attachable-type t) (attachable-type arg-type))
           (throw (ex-info (str name " arguments must be " arg-type)
                           {:error (type-error
                                    (str name " arguments must be " arg-type
@@ -1854,7 +1833,7 @@
       (assert-builtin-arity! name n args)
       (let [types (mapv #(check-expression env %) args)]
         (doseq [[i t expected] (map vector (range) types arg-types)]
-          (when-not (= (attachable-type t) expected)
+          (when-not (= (attachable-type t) (attachable-type expected))
             (throw (ex-info (str name " " (nth builtin-ordinals i) " argument must be " expected)
                             {:error (type-error
                                      (str name " " (nth builtin-ordinals i)
@@ -2046,7 +2025,7 @@
    "sleep"   check-builtin-sleep
    "hint_spin"    (builtin-nullary "hint_spin" "Void")
    "random_real"  (builtin-nullary "random_real" "Real")
-   "datetime_now" (builtin-nullary "datetime_now" "Integer64")
+   "datetime_now" (builtin-nullary "datetime_now" "Integer")
    "type_of"  (builtin-checked-args "type_of" 1 "String")
    "type_is"  check-builtin-type-is
    "await_all" check-builtin-await-all
@@ -2061,23 +2040,23 @@
    "regex_split"    (builtin-uniform-args "regex_split" 3 "String" {:base-type "Array" :type-args ["String"]})
 
    ;; datetime
-   "datetime_from_epoch_millis" (builtin-single-arg "datetime_from_epoch_millis" "Integer64" "Integer64")
-   "datetime_parse_iso"  (builtin-single-arg "datetime_parse_iso" "String" "Integer64")
-   "datetime_make"       (builtin-uniform-args "datetime_make" 6 "Integer" "Integer64")
-   "datetime_year"       (builtin-single-arg "datetime_year" "Integer64" "Integer")
-   "datetime_month"      (builtin-single-arg "datetime_month" "Integer64" "Integer")
-   "datetime_day"        (builtin-single-arg "datetime_day" "Integer64" "Integer")
-   "datetime_weekday"    (builtin-single-arg "datetime_weekday" "Integer64" "Integer")
-   "datetime_day_of_year" (builtin-single-arg "datetime_day_of_year" "Integer64" "Integer")
-   "datetime_hour"       (builtin-single-arg "datetime_hour" "Integer64" "Integer")
-   "datetime_minute"     (builtin-single-arg "datetime_minute" "Integer64" "Integer")
-   "datetime_second"     (builtin-single-arg "datetime_second" "Integer64" "Integer")
-   "datetime_epoch_millis" (builtin-single-arg "datetime_epoch_millis" "Integer64" "Integer64")
-   "datetime_add_millis"  (builtin-uniform-args "datetime_add_millis" 2 "Integer64" "Integer64")
-   "datetime_diff_millis" (builtin-uniform-args "datetime_diff_millis" 2 "Integer64" "Integer64")
-   "datetime_truncate_to_day"  (builtin-single-arg "datetime_truncate_to_day" "Integer64" "Integer64")
-   "datetime_truncate_to_hour" (builtin-single-arg "datetime_truncate_to_hour" "Integer64" "Integer64")
-   "datetime_format_iso" (builtin-single-arg "datetime_format_iso" "Integer64" "String")
+   "datetime_from_epoch_millis" (builtin-single-arg "datetime_from_epoch_millis" "Integer" "Integer")
+   "datetime_parse_iso"  (builtin-single-arg "datetime_parse_iso" "String" "Integer")
+   "datetime_make"       (builtin-uniform-args "datetime_make" 6 "Integer" "Integer")
+   "datetime_year"       (builtin-single-arg "datetime_year" "Integer" "Integer")
+   "datetime_month"      (builtin-single-arg "datetime_month" "Integer" "Integer")
+   "datetime_day"        (builtin-single-arg "datetime_day" "Integer" "Integer")
+   "datetime_weekday"    (builtin-single-arg "datetime_weekday" "Integer" "Integer")
+   "datetime_day_of_year" (builtin-single-arg "datetime_day_of_year" "Integer" "Integer")
+   "datetime_hour"       (builtin-single-arg "datetime_hour" "Integer" "Integer")
+   "datetime_minute"     (builtin-single-arg "datetime_minute" "Integer" "Integer")
+   "datetime_second"     (builtin-single-arg "datetime_second" "Integer" "Integer")
+   "datetime_epoch_millis" (builtin-single-arg "datetime_epoch_millis" "Integer" "Integer")
+   "datetime_add_millis"  (builtin-uniform-args "datetime_add_millis" 2 "Integer" "Integer")
+   "datetime_diff_millis" (builtin-uniform-args "datetime_diff_millis" 2 "Integer" "Integer")
+   "datetime_truncate_to_day"  (builtin-single-arg "datetime_truncate_to_day" "Integer" "Integer")
+   "datetime_truncate_to_hour" (builtin-single-arg "datetime_truncate_to_hour" "Integer" "Integer")
+   "datetime_format_iso" (builtin-single-arg "datetime_format_iso" "Integer" "String")
 
    ;; path
    "path_exists"       (builtin-single-arg "path_exists" "String" "Boolean")
@@ -2088,8 +2067,8 @@
    "path_name_without_extension" (builtin-single-arg "path_name_without_extension" "String" "String")
    "path_absolute"     (builtin-single-arg "path_absolute" "String" "String")
    "path_normalize"    (builtin-single-arg "path_normalize" "String" "String")
-   "path_size"         (builtin-single-arg "path_size" "String" "Integer64")
-   "path_modified_time" (builtin-single-arg "path_modified_time" "String" "Integer64")
+   "path_size"         (builtin-single-arg "path_size" "String" "Integer")
+   "path_modified_time" (builtin-single-arg "path_modified_time" "String" "Integer")
    "path_parent"       (builtin-single-arg "path_parent" "String" {:base-type "String" :detachable true})
    "path_child"        (builtin-positional-args "path_child" ["String" "String"] "String")
    "path_create_file"  (builtin-single-arg "path_create_file" "String" "Void")
@@ -2351,12 +2330,12 @@
                         {:error (type-error (str "Constructor not found: Atomic_Integer64." constructor))})))
       (when-not (= 1 (count args))
         (throw (ex-info "Atomic_Integer64.make expects 1 argument"
-                        {:error (type-error "Atomic_Integer64.make expects exactly 1 Integer64 argument")})))
+                        {:error (type-error "Atomic_Integer64.make expects exactly 1 Integer argument")})))
       (let [arg-type (check-expression env (first args))]
-        (when-not (types-compatible? env arg-type "Integer64")
-          (throw (ex-info "Atomic_Integer64.make requires Integer64 initial value"
+        (when-not (types-compatible? env arg-type "Integer")
+          (throw (ex-info "Atomic_Integer64.make requires Integer initial value"
                           {:error (type-error
-                                   (str "Atomic_Integer64.make expects Integer64, got "
+                                   (str "Atomic_Integer64.make expects Integer, got "
                                         (display-type arg-type)))}))))
       "Atomic_Integer64")
 
@@ -3616,7 +3595,7 @@
                    :return-type "Integer"})
 
   ;; Built-in scalar classes implement Comparable + Hashable
-  (doseq [scalar ["String" "Integer" "Integer64" "Real" "Decimal" "Boolean" "Char"]]
+  (doseq [scalar ["String" "Integer" "Real" "Boolean" "Char"]]
     (env-add-class env scalar {:name scalar
                                :deferred? false
                                :generic-params nil
@@ -3632,9 +3611,8 @@
   (doseq [[method-name sig]
           {"to_string" {:params [] :return-type "String"}
            "to_integer" {:params [] :return-type "Integer"}
-           "to_integer64" {:params [] :return-type "Integer64"}
+           "to_integer64" {:params [] :return-type "Integer"}
            "to_real" {:params [] :return-type "Real"}
-           "to_decimal" {:params [] :return-type "Decimal"}
            "abs" {:params [] :return-type "Integer"}
            "min" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
            "max" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
@@ -3654,35 +3632,16 @@
   (doseq [[method-name sig]
           {"to_string" {:params [] :return-type "String"}
            "to_integer" {:params [] :return-type "Integer"}
-           "to_integer64" {:params [] :return-type "Integer64"}
+           "to_integer64" {:params [] :return-type "Integer"}
            "to_real" {:params [] :return-type "Real"}
-           "to_decimal" {:params [] :return-type "Decimal"}
-           "abs" {:params [] :return-type "Integer64"}
-           "min" {:params [{:name "other" :type "Integer64"}] :return-type "Integer64"}
-           "max" {:params [{:name "other" :type "Integer64"}] :return-type "Integer64"}
-           "plus" {:params [{:name "other" :type "Integer64"}] :return-type "Integer64"}
-           "minus" {:params [{:name "other" :type "Integer64"}] :return-type "Integer64"}
-           "times" {:params [{:name "other" :type "Integer64"}] :return-type "Integer64"}
-           "divided_by" {:params [{:name "other" :type "Integer64"}] :return-type "Real"}
-           "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "not_equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "less_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "less_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "greater_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "greater_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}}]
-    (env-add-method env "Integer64" method-name sig))
-
-  (doseq [[method-name sig]
-          {"to_string" {:params [] :return-type "String"}
-           "to_integer" {:params [] :return-type "Integer"}
-           "to_integer64" {:params [] :return-type "Integer64"}
-           "to_real" {:params [] :return-type "Real"}
-           "to_decimal" {:params [] :return-type "Decimal"}
            "abs" {:params [] :return-type "Real"}
            "min" {:params [{:name "other" :type "Real"}] :return-type "Real"}
            "max" {:params [{:name "other" :type "Real"}] :return-type "Real"}
            "round"    {:params [] :return-type "Integer"}
            "to_fixed" {:params [{:name "places" :type "Integer"}] :return-type "Real"}
+           "is_nan" {:params [] :return-type "Boolean"}
+           "is_infinite" {:params [] :return-type "Boolean"}
+           "is_finite" {:params [] :return-type "Boolean"}
            "plus" {:params [{:name "other" :type "Real"}] :return-type "Real"}
            "minus" {:params [{:name "other" :type "Real"}] :return-type "Real"}
            "times" {:params [{:name "other" :type "Real"}] :return-type "Real"}
@@ -3694,29 +3653,6 @@
            "greater_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
            "greater_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}}]
     (env-add-method env "Real" method-name sig))
-
-  (doseq [[method-name sig]
-          {"to_string" {:params [] :return-type "String"}
-           "to_integer" {:params [] :return-type "Integer"}
-           "to_integer64" {:params [] :return-type "Integer64"}
-           "to_real" {:params [] :return-type "Real"}
-           "to_decimal" {:params [] :return-type "Decimal"}
-           "abs" {:params [] :return-type "Decimal"}
-           "min" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
-           "max" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
-           "round"    {:params [] :return-type "Integer"}
-           "to_fixed" {:params [{:name "places" :type "Integer"}] :return-type "Decimal"}
-           "plus" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
-           "minus" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
-           "times" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
-           "divided_by" {:params [{:name "other" :type "Decimal"}] :return-type "Decimal"}
-           "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "not_equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "less_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "less_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "greater_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "greater_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}}]
-    (env-add-method env "Decimal" method-name sig))
 
   (env-add-method env "Integer" "to_char" {:params [] :return-type "Char"})
 
@@ -3749,9 +3685,8 @@
            "to_upper"    {:params [] :return-type "String"}
            "to_lower"    {:params [] :return-type "String"}
            "to_integer"  {:params [] :return-type "Integer"}
-           "to_integer64" {:params [] :return-type "Integer64"}
+           "to_integer64" {:params [] :return-type "Integer"}
            "to_real"     {:params [] :return-type "Real"}
-           "to_decimal"  {:params [] :return-type "Decimal"}
            "contains"    {:params [{:name "substr" :type "String"}] :return-type "Boolean"}
            "starts_with" {:params [{:name "prefix" :type "String"}] :return-type "Boolean"}
            "ends_with"   {:params [{:name "suffix" :type "String"}] :return-type "Boolean"}
@@ -3930,18 +3865,18 @@
 
   (env-add-class env "Atomic_Integer64" {:name "Atomic_Integer64"})
   (env-add-method env "Atomic_Integer64" "make"
-                  {:params [{:name "initial" :type "Integer64"}]
+                  {:params [{:name "initial" :type "Integer"}]
                    :return-type "Atomic_Integer64"})
   (doseq [[method-name sig]
-          {"load" {:params [] :return-type "Integer64"}
-           "store" {:params [{:name "value" :type "Integer64"}] :return-type "Void"}
-           "compare_and_set" {:params [{:name "expected" :type "Integer64"}
-                                       {:name "update" :type "Integer64"}]
+          {"load" {:params [] :return-type "Integer"}
+           "store" {:params [{:name "value" :type "Integer"}] :return-type "Void"}
+           "compare_and_set" {:params [{:name "expected" :type "Integer"}
+                                       {:name "update" :type "Integer"}]
                               :return-type "Boolean"}
-           "get_and_add" {:params [{:name "delta" :type "Integer64"}] :return-type "Integer64"}
-           "add_and_get" {:params [{:name "delta" :type "Integer64"}] :return-type "Integer64"}
-           "increment" {:params [] :return-type "Integer64"}
-           "decrement" {:params [] :return-type "Integer64"}}]
+           "get_and_add" {:params [{:name "delta" :type "Integer"}] :return-type "Integer"}
+           "add_and_get" {:params [{:name "delta" :type "Integer"}] :return-type "Integer"}
+           "increment" {:params [] :return-type "Integer"}
+           "decrement" {:params [] :return-type "Integer"}}]
     (env-add-method env "Atomic_Integer64" method-name sig))
 
   (env-add-class env "Atomic_Boolean" {:name "Atomic_Boolean"})

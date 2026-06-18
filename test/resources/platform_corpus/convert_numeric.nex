@@ -1,0 +1,6 @@
+let r: Real := 3.99
+print(r.round)
+let big: Integer := 1000000007
+print(big * big)
+let s: String := "9007199254740993"
+print(s.to_integer)

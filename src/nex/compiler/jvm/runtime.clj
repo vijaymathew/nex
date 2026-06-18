@@ -221,9 +221,10 @@
    :comparator compare})
 
 (defn create-atomic-integer
+  ;; 64-bit (Int64), matching Nex Integer; AtomicInteger silently truncated >2^31.
   [initial]
   {:nex-builtin-type :AtomicInteger
-   :state (AtomicInteger. (int initial))})
+   :state (AtomicLong. (long initial))})
 
 (defn create-atomic-integer64
   [initial]
@@ -466,32 +467,32 @@
 
 (defn builtin-method-atomic_integer-load
   [target]
-  (.get ^AtomicInteger (:state target)))
+  (.get ^AtomicLong (:state target)))
 
 (defn builtin-method-atomic_integer-store
   [target value]
-  (.set ^AtomicInteger (:state target) (int value))
+  (.set ^AtomicLong (:state target) (long value))
   nil)
 
 (defn builtin-method-atomic_integer-compare-and-set
   [target expected update]
-  (.compareAndSet ^AtomicInteger (:state target) (int expected) (int update)))
+  (.compareAndSet ^AtomicLong (:state target) (long expected) (long update)))
 
 (defn builtin-method-atomic_integer-get-and-add
   [target delta]
-  (.getAndAdd ^AtomicInteger (:state target) (int delta)))
+  (.getAndAdd ^AtomicLong (:state target) (long delta)))
 
 (defn builtin-method-atomic_integer-add-and-get
   [target delta]
-  (.addAndGet ^AtomicInteger (:state target) (int delta)))
+  (.addAndGet ^AtomicLong (:state target) (long delta)))
 
 (defn builtin-method-atomic_integer-increment
   [target]
-  (.incrementAndGet ^AtomicInteger (:state target)))
+  (.incrementAndGet ^AtomicLong (:state target)))
 
 (defn builtin-method-atomic_integer-decrement
   [target]
-  (.decrementAndGet ^AtomicInteger (:state target)))
+  (.decrementAndGet ^AtomicLong (:state target)))
 
 (defn builtin-method-atomic_integer64-load
   [target]
@@ -1474,7 +1475,6 @@
 (def-builtin-method-wrapper builtin-method-integer-to-integer "to_integer")
 (def-builtin-method-wrapper builtin-method-integer-to-integer64 "to_integer64")
 (def-builtin-method-wrapper builtin-method-integer-to-real "to_real")
-(def-builtin-method-wrapper builtin-method-integer-to-decimal "to_decimal")
 (def-builtin-method-wrapper builtin-method-integer-abs "abs")
 (def-builtin-method-wrapper builtin-method-integer-min "min")
 (def-builtin-method-wrapper builtin-method-integer-max "max")
@@ -1493,37 +1493,18 @@
 (def-builtin-method-wrapper builtin-method-integer-greater-than-or-equal "greater_than_or_equal")
 (def-builtin-method-wrapper builtin-method-integer-to-char "to_char")
 
-(def-builtin-method-wrapper builtin-method-integer64-to-string "to_string")
-(def-builtin-method-wrapper builtin-method-integer64-to-integer "to_integer")
-(def-builtin-method-wrapper builtin-method-integer64-to-integer64 "to_integer64")
-(def-builtin-method-wrapper builtin-method-integer64-to-real "to_real")
-(def-builtin-method-wrapper builtin-method-integer64-to-decimal "to_decimal")
-(def-builtin-method-wrapper builtin-method-integer64-abs "abs")
-(def-builtin-method-wrapper builtin-method-integer64-min "min")
-(def-builtin-method-wrapper builtin-method-integer64-max "max")
-(def-builtin-method-wrapper builtin-method-integer64-compare "compare")
-(def-builtin-method-wrapper builtin-method-integer64-hash "hash")
-(def-builtin-method-wrapper builtin-method-integer64-plus "plus")
-(def-builtin-method-wrapper builtin-method-integer64-minus "minus")
-(def-builtin-method-wrapper builtin-method-integer64-times "times")
-(def-builtin-method-wrapper builtin-method-integer64-divided-by "divided_by")
-(def-builtin-method-wrapper builtin-method-integer64-equals "equals")
-(def-builtin-method-wrapper builtin-method-integer64-not-equals "not_equals")
-(def-builtin-method-wrapper builtin-method-integer64-less-than "less_than")
-(def-builtin-method-wrapper builtin-method-integer64-less-than-or-equal "less_than_or_equal")
-(def-builtin-method-wrapper builtin-method-integer64-greater-than "greater_than")
-(def-builtin-method-wrapper builtin-method-integer64-greater-than-or-equal "greater_than_or_equal")
-
 (def-builtin-method-wrapper builtin-method-real-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-real-to-integer "to_integer")
 (def-builtin-method-wrapper builtin-method-real-to-integer64 "to_integer64")
 (def-builtin-method-wrapper builtin-method-real-to-real "to_real")
-(def-builtin-method-wrapper builtin-method-real-to-decimal "to_decimal")
 (def-builtin-method-wrapper builtin-method-real-abs "abs")
 (def-builtin-method-wrapper builtin-method-real-min "min")
 (def-builtin-method-wrapper builtin-method-real-max "max")
 (def-builtin-method-wrapper builtin-method-real-round "round")
 (def-builtin-method-wrapper builtin-method-real-to-fixed "to_fixed")
+(def-builtin-method-wrapper builtin-method-real-is-nan "is_nan")
+(def-builtin-method-wrapper builtin-method-real-is-infinite "is_infinite")
+(def-builtin-method-wrapper builtin-method-real-is-finite "is_finite")
 (def-builtin-method-wrapper builtin-method-real-compare "compare")
 (def-builtin-method-wrapper builtin-method-real-hash "hash")
 (def-builtin-method-wrapper builtin-method-real-plus "plus")
@@ -1536,29 +1517,6 @@
 (def-builtin-method-wrapper builtin-method-real-less-than-or-equal "less_than_or_equal")
 (def-builtin-method-wrapper builtin-method-real-greater-than "greater_than")
 (def-builtin-method-wrapper builtin-method-real-greater-than-or-equal "greater_than_or_equal")
-
-(def-builtin-method-wrapper builtin-method-decimal-to-string "to_string")
-(def-builtin-method-wrapper builtin-method-decimal-to-integer "to_integer")
-(def-builtin-method-wrapper builtin-method-decimal-to-integer64 "to_integer64")
-(def-builtin-method-wrapper builtin-method-decimal-to-real "to_real")
-(def-builtin-method-wrapper builtin-method-decimal-to-decimal "to_decimal")
-(def-builtin-method-wrapper builtin-method-decimal-abs "abs")
-(def-builtin-method-wrapper builtin-method-decimal-min "min")
-(def-builtin-method-wrapper builtin-method-decimal-max "max")
-(def-builtin-method-wrapper builtin-method-decimal-round "round")
-(def-builtin-method-wrapper builtin-method-decimal-to-fixed "to_fixed")
-(def-builtin-method-wrapper builtin-method-decimal-compare "compare")
-(def-builtin-method-wrapper builtin-method-decimal-hash "hash")
-(def-builtin-method-wrapper builtin-method-decimal-plus "plus")
-(def-builtin-method-wrapper builtin-method-decimal-minus "minus")
-(def-builtin-method-wrapper builtin-method-decimal-times "times")
-(def-builtin-method-wrapper builtin-method-decimal-divided-by "divided_by")
-(def-builtin-method-wrapper builtin-method-decimal-equals "equals")
-(def-builtin-method-wrapper builtin-method-decimal-not-equals "not_equals")
-(def-builtin-method-wrapper builtin-method-decimal-less-than "less_than")
-(def-builtin-method-wrapper builtin-method-decimal-less-than-or-equal "less_than_or_equal")
-(def-builtin-method-wrapper builtin-method-decimal-greater-than "greater_than")
-(def-builtin-method-wrapper builtin-method-decimal-greater-than-or-equal "greater_than_or_equal")
 
 (def-builtin-method-wrapper builtin-method-char-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-char-to-upper "to_upper")
@@ -1584,7 +1542,6 @@
 (def-builtin-method-wrapper builtin-method-string-to-integer "to_integer")
 (def-builtin-method-wrapper builtin-method-string-to-integer64 "to_integer64")
 (def-builtin-method-wrapper builtin-method-string-to-real "to_real")
-(def-builtin-method-wrapper builtin-method-string-to-decimal "to_decimal")
 (def-builtin-method-wrapper builtin-method-string-contains "contains")
 (def-builtin-method-wrapper builtin-method-string-starts-with "starts_with")
 (def-builtin-method-wrapper builtin-method-string-ends-with "ends_with")
