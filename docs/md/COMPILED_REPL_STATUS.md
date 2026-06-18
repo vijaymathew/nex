@@ -267,9 +267,7 @@ The compiled REPL path currently supports:
 Target feature calls currently stay on the compiled path only when the receiver type is one of these runtime-backed builtin families:
 
 - `Integer`
-- `Integer64`
 - `Real`
-- `Decimal`
 - `Char`
 - `Boolean`
 - `String`

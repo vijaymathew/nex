@@ -65,7 +65,7 @@ Bytecode shape:
 The actual load and store opcodes vary with the lowered JVM type:
 
 - `ILOAD` / `ISTORE` for `Integer`, `Boolean`, and `Char`
-- `LLOAD` / `LSTORE` for `Integer64`
+- `LLOAD` / `LSTORE` for `Integer`
 - `DLOAD` / `DSTORE` for `Real`
 - `ALOAD` / `ASTORE` for object-typed values
 

@@ -38,7 +38,7 @@ let json: Json := create Json.make()
 - JSON object -> `Map[String, Any]`
 - JSON array -> `Array[Any]`
 - JSON string -> `String`
-- JSON integer -> `Integer` or `Integer64`
+- JSON integer -> `Integer`
 - JSON decimal/exponent number -> `Real`
 - JSON boolean -> `Boolean`
 - JSON `null` -> `nil`

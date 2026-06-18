@@ -1,6 +1,6 @@
 # Scalar Types
 
-Built-in scalar classes: `String`, `Integer`, `Integer64`, `Real`, `Decimal`, `Boolean`, `Char`.
+Built-in scalar classes: `String`, `Integer`, `Real`, `Boolean`, `Char`.
 
 All scalar classes are modeled as inheriting `Any` and implementing
 `Comparable` and `Hashable`.
@@ -15,9 +15,7 @@ All scalar classes are modeled as inheriting `Any` and implementing
 | `to_upper` | none | `String` | Uppercase copy. |
 | `to_lower` | none | `String` | Lowercase copy. |
 | `to_integer` | none | `Integer` | Parse integer value. |
-| `to_integer64` | none | `Integer64` | Parse 64-bit integer value. |
 | `to_real` | none | `Real` | Parse floating-point value. |
-| `to_decimal` | none | `Decimal` | Parse decimal value. |
 | `contains` | `substr: String` | `Boolean` | True if substring exists. |
 | `starts_with` | `prefix: String` | `Boolean` | True if string starts with prefix. |
 | `ends_with` | `suffix: String` | `Boolean` | True if string ends with suffix. |
@@ -61,6 +59,10 @@ print(bytes) -- [99, 97, 116]
 
 ## `Integer`
 
+`Integer` is a signed 64-bit integer (range `-2^63 .. 2^63-1`) on every backend.
+Arithmetic is *checked*: `+`, `-`, `*`, unary `-`, and `^` raise on overflow, and
+`/` and `%` raise on a zero divisor.
+
 Bitwise operations use 32-bit integer semantics. Bit index `0` is the least-significant
 bit. For method calls on integer literals, wrap the literal in parentheses:
 `(5).bitwise_left_shift(1)`.
@@ -97,32 +99,16 @@ bit. For method calls on integer literals, wrap the literal in parentheses:
 | `compare` | `other: Any` | `Integer` | Ordering as integer result. |
 | `hash` | none | `Integer` | Hash code. |
 
-## `Integer64`
-
-| Method | Arguments | Returns | Description |
-|---|---|---|---|
-| `to_string` | none | `String` | Convert to string. |
-| `abs` | none | `Integer64` | Absolute value. |
-| `min` | `other: Integer64` | `Integer64` | Smaller of two values. |
-| `max` | `other: Integer64` | `Integer64` | Larger of two values. |
-| `plus` | `other: Integer64` | `Integer64` | Addition. |
-| `minus` | `other: Integer64` | `Integer64` | Subtraction. |
-| `times` | `other: Integer64` | `Integer64` | Multiplication. |
-| `divided_by` | `other: Integer64` | `Real` | Division. |
-| `equals` | `other: Any` | `Boolean` | Equality check. |
-| `not_equals` | `other: Any` | `Boolean` | Inequality check. |
-| `less_than` | `other: Integer64` | `Boolean` | Numeric `<`. |
-| `less_than_or_equal` | `other: Integer64` | `Boolean` | Numeric `<=`. |
-| `greater_than` | `other: Integer64` | `Boolean` | Numeric `>`. |
-| `greater_than_or_equal` | `other: Integer64` | `Boolean` | Numeric `>=`. |
-| `compare` | `other: Any` | `Integer` | Ordering as integer result. |
-| `hash` | none | `Integer` | Hash code. |
-
 ## `Real`
 
 Real literals must include at least one digit after the decimal point. Valid
 forms include `3.14`, `10.0`, `.5`, and `12.0e-3`. Forms such as `10.` and
 `12.e-3` are not valid real literals.
+
+`Real` is an IEEE-754 double on every backend, in representation *and* arithmetic.
+Division by zero follows IEEE rather than raising: `1.0 / 0.0` is `Infinity`,
+`-1.0 / 0.0` is `-Infinity`, and `0.0 / 0.0` is `NaN`. (Integer division by zero,
+by contrast, raises.)
 
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
@@ -131,6 +117,10 @@ forms include `3.14`, `10.0`, `.5`, and `12.0e-3`. Forms such as `10.` and
 | `min` | `other: Real` | `Real` | Smaller of two values. |
 | `max` | `other: Real` | `Real` | Larger of two values. |
 | `round` | none | `Integer` | Round to nearest integer. |
+| `to_fixed` | `places: Integer` | `Real` | Round to `places` decimal places. |
+| `is_nan` | none | `Boolean` | True if the value is `NaN`. |
+| `is_infinite` | none | `Boolean` | True if the value is `±Infinity`. |
+| `is_finite` | none | `Boolean` | True if the value is neither `NaN` nor infinite. |
 | `plus` | `other: Real` | `Real` | Addition. |
 | `minus` | `other: Real` | `Real` | Subtraction. |
 | `times` | `other: Real` | `Real` | Multiplication. |
@@ -141,28 +131,6 @@ forms include `3.14`, `10.0`, `.5`, and `12.0e-3`. Forms such as `10.` and
 | `less_than_or_equal` | `other: Real` | `Boolean` | Numeric `<=`. |
 | `greater_than` | `other: Real` | `Boolean` | Numeric `>`. |
 | `greater_than_or_equal` | `other: Real` | `Boolean` | Numeric `>=`. |
-| `compare` | `other: Any` | `Integer` | Ordering as integer result. |
-| `hash` | none | `Integer` | Hash code. |
-
-## `Decimal`
-
-| Method | Arguments | Returns | Description |
-|---|---|---|---|
-| `to_string` | none | `String` | Convert to string. |
-| `abs` | none | `Decimal` | Absolute value. |
-| `min` | `other: Decimal` | `Decimal` | Smaller of two values. |
-| `max` | `other: Decimal` | `Decimal` | Larger of two values. |
-| `round` | none | `Integer` | Round to nearest integer. |
-| `plus` | `other: Decimal` | `Decimal` | Addition. |
-| `minus` | `other: Decimal` | `Decimal` | Subtraction. |
-| `times` | `other: Decimal` | `Decimal` | Multiplication. |
-| `divided_by` | `other: Decimal` | `Decimal` | Division. |
-| `equals` | `other: Any` | `Boolean` | Equality check. |
-| `not_equals` | `other: Any` | `Boolean` | Inequality check. |
-| `less_than` | `other: Decimal` | `Boolean` | Numeric `<`. |
-| `less_than_or_equal` | `other: Decimal` | `Boolean` | Numeric `<=`. |
-| `greater_than` | `other: Decimal` | `Boolean` | Numeric `>`. |
-| `greater_than_or_equal` | `other: Decimal` | `Boolean` | Numeric `>=`. |
 | `compare` | `other: Any` | `Integer` | Ordering as integer result. |
 | `hash` | none | `Integer` | Hash code. |
 

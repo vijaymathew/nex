@@ -99,7 +99,7 @@ Maps are declared using the `Map` type with two type parameters (key and value):
 ```nex
 class Store
   feature
-    prices: Map [String, Decimal]         -- String keys, Decimal values
+    prices: Map [String, Real]         -- String keys, Real values
     counts: Map [Integer, Integer]        -- Integer keys, Integer values
     lookup: Map [String, Array [String]]  -- String keys, Array values
 end
@@ -150,7 +150,7 @@ Use the `at` method to read entries and `set` method to update them:
 ```nex
 class Demo
   feature
-    prices: Map [String, Decimal]
+    prices: Map [String, Real]
 
     demo() do
       let applePrice := prices.get("apple")
@@ -164,7 +164,7 @@ class Demo
     end
 
 	create
-	  make(prices: Map[String, Decimal]) do
+	  make(prices: Map[String, Real]) do
 	    this.prices := prices
 	  end
 end
@@ -366,7 +366,7 @@ public class NumberList {
 ```nex
 class PriceList
   feature
-    prices: Map [String, Decimal]
+    prices: Map [String, Real]
 
   create
     make() do
@@ -378,7 +378,7 @@ class PriceList
       print(prices.get(item))
     end
 
-    update_price(item: String, new_price: Decimal) do
+    update_price(item: String, new_price: Real) do
       prices.put(item, new_price)
     end
 end
@@ -409,7 +409,7 @@ public class PriceList {
 class Store
   feature
     items: Array [String]
-    prices: Map [String, Decimal]
+    prices: Map [String, Real]
 
   create
     make() do
