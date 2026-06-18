@@ -7,6 +7,12 @@ All scalar classes are modeled as inheriting `Any` and implementing
 
 ## `String`
 
+A double-quoted string interprets backslash escapes: `\n` (newline), `\t` (tab),
+`\r` (carriage return), `\0` (null), `\\` (backslash), `\"` (double quote), and
+`\u{H...}` (a Unicode code point in hex); any other escape is an error. A
+single-quoted string is raw — every character, backslash included, is literal —
+which is convenient for regular-expression patterns and paths: `'\d+'`, `'C:\dir'`.
+
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
 | `length` | none | `Integer` | Number of characters. |
