@@ -39,7 +39,9 @@
 
     (string? nex-type)
     (case nex-type
-      "Integer" :int
+      ;; Integer is 64-bit (Int64), matching the interpreter and the numeric-tower
+      ;; model (NUMERIC_TOWER.md). Integer64 is a (deprecated) alias of the same.
+      "Integer" :long
       "Integer64" :long
       "Real" :double
       "Decimal" :double

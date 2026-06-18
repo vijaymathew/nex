@@ -445,6 +445,11 @@
     (and (= :int from-jvm-type) (= :long to-jvm-type))
     (.visitInsn mv Opcodes/I2L)
 
+    ;; Narrowing a 64-bit Nex Integer down to a 32-bit int — used at Java
+    ;; collection boundaries (ArrayList.get(int), etc.) that take int indices.
+    (and (= :long from-jvm-type) (= :int to-jvm-type))
+    (.visitInsn mv Opcodes/L2I)
+
     (and (= :int from-jvm-type) (= :double to-jvm-type))
     (.visitInsn mv Opcodes/I2D)
 
@@ -467,6 +472,16 @@
     (throw (ex-info "Unsupported JVM stack coercion"
                     {:from-jvm-type from-jvm-type
                      :to-jvm-type to-jvm-type}))))
+
+(declare emit-expr!)
+
+(defn- emit-as-int!
+  "Emit `expr` and narrow its result to a 32-bit int, inserting L2I when it is a
+   64-bit Nex Integer (:long). Used for the JVM int positions: collection indices,
+   shift amounts, and the 32-bit bitwise island (the interpreter masks bitwise ops
+   to int32, so the compiler matches by computing them in int and widening back)."
+  [^MethodVisitor mv expr state-slot]
+  (emit-stack-coerce! mv (emit-expr! mv expr state-slot) :int))
 
 (defn- numeric-promotion-jvm-type
   [left-jvm-type right-jvm-type]
@@ -525,6 +540,24 @@
     [:neg :double] Opcodes/DNEG
     [:bit-not :int] Opcodes/ICONST_M1
     nil))
+
+(defn- emit-checked-long-binary!
+  "Emit a checked 64-bit add/sub/mul via java.lang.Math.*Exact so the compiled
+   code raises ArithmeticException on overflow exactly as the interpreter (and
+   Clojure's checked arithmetic) does, instead of silently wrapping with
+   LADD/LSUB/LMUL. Returns true when it emitted the op, nil otherwise — callers
+   fall back to the raw opcode for non-long types and for div/mod/neg.
+   (Integer division by zero is still surfaced by LDIV/LREM; the Long.MIN_VALUE/-1
+   wraparound is left as-is to match the interpreter, which also wraps there.)"
+  [^MethodVisitor mv operator jvm-type]
+  (when (= :long jvm-type)
+    (when-let [method (case operator
+                        :add "addExact"
+                        :sub "subtractExact"
+                        :mul "multiplyExact"
+                        nil)]
+      (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Math" method "(JJ)J" false)
+      true)))
 
 (defn- compare-branch-opcode
   [operator jvm-type]
@@ -832,9 +865,9 @@
   [^MethodVisitor mv left-expr right-expr state-slot]
   (let [true-label (Label.)
         end-label (Label.)]
-    (emit-expr! mv left-expr state-slot)
+    (emit-as-int! mv left-expr state-slot)
     (.visitInsn mv Opcodes/ICONST_1)
-    (emit-expr! mv right-expr state-slot)
+    (emit-as-int! mv right-expr state-slot)
     (.visitInsn mv Opcodes/ISHL)
     (.visitInsn mv Opcodes/IAND)
     (.visitJumpInsn mv Opcodes/IFNE true-label)
@@ -845,10 +878,11 @@
     (.visitLabel mv end-label)))
 
 (defn- emit-bit-set-like!
+  "Leaves a 32-bit int on the stack; the caller widens to the Nex Integer (:long)."
   [^MethodVisitor mv operator left-expr right-expr state-slot]
-  (emit-expr! mv left-expr state-slot)
+  (emit-as-int! mv left-expr state-slot)
   (.visitInsn mv Opcodes/ICONST_1)
-  (emit-expr! mv right-expr state-slot)
+  (emit-as-int! mv right-expr state-slot)
   (.visitInsn mv Opcodes/ISHL)
   (case operator
     :bit-set (.visitInsn mv Opcodes/IOR)
@@ -1072,7 +1106,7 @@
       (do
         (emit-expr! mv target state-slot)
         (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (emit-expr! mv (first args) state-slot)
+        (emit-as-int! mv (first args) state-slot)
         (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "get" "(I)Ljava/lang/Object;" false)
         (emit-unbox-or-cast! mv jvm-type)
         jvm-type)
@@ -1093,7 +1127,7 @@
       (do
         (emit-expr! mv target state-slot)
         (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (emit-expr! mv (first args) state-slot)
+        (emit-as-int! mv (first args) state-slot)
         (emit-boxed-expr! mv (second args) state-slot)
         (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "add" "(ILjava/lang/Object;)V" false)
         :void)
@@ -1105,7 +1139,7 @@
       (do
         (emit-expr! mv target state-slot)
         (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (emit-expr! mv (first args) state-slot)
+        (emit-as-int! mv (first args) state-slot)
         (emit-boxed-expr! mv (second args) state-slot)
         (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "set" "(ILjava/lang/Object;)Ljava/lang/Object;" false)
         (.visitInsn mv Opcodes/POP)
@@ -1119,7 +1153,9 @@
         (emit-expr! mv target state-slot)
         (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
         (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "size" "()I" false)
-        :int)
+        ;; size() is a 32-bit int; widen to the Nex Integer (:long) result.
+        (emit-stack-coerce! mv :int jvm-type)
+        jvm-type)
 
       "size"
       (emit-collection-method! mv (assoc expr :method "length") state-slot)
@@ -1147,13 +1183,14 @@
                              (fn [] (emit-boxed-expr! mv (first args) state-slot))])
         (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Number")
         (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Number" "intValue" "()I" false)
-        :int)
+        (emit-stack-coerce! mv :int jvm-type)
+        jvm-type)
 
       "remove"
       (do
         (emit-expr! mv target state-slot)
         (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (emit-expr! mv (first args) state-slot)
+        (emit-as-int! mv (first args) state-slot)
         (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "remove" "(I)Ljava/lang/Object;" false)
         (.visitInsn mv Opcodes/POP)
         :void)
@@ -1335,7 +1372,8 @@
         (emit-expr! mv target state-slot)
         (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
         (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "size" "()I" false)
-        :int)
+        (emit-stack-coerce! mv :int jvm-type)
+        jvm-type)
 
       "is_empty"
       (do
@@ -1467,7 +1505,8 @@
         (emit-expr! mv target state-slot)
         (.visitTypeInsn mv Opcodes/CHECKCAST linkedhashset-internal-name)
         (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL linkedhashset-internal-name "size" "()I" false)
-        :int)
+        (emit-stack-coerce! mv :int jvm-type)
+        jvm-type)
 
       "is_empty"
       (do
@@ -1797,11 +1836,12 @@
 
         :bit-not
         (do
-          (when-not (= :int operand-type)
-            (throw (ex-info "Bitwise not requires int operand"
-                            {:expr expr :jvm-type operand-type})))
+          ;; 32-bit bitwise island (see emit-binary!): narrow the operand to int,
+          ;; complement, then widen the result back to Nex Integer (:long).
+          (emit-stack-coerce! mv operand-type :int)
           (.visitInsn mv Opcodes/ICONST_M1)
           (.visitInsn mv Opcodes/IXOR)
+          (emit-stack-coerce! mv :int (:jvm-type expr))
           (:jvm-type expr))
 
         (do
@@ -1810,10 +1850,14 @@
                             {:expr expr
                              :operand-jvm-type operand-type
                              :expr-jvm-type (:jvm-type expr)})))
-          (.visitInsn mv (or (unary-opcode (:operator expr) (:jvm-type expr))
-                             (throw (ex-info "Unsupported unary opcode emission"
-                                             {:operator (:operator expr)
-                                              :jvm-type (:jvm-type expr)}))))
+          ;; Checked negation matches the interpreter: -Long.MIN_VALUE overflows
+          ;; and must raise rather than wrap back to Long.MIN_VALUE (LNEG).
+          (if (and (= :neg (:operator expr)) (= :long (:jvm-type expr)))
+            (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Math" "negateExact" "(J)J" false)
+            (.visitInsn mv (or (unary-opcode (:operator expr) (:jvm-type expr))
+                               (throw (ex-info "Unsupported unary opcode emission"
+                                               {:operator (:operator expr)
+                                                :jvm-type (:jvm-type expr)})))))
           (:jvm-type expr))))
 
     :binary
@@ -1859,28 +1903,33 @@
       (emit-boolean-short-circuit! mv (:operator expr) (:left expr) (:right expr) state-slot)
       (:jvm-type expr))
 
+    ;; Bitwise ops form a 32-bit island: the interpreter masks them to int32
+    ;; (types/runtime.cljc), so the compiler narrows the Nex Integer (:long)
+    ;; operands to int, computes in int, then widens the result back to :long.
     (= :bit-rotl (:operator expr))
     (do
-      (emit-expr! mv (:left expr) state-slot)
-      (emit-expr! mv (:right expr) state-slot)
+      (emit-as-int! mv (:left expr) state-slot)
+      (emit-as-int! mv (:right expr) state-slot)
       (.visitMethodInsn mv
                         Opcodes/INVOKESTATIC
                         "java/lang/Integer"
                         "rotateLeft"
                         "(II)I"
                         false)
+      (emit-stack-coerce! mv :int (:jvm-type expr))
       (:jvm-type expr))
 
     (= :bit-rotr (:operator expr))
     (do
-      (emit-expr! mv (:left expr) state-slot)
-      (emit-expr! mv (:right expr) state-slot)
+      (emit-as-int! mv (:left expr) state-slot)
+      (emit-as-int! mv (:right expr) state-slot)
       (.visitMethodInsn mv
                         Opcodes/INVOKESTATIC
                         "java/lang/Integer"
                         "rotateRight"
                         "(II)I"
                         false)
+      (emit-stack-coerce! mv :int (:jvm-type expr))
       (:jvm-type expr))
 
     (= :bit-test (:operator expr))
@@ -1891,6 +1940,15 @@
     (#{:bit-set :bit-unset} (:operator expr))
     (do
       (emit-bit-set-like! mv (:operator expr) (:left expr) (:right expr) state-slot)
+      (emit-stack-coerce! mv :int (:jvm-type expr))
+      (:jvm-type expr))
+
+    (#{:bit-shl :bit-shr :bit-ushr :bit-and :bit-or :bit-xor} (:operator expr))
+    (do
+      (emit-as-int! mv (:left expr) state-slot)
+      (emit-as-int! mv (:right expr) state-slot)
+      (.visitInsn mv (binary-opcode (:operator expr) :int))
+      (emit-stack-coerce! mv :int (:jvm-type expr))
       (:jvm-type expr))
 
     :else
@@ -1907,7 +1965,8 @@
                            :result-jvm-type (:jvm-type expr)
                            :left-jvm-type left-type
                            :right-jvm-type right-type})))
-        (.visitInsn mv (binary-opcode (:operator expr) operand-type)))
+        (or (emit-checked-long-binary! mv (:operator expr) operand-type)
+            (.visitInsn mv (binary-opcode (:operator expr) operand-type))))
       (:jvm-type expr))))
 
 (defn- emit-compare!

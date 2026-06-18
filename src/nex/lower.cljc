@@ -2376,7 +2376,7 @@
 (defn lower-expression
   [env expr]
   (case (:type expr)
-    :integer (ir/const-node (:value expr) "Integer" :int)
+    :integer (ir/const-node (:value expr) "Integer" (desc/nex-type->jvm-type "Integer"))
     :real (ir/const-node (:value expr) "Real" :double)
     :string (ir/const-node (:value expr) "String" (ir/object-jvm-type "java/lang/String"))
     :char (ir/const-node (:value expr) "Char" :char)
