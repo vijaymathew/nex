@@ -739,7 +739,7 @@ end"
       let f: Boolean := 11 < 12
       let g: Boolean := true and false
       let h: Boolean := true or false
-      let g: Integer := 2 ^ 3
+      let i: Integer := 2 ^ 3
     end
 end"
           js-code (js/translate nex-code)]

@@ -127,7 +127,7 @@
     "let" "as" "and" "or" "not" "fn" "deferred" "convert" "to"
     "old" "create" "private" "note" "with" "import" "intern" "function"
     "raise" "rescue" "retry" "repeat" "across" "case" "of"
-    "spawn" "select" "timeout" "declare" "sealed" "once" "match", "type")
+    "spawn" "select" "timeout" "declare" "sealed" "once" "match" "type")
   "Nex language keywords.")
 
 (defconst nex-types

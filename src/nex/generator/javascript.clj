@@ -3280,7 +3280,7 @@
          ast (augment-ast-with-interns source-id (p/ast nex-code))]
      ;; Run type checker unless explicitly skipped
      (when-not (:skip-type-check opts)
-       (let [result (tc/type-check ast)]
+       (let [result (tc/type-check ast {:strict-undefined-targets? true})]
          (when-not (:success result)
            (doseq [err (:errors result)]
              (println (tc/format-type-error err)))
@@ -3305,7 +3305,7 @@
    (let [nex-code (slurp nex-file)
          ast (augment-ast-with-interns nex-file (p/ast nex-code))
          _ (when-not (:skip-type-check opts)
-             (let [result (tc/type-check ast)]
+             (let [result (tc/type-check ast {:strict-undefined-targets? true})]
                (when-not (:success result)
                  (throw (ex-info "Type checking failed"
                                  {:errors (map tc/format-type-error (:errors result))})))))

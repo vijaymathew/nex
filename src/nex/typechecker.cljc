@@ -7,6 +7,13 @@
 ;; Type Environment
 ;;
 
+(def ^:dynamic *strict-undefined-targets*
+  "When true, a member access / call on an unresolved bare-identifier target is a
+   compile-time 'Undefined variable' error. Enabled for whole-program/file
+   compilation; left off for the interactive REPL, whose incremental inputs may
+   reference bindings from earlier inputs that this type-check env does not carry."
+  false)
+
 (defn make-type-env
   "Create a new type environment"
   ([] (make-type-env nil))
@@ -18,6 +25,10 @@
     :type-aliases (atom {})
     :non-nil-vars (atom #{})
     :across-cursors (atom {})
+    ;; Names this env's block has declared with `let` (per-env, not inherited), so
+    ;; a second `let` of the same name in the *same* block is rejected while a
+    ;; nested block may still shadow.
+    :let-names (atom #{})
     ;; Non-fatal diagnostics surfaced to the user (e.g. equals/hash mismatch).
     ;; Lives on the root env; children share it via env-add-warning.
     :warnings (atom [])}))
@@ -1665,6 +1676,22 @@
                     (:base-type target-type)
                     target-type)
         type-map (build-generic-type-map env target-type)]
+    ;; A bare-identifier target that resolves to nothing — not a local, field,
+    ;; class, across cursor, a parameterless routine of the current class, nor a
+    ;; Java name inside `with java` — is an undefined variable. Without this the
+    ;; member access slips through type-checking with a nil/Any target type and
+    ;; fails later (cryptically in the JVM lowering, or only at runtime).
+    (when (and *strict-undefined-targets*
+               (string? target)
+               (nil? target-type)
+               (not across-item-type)
+               (not with-java?)
+               ;; `this`/`super`/`Current` are special call targets, not variables.
+               (not (#{"this" "super" "Current"} target))
+               (not (and current-class
+                         (lookup-class-method env current-class target 0 current-class))))
+      (throw (ex-info (str "Undefined variable: " target)
+                      {:error (type-error (str "Undefined variable: " target))})))
     (when (and (not class-target) target-detachable? (not guarded?))
       (throw (ex-info (str "Feature access on detachable target requires nil-check: " method)
                       {:error (type-error
@@ -2696,6 +2723,16 @@
 (defn check-let
   "Check a let statement"
   [env {:keys [name var-type value synthetic] :as stmt}]
+  ;; No two `let` declarations in the same block may bind the same identifier.
+  ;; `:let-names` is per-env, so a nested block (its own env) may still shadow.
+  ;; Compiler-synthesised lets (e.g. an across cursor) are exempt.
+  (when (and (not synthetic) (string? name) (:let-names env))
+    (if (contains? @(:let-names env) name)
+      (let [msg (str "Duplicate local variable '" name "' declared in the same block. "
+                     "A nested block may shadow an outer binding, but two declarations "
+                     "in one block may not share a name.")]
+        (throw (ex-info msg {:error (type-error msg)})))
+      (swap! (:let-names env) conj name)))
   (let [val-type (if var-type
                    (check-expression-with-expected env value var-type)
                    (check-expression env value))
@@ -4068,6 +4105,7 @@
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([program] (check-program program {}))
   ([{:keys [classes calls statements imports functions type-aliases duplicate-functions] :as program} opts]
+   (binding [*strict-undefined-targets* (boolean (:strict-undefined-targets? opts))]
    (let [env (make-type-env)
          normalized-functions (normalize-function-defs classes functions)
          visible-classes (class-defs-by-name-last-wins
@@ -4143,7 +4181,7 @@
            {:success false
             :errors [(or (:error error-data)
                         (type-error (ex-message e)))]
-            :warnings (vec @(:warnings env))}))))))
+            :warnings (vec @(:warnings env))})))))))
 
 (defn type-check
   "Type check Nex code (entry point).

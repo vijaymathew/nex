@@ -9,6 +9,14 @@
 (defn- check [code]
   (tc/type-check (p/ast code)))
 
+(defn- check-strict [code]
+  (tc/type-check (p/ast code) {:strict-undefined-targets? true}))
+
+(defn- strict-rejected-with [code substr]
+  (let [r (check-strict code)]
+    (and (not (:success r))
+         (some #(str/includes? (str (tc/format-type-error %)) substr) (:errors r)))))
+
 (defn- rejected-with [code substr]
   (let [r (check code)]
     (and (not (:success r))
@@ -49,6 +57,37 @@
     (is (rejected-with
          "class C feature f(p: Integer): Integer do result := p ensure k: result = old p end end"
          "may not be applied to the parameter 'p'"))))
+
+(deftest duplicate-locals-in-same-block-rejected
+  (testing "two `let` declarations of the same name in one block are a compile error"
+    (is (rejected-with "class C feature f() do let x := 1 let x := 2 print(x) end end"
+                       "Duplicate local variable 'x'"))
+    (is (rejected-with "class C feature f() do let x := 1 print(x) let x := 2 print(x) end end"
+                       "Duplicate local variable 'x'")))
+  (testing "a nested block may shadow an outer binding"
+    (is (accepted?
+         "class C feature f() do let x := 1 if true then let x := 2 print(x) end print(x) end end")))
+  (testing "sibling blocks may reuse a name"
+    (is (accepted?
+         "class C feature f() do if true then let x := 1 print(x) else let x := 2 print(x) end end end")))
+  (testing "different routines may reuse a name"
+    (is (accepted?
+         "class C feature f() do let x := 1 print(x) end g() do let x := 2 print(x) end end"))))
+
+(deftest undefined-member-access-target-rejected-when-strict
+  (testing "an undefined identifier used as a member-access/call target is rejected"
+    (is (strict-rejected-with "class C feature f() do print(zzz.size()) end end"
+                              "Undefined variable: zzz"))
+    (is (strict-rejected-with "class C feature f() do print(zzz.name) end end"
+                              "Undefined variable: zzz"))
+    (is (strict-rejected-with "function f() do print(zzz.size()) end\nf()"
+                              "Undefined variable: zzz")))
+  (testing "valid targets are still accepted under strict checking"
+    (is (:success (check-strict "class C feature s: String f() do print(s.length()) end end")))
+    (is (:success (check-strict "class C feature name(): String do result := \"x\" end f() do print(name.length()) end end")))
+    (is (:success (check-strict "class A create make() do end end\nclass B inherit A create make() do super.make() end end"))))
+  (testing "the check is off by default (interactive/REPL inputs stay lenient)"
+    (is (:success (check "class C feature f() do print(zzz.size()) end end")))))
 
 (deftest retry-only-in-rescue
   (testing "`retry` outside a rescue block is a compile-time error"
