@@ -1497,8 +1497,9 @@
   (try
     (transform-node parse-tree)
     (catch #?(:clj Exception :cljs :default) e
-      (throw (ex-info "Failed to transform parse tree"
-                      {:parse-tree parse-tree
-                       :cause #?(:clj (.getMessage e)
-                                :cljs (.-message e))}
-                      e)))))
+      (let [err-message #?(:clj (.getMessage e)
+                           :cljs (.-message e))]
+        (throw (ex-info err-message
+                        {:parse-tree parse-tree
+                         :cause err-message}
+                        e))))))
