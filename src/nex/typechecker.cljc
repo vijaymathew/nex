@@ -3145,9 +3145,99 @@
         false)
       true)))
 
+;; -----------------------------------------------------------------------------
+;; Static structural restrictions (the Definition's "Syntactic Restrictions").
+;; Diagnosed here, before evaluation, so a violation is a compile-time error even
+;; on a code path that never executes.
+;; -----------------------------------------------------------------------------
+
+(defn- first-duplicate
+  "The first value that occurs more than once in `coll`, or nil."
+  [coll]
+  (let [r (reduce (fn [seen x] (if (contains? seen x) (reduced x) (conj seen x)))
+                  #{} coll)]
+    (when-not (set? r) r)))
+
+(defn- restriction-error!
+  [msg]
+  (throw (ex-info msg {:error (type-error msg)})))
+
+(defn- check-distinct-parameters!
+  "No two parameters of one routine may bind the same identifier."
+  [params kind routine-name]
+  (when-let [dup (first-duplicate (map :name params))]
+    (restriction-error!
+     (str "Duplicate parameter '" dup "' in " kind " '" routine-name
+          "'. The parameters of a routine must have distinct names."))))
+
+(defn- check-distinct-fields!
+  "No two fields of one class may bind the same identifier."
+  [class-name body]
+  (let [field-names (->> body
+                         (filter #(= :feature-section (:type %)))
+                         (mapcat :members)
+                         (filter #(= :field (:type %)))
+                         (map :name))]
+    (when-let [dup (first-duplicate field-names)]
+      (restriction-error!
+       (str "Duplicate field '" dup "' in class '" class-name
+            "'. The fields of a class must have distinct names.")))))
+
+(defn- collect-old-nodes
+  "All `old` expression nodes within an AST fragment."
+  [node]
+  (cond
+    (sequential? node) (mapcat collect-old-nodes node)
+    (map? node) (if (= :old (:type node))
+                  (cons node (collect-old-nodes (vals (dissoc node :type))))
+                  (collect-old-nodes (vals (dissoc node :type))))
+    :else nil))
+
+(defn- collect-illegal-retry
+  "`retry` nodes that are not enclosed in a rescue block."
+  [node in-rescue?]
+  (cond
+    (sequential? node) (mapcat #(collect-illegal-retry % in-rescue?) node)
+    (map? node)
+    (case (:type node)
+      :retry (when-not in-rescue? [node])
+      ;; A nested `do ... rescue ... end`: its rescue arm is a valid retry context.
+      :scoped-block (concat (collect-illegal-retry (:body node) in-rescue?)
+                            (collect-illegal-retry (:rescue node) true))
+      ;; Closures and spawn bodies start a fresh routine context.
+      (:anonymous-function :spawn) nil
+      (mapcat #(collect-illegal-retry % in-rescue?) (vals (dissoc node :type))))
+    :else nil))
+
+(defn- check-old-and-retry!
+  "`old` may appear only in an `ensure` clause and must denote a field, not a
+   parameter; `retry` may appear only inside a `rescue` block."
+  [kind routine-name params require body ensure]
+  (when (some #(seq (collect-old-nodes %)) (cons body (map :condition require)))
+    (restriction-error!
+     (str "'old' may appear only in an ensure (postcondition) clause; found it "
+          "outside one in " kind " '" routine-name "'.")))
+  (let [param-names (set (map :name params))]
+    (doseq [assertion ensure
+            o (collect-old-nodes (:condition assertion))]
+      (let [e (:expr o)]
+        (when (and (map? e) (= :identifier (:type e))
+                   (contains? param-names (:name e)))
+          (restriction-error!
+           (str "'old' may not be applied to the parameter '" (:name e) "' in "
+                kind " '" routine-name "'; it must denote a field of the current object."))))))
+  (when (seq (concat (mapcat #(collect-illegal-retry (:condition %) false) require)
+                     (collect-illegal-retry body false)
+                     (mapcat #(collect-illegal-retry (:condition %) false) ensure)))
+    (restriction-error!
+     (str "'retry' may appear only inside a rescue block; found it elsewhere in "
+          kind " '" routine-name "'."))))
+
 (defn check-method
   "Check a method definition"
   [env class-name {:keys [name params return-type require body ensure rescue] :as method}]
+  (check-distinct-parameters! params "routine" name)
+  (check-old-and-retry! "routine" name params require body ensure)
   ;; Validate parameter and return type annotations (generic constraints)
   (doseq [param params]
     (when (:type param)
@@ -3225,6 +3315,8 @@
 (defn check-constructor
   "Check a constructor definition"
   [env class-name {:keys [name params require body ensure rescue] :as constructor}]
+  (check-distinct-parameters! params "constructor" name)
+  (check-old-and-retry! "constructor" name params require body ensure)
   (let [ctor-env (make-type-env env)]
     ;; Track current class for this/super resolution
     (env-add-var ctor-env "__current_class__" class-name)
@@ -3493,6 +3585,7 @@
         invariant (:invariant class-def)
         parents (:parents class-def)
         class-env (make-type-env env)]
+  (check-distinct-fields! name (:body class-def))
   (check-equals-hash-consistency env name class-def)
   (env-add-var class-env "__current_class__" name)
   (register-generic-param-classes! class-env generic-params)
