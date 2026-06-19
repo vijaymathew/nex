@@ -19,6 +19,14 @@
     (nex-object? value)
     (str "#<" (:class-name value) " object>")
 
+    ;; Set and Map are tagged maps; format them as collections before the generic
+    ;; builtin-type fallthrough below would render them as "#<NexSet>"/"#<NexMap>".
+    (rt/nex-set? value)
+    (formatter-set value)
+
+    (rt/nex-map? value)
+    (formatter-map value)
+
     (and (map? value) (:nex-builtin-type value))
     (str "#<" (name (:nex-builtin-type value)) ">")
 
@@ -78,18 +86,13 @@
     (rt/nex-array-from (map (partial nex-clone-value nex-object? make-object) #?(:clj value :cljs (array-seq value))))
 
     (rt/nex-map? value)
-    #?(:clj (java.util.HashMap. (into {} (map (fn [[k v]] [(nex-clone-value nex-object? make-object k)
-                                                           (nex-clone-value nex-object? make-object v)])
-                                                 value)))
-       :cljs (js/Map. (to-array (map (fn [[k v]] (to-array [(nex-clone-value nex-object? make-object k)
-                                                            (nex-clone-value nex-object? make-object v)]))
-                                     (es6-iterator-seq (.entries value))))))
+    (rt/nex-map-from (map (fn [[k v]] [(nex-clone-value nex-object? make-object k)
+                                       (nex-clone-value nex-object? make-object v)])
+                          (rt/nex-map-entries value)))
 
     (rt/nex-set? value)
-    #?(:clj (doto (java.util.LinkedHashSet.)
-              (#(doseq [v value] (.add % (nex-clone-value nex-object? make-object v)))))
-       :cljs (js/Set. (to-array (map (partial nex-clone-value nex-object? make-object)
-                                     (es6-iterator-seq (.values value))))))
+    (rt/nex-set-from (map (partial nex-clone-value nex-object? make-object)
+                          (rt/nex-set-seq value)))
 
     (and (map? value) (:nex-builtin-type value))
     (into {} value)
@@ -102,7 +105,7 @@
   (some (fn [[k2 v2]]
           (and (nex-deep-equals? nex-object? k1 k2)
                (nex-deep-equals? nex-object? v1 v2)))
-        #?(:clj m2 :cljs (es6-iterator-seq (.entries m2)))))
+        (rt/nex-map-entries m2)))
 
 (defn nex-deep-equals?
   [nex-object? a b]
@@ -122,14 +125,14 @@
     (and (rt/nex-map? a) (rt/nex-map? b))
     (and (= (rt/nex-map-size a) (rt/nex-map-size b))
          (every? (fn [[k v]] (nex-map-entry-match? nex-object? k v b))
-                 #?(:clj a :cljs (es6-iterator-seq (.entries a)))))
+                 (rt/nex-map-entries a)))
 
     (and (rt/nex-set? a) (rt/nex-set? b))
     (and (= (rt/nex-set-size a) (rt/nex-set-size b))
          (every? (fn [v1]
                    (some #(nex-deep-equals? nex-object? v1 %)
-                         #?(:clj b :cljs (es6-iterator-seq (.values b)))))
-                 #?(:clj a :cljs (es6-iterator-seq (.values a)))))
+                         (rt/nex-set-seq b)))
+                 (rt/nex-set-seq a)))
 
     :else
     (= a b)))

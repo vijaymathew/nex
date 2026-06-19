@@ -17,7 +17,17 @@
     :classes (atom {})
     :type-aliases (atom {})
     :non-nil-vars (atom #{})
-    :across-cursors (atom {})}))
+    :across-cursors (atom {})
+    ;; Non-fatal diagnostics surfaced to the user (e.g. equals/hash mismatch).
+    ;; Lives on the root env; children share it via env-add-warning.
+    :warnings (atom [])}))
+
+(defn env-add-warning
+  "Record a non-fatal type-checker warning on the root environment."
+  [env msg]
+  (let [root (loop [e env] (if (:parent e) (recur (:parent e)) e))]
+    (when-let [warnings (:warnings root)]
+      (swap! warnings conj msg))))
 
 (defn env-lookup-var
   "Look up a variable type in the environment"
@@ -3443,6 +3453,38 @@
                                           "Returns are covariant: the overriding return type must "
                                           "conform to the inherited one."))}))))))))
 
+(defn- class-defines-method?
+  "True when the class body itself declares a method of the given name."
+  [class-def method-name]
+  (boolean
+   (some (fn [section]
+           (and (= (:type section) :feature-section)
+                (some (fn [member]
+                        (and (= (:type member) :method)
+                             (= (:name member) method-name)))
+                      (:members section))))
+         (:body class-def))))
+
+(defn- check-equals-hash-consistency
+  "Equality and hashing must agree: equal objects must hash equal. Warn when a
+   class redefines one of `equals`/`hash` without the other, since such a class
+   misbehaves as a Set element or Map key."
+  [env class-name class-def]
+  (let [has-equals (class-defines-method? class-def "equals")
+        has-hash (class-defines-method? class-def "hash")]
+    (cond
+      (and has-equals (not has-hash))
+      (env-add-warning env
+                       (str "Class '" class-name "' overrides 'equals' but not 'hash'. "
+                            "A class that redefines equality should also redefine 'hash' so "
+                            "that equal objects hash equal; otherwise it misbehaves as a Set "
+                            "element or Map key."))
+
+      (and has-hash (not has-equals))
+      (env-add-warning env
+                       (str "Class '" class-name "' overrides 'hash' but not 'equals'. "
+                            "A custom 'hash' is only meaningful alongside a matching 'equals'.")))))
+
 (defn check-class
   "Check a class definition"
   [env {:keys [name body invariant parents generic-params] :as class-def}]
@@ -3451,6 +3493,7 @@
         invariant (:invariant class-def)
         parents (:parents class-def)
         class-env (make-type-env env)]
+  (check-equals-hash-consistency env name class-def)
   (env-add-var class-env "__current_class__" name)
   (register-generic-param-classes! class-env generic-params)
   (bind-visible-class-fields! class-env env name)
@@ -3573,6 +3616,7 @@
   (doseq [[method-name sig]
           {"to_string" {:params [] :return-type "String"}
            "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "hash" {:params [] :return-type "Integer"}
            "clone" {:params [] :return-type "Any"}}]
     (env-add-method env "Any" method-name sig))
 
@@ -3998,13 +4042,15 @@
            (check-expression env call)))
 
        {:success true
-        :errors []}
+        :errors []
+        :warnings (vec @(:warnings env))}
 
        (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e
          (let [error-data (ex-data e)]
            {:success false
             :errors [(or (:error error-data)
-                        (type-error (ex-message e)))]}))))))
+                        (type-error (ex-message e)))]
+            :warnings (vec @(:warnings env))}))))))
 
 (defn type-check
   "Type check Nex code (entry point).

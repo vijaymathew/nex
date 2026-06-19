@@ -88,6 +88,36 @@
         (is (not (str/includes? set-output "Error:")) set-output)
         (is (str/includes? get-output "95"))))))
 
+(deftest repl-compiled-backend-equals-override-drives-equality-operator-test
+  (testing "compiled backend `=`/`/=` honour a class's equals override; `==` stays identity"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            ;; equals ignores fields (always true), so `=` differs from structural
+            ;; comparison — proving `=` dispatches to the override.
+            _ (with-out-str
+                (repl/eval-code ctx "class Tag
+  feature
+    id: Integer
+    equals(other: Any): Boolean do
+      result := true
+    end
+  create
+    make(v: Integer) do
+      id := v
+    end
+end"))
+            _ (with-out-str (repl/eval-code ctx "let a := create Tag.make(1)"))
+            _ (with-out-str (repl/eval-code ctx "let b := create Tag.make(2)"))
+            eq-output  (with-out-str (repl/eval-code ctx "print(a = b)"))
+            neq-output (with-out-str (repl/eval-code ctx "print(a /= b)"))
+            id-output  (with-out-str (repl/eval-code ctx "print(a == b)"))]
+        (is (str/includes? eq-output "true"))
+        (is (str/includes? neq-output "false"))
+        (is (str/includes? id-output "false"))))))
+
 (deftest repl-compiled-backend-private-field-is-not-publicly-readable-test
   (testing "compiled backend rejects top-level access to private fields while keeping public methods callable"
     (binding [repl/*type-checking-enabled* (atom false)

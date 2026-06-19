@@ -1,7 +1,7 @@
 (ns nex.types.runtime
   (:require [clojure.string :as str]))
 
-(declare nex-set? nex-integer? ->nex-integer nex-int->number)
+(declare nex-set? nex-integer? ->nex-integer nex-int->number nex-hash-code)
 
 (defn nex-array [] #?(:clj (java.util.ArrayList.) :cljs #js []))
 (defn nex-array-from [coll] #?(:clj (java.util.ArrayList. (vec coll)) :cljs (js/Array.from (to-array coll))))
@@ -90,77 +90,180 @@
 (defn nex-array-str [formatter arr]
   (str "[" (str/join ", " (map formatter #?(:clj arr :cljs (array-seq arr)))) "]"))
 
-(defn nex-map [] #?(:clj (java.util.HashMap.) :cljs (js/Map.)))
-(defn nex-map-from [pairs]
-  #?(:clj (java.util.HashMap. (into {} pairs))
-     :cljs (js/Map. (to-array (map to-array pairs)))))
-(defn nex-map? [v] #?(:clj (instance? java.util.HashMap v) :cljs (instance? js/Map v)))
-(defn nex-map-get [m key] #?(:clj (.get m key) :cljs (.get m key)))
-(defn nex-map-put [m key val]
-  #?(:clj (do
-            (.put m key val)
-            nil)
-     :cljs (do
-             (.set m key val)
-             nil)))
-(defn nex-map-size [m] #?(:clj (.size m) :cljs (.-size m)))
-(defn nex-map-empty? [m] #?(:clj (.isEmpty m) :cljs (zero? (.-size m))))
-(defn nex-map-contains-key [m key] #?(:clj (.containsKey m key) :cljs (.has m key)))
-(defn nex-map-keys [m] #?(:clj (nex-array-from (.keySet m)) :cljs (nex-array-from (es6-iterator-seq (.keys m)))))
-(defn nex-map-values [m] #?(:clj (nex-array-from (.values m)) :cljs (nex-array-from (es6-iterator-seq (.values m)))))
-(defn nex-map-remove [m key]
-  #?(:clj (do
-            (.remove m key)
-            nil)
-     :cljs (do
-             (.delete m key)
-             nil)))
-(defn nex-map-str [formatter m]
-  (let [entries #?(:clj (for [[k v] m] (str (formatter k) ": " (formatter v)))
-                   :cljs (for [[k v] (es6-iterator-seq (.entries m))] (str (formatter k) ": " (formatter v))))]
-    (str "{" (str/join ", " entries) "}")))
+;; ---------------------------------------------------------------------------
+;; Value semantics for Set/Map: equality and hashing are injected so the
+;; collections can match elements/keys by Nex equality. They default to structural
+;; (host =/hash, value-based for Nex records on both backends); the interpreter
+;; binds richer versions that honour a class's `equals`/`hash` overrides.
+;; ---------------------------------------------------------------------------
 
-(defn nex-set [] #?(:clj (java.util.LinkedHashSet.) :cljs (js/Set.)))
-(defn nex-set-from [coll]
-  #?(:clj (doto (java.util.LinkedHashSet.)
-            (#(doseq [v coll] (.add % v))))
-     :cljs (js/Set. (to-array coll))))
-(defn nex-set? [v] #?(:clj (instance? java.util.LinkedHashSet v) :cljs (instance? js/Set v)))
-(defn nex-set-contains [s v] #?(:clj (.contains s v) :cljs (.has s v)))
-(defn nex-set-size [s] #?(:clj (.size s) :cljs (.-size s)))
-(defn nex-set-empty? [s] #?(:clj (.isEmpty s) :cljs (zero? (.-size s))))
-(defn nex-set-union [a b]
-  #?(:clj (let [out (java.util.LinkedHashSet. a)]
-            (.addAll out b)
-            out)
-     :cljs (nex-set-from (concat (es6-iterator-seq (.values a))
-                                 (es6-iterator-seq (.values b))))))
-(defn nex-set-difference [a b]
-  #?(:clj (let [out (java.util.LinkedHashSet. a)]
-            (.removeAll out b)
-            out)
-     :cljs (nex-set-from (remove #(.has b %) (es6-iterator-seq (.values a))))))
-(defn nex-set-intersection [a b]
-  #?(:clj (let [out (java.util.LinkedHashSet. a)]
-            (.retainAll out b)
-            out)
-     :cljs (nex-set-from (filter #(.has b %) (es6-iterator-seq (.values a))))))
-(defn nex-set-symmetric-difference [a b]
-  #?(:clj (let [out (java.util.LinkedHashSet.)]
-            (doseq [v a]
-              (when-not (.contains b v) (.add out v)))
-            (doseq [v b]
-              (when-not (.contains a v) (.add out v)))
-            out)
-     :cljs (nex-set-from (concat (remove #(.has b %) (es6-iterator-seq (.values a)))
-                                 (remove #(.has a %) (es6-iterator-seq (.values b)))))))
-(defn nex-set-str [formatter s]
-  (str "#{"
-       (str/join ", " (map formatter #?(:clj (seq s) :cljs (es6-iterator-seq (.values s)))))
+(def ^:dynamic *value-equals*
+  "Equality used for Set/Map membership and dedup. nil => structural host equality."
+  nil)
+
+(def ^:dynamic *value-hash*
+  "Hash used to bucket Set elements and Map keys. nil => structural host hash."
+  nil)
+
+(defn value-equals? [a b] (if *value-equals* (*value-equals* a b) (= a b)))
+(defn value-hash [v] (if *value-hash* (*value-hash* v) (nex-hash-code v)))
+
+;; ---------------------------------------------------------------------------
+;; Map: a portable, value-semantics collection (companion to Set below).
+;;
+;; Backed by plain Clojure data behind a single mutable cell rather than a host
+;; HashMap/js.Map, so keys are matched by Nex equality on every backend (host maps
+;; key by structural hashing on the JVM but reference identity on JS). A map is a
+;; tagged map { :state (atom { :keys  <insertion-ordered key vector>,
+;;                             :index <key-hash -> vector of [k v] pairs> }) }.
+;; Keys keep insertion order on both backends. put/remove mutate the cell, so the
+;; reference (and its aliases) observe updates as before.
+;; ---------------------------------------------------------------------------
+
+(defn nex-map [] {:nex-builtin-type :NexMap :state (atom {:keys [] :index {}})})
+
+;; Portable map (the interpreter's representation). The compiled JVM/JS backends
+;; still pass a host HashMap/js.Map through the shared interpreter bridge, so the
+;; accessors below also accept a host map (the `:else` branches). Phase 4 removes
+;; the host representation and the dual handling.
+(defn- portable-map? [v] (and (map? v) (= (:nex-builtin-type v) :NexMap)))
+(defn nex-map? [v]
+  (or (portable-map? v)
+      #?(:clj (instance? java.util.HashMap v) :cljs (instance? js/Map v))))
+
+(defn- map-find-pair [state k]
+  (some #(when (value-equals? (first %) k) %)
+        (get (:index state) (value-hash k))))
+
+(defn nex-map-entries
+  "The map's [k v] pairs (insertion order for portable maps)."
+  [m]
+  (if (portable-map? m)
+    (let [s @(:state m)] (map #(map-find-pair s %) (:keys s)))
+    #?(:clj (map (fn [^java.util.Map$Entry e] [(.getKey e) (.getValue e)])
+                 (.entrySet ^java.util.Map m))
+       :cljs (map vec (es6-iterator-seq (.entries m))))))
+
+(defn nex-map-get [m k]
+  (if (portable-map? m)
+    (when-let [pair (map-find-pair @(:state m) k)] (second pair))
+    #?(:clj (.get ^java.util.Map m k) :cljs (.get m k))))
+(defn nex-map-contains-key [m k]
+  (if (portable-map? m)
+    (boolean (map-find-pair @(:state m) k))
+    #?(:clj (.containsKey ^java.util.Map m k) :cljs (.has m k))))
+
+(defn nex-map-put [m k v]
+  (if (portable-map? m)
+    (swap! (:state m)
+           (fn [{:keys [index] :as s}]
+             (let [h (value-hash k)
+                   bucket (get index h [])
+                   i (first (keep-indexed (fn [idx p] (when (value-equals? (first p) k) idx)) bucket))]
+               (if i
+                 (assoc-in s [:index h i] [k v])
+                 (-> s
+                     (update :keys conj k)
+                     (assoc-in [:index h] (conj bucket [k v])))))))
+    #?(:clj (.put ^java.util.Map m k v) :cljs (.set m k v)))
+  nil)
+
+(defn nex-map-remove [m k]
+  (if (portable-map? m)
+    (swap! (:state m)
+           (fn [{:keys [keys index] :as s}]
+             (let [h (value-hash k)
+                   new-bucket (filterv #(not (value-equals? (first %) k)) (get index h []))]
+               (-> s
+                   (assoc :keys (filterv #(not (value-equals? % k)) keys))
+                   (assoc :index (if (seq new-bucket) (assoc index h new-bucket) (dissoc index h)))))))
+    #?(:clj (.remove ^java.util.Map m k) :cljs (.delete m k)))
+  nil)
+
+(defn nex-map-size [m]
+  (if (portable-map? m)
+    (count (:keys @(:state m)))
+    #?(:clj (.size ^java.util.Map m) :cljs (.-size m))))
+(defn nex-map-empty? [m]
+  (if (portable-map? m)
+    (empty? (:keys @(:state m)))
+    #?(:clj (.isEmpty ^java.util.Map m) :cljs (zero? (.-size m)))))
+(defn nex-map-keys [m] (nex-array-from (map first (nex-map-entries m))))
+(defn nex-map-values [m] (nex-array-from (map second (nex-map-entries m))))
+(defn nex-map-from [pairs]
+  (let [m (nex-map)]
+    (doseq [[k v] pairs] (nex-map-put m k v))
+    m))
+(defn nex-map-str [formatter m]
+  (str "{"
+       (str/join ", " (map (fn [[k v]] (str (formatter k) ": " (formatter v)))
+                           (nex-map-entries m)))
        "}"))
-(defn nex-set-to-array [s]
-  #?(:clj (nex-array-from s)
-     :cljs (nex-array-from (es6-iterator-seq (.values s)))))
+
+;; ---------------------------------------------------------------------------
+;; Set: a portable, value-semantics collection.
+;;
+;; Backed by plain immutable Clojure data rather than a host LinkedHashSet/js.Set,
+;; so element identity is decided by Nex equality on every backend instead of host
+;; hashing (structural on the JVM, but reference-based on JS). A set is a tagged map
+;; { :items  <deduped vector, insertion order>, :index <hash -> vector of items> }.
+;;
+;; Element equality/hashing use the shared injected *value-equals*/*value-hash*
+;; defined above (structural by default, override-aware when the interpreter binds
+;; them). Sets are built once (literals, `from`, set algebra) then read, so there
+;; is no incremental add.
+;; ---------------------------------------------------------------------------
+
+;; Portable set (the interpreter's representation). As with maps, the compiled
+;; backends bridge a host LinkedHashSet/js.Set through the interpreter, so the read
+;; accessors also accept a host set (the `:else` branches). Phase 4 removes this.
+(defn- portable-set? [v] (and (map? v) (= (:nex-builtin-type v) :NexSet)))
+(defn nex-set? [v]
+  (or (portable-set? v)
+      #?(:clj (instance? java.util.LinkedHashSet v) :cljs (instance? js/Set v))))
+
+(defn- set-bucket-member? [index v]
+  (boolean (some #(value-equals? % v) (get index (value-hash v)))))
+
+(defn- set-conj [{:keys [index] :as s} v]
+  (if (set-bucket-member? index v)
+    s
+    (-> s
+        (update :items conj v)
+        (update :index update (value-hash v) (fnil conj []) v))))
+
+(defn nex-set [] {:nex-builtin-type :NexSet :items [] :index {}})
+(defn nex-set-from [coll] (reduce set-conj (nex-set) coll))
+(defn nex-set-seq
+  "The set's elements as a seq, in insertion order."
+  [s]
+  (if (portable-set? s)
+    (:items s)
+    #?(:clj (seq s) :cljs (es6-iterator-seq (.values s)))))
+(defn nex-set-contains [s v]
+  (if (portable-set? s)
+    (set-bucket-member? (:index s) v)
+    (boolean (some #(value-equals? % v) (nex-set-seq s)))))
+(defn nex-set-size [s]
+  (if (portable-set? s)
+    (count (:items s))
+    #?(:clj (.size ^java.util.Set s) :cljs (.-size s))))
+(defn nex-set-empty? [s]
+  (if (portable-set? s)
+    (empty? (:items s))
+    #?(:clj (.isEmpty ^java.util.Set s) :cljs (zero? (.-size s)))))
+(defn nex-set-union [a b]
+  (nex-set-from (concat (:items a) (:items b))))
+(defn nex-set-difference [a b]
+  (nex-set-from (remove #(nex-set-contains b %) (:items a))))
+(defn nex-set-intersection [a b]
+  (nex-set-from (filter #(nex-set-contains b %) (:items a))))
+(defn nex-set-symmetric-difference [a b]
+  (nex-set-from (concat (remove #(nex-set-contains b %) (:items a))
+                        (remove #(nex-set-contains a %) (:items b)))))
+(defn nex-set-str [formatter s]
+  (str "#{" (str/join ", " (map formatter (:items s))) "}"))
+(defn nex-set-to-array [s] (nex-array-from (:items s)))
 
 ;; Bitwise operators are a 32-bit island: they mask operands to int32 and the
 ;; interpreter/compiler agree on that. On JS a Nex Integer is a BigInt, which
@@ -262,6 +365,15 @@
    codepoints, and other positions that require a 32/53-bit number."
   [v]
   #?(:clj v :cljs (js/Number v)))
+
+(defn nex-hash-code
+  "A host-stable hash code for a Nex scalar value, used to bucket Set elements.
+   Nex Integers are BigInt on JS, for which cljs `hash` is unreliable, so they are
+   hashed via their (canonical) string form. Hashes need only be consistent within
+   one host, not identical across hosts."
+  [v]
+  #?(:clj (hash v)
+     :cljs (if (nex-integer? v) (hash (str v)) (hash v))))
 
 (defn ->nex-real
   "Coerce a Nex numeric (Integer or Real) to the host Real (floating) value."

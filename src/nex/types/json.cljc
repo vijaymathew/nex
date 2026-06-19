@@ -33,8 +33,8 @@
     (rt/nex-map? value)
     (into {}
           (map (fn [[k v]] [(str k) (nex-value->json v)]))
-          value)
-    (rt/nex-set? value) (mapv nex-value->json value)
+          (rt/nex-map-entries value))
+    (rt/nex-set? value) (mapv nex-value->json (rt/nex-set-seq value))
     :else (throw (ex-info (str "Value is not JSON-serializable: " (pr-str (type value)))
                           {:value value}))))
 

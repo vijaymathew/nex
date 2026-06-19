@@ -118,6 +118,132 @@ end"
       (is (not (:success result)))
       (is (seq (:errors result))))))
 
+(deftest default-hash-is-structural-and-typed
+  (testing "Objects inherit a structural hash from Any: equal objects hash equal"
+    (let [code "class Box inherit Any
+  feature
+    x: Integer
+  create
+    make(v: Integer) do
+      x := v
+    end
+end
+
+class Test
+  feature
+    demo() do
+      let a: Box := create Box.make(5)
+      let b: Box := create Box.make(5)
+      print(a.hash() = b.hash())
+      print(type_of(a.hash()))
+    end
+end"
+          output (execute-method-output code)]
+      (is (= "true" (nth output 0)))
+      (is (= "\"Integer\"" (nth output 1))))))
+
+(deftest hash-override-is-invoked
+  (testing "A class may override hash; the override is what hash() returns"
+    (let [code "class Money inherit Any
+  feature
+    cents: Integer
+    equals(other: Any): Boolean do
+      result := type_is(\"Money\", other)
+    end
+    hash(): Integer do
+      result := cents
+    end
+  create
+    make(c: Integer) do
+      cents := c
+    end
+end
+
+class Test
+  feature
+    demo() do
+      let a: Money := create Money.make(42)
+      print(a.hash())
+    end
+end"
+          output (execute-method-output code)]
+      (is (= "42" (first output))))))
+
+(deftest equals-without-hash-warns
+  (testing "Overriding equals without hash produces a (non-fatal) warning"
+    (let [code "class Money inherit Any
+  feature
+    cents: Integer
+    equals(other: Any): Boolean do
+      result := type_is(\"Money\", other)
+    end
+  create
+    make(c: Integer) do
+      cents := c
+    end
+end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result))
+      (is (empty? (:errors result)))
+      (is (some #(and (str/includes? % "Money")
+                      (str/includes? % "hash"))
+                (:warnings result))))))
+
+(deftest equals-with-hash-does-not-warn
+  (testing "Overriding both equals and hash is consistent and warning-free"
+    (let [code "class Money inherit Any
+  feature
+    cents: Integer
+    equals(other: Any): Boolean do
+      result := type_is(\"Money\", other)
+    end
+    hash(): Integer do
+      result := cents
+    end
+  create
+    make(c: Integer) do
+      cents := c
+    end
+end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result))
+      (is (empty? (:warnings result))))))
+
+(deftest array-membership-honours-equals-override
+  (testing "Array contains and index_of honour a user-defined equals override"
+    (let [code "class Money inherit Any
+  feature
+    cents: Integer
+    equals(other: Any): Boolean do
+      if type_is(\"Money\", other) then
+        let m: Money := other
+        result := cents = m.cents
+      else
+        result := false
+      end
+    end
+  create
+    make(c: Integer) do
+      cents := c
+    end
+end
+
+class Test
+  feature
+    demo() do
+      let xs: Array[Money] := [create Money.make(10), create Money.make(20)]
+      print(xs.contains(create Money.make(20)))
+      print(xs.contains(create Money.make(99)))
+      print(xs.index_of(create Money.make(20)))
+      print(xs.index_of(create Money.make(99)))
+    end
+end"
+          output (execute-method-output code)]
+      (is (= "true" (nth output 0)))
+      (is (= "false" (nth output 1)))
+      (is (= "1" (nth output 2)))
+      (is (= "-1" (nth output 3))))))
+
 (deftest division-runtime-format-and-type
   (testing "Integral division yields an Integer at runtime when both operands are integral"
     (let [code "class Test
@@ -246,17 +372,63 @@ class Test
     demo() do
       let a: Box := create Box.make(10)
       let b: Any := a.clone()
+      let c: Box := create Box.make(20)
       print(a.to_string())
       print(type_of(b))
       print(a.equals(a))
       print(a.equals(b))
+      print(a.equals(c))
     end
 end"
           output (execute-method-output code)]
       (is (= "\"#<Box object>\"" (nth output 0)))
       (is (= "\"Box\"" (nth output 1)))
       (is (= "true" (nth output 2)))
-      (is (= "false" (nth output 3))))))
+      ;; Default equals is now structural: a clone with identical fields is equal.
+      (is (= "true" (nth output 3)))
+      ;; ...but an object with different field values is not.
+      (is (= "false" (nth output 4))))))
+
+(deftest equals-override-drives-equality-operator
+  (testing "= and /= honour a user-defined equals override; == stays identity"
+    (let [code "class Money inherit Any
+  feature
+    cents: Integer
+    equals(other: Any): Boolean do
+      if type_is(\"Money\", other) then
+        let m: Money := other
+        result := cents = m.cents
+      else
+        result := false
+      end
+    end
+  create
+    make(c: Integer) do
+      cents := c
+    end
+end
+
+class Test
+  feature
+    demo() do
+      let a: Money := create Money.make(100)
+      let b: Money := create Money.make(100)
+      let c: Money := create Money.make(250)
+      print(a = b)
+      print(a /= b)
+      print(a = c)
+      print(a == b)
+      print(a == a)
+    end
+end"
+          output (execute-method-output code)]
+      ;; = / /= route through the override (value equality)...
+      (is (= "true" (nth output 0)))
+      (is (= "false" (nth output 1)))
+      (is (= "false" (nth output 2)))
+      ;; ...while == / != stay identity-based.
+      (is (= "false" (nth output 3)))
+      (is (= "true" (nth output 4))))))
 
 (deftest collection-deep-methods-runtime
   (testing "Array, Map, and Set implement deep to_string, equals, and clone"
