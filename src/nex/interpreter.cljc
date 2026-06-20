@@ -16,6 +16,7 @@
 
 (declare nex-format-value)
 (declare eval-node)
+(declare object-equals-override)
 (declare runtime-resolve-call-user-method)
 (declare lookup-method-with-inheritance)
 (declare lookup-class)
@@ -73,6 +74,7 @@
 (def nex-map-contains-key rt/nex-map-contains-key)
 (def nex-map-keys rt/nex-map-keys)
 (def nex-map-values rt/nex-map-values)
+(def nex-map-entries rt/nex-map-entries)
 (def nex-map-remove rt/nex-map-remove)
 (defn nex-map-str [m] (rt/nex-map-str nex-format-value m))
 
@@ -87,6 +89,7 @@
 (def nex-set-intersection rt/nex-set-intersection)
 (def nex-set-symmetric-difference rt/nex-set-symmetric-difference)
 (def nex-set-to-array rt/nex-set-to-array)
+(def nex-set-seq rt/nex-set-seq)
 (defn nex-set-str [s] (rt/nex-set-str nex-format-value s))
 
 (def nex-bitwise-left-shift rt/nex-bitwise-left-shift)
@@ -1647,6 +1650,33 @@
 (defn- nex-deep-equals? [a b]
   (value/nex-deep-equals? nex-object? a b))
 
+(defn- nex-structural-hash
+  "A structural hash that agrees with the structural `equals` default
+   (nex-deep-equals?): values that compare equal hash equal. This is the default
+   `hash` an object inherits from `Any`. Object and Array hashing is order-
+   sensitive over fields/elements; Set and Map hashing is order-insensitive,
+   mirroring how those collections compare."
+  [v]
+  (cond
+    (nex-object? v)
+    (hash (into [(:class-name v)]
+                (map (fn [k] [k (nex-structural-hash (get (:fields v) k))])
+                     (sort (keys (:fields v))))))
+
+    (nex-array? v)
+    (hash (mapv nex-structural-hash
+                #?(:clj (seq v) :cljs (array-seq v))))
+
+    (nex-set? v)
+    (reduce + 0 (map nex-structural-hash (nex-set-seq v)))
+
+    (nex-map? v)
+    (reduce + 0 (map (fn [[k val]]
+                       (hash [(nex-structural-hash k) (nex-structural-hash val)]))
+                     (nex-map-entries v)))
+
+    :else (rt/nex-hash-code v)))
+
 (defn- builtin-scalar-value?
   [v]
   (or (nil? v)
@@ -1656,37 +1686,44 @@
       (char? v)))
 
 (defn- membership-equals?
-  [a b]
-  (if (and (builtin-scalar-value? a) (builtin-scalar-value? b))
-    (= a b)
-    (nex-deep-equals? a b)))
+  "Element equality for linear-scan membership (Array contains/index_of). With a
+   context, a user-defined `equals` override on the element's class is honoured;
+   otherwise comparison is structural — the same rule the `=` operator uses."
+  ([a b] (membership-equals? nil a b))
+  ([ctx a b]
+   (cond
+     (and (builtin-scalar-value? a) (builtin-scalar-value? b)) (= a b)
+     :else (let [overridden (object-equals-override ctx a b)]
+             (if (some? overridden) overridden (nex-deep-equals? a b))))))
 
 (defn- nex-array-contains-value?
-  [arr elem]
-  (boolean
-   (some #(membership-equals? % elem)
-         #?(:clj (seq arr) :cljs (array-seq arr)))))
+  ([arr elem] (nex-array-contains-value? nil arr elem))
+  ([ctx arr elem]
+   (boolean
+    (some #(membership-equals? ctx % elem)
+          #?(:clj (seq arr) :cljs (array-seq arr))))))
 
 (defn- nex-array-index-of-value
-  [arr elem]
-  (loop [idx 0
-         values #?(:clj (seq arr) :cljs (seq (array-seq arr)))]
-    (cond
-      (nil? values) -1
-      (membership-equals? (first values) elem) idx
-      :else (recur (inc idx) (next values)))))
+  ([arr elem] (nex-array-index-of-value nil arr elem))
+  ([ctx arr elem]
+   (loop [idx 0
+          values #?(:clj (seq arr) :cljs (seq (array-seq arr)))]
+     (cond
+       (nil? values) -1
+       (membership-equals? ctx (first values) elem) idx
+       :else (recur (inc idx) (next values))))))
 
 (defn- nex-map-contains-key-value?
   [m key]
-  (boolean
-   (some #(membership-equals? #?(:clj (.getKey %) :cljs (first %)) key)
-         #?(:clj (.entrySet m) :cljs (es6-iterator-seq (.entries m))))))
+  ;; The map's own key lookup already uses Nex equality (structural by default,
+  ;; honouring an `equals` override when the interpreter has bound it).
+  (nex-map-contains-key m key))
 
 (defn- nex-set-contains-value?
   [s value]
-  (boolean
-   (some #(membership-equals? % value)
-         #?(:clj (seq s) :cljs (es6-iterator-seq (.values s))))))
+  ;; The set's own membership already uses Nex equality (structural by default,
+  ;; honouring an `equals` override when the interpreter has bound it).
+  (nex-set-contains s value))
 
 (defn- sortable-builtin-scalar-value?
   [v]
@@ -2665,6 +2702,79 @@
     :else
     (call-builtin-method nil nil value "to_string" [])))
 
+(defn object-equals-override
+  "If `a` and `b` are both Nex objects and `a`'s class (or an ancestor) overrides
+   the `equals` feature, invoke it and return its boolean result. Returns nil to
+   signal \"no override\" — callers then fall back to structural comparison. A nil
+   `ctx` (no evaluation context available) also yields nil."
+  [ctx a b]
+  (when (and ctx (nex-object? a) (nex-object? b))
+    (let [class-def (lookup-class ctx (:class-name a))
+          override (and class-def
+                        (lookup-method-with-inheritance ctx class-def "equals" 1))]
+      (when override
+        (boolean (eval-node ctx {:type :call
+                                 :target {:type :literal :value a}
+                                 :method "equals"
+                                 :args [{:type :literal :value b}]}))))))
+
+(defn object-hash-override
+  "If `v` is a Nex object whose class (or an ancestor) overrides the `hash`
+   feature, invoke it and return its hash as a host number for bucketing. Returns
+   nil for \"no override\" (caller uses the structural hash) or when ctx is nil."
+  [ctx v]
+  (when (and ctx (nex-object? v))
+    (let [class-def (lookup-class ctx (:class-name v))
+          override (and class-def
+                        (lookup-method-with-inheritance ctx class-def "hash" 0))]
+      (when override
+        (nex-int->number
+         (eval-node ctx {:type :call
+                         :target {:type :literal :value v}
+                         :method "hash"
+                         :args []}))))))
+
+(defn value-equality-fn
+  "Equality over Nex values bound into the runtime collections for the dynamic
+   extent of a program run: a class's `equals` override when present, structural
+   comparison otherwise."
+  [ctx]
+  (fn [a b]
+    (let [overridden (object-equals-override ctx a b)]
+      (if (some? overridden) overridden (nex-deep-equals? a b)))))
+
+(defn value-hash-fn
+  "Hash over Nex values consistent with value-equality-fn: a class's `hash`
+   override when present, structural hash otherwise."
+  [ctx]
+  (fn [v]
+    (or (object-hash-override ctx v)
+        (nex-structural-hash v))))
+
+(defn with-value-semantics*
+  "Run `thunk` with Set/Map element equality and hashing bound to the Nex value
+   semantics for `ctx` (honouring `equals`/`hash` overrides). Outside this extent
+   the collections fall back to host structural equality, which is still correct
+   for any value without an override."
+  [ctx thunk]
+  (binding [rt/*value-equals* (value-equality-fn ctx)
+            rt/*value-hash* (value-hash-fn ctx)]
+    (thunk)))
+
+(defn- nex-objects-equal?
+  "Value equality for `=` / `/=` when at least one operand is a Nex object.
+   Two objects are equal when the (possibly inherited) `equals` feature says so;
+   if no class on the hierarchy overrides `equals`, fall back to structural,
+   field-by-field comparison (the same engine `=` used historically). An object
+   is never equal to a non-object value, including void."
+  [ctx a b]
+  (cond
+    (identical? a b) true
+    (not (and (nex-object? a) (nex-object? b))) false
+    :else
+    (let [overridden (object-equals-override ctx a b)]
+      (if (some? overridden) overridden (nex-deep-equals? a b)))))
+
 (defn- print-output-value
   "Convert a value for built-in print/println output.
    Preserve existing formatting for non-objects, but respect user-defined
@@ -2723,9 +2833,13 @@
             (nex-ordering-compare x y))]
     {:Any
    {"to_string"   (fn [v & _] (nex-format-value v))
-    "equals"      (fn [v other & _]
-                    #?(:clj (identical? v other)
-                       :cljs (js/Object.is v other)))
+    ;; Default equality is structural (deep, field-by-field). A class may
+    ;; override `equals` to change this; the `=`/`/=` operators then honour the
+    ;; override. Identity comparison remains available through `==`/`!=`.
+    "equals"      (fn [v other & _] (nex-deep-equals? v other))
+    ;; Default hash is structural and consistent with the structural `equals`
+    ;; above. A class that overrides `equals` should override `hash` too.
+    "hash"        (fn [v & _] (->nex-integer (nex-structural-hash v)))
     "clone"       (fn [v & _] (nex-clone-value v))}
 
    :String
@@ -2879,9 +2993,11 @@
     "set"         (fn [arr index value & _] (nex-array-set arr index value))
     "length"      (fn [arr & _] (->nex-integer (nex-array-size arr)))
     "is_empty"    (fn [arr & _] (nex-array-empty? arr))
-    "contains"    (fn [arr elem & _] (nex-array-contains-value? arr elem))
-    "index_of"    (fn [arr elem & _]
-                    (let [idx (nex-array-index-of-value arr elem)]
+    ;; A trailing ctx is supplied by call-builtin-method so element membership
+    ;; can honour a user-defined `equals` override (see object-equals-override).
+    "contains"    (fn [arr elem & rest] (nex-array-contains-value? (first rest) arr elem))
+    "index_of"    (fn [arr elem & rest]
+                    (let [idx (nex-array-index-of-value (first rest) arr elem)]
                       (->nex-integer (if (>= idx 0) idx -1))))
     "remove"      (fn [arr idx & _] (nex-array-remove arr idx))
     "reverse"     (fn [arr & _] (nex-array-reverse arr))
@@ -2950,7 +3066,7 @@
     "cursor"               (fn [s & _]
                              {:nex-builtin-type :SetCursor
                               :source s
-                              :values (atom #?(:clj (vec s) :cljs (vec (es6-iterator-seq (.values s)))))
+                              :values (atom (vec (nex-set-seq s)))
                               :index (atom 0)})}
 
    :Min_Heap
@@ -3151,9 +3267,7 @@
 
       :SetCursor
    {"start"   (fn [c & _]
-                (reset! (:values c) #?(:clj (vec (:source c))
-                                       :cljs (vec (es6-iterator-seq (.values (:source c)))))
-                )
+                (reset! (:values c) (vec (nex-set-seq (:source c))))
                 (reset! (:index c) 0)
                 nil)
     "item"    (fn [c & _]
@@ -3185,8 +3299,8 @@
                 (get-in builtin-type-methods [:Any method-name]))]
      (if (and ctx
               (let [type-name (get-type-name value)]
-                (or (and (= method-name "sort")
-                         (= type-name :Array))
+                (or (and (= type-name :Array)
+                         (contains? #{"sort" "contains" "index_of"} method-name))
                     (= type-name :Min_Heap))))
        (apply method-fn value (concat args [ctx]))
        (apply method-fn value args))
@@ -3409,31 +3523,35 @@
 
 (defmethod eval-node :program
   [ctx {:keys [imports interns classes functions statements calls]}]
-  ;; First, store all import statements (for code generation)
-  (doseq [import-node imports]
-    (when (map? import-node)
-      (swap! (:imports ctx) conj import-node)))
+  ;; Bind Set/Map value semantics for the whole run so collection membership and
+  ;; dedup honour `equals`/`hash` overrides (and are structural otherwise).
+  (with-value-semantics* ctx
+    (fn []
+      ;; First, store all import statements (for code generation)
+      (doseq [import-node imports]
+        (when (map? import-node)
+          (swap! (:imports ctx) conj import-node)))
 
-  ;; Then, process all intern statements
-  (doseq [intern-node interns]
-    (when (map? intern-node)
-      (process-intern ctx intern-node)))
+      ;; Then, process all intern statements
+      (doseq [intern-node interns]
+        (when (map? intern-node)
+          (process-intern ctx intern-node)))
 
-  ;; Register all class definitions
-  (doseq [class-node classes]
-    (when (map? class-node)
-      (register-class ctx class-node)))
+      ;; Register all class definitions
+      (doseq [class-node classes]
+        (when (map? class-node)
+          (register-class ctx class-node)))
 
-  ;; Register and instantiate functions
-  (doseq [fn-node functions]
-    (when (map? fn-node)
-      (eval-node ctx fn-node)))
+      ;; Register and instantiate functions
+      (doseq [fn-node functions]
+        (when (map? fn-node)
+          (eval-node ctx fn-node)))
 
-  ;; Execute top-level executable statements in source order.
-  ;; Fall back to legacy :calls-only programs if :statements is absent.
-  (doseq [stmt-node (if (seq statements) statements calls)]
-    (when (map? stmt-node)
-      (eval-node ctx stmt-node)))
+      ;; Execute top-level executable statements in source order.
+      ;; Fall back to legacy :calls-only programs if :statements is absent.
+      (doseq [stmt-node (if (seq statements) statements calls)]
+        (when (map? stmt-node)
+          (eval-node ctx stmt-node)))))
 
   ;; Return the context for inspection
   ctx)
@@ -4155,10 +4273,20 @@
     :else
     (let [left-val (eval-node ctx left)
           right-val (eval-node ctx right)]
-      (if (and (= operator "+")
-               (or (string? left-val) (string? right-val)))
+      (cond
+        (and (= operator "+")
+             (or (string? left-val) (string? right-val)))
         (str (concat-string-value ctx left-val)
              (concat-string-value ctx right-val))
+
+        ;; Value equality honours a user-defined `equals` when an object is
+        ;; involved; `==`/`!=` keep identity semantics in apply-binary-op.
+        (and (or (= operator "=") (= operator "/="))
+             (or (nex-object? left-val) (nex-object? right-val)))
+        (let [eq (nex-objects-equal? ctx left-val right-val)]
+          (if (= operator "=") eq (not eq)))
+
+        :else
         (apply-binary-op operator left-val right-val)))))
 
 (defmethod eval-node :unary

@@ -8,8 +8,12 @@ write `inherit Any`.
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
 | `to_string` | none | `String` | Return a user-facing string representation. |
-| `equals` | `other: Any` | `Boolean` | Default equality. Arbitrary objects use identity-style equality unless they override it. |
+| `equals` | `other: Any` | `Boolean` | Value equality used by the `=` and `/=` operators. The default compares structurally (deep, field-by-field); a class may override it to define its own equality. |
+| `hash` | none | `Integer` | Hash code, used to place values as `Set` elements and `Map` keys. The default is structural and consistent with the default `equals`. A class that overrides `equals` should also override `hash` so that equal values hash equal (the type checker warns otherwise). |
 | `clone` | none | `Any` | Clone the value. Built-in collections override this with deep-copy behavior. |
+
+The `=`/`/=` operators use `equals` (value equality); `==`/`!=` always compare
+object identity and are never overridable.
 
 ## `Function`
 

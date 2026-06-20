@@ -1,0 +1,16 @@
+let m: Map[String, Integer] := {"a": 1, "b": 2, "c": 3}
+m.put("b", 20)
+m.put("d", 4)
+print(m.size)
+print(m.get("b"))
+print(m.contains_key("c"))
+print(m.contains_key("z"))
+m.remove("a")
+print(m.size)
+print(m.contains_key("a"))
+
+let order: String := ""
+across m.keys as k do
+  order := order + k + " "
+end
+print(order)

@@ -553,6 +553,12 @@
                 (str "__nexIntPow(" left-code ", " right-code ")")
                 (str "(" left-code " ** " right-code ")"))))
 
+      ;; Value equality (`=`/`/=`) is structural and honours a class's `equals`
+      ;; override, matching the interpreter. Identity (`==`/`!=`) stays `===`/`!==`.
+      (contains? #{"=" "/="} operator)
+      (let [eq (str "__nexValueEquals(" left-code ", " right-code ")")]
+        (if (= operator "/=") (str "(!" eq ")") eq))
+
       :else
       (let [op (generate-binary-op operator)]
         (str "(" left-code " " op " " right-code ")")))))
@@ -1315,9 +1321,13 @@
 (defn generate-assignment
   "Generate JavaScript code for assignment"
   [{:keys [target value]}]
-  (if (and *spawn-result-flag* (= target "result"))
-    (str target " = " (generate-expression value) "; " *spawn-result-flag* " = true;")
-    (str target " = " (generate-expression value) ";")))
+  ;; Resolve the target the same way reads are resolved, so an implicit field
+  ;; write (`x := v` where x is a field) becomes `this.x = v` / `point.x = v`
+  ;; rather than a bare (global) `x = v`. Locals stay bare.
+  (let [lhs (resolve-identifier target)]
+    (if (and *spawn-result-flag* (= target "result"))
+      (str lhs " = " (generate-expression value) "; " *spawn-result-flag* " = true;")
+      (str lhs " = " (generate-expression value) ";"))))
 
 (defn generate-let
   "Generate JavaScript code for let (local variable declaration).
@@ -2313,6 +2323,13 @@
        "  }\n"
        "  return a === b;\n"
        "}\n"
+       "function __nexValueEquals(a, b) {\n"
+       "  // Nex `=`/`/=`: objects and collections compare structurally; scalars by\n"
+       "  // value. (Honouring a class's async `equals` override is future work — see\n"
+       "  // the JVM backend, which dispatches to the override synchronously.)\n"
+       "  if (a !== null && typeof a === 'object') return __nexDeepEquals(a, b);\n"
+       "  return a === b;\n"
+       "}\n"
        "function __nexArrayContains(values, needle) {\n"
        "  return values.some(v => __nexDeepEquals(v, needle));\n"
        "}\n"
@@ -3263,7 +3280,7 @@
          ast (augment-ast-with-interns source-id (p/ast nex-code))]
      ;; Run type checker unless explicitly skipped
      (when-not (:skip-type-check opts)
-       (let [result (tc/type-check ast)]
+       (let [result (tc/type-check ast {:strict-undefined-targets? true})]
          (when-not (:success result)
            (doseq [err (:errors result)]
              (println (tc/format-type-error err)))
@@ -3288,7 +3305,7 @@
    (let [nex-code (slurp nex-file)
          ast (augment-ast-with-interns nex-file (p/ast nex-code))
          _ (when-not (:skip-type-check opts)
-             (let [result (tc/type-check ast)]
+             (let [result (tc/type-check ast {:strict-undefined-targets? true})]
                (when-not (:success result)
                  (throw (ex-info "Type checking failed"
                                  {:errors (map tc/format-type-error (:errors result))})))))

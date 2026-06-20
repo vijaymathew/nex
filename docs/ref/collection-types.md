@@ -9,6 +9,10 @@ All built-in collection types inherit `Any`. Their `to_string`, `equals`, and
 `clone` methods operate recursively: `to_string` renders nested structure,
 `equals` performs deep structural equality, and `clone` performs a deep copy.
 
+`Set` membership and dedup, and `Map` key lookup, compare by Nex value equality —
+the same `equals`/`hash` used by the `=` operator — so a class that overrides
+`equals`/`hash` is matched by value as an element or key.
+
 ## `Array`
 
 ### Construction

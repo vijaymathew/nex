@@ -1592,6 +1592,16 @@
   [a b]
   (value/nex-deep-equals? interp/nex-object? a b))
 
+(defn value-equals
+  "Value equality for the `=`/`/=` operators. Honours a class's `equals` override
+   (a compiled user method, dispatched reflectively) when present; otherwise falls
+   back to structural comparison — matching the interpreter."
+  [state a b]
+  (if (and (some? a)
+           (find-user-method a (lowered-instance-method-name "equals" 1)))
+    (boolean (invoke-user-method state a "equals" [b]))
+    (deep-equals a b)))
+
 (defn- scalar-identity-value?
   [v]
   (or (nil? v)
@@ -1627,25 +1637,46 @@
       (deep-equals (first remaining) needle) idx
       :else (recur (inc idx) (next remaining)))))
 
+;; The compiled JVM path represents Map as a java.util.HashMap (see
+;; emit-map-literal! and the direct put/size/keys/values/remove bytecode), so these
+;; helpers operate on it directly rather than via the interpreter's portable map in
+;; nex.types.runtime. They still accept a portable (tagged) map defensively, in case
+;; one reaches the compiled path (e.g. from the HTTP runtime). Aligning the compiled
+;; backend with the interpreter's value-semantics map is a separate (Phase 4) step.
+
+(defn- hashmap-deep-get
+  [^java.util.Map m key not-found]
+  (if-let [^java.util.Map$Entry e (some (fn [^java.util.Map$Entry e]
+                                          (when (deep-equals (.getKey e) key) e))
+                                        (.entrySet m))]
+    (.getValue e)
+    not-found))
+
 (defn map-contains-key
   [values needle]
-  (boolean
-   (some #(deep-equals (.getKey ^java.util.Map$Entry %) needle)
-         (.entrySet ^java.util.Map values))))
+  (if (rt/nex-map? values)
+    (rt/nex-map-contains-key values needle)
+    (boolean
+     (some #(deep-equals (.getKey ^java.util.Map$Entry %) needle)
+           (.entrySet ^java.util.Map values)))))
 
 (defn set-contains
   [values needle]
-  (boolean (some #(deep-equals % needle) values)))
+  (if (rt/nex-set? values)
+    (rt/nex-set-contains values needle)
+    (boolean (some #(deep-equals % needle) values))))
 
 (defn map-get
   [state m key]
-  (let [ctx (rebuild-interpreter-ctx state)]
-    (interp/call-builtin-method ctx m m "get" [key])))
+  (if (rt/nex-map? m)
+    (rt/nex-map-get m key)
+    (hashmap-deep-get m key nil)))
 
 (defn map-try-get
   [state m key default]
-  (let [ctx (rebuild-interpreter-ctx state)]
-    (interp/call-builtin-method ctx m m "try_get" [key default])))
+  (if (rt/nex-map? m)
+    (if (rt/nex-map-contains-key m key) (rt/nex-map-get m key) default)
+    (hashmap-deep-get m key default)))
 
 (defn- sortable-builtin-scalar-value?
   [v]
@@ -1723,31 +1754,50 @@
 
 (defn map-to-string
   [values]
-  (rt/nex-map-str format-value values))
+  (if (rt/nex-map? values)
+    (rt/nex-map-str format-value values)
+    (str "{"
+         (str/join ", " (for [^java.util.Map$Entry e (.entrySet ^java.util.Map values)]
+                          (str (format-value (.getKey e)) ": " (format-value (.getValue e)))))
+         "}")))
+
+;; The compiled JVM path represents Set as a java.util.LinkedHashSet (see
+;; emit-set-literal!), so these helpers operate on it directly rather than via the
+;; interpreter's portable set in nex.types.runtime. Aligning the compiled backend
+;; with the interpreter's value-semantics set is a separate (Phase 4) step.
 
 (defn set-to-string
   [values]
-  (rt/nex-set-str format-value values))
+  (str "#{" (str/join ", " (map format-value values)) "}"))
 
 (defn set-union
   [a b]
-  (rt/nex-set-union a b))
+  (let [out (java.util.LinkedHashSet. ^java.util.Collection a)]
+    (.addAll out ^java.util.Collection b)
+    out))
 
 (defn set-difference
   [a b]
-  (rt/nex-set-difference a b))
+  (let [out (java.util.LinkedHashSet. ^java.util.Collection a)]
+    (.removeAll out ^java.util.Collection b)
+    out))
 
 (defn set-intersection
   [a b]
-  (rt/nex-set-intersection a b))
+  (let [out (java.util.LinkedHashSet. ^java.util.Collection a)]
+    (.retainAll out ^java.util.Collection b)
+    out))
 
 (defn set-symmetric-difference
   [a b]
-  (rt/nex-set-symmetric-difference a b))
+  (let [out (java.util.LinkedHashSet.)]
+    (doseq [v a] (when-not (.contains ^java.util.Set b v) (.add out v)))
+    (doseq [v b] (when-not (.contains ^java.util.Set a v) (.add out v)))
+    out))
 
 (defn set-to-array
   [s]
-  (rt/nex-set-to-array s))
+  (rt/nex-array-from s))
 
 (defn invoke-builtin
   [state name args]

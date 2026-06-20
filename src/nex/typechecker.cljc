@@ -7,6 +7,13 @@
 ;; Type Environment
 ;;
 
+(def ^:dynamic *strict-undefined-targets*
+  "When true, a member access / call on an unresolved bare-identifier target is a
+   compile-time 'Undefined variable' error. Enabled for whole-program/file
+   compilation; left off for the interactive REPL, whose incremental inputs may
+   reference bindings from earlier inputs that this type-check env does not carry."
+  false)
+
 (defn make-type-env
   "Create a new type environment"
   ([] (make-type-env nil))
@@ -17,7 +24,21 @@
     :classes (atom {})
     :type-aliases (atom {})
     :non-nil-vars (atom #{})
-    :across-cursors (atom {})}))
+    :across-cursors (atom {})
+    ;; Names this env's block has declared with `let` (per-env, not inherited), so
+    ;; a second `let` of the same name in the *same* block is rejected while a
+    ;; nested block may still shadow.
+    :let-names (atom #{})
+    ;; Non-fatal diagnostics surfaced to the user (e.g. equals/hash mismatch).
+    ;; Lives on the root env; children share it via env-add-warning.
+    :warnings (atom [])}))
+
+(defn env-add-warning
+  "Record a non-fatal type-checker warning on the root environment."
+  [env msg]
+  (let [root (loop [e env] (if (:parent e) (recur (:parent e)) e))]
+    (when-let [warnings (:warnings root)]
+      (swap! warnings conj msg))))
 
 (defn env-lookup-var
   "Look up a variable type in the environment"
@@ -1655,6 +1676,22 @@
                     (:base-type target-type)
                     target-type)
         type-map (build-generic-type-map env target-type)]
+    ;; A bare-identifier target that resolves to nothing — not a local, field,
+    ;; class, across cursor, a parameterless routine of the current class, nor a
+    ;; Java name inside `with java` — is an undefined variable. Without this the
+    ;; member access slips through type-checking with a nil/Any target type and
+    ;; fails later (cryptically in the JVM lowering, or only at runtime).
+    (when (and *strict-undefined-targets*
+               (string? target)
+               (nil? target-type)
+               (not across-item-type)
+               (not with-java?)
+               ;; `this`/`super`/`Current` are special call targets, not variables.
+               (not (#{"this" "super" "Current"} target))
+               (not (and current-class
+                         (lookup-class-method env current-class target 0 current-class))))
+      (throw (ex-info (str "Undefined variable: " target)
+                      {:error (type-error (str "Undefined variable: " target))})))
     (when (and (not class-target) target-detachable? (not guarded?))
       (throw (ex-info (str "Feature access on detachable target requires nil-check: " method)
                       {:error (type-error
@@ -2686,6 +2723,16 @@
 (defn check-let
   "Check a let statement"
   [env {:keys [name var-type value synthetic] :as stmt}]
+  ;; No two `let` declarations in the same block may bind the same identifier.
+  ;; `:let-names` is per-env, so a nested block (its own env) may still shadow.
+  ;; Compiler-synthesised lets (e.g. an across cursor) are exempt.
+  (when (and (not synthetic) (string? name) (:let-names env))
+    (if (contains? @(:let-names env) name)
+      (let [msg (str "Duplicate local variable '" name "' declared in the same block. "
+                     "A nested block may shadow an outer binding, but two declarations "
+                     "in one block may not share a name.")]
+        (throw (ex-info msg {:error (type-error msg)})))
+      (swap! (:let-names env) conj name)))
   (let [val-type (if var-type
                    (check-expression-with-expected env value var-type)
                    (check-expression env value))
@@ -3135,9 +3182,99 @@
         false)
       true)))
 
+;; -----------------------------------------------------------------------------
+;; Static structural restrictions (the Definition's "Syntactic Restrictions").
+;; Diagnosed here, before evaluation, so a violation is a compile-time error even
+;; on a code path that never executes.
+;; -----------------------------------------------------------------------------
+
+(defn- first-duplicate
+  "The first value that occurs more than once in `coll`, or nil."
+  [coll]
+  (let [r (reduce (fn [seen x] (if (contains? seen x) (reduced x) (conj seen x)))
+                  #{} coll)]
+    (when-not (set? r) r)))
+
+(defn- restriction-error!
+  [msg]
+  (throw (ex-info msg {:error (type-error msg)})))
+
+(defn- check-distinct-parameters!
+  "No two parameters of one routine may bind the same identifier."
+  [params kind routine-name]
+  (when-let [dup (first-duplicate (map :name params))]
+    (restriction-error!
+     (str "Duplicate parameter '" dup "' in " kind " '" routine-name
+          "'. The parameters of a routine must have distinct names."))))
+
+(defn- check-distinct-fields!
+  "No two fields of one class may bind the same identifier."
+  [class-name body]
+  (let [field-names (->> body
+                         (filter #(= :feature-section (:type %)))
+                         (mapcat :members)
+                         (filter #(= :field (:type %)))
+                         (map :name))]
+    (when-let [dup (first-duplicate field-names)]
+      (restriction-error!
+       (str "Duplicate field '" dup "' in class '" class-name
+            "'. The fields of a class must have distinct names.")))))
+
+(defn- collect-old-nodes
+  "All `old` expression nodes within an AST fragment."
+  [node]
+  (cond
+    (sequential? node) (mapcat collect-old-nodes node)
+    (map? node) (if (= :old (:type node))
+                  (cons node (collect-old-nodes (vals (dissoc node :type))))
+                  (collect-old-nodes (vals (dissoc node :type))))
+    :else nil))
+
+(defn- collect-illegal-retry
+  "`retry` nodes that are not enclosed in a rescue block."
+  [node in-rescue?]
+  (cond
+    (sequential? node) (mapcat #(collect-illegal-retry % in-rescue?) node)
+    (map? node)
+    (case (:type node)
+      :retry (when-not in-rescue? [node])
+      ;; A nested `do ... rescue ... end`: its rescue arm is a valid retry context.
+      :scoped-block (concat (collect-illegal-retry (:body node) in-rescue?)
+                            (collect-illegal-retry (:rescue node) true))
+      ;; Closures and spawn bodies start a fresh routine context.
+      (:anonymous-function :spawn) nil
+      (mapcat #(collect-illegal-retry % in-rescue?) (vals (dissoc node :type))))
+    :else nil))
+
+(defn- check-old-and-retry!
+  "`old` may appear only in an `ensure` clause and must denote a field, not a
+   parameter; `retry` may appear only inside a `rescue` block."
+  [kind routine-name params require body ensure]
+  (when (some #(seq (collect-old-nodes %)) (cons body (map :condition require)))
+    (restriction-error!
+     (str "'old' may appear only in an ensure (postcondition) clause; found it "
+          "outside one in " kind " '" routine-name "'.")))
+  (let [param-names (set (map :name params))]
+    (doseq [assertion ensure
+            o (collect-old-nodes (:condition assertion))]
+      (let [e (:expr o)]
+        (when (and (map? e) (= :identifier (:type e))
+                   (contains? param-names (:name e)))
+          (restriction-error!
+           (str "'old' may not be applied to the parameter '" (:name e) "' in "
+                kind " '" routine-name "'; it must denote a field of the current object."))))))
+  (when (seq (concat (mapcat #(collect-illegal-retry (:condition %) false) require)
+                     (collect-illegal-retry body false)
+                     (mapcat #(collect-illegal-retry (:condition %) false) ensure)))
+    (restriction-error!
+     (str "'retry' may appear only inside a rescue block; found it elsewhere in "
+          kind " '" routine-name "'."))))
+
 (defn check-method
   "Check a method definition"
   [env class-name {:keys [name params return-type require body ensure rescue] :as method}]
+  (check-distinct-parameters! params "routine" name)
+  (check-old-and-retry! "routine" name params require body ensure)
   ;; Validate parameter and return type annotations (generic constraints)
   (doseq [param params]
     (when (:type param)
@@ -3215,6 +3352,8 @@
 (defn check-constructor
   "Check a constructor definition"
   [env class-name {:keys [name params require body ensure rescue] :as constructor}]
+  (check-distinct-parameters! params "constructor" name)
+  (check-old-and-retry! "constructor" name params require body ensure)
   (let [ctor-env (make-type-env env)]
     ;; Track current class for this/super resolution
     (env-add-var ctor-env "__current_class__" class-name)
@@ -3443,6 +3582,38 @@
                                           "Returns are covariant: the overriding return type must "
                                           "conform to the inherited one."))}))))))))
 
+(defn- class-defines-method?
+  "True when the class body itself declares a method of the given name."
+  [class-def method-name]
+  (boolean
+   (some (fn [section]
+           (and (= (:type section) :feature-section)
+                (some (fn [member]
+                        (and (= (:type member) :method)
+                             (= (:name member) method-name)))
+                      (:members section))))
+         (:body class-def))))
+
+(defn- check-equals-hash-consistency
+  "Equality and hashing must agree: equal objects must hash equal. Warn when a
+   class redefines one of `equals`/`hash` without the other, since such a class
+   misbehaves as a Set element or Map key."
+  [env class-name class-def]
+  (let [has-equals (class-defines-method? class-def "equals")
+        has-hash (class-defines-method? class-def "hash")]
+    (cond
+      (and has-equals (not has-hash))
+      (env-add-warning env
+                       (str "Class '" class-name "' overrides 'equals' but not 'hash'. "
+                            "A class that redefines equality should also redefine 'hash' so "
+                            "that equal objects hash equal; otherwise it misbehaves as a Set "
+                            "element or Map key."))
+
+      (and has-hash (not has-equals))
+      (env-add-warning env
+                       (str "Class '" class-name "' overrides 'hash' but not 'equals'. "
+                            "A custom 'hash' is only meaningful alongside a matching 'equals'.")))))
+
 (defn check-class
   "Check a class definition"
   [env {:keys [name body invariant parents generic-params] :as class-def}]
@@ -3451,6 +3622,8 @@
         invariant (:invariant class-def)
         parents (:parents class-def)
         class-env (make-type-env env)]
+  (check-distinct-fields! name (:body class-def))
+  (check-equals-hash-consistency env name class-def)
   (env-add-var class-env "__current_class__" name)
   (register-generic-param-classes! class-env generic-params)
   (bind-visible-class-fields! class-env env name)
@@ -3573,6 +3746,7 @@
   (doseq [[method-name sig]
           {"to_string" {:params [] :return-type "String"}
            "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
+           "hash" {:params [] :return-type "Integer"}
            "clone" {:params [] :return-type "Any"}}]
     (env-add-method env "Any" method-name sig))
 
@@ -3931,6 +4105,7 @@
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([program] (check-program program {}))
   ([{:keys [classes calls statements imports functions type-aliases duplicate-functions] :as program} opts]
+   (binding [*strict-undefined-targets* (boolean (:strict-undefined-targets? opts))]
    (let [env (make-type-env)
          normalized-functions (normalize-function-defs classes functions)
          visible-classes (class-defs-by-name-last-wins
@@ -3998,13 +4173,15 @@
            (check-expression env call)))
 
        {:success true
-        :errors []}
+        :errors []
+        :warnings (vec @(:warnings env))}
 
        (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e
          (let [error-data (ex-data e)]
            {:success false
             :errors [(or (:error error-data)
-                        (type-error (ex-message e)))]}))))))
+                        (type-error (ex-message e)))]
+            :warnings (vec @(:warnings env))})))))))
 
 (defn type-check
   "Type check Nex code (entry point).

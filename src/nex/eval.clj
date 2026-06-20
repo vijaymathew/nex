@@ -18,7 +18,10 @@
 (defn- type-check-ast!
   [source-id ast]
   (let [module-ast (augment-ast-with-interns source-id ast)
-        result (tc/type-check module-ast)]
+        result (tc/type-check module-ast {:strict-undefined-targets? true})]
+    (doseq [w (:warnings result)]
+      (binding [*out* *err*]
+        (println (str "Warning: " w))))
     (when-not (:success result)
       (throw (ex-info (str "Type checking failed"
                            (when (seq (:errors result))

@@ -77,6 +77,11 @@ print([1, 2] /= [1, 2])          -- false
 print("abc" = "abc")             -- true
 ```
 
+For objects, `=`/`/=` use the class's `equals` method. By default that is a
+structural, field-by-field comparison, but a class may override `equals` (and the
+matching `hash`) to define its own value equality. `==`/`!=` ignore any override
+and always compare object identity.
+
 Identity equality checks whether two variables refer to the same runtime object:
 
 ```nex

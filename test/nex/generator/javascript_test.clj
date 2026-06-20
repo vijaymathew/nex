@@ -739,7 +739,7 @@ end"
       let f: Boolean := 11 < 12
       let g: Boolean := true and false
       let h: Boolean := true or false
-      let g: Integer := 2 ^ 3
+      let i: Integer := 2 ^ 3
     end
 end"
           js-code (js/translate nex-code)]
@@ -1274,6 +1274,62 @@ print(f1(20))"]
         (finally
           (doseq [f (reverse (file-seq tmp-dir))]
             (.delete f)))))))
+
+(defn- run-js-program
+  "Translate a whole Nex program to JS, bundle it, run it under node, and return
+   trimmed stdout. Throws with stderr if node exits non-zero."
+  [nex-code]
+  (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                         (str "nex-js-run-" (System/nanoTime)))
+        js-file (io/file tmp-dir "bundle.js")]
+    (try
+      (.mkdirs tmp-dir)
+      (let [out-dir (io/file tmp-dir "out")
+            files (js/translate-file
+                   (.getPath (doto (io/file tmp-dir "app.nex") (spit nex-code)))
+                   (.getPath out-dir) {})
+            main-js (-> (get files "main.js")
+                        (str/replace #"(?m)^\s*const \{ [^}]+ \} = require\([^)]+\);\n?" ""))
+            bundle (str/join "\n"
+                             (concat
+                              [(get files "Function.js")]
+                              (->> files keys
+                                   (remove #(#{"Function.js" "NexGlobals.js" "main.js"} %))
+                                   sort
+                                   (map files))
+                              [(get files "NexGlobals.js") main-js]))
+            _ (spit js-file bundle)
+            proc (.exec (Runtime/getRuntime)
+                        (into-array String ["node" (.getPath js-file)]))]
+        (.waitFor proc)
+        (let [output (slurp (.getInputStream proc))
+              stderr (slurp (.getErrorStream proc))]
+          (when-not (zero? (.exitValue proc))
+            (throw (ex-info (str "node failed: " stderr) {:stderr stderr})))
+          (str/trim output)))
+      (finally
+        (doseq [f (reverse (file-seq tmp-dir))] (.delete f))))))
+
+(deftest equality-operator-structural-default-js-runtime-test
+  (testing "compiled JS `=` is structural for objects (matches the interpreter's default)"
+    (let [output (run-js-program
+                  "class Point
+  feature
+    x: Integer
+    y: Integer
+  create
+    make(a: Integer, b: Integer) do
+      x := a
+      y := b
+    end
+end
+
+let a: Point := create Point.make(1, 2)
+let b: Point := create Point.make(1, 2)
+print(a = b)
+print(a == b)")]
+      ;; structural value equality is true; reference identity is false.
+      (is (= "true\nfalse" output)))))
 
 (deftest void-safety-enforced-in-js-generator-test
   (testing "JS generator should fail type-checking for uninitialized attachable fields"

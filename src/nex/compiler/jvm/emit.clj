@@ -2021,14 +2021,18 @@
             (emit-numeric-compare! mv operator :int))
           (if (ir/object-jvm-type? compare-type)
             (do
-              (emit-runtime-var! mv "deep-equals")
+              ;; `=`/`/=` on objects: honour a class's `equals` override, else
+              ;; structural. value-equals needs the repl state to dispatch the
+              ;; (reflective) user method, like runtime-compare-values above.
+              (emit-runtime-var! mv "value-equals")
+              (.visitVarInsn mv Opcodes/ALOAD state-slot)
               (emit-boxed-expr! mv (:left expr) state-slot)
               (emit-boxed-expr! mv (:right expr) state-slot)
               (.visitMethodInsn mv
                                 Opcodes/INVOKEVIRTUAL
                                 var-internal-name
                                 "invoke"
-                                "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                                "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
                                 false)
               (emit-unbox-or-cast! mv :boolean)
               (when (= :neq operator)

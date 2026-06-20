@@ -29,9 +29,11 @@ class DemoClass
         else
           print("Small value:", temp)
         end
+
+        count := count + 1
       ensure
-        -- Old values in contracts
-        value_unchanged: value = old value
+        -- Old values in contracts ('old' must denote a field)
+        count_advanced: count = old count + 1
       end
 
     -- Loop constructs with contracts
