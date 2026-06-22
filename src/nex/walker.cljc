@@ -324,6 +324,51 @@
      :body body
      :class-def class-def}))
 
+(defn- function-signature
+  "The type-relevant signature of a function node: ordered parameter types, the
+   return type, and any generic parameters. Parameter names are excluded — calls
+   are positional, so names do not participate in conformance."
+  [f]
+  {:params (mapv :type (or (:params f) []))
+   :return-type (:return-type f)
+   :generic-params (vec (or (:generic-params f) []))})
+
+(defn- render-signature
+  "Render a function signature for diagnostics, e.g. `f[T](Integer, String): Real`."
+  [name {:keys [params return-type generic-params]}]
+  (str name
+       (when (seq generic-params) (str "[" (str/join ", " generic-params) "]"))
+       "(" (str/join ", " params) ")"
+       (when return-type (str ": " return-type))))
+
+(defn- function-signature-conflicts
+  "Each `declare function` announces a signature that the later definition must
+   match exactly. The definitions collapse last-wins below, discarding the
+   declarations, so detect any disagreement here and report it with a message
+   the front-ends can surface verbatim."
+  [fn-nodes]
+  (let [decls (->> fn-nodes
+                   (filter :declaration-only?)
+                   (reduce (fn [m f] (if (contains? m (:name f)) m (assoc m (:name f) f))) {}))
+        defs  (->> fn-nodes
+                   (remove :declaration-only?)
+                   (reduce (fn [m f] (assoc m (:name f) f)) {}))]
+    (->> decls
+         (keep (fn [[nm decl]]
+                 (when-let [defn (get defs nm)]
+                   (let [d-sig (function-signature decl)
+                         f-sig (function-signature defn)]
+                     (when (not= d-sig f-sig)
+                       {:name nm
+                        :declared d-sig
+                        :defined f-sig
+                        :message (str "Function '" nm "' is declared as "
+                                      (render-signature nm d-sig)
+                                      " but defined as " (render-signature nm f-sig)
+                                      ". The later definition must match the earlier "
+                                      "declaration exactly.")})))))
+         vec)))
+
 (def node-handlers
   {:program
    (fn [[_ & nodes]]
@@ -343,6 +388,9 @@
                                     distinct
                                     (filter #(> (defined-fn-freq %) 1))
                                     vec)
+           ;; A `declare function` signature must be matched exactly by its
+           ;; later definition; record any that disagree before the collapse.
+           signature-conflicts (function-signature-conflicts fn-nodes)
            functions (->> fn-nodes
                           (reduce (fn [m f] (assoc m (:name f) f)) {})
                           vals
@@ -361,6 +409,7 @@
         :classes all-classes
         :functions (vec functions)
         :duplicate-functions duplicate-functions
+        :function-signature-conflicts signature-conflicts
         :statements (vec statements)
         :calls (vec calls)}))
 

@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [nex.parser :as p]
+            [nex.interpreter :as interp]
             [nex.repl :as repl]
             [nex.typechecker :as tc]))
 
@@ -31,6 +32,86 @@ end"
           functions (:functions ast)]
       (is (= 2 (count functions)))
       (is (= #{"is_even" "is_odd"} (set (map :name functions))))
+      (is (:success (tc/type-check ast))))))
+
+(deftest duplicate-free-function-definitions-rejected
+  ;; Definition §4.8: free-function names must be unique within a program. The
+  ;; walker collapses duplicates last-wins, so without an explicit check the
+  ;; earlier definition would silently vanish. Both front-ends must diagnose it.
+  (testing "the type checker rejects a name defined twice"
+    (let [result (tc/type-check
+                  (p/ast "function f(): Integer do result := 1 end
+function f(): Integer do result := 2 end
+print(f())"))]
+      (is (not (:success result)))
+      (is (some #(str/includes? (tc/format-type-error %) "defined more than once")
+                (:errors result)))))
+  (testing "the interpreter (authoritative account) rejects it directly, not just last-wins"
+    (let [ast (p/ast "function f(): Integer do result := 1 end
+function f(): Integer do result := 2 end
+print(f())")
+          ex (try (interp/eval-node (interp/make-context) ast) nil
+                  (catch Exception e e))]
+      (is (some? ex) "duplicate definition must raise rather than silently succeed")
+      (is (str/includes? (interp/nex-error-message ex) "defined more than once"))))
+  (testing "a forward declaration paired with one definition is not a duplicate"
+    (let [ast (p/ast "declare function f(): Integer
+function f(): Integer do result := 5 end
+print(f())")
+          ctx (interp/make-context)]
+      (interp/eval-node ctx ast)
+      (is (= ["5"] @(:output ctx)))))
+  (testing "distinct function names are accepted"
+    (let [ast (p/ast "function f(): Integer do result := 1 end
+function g(): Integer do result := 2 end
+print(f() + g())")
+          ctx (interp/make-context)]
+      (interp/eval-node ctx ast)
+      (is (= ["3"] @(:output ctx))))))
+
+(deftest definition-must-match-forward-declaration
+  ;; SYNTAX: "The later definition must match the earlier declaration exactly."
+  ;; The declaration is collapsed away before evaluation, so both the type
+  ;; checker and the authoritative interpreter must reject a signature mismatch.
+  (let [reject (fn [code]
+                 (let [ast (p/ast code)
+                       tcr (tc/type-check ast)
+                       ie (try (interp/eval-node (interp/make-context) ast) nil
+                               (catch Exception e e))]
+                   [tcr ie]))]
+    (testing "an arity mismatch between declaration and definition is rejected"
+      (let [[tcr ie] (reject "declare function f(x: Integer): Real
+function f(): Real do result := 3.14 end
+print(f())")]
+        (is (not (:success tcr)))
+        (is (some #(str/includes? (tc/format-type-error %) "must match the earlier declaration")
+                  (:errors tcr)))
+        (is (some? ie) "interpreter must raise rather than silently run the definition")
+        (is (str/includes? (interp/nex-error-message ie) "must match the earlier declaration"))))
+    (testing "a parameter-type mismatch is rejected"
+      (let [[tcr ie] (reject "declare function f(x: Integer): Real
+function f(x: String): Real do result := 3.14 end
+print(f(\"a\"))")]
+        (is (not (:success tcr)))
+        (is (some? ie))))
+    (testing "a return-type mismatch is rejected"
+      (let [[tcr ie] (reject "declare function f(x: Integer): Real
+function f(x: Integer): Integer do result := 3 end
+print(f(1))")]
+        (is (not (:success tcr)))
+        (is (some? ie)))))
+  (testing "a definition whose signature matches the declaration is accepted"
+    (let [ast (p/ast "declare function f(x: Integer): Real
+function f(x: Integer): Real do result := 3.14 end
+print(f(2))")
+          ctx (interp/make-context)]
+      (is (:success (tc/type-check ast)))
+      (interp/eval-node ctx ast)
+      (is (= ["3.14"] @(:output ctx)))))
+  (testing "parameter names need not match — only types, return, and generics form the signature"
+    (let [ast (p/ast "declare function f(x: Integer): Real
+function f(n: Integer): Real do result := 1.0 end
+print(f(2))")]
       (is (:success (tc/type-check ast))))))
 
 (deftest plain-function-signature-without-body-is-not-a-declaration
