@@ -3522,7 +3522,25 @@
      []))
 
 (defmethod eval-node :program
-  [ctx {:keys [imports interns classes functions statements calls]}]
+  [ctx {:keys [imports interns classes functions statements calls duplicate-functions
+               function-signature-conflicts]}]
+  ;; Free-function names must be unique within a program (Definition §4.8). The
+  ;; walker collapses duplicate definitions last-wins before they reach here, so
+  ;; the authoritative interpreter must reject them explicitly — otherwise the
+  ;; earlier definition would vanish silently rather than being diagnosed.
+  (when-let [dup (first duplicate-functions)]
+    (throw (ex-info (str "Function '" dup "' is defined more than once. "
+                         "Free-function names must be unique within a program; "
+                         "a later definition would silently replace the earlier one. "
+                         "Rename or remove the duplicate.")
+                    {:nex-error :duplicate-function :function dup})))
+  ;; A `declare function` signature must be matched exactly by its later
+  ;; definition. The declaration is collapsed away before evaluation, so the
+  ;; authoritative interpreter rejects a mismatch rather than silently adopting
+  ;; the definition's signature.
+  (when-let [conflict (first function-signature-conflicts)]
+    (throw (ex-info (:message conflict)
+                    {:nex-error :function-signature-conflict :function (:name conflict)})))
   ;; Bind Set/Map value semantics for the whole run so collection membership and
   ;; dedup honour `equals`/`hash` overrides (and are structural otherwise).
   (with-value-semantics* ctx

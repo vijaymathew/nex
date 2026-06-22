@@ -4104,7 +4104,8 @@
   "Type check a complete program.
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([program] (check-program program {}))
-  ([{:keys [classes calls statements imports functions type-aliases duplicate-functions] :as program} opts]
+  ([{:keys [classes calls statements imports functions type-aliases duplicate-functions
+            function-signature-conflicts] :as program} opts]
    (binding [*strict-undefined-targets* (boolean (:strict-undefined-targets? opts))]
    (let [env (make-type-env)
          normalized-functions (normalize-function-defs classes functions)
@@ -4124,6 +4125,13 @@
                                        "Free-function names must be unique within a program; "
                                        "a later definition would silently replace the earlier one. "
                                        "Rename or remove the duplicate."))})))
+
+       ;; A `declare function` signature must be matched exactly by its later
+       ;; definition (the declaration is collapsed away, so an unchecked
+       ;; mismatch would silently take the definition's signature).
+       (when-let [conflict (first function-signature-conflicts)]
+         (throw (ex-info (:message conflict)
+                         {:error (type-error (:message conflict))})))
 
        ;; Register imported Java classes (as placeholders)
        (doseq [{:keys [qualified-name source]} imports]
