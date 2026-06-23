@@ -1184,6 +1184,57 @@
                                ctx)]
       (reset! *repl-var-types* var-types))))
 
+(defn- repl-alias-env
+  "A minimal type-checker environment carrying just the active REPL type
+  aliases, suitable for `tc/expand-type-aliases`."
+  []
+  {:type-aliases (atom (into {}
+                             (map (fn [[k v]] [k (:type-expr v)]))
+                             @*repl-type-aliases*))
+   :parent nil})
+
+(defn- expand-alias-type
+  [env t]
+  (if (and t (or (string? t) (map? t)))
+    (tc/expand-type-aliases env t)
+    t))
+
+(defn- expand-type-aliases-in-ast
+  "Rewrite every declared-type annotation in `ast` through the active REPL type
+  aliases. The compiled backend is alias-agnostic: a variable recorded with an
+  alias type (e.g. `Goods`) would later be treated as an unknown user class and
+  fail to resolve to a JVM type, so the underlying type must be substituted
+  before the AST reaches the compiled session."
+  [ast]
+  (if (empty? @*repl-type-aliases*)
+    ast
+    (let [env (repl-alias-env)
+          ;; A node's own `:type` is its kind keyword; only a parameter's
+          ;; `:type` (a string or `:base-type` map) is an annotation.
+          type-key? (fn [k v]
+                      (or (contains? #{:var-type :target-type :return-type
+                                       :element-type :value-type :key-type} k)
+                          (and (= k :type)
+                               (or (string? v) (and (map? v) (:base-type v))))))
+          walk (fn walk [node]
+                 (cond
+                   (map? node)
+                   (reduce-kv (fn [m k v]
+                                (assoc m k (if (type-key? k v)
+                                             (expand-alias-type env v)
+                                             (walk v))))
+                              {} node)
+                   (sequential? node) (mapv walk node)
+                   :else node))]
+      (walk ast))))
+
+(defn- expand-type-aliases-in-var-types
+  [var-types]
+  (if (empty? @*repl-type-aliases*)
+    var-types
+    (let [env (repl-alias-env)]
+      (into {} (map (fn [[k v]] [k (expand-alias-type env v)])) var-types))))
+
 (defn- sync-interpreter-back-into-compiled-session!
   [ctx ast source-id]
   (when (= :compiled @*repl-backend*)
@@ -1191,8 +1242,8 @@
             (compiled-repl/sync-interpreter->session!
              @*compiled-repl-session*
              ctx
-             @*repl-var-types*
-             ast
+             (expand-type-aliases-in-var-types @*repl-var-types*)
+             (expand-type-aliases-in-ast ast)
              source-id))))
 
 (defn- unwrap-user-visible-exception
