@@ -57,6 +57,36 @@
         (is (= "Integer" (runtime/state-get-type (:state session) "x")))
         (is (str/includes? output "42"))))))
 
+(deftest repl-compiled-backend-type-alias-vars-compare-test
+  (testing "vars declared with a `declare type` alias compare/arithmetic on the compiled backend"
+    ;; The compiled backend is alias-agnostic. A variable recorded with its raw
+    ;; alias type (e.g. `Goods`) was later treated as an unknown user class,
+    ;; raising `Error: Goods` (a ClassNotFoundException) on the next cell that
+    ;; used it. The alias must be expanded to its underlying type when synced
+    ;; into the compiled session.
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-type-aliases* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx "declare type Goods = Integer")
+          (repl/eval-code ctx "declare type Bads = Integer")
+          (repl/eval-code ctx "let g_limit: Goods := 100")
+          (repl/eval-code ctx "let b_limit: Bads := 5"))
+        ;; The compiled session must hold the underlying type, never the alias.
+        (let [session @repl/*compiled-repl-session*]
+          (is (= "Integer" (runtime/state-get-type (:state session) "g_limit")))
+          (is (= "Integer" (runtime/state-get-type (:state session) "b_limit"))))
+        (let [neq (with-out-str (repl/eval-code ctx "g_limit = b_limit"))
+              eq  (with-out-str (repl/eval-code ctx "g_limit = g_limit"))
+              sum (with-out-str (repl/eval-code ctx "g_limit + b_limit"))]
+          (is (not (str/includes? neq "Error:")) neq)
+          (is (str/includes? neq "false"))
+          (is (str/includes? eq "true"))
+          (is (str/includes? sum "105")))))))
+
 (deftest repl-compiled-backend-typed-map-let-displays-binding-type-test
   (testing "compiled backend shows the declared binding type for top-level typed map lets"
     (binding [repl/*type-checking-enabled* (atom true)
