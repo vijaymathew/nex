@@ -98,6 +98,10 @@
 (def ^:private builtin-function-names
   (set (keys interp/builtins)))
 
+(defn- builtin-method-names
+  [type-name]
+  (set (keys (get interp/builtin-type-methods type-name))))
+
 (def ^:private builtin-runtime-receiver-types
   #{"Any" "Comparable" "Integer" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
@@ -119,25 +123,41 @@
    "bitwise_xor" :bit-xor
    "bitwise_not" :bit-not})
 
+(def ^:private array-method-aliases
+  {"push" "add"
+   "at" "add_at"
+   "size" "length"
+   "first" "get"
+   "last" "get"
+   "join" "to_string"})
+
+(defn- canonical-array-method
+  [method]
+  (get array-method-aliases method method))
+
 (def ^:private direct-array-methods
-  #{"get" "add" "push" "add_at" "at" "put" "set" "length" "size" "is_empty"
-    "contains" "index_of" "remove" "reverse" "slice" "sort" "first" "last"
-    "concat" "to_string" "equals" "clone" "join" "cursor" "take" "drop"
-    "take_last" "drop_last"})
+  (into (builtin-method-names :Array)
+        (keys array-method-aliases)))
+
+(def ^:private map-method-aliases
+  {"at" "put"})
+
+(defn- canonical-map-method
+  [method]
+  (get map-method-aliases method method))
 
 (def ^:private direct-map-methods
-  #{"get" "try_get" "put" "at" "set" "size" "is_empty" "contains_key"
-    "keys" "values" "remove" "to_string" "equals" "clone" "cursor"})
+  (into (builtin-method-names :Map)
+        (keys map-method-aliases)))
 
 (def ^:private direct-set-methods
-  #{"contains" "union" "difference" "intersection" "symmetric_difference"
-    "size" "is_empty" "to_array" "to_string" "equals" "clone" "cursor"})
+  (builtin-method-names :Set))
 
 (def ^:private direct-task-methods
-  #{"await" "cancel" "is_done" "is_cancelled"})
+  (builtin-method-names :Task))
 
 (def ^:private direct-channel-methods
-  #{"send" "try_send" "receive" "try_receive" "close" "is_closed" "capacity" "size"})
+  (builtin-method-names :Channel))
 
 (defn- base-type-name
   [t]
@@ -176,22 +196,42 @@
         [a b] (generic-type-args target-type)]
     (case base
       "Array"
-      (case method
-        ("get" "first" "last") (or a "Any")
-        ("add" "push" "add_at" "at" "put" "set" "remove") "Void"
-        ("length" "size" "index_of") "Integer"
-        ("is_empty" "contains" "equals") "Boolean"
-        ("reverse" "slice" "sort" "clone" "concat" "take" "drop" "take_last" "drop_last") (or target-type (array-type-of (or a "Any")))
-        ("to_string" "join") "String"
+      (case (canonical-array-method method)
+        "get" (or a "Any")
+        "add" "Void"
+        "add_at" "Void"
+        "put" "Void"
+        "set" "Void"
+        "remove" "Void"
+        "length" "Integer"
+        "index_of" "Integer"
+        "is_empty" "Boolean"
+        "contains" "Boolean"
+        "reverse" (or target-type (array-type-of (or a "Any")))
+        "slice" (or target-type (array-type-of (or a "Any")))
+        "sort" (or target-type (array-type-of (or a "Any")))
+        "concat" (or target-type (array-type-of (or a "Any")))
+        "take" (or target-type (array-type-of (or a "Any")))
+        "drop" (or target-type (array-type-of (or a "Any")))
+        "take_last" (or target-type (array-type-of (or a "Any")))
+        "drop_last" (or target-type (array-type-of (or a "Any")))
+        "to_string" "String"
+        "equals" "Boolean"
+        "clone" (or target-type (array-type-of (or a "Any")))
         "cursor" "Cursor"
         nil)
 
       "Map"
-      (case method
-        ("get" "try_get") (or b "Any")
-        ("put" "at" "set" "remove") "Void"
+      (case (canonical-map-method method)
+        "get" (or b "Any")
+        "try_get" (or b "Any")
+        "put" "Void"
+        "set" "Void"
+        "remove" "Void"
         "size" "Integer"
-        ("is_empty" "contains_key" "equals") "Boolean"
+        "is_empty" "Boolean"
+        "contains_key" "Boolean"
+        "equals" "Boolean"
         "keys" (array-type-of (or a "Any"))
         "values" (array-type-of (or b "Any"))
         "to_string" "String"
