@@ -34,6 +34,20 @@
       (is (str/includes? output "[92, 78, 95]"))
       (is (str/includes? output "[60, 95, 78, 92, 85]")))))
 
+(deftest array-take-drop-take-last-drop-last-test
+  (testing "take, drop, take_last, and drop_last return expected slices of arrays"
+    (let [ctx (repl/init-repl-context)
+          output (with-out-str
+                   (repl/eval-code ctx "let arr := [1, 2, 3, 4, 5]")
+                   (repl/eval-code ctx "arr.take(2)")
+                   (repl/eval-code ctx "arr.drop(2)")
+                   (repl/eval-code ctx "arr.take_last(2)")
+                   (repl/eval-code ctx "arr.drop_last(2)"))]
+      (is (str/includes? output "[1, 2]"))
+      (is (str/includes? output "[3, 4, 5]"))
+      (is (str/includes? output "[4, 5]"))
+      (is (str/includes? output "[1, 2, 3]")))))
+
 (deftest array-sort-supports-builtins-and-comparable-objects
   (testing "sort returns a new sorted array for builtins and Comparable user types"
     (let [ctx (repl/init-repl-context)
