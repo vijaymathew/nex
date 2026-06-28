@@ -2986,22 +2986,22 @@
     "hash"        (fn [b & _] (hash b))}
 
    :Array
-   {"get"         (fn [arr index & _] (nex-array-get arr index))
-    "add"         (fn [arr value & _] (nex-array-add arr value))
-    "add_at"      (fn [arr index value & _] (nex-array-add-at arr index value))
-    "put"         (fn [arr index value & _] (nex-array-set arr index value))
-    "set"         (fn [arr index value & _] (nex-array-set arr index value))
-    "length"      (fn [arr & _] (->nex-integer (nex-array-size arr)))
-    "is_empty"    (fn [arr & _] (nex-array-empty? arr))
+   {"get"         ^{:returns :element} (fn [arr index & _] (nex-array-get arr index))
+    "add"         ^{:returns "Void"} (fn [arr value & _] (nex-array-add arr value))
+    "add_at"      ^{:returns "Void"} (fn [arr index value & _] (nex-array-add-at arr index value))
+    "put"         ^{:returns "Void"} (fn [arr index value & _] (nex-array-set arr index value))
+    "set"         ^{:returns "Void"} (fn [arr index value & _] (nex-array-set arr index value))
+    "length"      ^{:returns "Integer"} (fn [arr & _] (->nex-integer (nex-array-size arr)))
+    "is_empty"    ^{:returns "Boolean"} (fn [arr & _] (nex-array-empty? arr))
     ;; A trailing ctx is supplied by call-builtin-method so element membership
     ;; can honour a user-defined `equals` override (see object-equals-override).
-    "contains"    (fn [arr elem & rest] (nex-array-contains-value? (first rest) arr elem))
-    "index_of"    (fn [arr elem & rest]
+    "contains"    ^{:returns "Boolean"} (fn [arr elem & rest] (nex-array-contains-value? (first rest) arr elem))
+    "index_of"    ^{:returns "Integer"} (fn [arr elem & rest]
                     (let [idx (nex-array-index-of-value (first rest) arr elem)]
                       (->nex-integer (if (>= idx 0) idx -1))))
-    "remove"      (fn [arr idx & _] (nex-array-remove arr idx))
-    "reverse"     (fn [arr & _] (nex-array-reverse arr))
-    "sort"        (fn [arr & args]
+    "remove"      ^{:returns "Void"} (fn [arr idx & _] (nex-array-remove arr idx))
+    "reverse"     ^{:returns :self} (fn [arr & _] (nex-array-reverse arr))
+    "sort"        ^{:returns :self} (fn [arr & args]
                     (let [ctx (last args)
                           method-args (butlast args)]
                       (case (count method-args)
@@ -3009,61 +3009,61 @@
                         1 (nex-array-sort-with-ctx ctx arr (first method-args))
                         (throw (ex-info "Method sort expects 0 or 1 arguments"
                                         {:target arr :method "sort" :actual (count method-args)})))))
-    "slice"       (fn [arr start end & _] (nex-array-slice arr start end))
-    "take"        (fn [arr n & _] (nex-array-take arr n))
-    "drop"        (fn [arr n & _] (nex-array-drop arr n))
-    "take_last"   (fn [arr n & _] (nex-array-take-last arr n))
-    "drop_last"   (fn [arr n & _] (nex-array-drop-last arr n))
-    "concat"      (fn [arr other & _] (nex-array-concat arr other))
-    "to_string"   (fn [arr & _] (nex-array-str arr))
-    "equals"      (fn [arr other & _] (nex-deep-equals? arr other))
-    "clone"       (fn [arr & _] (nex-clone-value arr))
-    "cursor"      (fn [arr & _]
+    "slice"       ^{:returns :self} (fn [arr start end & _] (nex-array-slice arr start end))
+    "take"        ^{:returns :self} (fn [arr n & _] (nex-array-take arr n))
+    "drop"        ^{:returns :self} (fn [arr n & _] (nex-array-drop arr n))
+    "take_last"   ^{:returns :self} (fn [arr n & _] (nex-array-take-last arr n))
+    "drop_last"   ^{:returns :self} (fn [arr n & _] (nex-array-drop-last arr n))
+    "concat"      ^{:returns :self} (fn [arr other & _] (nex-array-concat arr other))
+    "to_string"   ^{:returns "String"} (fn [arr & _] (nex-array-str arr))
+    "equals"      ^{:returns "Boolean"} (fn [arr other & _] (nex-deep-equals? arr other))
+    "clone"       ^{:returns :self} (fn [arr & _] (nex-clone-value arr))
+    "cursor"      ^{:returns "Cursor"} (fn [arr & _]
                     {:nex-builtin-type :ArrayCursor
                      :source arr
                      :index (atom 0)})}
 
    :Map
-   {"get"         (fn [m key & _]
+   {"get"         ^{:returns :value} (fn [m key & _]
                     (let [v (nex-map-get m key)]
                       (if (nil? v)
                         (report-contract-violation Precondition "key_must_exist" "has_key")
                         v)))
-    "try_get"      (fn [m key default & _]
+    "try_get"      ^{:returns :value} (fn [m key default & _]
                     (let [v (nex-map-get m key)]
                       (if (nil? v)
                         default
                         v)))
-    "put"          (fn [m key val & _] (nex-map-put m key val))
-    "set"          (fn [m key val & _] (nex-map-put m key val))
-    "size"         (fn [m & _] (->nex-integer (nex-map-size m)))
-    "is_empty"     (fn [m & _] (nex-map-empty? m))
-    "contains_key" (fn [m key & _] (nex-map-contains-key-value? m key))
-    "keys"         (fn [m & _] (nex-map-keys m))
-    "values"       (fn [m & _] (nex-map-values m))
-    "remove"       (fn [m key & _] (nex-map-remove m key))
-    "to_string"    (fn [m & _] (nex-map-str m))
-    "equals"       (fn [m other & _] (nex-deep-equals? m other))
-    "clone"        (fn [m & _] (nex-clone-value m))
-    "cursor"       (fn [m & _]
+    "put"          ^{:returns "Void"} (fn [m key val & _] (nex-map-put m key val))
+    "set"          ^{:returns "Void"} (fn [m key val & _] (nex-map-put m key val))
+    "size"         ^{:returns "Integer"} (fn [m & _] (->nex-integer (nex-map-size m)))
+    "is_empty"     ^{:returns "Boolean"} (fn [m & _] (nex-map-empty? m))
+    "contains_key" ^{:returns "Boolean"} (fn [m key & _] (nex-map-contains-key-value? m key))
+    "keys"         ^{:returns :array-of-element} (fn [m & _] (nex-map-keys m))
+    "values"       ^{:returns :array-of-value} (fn [m & _] (nex-map-values m))
+    "remove"       ^{:returns "Void"} (fn [m key & _] (nex-map-remove m key))
+    "to_string"    ^{:returns "String"} (fn [m & _] (nex-map-str m))
+    "equals"       ^{:returns "Boolean"} (fn [m other & _] (nex-deep-equals? m other))
+    "clone"        ^{:returns :self} (fn [m & _] (nex-clone-value m))
+    "cursor"       ^{:returns "Cursor"} (fn [m & _]
                      {:nex-builtin-type :MapCursor
                      :source m
                      :keys (atom (nex-map-keys m))
                      :index (atom 0)})}
 
    :Set
-   {"contains"             (fn [s value & _] (nex-set-contains-value? s value))
-    "union"                (fn [s other & _] (nex-set-union s other))
-    "difference"           (fn [s other & _] (nex-set-difference s other))
-    "intersection"         (fn [s other & _] (nex-set-intersection s other))
-    "symmetric_difference" (fn [s other & _] (nex-set-symmetric-difference s other))
-    "size"                 (fn [s & _] (->nex-integer (nex-set-size s)))
-    "is_empty"             (fn [s & _] (nex-set-empty? s))
-    "to_array"             (fn [s & _] (nex-set-to-array s))
-    "to_string"            (fn [s & _] (nex-set-str s))
-    "equals"               (fn [s other & _] (nex-deep-equals? s other))
-    "clone"                (fn [s & _] (nex-clone-value s))
-    "cursor"               (fn [s & _]
+   {"contains"             ^{:returns "Boolean"} (fn [s value & _] (nex-set-contains-value? s value))
+    "union"                ^{:returns :self} (fn [s other & _] (nex-set-union s other))
+    "difference"           ^{:returns :self} (fn [s other & _] (nex-set-difference s other))
+    "intersection"         ^{:returns :self} (fn [s other & _] (nex-set-intersection s other))
+    "symmetric_difference" ^{:returns :self} (fn [s other & _] (nex-set-symmetric-difference s other))
+    "size"                 ^{:returns "Integer"} (fn [s & _] (->nex-integer (nex-set-size s)))
+    "is_empty"             ^{:returns "Boolean"} (fn [s & _] (nex-set-empty? s))
+    "to_array"             ^{:returns :array-of-element} (fn [s & _] (nex-set-to-array s))
+    "to_string"            ^{:returns "String"} (fn [s & _] (nex-set-str s))
+    "equals"               ^{:returns "Boolean"} (fn [s other & _] (nex-deep-equals? s other))
+    "clone"                ^{:returns :self} (fn [s & _] (nex-clone-value s))
+    "cursor"               ^{:returns "Cursor"} (fn [s & _]
                              {:nex-builtin-type :SetCursor
                               :source s
                               :values (atom (vec (nex-set-seq s)))
@@ -3195,19 +3195,19 @@
                      :cljs (count (:buffer @(:state ch)))))}
 
    :Console
-   {"print"        (fn [_ msg & _] (nex-console-print (nex-display-value msg)) nil)
-    "print_line"   (fn [_ msg & _] (nex-console-println (nex-display-value msg)) nil)
-    "read_line"    (fn [_ & args] (when (seq args) (nex-console-print (str (first args)))) (nex-console-read-line))
-    "error"        (fn [_ msg & _] (nex-console-error (nex-display-value msg)) nil)
-    "new_line"     (fn [_ & _] (nex-console-newline) nil)
-    "flush"        (fn [_ & _] (nex-console-flush) nil)
-    "read_integer" (fn [_ & _] (nex-parse-integer (nex-console-read-line)))
-    "read_real"    (fn [_ & _] (nex-parse-real (nex-console-read-line)))}
+   {"print"        ^{:returns "Void"} (fn [_ msg & _] (nex-console-print (nex-display-value msg)) nil)
+    "print_line"   ^{:returns "Void"} (fn [_ msg & _] (nex-console-println (nex-display-value msg)) nil)
+    "read_line"    ^{:returns "String"} (fn [_ & args] (when (seq args) (nex-console-print (str (first args)))) (nex-console-read-line))
+    "error"        ^{:returns "Void"} (fn [_ msg & _] (nex-console-error (nex-display-value msg)) nil)
+    "new_line"     ^{:returns "Void"} (fn [_ & _] (nex-console-newline) nil)
+    "flush"        ^{:returns "Void"} (fn [_ & _] (nex-console-flush) nil)
+    "read_integer" ^{:returns "Integer"} (fn [_ & _] (nex-parse-integer (nex-console-read-line)))
+    "read_real"    ^{:returns "Real"} (fn [_ & _] (nex-parse-real (nex-console-read-line)))}
 
    :Process
-   {"getenv"       (fn [_ name & _] (or (nex-process-getenv (str name)) ""))
-    "setenv"       (fn [_ name value & _] (nex-process-setenv (str name) (str value)) nil)
-    "command_line" (fn [_ & _] (nex-process-command-line))}
+   {"getenv"       ^{:returns "String"} (fn [_ name & _] (or (nex-process-getenv (str name)) ""))
+    "setenv"       ^{:returns "Void"} (fn [_ name value & _] (nex-process-setenv (str name) (str value)) nil)
+    "command_line" ^{:returns {:base-type "Array" :type-params ["String"]}} (fn [_ & _] (nex-process-command-line))}
 
    :ArrayCursor
    {"start"   (fn [c & _] (reset! (:index c) 0) nil)
@@ -3284,6 +3284,21 @@
                   nil))
     "at_end"  (fn [c & _]
                 (>= @(:index c) (count @(:values c))))}}))
+
+(defn builtin-type-method-return-type
+  "Static return type for a built-in method, consumed by the compiler's lowering
+   pass. The return type is carried as `:returns` metadata on the method fn in
+   `builtin-type-methods`, so built-in method names stay defined in a single
+   place. The value is either a concrete Nex type or a marker keyword that the
+   consumer resolves against the receiver's generic arguments:
+
+   - `:element`          first type argument (`Array`/`Set` element, `Map` key)
+   - `:value`            second type argument (`Map` value)
+   - `:self`             the receiver collection type itself
+   - `:array-of-element` `Array` of the first type argument
+   - `:array-of-value`   `Array` of the second type argument"
+  [type-name method-name]
+  (:returns (meta (get-in builtin-type-methods [type-name method-name]))))
 
 (def get-type-name typeinfo/get-type-name)
 
