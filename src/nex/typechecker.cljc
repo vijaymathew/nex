@@ -2155,6 +2155,23 @@
    "http_server_stop"   (builtin-checked-args "http_server_stop" 1 "Void")
    "http_server_is_running" (builtin-checked-args "http_server_is_running" 1 "Boolean")})
 
+(defn- env-call-method-arities
+  "Collect the arities at which `class-name` directly defines `callN` methods,
+   walking the env parent chain (mirrors how env-lookup-method resolves). Used to
+   turn an unmatched `callN` lookup into a clear function-arity error rather than
+   an opaque \"Method not found: callN\"."
+  [env class-name]
+  (loop [e env
+         acc #{}]
+    (if e
+      (recur (:parent e)
+             (into acc
+                   (mapcat (fn [[mname arities]]
+                             (when (re-matches #"call\d+" (str mname))
+                               (keys arities)))
+                           (get @(:methods e) class-name))))
+      (sort acc))))
+
 (defn check-call
   "Check the type of a method call"
   [env {:keys [target method args has-parens] :as expr}]
@@ -2173,9 +2190,19 @@
             method-sig (env-lookup-method env base-type call-name (count args))
             class-def (env-lookup-class env base-type)]
         (when-not method-sig
-          (throw (ex-info (str "Method not found: " call-name)
-                          {:error (type-error
-                                   (str "Method not found: " call-name))})))
+          (let [call-arities (env-call-method-arities env base-type)]
+            (if (= 1 (count call-arities))
+              ;; A free function (or single-arity callable) invoked at the wrong
+              ;; arity: report the function and the counts instead of `callN`.
+              (let [expected (first call-arities)
+                    given (count args)
+                    msg (str "Function `" method "` takes " expected
+                             (if (= 1 expected) " argument" " arguments")
+                             ", " (when (< given expected) "only ") given " given")]
+                (throw (ex-info msg {:error (type-error msg)})))
+              (throw (ex-info (str "Method not found: " call-name)
+                              {:error (type-error
+                                       (str "Method not found: " call-name))})))))
         (let [generic-names (set (map :name (:generic-params class-def)))
               arg-types (mapv #(check-expression env %) args)
               inferred-type-map (reduce (fn [acc [arg-type param]]
