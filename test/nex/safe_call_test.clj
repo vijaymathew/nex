@@ -194,3 +194,32 @@ do
 end"
           checked (tc/type-check (p/ast code))]
       (is (:success checked) (pr-str (:errors checked))))))
+
+(def ^:private box-class-code
+  "class Box
+create
+  with_value(v: Integer) do
+    value := v
+  end
+feature
+  value: Integer
+  get_value(): Integer do
+    result := value
+  end
+end")
+
+(deftest bare-safe-call-expression-echoes-value-test
+  (testing "a bare safe call typed at the REPL echoes the receiver's value"
+    (doseq [backend [:compiled :interpreter]]
+      (binding [repl/*repl-backend* (atom backend)]
+        (let [ctx (repl/init-repl-context)]
+          (with-out-str (repl/eval-code ctx box-class-code))
+          (with-out-str (repl/eval-code ctx "let b: ?Box := create Box.with_value(10)"))
+          (let [present (with-out-str (repl/eval-code ctx "b?.get_value"))]
+            (is (str/includes? present "10")
+                (str "backend " backend ": " (pr-str present))))
+          ;; A nil receiver short-circuits and echoes nothing.
+          (with-out-str (repl/eval-code ctx "let n: ?Box := nil"))
+          (let [absent (with-out-str (repl/eval-code ctx "n?.get_value"))]
+            (is (not (str/includes? absent "10"))
+                (str "backend " backend ": " (pr-str absent)))))))))

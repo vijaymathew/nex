@@ -997,6 +997,42 @@
        "    end\n"
        "end"))
 
+(defn- top-level-safe-call-when-expr
+  "A bare safe call typed at the REPL (e.g. `b?.get_value`) parses in statement
+   position and desugars to a value-discarding scoped-block, so the REPL has no
+   value to echo. When the parsed program is exactly such a safe call on a simple
+   identifier receiver, rebuild it as the value-bearing `when` expression (the
+   same shape used in expression position) so the result is echoed. Returns the
+   rewritten AST, or the original AST when it does not match."
+  [ast]
+  (let [stmts (:statements ast)
+        stmt (first stmts)
+        [binding guard] (:body stmt)]
+    (if (and (= 1 (count stmts))
+             (= :scoped-block (:type stmt))
+             (nil? (:rescue stmt))
+             (= 2 (count (:body stmt)))
+             (= :let (:type binding))
+             (:synthetic binding)
+             (string? (:name binding))
+             (str/starts-with? (:name binding) "__safe_receiver_")
+             (= :identifier (:type (:value binding)))
+             (= :if (:type guard))
+             (= 1 (count (:then guard)))
+             (= :call (:type (first (:then guard))))
+             (nil? (:else guard)))
+      (let [target-expr (:value binding)
+            call (first (:then guard))]
+        (assoc ast :statements
+               [{:type :when
+                 :condition {:type :binary
+                             :operator "/="
+                             :left target-expr
+                             :right {:type :nil}}
+                 :consequent (assoc call :target (:name target-expr))
+                 :alternative {:type :nil}}]))
+      ast)))
+
 (defn- compiled-object-class-name
   [value]
   (when (and value (= :compiled @*repl-backend*))
@@ -1368,7 +1404,11 @@
                     (if (and (= code-to-parse input)
                              (looks-like-identifier? input))
                       [(p/ast (wrap-expression input)) true true]
-                      [(p/ast code-to-parse) (not= code-to-parse input) false])
+                      (let [parsed (p/ast code-to-parse)]
+                        [(if (= code-to-parse input)
+                           (top-level-safe-call-when-expr parsed)
+                           parsed)
+                         (not= code-to-parse input) false]))
                     (catch Exception e
                       ;; If parsing failed and we haven't wrapped yet, try wrapping
                       (if (= code-to-parse input)

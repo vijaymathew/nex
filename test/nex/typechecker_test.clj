@@ -2015,3 +2015,28 @@ end"
           result (tc/type-check (p/ast code))]
       (is (not (:success result)))
       (is (seq (:errors result))))))
+
+(deftest test-free-function-wrong-arity-reports-function-and-counts
+  (testing "calling a free function with the wrong number of arguments reports the
+            function name and arg counts, not an opaque `callN` lookup failure"
+    (let [too-few "function gcd(a, b: Integer): Integer
+                   do
+                     if b = 0 then result := a else result := gcd(a % b) end
+                   end"
+          too-few-result (tc/type-check (p/ast too-few))
+          too-many "function gcd(a, b: Integer): Integer
+                    do
+                      result := gcd(a, b, a)
+                    end"
+          too-many-result (tc/type-check (p/ast too-many))]
+      (is (not (:success too-few-result)))
+      (is (some #(str/includes? (:message %)
+                                "Function `gcd` takes 2 arguments, only 1 given")
+                (:errors too-few-result))
+          (pr-str (:errors too-few-result)))
+      (is (not (str/includes? (str (:errors too-few-result)) "call1")))
+      (is (not (:success too-many-result)))
+      (is (some #(str/includes? (:message %)
+                                "Function `gcd` takes 2 arguments, 3 given")
+                (:errors too-many-result))
+          (pr-str (:errors too-many-result))))))

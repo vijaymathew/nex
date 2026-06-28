@@ -98,6 +98,10 @@
 (def ^:private builtin-function-names
   (set (keys interp/builtins)))
 
+(defn- builtin-method-names
+  [type-name]
+  (set (keys (get interp/builtin-type-methods type-name))))
+
 (def ^:private builtin-runtime-receiver-types
   #{"Any" "Comparable" "Integer" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
@@ -120,23 +124,19 @@
    "bitwise_not" :bit-not})
 
 (def ^:private direct-array-methods
-  #{"get" "add" "push" "add_at" "at" "put" "set" "length" "size" "is_empty"
-    "contains" "index_of" "remove" "reverse" "slice" "sort" "first" "last"
-    "concat" "to_string" "equals" "clone" "join" "cursor"})
+  (builtin-method-names :Array))
 
 (def ^:private direct-map-methods
-  #{"get" "try_get" "put" "at" "set" "size" "is_empty" "contains_key"
-    "keys" "values" "remove" "to_string" "equals" "clone" "cursor"})
+  (builtin-method-names :Map))
 
 (def ^:private direct-set-methods
-  #{"contains" "union" "difference" "intersection" "symmetric_difference"
-    "size" "is_empty" "to_array" "to_string" "equals" "clone" "cursor"})
+  (builtin-method-names :Set))
 
 (def ^:private direct-task-methods
-  #{"await" "cancel" "is_done" "is_cancelled"})
+  (builtin-method-names :Task))
 
 (def ^:private direct-channel-methods
-  #{"send" "try_send" "receive" "try_receive" "close" "is_closed" "capacity" "size"})
+  (builtin-method-names :Channel))
 
 (defn- base-type-name
   [t]
@@ -169,46 +169,31 @@
   [elem-type]
   {:base-type "Set" :type-params [elem-type]})
 
-(defn- collection-method-return-type
-  [target-type method]
+(defn- resolve-collection-return-marker
+  "Resolve a return-type marker from `interp/builtin-type-method-return-type`
+   against the receiver's actual generic arguments. Concrete type names pass
+   through unchanged."
+  [target-type marker]
   (let [base (base-type-name target-type)
         [a b] (generic-type-args target-type)]
-    (case base
-      "Array"
-      (case method
-        ("get" "first" "last") (or a "Any")
-        ("add" "push" "add_at" "at" "put" "set" "remove") "Void"
-        ("length" "size" "index_of") "Integer"
-        ("is_empty" "contains" "equals") "Boolean"
-        ("reverse" "slice" "sort" "clone" "concat") (or target-type (array-type-of (or a "Any")))
-        ("to_string" "join") "String"
-        "cursor" "Cursor"
-        nil)
+    (case marker
+      :element (or a "Any")
+      :value (or b "Any")
+      :array-of-element (array-type-of (or a "Any"))
+      :array-of-value (array-type-of (or b "Any"))
+      :self (or target-type
+                (case base
+                  "Array" (array-type-of (or a "Any"))
+                  "Map" (map-type-of (or a "Any") (or b "Any"))
+                  "Set" (set-type-of (or a "Any"))
+                  nil))
+      marker)))
 
-      "Map"
-      (case method
-        ("get" "try_get") (or b "Any")
-        ("put" "at" "set" "remove") "Void"
-        "size" "Integer"
-        ("is_empty" "contains_key" "equals") "Boolean"
-        "keys" (array-type-of (or a "Any"))
-        "values" (array-type-of (or b "Any"))
-        "to_string" "String"
-        "clone" (or target-type (map-type-of (or a "Any") (or b "Any")))
-        "cursor" "Cursor"
-        nil)
-
-      "Set"
-      (case method
-        ("contains" "is_empty" "equals") "Boolean"
-        "size" "Integer"
-        ("union" "difference" "intersection" "symmetric_difference" "clone")
-        (or target-type (set-type-of (or a "Any")))
-        "to_array" (array-type-of (or a "Any"))
-        "to_string" "String"
-        "cursor" "Cursor"
-        nil)
-      nil)))
+(defn- collection-method-return-type
+  [target-type method]
+  (some->> (interp/builtin-type-method-return-type
+            (keyword (base-type-name target-type)) method)
+           (resolve-collection-return-marker target-type)))
 
 (defn- direct-collection-method?
   [target-type method]
@@ -561,19 +546,8 @@
                          (#(tc/resolve-generic-type % type-map)))))))
        (when (direct-collection-method? target-type (:method expr))
          (collection-method-return-type target-type (:method expr)))
-       (when (= "Console" base-type)
-         (case (:method expr)
-           ("print" "print_line" "error" "new_line" "flush") "Void"
-           "read_line" "String"
-           "read_integer" "Integer"
-           "read_real" "Real"
-           nil))
-       (when (= "Process" base-type)
-         (case (:method expr)
-           "getenv" "String"
-           ("setenv" "exit" "sleep") "Void"
-           "args" {:base-type "Array" :type-args ["String"]}
-           nil))
+       (when (contains? #{"Console" "Process"} base-type)
+         (interp/builtin-type-method-return-type (keyword base-type) (:method expr)))
        ;; Generic type parameter with constraint - look up method on constraint type
        (when-let [constraint (get (:generic-param-constraints env) base-type)]
          (case constraint
