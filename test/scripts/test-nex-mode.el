@@ -155,6 +155,49 @@
               "end")
             "\n"))))
 
+(ert-deftest nex-indent-from-loop-inline-until ()
+  "Inline loop-header clauses ('variant expr', 'until cond') align with 'from'.
+The clause keywords and the loop 'do'/'end' all sit at the loop level even when
+their content is inline (regression: 'do'/'end' used to over-decrease to 0, and
+the inline clauses landed at the wrong column)."
+  (should (string=
+           (nex-test--reindent
+            "function factorial_iter(product, counter, max_count: Integer): Integer\ndo\nfrom\nvariant max_count - counter\nuntil counter > max_count\ndo\nproduct := counter * product\ncounter := counter + 1\nend\nresult := product\nend")
+           (string-join
+            '("function factorial_iter(product, counter, max_count: Integer): Integer"
+              "do"
+              "  from"
+              "  variant max_count - counter"
+              "  until counter > max_count"
+              "  do"
+              "    product := counter * product"
+              "    counter := counter + 1"
+              "  end"
+              "  result := product"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-from-loop-inline-invariant-before-until ()
+  "A loop 'invariant'/'variant' written before 'until' aligns with 'from', not
+class level.  Bare-'from' init statements still indent one level under 'from'."
+  (should (string=
+           (nex-test--reindent
+            "function f(): Integer\ndo\nfrom\nlet i := 0\ninvariant a: a > 1\nvariant max_count - counter\nuntil counter > max_count\ndo\nresult := result + 1\nend\nresult := i\nend")
+           (string-join
+            '("function f(): Integer"
+              "do"
+              "  from"
+              "    let i := 0"
+              "  invariant a: a > 1"
+              "  variant max_count - counter"
+              "  until counter > max_count"
+              "  do"
+              "    result := result + 1"
+              "  end"
+              "  result := i"
+              "end")
+            "\n"))))
+
 (ert-deftest nex-indent-class-invariant-stays-class-level ()
   "A class 'invariant' still aligns with the class, not a loop."
   (should (string=

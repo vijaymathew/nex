@@ -247,7 +247,9 @@ are correctly ignored."
                 (should-decrease (nex-should-decrease-indent))
                 (is-class-level (nex-is-class-level-keyword))
                 (is-note-after-method (nex-is-note-after-method))
-                (is-contract-after-method (nex-is-contract-after-method)))
+                (is-contract-after-method (nex-is-contract-after-method))
+                (is-loop-do (nex-is-loop-do))
+                (is-loop-clause (nex-loop-clause-keyword-p)))
             (setq indent-col
                   (cond
                    ;; Class-level keywords: align with class (usually 0)
@@ -259,6 +261,14 @@ are correctly ignored."
                    ;; require/ensure/do after method: align with method
                    (is-contract-after-method
                     (nex-find-method-indent))
+                   ;; Loop header clauses ('until'/'variant'/loop 'invariant')
+                   ;; and the loop 'do' all align with their 'from'.  Anchoring
+                   ;; to the matching 'from' (rather than the previous line)
+                   ;; makes this form-independent: the clause keyword sits at
+                   ;; the loop level whether its content is on its own line
+                   ;; (block form) or inline ("until cond", "variant expr").
+                   ((or is-loop-clause is-loop-do)
+                    (or (nex-loop-from-indent) prev-indent))
                    ;; Closing keywords: decrease indent
                    (should-decrease
                     (max 0 (- prev-indent nex-indent-offset)))
@@ -338,23 +348,72 @@ are correctly ignored."
             (throw 'result nil)))))
       nil)))
 
+(defun nex-is-loop-do ()
+  "Return t if the current line is the loop 'do' of a from-until-do block.
+That is, a 'do' reached from the loop's 'until' rather than a method body or a
+contract block."
+  (save-excursion
+    (beginning-of-line)
+    (skip-chars-forward " \t")
+    (and (looking-at "\\bdo\\b")
+         (nex-in-from-block-p))))
+
+(defun nex-loop-from-indent ()
+  "Return the indentation of the 'from' of the loop enclosing point, or nil.
+Scans backward balancing 'from'/'end' so the matching opener is found even
+across nested or preceding sibling loops; a class 'invariant' or any code not
+inside a loop yields nil.  Matches inside strings/comments are ignored.  Works
+for any loop-header line ('invariant'/'variant'/'until'/loop 'do') because none
+of those are preceded by the loop's own 'end'."
+  (save-excursion
+    (beginning-of-line)
+    (let ((depth 0))
+      (catch 'found
+        (while (re-search-backward "\\b\\(from\\|end\\)\\b" nil t)
+          (unless (nth 8 (syntax-ppss))  ; skip 'from'/'end' in strings or comments
+            (let ((kw (match-string 1)))
+              (cond
+               ((string= kw "end")
+                (setq depth (1+ depth)))
+               ((string= kw "from")
+                (if (= depth 0)
+                    (throw 'found (current-indentation))
+                  (setq depth (1- depth))))))))
+        nil))))
+
+(defun nex-loop-clause-keyword-p ()
+  "Return t if the current line starts a from-loop header clause that should
+align with the loop's 'from': 'until', 'variant', or a loop (non-class)
+'invariant'.  A class-level 'invariant' returns nil."
+  (save-excursion
+    (beginning-of-line)
+    (skip-chars-forward " \t")
+    (cond
+     ((looking-at (regexp-opt '("until" "variant") 'words)) t)
+     ;; 'invariant' is a loop clause only when enclosed by a 'from'; otherwise
+     ;; it is a class invariant (handled by `nex-is-class-level-keyword').
+     ((looking-at "\\binvariant\\b")
+      (and (nex-loop-from-indent) t))
+     (t nil))))
+
 (defun nex-should-decrease-indent ()
   "Return t if the current line should decrease indentation."
   (save-excursion
     (beginning-of-line)
     (skip-chars-forward " \t")
     (or
-     ;; 'end', 'else', 'elseif', 'rescue', 'when', 'timeout', and 'until' close/open siblings
-     (looking-at (regexp-opt '("end" "else" "elseif" "rescue" "when" "timeout" "until") 'words))
+     ;; 'end', 'else', 'elseif', 'rescue', 'when', 'timeout' close/open siblings
+     (looking-at (regexp-opt '("end" "else" "elseif" "rescue" "when" "timeout") 'words))
      ;; 'do' aligns with require/ensure if inside contract block
      (and (looking-at "\\bdo\\b")
-          (nex-in-contract-block-p))
-     ;; 'do' aligns with 'from'/'until' if inside a from-until-do block
-     (and (looking-at "\\bdo\\b")
-          (nex-in-from-block-p))
-     ;; loop 'variant'/'invariant' align with 'from'/'until' inside a from-until-do block
-     (and (looking-at (regexp-opt '("variant" "invariant") 'words))
-          (nex-in-from-block-p)))))
+          (nex-in-contract-block-p)))
+     ;; NB: loop header clauses ('until'/'variant'/loop 'invariant') and the
+     ;; loop 'do' are NOT decreases.  They are handled separately in
+     ;; `nex-indent-line' via `nex-loop-clause-keyword-p'/`nex-is-loop-do',
+     ;; which align them with their 'from' rather than decreasing from the
+     ;; previous line (which may be an inline clause already at the loop
+     ;; level, in which case decreasing would overshoot).
+     ))
 
 (defun nex-is-class-level-keyword ()
   "Return t if the current line starts with a class-level keyword.
@@ -366,9 +425,11 @@ Class-level keywords should align with 'class' at column 0."
     (when (looking-at "\\bprivate\\s-+")
       (goto-char (match-end 0)))
     (and (looking-at (regexp-opt '("feature" "create" "inherit" "invariant") 'words))
-         ;; A loop 'invariant' (inside a from-until-do block) is not class-level.
+         ;; A loop 'invariant' (enclosed by a 'from') is not class-level.  Use
+         ;; the 'from'-balancing scan rather than `nex-in-from-block-p', which
+         ;; only sees a loop 'invariant' written after 'until'.
          (not (and (looking-at "\\binvariant\\b")
-                   (nex-in-from-block-p))))))
+                   (nex-loop-from-indent))))))
 
 (defun nex-find-class-indent ()
   "Find the indentation level of the enclosing class.
