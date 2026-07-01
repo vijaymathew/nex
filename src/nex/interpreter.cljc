@@ -2678,7 +2678,7 @@
     (throw (ex-info (str "Unknown binary operator: " op)
                     {:operator op}))))
 
-(defn- concat-string-value
+(defn concat-string-value
   "Convert a runtime value to the string form used by String concatenation.
    If a Nex object implements to_string, invoke it; otherwise use the built-in
    Any/to_string formatting path."
@@ -3943,22 +3943,31 @@
         (if (not= fn-obj ::not-found)
           (let [compiled-callable? #?(:clj (boolean (compiled-runtime-class-name ctx fn-obj))
                                       :cljs false)]
-            (if (or (nex-object? fn-obj) compiled-callable?)
-            (if (not= has-parens false)
-              ;; has-parens is true or nil (default): invoke the Function
-              (let [call-method (str "call" (count args))]
-                (eval-node ctx {:type :call
-                                :target method
-                                :method call-method
-                                :args args}))
-              ;; has-parens is false: return the Function object
-              fn-obj)
-            ;; Variable value found (non-callable). In no-parens form, treat as identifier.
-            ;; This keeps expressions like x + 1 working when parser emits :call for bare identifiers.
-            (if (false? has-parens)
+            (cond
+              (or (nex-object? fn-obj) compiled-callable?)
+              (if (not= has-parens false)
+                ;; has-parens is true or nil (default): invoke the Function
+                (let [call-method (str "call" (count args))]
+                  (eval-node ctx {:type :call
+                                  :target method
+                                  :method call-method
+                                  :args args}))
+                ;; has-parens is false: return the Function object
+                fn-obj)
+
+              ;; A plain host callable (e.g. a compiled top-level function bridged
+              ;; into the interpreter for a deoptimized closure): apply it.
+              (and (fn? fn-obj) (not= has-parens false))
+              (apply fn-obj arg-values)
+
+              ;; Variable value found (non-callable). In no-parens form, treat as identifier.
+              ;; This keeps expressions like x + 1 working when parser emits :call for bare identifiers.
+              (false? has-parens)
               fn-obj
+
+              :else
               (throw (ex-info (str "Undefined function: " method)
-                              {:function method})))))
+                              {:function method}))))
           (if-let [current-obj (:current-object ctx)]
             (let [class-def (lookup-class ctx (:class-name current-obj))
                   method-lookup (lookup-method-with-inheritance ctx

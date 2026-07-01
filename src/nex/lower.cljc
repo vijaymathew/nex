@@ -145,6 +145,25 @@
     (map? t) (:base-type t)
     :else nil))
 
+;; Program-global `declare type` aliases, bound once at the lowering entry point.
+;; Aliases are transparent, so lowering must see through them when it infers the
+;; type of a value (e.g. deciding that a variable typed via a function-type alias
+;; is callable). Threaded as a dynamic var rather than through every env so that
+;; nested function/method/constructor lowering picks it up automatically.
+(def ^:dynamic *type-aliases* {})
+
+(defn- resolve-type-alias
+  "Expand a declared type alias to its underlying type expression, following
+   chains (`H -> G -> Function(...)`). Non-alias types are returned unchanged."
+  [t]
+  (loop [t t
+         seen #{}]
+    (if (and (string? t)
+             (contains? *type-aliases* t)
+             (not (contains? seen t)))
+      (recur (get *type-aliases* t) (conj seen t))
+      t)))
+
 (defn- builtin-runtime-receiver-type?
   [env t]
   (let [base (base-type-name t)
@@ -282,7 +301,8 @@
 
 (defn- resolve-jvm-type
   [env nex-type]
-  (let [base (base-type-name nex-type)]
+  (let [nex-type (resolve-type-alias nex-type)
+        base (base-type-name nex-type)]
     (cond
       (contains? (:generic-param-names env) base)
       (ir/object-jvm-type "java/lang/Object")
@@ -596,7 +616,10 @@
                base-type (base-type-name binding-type)
                call-name (str "call" (count (:args expr)))]
            (if (= "Function" base-type)
-             "Any"
+             ;; A Function value that carries an explicit signature knows its
+             ;; own return type; use it rather than the generic `Any` so calls
+             ;; like `if pred(x)` lower with a concrete (e.g. Boolean) type.
+             (or (and (map? binding-type) (:return-type binding-type)) "Any")
              (some-> (get (visible-class-map env) base-type)
                      (class-method-def call-name (count (:args expr)))
                      function-return-type))))
@@ -1627,8 +1650,9 @@
 
 (defn- function-object-binding-type
   [env name]
-  (or (get-in (:locals env) [name :nex-type])
-      (get (:var-types env) name)))
+  (resolve-type-alias
+   (or (get-in (:locals env) [name :nex-type])
+       (get (:var-types env) name))))
 
 (defn- function-object-call?
   [env name arity]
@@ -2774,6 +2798,20 @@
                                       (mapv #(lower-expression env %) (:args expr)))
                                 nex-type
                                 (resolve-jvm-type env nex-type))))
+
+      (= class-name "Set")
+      (let [nex-type (infer-type env expr)]
+        (if (= "from_array" (:constructor expr))
+          (do
+            (when-not (= 1 (count (:args expr)))
+              (throw (ex-info "Set.from_array expects exactly 1 argument in compiled lowering"
+                              {:expr expr})))
+            (ir/call-runtime-node "create-set-from-array"
+                                  [(lower-expression env (first (:args expr)))]
+                                  nex-type
+                                  (resolve-jvm-type env nex-type)))
+          (throw (ex-info "Unsupported Set constructor in compiled lowering"
+                          {:expr expr :constructor (:constructor expr)}))))
 
       :else
       (do
@@ -4126,6 +4164,9 @@
 (defn lower-repl-cell
   "Lower a narrow REPL/program body to a first compiler unit."
   [program opts]
+  (binding [*type-aliases* (merge *type-aliases*
+                                  (into {} (map (juxt :name :type-expr)
+                                                (:type-aliases program))))]
   (let [unit-name (or (:name opts) "nex/repl/Cell_0001")
         actual-classes (vec (user-class-defs program))
         anonymous-classes (vec (collect-anonymous-class-defs program))
@@ -4213,4 +4254,4 @@
                                                               :compiled-classes (:compiled-classes opts)))
                                       (remove :declaration-only? (:functions program)))
                      :body lowered-body''
-                     :result-jvm-type (ir/object-jvm-type "java/lang/Object")})}))
+                     :result-jvm-type (ir/object-jvm-type "java/lang/Object")})})))

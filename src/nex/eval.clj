@@ -4,7 +4,9 @@
             [clojure.string :as str]
             [nex.parser :as parser]
             [nex.interpreter :as interp]
-            [nex.typechecker :as tc])
+            [nex.typechecker :as tc]
+            [nex.compiler.jvm.file :as jvm-file]
+            [nex.compiler.jvm.classloader :as loader])
   (:import [clj_antlr ParseError]))
 
 (defn- augment-ast-with-interns
@@ -29,7 +31,7 @@
                                   (str/join "\n" (map tc/format-type-error (:errors result))))))
                       {:errors (map tc/format-type-error (:errors result))})))))
 
-(defn- run-ast
+(defn- run-interpreted
   [source-id ast]
   (let [ctx (assoc (interp/make-context) :debug-source source-id)]
     (interp/eval-node ctx ast)
@@ -37,6 +39,49 @@
       (doseq [line output]
         (println line))
       output)))
+
+(defn- try-compile
+  "Compile the whole program with the JVM backend. Returns the compile result, or
+   nil if the program is outside the compilable subset (any compile-time failure).
+   Type errors are caught earlier by `type-check-ast!`, so a failure here means an
+   unsupported construct and the caller falls back to the interpreter."
+  [source-id ast]
+  (try
+    (jvm-file/compile-ast source-id ast {:skip-type-check true})
+    (catch Throwable _ nil)))
+
+(defn- run-compiled
+  "Define the generated classes in a fresh loader and invoke the program's `Main`,
+   running with the JVM backend's reference semantics (the same engine the REPL
+   uses). Output is captured so that if the compiled run fails partway, the caller
+   can discard it and fall back cleanly. Returns captured stdout on success, or
+   nil if the compiled run raised."
+  [{:keys [main-class classes]}]
+  (let [ldr (loader/make-loader)]
+    (doseq [[binary-name ^bytes bytecode] classes]
+      (loader/define-class! ldr binary-name bytecode))
+    (let [cls (loader/resolve-class ldr main-class)
+          m (.getMethod cls "main" (into-array Class [(Class/forName "[Ljava.lang.String;")]))
+          buf (java.io.ByteArrayOutputStream.)
+          real-out System/out]
+      (try
+        (System/setOut (java.io.PrintStream. buf true "UTF-8"))
+        (.invoke m nil (object-array [(into-array String [])]))
+        (.toString buf "UTF-8")
+        (catch Throwable _ nil)
+        (finally
+          (System/setOut real-out))))))
+
+(defn- run-ast
+  "Run a whole program. Prefers the compiled JVM backend (reference semantics,
+   matching the REPL) and falls back to the tree-walking interpreter when the
+   program is outside the compilable subset or the compiled run fails."
+  [source-id ast]
+  (let [compiled (try-compile source-id ast)
+        captured (when compiled (run-compiled compiled))]
+    (if captured
+      (do (print captured) (flush) captured)
+      (run-interpreted source-id ast))))
 
 (defn eval-file
   "Parse and evaluate a Nex file"

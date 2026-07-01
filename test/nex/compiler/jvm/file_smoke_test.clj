@@ -586,3 +586,68 @@ print(sorted)")
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-function-type-alias-call-smoke-test
+  (testing "compile-jar lowers calls through a function-type alias (declare type)"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-fn-alias")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "declare type IntFn = Function(x: Integer): Integer
+declare type Pred = Function(x: Integer): Boolean
+
+function apply_twice(f: IntFn, x: Integer): Integer do
+  result := f(f(x))
+end
+
+let inc: IntFn := fn (x: Integer): Integer do result := x + 1 end
+let is_even: Pred := fn (x: Integer): Boolean do result := x % 2 = 0 end
+
+print(apply_twice(inc, 10))
+if is_even(4) then print(1) else print(0) end")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["12" "1"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-collections-clone-and-tostring-smoke-test
+  (testing "compile-jar supports Set.from_array, set printing, Map.clone independence, and object to_string"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-collections")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class Point
+  feature
+    x: Integer
+    y: Integer
+    to_string(): String do result := \"P(\" + x + \", \" + y + \")\" end
+  create make(a: Integer, b: Integer) do x := a y := b end
+end
+
+let s: Set[String] := create Set[String].from_array([\"a\", \"b\", \"a\"])
+print(s.size)
+print(s)
+
+let m: Map[String, Integer] := {}
+m.put(\"k\", 1)
+let c: Map[String, Integer] := m.clone()
+c.put(\"j\", 2)
+print(m.contains_key(\"j\"))
+print(c.contains_key(\"j\"))
+
+let p: Point := create Point.make(3, 4)
+print(p)")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["2" "#{\"a\", \"b\"}" "false" "true" "P(3, 4)"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))

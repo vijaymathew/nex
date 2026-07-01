@@ -194,6 +194,11 @@
   (let [m (nex-map)]
     (doseq [[k v] pairs] (nex-map-put m k v))
     m))
+(defn nex-host-map-from
+  "Build a host-backed map (the representation the compiled backend uses)."
+  [pairs]
+  #?(:clj (let [m (java.util.HashMap.)] (doseq [[k v] pairs] (.put m k v)) m)
+     :cljs (let [m (js/Map.)] (doseq [[k v] pairs] (.set m k v)) m)))
 (defn nex-map-str [formatter m]
   (str "{"
        (str/join ", " (map (fn [[k v]] (str (formatter k) ": " (formatter v)))
@@ -234,6 +239,11 @@
 
 (defn nex-set [] {:nex-builtin-type :NexSet :items [] :index {}})
 (defn nex-set-from [coll] (reduce set-conj (nex-set) coll))
+(defn nex-host-set-from
+  "Build a host-backed set (the representation the compiled backend uses)."
+  [coll]
+  #?(:clj (let [s (java.util.LinkedHashSet.)] (doseq [e coll] (.add s e)) s)
+     :cljs (let [s (js/Set.)] (doseq [e coll] (.add s e)) s)))
 (defn nex-set-seq
   "The set's elements as a seq, in insertion order."
   [s]
@@ -262,8 +272,8 @@
   (nex-set-from (concat (remove #(nex-set-contains b %) (:items a))
                         (remove #(nex-set-contains a %) (:items b)))))
 (defn nex-set-str [formatter s]
-  (str "#{" (str/join ", " (map formatter (:items s))) "}"))
-(defn nex-set-to-array [s] (nex-array-from (:items s)))
+  (str "#{" (str/join ", " (map formatter (nex-set-seq s))) "}"))
+(defn nex-set-to-array [s] (nex-array-from (nex-set-seq s)))
 
 ;; Bitwise operators are a 32-bit island: they mask operands to int32 and the
 ;; interpreter/compiler agree on that. On JS a Nex Integer is a BigInt, which

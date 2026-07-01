@@ -717,6 +717,35 @@ end"
           result (tc/type-check ast)]
       (is (:success result) (pr-str result)))))
 
+(deftest test-function-type-alias-value-is-callable
+  (testing "Calling a value declared through a function-type alias resolves the alias"
+    (let [code "declare type F = Function(x: Integer): Integer
+class Test
+  feature
+    demo() do
+      let p: F := fn (x: Integer): Integer do result := x + 1 end
+      let y: Integer := p(6)
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str result)))))
+
+(deftest test-function-type-alias-value-callable-from-array
+  (testing "A function-type-alias value read out of a collection is callable"
+    (let [code "declare type Pred = Function(x: Integer): Boolean
+class Test
+  feature
+    demo() do
+      let preds: Array[Pred] := [fn (x: Integer): Boolean do result := x > 0 end]
+      let p: Pred := preds.get(0)
+      let ok: Boolean := p(6)
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str result)))))
+
 (deftest test-console-read-line-allows-prompt
   (testing "Console.read_line accepts an optional String prompt"
     (let [code "class Test

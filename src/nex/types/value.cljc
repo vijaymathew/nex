@@ -86,13 +86,21 @@
     (rt/nex-array-from (map (partial nex-clone-value nex-object? make-object) #?(:clj value :cljs (array-seq value))))
 
     (rt/nex-map? value)
-    (rt/nex-map-from (map (fn [[k v]] [(nex-clone-value nex-object? make-object k)
-                                       (nex-clone-value nex-object? make-object v)])
-                          (rt/nex-map-entries value)))
+    (let [pairs (map (fn [[k v]] [(nex-clone-value nex-object? make-object k)
+                                  (nex-clone-value nex-object? make-object v)])
+                     (rt/nex-map-entries value))]
+      ;; Preserve the map's representation: a portable map (Clojure map) clones to
+      ;; a portable map, a host map (compiled HashMap/js.Map) to a host map.
+      (if (map? value)
+        (rt/nex-map-from pairs)
+        (rt/nex-host-map-from pairs)))
 
     (rt/nex-set? value)
-    (rt/nex-set-from (map (partial nex-clone-value nex-object? make-object)
-                          (rt/nex-set-seq value)))
+    (let [elems (map (partial nex-clone-value nex-object? make-object)
+                     (rt/nex-set-seq value))]
+      (if (map? value)
+        (rt/nex-set-from elems)
+        (rt/nex-host-set-from elems)))
 
     (and (map? value) (:nex-builtin-type value))
     (into {} value)
