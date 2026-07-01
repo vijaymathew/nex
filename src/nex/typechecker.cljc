@@ -1662,13 +1662,20 @@
         with-java? (boolean (env-lookup-var env "__with_java__"))
         class-target (when target-name (env-lookup-class env target-name))
         current-class (env-lookup-var env "__current_class__")
-        target-type (if class-target
-                      target-name
-                      (if (string? target)
-                        (or (env-lookup-var env target)
-                            (when current-class
-                              (lookup-class-field env current-class target)))
-                        (check-expression env target)))
+        ;; Resolve any declared type alias before deriving `base-type` etc., so
+        ;; that a value typed through an alias (e.g. `declare type F =
+        ;; Function(...)`) is treated as its underlying type. Without this a
+        ;; call through a function-type alias misses the `Function` branch below
+        ;; and fails with an opaque "Method not found: callN".
+        target-type (expand-type-aliases
+                     env
+                     (if class-target
+                       target-name
+                       (if (string? target)
+                         (or (env-lookup-var env target)
+                             (when current-class
+                               (lookup-class-field env current-class target)))
+                         (check-expression env target))))
         normalized-target (normalize-type target-type)
         target-detachable? (detachable-type? normalized-target)
         guarded? (and (string? target) (env-var-non-nil? env target))
@@ -2184,7 +2191,7 @@
       ;; Function call (built-in like print/type_of/type_is) or function object call
       (if-let [checker (get builtin-call-checkers method)]
         (checker env args)
-      (if-let [var-type (env-lookup-var env method)]
+      (if-let [var-type (expand-type-aliases env (env-lookup-var env method))]
       (let [base-type (if (map? var-type) (:base-type var-type) var-type)
             call-name (str "call" (count args))
             method-sig (env-lookup-method env base-type call-name (count args))
