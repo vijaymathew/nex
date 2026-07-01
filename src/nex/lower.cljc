@@ -2799,6 +2799,20 @@
                                 nex-type
                                 (resolve-jvm-type env nex-type))))
 
+      (= class-name "Set")
+      (let [nex-type (infer-type env expr)]
+        (if (= "from_array" (:constructor expr))
+          (do
+            (when-not (= 1 (count (:args expr)))
+              (throw (ex-info "Set.from_array expects exactly 1 argument in compiled lowering"
+                              {:expr expr})))
+            (ir/call-runtime-node "create-set-from-array"
+                                  [(lower-expression env (first (:args expr)))]
+                                  nex-type
+                                  (resolve-jvm-type env nex-type)))
+          (throw (ex-info "Unsupported Set constructor in compiled lowering"
+                          {:expr expr :constructor (:constructor expr)}))))
+
       :else
       (do
         (when-not compiled

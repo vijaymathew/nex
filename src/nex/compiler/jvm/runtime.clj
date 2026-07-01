@@ -128,6 +128,28 @@
     (catch InvocationTargetException e
       (throw (or (.getCause e) e)))))
 
+(defn- registered-fn-callable
+  "Wrap a registered top-level function as a plain callable so the interpreter
+   (which runs deoptimized closures) can invoke it by name. The registry stores
+   either a reflective `Method` or an `{:owner :method}` descriptor."
+  [state entry]
+  (cond
+    (instance? Method entry)
+    (fn [& args]
+      (invoke-reflective! entry nil (object-array [state (object-array args)])))
+
+    (map? entry)
+    (let [{:keys [owner method]} entry]
+      (fn [& args]
+        (let [^Class cls (resolve-owner-class state owner)
+              ^Method m (.getDeclaredMethod
+                         cls method
+                         (into-array Class [nex.compiler.jvm.runtime.NexReplState
+                                            (class (object-array 0))]))]
+          (invoke-reflective! m nil (object-array [state (object-array args)])))))
+
+    :else nil))
+
 (defn invoke-function-object
   [state target args]
   (when-not target
@@ -213,6 +235,15 @@
   {:nex-builtin-type :MinHeap
    :data (atom [])
    :comparator nil})
+
+(defn create-set-from-array
+  "Build a compiled Set (LinkedHashSet, matching set literals) from a Nex array."
+  [arr]
+  (let [s (java.util.LinkedHashSet.)
+        n (rt/nex-array-size arr)]
+    (dotimes [i n]
+      (.add s (rt/nex-array-get arr i)))
+    s))
 
 (defn create-min-heap-from-comparator
   [compare]
@@ -732,6 +763,11 @@
                copy)))
     (doseq [[k v] @(:values state)]
       (interp/env-define (:globals ctx) k v))
+    ;; Make top-level functions resolvable by name from interpreted (deoptimized)
+    ;; closures, e.g. a helper called inside an `fn` stored in a collection.
+    (doseq [[k v] @(:functions state)]
+      (when-let [callable (registered-fn-callable state v)]
+        (interp/env-define (:globals ctx) k callable)))
     ctx))
 
 (defn- lowered-instance-method-name
@@ -977,6 +1013,11 @@
   [state value]
   (cond
     (string? value) value
+
+    ;; An interpreter object (e.g. created inside a deoptimized closure) renders
+    ;; through the interpreter so a user-defined `to_string` is honored.
+    (interp/nex-object? value)
+    (interp/concat-string-value (rebuild-interpreter-ctx state) value)
 
     (nil? value) "nil"
 
@@ -1827,6 +1868,9 @@
 
     (= name "create-min-heap-empty")
     (create-min-heap-empty)
+
+    (= name "create-set-from-array")
+    (create-set-from-array (first args))
 
     (= name "create-min-heap-from-comparator")
     (create-min-heap-from-comparator (first args))
