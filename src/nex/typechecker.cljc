@@ -4223,7 +4223,18 @@
            {:success false
             :errors [(or (:error error-data)
                         (type-error (ex-message e)))]
-            :warnings (vec @(:warnings env))})))))))
+            :warnings (vec @(:warnings env))}))
+
+       ;; Any other exception is an internal type-checker fault (e.g. a shape
+       ;; assumption broken by an unexpected AST). Surface it as a type error
+       ;; instead of letting a raw JVM exception escape this entry point; callers
+       ;; rely on type-check always returning a result map. (In cljs the `:default`
+       ;; clause above already covers this, so this JVM-only clause is elided there.)
+       #?(:clj
+          (catch Exception e
+            {:success false
+             :errors [(type-error (str "Internal type checker error: " (ex-message e)))]
+             :warnings (vec @(:warnings env))})))))))
 
 (defn type-check
   "Type check Nex code (entry point).

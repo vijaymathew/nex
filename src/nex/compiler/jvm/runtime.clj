@@ -818,6 +818,12 @@
 
 (defn- invoke-user-method
   [state target method-name args]
+  (if (interp/nex-object? target)
+    ;; The target was produced by the interpreter (e.g. returned from a function
+    ;; that fell back to the tree-walker) and stored in the compiled session. The
+    ;; compiled runtime cannot reflect user methods off an interpreter object, so
+    ;; dispatch it back through the interpreter — mirroring invoke-function-object.
+    (invoke-interpreter-object-method state target method-name args)
   (let [^Class cls (.getClass target)
         lowered-name (lowered-instance-method-name method-name (count args))]
     (if-let [[effective-target ^Method method] (find-user-method target lowered-name)]
@@ -838,7 +844,7 @@
               (throw (ex-info (str "Method not found: " method-name)
                               {:method method-name
                                :arity (count args)
-                               :class (.getName cls)})))))))))
+                               :class (.getName cls)}))))))))))
 
 (defn- get-user-field
   [target field-name]
