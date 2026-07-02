@@ -4047,8 +4047,31 @@
                           class-validation])
                  :override? false})))
 
+(defn- assert-distinct-lowered-methods!
+  "Nex mangles routine and constructor names by name+arity, so two of them that
+   share both would emit duplicate JVM methods and fail at `defineClass`. Reject
+   the collision here with a clear message; this guards every compilation path,
+   including the REPL and `compile jvm`, where the typechecker may be off."
+  [class-name class-def]
+  (doseq [[kind members] [["routine" (class-methods class-def)]
+                          ["constructor" (class-constructors class-def)]]]
+    (let [sigs (map (fn [m] [(:name m) (count (or (:params m) []))]) members)]
+      (when-let [dup (->> (frequencies sigs)
+                          (filter (fn [[_ n]] (> n 1)))
+                          ffirst)]
+        (let [[dup-name dup-arity] dup]
+          (throw (ex-info
+                  (str "Duplicate " kind " '" dup-name "' taking " dup-arity
+                       (if (= 1 dup-arity) " argument" " arguments")
+                       " in class '" class-name "'. Nex dispatches by name and "
+                       "argument count, so two " kind "s cannot share both a name "
+                       "and an arity; give them different arities or names.")
+                  {:nex-error :duplicate-method
+                   :class class-name :name dup-name :arity dup-arity})))))))
+
 (defn lower-class-def
   [class-def opts]
+  (assert-distinct-lowered-methods! (:name class-def) class-def)
   (let [compiled-classes (:compiled-classes opts)
         class-name (:name class-def)
         class-meta (class-jvm-meta {:compiled-classes compiled-classes} class-name)

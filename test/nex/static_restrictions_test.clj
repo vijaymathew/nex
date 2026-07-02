@@ -42,6 +42,25 @@
   (testing "distinct fields are accepted"
     (is (accepted? "class C feature a: Integer b: String end"))))
 
+(deftest duplicate-methods-rejected
+  (testing "two routines of one class may not share both a name and an arity"
+    (is (rejected-with
+         (str "class A feature "
+              "f(a: Integer): Integer do result := 1 + a end "
+              "f(s: String): String do result := s end end")
+         "Duplicate routine 'f' taking 1 argument")))
+  (testing "same-name routines that differ in arity are accepted (arity dispatch)"
+    (is (accepted?
+         (str "class A feature "
+              "f(a: Integer): Integer do result := 1 + a end "
+              "f(a: Integer, b: Integer): Integer do result := a + b end end"))))
+  (testing "two constructors of one class may not share both a name and an arity"
+    (is (rejected-with
+         (str "class C feature v: Integer create "
+              "make(a: Integer) do v := a end "
+              "make(b: Integer) do v := b end end")
+         "Duplicate constructor 'make' taking 1 argument"))))
+
 (deftest old-only-in-ensure
   (testing "`old` outside an ensure clause is a compile-time error"
     (is (rejected-with "class C feature x: Integer f() do let y := old x print(y) end end"
