@@ -3,7 +3,8 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [nex.compiler.jvm.file :as file]
-            [nex.compiler.jvm.runtime :as runtime]))
+            [nex.compiler.jvm.runtime :as runtime]
+            [nex.parser :as p]))
 
 (defn- delete-tree!
   [root]
@@ -32,6 +33,19 @@
 (defn- free-port []
   (with-open [socket (java.net.ServerSocket. 0)]
     (.getLocalPort socket)))
+
+(deftest compile-ast-rejects-duplicate-name-and-arity-methods-test
+  (testing "lowering rejects same-name/same-arity routines even with the typechecker skipped,
+            so bytecode generation never emits a class that fails at defineClass"
+    (let [src (str "class A feature "
+                   "f(a: Integer): Integer do result := 1 + a end "
+                   "f(s: String): String do result := s end end")
+          ast (p/ast src)
+          ex (try (file/compile-ast "dup.nex" ast {:skip-type-check true})
+                  nil
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (some? ex) "duplicate method must raise rather than emit an invalid class")
+      (is (str/includes? (.getMessage ex) "Duplicate routine 'f' taking 1 argument")))))
 
 (deftest compile-jar-functions-and-control-flow-smoke-test
   (testing "compile-jar runs top-level functions, lets, and control flow end-to-end"

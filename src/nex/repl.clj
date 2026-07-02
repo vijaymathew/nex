@@ -1701,6 +1701,18 @@
         (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
                                                  :wrap-expression-fn wrap-expression})
         (println "Error:" (interp/nex-error-message e))
+        ctx))
+
+    ;; Final safety net: the REPL must survive any evaluation failure, including
+    ;; JVM `Error`s that are not `Exception`s — e.g. a `ClassFormatError` from
+    ;; bytecode generation, a `StackOverflowError` from runaway recursion, or an
+    ;; `AssertionError`. Report it and keep the session alive rather than letting
+    ;; it unwind and kill the loop. (Read-side control flow — EOF / Ctrl-C — is
+    ;; handled separately in `read-input`, so it is unaffected.)
+    (catch Throwable e
+      (let [e (unwrap-user-visible-exception e)]
+        (flush-compiled-output-on-error!)
+        (println "Internal error:" (interp/nex-error-message e))
         ctx))))))
 
 ;;
@@ -1730,10 +1742,19 @@
           (if (str/blank? trimmed)
             ;; Empty line - just continue the loop
             (recur ctx)
-            ;; Non-empty input - process it
-            (let [new-ctx (if (str/starts-with? trimmed ":")
-                           (handle-command ctx trimmed)
-                           (eval-code ctx trimmed))]
+            ;; Non-empty input - process it. `eval-code` guards its own
+            ;; evaluation, but wrap the whole step in a final Throwable net so a
+            ;; failure in a command handler (`handle-command`) or anywhere else
+            ;; cannot unwind and kill the session; on error, keep the prior ctx.
+            (let [new-ctx (try
+                            (if (str/starts-with? trimmed ":")
+                              (handle-command ctx trimmed)
+                              (eval-code ctx trimmed))
+                            (catch Throwable e
+                              (println "Internal error:"
+                                       (interp/nex-error-message
+                                        (unwrap-user-visible-exception e)))
+                              ctx))]
               (if (= new-ctx :quit)
                 ;; Exit requested via :quit command
                 nil

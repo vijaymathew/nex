@@ -3254,6 +3254,29 @@
        (str "Duplicate field '" dup "' in class '" class-name
             "'. The fields of a class must have distinct names.")))))
 
+(defn- check-distinct-methods!
+  "Nex dispatches methods by name and argument count, so no two routines (or
+   two constructors) of one class may share both a name and an arity. Same-name
+   routines that differ in arity are permitted; a type-based overload is not."
+  [class-name body]
+  (let [routines (->> body
+                      (filter #(= :feature-section (:type %)))
+                      (mapcat :members)
+                      (filter #(= :method (:type %))))
+        constructors (->> body
+                          (filter #(= :constructors (:type %)))
+                          (mapcat :constructors))
+        signature (fn [m] [(:name m) (count (or (:params m) []))])]
+    (doseq [[kind members] [["routine" routines] ["constructor" constructors]]]
+      (when-let [dup (first-duplicate (map signature members))]
+        (let [[dup-name dup-arity] dup]
+          (restriction-error!
+           (str "Duplicate " kind " '" dup-name "' taking " dup-arity
+                (if (= 1 dup-arity) " argument" " arguments")
+                " in class '" class-name "'. Nex dispatches by name and argument "
+                "count, so two " kind "s cannot share both a name and an arity; "
+                "give them different arities or names.")))))))
+
 (defn- collect-old-nodes
   "All `old` expression nodes within an AST fragment."
   [node]
@@ -3657,6 +3680,7 @@
         parents (:parents class-def)
         class-env (make-type-env env)]
   (check-distinct-fields! name (:body class-def))
+  (check-distinct-methods! name (:body class-def))
   (check-equals-hash-consistency env name class-def)
   (env-add-var class-env "__current_class__" name)
   (register-generic-param-classes! class-env generic-params)
