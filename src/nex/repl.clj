@@ -1177,7 +1177,7 @@
   since the compiled backend's lowering cannot resolve declared aliases."
   [alias-names ast]
   (and (seq alias-names)
-       (let [annotation-keys [:var-type :target-type :return-type
+       (let [annotation-keys [:var-type :target-type :return-type :field-type
                               :element-type :value-type :key-type]]
          (boolean
           (some (fn [node]
@@ -1248,7 +1248,7 @@
           ;; A node's own `:type` is its kind keyword; only a parameter's
           ;; `:type` (a string or `:base-type` map) is an annotation.
           type-key? (fn [k v]
-                      (or (contains? #{:var-type :target-type :return-type
+                      (or (contains? #{:var-type :target-type :return-type :field-type
                                        :element-type :value-type :key-type} k)
                           (and (= k :type)
                                (or (string? v) (and (map? v) (:base-type v))))))

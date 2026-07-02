@@ -2069,3 +2069,17 @@ end"
                                 "Function `gcd` takes 2 arguments, 3 given")
                 (:errors too-many-result))
           (pr-str (:errors too-many-result))))))
+
+(deftest test-unexpected-internal-exception-becomes-error-result
+  (testing "a non-ExceptionInfo fault during checking returns a failure result, not a raw throw"
+    ;; type-check must always return a result map; internal shape faults (e.g. a
+    ;; ClassCastException from an unexpected AST) must be caught and reported
+    ;; rather than escaping to the caller (REPL/CLI). Force such a fault by making
+    ;; a helper called inside check-program throw a plain RuntimeException.
+    (let [ast (p/ast "let x: Integer := 1")]
+      (with-redefs [tc/check-statement (fn [& _] (throw (RuntimeException. "boom")))]
+        (let [result (tc/type-check ast)]
+          (is (false? (:success result)))
+          (is (seq (:errors result)))
+          (is (some #(str/includes? (:message %) "boom") (:errors result))
+              (pr-str (:errors result))))))))

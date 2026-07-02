@@ -87,6 +87,101 @@
           (is (str/includes? eq "true"))
           (is (str/includes? sum "105")))))))
 
+(deftest repl-compiled-backend-function-type-alias-field-test
+  (testing "a class field typed with a `declare type` function alias resolves on the compiled backend"
+    ;; A class field carries its type under `:field-type`, not `:var-type`, so the
+    ;; REPL's alias expansion (and its interpreter-fallback heuristic) originally
+    ;; skipped it. A field typed with a function alias (e.g. `add: Op`) was left as
+    ;; the raw alias name and later failed to resolve to a JVM type, raising a bare
+    ;; `Error: Op` when a cell created an instance of the class.
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-type-aliases* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx "declare type Op = Function(a: Any, b: Any): Any")
+          (repl/eval-code ctx (str "class Arithmetic\n"
+                                   "  feature\n"
+                                   "    add: Op\n"
+                                   "    apply_add(a: Any, b: Any): Any do\n"
+                                   "      let f: Op := add\n"
+                                   "      result := f(a, b)\n"
+                                   "    end\n"
+                                   "  create\n"
+                                   "    make(the_add: Op) do add := the_add end\n"
+                                   "end")))
+        (let [create-out (with-out-str
+                           (repl/eval-code
+                            ctx
+                            (str "let ar: Arithmetic := create Arithmetic.make("
+                                 "fn (a: Any, b: Any): Any do "
+                                 "if convert a to ai:Integer then "
+                                 "if convert b to bi:Integer then result := ai + bi "
+                                 "else raise \"nope\" end else raise \"nope\" end end)")))
+              call-out (with-out-str (repl/eval-code ctx "ar.apply_add(3, 4)"))]
+          (is (not (str/includes? create-out "Error:")) create-out)
+          (is (str/includes? create-out "Arithmetic"))
+          (is (not (str/includes? call-out "Error:")) call-out)
+          (is (str/includes? call-out "7")))))))
+
+(deftest repl-compiled-backend-method-call-on-interpreter-object-test
+  (testing "a compiled method call dispatches on an object produced by an interpreter-fallback function"
+    ;; `vectorize` below does not compile (its closures convert/iterate arrays),
+    ;; so it runs on the interpreter and returns an interpreter `NexObject` that is
+    ;; stored in the compiled session. A later compiled method call on that binding
+    ;; (`vec.apply_add(...)`) could not reflect user methods off a `NexObject` and
+    ;; failed with `Method not found: apply_add`; it must dispatch back through the
+    ;; interpreter instead (mirroring how function-object invocation already does).
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-type-aliases* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx "declare type Op2 = Function(a: Any, b: Any): Any")
+          (repl/eval-code ctx (str "class VecArith\n"
+                                   "  feature\n"
+                                   "    add: Op2\n"
+                                   "    apply_add(a: Any, b: Any): Any do\n"
+                                   "      let f: Op2 := add\n"
+                                   "      result := f(a, b)\n"
+                                   "    end\n"
+                                   "  create\n"
+                                   "    make(the_add: Op2) do add := the_add end\n"
+                                   "end"))
+          (repl/eval-code ctx (str "let base: VecArith := create VecArith.make("
+                                   "fn (a: Any, b: Any): Any do "
+                                   "if convert a to ai:Integer then "
+                                   "if convert b to bi:Integer then result := ai + bi "
+                                   "else raise \"nope\" end else raise \"nope\" end end)"))
+          (repl/eval-code ctx (str "function vectorize(b: VecArith): VecArith do\n"
+                                   "  result := create VecArith.make(\n"
+                                   "    fn (a: Any, c: Any): Any do\n"
+                                   "      if convert a to av:Array[Any] then\n"
+                                   "        if convert c to cv:Array[Any] then\n"
+                                   "          let out: Array[Any] := []\n"
+                                   "          from let i: Integer := 0 until i >= av.length do\n"
+                                   "            out.add(b.apply_add(av.get(i), cv.get(i)))\n"
+                                   "            i := i + 1\n"
+                                   "          end\n"
+                                   "          result := out\n"
+                                   "        else raise \"na\" end\n"
+                                   "      else raise \"na\" end\n"
+                                   "    end) end"))
+          (repl/eval-code ctx "let vec: VecArith := vectorize(base)"))
+        ;; The producing function fell back to the interpreter, so `vec` is an
+        ;; interpreter object stored in the compiled session.
+        (is (interp/nex-object?
+             (runtime/state-get-value
+              (:state @repl/*compiled-repl-session*) "vec")))
+        (let [call-out (with-out-str
+                         (repl/eval-code ctx "vec.apply_add([1, 2, 3], [10, 20, 30])"))]
+          (is (not (str/includes? call-out "Error:")) call-out)
+          (is (str/includes? call-out "[11, 22, 33]") call-out))))))
+
 (deftest repl-compiled-backend-typed-map-let-displays-binding-type-test
   (testing "compiled backend shows the declared binding type for top-level typed map lets"
     (binding [repl/*type-checking-enabled* (atom true)
