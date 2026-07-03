@@ -28,7 +28,12 @@
 ;; Type aliases (`declare type Name = ...`) declared in earlier inputs, kept by
 ;; name so later lines and the type checker can resolve them.
 (defonce ^:dynamic *repl-type-aliases* (atom {}))
-(defonce ^:dynamic *repl-backend* (atom :compiled))
+(defonce ^:dynamic *repl-backend*
+  ;; Always :compiled: the interpreted REPL backend was removed (backend
+  ;; alignment Stage D3). The interpreter remains reachable only through the
+  ;; internal narrow-fallback paths (wrapped expressions, REPL type aliases,
+  ;; the debugger) and the CLI's --interpret flag.
+  (atom :compiled))
 (defonce ^:dynamic *compiled-repl-session* (atom (compiled-repl/make-session)))
 
 (def nex-keywords
@@ -49,7 +54,7 @@
 
 (def nex-repl-commands
   [":help" ":quit" ":exit" ":clear" ":reset" ":classes" ":vars"
-   ":typecheck" ":load" ":backend"
+   ":typecheck" ":load"
    ":debug" ":break" ":tbreak" ":breaks" ":clearbreak" ":breakon"
    ":enable" ":disable" ":watch" ":watches" ":clearwatch"
    ":enablewatch" ":disablewatch"
@@ -344,9 +349,6 @@
   (println "  :typecheck off    - Disable type checking (default)")
   (println "  :typecheck status - Show current type checking status")
   (println "  :load <path>      - Load and evaluate a .nex file")
-  (println "  :backend compiled    - Use the JVM-compiled REPL path (default)")
-  (println "  :backend interpreter - Use the tree-walking interpreter fallback/escape hatch")
-  (println "  :backend status      - Show current backend")
   (println "  :debug on|off     - Enable/disable debugger")
   (println "  :debug status     - Show debugger status")
   (println "  :break <spec>     - Breakpoint: n | Class.method | Class.method:line | file.nex:line | field:name | Class#field")
@@ -517,36 +519,6 @@
   (do
     (println (str "Type checking is currently: "
                  (if @*type-checking-enabled* "ENABLED" "DISABLED")))
-    ctx))
-
-(defn- repl-cmd-backend-interpreter [ctx input]
-  (do
-    (sync-compiled-session-into-interpreter! ctx)
-    (reset! *repl-backend* :interpreter)
-    (println "REPL backend set to INTERPRETER.")
-    ctx))
-
-(defn- repl-cmd-backend-compiled [ctx input]
-  (do
-    (reset! *repl-backend* :compiled)
-    (let [session (compiled-repl/make-session)]
-      (compiled-repl/sync-interpreter->session! session
-                                                ctx
-                                                @*repl-var-types*
-                                                {:type :program
-                                                 :imports []
-                                                 :interns []
-                                                 :classes []
-                                                 :functions []
-                                                 :statements []
-                                                 :calls []})
-      (reset! *compiled-repl-session* session))
-    (println "REPL backend set to COMPILED. Unsupported inputs will fall back to the interpreter.")
-    ctx))
-
-(defn- repl-cmd-backend-status [ctx input]
-  (do
-    (println (str "REPL backend is currently: " (-> @*repl-backend* name str/upper-case)))
     ctx))
 
 (defn- repl-cmd-load [ctx input]
@@ -929,9 +901,6 @@
    {:names #{":typecheck on"} :handler repl-cmd-typecheck-on}
    {:names #{":typecheck off"} :handler repl-cmd-typecheck-off}
    {:names #{":typecheck" ":typecheck status"} :handler repl-cmd-typecheck-status}
-   {:names #{":backend interpreter"} :handler repl-cmd-backend-interpreter}
-   {:names #{":backend compiled"} :handler repl-cmd-backend-compiled}
-   {:names #{":backend" ":backend status"} :handler repl-cmd-backend-status}
    {:prefix ":load" :handler repl-cmd-load}
    {:names #{":debug on"} :handler repl-cmd-debug-on}
    {:names #{":debug off"} :handler repl-cmd-debug-off}

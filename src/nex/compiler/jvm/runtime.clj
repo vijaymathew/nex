@@ -4,6 +4,8 @@
             [clojure.string :as str]
             [nex.interpreter :as interp]
             [nex.types.builtins :as bi]
+            [nex.types.concurrency :as conc]
+            [nex.types.bootstrap :as bootstrap]
             [nex.types.bootstrap :as bootstrap]
             [nex.types.datetime :as dt]
             [nex.types.http :as http]
@@ -110,8 +112,7 @@
 
 (defn- resolve-java-host-class
   [state class-name]
-  (let [ctx (rebuild-interpreter-ctx state)
-        imported (bi/resolve-imported-java-class ctx class-name)]
+  (let [imported (bi/resolve-imported-java-class {:imports (:imports state)} class-name)]
     (or imported
         (try
           (Class/forName class-name)
@@ -207,15 +208,7 @@
 (defn create-channel
   ([] (create-channel 0))
   ([capacity]
-   (let [ctx (interp/make-context)
-         create-node {:type :create
-                      :class-name "Channel"
-                      :generic-args nil
-                      :constructor (when (pos? capacity) "with_capacity")
-                      :args (if (pos? capacity)
-                              [{:type :literal :value capacity}]
-                              [])}]
-     (interp/eval-node ctx create-node))))
+   (conc/make-channel (long capacity))))
 
 (defn create-array
   []
@@ -929,11 +922,26 @@
   [state class-name]
   (.get ^HashMap @(:classes state) class-name))
 
+(def ^:private builtin-base-class-defs
+  "The standard environment's base classes (Any, Function, Cursor, Comparable,
+   Hashable, and the scalars), for hierarchy walks that cross from program
+   classes into the builtin roots — no interpreter context needed."
+  (delay (into {}
+               (map (fn [class-def] [(:name class-def) class-def]))
+               (concat [(bootstrap/build-any-base-class)
+                        (bootstrap/build-function-base-class)
+                        (bootstrap/build-cursor-base-class)
+                        (bootstrap/build-comparable-base-class)
+                        (bootstrap/build-hashable-base-class)]
+                       (map bootstrap/build-builtin-scalar-class
+                            ["String" "Integer" "Real" "Boolean" "Char"])))))
+
 (defn- compiled-is-parent?
   [state class-name parent-name]
   (letfn [(walk [current seen]
             (when (and current (not (contains? seen current)))
-              (when-let [class-def (class-def-by-name state current)]
+              (when-let [class-def (or (class-def-by-name state current)
+                                       (get @builtin-base-class-defs current))]
                 (let [seen' (conj seen current)
                       parents (:parents class-def)]
                   (or (some #(= (:parent %) parent-name) parents)
@@ -942,10 +950,9 @@
 
 (defn- runtime-compatible-with?
   [state runtime-name target-name]
-  (let [ctx (rebuild-interpreter-ctx state)]
-    (or (= runtime-name target-name)
-        (compiled-is-parent? state runtime-name target-name)
-        (typeinfo/convert-compatible-runtime? interp/is-parent? ctx runtime-name target-name))))
+  (or (= runtime-name target-name)
+      (= target-name "Any")
+      (compiled-is-parent? state runtime-name target-name)))
 
 (defn- collect-effective-field-names
   [state class-def]

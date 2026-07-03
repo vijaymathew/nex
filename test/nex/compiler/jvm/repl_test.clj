@@ -35,14 +35,12 @@
     server))
 
 (deftest repl-compiled-backend-command-and-direct-let-test
-  (testing "experimental compiled backend can directly execute top-level let cells"
+  (testing "the compiled backend (the only REPL backend) directly executes top-level let cells"
     (binding [repl/*type-checking-enabled* (atom false)
               repl/*repl-var-types* (atom {})
-              repl/*repl-backend* (atom :interpreter)
+              repl/*repl-backend* (atom :compiled)
               repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
       (let [ctx0 (repl/init-repl-context)
-            _ (with-out-str
-                (repl/handle-command ctx0 ":backend compiled"))
             let-output (with-out-str
                          (repl/eval-code ctx0 "let x: Integer := 40"))
             globals-after-let @(:bindings (:globals ctx0))
@@ -540,8 +538,6 @@ end"))
       (let [ctx0 (repl/init-repl-context)
             ctx1 (binding [*out* (java.io.StringWriter.)]
                    (repl/eval-code ctx0 "let x: Integer := 40"))
-            _ (with-out-str
-                (repl/handle-command ctx1 ":backend compiled"))
             output (with-out-str
                      (repl/eval-code ctx1 "x + 2"))]
         (is (str/includes? output "42"))))))
@@ -2295,13 +2291,13 @@ end"))]
         (is (str/includes? output "9"))
         (is (not (str/includes? output "timeout")))))))
 
-(deftest repl-compiled-backend-status-command-test
-  (testing "backend status command reports the current backend"
+(deftest repl-backend-commands-removed-test
+  (testing ":backend commands were removed with the interpreted REPL backend (Stage D3)"
     (binding [repl/*repl-backend* (atom :compiled)]
       (let [ctx (repl/init-repl-context)
             output (with-out-str
                      (repl/handle-command ctx ":backend status"))]
-        (is (str/includes? output "COMPILED"))))))
+        (is (str/includes? output "Unknown command"))))))
 
 (deftest repl-compiled-backend-generic-function-with-detachable-elseif-fallback-test
   (testing "compiled REPL accepts generic functions that require detachable refinement across elseif"

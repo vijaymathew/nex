@@ -269,14 +269,11 @@
 (defn fresh-repl-state [backend]
   (let [ctx (repl/init-repl-context)
         var-types (atom {})
-        backend-atom (atom :interpreter)
+        ;; :interpreter here is a developer diagnostic only — the user-facing
+        ;; :backend switch was removed with the interpreted REPL backend
+        ;; (backend alignment, Stage D3).
+        backend-atom (atom backend)
         compiled-session (atom (compiled-repl/make-session))]
-    (binding [repl/*repl-var-types* var-types
-              repl/*repl-backend* backend-atom
-              repl/*compiled-repl-session* compiled-session]
-      (when (= :compiled backend)
-        (with-out-str
-          (repl/handle-command ctx ":backend compiled"))))
     {:ctx ctx
      :var-types var-types
      :backend-atom backend-atom
