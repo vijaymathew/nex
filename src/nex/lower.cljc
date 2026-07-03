@@ -14,6 +14,7 @@
   (:require [clojure.string :as str]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.interpreter :as interp]
+            [nex.types.builtins :as bi]
             [nex.ir :as ir]
             [nex.typechecker :as tc]))
 
@@ -100,7 +101,7 @@
 
 (defn- builtin-method-names
   [type-name]
-  (set (keys (get interp/builtin-type-methods type-name))))
+  (set (keys (get bi/builtin-type-methods type-name))))
 
 (def ^:private builtin-runtime-receiver-types
   #{"Any" "Comparable" "Integer" "Real" "Char" "Boolean" "String"
@@ -189,7 +190,7 @@
   {:base-type "Set" :type-params [elem-type]})
 
 (defn- resolve-collection-return-marker
-  "Resolve a return-type marker from `interp/builtin-type-method-return-type`
+  "Resolve a return-type marker from `bi/builtin-type-method-return-type`
    against the receiver's actual generic arguments. Concrete type names pass
    through unchanged."
   [target-type marker]
@@ -210,7 +211,7 @@
 
 (defn- collection-method-return-type
   [target-type method]
-  (some->> (interp/builtin-type-method-return-type
+  (some->> (bi/builtin-type-method-return-type
             (keyword (base-type-name target-type)) method)
            (resolve-collection-return-marker target-type)))
 
@@ -567,7 +568,7 @@
        (when (direct-collection-method? target-type (:method expr))
          (collection-method-return-type target-type (:method expr)))
        (when (contains? #{"Console" "Process"} base-type)
-         (interp/builtin-type-method-return-type (keyword base-type) (:method expr)))
+         (bi/builtin-type-method-return-type (keyword base-type) (:method expr)))
        ;; Generic type parameter with constraint - look up method on constraint type
        (when-let [constraint (get (:generic-param-constraints env) base-type)]
          (case constraint
