@@ -1448,6 +1448,22 @@
   (validate-type-annotation env target-type)
   (let [value-type (check-expression env value)
         target-type (normalize-type target-type)
+        base-name (fn [t] (if (map? t) (:base-type t) t))
+        numeric? #{"Integer" "Real"}
+        value-base (base-name value-type)
+        target-base (base-name target-type)
+        ;; convert never changes numeric representation: Integer and Real are
+        ;; unrelated classes (spec §4.3), so a statically numeric-to-numeric
+        ;; convert would always yield false at runtime. Reject it here.
+        _ (when (and (numeric? value-base)
+                     (numeric? target-base)
+                     (not= value-base target-base))
+            (throw (ex-info "Invalid convert type relation"
+                            {:error (type-error
+                                     (str "convert cannot change numeric representation ("
+                                          (display-type value-type) " to " (display-type target-type)
+                                          "); an Integer widens implicitly where a Real is"
+                                          " expected, and Real.round() yields an Integer"))})))
         compatible? (or (types-compatible? env value-type target-type)
                         (types-compatible? env target-type value-type)
                         (declared-generic-param? env value-type)

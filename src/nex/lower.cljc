@@ -1697,6 +1697,13 @@
     (when-not bound-type
       (throw (ex-info "convert binding is missing a target type"
                       {:var-name var-name})))
+    ;; The bound variable is detachable (the typechecker binds it as ?T): a
+    ;; failed convert stores nil, so the slot must be a reference type — a raw
+    ;; scalar target like Real would otherwise get a primitive slot and the
+    ;; nil store would NPE at the convert site.
+    (let [bound-type (if (map? bound-type)
+                       (assoc bound-type :detachable true)
+                       {:base-type bound-type :detachable true})]
     (if-let [binding (lookup-convert-binding env var-name)]
     [env binding]
       (if (and (:top-level? env) (not (:scoped-locals? env)))
@@ -1710,7 +1717,7 @@
                  :name var-name
                  :slot (:slot local)
                  :nex-type (:nex-type local)
-                 :jvm-type (:jvm-type local)}])))))
+                 :jvm-type (:jvm-type local)}]))))))
 
 (defn- lower-convert-expression
   [env {:keys [value var-name target-type] :as expr}]
@@ -1782,10 +1789,13 @@
                          (get (:var-types env) var-name))]
     (if current-type
       (let [refined-type (tc/attachable-type current-type)]
+        ;; Refine only the Nex type. The slot's JVM type is fixed at
+        ;; allocation (detachable bindings live in reference slots); re-resolving
+        ;; the attached type here can flip it to a primitive and emit a
+        ;; primitive load from a reference slot (VerifyError).
         (cond-> env
           (get-in env [:locals var-name])
-          (-> (assoc-in [:locals var-name :nex-type] refined-type)
-              (assoc-in [:locals var-name :jvm-type] (resolve-jvm-type env refined-type)))
+          (assoc-in [:locals var-name :nex-type] refined-type)
           true
           (assoc-in [:var-types var-name] refined-type)))
       env)))
@@ -1802,9 +1812,12 @@
                  (cond
                    (get-in acc [:locals name])
                    (let [refined-type (tc/attachable-type type)]
+                     ;; Refine only the Nex type: the slot was allocated for the
+                     ;; detachable (reference) binding and its JVM type cannot
+                     ;; change per-branch — a primitive re-resolve here would
+                     ;; emit DLOAD from an ASTORE'd slot (VerifyError).
                      (-> acc
                          (assoc-in [:locals name :nex-type] refined-type)
-                         (assoc-in [:locals name :jvm-type] (resolve-jvm-type acc refined-type))
                          (assoc-in [:var-types name] refined-type)))
 
                    (:top-level? acc)

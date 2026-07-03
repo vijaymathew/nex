@@ -222,8 +222,9 @@ end")
     (is (= "length" (:method ret-expr)))
     (is (= 0 (count (:args ret-expr))))))
 
-(deftest lower-top-level-if-convert-guard-binds-typed-local-test
-  (testing "top-level if convert guards allocate locals with the target JVM type"
+(deftest lower-top-level-if-convert-guard-binds-detachable-local-test
+  (testing "convert guards bind a detachable (reference-typed) local: a failed
+            convert stores nil, so the slot must never be primitive"
     (let [program (p/ast "if convert books.get(0).get(\"year\") to year: Integer then
   print(year + 1)
 end")
@@ -234,13 +235,14 @@ end")
           block (first (:body unit))
           if-stmt (second (:body block))
           binding (get-in if-stmt [:test :binding])]
-      ;; The Integer local is a 64-bit :long, which occupies two JVM slots, so the
-      ;; next free slot is 3 (slot 0 is the receiver, the long takes slots 1-2).
-      (is (= 3 (:next-slot env)))
+      ;; The binding is a one-slot reference local (slot 0 is the receiver).
+      (is (= 2 (:next-slot env)))
       (is (= :local (:kind binding)))
-      (is (= "Integer" (:nex-type binding)))
-      (is (= :long (:jvm-type binding)))
-      (is (= :long (get-in if-stmt [:then 0 :expr :args 0 :left :jvm-type]))))))
+      (is (= {:base-type "Integer" :detachable true} (:nex-type binding)))
+      (is (= (ir/object-jvm-type "java/lang/Object") (:jvm-type binding)))
+      ;; Reads inside the guarded branch keep the slot's reference type.
+      (is (= (ir/object-jvm-type "java/lang/Object")
+             (get-in if-stmt [:then 0 :expr :args 0 :left :jvm-type]))))))
 
 (deftest lower-operators-to-explicit-ir-test
   (testing "unary, concat, modulo, and bitwise operators lower to explicit operator-aware IR"
