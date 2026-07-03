@@ -107,7 +107,11 @@
 
 (defn env-lookup-type-alias
   [env name]
-  (if-let [t (get @(:type-aliases env) name)]
+  ;; Tolerate envs without a :type-aliases atom: the lowering layer calls
+  ;; types-compatible?/types-equal? with its own env map, which carries class
+  ;; and generic info but no alias registry.
+  (if-let [t (when-let [aliases (:type-aliases env)]
+               (get @aliases name))]
     t
     (when (:parent env)
       (env-lookup-type-alias (:parent env) name))))

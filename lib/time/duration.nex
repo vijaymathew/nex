@@ -2,7 +2,7 @@ class Duration
   note "Time span stored as total milliseconds."
 
 create
-  milliseconds(ms: Integer64) do
+  milliseconds(ms: Integer) do
     this.millis := ms
   end
 
@@ -27,9 +27,9 @@ create
   end
 
 feature
-  millis: Integer64
+  millis: Integer
 
-  total_milliseconds(): Integer64 do
+  total_milliseconds(): Integer do
     result := millis
   end
 

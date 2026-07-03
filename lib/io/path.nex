@@ -41,11 +41,11 @@ feature
     result := create Path.make(path_normalize(path))
   end
 
-  size(): Integer64 do
+  size(): Integer do
     result := path_size(path)
   end
 
-  modified_time(): Integer64 do
+  modified_time(): Integer do
     result := path_modified_time(path)
   end
 

@@ -8,7 +8,7 @@ create
     this.millis := datetime_now()
   end
 
-  from_epoch_millis(ms: Integer64) do
+  from_epoch_millis(ms: Integer) do
     this.millis := datetime_from_epoch_millis(ms)
   end
 
@@ -21,7 +21,7 @@ create
   end
 
 feature
-  millis: Integer64
+  millis: Integer
 
   year(): Integer do
     result := datetime_year(millis)
@@ -66,7 +66,7 @@ feature
     result := datetime_second(millis)
   end
 
-  epoch_millis(): Integer64 do
+  epoch_millis(): Integer do
     result := datetime_epoch_millis(millis)
   end
 
