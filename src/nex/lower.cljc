@@ -2501,6 +2501,19 @@
                               nex-type
                               jvm-type)
 
+        ;; Integer / and % go through checked runtime helpers (like op:pow-*):
+        ;; raw LDIV/LREM would leak the host's "/ by zero" message and silently
+        ;; wrap MIN_LONG / -1 instead of raising like the interpreter.
+        (and (#{"/" "%"} op) (#{:int :long} jvm-type))
+        (ir/call-runtime-node (case [op jvm-type]
+                                ["/" :int] "op:div-int"
+                                ["/" :long] "op:div-long"
+                                ["%" :int] "op:mod-int"
+                                ["%" :long] "op:mod-long")
+                              [left-ir right-ir]
+                              nex-type
+                              jvm-type)
+
         (#{"+" "-" "*" "/" "%" "and" "or"} op)
         (ir/binary-node (get {"+" :add
                               "-" :sub

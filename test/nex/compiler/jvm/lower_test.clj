@@ -260,8 +260,10 @@ end")
       (is (= "op:string-concat" (:helper concat-expr)))
       (is (= :unary (:op unary-expr)))
       (is (= :neg (:operator unary-expr)))
-      (is (= :binary (:op mod-expr)))
-      (is (= :mod (:operator mod-expr)))
+      ;; Integer % lowers to the checked runtime helper (canonical zero-divisor
+      ;; message, truncated semantics shared with the interpreter), not LREM.
+      (is (= :call-runtime (:op mod-expr)))
+      (is (= "op:mod-long" (:helper mod-expr)))
       (is (= :binary (:op bitwise-expr)))
       (is (= :bit-and (:operator bitwise-expr))))))
 

@@ -818,6 +818,11 @@
 
 (defn- invoke-user-method
   [state target method-name args]
+  (when (nil? target)
+    ;; A nil receiver must surface as the language's void-call error, not as a
+    ;; raw JVM NullPointerException from the reflective dispatch below.
+    (throw (ex-info "Used a value that is void (nil)"
+                    {:method method-name :arity (count args)})))
   (if (interp/nex-object? target)
     ;; The target was produced by the interpreter (e.g. returned from a function
     ;; that fell back to the tree-walker) and stored in the compiled session. The
@@ -1085,6 +1090,22 @@
 (defn string-concat
   [state args]
   (apply str (map #(concat-string-value state %) args)))
+
+(defn div-int
+  [a b]
+  (int (rt/nex-int-div (long a) (long b))))
+
+(defn div-long
+  [a b]
+  (long (rt/nex-int-div (long a) (long b))))
+
+(defn mod-int
+  [a b]
+  (int (rt/nex-int-mod (long a) (long b))))
+
+(defn mod-long
+  [a b]
+  (long (rt/nex-int-mod (long a) (long b))))
 
 (defn pow-int
   [a b]
@@ -1660,6 +1681,11 @@
 (defn identity-equals
   [a b]
   (cond
+    ;; On scalars == coincides with = (spec §5.1), so a mixed Integer/Real
+    ;; pair compares by numeric value: 5 == 5.0 is true, like the interpreter.
+    (and (rt/nex-numeric? a) (rt/nex-numeric? b))
+    (rt/nex-numeric-equals? a b)
+
     (and (scalar-identity-value? a)
          (scalar-identity-value? b))
     (= a b)
@@ -1925,6 +1951,18 @@
 
     (= name "op:string-concat")
     (apply str (map #(concat-string-value state %) args))
+
+    (= name "op:div-int")
+    (div-int (first args) (second args))
+
+    (= name "op:div-long")
+    (div-long (first args) (second args))
+
+    (= name "op:mod-int")
+    (mod-int (first args) (second args))
+
+    (= name "op:mod-long")
+    (mod-long (first args) (second args))
 
     (= name "op:pow-int")
     (int (rt/nex-int-pow (int (first args)) (int (second args))))
