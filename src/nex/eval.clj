@@ -104,43 +104,57 @@
           (System/setOut real-out))))))
 
 (defn- run-ast
-  "Run a whole program. Prefers the compiled JVM backend (reference semantics,
-   matching the REPL). Falls back to the tree-walking interpreter — loudly, on
-   stderr — only when the program cannot be compiled; a runtime failure of the
-   compiled program is reported as the program's outcome and never re-executed."
-  [source-id ast]
-  (let [{:keys [compiled compile-error]} (try-compile source-id ast)]
-    (if compile-error
-      (do (warn-fallback! (str "program is outside the compiled subset ("
-                               (or (ex-message compile-error) (str compile-error))
-                               ")"))
-          (run-interpreted source-id ast))
-      (if-let [{:keys [backend-defect]} (run-compiled compiled)]
-        (do (warn-fallback! (str "compiled program failed to link ("
-                                 (or (ex-message backend-defect) (str backend-defect))
-                                 ")"))
-            (run-interpreted source-id ast))
-        nil))))
+  "Run a whole program on the compiled JVM backend (reference semantics,
+   matching the REPL). The tree-walking interpreter runs only on explicit
+   request (:interpret? — the CLI's --interpret flag); a program outside the
+   compiled subset is otherwise an error naming the unsupported construct. A
+   runtime failure of the compiled program is the program's outcome and is
+   never re-executed. The one automatic fallback left is a LinkageError — a
+   backend defect, not the program's behaviour — which runs interpreted with a
+   warning rather than failing a valid program."
+  [source-id ast {:keys [interpret?]}]
+  (if interpret?
+    (run-interpreted source-id ast)
+    (let [{:keys [compiled compile-error]} (try-compile source-id ast)]
+      (if compile-error
+        (throw (ex-info (str "this program uses a construct the compiled backend"
+                             " does not support yet ("
+                             (or (ex-message compile-error) (str compile-error))
+                             "); run it with --interpret to use the tree-walking"
+                             " interpreter")
+                        {:type :not-compilable}
+                        compile-error))
+        (if-let [{:keys [backend-defect]} (run-compiled compiled)]
+          (do (warn-fallback! (str "compiled program failed to link ("
+                                   (or (ex-message backend-defect) (str backend-defect))
+                                   ")"))
+              (run-interpreted source-id ast))
+          nil)))))
 
 (defn eval-file
-  "Parse and evaluate a Nex file"
-  [file-path]
-  (let [source-id (.getCanonicalPath (io/file file-path))
-        source (slurp source-id)
-        ast (parser/ast source)]
-    (type-check-ast! source-id ast)
-    (run-ast source-id ast)))
+  "Parse and evaluate a Nex file. opts: {:interpret? bool} to force the
+   tree-walking interpreter instead of the compiled JVM backend."
+  ([file-path] (eval-file file-path {}))
+  ([file-path opts]
+   (let [source-id (.getCanonicalPath (io/file file-path))
+         source (slurp source-id)
+         ast (parser/ast source)]
+     (type-check-ast! source-id ast)
+     (run-ast source-id ast opts))))
 
 (defn -main
-  "Main entry point for nex eval command"
+  "Main entry point for nex eval command.
+   Usage: nex.eval [--interpret] <file.nex>"
   [& args]
-  (when (empty? args)
-    (println "Error: No file provided")
-    (System/exit 1))
-
-  (let [file (first args)]
+  (let [interpret? (boolean (some #{"--interpret"} args))
+        files (remove #{"--interpret"} args)
+        file (first files)]
+    (when (nil? file)
+      (println "Error: No file provided")
+      (println "Usage: nex <file.nex> [--interpret]")
+      (System/exit 1))
     (try
-      (eval-file file)
+      (eval-file file {:interpret? interpret?})
       (System/exit 0)
       (catch ParseError e
         (println "Syntax error:")
