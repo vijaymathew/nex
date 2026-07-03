@@ -9,6 +9,10 @@
             [nex.types.runtime :as rt]
             [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo]
+            [nex.types.json :as json-types]
+            [nex.types.datetime :as dt]
+            [nex.types.regex :as regex-types]
+            [nex.types.http :as http]
             [nex.types.concurrency :as conc])
   #?(:clj (:import [java.nio.charset StandardCharsets]
                    [java.util.concurrent CompletableFuture ExecutionException TimeUnit TimeoutException CancellationException]
@@ -155,7 +159,9 @@
          :call-object-method (fn [_ _ method _]
                                (throw (ex-info (str "No engine registered to invoke method: " method)
                                                {:method method})))
-         :user-to-string (fn [_ _] nil)}))
+         :user-to-string (fn [_ _] nil)
+         :add-output (fn [_ line] (rt/nex-console-println line))
+         :is-parent? (fn [_ _ _] false)}))
 
 (defn set-engine-hooks!
   "Register engine capabilities. Keys: :nex-object? :make-object
@@ -993,3 +999,725 @@
        (apply method-fn value args))
      (throw (ex-info (str "Method not found on type: " method-name)
                      {:target target :value value :method method-name})))))
+
+;; ---------------------------------------------------------------------------
+;; Free-function builtins (Stage D2). `builtins` maps a builtin function name
+;; to (fn [ctx & args]); print, type_is, and http-server handler dispatch go
+;; through the engine hooks (:add-output, :is-parent?, :call-object-method).
+;; ---------------------------------------------------------------------------
+
+(defn add-output
+  "Record one line of program output through the engine hook (the interpreter
+   accumulates it on the context; the default writes to the console)."
+  [ctx line]
+  ((:add-output @engine-hooks) ctx line))
+
+(defn is-parent?
+  "Class-hierarchy query through the engine hook."
+  [ctx class-name parent-name]
+  ((:is-parent? @engine-hooks) ctx class-name parent-name))
+
+(defn print-output-value
+  "Convert a value for built-in print/println output.
+   Preserve existing formatting for non-objects, but respect user-defined
+   to_string implementations on Nex objects."
+  [ctx value]
+  (if (nex-object? value)
+    (concat-string-value ctx value)
+    (nex-format-value value)))
+
+(defn runtime-type-name [value]
+  (typeinfo/runtime-type-name nex-object? get-type-name value))
+
+(defn runtime-type-is? [ctx target-type value]
+  (typeinfo/runtime-type-is? runtime-type-name is-parent? ctx target-type value))
+
+#?(:clj
+   (defn java-http-request
+     [method url body timeout-ms]
+     (http/java-http-request make-object method url body timeout-ms)))
+
+#?(:clj
+   (defn make-http-server-handle
+     [port]
+     (http/make-http-server-handle port)))
+
+#?(:clj
+   (defn start-http-server!
+     [ctx handle]
+     (http/start-http-server!
+      make-object
+      (fn [inner-ctx handler request-obj]
+        (eval-call inner-ctx handler "call1" [request-obj]))
+      ctx
+      handle)))
+
+#?(:clj
+   (defn resolve-imported-java-class
+     "Resolve a Java class name using imports in the context."
+     [ctx class-name]
+     (let [imports @(:imports ctx)
+           match (some (fn [{:keys [qualified-name source]}]
+                         (when (and (nil? source)
+                                    qualified-name
+                                    (= class-name (last (str/split qualified-name #"\."))))
+                           qualified-name))
+                       imports)
+           qualified (or match class-name)]
+       (try
+         (Class/forName qualified)
+         (catch Exception _ nil)))))
+
+#?(:clj
+   (defn java-create-object
+     "Create a Java object via reflection."
+     [ctx class-name arg-values]
+     (let [klass (resolve-imported-java-class ctx class-name)]
+       (when-not klass
+         (throw (ex-info (str "Undefined class: " class-name)
+                         {:class-name class-name})))
+       (clojure.lang.Reflector/invokeConstructor klass (to-array arg-values)))))
+
+#?(:clj
+   (defn java-call-method
+     "Call a Java method via reflection."
+     [target method-name arg-values]
+     (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array arg-values))))
+
+(def builtins
+  {"print"
+   (fn [ctx & args]
+     (let [output (str/join " " (map #(print-output-value ctx %) args))]
+       (add-output ctx output)
+       nil))
+
+   "println"
+   (fn [ctx & args]
+     (let [output (str/join " " (map #(print-output-value ctx %) args))]
+       (add-output ctx output)
+       nil))
+
+   "type_of"
+   (fn [ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "type_of expects exactly 1 argument"
+                       {:function "type_of" :expected 1 :actual (count args)})))
+     (runtime-type-name (first args)))
+
+   "type_is"
+   (fn [ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "type_is expects exactly 2 arguments"
+                       {:function "type_is" :expected 2 :actual (count args)})))
+     (let [[target-type value] args]
+       (runtime-type-is? ctx target-type value)))
+
+   "await_all"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "await_all expects exactly 1 argument"
+                       {:function "await_all" :expected 1 :actual (count args)})))
+     (let [tasks (first args)]
+       (when-not (nex-array? tasks)
+         (throw (ex-info "await_all requires an array of tasks"
+                         {:function "await_all" :actual-type (runtime-type-name tasks)})))
+       (doseq [task tasks]
+         (when-not (= (:nex-builtin-type task) :Task)
+           (throw (ex-info "await_all requires an array of tasks"
+                           {:function "await_all" :actual-type (runtime-type-name task)}))))
+       (await-all-tasks tasks)))
+
+   "await_any"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "await_any expects exactly 1 argument"
+                       {:function "await_any" :expected 1 :actual (count args)})))
+     (let [tasks (first args)]
+       (when-not (nex-array? tasks)
+         (throw (ex-info "await_any requires an array of tasks"
+                         {:function "await_any" :actual-type (runtime-type-name tasks)})))
+       (doseq [task tasks]
+         (when-not (= (:nex-builtin-type task) :Task)
+           (throw (ex-info "await_any requires an array of tasks"
+                           {:function "await_any" :actual-type (runtime-type-name task)}))))
+       (await-any-task tasks)))
+
+   "sleep"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "sleep expects exactly 1 argument"
+                       {:function "sleep" :expected 1 :actual (count args)})))
+     #?(:clj (do
+               (Thread/sleep (long (first args)))
+               nil)
+        :cljs (js/Promise. (fn [resolve _reject]
+                             (js/setTimeout #(resolve nil) (long (first args)))))))
+
+   "hint_spin"
+   (fn [_ctx & args]
+     (when (not= (count args) 0)
+       (throw (ex-info "hint_spin expects exactly 0 arguments"
+                       {:function "hint_spin" :expected 0 :actual (count args)})))
+     #?(:clj (Thread/onSpinWait)
+        :cljs nil)
+     nil)
+
+   "random_real"
+   (fn [_ctx & args]
+     (when (not= (count args) 0)
+       (throw (ex-info "random_real expects exactly 0 arguments"
+                       {:function "random_real" :expected 0 :actual (count args)})))
+     (rand))
+
+   "http_get"
+   (fn [_ctx & args]
+     (when-not (or (= (count args) 1) (= (count args) 2))
+       (throw (ex-info "http_get expects 1 or 2 arguments"
+                       {:function "http_get" :expected "1 or 2" :actual (count args)})))
+     (let [[url timeout-ms] args]
+       #?(:clj (java-http-request "GET" (str url) nil timeout-ms)
+          :cljs (throw (ex-info "http_get is not supported in the ClojureScript interpreter"
+                                {:function "http_get"})))))
+
+   "http_post"
+   (fn [_ctx & args]
+     (when-not (or (= (count args) 2) (= (count args) 3))
+       (throw (ex-info "http_post expects 2 or 3 arguments"
+                       {:function "http_post" :expected "2 or 3" :actual (count args)})))
+     (let [[url body timeout-ms] args]
+       #?(:clj (java-http-request "POST" (str url) (str body) timeout-ms)
+          :cljs (throw (ex-info "http_post is not supported in the ClojureScript interpreter"
+                                {:function "http_post"})))))
+
+   "json_parse"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "json_parse expects exactly 1 argument"
+                       {:function "json_parse" :expected 1 :actual (count args)})))
+     #?(:clj (json-types/nex-json-parse (first args))
+        :cljs (throw (ex-info "json_parse is not supported in the ClojureScript interpreter"
+                              {:function "json_parse"}))))
+
+   "json_stringify"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "json_stringify expects exactly 1 argument"
+                       {:function "json_stringify" :expected 1 :actual (count args)})))
+     #?(:clj (json-types/nex-json-stringify (first args))
+        :cljs (throw (ex-info "json_stringify is not supported in the ClojureScript interpreter"
+                              {:function "json_stringify"}))))
+
+   "regex_validate"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "regex_validate expects exactly 2 arguments" {:function "regex_validate"})))
+     #?(:clj (regex-types/regex-validate (first args) (second args))
+        :cljs (throw (ex-info "regex_validate is not supported in the ClojureScript interpreter"
+                              {:function "regex_validate"}))))
+
+   "regex_matches"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "regex_matches expects exactly 3 arguments" {:function "regex_matches"})))
+     #?(:clj (apply regex-types/regex-matches? args)
+        :cljs (throw (ex-info "regex_matches is not supported in the ClojureScript interpreter"
+                              {:function "regex_matches"}))))
+
+   "regex_find"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "regex_find expects exactly 3 arguments" {:function "regex_find"})))
+     #?(:clj (apply regex-types/regex-find args)
+        :cljs (throw (ex-info "regex_find is not supported in the ClojureScript interpreter"
+                              {:function "regex_find"}))))
+
+   "regex_find_all"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "regex_find_all expects exactly 3 arguments" {:function "regex_find_all"})))
+     #?(:clj (apply regex-types/regex-find-all args)
+        :cljs (throw (ex-info "regex_find_all is not supported in the ClojureScript interpreter"
+                              {:function "regex_find_all"}))))
+
+   "regex_replace"
+   (fn [_ctx & args]
+     (when (not= (count args) 4)
+       (throw (ex-info "regex_replace expects exactly 4 arguments" {:function "regex_replace"})))
+     #?(:clj (apply regex-types/regex-replace args)
+        :cljs (throw (ex-info "regex_replace is not supported in the ClojureScript interpreter"
+                              {:function "regex_replace"}))))
+
+   "regex_split"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "regex_split expects exactly 3 arguments" {:function "regex_split"})))
+     #?(:clj (apply regex-types/regex-split args)
+        :cljs (throw (ex-info "regex_split is not supported in the ClojureScript interpreter"
+                              {:function "regex_split"}))))
+
+   "datetime_now"
+   (fn [_ctx & args]
+     (when (not= (count args) 0)
+       (throw (ex-info "datetime_now expects exactly 0 arguments" {:function "datetime_now"})))
+     #?(:clj (dt/datetime-now)
+        :cljs (throw (ex-info "datetime_now is not supported in the ClojureScript interpreter"
+                              {:function "datetime_now"}))))
+
+   "datetime_from_epoch_millis"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_from_epoch_millis expects exactly 1 argument" {:function "datetime_from_epoch_millis"})))
+     #?(:clj (dt/datetime-from-epoch-millis (first args))
+        :cljs (throw (ex-info "datetime_from_epoch_millis is not supported in the ClojureScript interpreter"
+                              {:function "datetime_from_epoch_millis"}))))
+
+   "datetime_parse_iso"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_parse_iso expects exactly 1 argument" {:function "datetime_parse_iso"})))
+     #?(:clj (dt/datetime-parse-iso (first args))
+        :cljs (throw (ex-info "datetime_parse_iso is not supported in the ClojureScript interpreter"
+                              {:function "datetime_parse_iso"}))))
+
+   "datetime_make"
+   (fn [_ctx & args]
+     (when (not= (count args) 6)
+       (throw (ex-info "datetime_make expects exactly 6 arguments" {:function "datetime_make"})))
+     #?(:clj (apply dt/datetime-make args)
+        :cljs (throw (ex-info "datetime_make is not supported in the ClojureScript interpreter"
+                              {:function "datetime_make"}))))
+
+   "datetime_year"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_year expects exactly 1 argument" {:function "datetime_year"})))
+     #?(:clj (dt/datetime-year (first args))
+        :cljs (throw (ex-info "datetime_year is not supported in the ClojureScript interpreter"
+                              {:function "datetime_year"}))))
+
+   "datetime_month"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_month expects exactly 1 argument" {:function "datetime_month"})))
+     #?(:clj (dt/datetime-month (first args))
+        :cljs (throw (ex-info "datetime_month is not supported in the ClojureScript interpreter"
+                              {:function "datetime_month"}))))
+
+   "datetime_day"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_day expects exactly 1 argument" {:function "datetime_day"})))
+     #?(:clj (dt/datetime-day (first args))
+        :cljs (throw (ex-info "datetime_day is not supported in the ClojureScript interpreter"
+                              {:function "datetime_day"}))))
+
+   "datetime_weekday"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_weekday expects exactly 1 argument" {:function "datetime_weekday"})))
+     #?(:clj (dt/datetime-weekday (first args))
+        :cljs (throw (ex-info "datetime_weekday is not supported in the ClojureScript interpreter"
+                              {:function "datetime_weekday"}))))
+
+   "datetime_day_of_year"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_day_of_year expects exactly 1 argument" {:function "datetime_day_of_year"})))
+     #?(:clj (dt/datetime-day-of-year (first args))
+        :cljs (throw (ex-info "datetime_day_of_year is not supported in the ClojureScript interpreter"
+                              {:function "datetime_day_of_year"}))))
+
+   "datetime_hour"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_hour expects exactly 1 argument" {:function "datetime_hour"})))
+     #?(:clj (dt/datetime-hour (first args))
+        :cljs (throw (ex-info "datetime_hour is not supported in the ClojureScript interpreter"
+                              {:function "datetime_hour"}))))
+
+   "datetime_minute"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_minute expects exactly 1 argument" {:function "datetime_minute"})))
+     #?(:clj (dt/datetime-minute (first args))
+        :cljs (throw (ex-info "datetime_minute is not supported in the ClojureScript interpreter"
+                              {:function "datetime_minute"}))))
+
+   "datetime_second"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_second expects exactly 1 argument" {:function "datetime_second"})))
+     #?(:clj (dt/datetime-second (first args))
+        :cljs (throw (ex-info "datetime_second is not supported in the ClojureScript interpreter"
+                              {:function "datetime_second"}))))
+
+   "datetime_epoch_millis"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_epoch_millis expects exactly 1 argument" {:function "datetime_epoch_millis"})))
+     #?(:clj (dt/datetime-epoch-millis (first args))
+        :cljs (throw (ex-info "datetime_epoch_millis is not supported in the ClojureScript interpreter"
+                              {:function "datetime_epoch_millis"}))))
+
+   "datetime_add_millis"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "datetime_add_millis expects exactly 2 arguments" {:function "datetime_add_millis"})))
+     #?(:clj (apply dt/datetime-add-millis args)
+        :cljs (throw (ex-info "datetime_add_millis is not supported in the ClojureScript interpreter"
+                              {:function "datetime_add_millis"}))))
+
+   "datetime_diff_millis"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "datetime_diff_millis expects exactly 2 arguments" {:function "datetime_diff_millis"})))
+     #?(:clj (apply dt/datetime-diff-millis args)
+        :cljs (throw (ex-info "datetime_diff_millis is not supported in the ClojureScript interpreter"
+                              {:function "datetime_diff_millis"}))))
+
+   "datetime_truncate_to_day"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_truncate_to_day expects exactly 1 argument" {:function "datetime_truncate_to_day"})))
+     #?(:clj (dt/datetime-truncate-to-day (first args))
+        :cljs (throw (ex-info "datetime_truncate_to_day is not supported in the ClojureScript interpreter"
+                              {:function "datetime_truncate_to_day"}))))
+
+   "datetime_truncate_to_hour"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_truncate_to_hour expects exactly 1 argument" {:function "datetime_truncate_to_hour"})))
+     #?(:clj (dt/datetime-truncate-to-hour (first args))
+        :cljs (throw (ex-info "datetime_truncate_to_hour is not supported in the ClojureScript interpreter"
+                              {:function "datetime_truncate_to_hour"}))))
+
+   "datetime_format_iso"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "datetime_format_iso expects exactly 1 argument" {:function "datetime_format_iso"})))
+     #?(:clj (dt/datetime-format-iso (first args))
+        :cljs (throw (ex-info "datetime_format_iso is not supported in the ClojureScript interpreter"
+                              {:function "datetime_format_iso"}))))
+
+   "path_exists"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_exists expects exactly 1 argument" {:function "path_exists"})))
+     (rt/path-exists? (str (first args))))
+
+   "path_is_file"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_is_file expects exactly 1 argument" {:function "path_is_file"})))
+     (rt/path-is-file? (str (first args))))
+
+   "path_is_directory"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_is_directory expects exactly 1 argument" {:function "path_is_directory"})))
+     (rt/path-is-directory? (str (first args))))
+
+   "path_name"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_name expects exactly 1 argument" {:function "path_name"})))
+     (rt/path-name (str (first args))))
+
+   "path_extension"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_extension expects exactly 1 argument" {:function "path_extension"})))
+     (rt/path-extension (str (first args))))
+
+   "path_name_without_extension"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_name_without_extension expects exactly 1 argument" {:function "path_name_without_extension"})))
+     (rt/path-name-without-extension (str (first args))))
+
+   "path_absolute"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_absolute expects exactly 1 argument" {:function "path_absolute"})))
+     (str (rt/path-absolute (str (first args)))))
+
+   "path_normalize"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_normalize expects exactly 1 argument" {:function "path_normalize"})))
+     (str (rt/path-normalize (str (first args)))))
+
+   "path_size"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_size expects exactly 1 argument" {:function "path_size"})))
+     (rt/path-size (str (first args))))
+
+   "path_modified_time"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_modified_time expects exactly 1 argument" {:function "path_modified_time"})))
+     (rt/path-modified-time (str (first args))))
+
+   "path_parent"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_parent expects exactly 1 argument" {:function "path_parent"})))
+     (rt/path-parent (str (first args))))
+
+   "path_child"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_child expects exactly 2 arguments" {:function "path_child"})))
+     (rt/path-child (str (first args)) (str (second args))))
+
+   "path_create_file"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_create_file expects exactly 1 argument" {:function "path_create_file"})))
+     (rt/path-create-file (str (first args))))
+
+   "path_create_directory"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_create_directory expects exactly 1 argument" {:function "path_create_directory"})))
+     (rt/path-create-directory (str (first args))))
+
+   "path_create_directories"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_create_directories expects exactly 1 argument" {:function "path_create_directories"})))
+     (rt/path-create-directories (str (first args))))
+
+   "path_delete"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_delete expects exactly 1 argument" {:function "path_delete"})))
+     (rt/path-delete (str (first args))))
+
+   "path_delete_tree"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_delete_tree expects exactly 1 argument" {:function "path_delete_tree"})))
+     (rt/path-delete-tree (str (first args))))
+
+   "path_copy"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_copy expects exactly 2 arguments" {:function "path_copy"})))
+     (rt/path-copy (str (first args)) (str (second args))))
+
+   "path_move"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_move expects exactly 2 arguments" {:function "path_move"})))
+     (rt/path-move (str (first args)) (str (second args))))
+
+   "path_read_text"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_read_text expects exactly 1 argument" {:function "path_read_text"})))
+     (rt/path-read-text (str (first args))))
+
+   "path_write_text"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_write_text expects exactly 2 arguments" {:function "path_write_text"})))
+     (rt/path-write-text (str (first args)) (str (second args))))
+
+   "path_append_text"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "path_append_text expects exactly 2 arguments" {:function "path_append_text"})))
+     (rt/path-append-text (str (first args)) (str (second args))))
+
+   "path_list"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_list expects exactly 1 argument" {:function "path_list"})))
+     (rt/path-list (str (first args))))
+
+   "text_file_open_read"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_open_read expects exactly 1 argument" {:function "text_file_open_read"})))
+     (rt/text-file-open-read (str (first args))))
+
+   "text_file_open_write"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_open_write expects exactly 1 argument" {:function "text_file_open_write"})))
+     (rt/text-file-open-write (str (first args))))
+
+   "text_file_open_append"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_open_append expects exactly 1 argument" {:function "text_file_open_append"})))
+     (rt/text-file-open-append (str (first args))))
+
+   "text_file_read_line"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_read_line expects exactly 1 argument" {:function "text_file_read_line"})))
+     (rt/text-file-read-line (first args)))
+
+   "text_file_write"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "text_file_write expects exactly 2 arguments" {:function "text_file_write"})))
+     (rt/text-file-write (first args) (str (second args))))
+
+   "text_file_close"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "text_file_close expects exactly 1 argument" {:function "text_file_close"})))
+     (rt/text-file-close (first args)))
+
+   "binary_file_open_read"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_open_read expects exactly 1 argument" {:function "binary_file_open_read"})))
+     (rt/binary-file-open-read (str (first args))))
+
+   "binary_file_open_write"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_open_write expects exactly 1 argument" {:function "binary_file_open_write"})))
+     (rt/binary-file-open-write (str (first args))))
+
+   "binary_file_open_append"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_open_append expects exactly 1 argument" {:function "binary_file_open_append"})))
+     (rt/binary-file-open-append (str (first args))))
+
+   "binary_file_read_all"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_read_all expects exactly 1 argument" {:function "binary_file_read_all"})))
+     (rt/binary-file-read-all (first args)))
+
+   "binary_file_read"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "binary_file_read expects exactly 2 arguments" {:function "binary_file_read"})))
+     (rt/binary-file-read (first args) (second args)))
+
+   "binary_file_write"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "binary_file_write expects exactly 2 arguments" {:function "binary_file_write"})))
+     (rt/binary-file-write (first args) (second args)))
+
+   "binary_file_position"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_position expects exactly 1 argument" {:function "binary_file_position"})))
+     (rt/binary-file-position (first args)))
+
+   "binary_file_seek"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "binary_file_seek expects exactly 2 arguments" {:function "binary_file_seek"})))
+     (rt/binary-file-seek (first args) (second args)))
+
+   "binary_file_close"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "binary_file_close expects exactly 1 argument" {:function "binary_file_close"})))
+     (rt/binary-file-close (first args)))
+
+   "http_server_create"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "http_server_create expects exactly 1 argument"
+                       {:function "http_server_create" :expected 1 :actual (count args)})))
+     #?(:clj (make-http-server-handle (int (first args)))
+        :cljs (throw (ex-info "http_server_create is not supported in the ClojureScript interpreter"
+                              {:function "http_server_create"}))))
+
+   "http_server_get"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "http_server_get expects exactly 3 arguments"
+                       {:function "http_server_get" :expected 3 :actual (count args)})))
+     (let [[handle path handler] args]
+       #?(:clj (do
+                 (swap! (get-in handle [:routes "GET"]) conj {:path-pattern (str path)
+                                                              :handler handler})
+                 nil)
+          :cljs (throw (ex-info "http_server_get is not supported in the ClojureScript interpreter"
+                                {:function "http_server_get"})))))
+
+   "http_server_post"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "http_server_post expects exactly 3 arguments"
+                       {:function "http_server_post" :expected 3 :actual (count args)})))
+     (let [[handle path handler] args]
+       #?(:clj (do
+                 (swap! (get-in handle [:routes "POST"]) conj {:path-pattern (str path)
+                                                               :handler handler})
+                 nil)
+          :cljs (throw (ex-info "http_server_post is not supported in the ClojureScript interpreter"
+                                {:function "http_server_post"})))))
+
+   "http_server_put"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "http_server_put expects exactly 3 arguments"
+                       {:function "http_server_put" :expected 3 :actual (count args)})))
+     (let [[handle path handler] args]
+       #?(:clj (do
+                 (swap! (get-in handle [:routes "PUT"]) conj {:path-pattern (str path)
+                                                              :handler handler})
+                 nil)
+          :cljs (throw (ex-info "http_server_put is not supported in the ClojureScript interpreter"
+                                {:function "http_server_put"})))))
+
+   "http_server_delete"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "http_server_delete expects exactly 3 arguments"
+                       {:function "http_server_delete" :expected 3 :actual (count args)})))
+     (let [[handle path handler] args]
+       #?(:clj (do
+                 (swap! (get-in handle [:routes "DELETE"]) conj {:path-pattern (str path)
+                                                                 :handler handler})
+                 nil)
+          :cljs (throw (ex-info "http_server_delete is not supported in the ClojureScript interpreter"
+                                {:function "http_server_delete"})))))
+
+   "http_server_start"
+   (fn [ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "http_server_start expects exactly 1 argument"
+                       {:function "http_server_start" :expected 1 :actual (count args)})))
+     #?(:clj (start-http-server! ctx (first args))
+        :cljs (throw (ex-info "http_server_start is not supported in the ClojureScript interpreter"
+                              {:function "http_server_start"}))))
+
+   "http_server_stop"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "http_server_stop expects exactly 1 argument"
+                       {:function "http_server_stop" :expected 1 :actual (count args)})))
+     #?(:clj (let [handle (first args)
+                   server @(:server handle)]
+               (when server
+                 (.stop ^com.sun.net.httpserver.HttpServer server 0)
+                 (reset! (:server handle) nil))
+               nil)
+        :cljs (throw (ex-info "http_server_stop is not supported in the ClojureScript interpreter"
+                              {:function "http_server_stop"}))))
+
+   "http_server_is_running"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "http_server_is_running expects exactly 1 argument"
+                       {:function "http_server_is_running" :expected 1 :actual (count args)})))
+     #?(:clj (some? @(:server (first args)))
+        :cljs (throw (ex-info "http_server_is_running is not supported in the ClojureScript interpreter"
+                              {:function "http_server_is_running"}))))
+
+   })

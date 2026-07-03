@@ -111,7 +111,7 @@
 (defn- resolve-java-host-class
   [state class-name]
   (let [ctx (rebuild-interpreter-ctx state)
-        imported (interp/resolve-imported-java-class ctx class-name)]
+        imported (bi/resolve-imported-java-class ctx class-name)]
     (or imported
         (try
           (Class/forName class-name)
@@ -276,7 +276,7 @@
 (defn java-create-object
   [state class-name args]
   (let [ctx (rebuild-interpreter-ctx state)]
-    (interp/java-create-object ctx class-name args)))
+    (bi/java-create-object ctx class-name args)))
 
 (defn java-call-static
   [state class-name method-name args]
@@ -285,7 +285,7 @@
 
 (defn java-call-method
   [state method-name target args]
-  (interp/java-call-method target method-name args))
+  (bi/java-call-method target method-name args))
 
 (defn java-get-static-field
   [state class-name field-name]
@@ -1994,7 +1994,7 @@
         (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
 
         :else
-      (let [builtin-fn (get interp/builtins name)]
+      (let [builtin-fn (get bi/builtins name)]
         (when-not builtin-fn
           (throw (ex-info (str "Undefined compiled builtin: " name) {:name name})))
         (let [result (apply builtin-fn ctx args)]

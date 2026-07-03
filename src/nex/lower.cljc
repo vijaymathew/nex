@@ -13,8 +13,8 @@
   Unsupported nodes fail fast with ex-info."
   (:require [clojure.string :as str]
             [nex.compiler.jvm.descriptor :as desc]
-            [nex.interpreter :as interp]
             [nex.types.builtins :as bi]
+            [nex.types.bootstrap :as bootstrap]
             [nex.ir :as ir]
             [nex.typechecker :as tc]))
 
@@ -74,7 +74,15 @@
 
 (defn- builtin-class-defs
   []
-  (let [interp-builtins @(:classes (interp/make-context))
+  (let [interp-builtins (into {}
+                              (map (fn [class-def] [(:name class-def) class-def]))
+                              (concat [(bootstrap/build-any-base-class)
+                                       (bootstrap/build-function-base-class)
+                                       (bootstrap/build-cursor-base-class)
+                                       (bootstrap/build-comparable-base-class)
+                                       (bootstrap/build-hashable-base-class)]
+                                      (map bootstrap/build-builtin-scalar-class
+                                           ["String" "Integer" "Real" "Boolean" "Char"])))
         env (tc/make-type-env)]
     (tc/register-builtin-methods env)
     (vals (merge interp-builtins @(:classes env)))))
@@ -97,7 +105,7 @@
     :anonymous-function :spawn})
 
 (def ^:private builtin-function-names
-  (set (keys interp/builtins)))
+  (set (keys bi/builtins)))
 
 (defn- builtin-method-names
   [type-name]
