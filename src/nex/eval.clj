@@ -40,22 +40,33 @@
         (println line))
       output)))
 
+(defn- warn-fallback!
+  [reason]
+  (binding [*out* *err*]
+    (println (str "Warning: falling back to the tree-walking interpreter: " reason))))
+
 (defn- try-compile
-  "Compile the whole program with the JVM backend. Returns the compile result, or
-   nil if the program is outside the compilable subset (any compile-time failure).
-   Type errors are caught earlier by `type-check-ast!`, so a failure here means an
-   unsupported construct and the caller falls back to the interpreter."
+  "Compile the whole program with the JVM backend. Returns {:compiled result} or,
+   when the program is outside the compilable subset, {:compile-error e}. Type
+   errors are caught earlier by `type-check-ast!`, so a failure here means an
+   unsupported construct (or a compiler defect)."
   [source-id ast]
   (try
-    (jvm-file/compile-ast source-id ast {:skip-type-check true})
-    (catch Throwable _ nil)))
+    {:compiled (jvm-file/compile-ast source-id ast {:skip-type-check true})}
+    (catch Throwable e {:compile-error e})))
 
 (defn- run-compiled
   "Define the generated classes in a fresh loader and invoke the program's `Main`,
    running with the JVM backend's reference semantics (the same engine the REPL
-   uses). Output is captured so that if the compiled run fails partway, the caller
-   can discard it and fall back cleanly. Returns captured stdout on success, or
-   nil if the compiled run raised."
+   uses). Stdout is captured only so the program's partial output survives an
+   exception; it is always printed — a runtime exception is the program's
+   outcome (spec §7.3), not a reason to re-execute under the interpreter.
+
+   Returns nil on success. A LinkageError (VerifyError and kin) is a backend
+   defect surfacing after compile time, not the program's behaviour, so it is
+   returned as {:backend-defect e} for the caller to fall back on; any other
+   throwable is rethrown (unwrapped from the reflective call) after the partial
+   output is flushed."
   [{:keys [main-class classes]}]
   (let [ldr (loader/make-loader)]
     (doseq [[binary-name ^bytes bytecode] classes]
@@ -63,45 +74,87 @@
     (let [cls (loader/resolve-class ldr main-class)
           m (.getMethod cls "main" (into-array Class [(Class/forName "[Ljava.lang.String;")]))
           buf (java.io.ByteArrayOutputStream.)
-          real-out System/out]
+          real-out System/out
+          flush-buf! (fn [] (print (.toString buf "UTF-8")) (flush))]
       (try
         (System/setOut (java.io.PrintStream. buf true "UTF-8"))
         (.invoke m nil (object-array [(into-array String [])]))
-        (.toString buf "UTF-8")
-        (catch Throwable _ nil)
+        (System/setOut real-out)
+        (flush-buf!)
+        nil
+        (catch Throwable t
+          (System/setOut real-out)
+          (let [cause (loop [e t]
+                        (if (and (or (instance? java.lang.reflect.InvocationTargetException e)
+                                     (instance? ExceptionInInitializerError e))
+                                 (.getCause e))
+                          (recur (.getCause e))
+                          e))]
+            (if (instance? LinkageError cause)
+              ;; Classes link lazily, so in principle this can fire mid-run;
+              ;; in practice the program's classes are resolved before user
+              ;; statements execute, so no output has been produced yet.
+              {:backend-defect cause}
+              (do
+                (flush-buf!)
+                (throw (if (instance? Exception cause)
+                         cause
+                         (ex-info (str cause) {:cause cause})))))))
         (finally
           (System/setOut real-out))))))
 
 (defn- run-ast
-  "Run a whole program. Prefers the compiled JVM backend (reference semantics,
-   matching the REPL) and falls back to the tree-walking interpreter when the
-   program is outside the compilable subset or the compiled run fails."
-  [source-id ast]
-  (let [compiled (try-compile source-id ast)
-        captured (when compiled (run-compiled compiled))]
-    (if captured
-      (do (print captured) (flush) captured)
-      (run-interpreted source-id ast))))
+  "Run a whole program on the compiled JVM backend (reference semantics,
+   matching the REPL). The tree-walking interpreter runs only on explicit
+   request (:interpret? — the CLI's --interpret flag); a program outside the
+   compiled subset is otherwise an error naming the unsupported construct. A
+   runtime failure of the compiled program is the program's outcome and is
+   never re-executed. The one automatic fallback left is a LinkageError — a
+   backend defect, not the program's behaviour — which runs interpreted with a
+   warning rather than failing a valid program."
+  [source-id ast {:keys [interpret?]}]
+  (if interpret?
+    (run-interpreted source-id ast)
+    (let [{:keys [compiled compile-error]} (try-compile source-id ast)]
+      (if compile-error
+        (throw (ex-info (str "this program uses a construct the compiled backend"
+                             " does not support yet ("
+                             (or (ex-message compile-error) (str compile-error))
+                             "); run it with --interpret to use the tree-walking"
+                             " interpreter")
+                        {:type :not-compilable}
+                        compile-error))
+        (if-let [{:keys [backend-defect]} (run-compiled compiled)]
+          (do (warn-fallback! (str "compiled program failed to link ("
+                                   (or (ex-message backend-defect) (str backend-defect))
+                                   ")"))
+              (run-interpreted source-id ast))
+          nil)))))
 
 (defn eval-file
-  "Parse and evaluate a Nex file"
-  [file-path]
-  (let [source-id (.getCanonicalPath (io/file file-path))
-        source (slurp source-id)
-        ast (parser/ast source)]
-    (type-check-ast! source-id ast)
-    (run-ast source-id ast)))
+  "Parse and evaluate a Nex file. opts: {:interpret? bool} to force the
+   tree-walking interpreter instead of the compiled JVM backend."
+  ([file-path] (eval-file file-path {}))
+  ([file-path opts]
+   (let [source-id (.getCanonicalPath (io/file file-path))
+         source (slurp source-id)
+         ast (parser/ast source)]
+     (type-check-ast! source-id ast)
+     (run-ast source-id ast opts))))
 
 (defn -main
-  "Main entry point for nex eval command"
+  "Main entry point for nex eval command.
+   Usage: nex.eval [--interpret] <file.nex>"
   [& args]
-  (when (empty? args)
-    (println "Error: No file provided")
-    (System/exit 1))
-
-  (let [file (first args)]
+  (let [interpret? (boolean (some #{"--interpret"} args))
+        files (remove #{"--interpret"} args)
+        file (first files)]
+    (when (nil? file)
+      (println "Error: No file provided")
+      (println "Usage: nex <file.nex> [--interpret]")
+      (System/exit 1))
     (try
-      (eval-file file)
+      (eval-file file {:interpret? interpret?})
       (System/exit 0)
       (catch ParseError e
         (println "Syntax error:")

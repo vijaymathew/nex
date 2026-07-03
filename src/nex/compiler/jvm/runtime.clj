@@ -3,6 +3,9 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [nex.interpreter :as interp]
+            [nex.types.builtins :as bi]
+            [nex.types.concurrency :as conc]
+            [nex.types.bootstrap :as bootstrap]
             [nex.types.bootstrap :as bootstrap]
             [nex.types.datetime :as dt]
             [nex.types.http :as http]
@@ -31,7 +34,7 @@
   [fn-name method-name]
   `(defn ~fn-name
      [target# & args#]
-     (interp/call-builtin-method nil target# target# ~method-name (vec args#))))
+     (bi/call-builtin-method nil target# target# ~method-name (vec args#))))
 
 (defn- ->java-array-list
   [value]
@@ -109,8 +112,7 @@
 
 (defn- resolve-java-host-class
   [state class-name]
-  (let [ctx (rebuild-interpreter-ctx state)
-        imported (interp/resolve-imported-java-class ctx class-name)]
+  (let [imported (bi/resolve-imported-java-class {:imports (:imports state)} class-name)]
     (or imported
         (try
           (Class/forName class-name)
@@ -206,15 +208,7 @@
 (defn create-channel
   ([] (create-channel 0))
   ([capacity]
-   (let [ctx (interp/make-context)
-         create-node {:type :create
-                      :class-name "Channel"
-                      :generic-args nil
-                      :constructor (when (pos? capacity) "with_capacity")
-                      :args (if (pos? capacity)
-                              [{:type :literal :value capacity}]
-                              [])}]
-     (interp/eval-node ctx create-node))))
+   (conc/make-channel (long capacity))))
 
 (defn create-array
   []
@@ -275,7 +269,7 @@
 (defn java-create-object
   [state class-name args]
   (let [ctx (rebuild-interpreter-ctx state)]
-    (interp/java-create-object ctx class-name args)))
+    (bi/java-create-object ctx class-name args)))
 
 (defn java-call-static
   [state class-name method-name args]
@@ -284,7 +278,7 @@
 
 (defn java-call-method
   [state method-name target args]
-  (interp/java-call-method target method-name args))
+  (bi/java-call-method target method-name args))
 
 (defn java-get-static-field
   [state class-name field-name]
@@ -355,39 +349,39 @@
 
 (defn channel-send-method
   ([ch value]
-   (interp/call-builtin-method nil ch ch "send" [value]))
+   (bi/call-builtin-method nil ch ch "send" [value]))
   ([ch value timeout]
-   (interp/call-builtin-method nil ch ch "send" [value timeout])))
+   (bi/call-builtin-method nil ch ch "send" [value timeout])))
 
 (defn channel-try-send-method
   [ch value]
-  (interp/call-builtin-method nil ch ch "try_send" [value]))
+  (bi/call-builtin-method nil ch ch "try_send" [value]))
 
 (defn channel-receive-method
   ([ch]
-   (interp/call-builtin-method nil ch ch "receive" []))
+   (bi/call-builtin-method nil ch ch "receive" []))
   ([ch timeout]
-   (interp/call-builtin-method nil ch ch "receive" [timeout])))
+   (bi/call-builtin-method nil ch ch "receive" [timeout])))
 
 (defn channel-try-receive-method
   [ch]
-  (interp/call-builtin-method nil ch ch "try_receive" []))
+  (bi/call-builtin-method nil ch ch "try_receive" []))
 
 (defn channel-close-method
   [ch]
-  (interp/call-builtin-method nil ch ch "close" []))
+  (bi/call-builtin-method nil ch ch "close" []))
 
 (defn channel-is-closed-method
   [ch]
-  (interp/call-builtin-method nil ch ch "is_closed" []))
+  (bi/call-builtin-method nil ch ch "is_closed" []))
 
 (defn channel-capacity-method
   [ch]
-  (interp/call-builtin-method nil ch ch "capacity" []))
+  (bi/call-builtin-method nil ch ch "capacity" []))
 
 (defn channel-size-method
   [ch]
-  (interp/call-builtin-method nil ch ch "size" []))
+  (bi/call-builtin-method nil ch ch "size" []))
 
 (defn- min-heap-compare
   [state heap left right]
@@ -608,7 +602,7 @@
       (if (interp/nex-object? target)
         (invoke-interpreter-object-method state target method-name args)
         (invoke-user-method state target method-name args))
-      (interp/call-builtin-method nil target target method-name args))))
+      (bi/call-builtin-method nil target target method-name args))))
 
 (defn builtin-cursor-start
   [state target]
@@ -818,6 +812,11 @@
 
 (defn- invoke-user-method
   [state target method-name args]
+  (when (nil? target)
+    ;; A nil receiver must surface as the language's void-call error, not as a
+    ;; raw JVM NullPointerException from the reflective dispatch below.
+    (throw (ex-info "Used a value that is void (nil)"
+                    {:method method-name :arity (count args)})))
   (if (interp/nex-object? target)
     ;; The target was produced by the interpreter (e.g. returned from a function
     ;; that fell back to the tree-walker) and stored in the compiled session. The
@@ -836,7 +835,7 @@
           target
           (let [builtin-result (try
                                  (if (typeinfo/get-type-name target)
-                                   (interp/call-builtin-method nil target target method-name args)
+                                   (bi/call-builtin-method nil target target method-name args)
                                    ::not-found)
                                  (catch Exception _ ::not-found))]
             (if (not= builtin-result ::not-found)
@@ -923,11 +922,26 @@
   [state class-name]
   (.get ^HashMap @(:classes state) class-name))
 
+(def ^:private builtin-base-class-defs
+  "The standard environment's base classes (Any, Function, Cursor, Comparable,
+   Hashable, and the scalars), for hierarchy walks that cross from program
+   classes into the builtin roots — no interpreter context needed."
+  (delay (into {}
+               (map (fn [class-def] [(:name class-def) class-def]))
+               (concat [(bootstrap/build-any-base-class)
+                        (bootstrap/build-function-base-class)
+                        (bootstrap/build-cursor-base-class)
+                        (bootstrap/build-comparable-base-class)
+                        (bootstrap/build-hashable-base-class)]
+                       (map bootstrap/build-builtin-scalar-class
+                            ["String" "Integer" "Real" "Boolean" "Char"])))))
+
 (defn- compiled-is-parent?
   [state class-name parent-name]
   (letfn [(walk [current seen]
             (when (and current (not (contains? seen current)))
-              (when-let [class-def (class-def-by-name state current)]
+              (when-let [class-def (or (class-def-by-name state current)
+                                       (get @builtin-base-class-defs current))]
                 (let [seen' (conj seen current)
                       parents (:parents class-def)]
                   (or (some #(= (:parent %) parent-name) parents)
@@ -936,10 +950,9 @@
 
 (defn- runtime-compatible-with?
   [state runtime-name target-name]
-  (let [ctx (rebuild-interpreter-ctx state)]
-    (or (= runtime-name target-name)
-        (compiled-is-parent? state runtime-name target-name)
-        (typeinfo/convert-compatible-runtime? interp/is-parent? ctx runtime-name target-name))))
+  (or (= runtime-name target-name)
+      (= target-name "Any")
+      (compiled-is-parent? state runtime-name target-name)))
 
 (defn- collect-effective-field-names
   [state class-def]
@@ -1023,7 +1036,7 @@
     ;; An interpreter object (e.g. created inside a deoptimized closure) renders
     ;; through the interpreter so a user-defined `to_string` is honored.
     (interp/nex-object? value)
-    (interp/concat-string-value (rebuild-interpreter-ctx state) value)
+    (bi/concat-string-value (rebuild-interpreter-ctx state) value)
 
     (nil? value) "nil"
 
@@ -1033,16 +1046,16 @@
             (let [result (invoke-user-method state value "to_string" [])]
               (if (string? result)
                 result
-                (interp/nex-format-value result)))
+                (bi/nex-format-value result)))
             (catch Exception _
-              (interp/call-builtin-method nil nil value "to_string" [])))]
+              (bi/call-builtin-method nil nil value "to_string" [])))]
       (if (string? string-value)
         string-value
-        (interp/nex-format-value string-value)))))
+        (bi/nex-format-value string-value)))))
 
 (defn format-value
   [value]
-  (interp/nex-format-value value))
+  (bi/nex-format-value value))
 
 (defn- has-user-to-string?
   [value]
@@ -1085,6 +1098,22 @@
 (defn string-concat
   [state args]
   (apply str (map #(concat-string-value state %) args)))
+
+(defn div-int
+  [a b]
+  (int (rt/nex-int-div (long a) (long b))))
+
+(defn div-long
+  [a b]
+  (long (rt/nex-int-div (long a) (long b))))
+
+(defn mod-int
+  [a b]
+  (int (rt/nex-int-mod (long a) (long b))))
+
+(defn mod-long
+  [a b]
+  (long (rt/nex-int-mod (long a) (long b))))
 
 (defn pow-int
   [a b]
@@ -1606,7 +1635,7 @@
 (defn builtin-method-string-split
   [target delim]
   (->java-array-list
-   (interp/call-builtin-method nil target target "split" [delim])))
+   (bi/call-builtin-method nil target target "split" [delim])))
 (def-builtin-method-wrapper builtin-method-string-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-string-equals "equals")
 (def-builtin-method-wrapper builtin-method-string-not-equals "not_equals")
@@ -1660,6 +1689,11 @@
 (defn identity-equals
   [a b]
   (cond
+    ;; On scalars == coincides with = (spec §5.1), so a mixed Integer/Real
+    ;; pair compares by numeric value: 5 == 5.0 is true, like the interpreter.
+    (and (rt/nex-numeric? a) (rt/nex-numeric? b))
+    (rt/nex-numeric-equals? a b)
+
     (and (scalar-identity-value? a)
          (scalar-identity-value? b))
     (= a b)
@@ -1737,7 +1771,7 @@
   (cond
     (and (sortable-builtin-scalar-value? a)
          (sortable-builtin-scalar-value? b))
-    (interp/call-builtin-method nil a a "compare" [b])
+    (bi/call-builtin-method nil a a "compare" [b])
 
     :else
     (let [runtime-name (runtime-type-name state a)]
@@ -1784,14 +1818,14 @@
 (defn array-join
   [state values sep]
   (let [ctx (rebuild-interpreter-ctx state)
-        result (interp/call-builtin-method ctx values values "join" [sep])]
+        result (bi/call-builtin-method ctx values values "join" [sep])]
     (reset! (:output state) @(:output ctx))
     result))
 
 (defn collection-cursor
   [state kind value]
   (let [ctx (rebuild-interpreter-ctx state)
-        result (interp/call-builtin-method ctx value value "cursor" [])]
+        result (bi/call-builtin-method ctx value value "cursor" [])]
     (reset! (:output state) @(:output ctx))
     result))
 
@@ -1926,6 +1960,18 @@
     (= name "op:string-concat")
     (apply str (map #(concat-string-value state %) args))
 
+    (= name "op:div-int")
+    (div-int (first args) (second args))
+
+    (= name "op:div-long")
+    (div-long (first args) (second args))
+
+    (= name "op:mod-int")
+    (mod-int (first args) (second args))
+
+    (= name "op:mod-long")
+    (mod-long (first args) (second args))
+
     (= name "op:pow-int")
     (int (rt/nex-int-pow (int (first args)) (int (second args))))
 
@@ -1941,7 +1987,7 @@
       (let [method-name (subs name (count "method:"))
             target (first args)
             method-args (rest args)
-            result (interp/call-builtin-method ctx target target method-name method-args)]
+            result (bi/call-builtin-method ctx target target method-name method-args)]
         (reset! (:output state) @(:output ctx))
         result)
       (cond
@@ -1955,7 +2001,7 @@
         (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
 
         :else
-      (let [builtin-fn (get interp/builtins name)]
+      (let [builtin-fn (get bi/builtins name)]
         (when-not builtin-fn
           (throw (ex-info (str "Undefined compiled builtin: " name) {:name name})))
         (let [result (apply builtin-fn ctx args)]

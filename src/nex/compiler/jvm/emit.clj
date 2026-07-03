@@ -613,7 +613,12 @@
                     :neq Opcodes/IFNE
                     (throw (ex-info "Unsupported compare operator"
                                     {:operator operator :jvm-type jvm-type})))]
-    (.visitInsn mv (if (= :long jvm-type) Opcodes/LCMP Opcodes/DCMPL))
+    ;; NaN handling (spec §B.3): DCMPG pushes +1 on NaN so `<`/`<=` fall to
+    ;; false; DCMPL pushes -1 so `>`/`>=` do — the same split javac emits.
+    (.visitInsn mv (cond
+                     (= :long jvm-type) Opcodes/LCMP
+                     (#{:lt :lte} operator) Opcodes/DCMPG
+                     :else Opcodes/DCMPL))
     (.visitJumpInsn mv branch-op true-label)
     (.visitInsn mv Opcodes/ICONST_0)
     (.visitJumpInsn mv Opcodes/GOTO end-label)
@@ -783,6 +788,10 @@
    "java-get-static-field"                   ["java-get-static-field" [:state :b0 :b1]]
    "validate-object-state"                   ["validate-object-state" [:state :b0 :b1]]
    "op:string-concat"                        ["string-concat" [:state :args]]
+   "op:div-int"                              ["div-int" [:b0 :b1]]
+   "op:div-long"                             ["div-long" [:b0 :b1]]
+   "op:mod-int"                              ["mod-int" [:b0 :b1]]
+   "op:mod-long"                             ["mod-long" [:b0 :b1]]
    "op:pow-int"                              ["pow-int" [:b0 :b1]]
    "op:pow-long"                             ["pow-long" [:b0 :b1]]
    "op:pow-double"                           ["pow-double" [:b0 :b1]]

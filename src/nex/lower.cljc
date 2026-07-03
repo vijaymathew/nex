@@ -13,7 +13,8 @@
   Unsupported nodes fail fast with ex-info."
   (:require [clojure.string :as str]
             [nex.compiler.jvm.descriptor :as desc]
-            [nex.interpreter :as interp]
+            [nex.types.builtins :as bi]
+            [nex.types.bootstrap :as bootstrap]
             [nex.ir :as ir]
             [nex.typechecker :as tc]))
 
@@ -73,7 +74,15 @@
 
 (defn- builtin-class-defs
   []
-  (let [interp-builtins @(:classes (interp/make-context))
+  (let [interp-builtins (into {}
+                              (map (fn [class-def] [(:name class-def) class-def]))
+                              (concat [(bootstrap/build-any-base-class)
+                                       (bootstrap/build-function-base-class)
+                                       (bootstrap/build-cursor-base-class)
+                                       (bootstrap/build-comparable-base-class)
+                                       (bootstrap/build-hashable-base-class)]
+                                      (map bootstrap/build-builtin-scalar-class
+                                           ["String" "Integer" "Real" "Boolean" "Char"])))
         env (tc/make-type-env)]
     (tc/register-builtin-methods env)
     (vals (merge interp-builtins @(:classes env)))))
@@ -96,11 +105,11 @@
     :anonymous-function :spawn})
 
 (def ^:private builtin-function-names
-  (set (keys interp/builtins)))
+  (set (keys bi/builtins)))
 
 (defn- builtin-method-names
   [type-name]
-  (set (keys (get interp/builtin-type-methods type-name))))
+  (set (keys (get bi/builtin-type-methods type-name))))
 
 (def ^:private builtin-runtime-receiver-types
   #{"Any" "Comparable" "Integer" "Real" "Char" "Boolean" "String"
@@ -189,7 +198,7 @@
   {:base-type "Set" :type-params [elem-type]})
 
 (defn- resolve-collection-return-marker
-  "Resolve a return-type marker from `interp/builtin-type-method-return-type`
+  "Resolve a return-type marker from `bi/builtin-type-method-return-type`
    against the receiver's actual generic arguments. Concrete type names pass
    through unchanged."
   [target-type marker]
@@ -210,7 +219,7 @@
 
 (defn- collection-method-return-type
   [target-type method]
-  (some->> (interp/builtin-type-method-return-type
+  (some->> (bi/builtin-type-method-return-type
             (keyword (base-type-name target-type)) method)
            (resolve-collection-return-marker target-type)))
 
@@ -567,7 +576,7 @@
        (when (direct-collection-method? target-type (:method expr))
          (collection-method-return-type target-type (:method expr)))
        (when (contains? #{"Console" "Process"} base-type)
-         (interp/builtin-type-method-return-type (keyword base-type) (:method expr)))
+         (bi/builtin-type-method-return-type (keyword base-type) (:method expr)))
        ;; Generic type parameter with constraint - look up method on constraint type
        (when-let [constraint (get (:generic-param-constraints env) base-type)]
          (case constraint
@@ -579,7 +588,107 @@
            (case (:method expr)
              "hash" "Integer"
              nil)
-           nil))))))
+           nil))
+       ;; The Any/Comparable/Hashable protocols (spec B.1): every value renders
+       ;; with to_string and compares with equals, so their types are known even
+       ;; when the receiver is a builtin scalar with no per-method type table.
+       (case (:method expr)
+         "to_string" "String"
+         "equals" "Boolean"
+         "not_equals" "Boolean"
+         "hash" "Integer"
+         "compare" "Integer"
+         nil)))))
+
+(def ^:private builtin-free-function-return-types
+  "Return types of the builtin free functions. Mirrors the typechecker's
+   builtin-call-checkers table (typechecker.cljc) — keep the two in sync."
+  {"print" "Void"
+   "println" "Void"
+   "sleep" "Void"
+   "hint_spin" "Void"
+   "random_real" "Real"
+   "type_of" "String"
+   "type_is" "Boolean"
+   ;; regex
+   "regex_validate" "Boolean"
+   "regex_matches" "Boolean"
+   "regex_find" {:base-type "String" :detachable true}
+   "regex_find_all" {:base-type "Array" :type-params ["String"]}
+   "regex_replace" "String"
+   "regex_split" {:base-type "Array" :type-params ["String"]}
+   ;; datetime
+   "datetime_now" "Integer"
+   "datetime_from_epoch_millis" "Integer"
+   "datetime_parse_iso" "Integer"
+   "datetime_make" "Integer"
+   "datetime_year" "Integer"
+   "datetime_month" "Integer"
+   "datetime_day" "Integer"
+   "datetime_weekday" "Integer"
+   "datetime_day_of_year" "Integer"
+   "datetime_hour" "Integer"
+   "datetime_minute" "Integer"
+   "datetime_second" "Integer"
+   "datetime_epoch_millis" "Integer"
+   "datetime_add_millis" "Integer"
+   "datetime_diff_millis" "Integer"
+   "datetime_truncate_to_day" "Integer"
+   "datetime_truncate_to_hour" "Integer"
+   "datetime_format_iso" "String"
+   ;; path
+   "path_exists" "Boolean"
+   "path_is_file" "Boolean"
+   "path_is_directory" "Boolean"
+   "path_name" "String"
+   "path_extension" "String"
+   "path_name_without_extension" "String"
+   "path_absolute" "String"
+   "path_normalize" "String"
+   "path_size" "Integer"
+   "path_modified_time" "Integer"
+   "path_parent" {:base-type "String" :detachable true}
+   "path_child" "String"
+   "path_create_file" "Void"
+   "path_create_directory" "Void"
+   "path_create_directories" "Void"
+   "path_delete" "Void"
+   "path_delete_tree" "Void"
+   "path_copy" "Void"
+   "path_move" "Void"
+   "path_read_text" "String"
+   "path_write_text" "Void"
+   "path_append_text" "Void"
+   "path_list" {:base-type "Array" :type-params ["String"]}
+   ;; text files
+   "text_file_open_read" "Any"
+   "text_file_open_write" "Any"
+   "text_file_open_append" "Any"
+   "text_file_read_line" {:base-type "String" :detachable true}
+   "text_file_write" "Void"
+   "text_file_close" "Void"
+   ;; binary files
+   "binary_file_open_read" "Any"
+   "binary_file_open_write" "Any"
+   "binary_file_open_append" "Any"
+   "binary_file_read_all" {:base-type "Array" :type-params ["Integer"]}
+   "binary_file_read" {:base-type "Array" :type-params ["Integer"]}
+   "binary_file_write" "Void"
+   "binary_file_position" "Integer"
+   "binary_file_seek" "Void"
+   "binary_file_close" "Void"
+   ;; http client / json
+   "json_parse" "Any"
+   "json_stringify" "String"
+   ;; http server
+   "http_server_create" "Any"
+   "http_server_get" "Void"
+   "http_server_post" "Void"
+   "http_server_put" "Void"
+   "http_server_delete" "Void"
+   "http_server_start" "Integer"
+   "http_server_stop" "Void"
+   "http_server_is_running" "Boolean"})
 
 (defn- infer-call-type
   [env expr]
@@ -593,17 +702,7 @@
         target-expr (normalize-call-target raw-target)]
     (if (nil? target-expr)
       (or
-       (case (:method expr)
-         "print" "Void"
-         "println" "Void"
-         "sleep" "Void"
-         "hint_spin" "Void"
-         "random_real" "Real"
-         "type_of" "String"
-         "type_is" "Boolean"
-         "path_exists" "Boolean"
-         "datetime_now" "Integer"
-         nil)
+       (get builtin-free-function-return-types (:method expr))
        (when-let [fn-def (some (fn [fn-def]
                                  (when (and (= (:name fn-def) (:method expr))
                                             (= (count (or (:params fn-def) []))
@@ -1697,6 +1796,13 @@
     (when-not bound-type
       (throw (ex-info "convert binding is missing a target type"
                       {:var-name var-name})))
+    ;; The bound variable is detachable (the typechecker binds it as ?T): a
+    ;; failed convert stores nil, so the slot must be a reference type — a raw
+    ;; scalar target like Real would otherwise get a primitive slot and the
+    ;; nil store would NPE at the convert site.
+    (let [bound-type (if (map? bound-type)
+                       (assoc bound-type :detachable true)
+                       {:base-type bound-type :detachable true})]
     (if-let [binding (lookup-convert-binding env var-name)]
     [env binding]
       (if (and (:top-level? env) (not (:scoped-locals? env)))
@@ -1710,7 +1816,7 @@
                  :name var-name
                  :slot (:slot local)
                  :nex-type (:nex-type local)
-                 :jvm-type (:jvm-type local)}])))))
+                 :jvm-type (:jvm-type local)}]))))))
 
 (defn- lower-convert-expression
   [env {:keys [value var-name target-type] :as expr}]
@@ -1782,10 +1888,13 @@
                          (get (:var-types env) var-name))]
     (if current-type
       (let [refined-type (tc/attachable-type current-type)]
+        ;; Refine only the Nex type. The slot's JVM type is fixed at
+        ;; allocation (detachable bindings live in reference slots); re-resolving
+        ;; the attached type here can flip it to a primitive and emit a
+        ;; primitive load from a reference slot (VerifyError).
         (cond-> env
           (get-in env [:locals var-name])
-          (-> (assoc-in [:locals var-name :nex-type] refined-type)
-              (assoc-in [:locals var-name :jvm-type] (resolve-jvm-type env refined-type)))
+          (assoc-in [:locals var-name :nex-type] refined-type)
           true
           (assoc-in [:var-types var-name] refined-type)))
       env)))
@@ -1802,9 +1911,12 @@
                  (cond
                    (get-in acc [:locals name])
                    (let [refined-type (tc/attachable-type type)]
+                     ;; Refine only the Nex type: the slot was allocated for the
+                     ;; detachable (reference) binding and its JVM type cannot
+                     ;; change per-branch — a primitive re-resolve here would
+                     ;; emit DLOAD from an ASTORE'd slot (VerifyError).
                      (-> acc
                          (assoc-in [:locals name :nex-type] refined-type)
-                         (assoc-in [:locals name :jvm-type] (resolve-jvm-type acc refined-type))
                          (assoc-in [:var-types name] refined-type)))
 
                    (:top-level? acc)
@@ -2501,6 +2613,19 @@
                               nex-type
                               jvm-type)
 
+        ;; Integer / and % go through checked runtime helpers (like op:pow-*):
+        ;; raw LDIV/LREM would leak the host's "/ by zero" message and silently
+        ;; wrap MIN_LONG / -1 instead of raising like the interpreter.
+        (and (#{"/" "%"} op) (#{:int :long} jvm-type))
+        (ir/call-runtime-node (case [op jvm-type]
+                                ["/" :int] "op:div-int"
+                                ["/" :long] "op:div-long"
+                                ["%" :int] "op:mod-int"
+                                ["%" :long] "op:mod-long")
+                              [left-ir right-ir]
+                              nex-type
+                              jvm-type)
+
         (#{"+" "-" "*" "/" "%" "and" "or"} op)
         (ir/binary-node (get {"+" :add
                               "-" :sub
@@ -2784,24 +2909,40 @@
                               (resolve-jvm-type env nex-type)))
 
       (and class-def (:import class-def))
-      (do
-        (when (:constructor expr)
-          (throw (ex-info "Imported Java classes do not support named constructors on the compiled path"
-                          {:expr expr
-                           :class-name class-name
-                           :constructor (:constructor expr)})))
-        (let [nex-type (infer-type env expr)]
-          (ir/call-runtime-node "java-create-object"
-                                (into [(ir/const-node class-name
-                                                      "String"
-                                                      (ir/object-jvm-type "java/lang/String"))]
-                                      (mapv #(lower-expression env %) (:args expr)))
-                                nex-type
-                                (resolve-jvm-type env nex-type))))
+      ;; A constructor name on an imported Java class is decorative: the
+      ;; interpreter's java-create-object ignores it and reflectively invokes
+      ;; the host constructor with the arguments, so lowering does the same.
+      (let [nex-type (infer-type env expr)]
+        (ir/call-runtime-node "java-create-object"
+                              (into [(ir/const-node class-name
+                                                    "String"
+                                                    (ir/object-jvm-type "java/lang/String"))]
+                                    (mapv #(lower-expression env %) (:args expr)))
+                              nex-type
+                              (resolve-jvm-type env nex-type)))
+
+      (= class-name "Map")
+      (let [nex-type (infer-type env expr)]
+        (if (nil? (:constructor expr))
+          (do
+            (when (seq (:args expr))
+              (throw (ex-info "create Map takes no arguments in compiled lowering"
+                              {:expr expr})))
+            (ir/map-literal-node [] nex-type (resolve-jvm-type env nex-type)))
+          (throw (ex-info "Unsupported Map constructor in compiled lowering"
+                          {:expr expr :constructor (:constructor expr)}))))
 
       (= class-name "Set")
       (let [nex-type (infer-type env expr)]
-        (if (= "from_array" (:constructor expr))
+        (case (:constructor expr)
+          nil
+          (do
+            (when (seq (:args expr))
+              (throw (ex-info "create Set takes no arguments in compiled lowering"
+                              {:expr expr})))
+            (ir/set-literal-node [] nex-type (resolve-jvm-type env nex-type)))
+
+          "from_array"
           (do
             (when-not (= 1 (count (:args expr)))
               (throw (ex-info "Set.from_array expects exactly 1 argument in compiled lowering"
@@ -2810,6 +2951,7 @@
                                   [(lower-expression env (first (:args expr)))]
                                   nex-type
                                   (resolve-jvm-type env nex-type)))
+
           (throw (ex-info "Unsupported Set constructor in compiled lowering"
                           {:expr expr :constructor (:constructor expr)}))))
 
@@ -3129,7 +3271,14 @@
                                         nex-type
                                         jvm-type)))
 
-              (:with-java? env)
+              ;; Host interop is only for *unresolved* targets (see the env
+              ;; docstring): a with-"java" block still contains ordinary Nex
+              ;; calls (Console, collections, user classes), which must keep
+              ;; their normal dispatch rather than fall into reflection.
+              (and (:with-java? env)
+                   (not (builtin-runtime-receiver-type? env target-type))
+                   (not (get (visible-class-map env) (base-type-name target-type)))
+                   (not (get (:compiled-classes env) (base-type-name target-type))))
               (let [target-ir (lower-expression env target-expr)
                     nex-type (or (infer-call-type env expr) "Any")
                     jvm-type (resolve-jvm-type env nex-type)]
@@ -3991,13 +4140,22 @@
 
 (defn- make-delegation-method-node
   [env class-meta class-name compiled-classes {:keys [source-class carrier-owner carrier-field owner-internal-name method-def carrier-jvm-type]}]
-  (let [return-type (function-return-type method-def)
+  (let [;; method-def is declared by source-class, so its parameter/return types
+        ;; may name the *parent's* generic params — resolve with both the
+        ;; subclass's generics (env) and the declaring class's in scope, or a
+        ;; bare `T` becomes a literal class name (CHECKCAST T → CNFE at run time).
+        resolve-env {:compiled-classes compiled-classes
+                     :generic-param-names (into (set (:generic-param-names env))
+                                                (map :name
+                                                     (:generic-params
+                                                      (get (visible-class-map env) source-class))))}
+        return-type (function-return-type method-def)
         params (map-indexed (fn [idx {:keys [name type]}]
                               {:name name
                                :slot (+ 2 idx)
                                :arg-index idx
                                :nex-type type
-                               :jvm-type (resolve-jvm-type {:compiled-classes compiled-classes} type)})
+                               :jvm-type (resolve-jvm-type resolve-env type)})
                             (:params method-def))
         result-slot (+ 2 (reduce + (map (fn [{:keys [jvm-type]}]
                                           (if (#{:long :double} jvm-type) 2 1))
@@ -4017,7 +4175,7 @@
                                       target-ir
                                       call-args
                                       return-type
-                                      (resolve-jvm-type {:compiled-classes compiled-classes} return-type))
+                                      (resolve-jvm-type resolve-env return-type))
         class-validation (ir/pop-node
                           (validate-object-state-ir {:compiled-classes compiled-classes}
                                                     class-name
@@ -4035,12 +4193,12 @@
                          [(ir/set-local-node result-slot
                                              call-ir
                                              return-type
-                                             (resolve-jvm-type {:compiled-classes compiled-classes} return-type))
+                                             (resolve-jvm-type resolve-env return-type))
                           class-validation
                           (ir/return-node (ir/local-node "__result"
                                                          result-slot
                                                          return-type
-                                                         (resolve-jvm-type {:compiled-classes compiled-classes} return-type))
+                                                         (resolve-jvm-type resolve-env return-type))
                                           return-type
                                           (ir/object-jvm-type "java/lang/Object"))]
                          [(ir/pop-node call-ir)

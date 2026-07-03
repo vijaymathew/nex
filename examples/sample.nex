@@ -79,8 +79,10 @@ feature
   show() do
     print("Savings account: ")
     print(account_number)
-    print(" base balance via Account.balance = ")
-    print(Account.balance)
+    -- Inherited fields are read directly; Parent.name works for routines
+    -- (like Account.withdraw above) but not for fields.
+    print(" balance = ")
+    print(balance)
     print(", rate = ")
     print(interest_rate)
   end

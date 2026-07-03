@@ -281,11 +281,13 @@
 ;; `js/Number` on the way in, and `i32->int` lifts the int32 result back to the
 ;; Nex Integer representation on the way out.
 (defn- int32 [n]
-  #?(:clj (int n)
+  ;; Truncate, never range-check: values outside int32 keep their low 32 bits
+  ;; (`(int n)` would raise), matching the compiled backend's l2i truncation.
+  #?(:clj (unchecked-int (long n))
      :cljs (bit-or (js/Number n) 0)))
 
 (defn- bit-index [n]
-  #?(:clj (bit-and (int n) 31)
+  #?(:clj (bit-and (unchecked-int (long n)) 31)
      :cljs (bit-and (js/Number n) 31)))
 
 (defn- i32->int [v] (->nex-integer v))
@@ -416,12 +418,39 @@
 (defn nex-int-mul [a b] #?(:clj (* a b)    :cljs (check-int64! (* a b))))
 (defn nex-int-neg [a]   #?(:clj (- a)      :cljs (check-int64! (- a))))
 ;; Truncating integer division (toward zero), like quot / BigInt `/`.
+;; Raw — no zero or overflow check; nex-int-div is the checked entry point.
 (defn nex-int-quot [a b] #?(:clj (quot a b) :cljs (js* "~{} / ~{}" a b)))
-;; Floored modulo, matching Clojure `mod` on both hosts.
-(defn nex-int-mod [a b]
-  #?(:clj (mod a b)
-     :cljs (let [m (js* "~{} % ~{}" a b)]
-             (if (or (nex-int-zero? m) (= (neg? m) (neg? b))) m (+ m b)))))
+
+(defn nex-int-div
+  "Checked Integer division: raises on a zero divisor and on the one
+   overflowing case (MIN_LONG / -1). Truncates toward zero. The canonical
+   entry point for Nex `/` on Integers in every backend."
+  [a b]
+  (when (nex-int-zero? b)
+    (throw (ex-info "Division by zero" {:left a :right b})))
+  #?(:clj (if (and (= a Long/MIN_VALUE) (= b -1))
+            (throw (ArithmeticException. "long overflow"))
+            (quot a b))
+     :cljs (check-int64! (js* "~{} / ~{}" a b))))
+
+;; Truncated remainder (sign of the dividend), like Java % / BigInt %.
+;; Nex `%` is truncated in every backend — the JVM's LREM/DREM and JS's `%`
+;; are truncated natively, and the interpreter matches them through here.
+(defn nex-int-mod
+  "Checked Integer remainder: raises on a zero divisor; truncated semantics."
+  [a b]
+  (when (nex-int-zero? b)
+    (throw (ex-info "Division by zero" {:left a :right b})))
+  #?(:clj (rem a b)
+     :cljs (js* "~{} % ~{}" a b)))
+
+(defn nex-real-rem
+  "Truncated remainder on Reals (IEEE `%`, sign of the dividend), matching the
+   JVM's DREM and JS's `%`; x % 0.0 is NaN."
+  [a b]
+  #?(:clj (let [d (double b)]
+            (if (zero? d) Double/NaN (rem (double a) d)))
+     :cljs (js-mod a b)))
 (defn nex-int-odd? [a]
   #?(:clj (odd? a) :cljs (js* "(~{} & 1n) === 1n" a)))
 
@@ -441,6 +470,27 @@
     (and (nex-integer? x) (nex-integer? y)) (= x y)
     (and (number? x) (number? y)) (== x y)
     :else false))
+
+;; IEEE-correct numeric ordering: unlike the 3-way nex-numeric-compare (which
+;; cannot express "unordered"), these return false for any comparison against
+;; NaN, as spec §B.3 requires. Integer pairs compare in their own
+;; representation; mixed pairs as Reals.
+(defn nex-numeric-lt [x y]
+  (if (and (nex-integer? x) (nex-integer? y))
+    (< x y)
+    (< (->nex-real x) (->nex-real y))))
+(defn nex-numeric-lte [x y]
+  (if (and (nex-integer? x) (nex-integer? y))
+    (<= x y)
+    (<= (->nex-real x) (->nex-real y))))
+(defn nex-numeric-gt [x y]
+  (if (and (nex-integer? x) (nex-integer? y))
+    (> x y)
+    (> (->nex-real x) (->nex-real y))))
+(defn nex-numeric-gte [x y]
+  (if (and (nex-integer? x) (nex-integer? y))
+    (>= x y)
+    (>= (->nex-real x) (->nex-real y))))
 
 (defn nex-int-pow [base exponent]
   (when (neg? exponent)
