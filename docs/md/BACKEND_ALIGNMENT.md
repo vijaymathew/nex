@@ -72,15 +72,25 @@ Update the Status column as work lands; add a commit hash when a stage merges.
 
 ## Spec updates owed (definition-of-nex repo)
 
-- §B.3: document truncated `%` (D1) and note `MIN/-1` raises.
-- §2.6: `^` associativity — implementation is left-associative; either fix the
-  implementations or the spec (undecided).
-- Appendix C.2: `repeat` bound — both backends re-evaluate each iteration
-  (spec says once). Undecided which side changes.
-- §2.8/Ch.5: `with` — implemented as a `with "java"` interop switch, not a
-  resource block; the promised Ch.5 explanation doesn't exist.
-- §3.3: field initializers — implemented as `=` (not `:=`) and behave as
-  constants, not per-instance initial values.
+All DONE (2026-07-04), spec updated to match the implementation:
+
+- §B.3: truncated `/` and `%` (integer and real, with the `a = (a/b)*b + a%b`
+  identity), `MIN/-1` raises overflow, real `% 0.0` is NaN, NaN ordering
+  comparisons false.
+- §2.6 + Appendix A.5: `^` documented left-associative (`2^3^2 = 64`).
+- Appendix C.2: `repeat` translation drops the `_n` binding; bound documented
+  as re-evaluated per iteration.
+- §2.8/§5.8: `with` renamed "host block"; new §5.8 subsection defines it
+  (recognised facility → host name resolution; unrecognised → block skipped;
+  does not open a scope — `let` bindings escape). JVM facility: `"java"`.
+- §3.3 + Appendix A: field initialisers removed from the grammar; new
+  `constant` member production (`id ⟨: ty⟩ = exp`), documented as class-level,
+  immutable, accessed bare in-class / `C.x` outside; §5.5 field defaults
+  updated (zero / nil, no initialiser clause).
+
+Remaining spec/impl gap (spec leads impl, left in spec deliberately): `once`
+fields (§3.3, rule 4.17, §4.4, §5.5) are specified but the parser does not
+accept `once` — decide: implement or remove from the Definition.
 
 ## Verification
 
