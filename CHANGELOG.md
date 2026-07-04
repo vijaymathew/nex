@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.1-beta - 2026-07-04
 
 - **Breaking:** function and method parameters are now **contravariant** and
   return types **covariant** (previously parameters were covariant). A function
