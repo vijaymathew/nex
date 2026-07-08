@@ -665,3 +665,46 @@ print(p)")
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
+
+(deftest closure-that-captures-and-constructs-smoke-test
+  (testing "a fn closure that BOTH captures an enclosing binding AND runs `create`
+            must compile and execute -- currently fails at runtime with
+            'Undefined compiled field' because the constructed object's fields are
+            reflected against the wrong class inside the captured closure.
+
+            Capture-without-construct (e.g. `compose`, an integer adder) works, and
+            construct-without-capture works; only the combination is broken. This is
+            a known-failing regression guard -- it should pass once the closure
+            codegen resolves the constructed object's own class for field access."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-closure-capture-construct")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class Box
+  feature v: Integer
+  create make(n: Integer) do v := n end
+end
+
+declare type Maker = Function(): Box
+
+function make_maker(n: Integer): Maker do
+  result := fn (): Box do result := create Box.make(n) end
+end
+
+let m: Maker := make_maker(7)
+print(m().v)")
+        ;; Run a real standalone jar (as `nex file.nex` does) rather than loading
+        ;; the class in-process: the closure path deoptimizes to the interpreter,
+        ;; and an in-process URLClassLoader would cross runtime classloaders. The
+        ;; defect surfaced at run time as "Undefined compiled field: v" because the
+        ;; interpreter-produced object's fields were read via JVM reflection.
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))]
+          (is (= 0 exit) err)
+          (is (= "7" (str/trim out))
+              (str "closure capturing `n` and constructing a Box should print the "
+                   "Box's field; stderr: " err)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
