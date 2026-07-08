@@ -847,11 +847,19 @@
 
 (defn- get-user-field
   [target field-name]
-  (let [[owner ^Field field] (or (deep-reflected-field target field-name)
-                                 (throw (ex-info (str "Undefined compiled field: " field-name)
-                                                 {:field field-name
-                                                  :class (.getName (.getClass target))})))]
-    (.get field owner)))
+  (if (interp/nex-object? target)
+    ;; The target was produced by the interpreter (e.g. a value constructed inside
+    ;; a deoptimized closure) and stored in the compiled session. Its fields live in
+    ;; the object's :fields map, not as reflectable JVM fields, so read them
+    ;; directly — mirroring object-field-value and invoke-user-method.
+    (let [fields (:fields target)]
+      (or (get fields field-name)
+          (get fields (keyword field-name))))
+    (let [[owner ^Field field] (or (deep-reflected-field target field-name)
+                                   (throw (ex-info (str "Undefined compiled field: " field-name)
+                                                   {:field field-name
+                                                    :class (.getName (.getClass target))})))]
+      (.get field owner))))
 
 (defn- set-user-field!
   [target field-name value]
