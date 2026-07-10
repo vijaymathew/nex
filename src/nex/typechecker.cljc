@@ -1164,8 +1164,10 @@
 (defn check-binary-op
   "Check the type of a binary operation"
   [env {:keys [operator left right] :as expr}]
-  (let [left-type (check-expression env left)
-        right-type (check-expression env right)
+  (let [;; Expand aliases (incl. refinement types) so a `Quantity` operand is
+        ;; seen as its base `Integer` for arithmetic/comparison.
+        left-type (expand-type-aliases env (check-expression env left))
+        right-type (expand-type-aliases env (check-expression env right))
         left-base (let [t (attachable-type left-type)]
                     (if (map? t) (:base-type t) t))
         right-base (let [t (attachable-type right-type)]

@@ -50,8 +50,11 @@ declareFunctionDecl
     : DECLARE FUNCTION IDENTIFIER genericParams? '(' paramList? ')' (':' type)? noteClause?
     ;
 
+// `declare type X = Base` is a structural alias. With an optional `where`
+// predicate it becomes a refinement type: Base narrowed by a boolean predicate,
+// checked at narrowing boundaries (see the refinement pass in walker.cljc).
 declareTypeDecl
-    : DECLARE TYPE_KW IDENTIFIER EQUAL type
+    : DECLARE TYPE_KW IDENTIFIER EQUAL type (WHERE IDENTIFIER ':' expression)?
     ;
 
 genericParams
@@ -268,7 +271,7 @@ variantClause
 
 assignment
     : IDENTIFIER ASSIGN expression
-    | primary '.' (IDENTIFIER | UNION) ASSIGN expression
+    | primary '.' (IDENTIFIER | UNION | WHERE) ASSIGN expression
     ;
 
 localVarDecl
@@ -337,11 +340,12 @@ postfixPart
     | callSuffix
     ;
 
-// `union` is a soft keyword: reserved only as the leading token of a top-level
-// declaration (unionDecl). Everywhere a member name is expected it stays usable
-// as an ordinary identifier — notably Set's `union` method (`s.union(...)`).
+// `union`/`where` are soft keywords: reserved only in their declaration
+// positions (unionDecl, the `where` clause of declareTypeDecl). Everywhere a
+// member name is expected they stay usable as ordinary identifiers — notably
+// Set's `union` method (`s.union(...)`).
 memberAccess
-    : QMARK? '.' (IDENTIFIER | UNION) ('(' argumentList? ')')?
+    : QMARK? '.' (IDENTIFIER | UNION | WHERE) ('(' argumentList? ')')?
     ;
 
 callSuffix
@@ -453,6 +457,7 @@ setLiteral
 
 CLASS        : 'class';
 UNION        : 'union';
+WHERE        : 'where';
 SEALED       : 'sealed';
 DEFERRED     : 'deferred';
 ONCE         : 'once';

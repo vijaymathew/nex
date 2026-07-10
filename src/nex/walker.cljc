@@ -442,6 +442,100 @@
              [constructors])
      :invariant nil}))
 
+;;
+;; refinement types (lightweight predicate-narrowed subtypes)
+;;
+;; `declare type Quantity = Integer where n: n > 0` is an alias to Integer for
+;; type checking, plus a predicate checked wherever a value is *narrowed* into
+;; the refinement. Narrowing sites reachable from the syntax alone are: a `let`
+;; whose declared type is the refinement, a parameter of that type (checked at
+;; entry), and a return of that type (checked on `result`). The check is emitted
+;; as ordinary AST — a scoped block that binds the predicate's binder to the
+;; value and raises when the predicate is false — so every backend runs it and
+;; `skip-contracts` is out of scope here (a follow-up can gate it like `require`).
+
+(defn- refinement-name
+  "The refinement name a type annotation refers to, or nil. Only plain named
+  types are handled; detachable/parameterized annotations are left unchecked."
+  [type-expr]
+  (when (string? type-expr) type-expr))
+
+(defn- collect-refinements
+  "Map of refinement name -> {:base :binder :predicate} from a program's aliases."
+  [program]
+  (reduce (fn [m {:keys [name type-expr refinement]}]
+            (if refinement
+              (assoc m name (assoc refinement :base type-expr))
+              m))
+          {}
+          (:type-aliases program)))
+
+(defn- make-refinement-check
+  "AST for `do let <binder>: <base> := <value-var>  if not(<pred>) then raise ... end end`.
+  Binding the predicate binder at the base type keeps its methods/operators
+  resolvable on every backend (a refinement is otherwise opaque to lowering)."
+  [rname {:keys [binder predicate base]} value-var]
+  {:type :scoped-block
+   :rescue nil
+   :body [{:type :let :name binder :var-type base
+           :value {:type :identifier :name value-var}}
+          {:type :if
+           :condition {:type :unary :operator "not" :expr predicate}
+           :then [{:type :raise
+                   :value {:type :string
+                           :value (str "Refinement " rname " violated")}}]
+           :elseif []
+           :else nil}]})
+
+(defn- expand-refinement-lets
+  "Expand each `let x: R := …` in a statement vector into [the-let, check]."
+  [stmts refinements]
+  (vec (mapcat
+        (fn [s]
+          (if-let [r (and (map? s) (= :let (:type s))
+                          (get refinements (refinement-name (:var-type s))))]
+            [s (make-refinement-check (refinement-name (:var-type s)) r (:name s))]
+            [s]))
+        stmts)))
+
+(defn- add-param-return-checks
+  "Prepend a check for each refinement-typed parameter and append one for a
+  refinement return type (on `result`)."
+  [node refinements]
+  (let [param-checks (keep (fn [p]
+                             (when-let [r (get refinements (refinement-name (:type p)))]
+                               (make-refinement-check (refinement-name (:type p)) r (:name p))))
+                           (:params node))
+        ret-name (refinement-name (:return-type node))
+        ret-r (get refinements ret-name)
+        ret-check (when ret-r (make-refinement-check ret-name ret-r "result"))]
+    (if (or (seq param-checks) ret-check)
+      (assoc node :body (vec (concat param-checks
+                                     (or (:body node) [])
+                                     (when ret-check [ret-check]))))
+      node)))
+
+(defn inject-refinement-checks
+  "Rewrite a walked program, injecting predicate checks at every refinement
+  narrowing site (let bindings, parameters, returns) throughout the tree."
+  [program]
+  (let [refinements (collect-refinements program)]
+    (if (empty? refinements)
+      program
+      (walk/postwalk
+       (fn [n]
+         (if (map? n)
+           (let [n (reduce (fn [m k]
+                             (if (sequential? (get m k))
+                               (assoc m k (expand-refinement-lets (get m k) refinements))
+                               m))
+                           n [:body :then :else :statements])]
+             (if (#{:method :constructor :function} (:type n))
+               (add-param-return-checks n refinements)
+               n))
+           n))
+       program))))
+
 (def node-handlers
   {:program
    (fn [[_ & nodes]]
@@ -477,16 +571,17 @@
            ;; `union` declarations desugar to a sealed parent + variant classes.
            union-classes (mapcat :classes (filter #(= :union (:type %)) transformed))
            all-classes (vec (concat classes function-classes union-classes))]
-       {:type :program
-        :imports (vec imports)
-        :interns (vec interns)
-        :type-aliases (vec type-aliases)
-        :classes all-classes
-        :functions (vec functions)
-        :duplicate-functions duplicate-functions
-        :function-signature-conflicts signature-conflicts
-        :statements (vec statements)
-        :calls (vec calls)}))
+       (inject-refinement-checks
+        {:type :program
+         :imports (vec imports)
+         :interns (vec interns)
+         :type-aliases (vec type-aliases)
+         :classes all-classes
+         :functions (vec functions)
+         :duplicate-functions duplicate-functions
+         :function-signature-conflicts signature-conflicts
+         :statements (vec statements)
+         :calls (vec calls)})))
 
    :internStmt
    (fn [[_ _intern-kw & tokens]]
@@ -933,10 +1028,20 @@
         :type (when type-node (transform-node type-node))}))
 
    :declareTypeDecl
-   (fn [[_ _declare-kw _type-kw name _eq type-node]]
-     {:type :type-alias
-      :name (token-text name)
-      :type-expr (transform-node type-node)})
+   (fn [[_ _declare-kw _type-kw name _eq type-node & where-rest]]
+     ;; `declare type X = Base` is a structural alias. `... where n: <expr>`
+     ;; makes it a refinement type: still an alias to Base for type checking, but
+     ;; the predicate is recorded so the refinement pass can inject narrowing
+     ;; checks. (Base is kept as :type-expr, so aliasing/transparency is free.)
+     (let [base {:type :type-alias
+                 :name (token-text name)
+                 :type-expr (transform-node type-node)}]
+       (if (and (seq where-rest)
+                (= "where" (token-text (first where-rest))))
+         (let [binder (token-text (nth where-rest 1))
+               predicate (transform-node (last (filter sequential? where-rest)))]
+           (assoc base :refinement {:binder binder :predicate predicate}))
+         base)))
 
    :typeArgs
    (fn [[_ _open-bracket & args]]

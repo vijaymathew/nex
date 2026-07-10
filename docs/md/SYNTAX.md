@@ -709,6 +709,47 @@ Any type can be aliased, not just function types:
 declare type Matrix = Array[Array[Real]]
 ```
 
+## Refinement Types
+
+A `declare type` with a `where` clause is a **refinement type**: an existing type
+narrowed by a boolean predicate, without declaring a class.
+
+```nex
+declare type Quantity   = Integer where n: n > 0
+declare type Percentage = Real    where p: p >= 0.0 and p <= 100.0
+declare type NonEmpty   = String  where s: s.length() > 0
+```
+
+`where n: <expr>` binds the value under test to `n` (any name) and gives a
+boolean predicate over it, mirroring the `label: condition` shape of contracts.
+
+A refinement is its base type with a checked constraint — **not** a class: no
+fields, no constructor, no wrapper. A `Quantity` *is* an `Integer` at runtime, so
+it interoperates freely with its base:
+
+```nex
+let q: Quantity := 5          -- checked: raises if the value is not > 0
+let total: Integer := q + 10  -- free: a Quantity is an Integer
+```
+
+The predicate is enforced wherever a value is **narrowed** into the refinement —
+a `let` of that type, a parameter of that type (checked at the call boundary),
+and a return of that type. Widening (`Quantity` → `Integer`) is always free.
+
+```nex
+function debit(amount: Quantity): Integer do   -- amount checked on entry
+  result := amount
+end
+```
+
+Notes and current limits:
+
+- Operations do not propagate the refinement: `q + q` is an `Integer`. Flow the
+  result back into a refinement-typed binding to re-check it.
+- Fields, `convert` targets, `?R` detachable bindings, and `distinct` nominal
+  newtypes are not yet checked/supported — use a class where you need those.
+- The predicate should be side-effect free.
+
 ## Generics
 
 ```nex

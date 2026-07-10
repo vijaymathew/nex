@@ -27,7 +27,11 @@ code.
    `Quantity` class with a constructor precondition *and* an invariant. Every
    constrained scalar becomes a class. This is the biggest tax on "make illegal
    states unrepresentable." **Proposal:** refinement subtypes — an existing type
-   narrowed by a predicate — without declaring a class.
+   narrowed by a predicate — without declaring a class. **Implemented** as
+   `declare type X = Base where n: <pred>` (`docs/proposals/refinement-types.md`);
+   the predicate is checked at narrowing sites (let / parameter / return), the
+   value erases to its base (no boxing). Fields, `convert`, `?R`, and `distinct`
+   newtypes are not yet covered.
 
 3. **No stdlib `Result`/`Option`, and no error-propagation sugar.** `Result[T]`
    had to be hand-defined; threading failures meant manual `match`-and-rewrap at
