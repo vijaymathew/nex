@@ -7,7 +7,7 @@ grammar nexlang;
  */
 
 program
-    : (importStmt | internStmt | classDecl | declareTypeDecl | declareFunctionDecl | functionDecl | statement)* EOF
+    : (importStmt | internStmt | classDecl | unionDecl | declareTypeDecl | declareFunctionDecl | functionDecl | statement)* EOF
     ;
 
 importStmt
@@ -25,6 +25,21 @@ classDecl
       classBody
       invariantClause?
       END
+    ;
+
+// Concise sum-type declaration. Desugars in the walker to a
+// `sealed deferred class` parent plus one `class ... inherit Parent`
+// per variant (see src/nex/walker.cljc :unionDecl). Payloads become
+// feature fields plus an auto-generated `make` constructor.
+unionDecl
+    : UNION IDENTIFIER genericParams?
+      noteClause?
+      unionVariant+
+      END
+    ;
+
+unionVariant
+    : IDENTIFIER ('(' paramList? ')')?
     ;
 
 functionDecl
@@ -253,7 +268,7 @@ variantClause
 
 assignment
     : IDENTIFIER ASSIGN expression
-    | primary '.' IDENTIFIER ASSIGN expression
+    | primary '.' (IDENTIFIER | UNION) ASSIGN expression
     ;
 
 localVarDecl
@@ -322,8 +337,11 @@ postfixPart
     | callSuffix
     ;
 
+// `union` is a soft keyword: reserved only as the leading token of a top-level
+// declaration (unionDecl). Everywhere a member name is expected it stays usable
+// as an ordinary identifier — notably Set's `union` method (`s.union(...)`).
 memberAccess
-    : QMARK? '.' IDENTIFIER ('(' argumentList? ')')?
+    : QMARK? '.' (IDENTIFIER | UNION) ('(' argumentList? ')')?
     ;
 
 callSuffix
@@ -434,6 +452,7 @@ setLiteral
  */
 
 CLASS        : 'class';
+UNION        : 'union';
 SEALED       : 'sealed';
 DEFERRED     : 'deferred';
 ONCE         : 'once';

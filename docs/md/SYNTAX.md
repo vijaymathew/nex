@@ -585,6 +585,36 @@ class Err
 end
 ```
 
+## Sum Types (`union`)
+
+Writing a sealed hierarchy by hand is verbose: a `sealed deferred class` parent plus a full `class … inherit … feature … create make` for every variant. The `union` form is concise sugar for exactly that shape.
+
+```nex
+union Order
+  Draft
+  Placed(id: String, total: Real)
+  Shipped(tracking: String, at: Date)
+end
+```
+
+This desugars to a `sealed deferred class Order` parent and one ordinary class per variant. Each variant's payload becomes `feature` fields plus an auto-generated `make` constructor, so construction and matching are the same as for hand-written sealed classes:
+
+```nex
+let o: Order := create Placed.make("A-100", 42.0)
+
+match o of
+  when Draft   as d then print("draft")
+  when Placed  as p then print(p.id)       -- payloads are ordinary fields
+  when Shipped as s then print(s.tracking)
+end
+```
+
+- A variant with no payload (`Draft`) still gets a nullary `make`, so `create Draft.make()` works.
+- Generic parameters carry through to every variant: `union Result[T]` gives `Ok`/`Err` that inherit `Result[T]`.
+- Because a `union` *is* a sealed hierarchy after desugaring, `match` exhaustiveness is checked exactly as in the previous section — a missing variant is a compile-time error.
+
+The `union` form is deliberately data-only. When a variant needs its own contracts, invariants, or methods, write the explicit `sealed deferred class` form above; both compile to the same thing.
+
 ## Match Statement
 
 `match` dispatches on the runtime type of an expression. Used with a sealed parent class it becomes an exhaustive type switch — every variant must be handled or the typechecker rejects the program:

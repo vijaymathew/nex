@@ -369,6 +369,79 @@
                                       "declaration exactly.")})))))
          vec)))
 
+;;
+;; union (concise sum type) desugaring
+;;
+;; A `union P[G…]` declaration is rewritten into the exact sealed-class AST Nex
+;; already produces: a `sealed deferred class P[G…]` parent plus one ordinary
+;; `class Vi[G…] inherit P[G…]` per variant, each with its payload fields and an
+;; auto-generated `make` constructor. Everything downstream (type checker,
+;; interpreter, JVM/JS backends) only ever sees `:class` nodes.
+
+(defn- union-variant->class
+  "Build the ordinary :class AST node for one union variant.
+
+  variant-node is a parsed (:unionVariant IDENTIFIER '(' paramList? ')') tree.
+  generic-params is the parent's already-transformed generic-param vector, shared
+  verbatim by every variant so payload types can reference them (e.g. Ok[T])."
+  [variant-node parent-name generic-params]
+  (let [var-name (token-text (second variant-node))
+        param-list-node (first (filter #(and (sequential? %)
+                                             (= :paramList (first %)))
+                                       (drop 2 variant-node)))
+        payload (if param-list-node (transform-node param-list-node) [])
+        ;; inherit P[G…] — parent generic args are the bare param names.
+        gargs (mapv :name generic-params)
+        parent-entry (cond-> {:parent parent-name}
+                       (seq gargs) (assoc :generic-args gargs))
+        fields (mapv (fn [{:keys [name type]}]
+                       {:type :field
+                        :name name
+                        :field-type type
+                        :once? false
+                        :constant? false
+                        :value nil
+                        :note nil})
+                     payload)
+        ;; Constructor params are given internal names distinct from the field
+        ;; names (payload construction is positional), so the field-init
+        ;; `field := arg__i` is never ambiguous with the param in scope.
+        ctor-params (vec (map-indexed
+                          (fn [i {:keys [type]}]
+                            {:name (str "arg__" (inc i))
+                             :type type})
+                          payload))
+        ctor-body (vec (map-indexed
+                        (fn [i {:keys [name]}]
+                          {:type :assign
+                           :target name
+                           :value {:type :identifier :name (str "arg__" (inc i))}})
+                        payload))
+        feature-section (when (seq fields)
+                          {:type :feature-section
+                           :visibility {:type :public}
+                           :members fields})
+        constructor {:type :constructor
+                     :name "make"
+                     :params (when (seq ctor-params) ctor-params)
+                     :require nil
+                     :body ctor-body
+                     :ensure nil
+                     :rescue nil}
+        constructors {:type :constructors
+                      :constructors [constructor]}]
+    {:type :class
+     :name var-name
+     :deferred? false
+     :sealed? false
+     :generic-params (when (seq generic-params) generic-params)
+     :note nil
+     :parents [parent-entry]
+     :body (if feature-section
+             [feature-section constructors]
+             [constructors])
+     :invariant nil}))
+
 (def node-handlers
   {:program
    (fn [[_ & nodes]]
@@ -398,10 +471,12 @@
            interns (filter #(= :intern (:type %)) transformed)
            imports (filter #(= :import (:type %)) transformed)
            type-aliases (filter #(= :type-alias (:type %)) transformed)
-           statements (filter #(not (#{:class :function :intern :import :type-alias} (:type %))) transformed)
+           statements (filter #(not (#{:class :union :function :intern :import :type-alias} (:type %))) transformed)
            calls (filter #(= :call (:type %)) statements)
            function-classes (mapv :class-def functions)
-           all-classes (vec (concat classes function-classes))]
+           ;; `union` declarations desugar to a sealed parent + variant classes.
+           union-classes (mapcat :classes (filter #(= :union (:type %)) transformed))
+           all-classes (vec (concat classes function-classes union-classes))]
        {:type :program
         :imports (vec imports)
         :interns (vec interns)
@@ -498,6 +573,34 @@
         :parents (when inherit-clause (transform-node inherit-clause))
         :body (walk-children class-body)
         :invariant (when invariant-clause (transform-node invariant-clause))}))
+
+   :unionDecl
+   (fn [[_ _union-kw name & rest]]
+     (let [generic-params-node (first (filter #(and (sequential? %)
+                                                    (= :genericParams (first %)))
+                                              rest))
+           note-clause (first (filter #(and (sequential? %)
+                                            (= :noteClause (first %)))
+                                      rest))
+           generic-params (when generic-params-node (transform-node generic-params-node))
+           variant-nodes (filter #(and (sequential? %)
+                                       (= :unionVariant (first %)))
+                                 rest)
+           parent-name (token-text name)
+           parent {:type :class
+                   :name parent-name
+                   :deferred? true
+                   :sealed? true
+                   :generic-params generic-params
+                   :note (when note-clause (transform-node note-clause))
+                   :parents nil
+                   :body []
+                   :invariant nil}
+           variant-classes (mapv #(union-variant->class % parent-name generic-params)
+                                 variant-nodes)]
+       {:type :union
+        :name parent-name
+        :classes (into [parent] variant-classes)}))
 
    :functionDecl
    (fn [[_ _function-kw name & rest]]
