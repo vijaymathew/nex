@@ -369,6 +369,205 @@
                                       "declaration exactly.")})))))
          vec)))
 
+;;
+;; union (concise sum type) desugaring
+;;
+;; A `union P[G…]` declaration is rewritten into the exact sealed-class AST Nex
+;; already produces: a `sealed deferred class P[G…]` parent plus one ordinary
+;; `class Vi[G…] inherit P[G…]` per variant, each with its payload fields and an
+;; auto-generated `make` constructor. Everything downstream (type checker,
+;; interpreter, JVM/JS backends) only ever sees `:class` nodes.
+
+(defn- union-variant->class
+  "Build the ordinary :class AST node for one union variant.
+
+  variant-node is a parsed (:unionVariant IDENTIFIER '(' paramList? ')') tree.
+  generic-params is the parent's already-transformed generic-param vector, shared
+  verbatim by every variant so payload types can reference them (e.g. Ok[T])."
+  [variant-node parent-name generic-params]
+  (let [var-name (token-text (second variant-node))
+        param-list-node (first (filter #(and (sequential? %)
+                                             (= :paramList (first %)))
+                                       (drop 2 variant-node)))
+        payload (if param-list-node (transform-node param-list-node) [])
+        ;; inherit P[G…] — parent generic args are the bare param names.
+        gargs (mapv :name generic-params)
+        parent-entry (cond-> {:parent parent-name}
+                       (seq gargs) (assoc :generic-args gargs))
+        fields (mapv (fn [{:keys [name type]}]
+                       {:type :field
+                        :name name
+                        :field-type type
+                        :once? false
+                        :constant? false
+                        :value nil
+                        :note nil})
+                     payload)
+        ;; Constructor params are given internal names distinct from the field
+        ;; names (payload construction is positional), so the field-init
+        ;; `field := arg__i` is never ambiguous with the param in scope.
+        ctor-params (vec (map-indexed
+                          (fn [i {:keys [type]}]
+                            {:name (str "arg__" (inc i))
+                             :type type})
+                          payload))
+        ctor-body (vec (map-indexed
+                        (fn [i {:keys [name]}]
+                          {:type :assign
+                           :target name
+                           :value {:type :identifier :name (str "arg__" (inc i))}})
+                        payload))
+        feature-section (when (seq fields)
+                          {:type :feature-section
+                           :visibility {:type :public}
+                           :members fields})
+        constructor {:type :constructor
+                     :name "make"
+                     :params (when (seq ctor-params) ctor-params)
+                     :require nil
+                     :body ctor-body
+                     :ensure nil
+                     :rescue nil}
+        constructors {:type :constructors
+                      :constructors [constructor]}]
+    {:type :class
+     :name var-name
+     :deferred? false
+     :sealed? false
+     :generic-params (when (seq generic-params) generic-params)
+     :note nil
+     :parents [parent-entry]
+     :body (if feature-section
+             [feature-section constructors]
+             [constructors])
+     :invariant nil}))
+
+;;
+;; refinement types (lightweight predicate-narrowed subtypes)
+;;
+;; `declare type Quantity = Integer where n: n > 0` is an alias to Integer for
+;; type checking, plus a predicate checked wherever a value is *narrowed* into
+;; the refinement. Narrowing sites reachable from the syntax alone are: a `let`
+;; whose declared type is the refinement, a parameter of that type (checked at
+;; entry), and a return of that type (checked on `result`). The check is emitted
+;; as ordinary AST — a scoped block that binds the predicate's binder to the
+;; value and raises when the predicate is false — so every backend runs it and
+;; `skip-contracts` is out of scope here (a follow-up can gate it like `require`).
+
+(defn- refinement-name
+  "The refinement name a type annotation refers to, or nil. Only plain named
+  types are handled; detachable/parameterized annotations are left unchecked."
+  [type-expr]
+  (when (string? type-expr) type-expr))
+
+(defn- collect-refinements
+  "Map of refinement name -> {:base :binder :predicate} from a program's aliases."
+  [program]
+  (reduce (fn [m {:keys [name type-expr refinement]}]
+            (if refinement
+              (assoc m name (assoc refinement :base type-expr))
+              m))
+          {}
+          (:type-aliases program)))
+
+(defn- make-refinement-check
+  "AST for `do let <binder>: <base> := <value-var>  if not(<pred>) then raise ... end end`.
+  Binding the predicate binder at the base type keeps its methods/operators
+  resolvable on every backend (a refinement is otherwise opaque to lowering)."
+  [rname {:keys [binder predicate base]} value-var]
+  {:type :scoped-block
+   :rescue nil
+   :body [{:type :let :name binder :var-type base
+           :value {:type :identifier :name value-var}}
+          {:type :if
+           :condition {:type :unary :operator "not" :expr predicate}
+           :then [{:type :raise
+                   :value {:type :string
+                           :value (str "Refinement " rname " violated")}}]
+           :elseif []
+           :else nil}]})
+
+(defn- expand-refinement-lets
+  "Expand each `let x: R := …` in a statement vector into [the-let, check]."
+  [stmts refinements]
+  (vec (mapcat
+        (fn [s]
+          (if-let [r (and (map? s) (= :let (:type s))
+                          (get refinements (refinement-name (:var-type s))))]
+            [s (make-refinement-check (refinement-name (:var-type s)) r (:name s))]
+            [s]))
+        stmts)))
+
+(defn- add-param-return-checks
+  "Prepend a check for each refinement-typed parameter and append one for a
+  refinement return type (on `result`)."
+  [node refinements]
+  (let [param-checks (keep (fn [p]
+                             (when-let [r (get refinements (refinement-name (:type p)))]
+                               (make-refinement-check (refinement-name (:type p)) r (:name p))))
+                           (:params node))
+        ret-name (refinement-name (:return-type node))
+        ret-r (get refinements ret-name)
+        ret-check (when ret-r (make-refinement-check ret-name ret-r "result"))]
+    (if (or (seq param-checks) ret-check)
+      (assoc node :body (vec (concat param-checks
+                                     (or (:body node) [])
+                                     (when ret-check [ret-check]))))
+      node)))
+
+(defn inject-refinement-checks
+  "Rewrite a walked program, injecting predicate checks at every refinement
+  narrowing site (let bindings, parameters, returns) throughout the tree."
+  [program]
+  (let [refinements (collect-refinements program)]
+    (if (empty? refinements)
+      program
+      (walk/postwalk
+       (fn [n]
+         (if (map? n)
+           (let [n (reduce (fn [m k]
+                             (if (sequential? (get m k))
+                               (assoc m k (expand-refinement-lets (get m k) refinements))
+                               m))
+                           n [:body :then :else :statements])]
+             (if (#{:method :constructor :function} (:type n))
+               (add-param-return-checks n refinements)
+               n))
+           n))
+       program))))
+
+(defn- process-field-patterns
+  "Desugar a variant's field patterns against a bound variable `var-name`.
+  Returns {:bindings :guards :body-binds}:
+   - :bindings   safe `let`s (direct field binds), run before the guard;
+   - :guards     boolean conjuncts (literal equalities, nested `convert`s);
+   - :body-binds `let`s that depend on a nested `convert` succeeding, so they run
+                 in the body after the guard.
+  Nested patterns recurse: the field is narrowed with `convert … to __nest: T` in
+  the guard, and the sub-pattern's binds move into :body-binds."
+  [var-name field-patterns]
+  (reduce
+   (fn [acc {:keys [kind field] :as fp}]
+     (let [fr {:type :call :target var-name :method field :args [] :has-parens false}]
+       (case kind
+         :bind (if (= "_" field)
+                 acc
+                 (update acc :bindings conj
+                         {:type :let :name (:bind fp) :var-type nil :value fr}))
+         :literal (update acc :guards conj
+                          {:type :binary :operator "==" :left fr :right (:value fp)})
+         :nested (let [sub-var (str "__nest_" (swap! next-fn-id inc) "__")
+                       conv {:type :convert :value fr :var-name sub-var
+                             :target-type (if (:generic-args fp)
+                                            {:base-type (:type fp) :type-args (:generic-args fp)}
+                                            (:type fp))}
+                       sub (process-field-patterns sub-var (:subpatterns fp))]
+                   (-> acc
+                       (update :guards #(vec (concat % [conv] (:guards sub))))
+                       (update :body-binds #(vec (concat % (:bindings sub) (:body-binds sub)))))))))
+   {:bindings [] :guards [] :body-binds []}
+   field-patterns))
+
 (def node-handlers
   {:program
    (fn [[_ & nodes]]
@@ -398,20 +597,23 @@
            interns (filter #(= :intern (:type %)) transformed)
            imports (filter #(= :import (:type %)) transformed)
            type-aliases (filter #(= :type-alias (:type %)) transformed)
-           statements (filter #(not (#{:class :function :intern :import :type-alias} (:type %))) transformed)
+           statements (filter #(not (#{:class :union :function :intern :import :type-alias} (:type %))) transformed)
            calls (filter #(= :call (:type %)) statements)
            function-classes (mapv :class-def functions)
-           all-classes (vec (concat classes function-classes))]
-       {:type :program
-        :imports (vec imports)
-        :interns (vec interns)
-        :type-aliases (vec type-aliases)
-        :classes all-classes
-        :functions (vec functions)
-        :duplicate-functions duplicate-functions
-        :function-signature-conflicts signature-conflicts
-        :statements (vec statements)
-        :calls (vec calls)}))
+           ;; `union` declarations desugar to a sealed parent + variant classes.
+           union-classes (mapcat :classes (filter #(= :union (:type %)) transformed))
+           all-classes (vec (concat classes function-classes union-classes))]
+       (inject-refinement-checks
+        {:type :program
+         :imports (vec imports)
+         :interns (vec interns)
+         :type-aliases (vec type-aliases)
+         :classes all-classes
+         :functions (vec functions)
+         :duplicate-functions duplicate-functions
+         :function-signature-conflicts signature-conflicts
+         :statements (vec statements)
+         :calls (vec calls)})))
 
    :internStmt
    (fn [[_ _intern-kw & tokens]]
@@ -498,6 +700,34 @@
         :parents (when inherit-clause (transform-node inherit-clause))
         :body (walk-children class-body)
         :invariant (when invariant-clause (transform-node invariant-clause))}))
+
+   :unionDecl
+   (fn [[_ _union-kw name & rest]]
+     (let [generic-params-node (first (filter #(and (sequential? %)
+                                                    (= :genericParams (first %)))
+                                              rest))
+           note-clause (first (filter #(and (sequential? %)
+                                            (= :noteClause (first %)))
+                                      rest))
+           generic-params (when generic-params-node (transform-node generic-params-node))
+           variant-nodes (filter #(and (sequential? %)
+                                       (= :unionVariant (first %)))
+                                 rest)
+           parent-name (token-text name)
+           parent {:type :class
+                   :name parent-name
+                   :deferred? true
+                   :sealed? true
+                   :generic-params generic-params
+                   :note (when note-clause (transform-node note-clause))
+                   :parents nil
+                   :body []
+                   :invariant nil}
+           variant-classes (mapv #(union-variant->class % parent-name generic-params)
+                                 variant-nodes)]
+       {:type :union
+        :name parent-name
+        :classes (into [parent] variant-classes)}))
 
    :functionDecl
    (fn [[_ _function-kw name & rest]]
@@ -830,10 +1060,20 @@
         :type (when type-node (transform-node type-node))}))
 
    :declareTypeDecl
-   (fn [[_ _declare-kw _type-kw name _eq type-node]]
-     {:type :type-alias
-      :name (token-text name)
-      :type-expr (transform-node type-node)})
+   (fn [[_ _declare-kw _type-kw name _eq type-node & where-rest]]
+     ;; `declare type X = Base` is a structural alias. `... where n: <expr>`
+     ;; makes it a refinement type: still an alias to Base for type checking, but
+     ;; the predicate is recorded so the refinement pass can inject narrowing
+     ;; checks. (Base is kept as :type-expr, so aliasing/transparency is free.)
+     (let [base {:type :type-alias
+                 :name (token-text name)
+                 :type-expr (transform-node type-node)}]
+       (if (and (seq where-rest)
+                (= "where" (token-text (first where-rest))))
+         (let [binder (token-text (nth where-rest 1))
+               predicate (transform-node (last (filter sequential? where-rest)))]
+           (assoc base :refinement {:binder binder :predicate predicate}))
+         base)))
 
    :typeArgs
    (fn [[_ _open-bracket & args]]
@@ -879,33 +1119,87 @@
    :matchStatement
    (fn [[_ _match-kw expr _of-kw & rest]]
      (let [tokens (vec rest)
-           clauses (filterv #(and (sequential? %) (= :matchClause (first %))) tokens)
+           clause-nodes (filterv #(and (sequential? %) (= :matchClause (first %))) tokens)
+           transformed (mapv transform-node clause-nodes)
+           ;; A `when _` clause is a catch-all; fold its body into `else`.
+           wildcard (first (filter :wildcard? transformed))
+           clauses (filterv #(not (:wildcard? %)) transformed)
            has-else? (some #(= "else" %) tokens)
-           else-block (when has-else?
-                        (let [after-else (drop-while #(not= "else" %) tokens)
-                              block-node (second after-else)]
-                          (when (and (sequential? block-node) (= :block (first block-node)))
-                            (transform-node block-node))))]
+           explicit-else (when has-else?
+                           (let [after-else (drop-while #(not= "else" %) tokens)
+                                 block-node (second after-else)]
+                             (when (and (sequential? block-node) (= :block (first block-node)))
+                               (transform-node block-node))))]
        {:type :match
         :expr (transform-node expr)
-        :clauses (mapv transform-node clauses)
-        :else else-block}))
+        :clauses clauses
+        :else (or explicit-else (when wildcard (:body wildcard)))}))
+
+   :fieldPattern
+   (fn [[_ & toks]]
+     ;; `id`         -> bind field `id` to local `id`
+     ;; `id: x`      -> bind field `id` to local `x`
+     ;; `id: 0`      -> require field `id` to equal the literal 0
+     ;; `id: T(...)` -> require field `id` to be a `T`, matching the sub-patterns
+     (let [field (token-text (first toks))
+           has-colon? (some #(= ":" %) toks)
+           after (rest (drop-while #(not= ":" %) toks))]
+       (cond
+         (not has-colon?)
+         {:kind :bind :field field :bind field}
+
+         (some #(= "(" %) toks)
+         (let [tn (first after)
+               type-name (if (sequential? tn) (transform-node tn) (token-text tn))
+               type-args-node (first (filter #(and (sequential? %) (= :typeArgs (first %))) after))
+               subpats (mapv transform-node
+                             (filter #(and (sequential? %) (= :fieldPattern (first %))) after))]
+           {:kind :nested :field field :type type-name
+            :generic-args (when type-args-node (transform-node type-args-node))
+            :subpatterns subpats})
+
+         (some sequential? after)
+         {:kind :literal :field field :value (transform-node (first (filter sequential? after)))}
+
+         :else
+         {:kind :bind :field field :bind (token-text (first (filter string? after)))})))
 
    :matchClause
    (fn [[_ _when-kw class-name & rest]]
      (let [tokens (vec rest)
            type-args-node (first (filter #(and (sequential? %) (= :typeArgs (first %))) tokens))
            generic-args (when type-args-node (transform-node type-args-node))
+           field-patterns (mapv transform-node
+                                (filter #(and (sequential? %) (= :fieldPattern (first %))) tokens))
            as-idx (first (keep-indexed (fn [i v] (when (= "as" v) i)) tokens))
-           var-name (token-text (nth tokens (inc as-idx)))
+           explicit-var (when as-idx (token-text (nth tokens (inc as-idx))))
+           if-idx (first (keep-indexed (fn [i v] (when (= "if" v) i)) tokens))
+           explicit-guard (when if-idx (transform-node (nth tokens (inc if-idx))))
            body-node (first (filter #(and (sequential? %) (= :block (first %))) tokens))
+           body (transform-node body-node)
            resolved-class-name (if (sequential? class-name)
                                  (transform-node class-name)
                                  (token-text class-name))]
-       {:class-name resolved-class-name
-        :generic-args generic-args
-        :var-name var-name
-        :body (transform-node body-node)}))
+       (if (and (= resolved-class-name "_") (empty? field-patterns))
+         ;; Top-level wildcard: handled as `else` by :matchStatement.
+         {:wildcard? true :body body}
+         ;; A synthetic binder lets a clause read destructured fields even when it
+         ;; does not bind the whole value with `as`. Field patterns desugar to
+         ;; `:bindings` (direct binds, before the guard), `:guard` conjuncts
+         ;; (literal equalities and nested `convert`s, ANDed with any explicit
+         ;; `if`), and body-prepended binds for nested sub-fields.
+         (let [var-name (or explicit-var (str "__match_" (swap! next-fn-id inc) "__"))
+               {:keys [bindings guards body-binds]} (process-field-patterns var-name field-patterns)
+               guard-parts (concat guards (when explicit-guard [explicit-guard]))
+               guard (when (seq guard-parts)
+                       (reduce (fn [a b] {:type :binary :operator "and" :left a :right b})
+                               guard-parts))]
+           {:class-name resolved-class-name
+            :generic-args generic-args
+            :var-name var-name
+            :bindings bindings
+            :guard guard
+            :body (into (vec body-binds) body)}))))
 
    :selectStatement
    (fn [[_ _select-kw & rest]]

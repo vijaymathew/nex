@@ -52,6 +52,8 @@
          infer-free-function-return-type)
 (declare collect-anonymous-class-defs)
 (declare refine-condition-branch-env)
+(declare lower-boolean-condition)
+(declare convert-binding-init-stmts)
 (declare function-object-call?)
 (declare function-object-binding-type)
 (declare lower-select)
@@ -1119,10 +1121,13 @@
     (lower-scoped-statements env else-stmts)))
 
 (defn- lower-match-clauses
-  "Lower match clauses as a chain of convert-based instanceof checks."
+  "Lower match clauses as a chain of convert-based instanceof checks. Destructure
+  `:bindings` run in the matched scope; a `:guard`, when present, is tested after
+  them and falls through to the remaining clauses when false."
   [env match-tmp-name clauses else-stmts]
   (if-let [clause (first clauses)]
-    (let [{:keys [class-name var-name body generic-args]} clause
+    (let [{:keys [class-name var-name body generic-args bindings guard]} clause
+          bindings (vec (or bindings []))
           target-type (if generic-args
                         {:base-type class-name :type-args generic-args}
                         class-name)
@@ -1131,14 +1136,30 @@
                              :var-name var-name
                              :target-type target-type}
           [env1 _binding] (ensure-convert-binding env synthetic-convert)
-          [env2 lowered-body] (lower-scoped-statements env1 body)
-          [env3 else-body] (lower-match-clauses (scoped-env env env2)
-                                                match-tmp-name
-                                                (rest clauses)
-                                                else-stmts)
           [_ convert-ir] (lower-convert-expression env1 synthetic-convert)]
-      [(scoped-env env env3)
-       [(ir/if-stmt-node convert-ir lowered-body else-body)]])
+      (if guard
+        ;; `if (convert…) then { bindings; init; if guard then body else rest } else rest`.
+        ;; The guard is lowered as a boolean condition so a `convert … to v: T`
+        ;; guard allocates/initializes v and refines it non-nil in the body
+        ;; (this is what makes a nested pattern's field-narrowing compile).
+        (let [child (scoped-child-env env1)
+              [env-b lowered-bindings] (lower-statements child bindings)
+              [cond-env guard-ir] (lower-boolean-condition env-b guard)
+              guard-init-stmts (convert-binding-init-stmts cond-env guard)
+              body-env (refine-condition-branch-env cond-env guard :then)
+              [env-body lowered-body] (lower-statements body-env body)
+              [env3 else-body] (lower-match-clauses (scoped-env env env-body)
+                                                    match-tmp-name (rest clauses) else-stmts)
+              then-branch (vec (concat lowered-bindings
+                                       guard-init-stmts
+                                       [(ir/if-stmt-node guard-ir lowered-body else-body)]))]
+          [(scoped-env env env3)
+           [(ir/if-stmt-node convert-ir then-branch else-body)]])
+        (let [[env2 lowered-body] (lower-scoped-statements env1 (into bindings body))
+              [env3 else-body] (lower-match-clauses (scoped-env env env2)
+                                                    match-tmp-name (rest clauses) else-stmts)]
+          [(scoped-env env env3)
+           [(ir/if-stmt-node convert-ir lowered-body else-body)]])))
     (lower-scoped-statements env else-stmts)))
 
 (defn- select-clause-value-type

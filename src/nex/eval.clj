@@ -14,6 +14,8 @@
   (assoc ast
          :classes (vec (concat (interp/resolve-interned-classes source-id ast)
                                (:classes ast)))
+         :functions (vec (concat (interp/resolve-interned-functions source-id ast)
+                                 (:functions ast)))
          :imports (vec (concat (interp/resolve-interned-imports source-id ast)
                                (:imports ast)))))
 

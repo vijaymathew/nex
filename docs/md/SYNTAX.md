@@ -585,6 +585,68 @@ class Err
 end
 ```
 
+## Sum Types (`union`)
+
+Writing a sealed hierarchy by hand is verbose: a `sealed deferred class` parent plus a full `class … inherit … feature … create make` for every variant. The `union` form is concise sugar for exactly that shape.
+
+```nex
+union Order
+  Draft
+  Placed(id: String, total: Real)
+  Shipped(tracking: String, at: Date)
+end
+```
+
+This desugars to a `sealed deferred class Order` parent and one ordinary class per variant. Each variant's payload becomes `feature` fields plus an auto-generated `make` constructor, so construction and matching are the same as for hand-written sealed classes:
+
+```nex
+let o: Order := create Placed.make("A-100", 42.0)
+
+match o of
+  when Draft   as d then print("draft")
+  when Placed  as p then print(p.id)       -- payloads are ordinary fields
+  when Shipped as s then print(s.tracking)
+end
+```
+
+- A variant with no payload (`Draft`) still gets a nullary `make`, so `create Draft.make()` works.
+- Generic parameters carry through to every variant: `union Result[T]` gives `Ok`/`Err` that inherit `Result[T]`.
+- Because a `union` *is* a sealed hierarchy after desugaring, `match` exhaustiveness is checked exactly as in the previous section — a missing variant is a compile-time error.
+
+The `union` form is deliberately data-only. When a variant needs its own contracts, invariants, or methods, write the explicit `sealed deferred class` form above; both compile to the same thing.
+
+## Standard Result and Option
+
+The standard library provides two sealed sum types for error handling and
+optional values, imported with `intern`:
+
+```nex
+intern data/Result
+intern data/Option
+
+let r: Result[Integer, String] := create Ok[Integer, String].make(10)
+let doubled: Result[Integer, String] :=
+  result_map(r, fn (x: Integer): Integer do result := x * 2 end)
+print(doubled.unwrap_or(0))          -- 20
+
+let o: Option[Integer] := create Some[Integer].make(7)
+print(o.get_or(0))                   -- 7
+```
+
+- `Result[T, E]` is `Ok(value: T)` or `Err(error: E)`; `Option[T]` is
+  `Some(value: T)` or `None`.
+- Query/unwrap are methods: `is_ok()`, `is_err()`, `unwrap_or(fallback)` on
+  `Result`; `is_some()`, `is_none()`, `get_or(fallback)` on `Option`.
+- Transforming combinators are free functions (they introduce a fresh type
+  parameter): `result_map`, `result_and_then`, `result_map_err`; `option_map`,
+  `option_and_then`, `option_filter`. `and_then` is the bind that chains fallible
+  steps and short-circuits on the first `Err`/`None`.
+- Construction infers type arguments from the constructor's arguments, so
+  `create Ok.make(10)` gives `Ok[Integer, Any]` — assignable to
+  `Result[Integer, String]` (a parameter the constructor does not mention, like
+  `Err`'s value type here, stays `Any` and acts as a wildcard). Write explicit
+  arguments (`create Ok[Integer, String].make(…)`) when you need to pin them.
+
 ## Match Statement
 
 `match` dispatches on the runtime type of an expression. Used with a sealed parent class it becomes an exhaustive type switch — every variant must be handled or the typechecker rejects the program:
@@ -610,6 +672,96 @@ match r of
     print("not ok")
 end
 ```
+
+### Destructuring and wildcards
+
+A clause may destructure the matched variant's payload fields by name, instead of
+binding the whole object and reading `.field`:
+
+```nex
+match order of
+  when Draft                       then print("draft")
+  when Placed(id, total)           then print(id)        -- bind fields id, total
+  when Shipped(tracking: t, at: _) then print(t)         -- rename tracking→t, ignore at
+end
+```
+
+- `when Variant(a, b)` binds the payload fields named `a` and `b` to locals of the
+  same name; `Variant(a: x)` binds field `a` to a local `x`; `_` in a field
+  position ignores that field. Order does not matter — fields are matched by name.
+- `as` still binds the whole value and composes with destructuring
+  (`when Placed(id, total) as p then …`). A clause may bind neither (`when Draft`).
+- `when _` is a catch-all, equivalent to `else`, and likewise suppresses the
+  exhaustiveness check.
+
+Destructuring and `_` are pure sugar over the type-dispatch form above, so
+exhaustiveness and type checking behave identically (a destructured field the
+variant does not have is a compile-time error).
+
+### Guards
+
+A clause may add an `if <boolean>` guard, evaluated after the type match and
+destructuring. A false guard falls through to the next clause:
+
+```nex
+match order of
+  when Placed(id, total) if total > 1000 then flag(id)
+  when Placed(id, total)                 then charge(id, total)
+  when Draft                             then note_draft()
+end
+```
+
+- The guard may reference the destructured fields and the `as` binding.
+- A guard must be `Boolean`.
+- A guarded clause does **not** count toward exhaustiveness (it might not fire),
+  so a variant handled only by guarded clauses still needs an unguarded clause,
+  a `when _`, or `else`.
+
+Guards run on the JVM (compiled) and interpreter backends.
+
+### Literal field patterns
+
+A field pattern may pin a field to a literal value with `field: <literal>`; the
+clause matches only when the field equals it, falling through otherwise:
+
+```nex
+match cmd of
+  when Move(dx: 0, dy: 0) then stay()
+  when Move(dx, dy)       then move(dx, dy)
+  when Say(text: "quit")  then bye()
+  when Say(text)          then say(text)
+end
+```
+
+A literal field pattern is sugar for an equality guard (`Move(dx: 0, …)` ≡
+`Move(dx, …) if dx == 0`), so — like guards — a clause constrained by a literal
+does not count toward exhaustiveness. Literals combine with binds and an explicit
+`if` guard in the same clause.
+
+### Nested patterns
+
+A field pattern may itself be a variant pattern, `field: Type(sub-patterns)`,
+which narrows the field to `Type` and matches its payload:
+
+```nex
+match result of
+  when Ok(inner: Some[Integer](value: x)) then use(x)   -- Ok whose inner is a Some
+  when _                                  then fallback()
+end
+```
+
+- The field is narrowed with a runtime type test; if it is not that variant, the
+  clause falls through (so, like a guard, a nested pattern does not count toward
+  exhaustiveness).
+- Sub-patterns are matched **by field name** and nest arbitrarily deep. Give the
+  nested type its arguments (`Some[Integer]`) for the bound sub-fields to keep
+  their element type; without them the sub-fields bind as `Any`.
+- Match binding now carries the subject's generic arguments onto the clause
+  variable, so a matched field such as `o.inner` has its real type
+  (`Option[Integer]`, not `Option[Any]`) — which is what lets the nested test
+  type-check.
+
+Nested patterns run on the JVM (compiled) and interpreter backends.
 
 ## Scoped Blocks
 
@@ -678,6 +830,47 @@ Any type can be aliased, not just function types:
 ```nex
 declare type Matrix = Array[Array[Real]]
 ```
+
+## Refinement Types
+
+A `declare type` with a `where` clause is a **refinement type**: an existing type
+narrowed by a boolean predicate, without declaring a class.
+
+```nex
+declare type Quantity   = Integer where n: n > 0
+declare type Percentage = Real    where p: p >= 0.0 and p <= 100.0
+declare type NonEmpty   = String  where s: s.length() > 0
+```
+
+`where n: <expr>` binds the value under test to `n` (any name) and gives a
+boolean predicate over it, mirroring the `label: condition` shape of contracts.
+
+A refinement is its base type with a checked constraint — **not** a class: no
+fields, no constructor, no wrapper. A `Quantity` *is* an `Integer` at runtime, so
+it interoperates freely with its base:
+
+```nex
+let q: Quantity := 5          -- checked: raises if the value is not > 0
+let total: Integer := q + 10  -- free: a Quantity is an Integer
+```
+
+The predicate is enforced wherever a value is **narrowed** into the refinement —
+a `let` of that type, a parameter of that type (checked at the call boundary),
+and a return of that type. Widening (`Quantity` → `Integer`) is always free.
+
+```nex
+function debit(amount: Quantity): Integer do   -- amount checked on entry
+  result := amount
+end
+```
+
+Notes and current limits:
+
+- Operations do not propagate the refinement: `q + q` is an `Integer`. Flow the
+  result back into a refinement-typed binding to re-check it.
+- Fields, `convert` targets, `?R` detachable bindings, and `distinct` nominal
+  newtypes are not yet checked/supported — use a class where you need those.
+- The predicate should be side-effect free.
 
 ## Generics
 

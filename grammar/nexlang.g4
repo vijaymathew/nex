@@ -7,7 +7,7 @@ grammar nexlang;
  */
 
 program
-    : (importStmt | internStmt | classDecl | declareTypeDecl | declareFunctionDecl | functionDecl | statement)* EOF
+    : (importStmt | internStmt | classDecl | unionDecl | declareTypeDecl | declareFunctionDecl | functionDecl | statement)* EOF
     ;
 
 importStmt
@@ -27,6 +27,21 @@ classDecl
       END
     ;
 
+// Concise sum-type declaration. Desugars in the walker to a
+// `sealed deferred class` parent plus one `class ... inherit Parent`
+// per variant (see src/nex/walker.cljc :unionDecl). Payloads become
+// feature fields plus an auto-generated `make` constructor.
+unionDecl
+    : UNION IDENTIFIER genericParams?
+      noteClause?
+      unionVariant+
+      END
+    ;
+
+unionVariant
+    : IDENTIFIER ('(' paramList? ')')?
+    ;
+
 functionDecl
     : FUNCTION IDENTIFIER genericParams? '(' paramList? ')' (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
     ;
@@ -35,8 +50,11 @@ declareFunctionDecl
     : DECLARE FUNCTION IDENTIFIER genericParams? '(' paramList? ')' (':' type)? noteClause?
     ;
 
+// `declare type X = Base` is a structural alias. With an optional `where`
+// predicate it becomes a refinement type: Base narrowed by a boolean predicate,
+// checked at narrowing boundaries (see the refinement pass in walker.cljc).
 declareTypeDecl
-    : DECLARE TYPE_KW IDENTIFIER EQUAL type
+    : DECLARE TYPE_KW IDENTIFIER EQUAL type (WHERE IDENTIFIER ':' expression)?
     ;
 
 genericParams
@@ -195,8 +213,18 @@ matchStatement
     : MATCH expression OF matchClause+ (ELSE block)? END
     ;
 
+// A match clause may destructure the matched variant's payload fields by name
+// (`when Placed(id, total)`), bind the whole value (`as v`), both, or neither
+// (`when Draft`). `when _` is a catch-all. Destructuring/wildcard desugar in the
+// walker to the plain type-dispatch form, so the backends are unchanged.
 matchClause
-    : WHEN typeName typeArgs? AS IDENTIFIER THEN block
+    : WHEN typeName typeArgs? ('(' fieldPattern (',' fieldPattern)* ')')? (AS IDENTIFIER)? (IF expression)? THEN block
+    ;
+
+fieldPattern
+    : IDENTIFIER ':' literal          // field must equal a literal value
+    | IDENTIFIER ':' typeName typeArgs? '(' (fieldPattern (',' fieldPattern)*)? ')'   // nested variant pattern
+    | IDENTIFIER (':' IDENTIFIER)?     // bind field to a local (rename with `:`)
     ;
 
 selectStatement
@@ -253,7 +281,7 @@ variantClause
 
 assignment
     : IDENTIFIER ASSIGN expression
-    | primary '.' IDENTIFIER ASSIGN expression
+    | primary '.' (IDENTIFIER | UNION | WHERE) ASSIGN expression
     ;
 
 localVarDecl
@@ -322,8 +350,12 @@ postfixPart
     | callSuffix
     ;
 
+// `union`/`where` are soft keywords: reserved only in their declaration
+// positions (unionDecl, the `where` clause of declareTypeDecl). Everywhere a
+// member name is expected they stay usable as ordinary identifiers — notably
+// Set's `union` method (`s.union(...)`).
 memberAccess
-    : QMARK? '.' IDENTIFIER ('(' argumentList? ')')?
+    : QMARK? '.' (IDENTIFIER | UNION | WHERE) ('(' argumentList? ')')?
     ;
 
 callSuffix
@@ -434,6 +466,8 @@ setLiteral
  */
 
 CLASS        : 'class';
+UNION        : 'union';
+WHERE        : 'where';
 SEALED       : 'sealed';
 DEFERRED     : 'deferred';
 ONCE         : 'once';

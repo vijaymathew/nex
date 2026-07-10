@@ -537,11 +537,16 @@
               (= (:base-type t1) "Function") (= (:base-type t2) "Function")
               (= (mapv :type (:param-types t1)) (mapv :type (:param-types t2)))
               (= (:return-type t1) (:return-type t2)))
-         ;; Handle other parameterized types
+         ;; Handle other parameterized types. Compare arguments element-wise so a
+         ;; recursive `Any` acts as a wildcard (e.g. an inferred `Ok[Integer, Any]`
+         ;; matches `Ok[Integer, String]` — the permissive-Any policy for partial
+         ;; construction inference).
          (and (map? t1) (map? t2)
               (not= (:base-type t1) "Function")
               (= (:base-type t1) (:base-type t2))
-              (= (:type-params t1) (:type-params t2)))
+              (= (count (:type-params t1)) (count (:type-params t2)))
+              (every? (fn [[a b]] (types-equal? env a b))
+                      (map vector (:type-params t1) (:type-params t2))))
          ;; Allow base class name to match parameterized type (e.g., "Box" matches {:base-type "Box", ...})
          (or (and (string? t1) (map? t2) (= t1 (:base-type t2)))
              (and (map? t1) (string? t2) (= (:base-type t1) t2)))))))
@@ -643,13 +648,17 @@
           (and (map? a1) (map? a2)
                (not= (:base-type a1) "Function") (not= (:base-type a2) "Function")
                (class-subtype? env (:base-type a1) (:base-type a2))
-               (= (:type-params a1) (:type-params a2)))
+               (= (count (:type-params a1)) (count (:type-params a2)))
+               (every? true? (map (fn [p1 p2]
+                                    (or (= p1 "Any") (= p2 "Any")
+                                        (types-compatible? env p1 p2)))
+                                  (:type-params a1) (:type-params a2))))
           (and (map? a1) (map? a2)
                (not= (:base-type a1) "Function") (not= (:base-type a2) "Function")
                (= (:base-type a1) (:base-type a2))
                (= (count (:type-params a1)) (count (:type-params a2)))
                (every? true? (map (fn [p1 p2]
-                                    (or (= p2 "Any")
+                                    (or (= p1 "Any") (= p2 "Any")
                                         (types-compatible? env p1 p2)))
                                   (:type-params a1) (:type-params a2))))))))
 
@@ -1164,8 +1173,10 @@
 (defn check-binary-op
   "Check the type of a binary operation"
   [env {:keys [operator left right] :as expr}]
-  (let [left-type (check-expression env left)
-        right-type (check-expression env right)
+  (let [;; Expand aliases (incl. refinement types) so a `Quantity` operand is
+        ;; seen as its base `Integer` for arithmetic/comparison.
+        left-type (expand-type-aliases env (check-expression env left))
+        right-type (expand-type-aliases env (check-expression env right))
         left-base (let [t (attachable-type left-type)]
                     (if (map? t) (:base-type t) t))
         right-base (let [t (attachable-type right-type)]
@@ -2505,12 +2516,7 @@
       (when-not (or (env-lookup-class env class-name) (builtin-type? class-name))
         (throw (ex-info (str "Undefined class: " class-name)
                         {:error (type-error (str "Undefined class: " class-name))})))
-      (let [class-def (env-lookup-class env class-name)
-            target-type (if (seq generic-args)
-                          (do
-                            (validate-generic-args env class-name generic-args)
-                            {:base-type class-name :type-args generic-args})
-                          class-name)]
+      (let [class-def (env-lookup-class env class-name)]
         (when (:deferred? class-def)
           (throw (ex-info (str "Cannot instantiate deferred class: " class-name)
                           {:error (type-error
@@ -2518,40 +2524,64 @@
                                         "; instantiate a concrete child class instead"))})))
         ;; Imported Java classes have no Nex constructor signatures; skip validation.
         (if (and class-def (:import class-def))
-          target-type
-          (do
-            (let [constructors (lookup-class-constructors env class-name)
-                  has-constructors? (seq constructors)
-                  type-map (build-generic-type-map env target-type)
-                  ctor-name (or constructor "make")
-                  ctor-sig (lookup-class-method env class-name ctor-name)]
-              ;; If class defines constructors, disallow implicit default create.
-              (when (and has-constructors?
-                         (nil? constructor)
-                         (empty? args))
-                (throw (ex-info (str "Constructor required for class " class-name)
+          (if (seq generic-args)
+            (do (validate-generic-args env class-name generic-args)
+                {:base-type class-name :type-args generic-args})
+            class-name)
+          (let [constructors (lookup-class-constructors env class-name)
+                has-constructors? (seq constructors)
+                ctor-name (or constructor "make")
+                ctor-sig (lookup-class-method env class-name ctor-name)
+                gparams (:generic-params class-def)
+                arg-types (when (and (or constructor (seq args)) ctor-sig)
+                            (mapv #(check-expression env %) args))
+                ;; When type arguments are not written explicitly, infer them from
+                ;; the constructor's argument types (`create Ok.make(5)` ->
+                ;; Ok[Integer, Any]); parameters not mentioned by the constructor
+                ;; stay `Any`. Explicit `[…]` remains authoritative.
+                inferred-map (when (and (empty? generic-args) (seq gparams) ctor-sig (seq args))
+                               (reduce (fn [acc [arg-type param]]
+                                         (merge-inferred-generic-bindings
+                                          env acc
+                                          (infer-generic-type-map-from-arg
+                                           env (set (map :name gparams)) (:type param) arg-type)))
+                                       {}
+                                       (map vector arg-types (:params ctor-sig))))
+                target-type (cond
+                              (seq generic-args)
+                              (do (validate-generic-args env class-name generic-args)
+                                  {:base-type class-name :type-args generic-args})
+                              (and (seq gparams) inferred-map)
+                              {:base-type class-name
+                               :type-args (mapv #(get inferred-map (:name %) "Any") gparams)}
+                              :else class-name)
+                type-map (build-generic-type-map env target-type)]
+            ;; If class defines constructors, disallow implicit default create.
+            (when (and has-constructors?
+                       (nil? constructor)
+                       (empty? args))
+              (throw (ex-info (str "Constructor required for class " class-name)
+                              {:error (type-error
+                                       (str "Class " class-name
+                                            " defines constructors; use an explicit constructor call, e.g. create "
+                                            class-name ".<ctor>(...)"))})))
+            (when (or constructor (seq args))
+              (when-not ctor-sig
+                (throw (ex-info (str "Constructor not found: " class-name "." ctor-name)
                                 {:error (type-error
-                                         (str "Class " class-name
-                                              " defines constructors; use an explicit constructor call, e.g. create "
-                                              class-name ".<ctor>(...)"))})))
-              (when (or constructor (seq args))
-                (when-not ctor-sig
-                  (throw (ex-info (str "Constructor not found: " class-name "." ctor-name)
+                                         (str "Constructor not found: " class-name "." ctor-name))})))
+              (let [params (:params ctor-sig)]
+                (when (not= (count params) (count args))
+                  (throw (ex-info (str "Constructor argument count mismatch for " class-name "." ctor-name)
                                   {:error (type-error
-                                           (str "Constructor not found: " class-name "." ctor-name))})))
-                (let [params (:params ctor-sig)]
-                  (when (not= (count params) (count args))
-                    (throw (ex-info (str "Constructor argument count mismatch for " class-name "." ctor-name)
-                                    {:error (type-error
-                                             (str "Expected " (count params) " args, got "
-                                                  (count args)))})))
-                  (doseq [[arg param] (map vector args params)]
-                    (let [arg-type (check-expression env arg)
-                          param-type (resolve-generic-type (:type param) type-map)]
-                      (when-not (types-compatible? env arg-type param-type)
-                        (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
-                                        {:error (type-error
-                                                 (str "Expected " (display-type param-type) ", got " (display-type arg-type)))}))))))))
+                                           (str "Expected " (count params) " args, got "
+                                                (count args)))})))
+                (doseq [[arg-type param] (map vector arg-types params)]
+                  (let [param-type (resolve-generic-type (:type param) type-map)]
+                    (when-not (types-compatible? env arg-type param-type)
+                      (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
+                                      {:error (type-error
+                                               (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))))
             target-type))))))
 
 (defn check-array-literal
@@ -2989,6 +3019,29 @@
        (map :name)
        set))
 
+(defn- match-clause-binding-type
+  "Reconstruct a match clause's type with generic arguments carried over from the
+  matched subject. Given subject `Parent[A…]` and clause class `C` declared
+  `C[G…] inherit Parent[P…]`, map each `Gᵢ` to the subject arg at the position
+  where `Pⱼ = Gᵢ`. Falls back to the bare class name when it cannot be resolved
+  (raw subject, unknown class, or an indirect/ mismatched inherit)."
+  [env subject-type class-name]
+  (let [subject (normalize-type subject-type)
+        subject-base (if (map? subject) (:base-type subject) subject)
+        subject-args (when (map? subject) (or (:type-args subject) (:type-params subject)))
+        class-def (when (string? class-name) (env-lookup-class env class-name))
+        gparams (map :name (:generic-params class-def))]
+    (if (and (seq subject-args) (seq gparams))
+      (let [parent-entry (some #(when (= (:parent %) subject-base) %)
+                               (:parents class-def))
+            parent-args (map #(if (map? %) (:base-type %) %) (:generic-args parent-entry))]
+        (if (and parent-entry (= (count parent-args) (count subject-args)))
+          (let [name->arg (zipmap parent-args subject-args)]
+            {:base-type class-name
+             :type-args (mapv #(get name->arg % "Any") gparams)})
+          class-name))
+      class-name)))
+
 (defn check-match
   "Type-check a match statement over a sealed type."
   [env {:keys [expr clauses else]}]
@@ -2996,7 +3049,7 @@
         base-type-name (if (map? expr-type) (:base-type expr-type) expr-type)
         class-def (env-lookup-class env base-type-name)
         sealed? (and class-def (:sealed? class-def))]
-    (doseq [{:keys [class-name var-name body]} clauses]
+    (doseq [{:keys [class-name var-name bindings guard body generic-args]} clauses]
       (when-not (or (= class-name base-type-name)
                     (class-subtype? env class-name base-type-name))
         (throw (ex-info (str "Match clause type " class-name
@@ -3004,15 +3057,36 @@
                         {:error (type-error
                                  (str class-name " is not a subclass of "
                                       base-type-name))})))
-      (let [clause-env (make-type-env env)]
-        (env-add-var clause-env var-name class-name)
+      (let [clause-env (make-type-env env)
+            ;; Carry the subject's type arguments onto the bound variable so
+            ;; `o.field` resolves with the real element types. An explicit
+            ;; `when C[...]` on the clause wins over inference.
+            binding-type (if (seq generic-args)
+                           {:base-type class-name :type-args generic-args}
+                           (match-clause-binding-type env expr-type class-name))]
+        (env-add-var clause-env var-name binding-type)
         (env-mark-non-nil clause-env var-name)
+        ;; Destructure bindings come into scope before the guard and body.
+        (doseq [b bindings]
+          (check-statement clause-env b))
+        (when guard
+          (let [guard-type (check-expression clause-env guard)]
+            (when-not (types-compatible? clause-env guard-type "Boolean")
+              (throw (ex-info "Match guard must be Boolean"
+                              {:error (type-error
+                                       (str "Match guard must be Boolean, got "
+                                            (display-type guard-type)))})))
+            ;; The body runs only when the guard held, so refine it: a
+            ;; `convert … to v: T` guard makes `v` a non-nil `T` in the body
+            ;; (this is what lets a nested pattern narrow a field).
+            (apply-condition-branch-refinement! clause-env guard :then)))
         (doseq [s body]
           (check-statement clause-env s))))
     (when else
       (doseq [s else] (check-statement env s)))
     (when (and sealed? (not else))
-      (let [covered (set (map :class-name clauses))
+      ;; A guarded clause may not fire, so it does not cover its variant.
+      (let [covered (set (map :class-name (remove :guard clauses)))
             known (find-sealed-subclasses env base-type-name)
             uncovered (set/difference known covered)]
         (when (seq uncovered)
@@ -3179,9 +3253,12 @@
                            assigned?)]
             (every? true? (concat clause-outs [else-out])))
     :match (let [clause-outs (map #(result-definitely-assigned-in-body? (:body %) assigned?) (:clauses stmt))
+                 ;; A match with no `else` that type-checked is exhaustive over a
+                 ;; sealed type (the exhaustiveness check rejects it otherwise), so
+                 ;; there is no fall-through path — every value hits a clause.
                  else-out (if-let [else-body (:else stmt)]
                             (result-definitely-assigned-in-body? else-body assigned?)
-                            assigned?)]
+                            true)]
              (every? true? (concat clause-outs [else-out])))
     assigned?))
 

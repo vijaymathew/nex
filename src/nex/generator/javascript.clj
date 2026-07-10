@@ -1485,10 +1485,15 @@
         expr-code (generate-expression expr)
         init (indent level (str "const " temp-name " = " expr-code ";"))
         clause-strs (map-indexed
-                     (fn [i {:keys [class-name var-name body]}]
+                     (fn [i {:keys [class-name var-name bindings guard body]}]
+                       (when guard
+                         (throw (ex-info "Match guards are not supported by the JavaScript backend yet"
+                                         {:clause class-name})))
                        (let [prefix (if (zero? i) "if" "else if")
                              body-var-names (conj var-names var-name)
-                             body-code (str/join "\n" (map #(generate-statement (+ level 1) % body-var-names) body))]
+                             ;; Destructure bindings run first, then the body.
+                             full-body (concat bindings body)
+                             body-code (str/join "\n" (map #(generate-statement (+ level 1) % body-var-names) full-body))]
                          (str/join "\n"
                                    [(indent level (str prefix " (" temp-name " instanceof " class-name ") {"))
                                     (indent (+ level 1) (str "const " var-name " = " temp-name ";"))
