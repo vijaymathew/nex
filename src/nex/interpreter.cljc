@@ -1506,23 +1506,28 @@
      (letfn [(resolve* [current-source current-program seen]
                (let [ctx (assoc (make-context) :debug-source current-source)]
                  (reduce
-                  (fn [{:keys [classes imports seen]} {:keys [path class-name alias]}]
+                  (fn [{:keys [classes imports functions seen]} {:keys [path class-name alias]}]
                     (let [file-path (find-intern-file ctx path class-name)
                           canonical (.getCanonicalPath (clojure.java.io/file file-path))]
                       (if (contains? seen canonical)
-                        {:classes classes :imports imports :seen seen}
+                        {:classes classes :imports imports :functions functions :seen seen}
                         (let [file-ast (parser/ast (slurp file-path))
                               nested (resolve* canonical file-ast (conj seen canonical))
                               direct-classes (:classes file-ast)
                               all-file-classes (concat direct-classes (:classes nested))
                               all-file-imports (concat (:imports file-ast) (:imports nested))
+                              ;; Free functions defined in an interned module are
+                              ;; brought into scope too, so a library can export
+                              ;; helper/combinator functions, not just classes.
+                              all-file-functions (concat (:functions file-ast) (:functions nested))
                               aliased-class (when alias
                                               (when-let [class-def (some #(when (= (:name %) class-name) %) all-file-classes)]
                                                 [(assoc class-def :name alias)]))]
                           {:classes (into classes (concat all-file-classes aliased-class))
                            :imports (into imports all-file-imports)
+                           :functions (into functions all-file-functions)
                            :seen (:seen nested)}))))
-                  {:classes [] :imports [] :seen seen}
+                  {:classes [] :imports [] :functions [] :seen seen}
                   (:interns current-program))))]
        (resolve* source-id program seen-files))))
 
@@ -1551,6 +1556,22 @@
       (distinct (:imports (resolve-interned* source-id program seen-files)))))
    :cljs
    (defn resolve-interned-imports
+     [& _]
+     []))
+
+#?(:clj
+   (defn resolve-interned-functions
+     "Resolve intern declarations to the free-function definitions they bring into
+      scope (recursively), so the typechecker and compiled backend can see a
+      library's exported functions. The runtime interpreter registers them when it
+      evaluates the interned module, so this is only needed for static analysis
+      and compilation."
+     ([source-id program]
+      (resolve-interned-functions source-id program #{}))
+     ([source-id program seen-files]
+      (:functions (resolve-interned* source-id program seen-files))))
+   :cljs
+   (defn resolve-interned-functions
      [& _]
      []))
 
@@ -2229,10 +2250,19 @@
   (let [val (eval-node ctx expr)
         val-class (or (when (nex-object? val) (:class-name val))
                       #?(:clj (compiled-runtime-class-name ctx val)))
+        ;; A generic instance carries its specialized name (e.g. "Ok[Integer,String]")
+        ;; while a `when` clause names the base class ("Ok"), so compare on the
+        ;; base name too.
+        val-class-base (when val-class
+                         (if-let [i (clojure.string/index-of val-class "[")]
+                           (subs val-class 0 i)
+                           val-class))
         matched (some (fn [{:keys [class-name var-name body]}]
                         (when (and val-class
                                    (or (= val-class class-name)
-                                       (is-parent? ctx val-class class-name)))
+                                       (= val-class-base class-name)
+                                       (is-parent? ctx val-class class-name)
+                                       (is-parent? ctx val-class-base class-name)))
                           (let [match-env (make-env (:current-env ctx))]
                             (env-define match-env var-name val)
                             [:matched (last (map #(eval-node (assoc ctx :current-env match-env) %) body))])))

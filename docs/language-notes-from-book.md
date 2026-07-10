@@ -38,7 +38,14 @@ code.
    every level (no `?` / `and_then` / bind / do-notation). Typed errors also do
    not compose: `Err[Quantity]` cannot stand in for `Err[Line_Item]`.
    **Proposal:** standard `Result`/`Option`, a bind/`?` operator, and a shared
-   error-channel story.
+   error-channel story. **Partly implemented:** stdlib `data/result` and
+   `data/option` modules (`intern data/Result` / `data/Option`) with
+   `map`/`and_then`/`map_err`/`filter` combinators (`docs/proposals/result-option.md`).
+   Enabled three underlying fixes: `intern` now exports free functions,
+   the interpreter dispatches `match` on generic sealed classes, and an
+   exhaustive `match` satisfies definite-assignment. Still TODO: the `?`
+   propagation operator, and typed-error composition still needs an explicit
+   `result_map_err` (no automatic widening).
 
 4. **Pattern matching is type-only.** `match` dispatches on runtime class only —
    no destructuring, nested patterns, literal patterns, or guards. The DSL

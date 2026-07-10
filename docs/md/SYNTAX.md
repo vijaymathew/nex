@@ -615,6 +615,35 @@ end
 
 The `union` form is deliberately data-only. When a variant needs its own contracts, invariants, or methods, write the explicit `sealed deferred class` form above; both compile to the same thing.
 
+## Standard Result and Option
+
+The standard library provides two sealed sum types for error handling and
+optional values, imported with `intern`:
+
+```nex
+intern data/Result
+intern data/Option
+
+let r: Result[Integer, String] := create Ok[Integer, String].make(10)
+let doubled: Result[Integer, String] :=
+  result_map(r, fn (x: Integer): Integer do result := x * 2 end)
+print(doubled.unwrap_or(0))          -- 20
+
+let o: Option[Integer] := create Some[Integer].make(7)
+print(o.get_or(0))                   -- 7
+```
+
+- `Result[T, E]` is `Ok(value: T)` or `Err(error: E)`; `Option[T]` is
+  `Some(value: T)` or `None`.
+- Query/unwrap are methods: `is_ok()`, `is_err()`, `unwrap_or(fallback)` on
+  `Result`; `is_some()`, `is_none()`, `get_or(fallback)` on `Option`.
+- Transforming combinators are free functions (they introduce a fresh type
+  parameter): `result_map`, `result_and_then`, `result_map_err`; `option_map`,
+  `option_and_then`, `option_filter`. `and_then` is the bind that chains fallible
+  steps and short-circuits on the first `Err`/`None`.
+- Construct with explicit type arguments (`create Ok[Integer, String].make(…)`),
+  since Nex does not yet infer generic arguments at construction.
+
 ## Match Statement
 
 `match` dispatches on the runtime type of an expression. Used with a sealed parent class it becomes an exhaustive type switch — every variant must be handled or the typechecker rejects the program:

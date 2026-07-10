@@ -3181,9 +3181,12 @@
                            assigned?)]
             (every? true? (concat clause-outs [else-out])))
     :match (let [clause-outs (map #(result-definitely-assigned-in-body? (:body %) assigned?) (:clauses stmt))
+                 ;; A match with no `else` that type-checked is exhaustive over a
+                 ;; sealed type (the exhaustiveness check rejects it otherwise), so
+                 ;; there is no fall-through path — every value hits a clause.
                  else-out (if-let [else-body (:else stmt)]
                             (result-definitely-assigned-in-body? else-body assigned?)
-                            assigned?)]
+                            true)]
              (every? true? (concat clause-outs [else-out])))
     assigned?))
 

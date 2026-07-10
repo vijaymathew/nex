@@ -1,0 +1,68 @@
+-- Result[T, E]: a value that is either a success `Ok` carrying a T, or a
+-- failure `Err` carrying an E. Import with `intern data/Result`, which also
+-- brings the `Ok` and `Err` variants and the `result_*` combinator functions
+-- into scope.
+--
+-- Construction uses explicit type arguments, e.g.
+--   create Ok[Integer, String].make(42)
+--   create Err[Integer, String].make("bad input")
+--
+-- Query and unwrap are methods (`r.is_ok()`, `r.unwrap_or(0)`); the
+-- transforming combinators are free functions (`result_map`, `result_and_then`,
+-- `result_map_err`) because they introduce a fresh type parameter.
+
+sealed deferred class Result[T, E]
+  note "Either a success (Ok) carrying a T or a failure (Err) carrying an E."
+feature
+  is_ok(): Boolean deferred
+  is_err(): Boolean deferred
+  -- The Ok value, or `fallback` when this is an Err.
+  unwrap_or(fallback: T): T deferred
+end
+
+class Ok[T, E] inherit Result[T, E]
+feature
+  value: T
+  is_ok(): Boolean do result := true end
+  is_err(): Boolean do result := false end
+  unwrap_or(fallback: T): T do result := value end
+create
+  make(v: T) do value := v end
+end
+
+class Err[T, E] inherit Result[T, E]
+feature
+  error: E
+  is_ok(): Boolean do result := false end
+  is_err(): Boolean do result := true end
+  unwrap_or(fallback: T): T do result := fallback end
+create
+  make(e: E) do error := e end
+end
+
+-- Apply `f` to the success value, leaving an Err untouched.
+function result_map[T, E, U](r: Result[T, E], f: Function(x: T): U): Result[U, E] do
+  match r of
+    when Ok  as ok then result := create Ok[U, E].make(f(ok.value))
+    when Err as er then result := create Err[U, E].make(er.error)
+  end
+end
+
+-- Chain a fallible step: run `f` on the success value (itself returning a
+-- Result), short-circuiting on the first Err. This is the bind/`and_then` that
+-- collapses manual match-and-rewrap to one call.
+function result_and_then[T, E, U](r: Result[T, E], f: Function(x: T): Result[U, E]): Result[U, E] do
+  match r of
+    when Ok  as ok then result := f(ok.value)
+    when Err as er then result := create Err[U, E].make(er.error)
+  end
+end
+
+-- Transform the error channel, leaving an Ok untouched. Lets a caller convert a
+-- lower-level error type into its own (so `Err[E1]` composes into `Err[E2]`).
+function result_map_err[T, E, F](r: Result[T, E], f: Function(x: E): F): Result[T, F] do
+  match r of
+    when Ok  as ok then result := create Ok[T, F].make(ok.value)
+    when Err as er then result := create Err[T, F].make(f(er.error))
+  end
+end

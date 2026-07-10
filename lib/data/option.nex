@@ -1,0 +1,69 @@
+-- Option[T]: a value that is either present (`Some` carrying a T) or absent
+-- (`None`). Import with `intern data/Option`, which also brings the `Some` and
+-- `None` variants and the `option_*` combinator functions into scope.
+--
+-- Construction uses explicit type arguments, e.g.
+--   create Some[Integer].make(42)
+--   create None[Integer].make()
+--
+-- Option is a typed alternative to a detachable `?T`: it survives through
+-- generic code and keeps the sealed-type exhaustiveness guarantee that `?T`
+-- (plain nil) does not.
+
+sealed deferred class Option[T]
+  note "Either a present value (Some) or an absent one (None)."
+feature
+  is_some(): Boolean deferred
+  is_none(): Boolean deferred
+  -- The Some value, or `fallback` when this is None.
+  get_or(fallback: T): T deferred
+end
+
+class Some[T] inherit Option[T]
+feature
+  value: T
+  is_some(): Boolean do result := true end
+  is_none(): Boolean do result := false end
+  get_or(fallback: T): T do result := value end
+create
+  make(v: T) do value := v end
+end
+
+class None[T] inherit Option[T]
+feature
+  is_some(): Boolean do result := false end
+  is_none(): Boolean do result := true end
+  get_or(fallback: T): T do result := fallback end
+create
+  make() do end
+end
+
+-- Apply `f` to the contained value, leaving None untouched.
+function option_map[T, U](o: Option[T], f: Function(x: T): U): Option[U] do
+  match o of
+    when Some as s then result := create Some[U].make(f(s.value))
+    when None as n then result := create None[U].make()
+  end
+end
+
+-- Chain an optional step: run `f` on the contained value (itself returning an
+-- Option), short-circuiting on None.
+function option_and_then[T, U](o: Option[T], f: Function(x: T): Option[U]): Option[U] do
+  match o of
+    when Some as s then result := f(s.value)
+    when None as n then result := create None[U].make()
+  end
+end
+
+-- Keep a Some only when it satisfies `pred`; otherwise yield None.
+function option_filter[T](o: Option[T], pred: Function(x: T): Boolean): Option[T] do
+  match o of
+    when Some as s then
+      if pred(s.value) then
+        result := o
+      else
+        result := create None[T].make()
+      end
+    when None as n then result := create None[T].make()
+  end
+end

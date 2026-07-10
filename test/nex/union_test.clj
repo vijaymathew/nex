@@ -30,6 +30,49 @@
       (interp/eval-node ctx stmt))
     @(:output ctx)))
 
+(defn- run-program
+  "Evaluate a whole program (functions register), returning printed output."
+  [code]
+  (let [ast (p/ast code)
+        ctx (interp/make-context)]
+    (interp/eval-node ctx ast)
+    @(:output ctx)))
+
+(deftest generic-union-match-dispatches-at-runtime
+  (testing "match on a generic sealed class matches the base variant name"
+    (is (= ["\"full\"" "\"empty\""]
+           (run-program "union Box[T]
+  Full(v: T)
+  Empty
+end
+let a: Box[Integer] := create Full[Integer].make(3)
+let b: Box[Integer] := create Empty[Integer].make()
+match a of
+  when Full  as f then print(\"full\")
+  when Empty as e then print(\"empty\")
+end
+match b of
+  when Full  as f then print(\"full\")
+  when Empty as e then print(\"empty\")
+end")))))
+
+(deftest exhaustive-match-satisfies-definite-assignment
+  (testing "a function whose body is only an exhaustive match assigns result on all paths"
+    (let [code "union Shape
+  Circle(r: Integer)
+  Square(s: Integer)
+end
+function area(sh: Shape): Integer do
+  match sh of
+    when Circle as c then result := 3 * c.r * c.r
+    when Square as s then result := s.s * s.s
+  end
+end
+print(area(create Square.make(4)))"
+          result (tc/type-check (p/ast code))]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest union-desugars-to-sealed-class-ast
   (testing "a union produces exactly the classes of the hand-written sealed form"
     (let [union-code "union Order
