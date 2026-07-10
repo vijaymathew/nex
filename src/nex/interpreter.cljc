@@ -2205,9 +2205,16 @@
   (let [v (eval-node ctx value)
         target-name (if (map? target-type) (:base-type target-type) target-type)
         runtime-name (runtime-type-name v)
+        ;; A generic instance carries a specialized name ("Some[Integer]") while
+        ;; the target is the base class ("Some"); compare on the base too.
+        runtime-base (when (string? runtime-name)
+                       (if-let [i (clojure.string/index-of runtime-name "[")]
+                         (subs runtime-name 0 i)
+                         runtime-name))
         ok? (and (some? v)
                  (string? target-name)
-                 (convert-compatible-runtime? ctx runtime-name target-name))]
+                 (or (convert-compatible-runtime? ctx runtime-name target-name)
+                     (convert-compatible-runtime? ctx runtime-base target-name)))]
     (env-define (:current-env ctx) var-name (if ok? v nil))
     ok?))
 
@@ -2257,15 +2264,21 @@
                          (if-let [i (clojure.string/index-of val-class "[")]
                            (subs val-class 0 i)
                            val-class))
-        matched (some (fn [{:keys [class-name var-name body]}]
+        matched (some (fn [{:keys [class-name var-name bindings guard body]}]
                         (when (and val-class
                                    (or (= val-class class-name)
                                        (= val-class-base class-name)
                                        (is-parent? ctx val-class class-name)
                                        (is-parent? ctx val-class-base class-name)))
-                          (let [match-env (make-env (:current-env ctx))]
+                          (let [match-env (make-env (:current-env ctx))
+                                match-ctx (assoc ctx :current-env match-env)]
                             (env-define match-env var-name val)
-                            [:matched (last (map #(eval-node (assoc ctx :current-env match-env) %) body))])))
+                            ;; Destructure bindings run before the guard, so the
+                            ;; guard may reference the bound field names.
+                            (doseq [b bindings] (eval-node match-ctx b))
+                            ;; A false guard falls through to the next clause.
+                            (when (or (nil? guard) (eval-node match-ctx guard))
+                              [:matched (last (map #(eval-node match-ctx %) body))]))))
                       clauses)]
     (if matched
       (second matched)

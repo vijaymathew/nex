@@ -3,9 +3,11 @@
 -- brings the `Ok` and `Err` variants and the `result_*` combinator functions
 -- into scope.
 --
--- Construction uses explicit type arguments, e.g.
---   create Ok[Integer, String].make(42)
---   create Err[Integer, String].make("bad input")
+-- Construction infers type arguments from the value, e.g.
+--   create Ok.make(42)          -- Ok[Integer, Any]
+--   create Err.make("bad")      -- Err[Any, String]
+-- The unmentioned parameter stays `Any` (a wildcard), so both assign to a
+-- `Result[Integer, String]`. Write explicit args to pin them.
 --
 -- Query and unwrap are methods (`r.is_ok()`, `r.unwrap_or(0)`); the
 -- transforming combinators are free functions (`result_map`, `result_and_then`,

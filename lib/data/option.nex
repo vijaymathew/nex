@@ -2,9 +2,9 @@
 -- (`None`). Import with `intern data/Option`, which also brings the `Some` and
 -- `None` variants and the `option_*` combinator functions into scope.
 --
--- Construction uses explicit type arguments, e.g.
---   create Some[Integer].make(42)
---   create None[Integer].make()
+-- Construction infers the type argument from the value, e.g.
+--   create Some.make(42)        -- Some[Integer]
+--   create None.make()          -- None[Any] (write None[Integer] to pin it)
 --
 -- Option is a typed alternative to a detachable `?T`: it survives through
 -- generic code and keeps the sealed-type exhaustiveness guarantee that `?T`

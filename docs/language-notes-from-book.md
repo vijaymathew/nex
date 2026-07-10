@@ -51,7 +51,21 @@ code.
    no destructuring, nested patterns, literal patterns, or guards. The DSL
    interpreter and the unifier (Ch 10–13) wanted structural destructuring;
    instead they nest `match` and use `convert`. **Proposal:** richer patterns
-   (destructuring, nested, literals, `when`-guards).
+   (destructuring, nested, literals, `when`-guards). See
+   `docs/proposals/richer-patterns.md`. **Phases 1–2 implemented:** field
+   destructuring (`when Placed(id, total)`), rename (`id: x`)/skip (`_`), optional
+   `as`, `when _` catch-all, `if` guards (fall-through, Boolean check, excluded
+   from exhaustiveness), literal field patterns (`field: 0`), and **nested
+   patterns** (`field: Some[Integer](value: x)`) — on the JVM and interpreter
+   backends. Nested patterns were unblocked by implementing **Finding 2 of
+   `docs/proposals/generic-inference.md`** (match binding now carries the
+   subject's generic args, so `o.inner : Option[Integer]`) plus fixing generic
+   `convert` in the interpreter and `convert`-in-guard lowering on the JVM.
+   **Finding 1** (construction inference) is now also done: `create Ok.make(5)`
+   infers `Ok[Integer, Any]`, with `Any` a per-argument wildcard in
+   `types-compatible?` so it assigns to `Result[Integer, String]`. (Nested
+   sub-fields still want the nested type's args written for a precise element
+   type.)
 
 5. **Contracts lack quantifiers and connectives.** Could not write "every line
    has positive quantity" directly (needed a `sum_of` helper); the capstone

@@ -213,8 +213,18 @@ matchStatement
     : MATCH expression OF matchClause+ (ELSE block)? END
     ;
 
+// A match clause may destructure the matched variant's payload fields by name
+// (`when Placed(id, total)`), bind the whole value (`as v`), both, or neither
+// (`when Draft`). `when _` is a catch-all. Destructuring/wildcard desugar in the
+// walker to the plain type-dispatch form, so the backends are unchanged.
 matchClause
-    : WHEN typeName typeArgs? AS IDENTIFIER THEN block
+    : WHEN typeName typeArgs? ('(' fieldPattern (',' fieldPattern)* ')')? (AS IDENTIFIER)? (IF expression)? THEN block
+    ;
+
+fieldPattern
+    : IDENTIFIER ':' literal          // field must equal a literal value
+    | IDENTIFIER ':' typeName typeArgs? '(' (fieldPattern (',' fieldPattern)*)? ')'   // nested variant pattern
+    | IDENTIFIER (':' IDENTIFIER)?     // bind field to a local (rename with `:`)
     ;
 
 selectStatement

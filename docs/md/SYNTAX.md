@@ -641,8 +641,11 @@ print(o.get_or(0))                   -- 7
   parameter): `result_map`, `result_and_then`, `result_map_err`; `option_map`,
   `option_and_then`, `option_filter`. `and_then` is the bind that chains fallible
   steps and short-circuits on the first `Err`/`None`.
-- Construct with explicit type arguments (`create Ok[Integer, String].make(…)`),
-  since Nex does not yet infer generic arguments at construction.
+- Construction infers type arguments from the constructor's arguments, so
+  `create Ok.make(10)` gives `Ok[Integer, Any]` — assignable to
+  `Result[Integer, String]` (a parameter the constructor does not mention, like
+  `Err`'s value type here, stays `Any` and acts as a wildcard). Write explicit
+  arguments (`create Ok[Integer, String].make(…)`) when you need to pin them.
 
 ## Match Statement
 
@@ -669,6 +672,96 @@ match r of
     print("not ok")
 end
 ```
+
+### Destructuring and wildcards
+
+A clause may destructure the matched variant's payload fields by name, instead of
+binding the whole object and reading `.field`:
+
+```nex
+match order of
+  when Draft                       then print("draft")
+  when Placed(id, total)           then print(id)        -- bind fields id, total
+  when Shipped(tracking: t, at: _) then print(t)         -- rename tracking→t, ignore at
+end
+```
+
+- `when Variant(a, b)` binds the payload fields named `a` and `b` to locals of the
+  same name; `Variant(a: x)` binds field `a` to a local `x`; `_` in a field
+  position ignores that field. Order does not matter — fields are matched by name.
+- `as` still binds the whole value and composes with destructuring
+  (`when Placed(id, total) as p then …`). A clause may bind neither (`when Draft`).
+- `when _` is a catch-all, equivalent to `else`, and likewise suppresses the
+  exhaustiveness check.
+
+Destructuring and `_` are pure sugar over the type-dispatch form above, so
+exhaustiveness and type checking behave identically (a destructured field the
+variant does not have is a compile-time error).
+
+### Guards
+
+A clause may add an `if <boolean>` guard, evaluated after the type match and
+destructuring. A false guard falls through to the next clause:
+
+```nex
+match order of
+  when Placed(id, total) if total > 1000 then flag(id)
+  when Placed(id, total)                 then charge(id, total)
+  when Draft                             then note_draft()
+end
+```
+
+- The guard may reference the destructured fields and the `as` binding.
+- A guard must be `Boolean`.
+- A guarded clause does **not** count toward exhaustiveness (it might not fire),
+  so a variant handled only by guarded clauses still needs an unguarded clause,
+  a `when _`, or `else`.
+
+Guards run on the JVM (compiled) and interpreter backends.
+
+### Literal field patterns
+
+A field pattern may pin a field to a literal value with `field: <literal>`; the
+clause matches only when the field equals it, falling through otherwise:
+
+```nex
+match cmd of
+  when Move(dx: 0, dy: 0) then stay()
+  when Move(dx, dy)       then move(dx, dy)
+  when Say(text: "quit")  then bye()
+  when Say(text)          then say(text)
+end
+```
+
+A literal field pattern is sugar for an equality guard (`Move(dx: 0, …)` ≡
+`Move(dx, …) if dx == 0`), so — like guards — a clause constrained by a literal
+does not count toward exhaustiveness. Literals combine with binds and an explicit
+`if` guard in the same clause.
+
+### Nested patterns
+
+A field pattern may itself be a variant pattern, `field: Type(sub-patterns)`,
+which narrows the field to `Type` and matches its payload:
+
+```nex
+match result of
+  when Ok(inner: Some[Integer](value: x)) then use(x)   -- Ok whose inner is a Some
+  when _                                  then fallback()
+end
+```
+
+- The field is narrowed with a runtime type test; if it is not that variant, the
+  clause falls through (so, like a guard, a nested pattern does not count toward
+  exhaustiveness).
+- Sub-patterns are matched **by field name** and nest arbitrarily deep. Give the
+  nested type its arguments (`Some[Integer]`) for the bound sub-fields to keep
+  their element type; without them the sub-fields bind as `Any`.
+- Match binding now carries the subject's generic arguments onto the clause
+  variable, so a matched field such as `o.inner` has its real type
+  (`Option[Integer]`, not `Option[Any]`) — which is what lets the nested test
+  type-check.
+
+Nested patterns run on the JVM (compiled) and interpreter backends.
 
 ## Scoped Blocks
 

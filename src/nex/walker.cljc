@@ -536,6 +536,38 @@
            n))
        program))))
 
+(defn- process-field-patterns
+  "Desugar a variant's field patterns against a bound variable `var-name`.
+  Returns {:bindings :guards :body-binds}:
+   - :bindings   safe `let`s (direct field binds), run before the guard;
+   - :guards     boolean conjuncts (literal equalities, nested `convert`s);
+   - :body-binds `let`s that depend on a nested `convert` succeeding, so they run
+                 in the body after the guard.
+  Nested patterns recurse: the field is narrowed with `convert … to __nest: T` in
+  the guard, and the sub-pattern's binds move into :body-binds."
+  [var-name field-patterns]
+  (reduce
+   (fn [acc {:keys [kind field] :as fp}]
+     (let [fr {:type :call :target var-name :method field :args [] :has-parens false}]
+       (case kind
+         :bind (if (= "_" field)
+                 acc
+                 (update acc :bindings conj
+                         {:type :let :name (:bind fp) :var-type nil :value fr}))
+         :literal (update acc :guards conj
+                          {:type :binary :operator "==" :left fr :right (:value fp)})
+         :nested (let [sub-var (str "__nest_" (swap! next-fn-id inc) "__")
+                       conv {:type :convert :value fr :var-name sub-var
+                             :target-type (if (:generic-args fp)
+                                            {:base-type (:type fp) :type-args (:generic-args fp)}
+                                            (:type fp))}
+                       sub (process-field-patterns sub-var (:subpatterns fp))]
+                   (-> acc
+                       (update :guards #(vec (concat % [conv] (:guards sub))))
+                       (update :body-binds #(vec (concat % (:bindings sub) (:body-binds sub)))))))))
+   {:bindings [] :guards [] :body-binds []}
+   field-patterns))
+
 (def node-handlers
   {:program
    (fn [[_ & nodes]]
@@ -1087,33 +1119,87 @@
    :matchStatement
    (fn [[_ _match-kw expr _of-kw & rest]]
      (let [tokens (vec rest)
-           clauses (filterv #(and (sequential? %) (= :matchClause (first %))) tokens)
+           clause-nodes (filterv #(and (sequential? %) (= :matchClause (first %))) tokens)
+           transformed (mapv transform-node clause-nodes)
+           ;; A `when _` clause is a catch-all; fold its body into `else`.
+           wildcard (first (filter :wildcard? transformed))
+           clauses (filterv #(not (:wildcard? %)) transformed)
            has-else? (some #(= "else" %) tokens)
-           else-block (when has-else?
-                        (let [after-else (drop-while #(not= "else" %) tokens)
-                              block-node (second after-else)]
-                          (when (and (sequential? block-node) (= :block (first block-node)))
-                            (transform-node block-node))))]
+           explicit-else (when has-else?
+                           (let [after-else (drop-while #(not= "else" %) tokens)
+                                 block-node (second after-else)]
+                             (when (and (sequential? block-node) (= :block (first block-node)))
+                               (transform-node block-node))))]
        {:type :match
         :expr (transform-node expr)
-        :clauses (mapv transform-node clauses)
-        :else else-block}))
+        :clauses clauses
+        :else (or explicit-else (when wildcard (:body wildcard)))}))
+
+   :fieldPattern
+   (fn [[_ & toks]]
+     ;; `id`         -> bind field `id` to local `id`
+     ;; `id: x`      -> bind field `id` to local `x`
+     ;; `id: 0`      -> require field `id` to equal the literal 0
+     ;; `id: T(...)` -> require field `id` to be a `T`, matching the sub-patterns
+     (let [field (token-text (first toks))
+           has-colon? (some #(= ":" %) toks)
+           after (rest (drop-while #(not= ":" %) toks))]
+       (cond
+         (not has-colon?)
+         {:kind :bind :field field :bind field}
+
+         (some #(= "(" %) toks)
+         (let [tn (first after)
+               type-name (if (sequential? tn) (transform-node tn) (token-text tn))
+               type-args-node (first (filter #(and (sequential? %) (= :typeArgs (first %))) after))
+               subpats (mapv transform-node
+                             (filter #(and (sequential? %) (= :fieldPattern (first %))) after))]
+           {:kind :nested :field field :type type-name
+            :generic-args (when type-args-node (transform-node type-args-node))
+            :subpatterns subpats})
+
+         (some sequential? after)
+         {:kind :literal :field field :value (transform-node (first (filter sequential? after)))}
+
+         :else
+         {:kind :bind :field field :bind (token-text (first (filter string? after)))})))
 
    :matchClause
    (fn [[_ _when-kw class-name & rest]]
      (let [tokens (vec rest)
            type-args-node (first (filter #(and (sequential? %) (= :typeArgs (first %))) tokens))
            generic-args (when type-args-node (transform-node type-args-node))
+           field-patterns (mapv transform-node
+                                (filter #(and (sequential? %) (= :fieldPattern (first %))) tokens))
            as-idx (first (keep-indexed (fn [i v] (when (= "as" v) i)) tokens))
-           var-name (token-text (nth tokens (inc as-idx)))
+           explicit-var (when as-idx (token-text (nth tokens (inc as-idx))))
+           if-idx (first (keep-indexed (fn [i v] (when (= "if" v) i)) tokens))
+           explicit-guard (when if-idx (transform-node (nth tokens (inc if-idx))))
            body-node (first (filter #(and (sequential? %) (= :block (first %))) tokens))
+           body (transform-node body-node)
            resolved-class-name (if (sequential? class-name)
                                  (transform-node class-name)
                                  (token-text class-name))]
-       {:class-name resolved-class-name
-        :generic-args generic-args
-        :var-name var-name
-        :body (transform-node body-node)}))
+       (if (and (= resolved-class-name "_") (empty? field-patterns))
+         ;; Top-level wildcard: handled as `else` by :matchStatement.
+         {:wildcard? true :body body}
+         ;; A synthetic binder lets a clause read destructured fields even when it
+         ;; does not bind the whole value with `as`. Field patterns desugar to
+         ;; `:bindings` (direct binds, before the guard), `:guard` conjuncts
+         ;; (literal equalities and nested `convert`s, ANDed with any explicit
+         ;; `if`), and body-prepended binds for nested sub-fields.
+         (let [var-name (or explicit-var (str "__match_" (swap! next-fn-id inc) "__"))
+               {:keys [bindings guards body-binds]} (process-field-patterns var-name field-patterns)
+               guard-parts (concat guards (when explicit-guard [explicit-guard]))
+               guard (when (seq guard-parts)
+                       (reduce (fn [a b] {:type :binary :operator "and" :left a :right b})
+                               guard-parts))]
+           {:class-name resolved-class-name
+            :generic-args generic-args
+            :var-name var-name
+            :bindings bindings
+            :guard guard
+            :body (into (vec body-binds) body)}))))
 
    :selectStatement
    (fn [[_ _select-kw & rest]]
