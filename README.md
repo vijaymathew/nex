@@ -27,8 +27,6 @@ This has consequences that go beyond style.
 
 **Loop contracts prove termination.** A loop `variant` is an expression that must decrease with every iteration and never fall below zero. Writing one is a commitment that the loop terminates — not as a belief but as a verified property. Combined with loop invariants, this gives loops the same specification discipline as methods.
 
-**Contracts can be stripped for production.** The JVM compiler supports a `skip-contracts` flag that removes all contract checks from the generated output. Development builds run with full checking; production builds run without the overhead. The specification remains in the source as documentation and can be re-enabled for debugging at any time.
-
 **The language is designed for clarity at every level of abstraction.** From high-level system design — where classes represent domain entities and their invariants — down to individual routines, Nex's English-like syntax keeps intent visible. This makes Nex well-suited to contexts where code must be read and reasoned about carefully: education, specification-first development, and code review.
 
 ---
