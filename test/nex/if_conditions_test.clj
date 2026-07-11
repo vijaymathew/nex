@@ -1,9 +1,7 @@
 (ns nex.if-conditions-test
   (:require [clojure.test :refer [deftest is testing run-tests]]
-            [clojure.string :as str]
             [nex.parser :as p]
-            [nex.interpreter :as interp]
-            [nex.generator.javascript :as js-gen]))
+            [nex.interpreter :as interp]))
 
 ;; Helper function to execute a method body
 (defn execute-method [code]
@@ -294,26 +292,6 @@ end"
           output (execute-method code)]
       (is (= ["\"done\""] output)))))
 
-(deftest js-codegen-elseif-test
-  (testing "JavaScript codegen emits else if for elseif"
-    (let [code "class Test
-  feature
-    demo() do
-      let x: Integer := 0
-      if x < 0 then
-        print(\"negative\")
-      elseif x > 100 then
-        print(\"big\")
-      else
-        print(\"normal\")
-      end
-    end
-end"
-          ast (p/ast code)
-          js-code (js-gen/translate-ast ast)]
-      (is (str/includes? js-code "} else if ("))
-      (is (str/includes? js-code "} else {")))))
-
 ;; ========== when expression tests ==========
 
 (deftest when-true-condition-test
@@ -376,16 +354,3 @@ end"
 end"
           output (execute-method code)]
       (is (= ["40"] output)))))
-
-(deftest js-codegen-when-test
-  (testing "JavaScript codegen emits ternary for when expression"
-    (let [code "class Test
-  feature
-    demo() do
-      let x: Integer := when 1 < 5 then 1 else 2 end
-    end
-end"
-          ast (p/ast code)
-          js-code (js-gen/translate-ast ast)]
-      (is (str/includes? js-code "?"))
-      (is (str/includes? js-code ":")))))

@@ -8,7 +8,7 @@
   </picture>
 </p>
 
-Nex is a programming language designed to make good software engineering habits the path of least resistance — where contracts, invariants, and explicit behavioral guarantees are not add-ons but the natural way code is written. It compiles to the JVM and to JavaScript, bringing specification-quality discipline to production environments on both platforms.
+Nex is a programming language designed to make good software engineering habits the path of least resistance — where contracts, invariants, and explicit behavioral guarantees are not add-ons but the natural way code is written. It compiles to the JVM, bringing specification-quality discipline to production environments.
 
 Nex is also a serious tool for teaching software engineering. Because contracts are woven into the language rather than bolted on, students learn to think about preconditions, postconditions, and invariants not as formalism but as ordinary practice — the way professional engineers think about code before they write it.
 
@@ -26,8 +26,6 @@ This has consequences that go beyond style.
 **Invariants enforce class-level consistency.** An `invariant` block on a class asserts conditions that must hold after every operation on that class. The runtime checks these automatically. A class whose invariant can be violated by any operation on it has a structural defect, and Nex makes that defect visible immediately rather than silently allowing inconsistent state to propagate.
 
 **Loop contracts prove termination.** A loop `variant` is an expression that must decrease with every iteration and never fall below zero. Writing one is a commitment that the loop terminates — not as a belief but as a verified property. Combined with loop invariants, this gives loops the same specification discipline as methods.
-
-**Contracts can be stripped for production.** The Java and JavaScript translators support a `skip-contracts` flag that removes all contract checks from the generated output. Development builds run with full checking; production builds run without the overhead. The specification remains in the source as documentation and can be re-enabled for debugging at any time.
 
 **The language is designed for clarity at every level of abstraction.** From high-level system design — where classes represent domain entities and their invariants — down to individual routines, Nex's English-like syntax keeps intent visible. This makes Nex well-suited to contexts where code must be read and reasoned about carefully: education, specification-first development, and code review.
 
@@ -166,12 +164,12 @@ str_box.print_value   -- Prints: hello
 
 ## Code Generation
 
-Nex currently has two implementation targets:
+Nex compiles to a single implementation target: a JVM bytecode compiler that
+produces standalone runnable jars. Programs can also run directly on the
+tree-walking interpreter.
 
-- a JVM bytecode compiler that produces standalone runnable jars
-- a JavaScript generator that emits ES module source files
-
-The repository does not currently ship a Java source-code generator.
+The repository does not currently ship a source-code generator for other
+platforms.
 
 ### JVM Compilation
 
@@ -205,38 +203,6 @@ From Clojure, use the JVM backend directly:
 ;; Compile a Nex file to a standalone JVM jar
 (jvm/compile-jar "account.nex" "build/")
 ```
-
-### JavaScript Generation
-
-```javascript
-class Account {
-  constructor() {
-    this.balance = 0;
-  }
-
-  /** @param {number} amount */
-  deposit(amount) {
-    if (!((amount > 0))) throw new Error("Precondition violation: positive");
-    this.balance = (this.balance + amount);
-    if (!((this.balance >= 0))) throw new Error("Postcondition violation: increased");
-  }
-}
-```
-
-From Clojure:
-
-```clojure
-(require '[nex.generator.javascript :as js])
-
-(println (js/translate nex-code))
-(println (js/translate nex-code {:skip-contracts true}))
-
-;; Writes Function.js, NexRuntime.js, per-class files, and main.js
-(js/translate-file "input.nex" "out/")
-(js/translate-file "input.nex" "out/" {:skip-contracts true})
-```
-
-`{:skip-contracts true}` is supported by the JavaScript generator and omits generated contract checks.
 
 ---
 
@@ -361,19 +327,6 @@ The JVM compiler shades the current compiler classpath into the output jar. To
 include extra Java/Maven dependencies, launch the compiler with those deps on
 the classpath first. See [docs/md/CLI.md](/home/vijay/Projects/nex/docs/md/CLI.md) for exact CLI examples.
 
-### Translating to JavaScript
-
-```clojure
-(require '[nex.generator.javascript :as js])
-
-(println (js/translate nex-code))
-(println (js/translate nex-code {:skip-contracts true}))
-
-;; Writes Function.js, NexRuntime.js, per-class files, and main.js
-(js/translate-file "input.nex" "out/")
-(js/translate-file "input.nex" "out/" {:skip-contracts true})
-```
-
 ### Running Tests
 
 ```bash
@@ -386,7 +339,6 @@ clojure -M:test test/scripts/run_tests.clj
 clojure examples/demo_gcd.clj
 clojure examples/demo_complete_dbc.clj
 clojure examples/demo_complete_inheritance.clj
-clojure examples/demo_nex_to_javascript.clj
 clojure examples/demo_skip_contracts.clj
 ```
 
@@ -432,23 +384,21 @@ clojure examples/demo_skip_contracts.clj
 nex/
 ├── src/nex/
 │   ├── parser.clj              # ANTLR parser entry point
-│   ├── walker.cljc             # Parse-tree to AST transformation
-│   ├── interpreter.cljc        # Runtime interpreter
-│   ├── typechecker.cljc        # Static type checker
-│   ├── lower.cljc              # Lowering to compiler IR/class specs
-│   ├── ir.cljc                 # Compiler IR nodes
+│   ├── walker.clj              # Parse-tree to AST transformation
+│   ├── interpreter.clj         # Runtime interpreter
+│   ├── typechecker.clj         # Static type checker
+│   ├── lower.clj               # Lowering to compiler IR/class specs
+│   ├── ir.clj                  # Compiler IR nodes
 │   ├── repl.clj                # User-facing REPL
 │   ├── fmt.clj                 # Formatter
 │   ├── docgen.clj              # Markdown documentation generator
 │   ├── eval.clj                # `nex eval` entry point
 │   ├── debugger.clj            # REPL debugger
-│   ├── compiler/jvm/           # JVM bytecode compiler backend
-│   │   ├── emit.clj
-│   │   ├── file.clj
-│   │   ├── repl.clj
-│   │   └── runtime.clj
-│   └── generator/
-│       └── javascript.clj      # JavaScript (ES6+) code generator
+│   └── compiler/jvm/           # JVM bytecode compiler backend
+│       ├── emit.clj
+│       ├── file.clj
+│       ├── repl.clj
+│       └── runtime.clj
 ├── lib/                        # Shipped Nex libraries (`io`, `net`, `text`, `time`, ...)
 ├── test/
 │   ├── nex/                    # Test suites by feature
@@ -535,10 +485,7 @@ Support for VS Code, Vim, and other editors is planned. Contributions welcome.
 | Status | Item |
 |---|---|
 | Done | JVM bytecode compiler and standalone jar packaging |
-| Done | JavaScript (ES6+) code generator |
 | Done | Shipped standard libraries under `lib/` |
-| Planned | TypeScript code generator |
-| Planned | Python code generator |
 | Planned | LSP server for IDE integration |
 | Planned | Expanded standard libraries |
 | Planned | Package manager |

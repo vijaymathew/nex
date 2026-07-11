@@ -1,11 +1,8 @@
 (ns nex.top-level-let-test
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.string :as str]
-            [clojure.java.io :as io]
             [nex.parser :as p]
             [nex.interpreter :as interp]
-            [nex.typechecker :as tc]
-            [nex.generator.javascript :as js]))
+            [nex.typechecker :as tc]))
 
 (def mixed-top-level-code
   "function double(n: Integer): Integer
@@ -71,22 +68,3 @@ let y: Integer := double(5)")
           result (tc/type-check ast)]
       (is (:success result))
       (is (empty? (:errors result))))))
-
-(deftest javascript-generator-emits-top-level-statements-in-main
-  (testing "JavaScript generator executes top-level statements in main.js"
-    (let [code "function double(n: Integer): Integer
-do
-  result := n * 2
-end
-
-let y: Integer := double(5)
-print(y)"
-          tmp (java.io.File/createTempFile "nex-top-level-let-" ".nex")]
-      (try
-        (spit tmp code)
-        (let [js-files (js/translate-file (.getPath tmp) nil {})
-              main-js (get js-files "main.js")]
-          (is (str/includes? main-js "let y = await NexGlobals.double.call1(5);"))
-          (is (str/includes? main-js "console.log(__nexPrintValue(y))")))
-        (finally
-          (.delete tmp))))))

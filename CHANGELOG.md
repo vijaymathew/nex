@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.1.1-beta - 2026-07-04
+## Unreleased
+
+- **Breaking:** the **JavaScript backend has been removed**, leaving a single
+  JVM implementation. The Nex→JavaScript generator (`nex.generator.javascript`),
+  the ClojureScript/Node interpreter runtime (shadow-cljs, `package.json`,
+  `nex-wrapper.js`, `bin/nex-node.js`, the platform-diff harness), and the
+  `nex compile js` / `./install.sh nodejs` targets are all gone. The interpreter,
+  typechecker, lowering, and runtime source moved from `.cljc` to `.clj` and the
+  `#?(:cljs …)` reader conditionals were dropped. `nex compile` now accepts only
+  the `jvm` target. The `import X from "…"` and `with "javascript"` surface
+  syntax still parses but has no backend that consumes it.
 
 - **Breaking:** function and method parameters are now **contravariant** and
   return types **covariant** (previously parameters were covariant). A function

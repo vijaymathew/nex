@@ -223,8 +223,7 @@
       (str/ends-with? entry-name ".SF")
       (str/ends-with? entry-name ".DSA")
       (str/ends-with? entry-name ".RSA")
-      (= entry-name "nex/compiler/jvm/runtime.clj")
-      (= entry-name "nex/compiler/jvm/runtime.cljc")))
+      (= entry-name "nex/compiler/jvm/runtime.clj")))
 
 (defn- add-entry!
   [^JarOutputStream jar-out seen entry-name input-fn]

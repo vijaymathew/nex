@@ -1,6 +1,6 @@
 (ns nex.interpreter
   (:require [clojure.string :as str]
-            #?(:clj [nex.parser :as parser])
+            [nex.parser :as parser]
             [nex.types.runtime :as rt]
             [nex.types.concurrency :as conc]
             [nex.types.builtins :as bi]
@@ -11,10 +11,10 @@
             [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo]
             [nex.types.bootstrap :as bootstrap])
-  #?(:clj (:import [java.lang.reflect Field]
+  (:import [java.lang.reflect Field]
                    [java.nio.charset StandardCharsets]
                    [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException]
-                   [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference])))
+                   [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference]))
 
 (declare nex-format-value)
 (declare eval-node)
@@ -140,8 +140,7 @@
    \"Division by zero\", etc.) pass through unchanged."
   [e]
   (let [raw (or (ex-message e) "")]
-    #?(:clj
-       (cond
+    (cond
          (instance? java.lang.ArithmeticException e)
          (cond
            (re-find #"(?i)overflow" raw)                 "Arithmetic overflow"
@@ -152,14 +151,7 @@
          (instance? clojure.lang.ArityException e)         "Wrong number of arguments"
          (instance? java.lang.NullPointerException e)      "Used a value that is void (nil)"
          (instance? java.lang.IndexOutOfBoundsException e) (if (seq raw) raw "Index out of bounds")
-         :else (if (seq raw) raw (str e)))
-       :cljs
-       (cond
-         (re-find #"(?i)overflow" raw)                          "Arithmetic overflow"
-         (re-find #"(?i)division by zero|divide by zero" raw)   "Division by zero"
-         (re-find #"(?i)cannot mix bigint|cannot convert .*bigint" raw) "Type error: a value was not of the expected type"
-         (re-find #"(?i)cannot convert|not a (valid|finite) number|invalid (number|bigint)" raw) "Not a valid number"
-         :else (if (seq raw) raw (str e))))))
+         :else (if (seq raw) raw (str e)))))
 
 (def nex-console-print rt/nex-console-print)
 (def nex-console-println rt/nex-console-println)
@@ -175,45 +167,40 @@
 (def nex-process-setenv rt/nex-process-setenv)
 (def nex-process-command-line rt/nex-process-command-line)
 
-#?(:clj
-   (defn- http-response-headers->nex-map
+(defn- http-response-headers->nex-map
      [headers]
-     (http/http-response-headers->nex-map headers)))
+     (http/http-response-headers->nex-map headers))
 
-#?(:clj
-   (defn- make-http-response-object
+(defn- make-http-response-object
      [status body headers]
-     (http/make-http-response-object make-object status body headers)))
+     (http/make-http-response-object make-object status body headers))
 
-#?(:clj
-   (defn- make-http-server-request-object
+(defn- make-http-server-request-object
      [method-name path-value body-text header-map route-params query-map]
-     (http/make-http-server-request-object make-object method-name path-value body-text header-map route-params query-map)))
+     (http/make-http-server-request-object make-object method-name path-value body-text header-map route-params query-map))
 
-#?(:clj
-   (defn- make-http-server-default-response-object
+(defn- make-http-server-default-response-object
      []
-     (http/make-http-server-default-response-object make-object)))
+     (http/make-http-server-default-response-object make-object))
 
-#?(:clj
-   (defn- http-exchange-headers->nex-map
+(defn- http-exchange-headers->nex-map
      [headers]
-     (http/http-exchange-headers->nex-map headers)))
+     (http/http-exchange-headers->nex-map headers))
 
-#?(:clj (def java-http-request bi/java-http-request))
+(def java-http-request bi/java-http-request)
 
-#?(:clj (def make-http-server-handle bi/make-http-server-handle))
+(def make-http-server-handle bi/make-http-server-handle)
 
-#?(:clj (def url-decode http/url-decode))
-#?(:clj (def path-segments http/path-segments))
-#?(:clj (def parse-query-map http/parse-query-map))
-#?(:clj (def route-match http/route-match))
-#?(:clj (def find-route http/find-route))
-#?(:clj (def http-server-response-status http/http-server-response-status))
-#?(:clj (def http-server-response-body http/http-server-response-body))
-#?(:clj (def http-server-response-headers http/http-server-response-headers))
+(def url-decode http/url-decode)
+(def path-segments http/path-segments)
+(def parse-query-map http/parse-query-map)
+(def route-match http/route-match)
+(def find-route http/find-route)
+(def http-server-response-status http/http-server-response-status)
+(def http-server-response-body http/http-server-response-body)
+(def http-server-response-headers http/http-server-response-headers)
 
-#?(:clj (def start-http-server! bi/start-http-server!))
+(def start-http-server! bi/start-http-server!)
 
 
 ;; Built-in IO / cursor / primitive predicates imported from nex.types.runtime
@@ -342,7 +329,7 @@
       (with-meta result (assoc (meta result)
                                write-back-target-key origin
                                write-back-source-key result))
-      (catch #?(:clj Exception :cljs :default) _
+      (catch Exception _
         result))
     result))
 
@@ -419,7 +406,7 @@
       (swap! (:classes ctx) assoc class-name class-def)
       (try
         (validate-class! class-def)
-        (catch #?(:clj Exception :cljs :default) e
+        (catch Exception e
           (if previous
             (swap! (:classes ctx) assoc class-name previous)
             (swap! (:classes ctx) dissoc class-name))
@@ -439,12 +426,11 @@
   (or (get @(:classes ctx) class-name)
       (get @(:specialized-classes ctx) class-name)))
 
-#?(:clj (def resolve-imported-java-class bi/resolve-imported-java-class))
-#?(:clj (def java-create-object bi/java-create-object))
-#?(:clj (def java-call-method bi/java-call-method))
+(def resolve-imported-java-class bi/resolve-imported-java-class)
+(def java-create-object bi/java-create-object)
+(def java-call-method bi/java-call-method)
 
-#?(:clj
-   (defn runtime-resolve-call-user-method
+(defn runtime-resolve-call-user-method
      [ctx target method-name arg-values]
      (let [resolver (requiring-resolve 'nex.compiler.jvm.runtime/call-compiled-user-method)
            compiled-state-slot (:compiled-state ctx)
@@ -452,10 +438,9 @@
                    (instance? clojure.lang.IDeref compiled-state-slot) @compiled-state-slot
                    (some? compiled-state-slot) compiled-state-slot
                    :else nil)]
-       (resolver state target method-name arg-values))))
+       (resolver state target method-name arg-values)))
 
-#?(:clj
-   (defn- reflected-field
+(defn- reflected-field
      [^Class cls field-name]
      (or (try
            (.getField cls field-name)
@@ -464,35 +449,31 @@
                  (when (= (.getName field) field-name)
                    (.setAccessible field true)
                    field))
-               (.getDeclaredFields cls)))))
+               (.getDeclaredFields cls))))
 
-#?(:clj
-   (defn- composition-fields
+(defn- composition-fields
      [^Class cls]
      (->> (.getDeclaredFields cls)
           (filter (fn [^Field field] (str/starts-with? (.getName field) "_parent_")))
           (map (fn [^Field field]
                  (.setAccessible field true)
-                 field)))))
+                 field))))
 
-#?(:clj
-   (defn- deep-reflected-field
+(defn- deep-reflected-field
      [value field-name]
      (or (when-let [^Field field (reflected-field (.getClass value) field-name)]
            [value field])
          (some (fn [^Field parent-field]
                  (when-let [parent-value (.get parent-field value)]
                    (deep-reflected-field parent-value field-name)))
-               (composition-fields (.getClass value))))))
+               (composition-fields (.getClass value)))))
 
-#?(:clj
-   (defn- compiled-object-field
+(defn- compiled-object-field
      [value field-name]
      (when-let [[owner ^Field field] (deep-reflected-field value field-name)]
-       [true (.get field owner)])))
+       [true (.get field owner)]))
 
-#?(:clj
-   (defn- compiled-runtime-class-name
+(defn- compiled-runtime-class-name
      [ctx value]
      (when value
        (let [binary-name (.getName (.getClass value))
@@ -505,7 +486,7 @@
            :else
            (when-let [[_ candidate] (re-matches #"(.+)_\d{4}" simple-name)]
              (when (contains? known-classes candidate)
-               candidate)))))))
+               candidate))))))
 
 (defn register-specialized-class
   "Register a specialized (type-realized) class in the context."
@@ -614,22 +595,15 @@
   ([class-name field-values closure-env]
    (->NexObject class-name field-values closure-env)))
 
-#?(:clj
-   (defonce ^:private concurrent-executor
-     (Executors/newCachedThreadPool)))
+(defonce ^:private concurrent-executor
+     (Executors/newCachedThreadPool))
 
-#?(:clj
-   (defn shutdown-runtime!
+(defn shutdown-runtime!
      "Release shared JVM runtime resources so short-lived tools and test runners can exit cleanly."
      []
      (.shutdown ^java.util.concurrent.ExecutorService concurrent-executor)
      (when-not (.awaitTermination ^java.util.concurrent.ExecutorService concurrent-executor 100 TimeUnit/MILLISECONDS)
-       (.shutdownNow ^java.util.concurrent.ExecutorService concurrent-executor))))
-
-#?(:cljs
-   (defn shutdown-runtime!
-     []
-     nil))
+       (.shutdownNow ^java.util.concurrent.ExecutorService concurrent-executor)))
 
 (defn nex-object?
   "Check if a value is a Nex object instance."
@@ -646,9 +620,6 @@
 (def queue-conj conc/queue-conj)
 (def queue-pop conc/queue-pop)
 (def make-task conc/make-task)
-#?(:cljs (def promise? conc/promise?))
-#?(:cljs (def ->promise conc/->promise))
-#?(:cljs (def promise-all conc/promise-all))
 (def make-channel conc/make-channel)
 (def task-await conc/task-await)
 (def task-done? conc/task-done?)
@@ -727,8 +698,7 @@
     :else nil))
 
 (defn- sleep-select-step! []
-  #?(:clj (Thread/sleep 1)
-     :cljs nil))
+  (Thread/sleep 1))
 
 ;;
 ;; Debugger Hooks
@@ -1178,8 +1148,7 @@
     ;; so the :clj Real branch divides primitives.
     "/" (if (and (nex-integer? left) (nex-integer? right))
           (nex-int-div left right)
-          #?(:clj (/ (double left) (double right))
-             :cljs (/ (->nex-real left) (->nex-real right))))
+          (/ (double left) (double right)))
     "^" (if (and (nex-integer? left) (nex-integer? right))
           (nex-int-pow left right)
           (Math/pow (->nex-real left) (->nex-real right)))
@@ -1350,8 +1319,7 @@
       (map? node) (:type node)
       :else :literal)))
 
-#?(:clj
-   (defn- intern-search-roots
+(defn- intern-search-roots
      "Return directories to search for project-local interned classes.
       Prefer the currently loaded source file's directory when available, then
       fall back to the user's original working directory."
@@ -1367,23 +1335,7 @@
             (remove nil?)
             distinct)))
 
-   :cljs
-   (defn- intern-search-roots
-     [ctx]
-     (let [path-module (js/require "path")
-           source-dir (when-let [source (:debug-source ctx)]
-                        (when (.isAbsolute path-module source)
-                          (.dirname path-module source)))
-           user-dir (or (.-nex_user_dir js/process.env)
-                        (.-NEX_USER_DIR js/process.env)
-                        (.-PWD js/process.env))
-           pwd (.resolve path-module ".")]
-       (->> [source-dir user-dir pwd]
-            (remove nil?)
-            distinct))))
-
-#?(:clj
-   (defn find-intern-file
+(defn find-intern-file
      "Search for an intern file in the specified locations.
       Returns the absolute path if found, otherwise throws an exception."
      [ctx path class-name]
@@ -1426,46 +1378,8 @@
                         {:path path
                          :class-name class-name
                          :searched-locations locations})))))
-   :cljs
-   (defn find-intern-file
-     "Search for an intern file in the specified locations.
-      Returns the absolute path if found, otherwise throws an exception."
-     [ctx path class-name]
-     (let [fs (js/require "fs")
-           path-module (js/require "path")
-           filenames (intern-filenames class-name)
-           home (or (.-HOME js/process.env) (.-USERPROFILE js/process.env) ".")
-           local-roots (intern-search-roots ctx)
-           local-direct (mapcat (fn [root]
-                                  (map #(.join path-module root %) filenames))
-                                local-roots)
-           local-lib (when (seq path)
-                       (mapcat (fn [root]
-                                 (concat
-                                  (map #(.join path-module root "lib" path %) filenames)
-                                  (map #(.join path-module root "lib" path "src" %) filenames)))
-                               local-roots))
-           home-deps (if (seq path)
-                       (concat
-                        (map #(str home "/.nex/deps/" path "/" %) filenames)
-                        (map #(str home "/.nex/deps/" path "/src/" %) filenames))
-                       (concat
-                        (map #(str home "/.nex/deps/" %) filenames)
-                        (map #(str home "/.nex/deps/src/" %) filenames)))
-           locations (vec (concat local-direct local-lib home-deps))
-           found (first (filter #(.existsSync fs %) locations))]
-       (if found
-         found
-         (throw (ex-info (str "Cannot find intern file for "
-                              (if (seq path)
-                                (str path "/" class-name)
-                                class-name))
-                        {:path path
-                         :class-name class-name
-                         :searched-locations locations}))))))
 
-#?(:clj
-   (defn process-intern
+(defn process-intern
      "Load and interpret an external file, then register the class with the given alias."
      [ctx {:keys [path class-name alias]}]
      (let [file-path (find-intern-file ctx path class-name)
@@ -1486,15 +1400,8 @@
          (swap! (:classes ctx) assoc alias registered-class))
        ;; Return the class name that was registered
        intern-name))
-   :cljs
-   (defn process-intern
-     "In ClojureScript, intern is not supported. Use registerClass instead."
-     [ctx {:keys [path class-name alias]}]
-     (throw (ex-info "intern is not supported in ClojureScript. Parse on the JVM and send the AST, or use registerClass to manually register classes."
-                    {:path path :class-name class-name :alias alias}))))
 
-#?(:clj
-   (defn- resolve-interned*
+(defn- resolve-interned*
      "Traverse intern declarations recursively and collect both the class
       definitions and the import declarations they bring into scope for static
       analysis. Returns {:classes [...] :imports [...] :seen #{...}}. Aliased
@@ -1529,10 +1436,9 @@
                            :seen (:seen nested)}))))
                   {:classes [] :imports [] :functions [] :seen seen}
                   (:interns current-program))))]
-       (resolve* source-id program seen-files))))
+       (resolve* source-id program seen-files)))
 
-#?(:clj
-   (defn resolve-interned-classes
+(defn resolve-interned-classes
      "Resolve intern declarations to the class ASTs they bring into scope for static analysis.
       Returns a flat sequence of class definitions, including recursively interned classes.
       Aliased interns are represented as an additional class entry with the alias name."
@@ -1540,13 +1446,8 @@
       (resolve-interned-classes source-id program #{}))
      ([source-id program seen-files]
       (:classes (resolve-interned* source-id program seen-files))))
-   :cljs
-   (defn resolve-interned-classes
-     [& _]
-     []))
 
-#?(:clj
-   (defn resolve-interned-imports
+(defn resolve-interned-imports
      "Resolve intern declarations to the import declarations they bring into scope
       for static analysis (recursively, deduplicated). These let the typechecker
       see the host-class imports declared inside interned modules."
@@ -1554,13 +1455,8 @@
       (resolve-interned-imports source-id program #{}))
      ([source-id program seen-files]
       (distinct (:imports (resolve-interned* source-id program seen-files)))))
-   :cljs
-   (defn resolve-interned-imports
-     [& _]
-     []))
 
-#?(:clj
-   (defn resolve-interned-functions
+(defn resolve-interned-functions
      "Resolve intern declarations to the free-function definitions they bring into
       scope (recursively), so the typechecker and compiled backend can see a
       library's exported functions. The runtime interpreter registers them when it
@@ -1570,10 +1466,6 @@
       (resolve-interned-functions source-id program #{}))
      ([source-id program seen-files]
       (:functions (resolve-interned* source-id program seen-files))))
-   :cljs
-   (defn resolve-interned-functions
-     [& _]
-     []))
 
 (defmethod eval-node :program
   [ctx {:keys [imports interns classes functions statements calls duplicate-functions
@@ -1746,7 +1638,7 @@
                                           field-key (keyword field-name)
                                           val (try
                                                 (env-lookup method-env field-name)
-                                                (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+                                                (catch Exception _ ::not-found))]
                                       (if (not= val ::not-found)
                                         (assoc m field-key val)
                                         m)))
@@ -1755,7 +1647,7 @@
             updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
             result (let [res (try
                                (env-lookup method-env "result")
-                               (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+                               (catch Exception _ ::not-found))]
                      (if (not= res ::not-found)
                        res
                        nil))]
@@ -1763,13 +1655,13 @@
         (when-let [tgt (:current-target ctx)]
           (try
             (env-set! (:current-env ctx) tgt updated-obj)
-            (catch #?(:clj Exception :cljs :default) _)))
+            (catch Exception _)))
         ;; Only update field env vars that belong to the parent class
         (doseq [[field-name field-val] (:fields updated-obj)]
           (when (contains? parent-field-names (name field-name))
             (try
               (env-set! (:current-env ctx) (name field-name) field-val)
-              (catch #?(:clj Exception :cljs :default) _))))
+              (catch Exception _))))
         result)
       (throw (ex-info (str "Method not found in parent " parent-class-name ": " method)
                       {:parent parent-class-name :method method})))))
@@ -1811,14 +1703,13 @@
         (cond
           ;; Java static method or field access inside with "java" block
           java-class?
-          #?(:clj (let [klass (or (resolve-imported-java-class ctx target-name)
+          (let [klass (or (resolve-imported-java-class ctx target-name)
                                   (try (Class/forName (str "java.lang." target-name)) (catch Exception _ nil))
                                   (throw (ex-info (str "Undefined Java class: " target-name) {:class-name target-name})))]
                     (if has-parens
                       (clojure.lang.Reflector/invokeStaticMethod klass method (to-array arg-values))
                       (let [^java.lang.reflect.Field field (.getField klass method)]
                         (.get field nil))))
-             :cljs nil)
 
           ;; Class-qualified constant access: A.CONST
           (and class-target
@@ -1895,7 +1786,7 @@
                                                   m
                                                   (let [val (try
                                                               (env-lookup method-env field-name)
-                                                              (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+                                                              (catch Exception _ ::not-found))]
                                                     (if (not= val ::not-found)
                                                       (assoc m field-key val)
                                                       m)))))
@@ -1904,14 +1795,14 @@
                       updated-obj (make-object (:class-name obj) updated-fields (:closure-env obj))
                       result-flag (try
                                     (env-lookup method-env "__result_assigned__")
-                                    (catch #?(:clj Exception :cljs :default) _ ::not-found))
+                                    (catch Exception _ ::not-found))
                       result (cond
                                (= result-flag "result")
                                (env-lookup method-env "result")
                                :else
                                (let [res (try
                                            (env-lookup method-env "result")
-                                           (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+                                           (catch Exception _ ::not-found))]
                                  (if (not= res ::not-found)
                                    res
                                    nil)))]
@@ -1921,7 +1812,7 @@
                     (check-class-invariant new-ctx class-def)
                     (write-back-target! ctx target updated-obj source-obj)
                     (annotate-reference-result target obj result)
-                    (catch #?(:clj Exception :cljs :default) e
+                    (catch Exception e
                       (write-back-target! ctx target source-obj source-obj)
                       (throw e))))))
               (let [field (lookup-field-with-inheritance ctx class-def method (:current-class-name ctx))]
@@ -1949,7 +1840,7 @@
           (call-builtin-method ctx (or target-name target) obj method arg-values)
 
           :else
-          #?(:clj (let [compiled-class-name (compiled-runtime-class-name ctx obj)
+          (let [compiled-class-name (compiled-runtime-class-name ctx obj)
                         compiled-class-def (when compiled-class-name
                                              (lookup-class-if-exists ctx compiled-class-name))]
                     (if compiled-class-def
@@ -1972,16 +1863,13 @@
                                              :class-name compiled-class-name}))
                             (runtime-resolve-call-user-method ctx obj method arg-values)))
                         (runtime-resolve-call-user-method ctx obj method arg-values))
-                      (java-call-method obj method arg-values)))
-             :cljs (throw (ex-info (str "Method not found on type: " method)
-                                   {:target target :value obj :method method})))))
+                      (java-call-method obj method arg-values)))))
 
       (let [fn-obj (try
                      (env-lookup (:current-env ctx) method)
-                     (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+                     (catch Exception _ ::not-found))]
         (if (not= fn-obj ::not-found)
-          (let [compiled-callable? #?(:clj (boolean (compiled-runtime-class-name ctx fn-obj))
-                                      :cljs false)]
+          (let [compiled-callable? (boolean (compiled-runtime-class-name ctx fn-obj))]
             (cond
               (or (nex-object? fn-obj) compiled-callable?)
               (if (not= has-parens false)
@@ -2022,7 +1910,7 @@
                                                 field-key (keyword field-name)
                                                 val (try
                                                       (env-lookup current-env field-name)
-                                                      (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+                                                      (catch Exception _ ::not-found))]
                                             (if (not= val ::not-found)
                                               (assoc m field-key val)
                                               m)))
@@ -2162,13 +2050,13 @@
       (reset! should-retry false)
       (try
         (doseq [stmt body] (eval-node ctx stmt))
-        (catch #?(:clj Exception :cljs :default) e
+        (catch Exception e
           ;; Don't catch retry markers from nested blocks
-          (if (and (instance? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) e)
+          (if (and (instance? clojure.lang.ExceptionInfo e)
                    (= :nex-retry (:type (ex-data e))))
             (throw e)
             ;; Real exception — run rescue
-            (let [exc-value (if (and (instance? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) e)
+            (let [exc-value (if (and (instance? clojure.lang.ExceptionInfo e)
                                     (= :nex-exception (:type (ex-data e))))
                               (:value (ex-data e))
                               (nex-error-message e))
@@ -2177,8 +2065,8 @@
                   rescue-ctx (assoc ctx :current-env rescue-env)]
               (try
                 (doseq [stmt rescue] (eval-node rescue-ctx stmt))
-                (catch #?(:clj Exception :cljs :default) re
-                  (if (and (instance? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) re)
+                (catch Exception re
+                  (if (and (instance? clojure.lang.ExceptionInfo re)
                            (= :nex-retry (:type (ex-data re))))
                     (reset! should-retry true) ;; retry: loop back
                     (throw re)))))))))))
@@ -2256,7 +2144,7 @@
   (maybe-debug-pause ctx {:type :match :expr expr :clauses clauses :else else})
   (let [val (eval-node ctx expr)
         val-class (or (when (nex-object? val) (:class-name val))
-                      #?(:clj (compiled-runtime-class-name ctx val)))
+                      (compiled-runtime-class-name ctx val))
         ;; A generic instance carries its specialized name (e.g. "Ok[Integer,String]")
         ;; while a `when` clause names the base class ("Ok"), so compare on the
         ;; base name too.
@@ -2444,7 +2332,7 @@
   [ctx {:keys [name]}]
   (let [val (try
               (env-lookup (:current-env ctx) name)
-              (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+              (catch Exception _ ::not-found))]
     (if (not= val ::not-found)
       val
       ;; Not in env - check if it's a zero-arg method on current object
@@ -2580,7 +2468,7 @@
                            (throw (ex-info "Atomic_Reference.make expects 1 argument"
                                            {:class-name "Atomic_Reference" :constructor constructor})))
                          (make-atomic-reference (first arg-values)))
-    "Channel" #?(:clj (let [arg-values (mapv #(eval-node ctx %) args)]
+    "Channel" (let [arg-values (mapv #(eval-node ctx %) args)]
                         (cond
                           (nil? constructor) (make-channel)
                           (= constructor "with_capacity")
@@ -2595,14 +2483,12 @@
                           :else
                           (throw (ex-info (str "Constructor not found: Channel." constructor)
                                           {:class-name "Channel" :constructor constructor}))))
-                 :cljs (throw (ex-info "Channels are not supported in ClojureScript interpreter"
-                                       {:class-name "Channel"})))
     "Set" (let [arg-values (mapv #(eval-node ctx %) args)]
             (cond
               (nil? constructor) (nex-set)
               (= constructor "from_array") (let [source (first arg-values)]
                                              (cond
-                                               (nex-array? source) (nex-set-from #?(:clj source :cljs (array-seq source)))
+                                               (nex-array? source) (nex-set-from source)
                                                (sequential? source) (nex-set-from source)
                                                :else (throw (ex-info "Set.from_array requires an array"
                                                                      {:class-name "Set"}))))
@@ -2696,7 +2582,7 @@
                                                                field-key (keyword field-name)
                                                                val (try
                                                                      (env-lookup ctor-env field-name)
-                                                                     (catch #?(:clj Exception :cljs :default) _ ::not-found))]
+                                                                     (catch Exception _ ::not-found))]
                                                            (if (not= val ::not-found)
                                                              (assoc m field-key val)
                                                              m)))
@@ -2723,14 +2609,11 @@
         ;; Return the object
         obj)
       ;; Java interop fallback (CLJ only)
-      #?(:clj (java-create-object ctx class-name (mapv #(eval-node ctx %) args))
-         :cljs (throw (ex-info (str "Undefined class: " class-name)
-                               {:class-name class-name})))))))
+      (java-create-object ctx class-name (mapv #(eval-node ctx %) args))))))
 
 (defmethod eval-node :spawn
   [ctx {:keys [body]}]
-  #?(:clj
-     (make-task
+  (make-task
        (CompletableFuture/supplyAsync
         (reify java.util.function.Supplier
           (get [_]
@@ -2745,10 +2628,7 @@
                 (if (= result-flag "result")
                   (env-lookup spawn-env "result")
                   nil)))))
-        concurrent-executor))
-     :cljs
-     (throw (ex-info "spawn is not supported in ClojureScript interpreter"
-                     {:type :unsupported}))))
+        concurrent-executor)))
 
 (defmethod eval-node :literal
   [_ctx node]

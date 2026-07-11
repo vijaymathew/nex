@@ -317,7 +317,7 @@
   [node f]
   (try
     (f)
-    (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e
+    (catch clojure.lang.ExceptionInfo e
       (throw (annotate-type-exception e node)))))
 
 (defn display-type
@@ -903,8 +903,7 @@
                             (:parents class-def)))))))]
       (lookup-method class-name #{}))))
 
-#?(:clj
-   (defn- resolve-imported-java-class
+(defn- resolve-imported-java-class
      [env class-name]
      (when (string? class-name)
        (let [class-def (env-lookup-class env class-name)
@@ -916,21 +915,16 @@
              (Class/forName qualified-name)
              (catch Exception _
                nil))))))
-   :cljs
-   (defn- resolve-imported-java-class
-     [_ _]
-     nil))
 
 (defn- known-reference-type
-  [env ^#?(:clj Class :cljs js/Object) klass]
-  (let [simple-name #?(:clj (.getSimpleName klass) :cljs nil)]
+  [env ^Class klass]
+  (let [simple-name (.getSimpleName klass)]
     (cond
       (builtin-type? simple-name) simple-name
       (env-lookup-class env simple-name) simple-name
       :else "Any")))
 
-#?(:clj
-   (defn- java-class->nex-type
+(defn- java-class->nex-type
      [env ^Class klass]
      (cond
        (nil? klass) "Any"
@@ -972,13 +966,8 @@
 
        :else
        (known-reference-type env klass)))
-   :cljs
-   (defn- java-class->nex-type
-     [_ _]
-     "Any"))
 
-#?(:clj
-   (defn- reflected-java-method-signatures
+(defn- reflected-java-method-signatures
      [env class-name method-name argc static?]
      (when-let [klass (resolve-imported-java-class env class-name)]
        (->> (.getMethods ^Class klass)
@@ -993,10 +982,6 @@
                                    (range argc)
                                    (.getParameterTypes method))
                      :return-type (java-class->nex-type env (.getReturnType method))})))))
-   :cljs
-   (defn- reflected-java-method-signatures
-     [_ _ _ _ _]
-     nil))
 
 (defn- reflected-java-method-signature
   [env class-name method-name arg-types static?]
@@ -4339,7 +4324,7 @@
         :errors []
         :warnings (vec @(:warnings env))}
 
-       (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e
+       (catch clojure.lang.ExceptionInfo e
          (let [error-data (ex-data e)]
            {:success false
             :errors [(or (:error error-data)
@@ -4351,11 +4336,10 @@
        ;; instead of letting a raw JVM exception escape this entry point; callers
        ;; rely on type-check always returning a result map. (In cljs the `:default`
        ;; clause above already covers this, so this JVM-only clause is elided there.)
-       #?(:clj
-          (catch Exception e
+       (catch Exception e
             {:success false
              :errors [(type-error (str "Internal type checker error: " (ex-message e)))]
-             :warnings (vec @(:warnings env))})))))))
+             :warnings (vec @(:warnings env))}))))))
 
 (defn type-check
   "Type check Nex code (entry point).
@@ -4389,4 +4373,4 @@
       (doseq [[var-name var-type] visible-var-types]
         (env-add-var env var-name var-type))
       (check-expression env expr))
-    (catch #?(:clj Exception :cljs :default) _ nil)))
+    (catch Exception _ nil)))

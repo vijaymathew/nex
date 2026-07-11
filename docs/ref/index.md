@@ -1,4 +1,4 @@
-This reference documents the interpreter-level built-ins currently defined in `src/nex/interpreter.cljc`.
+This reference documents the interpreter-level built-ins currently defined in `src/nex/interpreter.clj`.
 
 ## Contents
 
@@ -21,4 +21,4 @@ This reference documents the interpreter-level built-ins currently defined in `s
 - Method names are listed exactly as implemented.
 - Signatures are shown in Nex-style pseudocode.
 - `nil` means no useful return value.
-- Some behavior differs by runtime (`jvm` vs `node`), especially for `Process` and platform-specific libraries under `lib/`.
+- Some `Process` and platform-specific behavior under `lib/` depends on the host operating system.

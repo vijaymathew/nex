@@ -360,12 +360,6 @@ end
 
 `select` probes its clauses using `try_send` / `try_receive` for channels and `is_done` for tasks. Task clauses must use `Task.await`; they fire only when the task has already completed. If no clause is ready and there is no `else`, `select` waits until one becomes ready.
 
-JavaScript target note:
-- generated JavaScript uses Promise-based semantics
-- Nex source syntax stays the same
-- `spawn` lowers to async task code
-- `Task.await`, `Channel.send`, and `Channel.receive` lower to `await ...` in generated JavaScript
-
 For full concurrency semantics and runtime details, see [CONCURRENCY.md](CONCURRENCY.md).
 
 ## Classes

@@ -6,9 +6,8 @@ These are library classes, not core built-in classes. Load them with `intern`.
 
 ## Platform Scope
 
-- `time/Date_Time`: JVM interpreter, generated JVM, generated JavaScript/Node
-- `time/Duration`: JVM interpreter, generated JVM, generated JavaScript/Node
-- Retired browser interpreter path: not supported
+- `time/Date_Time`: JVM interpreter, generated JVM
+- `time/Duration`: JVM interpreter, generated JVM
 
 ## Load
 

@@ -4,15 +4,8 @@ This guide explains how to install the Nex language implementation on your syste
 
 ## Prerequisites
 
-### For JVM Installation (Recommended)
 - **Java 11 or later** - [Download](https://adoptium.net/)
 - **Clojure CLI** - [Installation Guide](https://clojure.org/guides/install_clojure)
-
-### For Node.js Installation
-- **Node.js 16 or later** - [Download](https://nodejs.org/)
-- **npm** (comes with Node.js)
-
-**Note:** The Node.js installation has limited functionality. For full features (REPL, format, doc, compile), use the JVM installation.
 
 ## Quick Install
 
@@ -57,18 +50,6 @@ To install into a custom prefix without exporting `INSTALL_PREFIX` first:
 ./install.sh jvm --prefix "$HOME/.local"
 ```
 
-### Node.js Installation
-
-```bash
-./install.sh nodejs
-```
-
-With automatic dependency installation:
-
-```bash
-./install.sh nodejs --install-deps
-```
-
 ## Supported Platforms
 
 The installer supports automatic dependency installation on:
@@ -86,22 +67,16 @@ The installer supports automatic dependency installation on:
 
 When using `--install-deps` flag:
 
-**For JVM:**
 - Java (OpenJDK 11 or later)
 - Clojure CLI tools (latest stable)
-
-**For Node.js:**
-- Node.js (LTS version)
-- npm (comes with Node.js)
 
 ## Installation Details
 
 The installation script will:
 
-1. **Check prerequisites** - Verify Java/Clojure or Node.js is installed
+1. **Check prerequisites** - Verify Java and Clojure are installed
 2. **Offer to install dependencies** - If missing (or auto-install with `--install-deps`)
-3. **Build** - Compile ClojureScript if needed (Node.js only)
-4. **Install files** to:
+3. **Install files** to:
    - Executable: `/usr/local/bin/nex`
    - Library: `/usr/local/lib/nex`
 5. **Verify** - Test that `nex` command is available
@@ -199,11 +174,7 @@ You should see the Nex REPL prompt.
 ### Compile a Test File
 
 ```bash
-# Preferred JVM backend
 nex compile jvm examples/create_example.nex
-
-# Compile to JavaScript
-nex compile js examples/create_example.nex
 ```
 
 ## Uninstallation
@@ -275,23 +246,6 @@ sudo pacman -S jdk-openjdk
 # Then install Clojure CLI (see Ubuntu instructions)
 ```
 
-### ClojureScript Build Fails (Node.js installation)
-
-1. Clear caches:
-   ```bash
-   rm -rf .shadow-cljs target node_modules
-   ```
-
-2. Reinstall dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Try building manually:
-   ```bash
-   npx shadow-cljs compile node
-   ```
-
 ## Development Installation
 
 If you're developing Nex itself, you don't need to install system-wide. Instead:
@@ -326,18 +280,12 @@ After installation:
 - Check `docs/` directory for documentation
 - Report issues on GitHub: [your-repo-url]
 
-## Features by Installation Type
+## Features
 
-| Feature | JVM | Node.js |
-|---------|-----|---------|
-| REPL | ✅ | ❌ |
-| Compile to Java (deprecated) | ✅ | ❌ |
-| Compile to JavaScript | ✅ | ❌ |
-| Format files | ✅ | ❌ |
-| Generate docs | ✅ | ❌ |
-| Eval code | ✅ | ❌* |
-| Run pre-compiled AST | ✅ | ✅ |
-
-*Node.js can evaluate pre-parsed AST but cannot parse Nex source code.
-
-For full functionality, **use the JVM installation**.
+| Feature | JVM |
+|---------|-----|
+| REPL | ✅ |
+| Compile to a standalone JVM jar | ✅ |
+| Format files | ✅ |
+| Generate docs | ✅ |
+| Eval code | ✅ |

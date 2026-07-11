@@ -4,8 +4,7 @@
             [clojure.string :as str]
             [nex.parser :as p]
             [nex.interpreter :as interp]
-            [nex.typechecker :as tc]
-            [nex.generator.javascript :as js]))
+            [nex.typechecker :as tc]))
 
 ;; ============================================================================
 ;; CONSOLE INTERPRETER TESTS
@@ -146,38 +145,6 @@ end"
 ;; JAVASCRIPT GENERATOR TESTS
 ;; ============================================================================
 
-(deftest js-console-create-test
-  (testing "JS generation for create Console"
-    (let [code "class Main
-  feature
-    demo() do
-      let io: Console := create Console
-    end
-end"
-          js-code (js/translate code)]
-      (is (str/includes? js-code "({_type: 'Console'})")))))
-
-(deftest js-console-methods-test
-  (testing "JS generation for Console methods"
-    (let [code "class Main
-  feature
-    demo() do
-      let io: Console := create Console
-      io.print(\"hello\")
-      io.print_line(\"world\")
-      io.error(\"oops\")
-      io.new_line()
-      io.flush()
-    end
-end"
-          js-code (js/translate code)]
-      ;; Console methods lower to direct JS runtime calls when target type is known.
-      (is (str/includes? js-code "process.stdout.write(String(\"hello\"))"))
-      (is (str/includes? js-code "console.log(\"world\")"))
-      (is (str/includes? js-code "console.error(\"oops\")"))
-      (is (str/includes? js-code "console.log()"))
-      (is (str/includes? js-code "process.stdout.write('')")))))
-
 ;; ============================================================================
 ;; PROCESS INTERPRETER TESTS
 ;; ============================================================================
@@ -240,14 +207,3 @@ end"
 end"
           result (tc/type-check (p/ast code))]
       (is (:success result)))))
-
-(deftest js-process-create-test
-  (testing "JS generation for create Process"
-    (let [code "class Main
-  feature
-    demo() do
-      let p: Process := create Process
-    end
-end"
-          js-code (js/translate code)]
-      (is (str/includes? js-code "({_type: 'Process'})")))))

@@ -1,10 +1,15 @@
 # Backend Alignment: stages & progress
 
-Tracking doc for aligning the tree-walking interpreter, the JVM compiler, and
-(eventually) the JS generator with each other and with the Definition of Nex
+Tracking doc for aligning the tree-walking interpreter and the JVM compiler with
+each other and with the Definition of Nex
 (`vijaymathew.github.io/nex/docs/definition-of-nex`). Origin: a differential
 audit (2026-07-03) that ran the same programs through `interp/eval-node` and
 `jvm-file/compile-ast` + `Main.main` and diffed stdout.
+
+(Historical note: the project also once maintained a JavaScript generator and a
+ClojureScript interpreter runtime. Both were removed to leave a single JVM
+implementation; earlier stage entries below that mention `cljs`, platform-diff,
+or the JS generator are kept as a record of that period.)
 
 Update the Status column as work lands; add a commit hash when a stage merges.
 
@@ -23,7 +28,7 @@ Update the Status column as work lands; add a commit hash when a stage merges.
 
 | Item | Change | Status |
 |------|--------|--------|
-| A1 | `%` truncated + zero-check with canonical message: `nex-int-mod`/`nex-int-div` in `types/runtime.cljc` become the checked entry points; interpreter `apply-binary-op` uses them; lowering routes int `/` `%` through `op:div-*`/`op:mod-*` runtime helpers (like `op:pow-*`) instead of raw LDIV/LREM; real `%` truncated via `nex-real-rem` | done |
+| A1 | `%` truncated + zero-check with canonical message: `nex-int-mod`/`nex-int-div` in `types/runtime.clj` become the checked entry points; interpreter `apply-binary-op` uses them; lowering routes int `/` `%` through `op:div-*`/`op:mod-*` runtime helpers (like `op:pow-*`) instead of raw LDIV/LREM; real `%` truncated via `nex-real-rem` | done |
 | A2 | NaN ordering: `emit-long-or-double-compare!` uses DCMPG for `<`/`<=` (DCMPL for `>`/`>=`); interpreter comparisons get a numeric fast path (`nex-numeric-lt` etc.) instead of the 3-way compare | done |
 | A3 | `MIN_LONG / -1` raises (part of the new div helper) | done |
 | A4 | `5 == 5.0` → true compiled: `identity-equals` in `compiler/jvm/runtime.clj` uses `nex-numeric-equals?` for numeric pairs | done |
@@ -54,8 +59,8 @@ Update the Status column as work lands; add a commit hash when a stage merges.
 
 | Item | Change | Status |
 |------|--------|--------|
-| D1 | **Builtin library extracted** (landed 2026-07-03). Two new engine-neutral namespaces: `nex.types.concurrency` (tasks, channels, the queue/promise plumbing — clj + cljs variants, ~536 lines) and `nex.types.builtins` (`builtin-type-methods`, `call-builtin-method`, `builtin-type-method-return-type`, plus the value-level helpers they're built from: ordering, structural hashing, membership, sorting, heaps, atomics, `concat-string-value`, `report-contract-violation`; ~995 lines). Engine-specific behaviour is injected via `set-engine-hooks!` (`:nex-object?`, `:make-object`, `:object-equals-override`, `:call-object-method`, `:user-to-string`), following the `*value-equals*`/`*value-hash*` precedent in `nex.types.runtime`; the interpreter registers its eval-node-backed hooks at load. `interpreter.cljc` shrank 4757 → 3494 lines and re-exports the moved names as aliases, so no other interpreter code changed. `compiler/jvm/runtime.clj` and `lower.cljc` now take `call-builtin-method`/`nex-format-value`/`concat-string-value` and the builtin-method metadata from `nex.types.builtins` directly (interp/ call sites in runtime.clj: 59 → 36). Verified: full suite, cljs platform-diff 21/21, differential sweep unchanged. | done |
-| D2 | **Free-function table + Java interop extracted** (landed 2026-07-03). The `builtins` table (print/println, type_of/type_is, regex/datetime/path/file/json/http families, await_*, http-server routes), `print-output-value`, `runtime-type-name`/`runtime-type-is?`, the http-server plumbing, and the Java-interop helpers (`resolve-imported-java-class`, `java-create-object`, `java-call-method`) all moved to `nex.types.builtins`. Two new engine hooks: `:add-output` (interpreter accumulates on the ctx; default writes to console) and `:is-parent?` (class-hierarchy query); http-server handler dispatch reuses `:call-object-method`. **`lower.cljc` no longer requires `nex.interpreter` at all** — builtin names/metadata come from `nex.types.builtins` and the base-class defs from `nex.types.bootstrap` directly. `runtime.clj` interp/ sites: 36 → 31; `interpreter.cljc` 3494 → 2801 lines. | done |
+| D1 | **Builtin library extracted** (landed 2026-07-03). Two new engine-neutral namespaces: `nex.types.concurrency` (tasks, channels, the queue/promise plumbing — clj + cljs variants, ~536 lines) and `nex.types.builtins` (`builtin-type-methods`, `call-builtin-method`, `builtin-type-method-return-type`, plus the value-level helpers they're built from: ordering, structural hashing, membership, sorting, heaps, atomics, `concat-string-value`, `report-contract-violation`; ~995 lines). Engine-specific behaviour is injected via `set-engine-hooks!` (`:nex-object?`, `:make-object`, `:object-equals-override`, `:call-object-method`, `:user-to-string`), following the `*value-equals*`/`*value-hash*` precedent in `nex.types.runtime`; the interpreter registers its eval-node-backed hooks at load. `interpreter.clj` shrank 4757 → 3494 lines and re-exports the moved names as aliases, so no other interpreter code changed. `compiler/jvm/runtime.clj` and `lower.clj` now take `call-builtin-method`/`nex-format-value`/`concat-string-value` and the builtin-method metadata from `nex.types.builtins` directly (interp/ call sites in runtime.clj: 59 → 36). Verified: full suite, cljs platform-diff 21/21, differential sweep unchanged. | done |
+| D2 | **Free-function table + Java interop extracted** (landed 2026-07-03). The `builtins` table (print/println, type_of/type_is, regex/datetime/path/file/json/http families, await_*, http-server routes), `print-output-value`, `runtime-type-name`/`runtime-type-is?`, the http-server plumbing, and the Java-interop helpers (`resolve-imported-java-class`, `java-create-object`, `java-call-method`) all moved to `nex.types.builtins`. Two new engine hooks: `:add-output` (interpreter accumulates on the ctx; default writes to console) and `:is-parent?` (class-hierarchy query); http-server handler dispatch reuses `:call-object-method`. **`lower.clj` no longer requires `nex.interpreter` at all** — builtin names/metadata come from `nex.types.builtins` and the base-class defs from `nex.types.bootstrap` directly. `runtime.clj` interp/ sites: 36 → 31; `interpreter.clj` 3494 → 2801 lines. | done |
 | D3 | Retire the deopt path — decision: **option (a)**, drop the interpreted REPL backend. First increment landed 2026-07-03: the user-facing `:backend interpreter`/`compiled`/`status` commands are **removed** (compiled is the only REPL backend; `*repl-backend*` is pinned `:compiled`, and the `--interpreter` flag of `check_docs_examples.clj` is a developer diagnostic that pokes the atom directly). Three bridge pieces retired from `runtime.clj`: channel creation now calls `conc/make-channel` directly (was: a `:create` node through a fresh interpreter context), imported-class resolution passes a plain `{:imports …}` map instead of rebuilding an interpreter ctx, and `runtime-compatible-with?`/`compiled-is-parent?` walk the program classes plus `nex.types.bootstrap` base-class defs with no interpreter involved. | in progress |
 | D3b | What remains of the bridge (30 `interp/` sites, 12 `rebuild-interpreter-ctx`): the REPL's *internal* narrow fallback still evaluates some cells with the interpreter and syncs both ways — wrapped expression inputs, cells referencing REPL `declare type` aliases, three construct predicates (`ast-needs-interpreter-fallback?`), two `fallback-eligible-compiled-error?` runtime errors, and debugger sessions (`:debug on` evaluates interpreted). Retiring those means teaching `compiled-repl` to execute wrapped/expression cells and alias-typed vars, then deleting `sync-session->interpreter!`/`sync-interpreter-back-into-compiled-session!` and the `nex-object?` deopt branches. Separately: http request/response objects are built through the `:make-object` hook (interpreter's `NexObject` when loaded), so compiled method calls on them still route through `invoke-interpreter-object-method`. | open |
 
@@ -64,9 +69,7 @@ Update the Status column as work lands; add a commit hash when a stage merges.
 1. Interpreter object aliasing (value semantics + write-back) — objects in
    field slots / array elements go stale. Fix or retire the interpreter as an
    execution engine (Stage C/D make the latter viable).
-2. JS generator integer model — plain JS numbers; needs the checked-BigInt
-   representation the cljs interpreter already uses (spec §B.3).
-3. Closure capture semantics — compiled closures mutate a *copy* of captured
+2. Closure capture semantics — compiled closures mutate a *copy* of captured
    locals, interpreter writes back. Needs a decision: write-back boxes in
    compiled closures, or typechecker rejects assignment to captured locals.
 
@@ -99,5 +102,3 @@ accept `once` — decide: implement or remove from the Definition.
   stdout). Cases: mod signs, real mod, NaN compares, mixed `==`, overflow,
   `MIN/-1`, bitwise shifts, div-by-zero messages, nil-deref message.
 - Full suite: `clojure -M:test test/scripts/run_tests.clj`
-- cljs side shares `types/runtime.cljc`, so A1/A5 fixes apply there too;
-  re-run `npm run test:platform-diff` when touching shared runtime.

@@ -2,7 +2,7 @@
 set -e
 
 # Nex Language Installation Script
-# Usage: ./install.sh [jvm|nodejs] [--install-deps] [--prefix DIR]
+# Usage: ./install.sh [--install-deps] [--prefix DIR]
 
 VERSION="0.1.1"
 TARGET="jvm"
@@ -15,7 +15,7 @@ USER_DEPS_DIR="${HOME}/.nex/deps"
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        jvm|nodejs)
+        jvm)
             TARGET="$1"
             shift
             ;;
@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help|-h)
-            echo "Usage: ./install.sh [jvm|nodejs] [--install-deps] [--prefix DIR]"
+            echo "Usage: ./install.sh [--install-deps] [--prefix DIR]"
             exit 0
             ;;
         *)
@@ -50,9 +50,9 @@ echo "╚═══════════════════════�
 echo ""
 
 # Validate target
-if [[ "$TARGET" != "jvm" && "$TARGET" != "nodejs" ]]; then
-    echo "Error: Invalid target '$TARGET'. Must be 'jvm' or 'nodejs'."
-    echo "Usage: ./install.sh [jvm|nodejs] [--install-deps] [--prefix DIR]"
+if [[ "$TARGET" != "jvm" ]]; then
+    echo "Error: Invalid target '$TARGET'. The only supported target is 'jvm'."
+    echo "Usage: ./install.sh [--install-deps] [--prefix DIR]"
     exit 1
 fi
 
@@ -138,146 +138,60 @@ install_clojure() {
     echo "  ✓ Clojure CLI installed"
 }
 
-# Install Node.js and npm
-install_nodejs() {
-    echo "Installing Node.js..."
-
-    case "$OS" in
-        ubuntu|debian)
-            # Install NodeSource repository
-            curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-            sudo apt-get install -y nodejs
-            ;;
-        fedora)
-            sudo dnf install -y nodejs npm
-            ;;
-        centos|rhel)
-            # Install NodeSource repository
-            curl -fsSL https://rpm.nodesource.com/setup_lts.x | sudo bash -
-            sudo yum install -y nodejs
-            ;;
-        arch|manjaro)
-            sudo pacman -S --noconfirm nodejs npm
-            ;;
-        macos)
-            if ! command -v brew &> /dev/null; then
-                echo "Error: Homebrew not found. Install it from https://brew.sh"
-                exit 1
-            fi
-            brew install node
-            ;;
-        *)
-            echo "Error: Unsupported OS for automatic Node.js installation: $OS"
-            echo "Please install Node.js 16+ manually:"
-            echo "  https://nodejs.org/"
-            exit 1
-            ;;
-    esac
-
-    echo "  ✓ Node.js installed"
-}
-
 # Check and optionally install prerequisites
 check_prerequisites() {
     echo "Checking prerequisites..."
 
     detect_os
 
-    if [[ "$TARGET" == "jvm" ]]; then
-        # Check Java
-        if ! command -v java &> /dev/null; then
-            if [[ "$INSTALL_DEPS" == true ]]; then
+    # Check Java
+    if ! command -v java &> /dev/null; then
+        if [[ "$INSTALL_DEPS" == true ]]; then
+            install_java
+        else
+            echo ""
+            echo "Java is not installed."
+            read -p "Would you like to install it automatically? (y/n) " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
                 install_java
             else
-                echo ""
-                echo "Java is not installed."
-                read -p "Would you like to install it automatically? (y/n) " -n 1 -r
-                echo
-                if [[ $REPLY =~ ^[Yy]$ ]]; then
-                    install_java
-                else
-                    echo "Error: Java is required for JVM installation."
-                    echo "Install Java 11 or later from: https://adoptium.net/"
-                    exit 1
-                fi
+                echo "Error: Java is required for JVM installation."
+                echo "Install Java 11 or later from: https://adoptium.net/"
+                exit 1
             fi
-        else
-            echo "  ✓ Java $(java -version 2>&1 | head -n 1)"
-        fi
-
-        # Check Clojure
-        if ! command -v clojure &> /dev/null; then
-            if [[ "$INSTALL_DEPS" == true ]]; then
-                install_clojure
-            else
-                echo ""
-                echo "Clojure CLI is not installed."
-                read -p "Would you like to install it automatically? (y/n) " -n 1 -r
-                echo
-                if [[ $REPLY =~ ^[Yy]$ ]]; then
-                    install_clojure
-                else
-                    echo "Error: Clojure CLI is required for JVM installation."
-                    echo "Install from: https://clojure.org/guides/install_clojure"
-                    exit 1
-                fi
-            fi
-        else
-            echo "  ✓ Clojure CLI"
         fi
     else
-        # Check Node.js
-        if ! command -v node &> /dev/null; then
-            if [[ "$INSTALL_DEPS" == true ]]; then
-                install_nodejs
-            else
-                echo ""
-                echo "Node.js is not installed."
-                read -p "Would you like to install it automatically? (y/n) " -n 1 -r
-                echo
-                if [[ $REPLY =~ ^[Yy]$ ]]; then
-                    install_nodejs
-                else
-                    echo "Error: Node.js is required for Node.js installation."
-                    echo "Install Node.js 16+ from: https://nodejs.org/"
-                    exit 1
-                fi
-            fi
-        else
-            echo "  ✓ Node.js $(node --version)"
-        fi
+        echo "  ✓ Java $(java -version 2>&1 | head -n 1)"
+    fi
 
-        if ! command -v npm &> /dev/null; then
-            echo "Error: npm is not installed but Node.js is."
-            echo "This is unusual. Please reinstall Node.js from: https://nodejs.org/"
-            exit 1
+    # Check Clojure
+    if ! command -v clojure &> /dev/null; then
+        if [[ "$INSTALL_DEPS" == true ]]; then
+            install_clojure
         else
-            echo "  ✓ npm $(npm --version)"
+            echo ""
+            echo "Clojure CLI is not installed."
+            read -p "Would you like to install it automatically? (y/n) " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                install_clojure
+            else
+                echo "Error: Clojure CLI is required for JVM installation."
+                echo "Install from: https://clojure.org/guides/install_clojure"
+                exit 1
+            fi
         fi
+    else
+        echo "  ✓ Clojure CLI"
     fi
     echo ""
 }
 
 # Build for target
 build() {
-    echo "Building Nex for $TARGET..."
-
-    if [[ "$TARGET" == "jvm" ]]; then
-        echo "  No build required for JVM (using Clojure CLI)"
-    else
-        echo "  Installing npm dependencies..."
-        npm install --silent
-
-        echo "  Compiling ClojureScript..."
-        npx shadow-cljs release node
-
-        if [[ ! -f "target/nex.js" ]]; then
-            echo "Error: ClojureScript build failed. target/nex.js not found."
-            exit 1
-        fi
-
-        echo "  ✓ ClojureScript build complete"
-    fi
+    echo "Building Nex..."
+    echo "  No build required for JVM (using Clojure CLI)"
     echo ""
 }
 
@@ -299,13 +213,9 @@ install_files() {
     echo "  Cleaning previously installed managed files to avoid stale namespace conflicts..."
 
     # Remove previously installed managed content first so deleted/renamed source
-    # files do not linger and shadow newer namespaces (for example .clj vs .cljc).
+    # files do not linger and shadow newer namespaces.
     sudo rm -rf "$LIB_DIR/src" "$LIB_DIR/grammar"
-    sudo rm -f "$LIB_DIR/deps.edn" "$LIB_DIR/package.json" "$LIB_DIR/package-lock.json" \
-      "$LIB_DIR/nex.js" "$LIB_DIR/nex-wrapper.js"
-    if [[ "$TARGET" == "nodejs" ]]; then
-        sudo rm -rf "$LIB_DIR/node_modules"
-    fi
+    sudo rm -f "$LIB_DIR/deps.edn"
 
     # Copy source files
     sudo cp -r src "$LIB_DIR/"
@@ -313,22 +223,6 @@ install_files() {
     sudo cp deps.edn "$LIB_DIR/"
 
     echo "  ✓ Installed source files to $LIB_DIR"
-
-    if [[ "$TARGET" == "nodejs" ]]; then
-        sudo cp target/nex.js "$LIB_DIR/"
-        sudo cp nex-wrapper.js "$LIB_DIR/"
-        sudo cp package.json "$LIB_DIR/"
-        if [[ -f "package-lock.json" ]]; then
-            sudo cp package-lock.json "$LIB_DIR/"
-        fi
-
-        # Copy node_modules if they exist
-        if [[ -d "node_modules" ]]; then
-            sudo cp -r node_modules "$LIB_DIR/"
-        fi
-
-        echo "  ✓ Installed Node.js runtime files"
-    fi
     echo ""
 }
 
@@ -356,21 +250,12 @@ install_shipped_libraries() {
 install_executable() {
     echo "Installing nex executable..."
 
-    if [[ "$TARGET" == "jvm" ]]; then
-        sudo cp bin/nex "$BIN_DIR/nex"
-        sudo chmod +x "$BIN_DIR/nex"
+    sudo cp bin/nex "$BIN_DIR/nex"
+    sudo chmod +x "$BIN_DIR/nex"
 
-        # Update the NEX_HOME in the installed script
-        sudo sed -i.bak "s|NEX_HOME=.*|NEX_HOME=\"$LIB_DIR\"|" "$BIN_DIR/nex"
-        sudo rm -f "$BIN_DIR/nex.bak"
-    else
-        sudo cp bin/nex-node.js "$BIN_DIR/nex"
-        sudo chmod +x "$BIN_DIR/nex"
-
-        # Update the NEX_HOME in the installed script
-        sudo sed -i.bak "s|NEX_HOME=.*|NEX_HOME=\"$LIB_DIR\"|" "$BIN_DIR/nex"
-        sudo rm -f "$BIN_DIR/nex.bak"
-    fi
+    # Update the NEX_HOME in the installed script
+    sudo sed -i.bak "s|NEX_HOME=.*|NEX_HOME=\"$LIB_DIR\"|" "$BIN_DIR/nex"
+    sudo rm -f "$BIN_DIR/nex.bak"
 
     echo "  ✓ Installed nex command to $BIN_DIR/nex"
     echo ""

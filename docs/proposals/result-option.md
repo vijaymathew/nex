@@ -43,7 +43,7 @@ type explicitly.
 These are the substance — the library is a thin layer over them, and each is a
 general correctness/capability improvement independent of Result/Option.
 
-1. **`intern` exports free functions** (`interpreter.cljc`, `eval.clj`,
+1. **`intern` exports free functions** (`interpreter.clj`, `eval.clj`,
    `compiler/jvm/file.clj`). Previously `intern` brought in only classes, so a
    library could not ship helper/combinator *functions*. `resolve-interned*` now
    also collects `:functions`, merged into the program for the typechecker and
@@ -51,14 +51,14 @@ general correctness/capability improvement independent of Result/Option.
    it evaluated the module, so only static analysis and compilation needed it.)
 
 2. **`match` dispatches on generic sealed classes at runtime**
-   (`interpreter.cljc`, `eval-node :match`). A generic instance carries its
+   (`interpreter.clj`, `eval-node :match`). A generic instance carries its
    *specialized* class name (`Ok[Integer,String]`), but a `when` clause names the
    base (`Ok`), so the interpreter matched nothing and raised "No matching clause
    in match". The dispatch now also compares the base name. Without this, no
    generic sum type — including a hand-written `Result` — could be matched under
    the interpreter.
 
-3. **An exhaustive `match` satisfies definite-assignment** (`typechecker.cljc`,
+3. **An exhaustive `match` satisfies definite-assignment** (`typechecker.clj`,
    `result-definitely-assigned-after-stmt`). A `match` with no `else` that
    type-checked is exhaustive over a sealed type, so it has no fall-through path;
    the analysis now treats it as assigning `result` on all paths when every clause

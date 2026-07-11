@@ -4,8 +4,8 @@ The JVM backend is a mature execution target for Nex. It covers most of the lang
 
 This chapter is a translation guide for the current implementation. It is not a wishlist, and it is not a plan. The primary implementation lives in:
 
-- [`src/nex/lower.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/lower.cljc)
-- [`src/nex/ir.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/ir.cljc)
+- [`src/nex/lower.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/lower.clj)
+- [`src/nex/ir.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/ir.clj)
 - [`src/nex/compiler/jvm/emit.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/emit.clj)
 - [`src/nex/compiler/jvm/runtime.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/runtime.clj)
 - [`src/nex/compiler/jvm/repl.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/repl.clj)
@@ -55,9 +55,9 @@ Typechecking still belongs to the shared typechecker, not to the JVM backend. Th
 
 ### Lowering
 
-The lowering pass in [`src/nex/lower.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/lower.cljc) converts AST nodes into:
+The lowering pass in [`src/nex/lower.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/lower.clj) converts AST nodes into:
 
-- expression and statement IR in [`src/nex/ir.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/ir.cljc),
+- expression and statement IR in [`src/nex/ir.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/ir.clj),
 - function specs,
 - class specs,
 - launcher/program units for file compilation.

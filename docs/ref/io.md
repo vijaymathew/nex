@@ -6,11 +6,10 @@ These are library classes, not core built-in classes. Load them with `intern`.
 
 ## Platform Scope
 
-- `io/Path`: JVM interpreter, generated JVM, generated JavaScript/Node
-- `io/Directory`: JVM interpreter, generated JVM, generated JavaScript/Node
-- `io/Text_File`: JVM interpreter, generated JVM, generated JavaScript/Node
-- `io/Binary_File`: JVM interpreter, generated JVM, generated JavaScript/Node
-- Retired browser interpreter path: not supported
+- `io/Path`: JVM interpreter, generated JVM
+- `io/Directory`: JVM interpreter, generated JVM
+- `io/Text_File`: JVM interpreter, generated JVM
+- `io/Binary_File`: JVM interpreter, generated JVM
 
 ## Load
 

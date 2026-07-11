@@ -2,24 +2,21 @@
   (:require [clojure.string :as str]
             [nex.types.runtime :as rt]))
 
-#?(:clj
-   (defn http-response-headers->nex-map
+(defn http-response-headers->nex-map
      [headers]
      (let [m (rt/nex-map)]
        (doseq [[k values] (.map ^java.net.http.HttpHeaders headers)]
          (rt/nex-map-put m k (if (seq values) (str (first values)) "")))
-       m)))
+       m))
 
-#?(:clj
-   (defn make-http-response-object
+(defn make-http-response-object
      [make-object-fn status body headers]
      (make-object-fn "Http_Response"
                      {"status_code" status
                       "body_text" body
-                      "header_map" headers})))
+                      "header_map" headers}))
 
-#?(:clj
-   (defn make-http-server-request-object
+(defn make-http-server-request-object
      [make-object-fn method-name path-value body-text header-map route-params query-map]
      (make-object-fn "Http_Request"
                      {"method_name" method-name
@@ -27,18 +24,16 @@
                       "body_text" body-text
                       "header_map" header-map
                       "route_params" route-params
-                      "query_map" query-map})))
+                      "query_map" query-map}))
 
-#?(:clj
-   (defn make-http-server-default-response-object
+(defn make-http-server-default-response-object
      [make-object-fn]
      (make-object-fn "Http_Server_Response"
                      {"status_code" 404
                       "body_text" "Not Found"
-                      "header_map" (rt/nex-map)})))
+                      "header_map" (rt/nex-map)}))
 
-#?(:clj
-   (defn http-exchange-headers->nex-map
+(defn http-exchange-headers->nex-map
      [headers]
      (let [m (rt/nex-map)]
        (doseq [entry (.entrySet headers)]
@@ -48,10 +43,9 @@
                            (if (seq values)
                              (str (first values))
                              ""))))
-       m)))
+       m))
 
-#?(:clj
-   (defn java-http-request
+(defn java-http-request
      [make-object-fn method url body timeout-ms]
      (let [builder (java.net.http.HttpRequest/newBuilder
                     (java.net.URI/create url))
@@ -69,10 +63,9 @@
        (make-http-response-object make-object-fn
                                   (.statusCode response)
                                   (.body response)
-                                  (http-response-headers->nex-map (.headers response))))))
+                                  (http-response-headers->nex-map (.headers response)))))
 
-#?(:clj
-   (defn make-http-server-handle
+(defn make-http-server-handle
      [port]
      {:nex-builtin-type :HttpServerHandle
       :port (atom port)
@@ -80,25 +73,22 @@
       :routes {"GET" (atom [])
                "POST" (atom [])
                "PUT" (atom [])
-               "DELETE" (atom [])}}))
+               "DELETE" (atom [])}})
 
-#?(:clj
-   (defn url-decode
+(defn url-decode
      [s]
-     (java.net.URLDecoder/decode (str (or s "")) "UTF-8")))
+     (java.net.URLDecoder/decode (str (or s "")) "UTF-8"))
 
-#?(:clj
-   (defn path-segments
+(defn path-segments
      [path]
      (let [trimmed (or path "")]
        (if (or (= trimmed "") (= trimmed "/"))
          []
          (->> (str/split trimmed #"/")
               (remove str/blank?)
-              vec)))))
+              vec))))
 
-#?(:clj
-   (defn parse-query-map
+(defn parse-query-map
      [query]
      (let [m (rt/nex-map)]
        (when (seq query)
@@ -106,10 +96,9 @@
            (when (seq part)
              (let [[k v] (str/split part #"=" 2)]
                (rt/nex-map-put m (url-decode k) (url-decode (or v "")))))))
-       m)))
+       m))
 
-#?(:clj
-   (defn route-match
+(defn route-match
      [pattern path]
      (let [pattern-segments (path-segments pattern)
            path-segments* (path-segments path)
@@ -139,38 +128,33 @@
            (= (first ps) (first xs))
            (recur (rest ps) (rest xs))
 
-           :else nil)))))
+           :else nil))))
 
-#?(:clj
-   (defn find-route
+(defn find-route
      [handle method path]
      (some (fn [{:keys [path-pattern handler]}]
              (when-let [params (route-match path-pattern path)]
                {:handler handler :params params}))
-           @(get (:routes handle) method))))
+           @(get (:routes handle) method)))
 
-#?(:clj
-   (defn http-server-response-status
+(defn http-server-response-status
      [response]
      (let [fields (:fields response)]
        (or (get fields :status_code)
-           200))))
+           200)))
 
-#?(:clj
-   (defn http-server-response-body
+(defn http-server-response-body
      [response]
      (let [fields (:fields response)]
-       (str (or (get fields :body_text) "")))))
+       (str (or (get fields :body_text) ""))))
 
-#?(:clj
-   (defn http-server-response-headers
+(defn http-server-response-headers
      [response]
      (let [fields (:fields response)
            headers (or (get fields :header_map) (rt/nex-map))]
-       headers)))
+       headers))
 
-#?(:clj
-   (defn start-http-server!
+(defn start-http-server!
      [make-object-fn invoke-handler-fn ctx handle]
      (let [server (com.sun.net.httpserver.HttpServer/create (java.net.InetSocketAddress. "127.0.0.1" (int @(:port handle))) 0)
            dispatch
@@ -211,4 +195,4 @@
        (.start server)
        (reset! (:server handle) server)
        (reset! (:port handle) (.getPort (.getAddress server)))
-       @(:port handle))))
+       @(:port handle)))

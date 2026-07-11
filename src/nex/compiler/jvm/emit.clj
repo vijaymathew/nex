@@ -1913,7 +1913,7 @@
       (:jvm-type expr))
 
     ;; Bitwise ops form a 32-bit island: the interpreter masks them to int32
-    ;; (types/runtime.cljc), so the compiler narrows the Nex Integer (:long)
+    ;; (types/runtime.clj), so the compiler narrows the Nex Integer (:long)
     ;; operands to int, computes in int, then widens the result back to :long.
     (= :bit-rotl (:operator expr))
     (do

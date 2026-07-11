@@ -1,7 +1,6 @@
 (ns nex.member-assign-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
-            [nex.generator.javascript :as js]
             [nex.interpreter :as interp]
             [nex.typechecker :as tc]
             [nex.parser :as p]))
@@ -122,23 +121,3 @@ let c: C := create C")]
                                   :target "c"
                                   :method "break_y"
                                   :args []}))))))
-
-(deftest member-assign-generator-test
-  (testing "JavaScript generator emits same-class explicit target field assignment"
-    (let [code "class Point
-feature
-  x: Integer
-  copy_to(other: Point) do
-    other.x := 10
-  end
-end
-
-class Main
-feature
-  run() do
-    let p: Point := create Point
-    let q: Point := create Point
-    p.copy_to(q)
-  end
-end"]
-      (is (str/includes? (js/translate code) "other.x = 10;")))))

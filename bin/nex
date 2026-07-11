@@ -23,17 +23,12 @@ USAGE:
 
 COMMANDS:
     (no command)              Start the Nex REPL
-    compile <target> <file> [output-dir]
-                              Compile a Nex file to target language
+    compile jvm <file> [output-dir]
+                              Compile a Nex file to a standalone JVM JAR
     format <file|dir>         Format Nex source files
     doc <file|dir> [output]   Generate documentation from Nex files
     eval <code>               Evaluate a Nex code snippet
     help                      Show this help message
-
-COMPILE TARGETS:
-    jvm         Compile to a standalone JVM JAR (bytecode backend)
-    javascript  Generate JavaScript source files
-    js          Alias for javascript
 
 EXAMPLES:
     nex                                      # Start REPL
@@ -41,8 +36,6 @@ EXAMPLES:
     nex app.nex --interpret                  # Run on the tree-walking interpreter
     nex compile jvm app.nex                  # Compile to a standalone app.jar in current dir
     nex compile jvm app.nex build/           # Compile to a standalone app.jar in build/
-    nex compile js app.nex                   # Print JavaScript to stdout
-    nex compile js app.nex build/            # Write .js files to build/
     nex format src/                          # Format all files in directory
     nex format MyClass.nex                   # Format single file
     nex doc MyClass.nex MyClass.md           # Generate documentation
@@ -75,18 +68,12 @@ cmd_compile() {
 
     if [[ -z "$target" || -z "$file" ]]; then
         echo "Error: compile requires target and file arguments"
-        echo "Usage: nex compile <target> <file> [output-dir]"
-        echo "Targets: jvm, javascript (or js)"
+        echo "Usage: nex compile jvm <file> [output-dir]"
         exit 1
     fi
 
-    # Normalize target
-    if [[ "$target" == "js" ]]; then
-        target="javascript"
-    fi
-
-    if [[ "$target" != "jvm" && "$target" != "javascript" ]]; then
-        echo "Error: Invalid target '$target'. Must be 'jvm' or 'javascript'"
+    if [[ "$target" != "jvm" ]]; then
+        echo "Error: Invalid target '$target'. The only compile target is 'jvm'."
         exit 1
     fi
 
@@ -98,27 +85,15 @@ cmd_compile() {
     # Use absolute path for file
     file="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
 
-    # File-producing targets default to the user's current directory
-    if [[ "$target" == "jvm" && -z "$output" ]]; then
+    # The JVM target defaults to the user's current directory
+    if [[ -z "$output" ]]; then
         output="$USER_DIR"
     fi
 
-    if [[ -n "$output" ]]; then
-        # Make output path absolute
-        mkdir -p "$output"
-        output="$(cd "$output" && pwd)"
-        if [[ "$target" == "jvm" ]]; then
-            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.compiler.jvm.file "$file" "$output"
-        else
-            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.generator.javascript "$file" "$output"
-        fi
-    else
-        if [[ "$target" == "jvm" ]]; then
-            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.compiler.jvm.file "$file"
-        else
-            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.generator.javascript "$file"
-        fi
-    fi
+    # Make output path absolute
+    mkdir -p "$output"
+    output="$(cd "$output" && pwd)"
+    cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.compiler.jvm.file "$file" "$output"
 }
 
 cmd_format() {

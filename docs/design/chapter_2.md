@@ -8,8 +8,8 @@ The relevant files are:
 
 - [`grammar/nexlang.g4`](https://github.com/vijaymathew/nex/blob/main/grammar/nexlang.g4) — the ANTLR grammar
 - [`src/nex/parser.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/parser.clj) — the thin parser layer
-- [`src/nex/walker.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/walker.cljc) — grammar tree to semantic AST
-- [`src/nex/interpreter.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/interpreter.cljc) — evaluation
+- [`src/nex/walker.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/walker.clj) — grammar tree to semantic AST
+- [`src/nex/interpreter.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/interpreter.clj) — evaluation
 
 If you are reading the code for the first time, treat this chapter as a guide to reading order. The shortest useful path through the implementation is:
 
@@ -57,7 +57,7 @@ It also means the first real implementation boundary is easy to locate. Everythi
 
 ## 2.3 The Walker: From Grammar Trees to Semantic ASTs
 
-The parse tree that ANTLR produces is faithful to the grammar, but grammar-faithful is not the same as easy to evaluate. Grammar trees carry syntactic noise — token boundaries, optional punctuation, production-rule artifacts — that the rest of the implementation should not have to navigate. The role of [`src/nex/walker.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/walker.cljc) is to convert grammar-shaped trees into semantic AST nodes that the interpreter and type-checker can work with directly.
+The parse tree that ANTLR produces is faithful to the grammar, but grammar-faithful is not the same as easy to evaluate. Grammar trees carry syntactic noise — token boundaries, optional punctuation, production-rule artifacts — that the rest of the implementation should not have to navigate. The role of [`src/nex/walker.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/walker.clj) is to convert grammar-shaped trees into semantic AST nodes that the interpreter and type-checker can work with directly.
 
 This conversion produces regular Clojure maps with a `:type` key and a set of named fields:
 
@@ -116,7 +116,7 @@ This structure encodes an important distinction: declarations and executable sta
 
 ## 2.6 The Runtime Context
 
-The interpreter in [`src/nex/interpreter.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/interpreter.cljc) keeps execution state inside a `Context` record. The context holds everything evaluation needs:
+The interpreter in [`src/nex/interpreter.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/interpreter.clj) keeps execution state inside a `Context` record. The context holds everything evaluation needs:
 
 - known classes
 - global bindings
@@ -196,7 +196,7 @@ It is the kind of machinery that is easy to overlook when discussing a language 
 
 ## 2.11 The Interpreter as Semantic Baseline
 
-The interpreter is the semantic baseline for Nex. Even when Nex is compiled to JVM bytecode or JavaScript, the interpreter remains the authoritative statement of what the language means. The generators are correct when they produce behaviour that matches the interpreter. When they diverge, the interpreter wins.
+The interpreter is the semantic baseline for Nex. Even when Nex is compiled to JVM bytecode, the interpreter remains the authoritative statement of what the language means. The compiler is correct when it produces behaviour that matches the interpreter. When they diverge, the interpreter wins.
 
 This has a practical consequence for contributors: if you are unsure what a feature should do, make it work correctly in the interpreter first. The generators should follow the interpreter, not define their own semantics independently. A generator that is easier to write by taking a shortcut from the intended semantics is a generator that is wrong.
 

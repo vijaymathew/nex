@@ -22,7 +22,7 @@ variant tag, which is exactly what the sealed-class hierarchy already provides.
 It is not a C-style untyped memory overlay.)
 
 This keeps the change tightly scoped to the two front-end layers
-(`grammar/nexlang.g4` and `src/nex/walker.cljc`) and leaves the "open edge" — the
+(`grammar/nexlang.g4` and `src/nex/walker.clj`) and leaves the "open edge" — the
 explicit `sealed deferred class` form — fully available for anything the concise
 form deliberately does not cover.
 
@@ -172,12 +172,12 @@ remains reserved only as the leading token of a top-level declaration and as a
 bare variable name (a variable literally named `union` is disallowed — an
 acceptable, documented trade-off).
 
-### 2. Walker — `src/nex/walker.cljc`
+### 2. Walker — `src/nex/walker.clj`
 
 Add a `:unionDecl` handler that returns a single node carrying the generated
 classes, mirroring how anonymous functions already emit a `:class-def`
-(`walker.cljc:544`) and how free functions contribute `function-classes`
-(`walker.cljc:403`):
+(`walker.clj:544`) and how free functions contribute `function-classes`
+(`walker.clj:403`):
 
 ```clojure
 :unionDecl
@@ -202,10 +202,10 @@ classes, mirroring how anonymous functions already emit a `:class-def`
 
 `union-variant->class` builds an ordinary `:class` node whose `:body` is exactly
 a `[{:type :feature-section …} {:type :constructors …}]` pair — the same shapes
-produced at `walker.cljc:549` and `walker.cljc:612`. A payload-free variant emits
+produced at `walker.clj:549` and `walker.clj:612`. A payload-free variant emits
 an empty feature section and a nullary constructor.
 
-Then, in the `:program` handler (`walker.cljc:373`), flatten `:union` nodes into
+Then, in the `:program` handler (`walker.clj:373`), flatten `:union` nodes into
 `all-classes` alongside `classes` and `function-classes`:
 
 ```clojure

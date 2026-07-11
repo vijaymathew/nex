@@ -16,8 +16,6 @@ intern data/Json
 |---|---|
 | JVM REPL / interpreter | Yes |
 | Generated JVM code | Yes |
-| Generated JavaScript / Node | Yes |
-| Retired browser interpreter path | No |
 
 ### Construction
 

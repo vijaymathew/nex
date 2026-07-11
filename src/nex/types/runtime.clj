@@ -3,92 +3,74 @@
 
 (declare nex-set? nex-integer? ->nex-integer nex-int->number nex-hash-code)
 
-(defn nex-array [] #?(:clj (java.util.ArrayList.) :cljs #js []))
-(defn nex-array-from [coll] #?(:clj (java.util.ArrayList. (vec coll)) :cljs (js/Array.from (to-array coll))))
-(defn nex-array? [v] #?(:clj (instance? java.util.ArrayList v) :cljs (array? v)))
+(defn nex-array [] (java.util.ArrayList.))
+(defn nex-array-from [coll] (java.util.ArrayList. (vec coll)))
+(defn nex-array? [v] (instance? java.util.ArrayList v))
 ;; Nex Integer indices are BigInt on JS; convert to a plain number for the host
 ;; collection. nex-int->number is identity on the JVM (a long index works as-is).
-(defn nex-array-get [arr idx] (let [idx (nex-int->number idx)] #?(:clj (.get arr idx) :cljs (aget arr idx))))
+(defn nex-array-get [arr idx] (let [idx (nex-int->number idx)] (.get arr idx)))
 (defn nex-array-add [arr val]
-  #?(:clj (do
+  (do
             (.add arr val)
-            nil)
-     :cljs (do
-             (.push arr val)
-             nil)))
+            nil))
 (defn nex-array-add-at [arr idx val]
   (let [idx (nex-int->number idx)]
-    #?(:clj (do
+    (do
               (.add arr idx val)
-              nil)
-       :cljs (do
-               (.splice arr idx 0 val)
-               nil))))
+              nil)))
 (defn nex-array-set [arr idx val]
   (let [idx (nex-int->number idx)]
-    #?(:clj (do
+    (do
               (.set arr idx val)
-              nil)
-       :cljs (do
-               (aset arr idx val)
-               nil))))
-(defn nex-array-size [arr] #?(:clj (.size arr) :cljs (.-length arr)))
-(defn nex-array-empty? [arr] #?(:clj (.isEmpty arr) :cljs (zero? (.-length arr))))
-(defn nex-array-contains [arr elem] #?(:clj (.contains arr elem) :cljs (.includes arr elem)))
-(defn nex-array-index-of [arr elem] #?(:clj (.indexOf arr elem) :cljs (.indexOf arr elem)))
+              nil)))
+(defn nex-array-size [arr] (.size arr))
+(defn nex-array-empty? [arr] (.isEmpty arr))
+(defn nex-array-contains [arr elem] (.contains arr elem))
+(defn nex-array-index-of [arr elem] (.indexOf arr elem))
 (defn nex-array-remove [arr idx]
   (let [idx (nex-int->number idx)]
-    #?(:clj (do
+    (do
               (.remove ^java.util.ArrayList arr ^int (int idx))
-              nil)
-       :cljs (do
-               (.splice arr idx 1)
-               nil))))
-(defn nex-array-reverse [arr] #?(:clj (java.util.ArrayList. (.reversed arr)) :cljs (js/Array.from (.reverse (.slice arr)))))
-(defn nex-array-sort [arr] #?(:clj (.sort arr nil) :cljs (.sort arr)))
+              nil)))
+(defn nex-array-reverse [arr] (java.util.ArrayList. (.reversed arr)))
+(defn nex-array-sort [arr] (.sort arr nil))
 (defn nex-array-slice [arr start end]
   (let [start (nex-int->number start)
         end (nex-int->number end)
-        len #?(:clj (.size arr) :cljs (.-length arr))
+        len (.size arr)
         resolve (fn [i] (-> (if (< i 0) (+ len i) i) (max 0) (min len)))
         s (resolve start)
         e (resolve end)]
-    #?(:clj (java.util.ArrayList. (.subList arr s e))
-       :cljs (.slice arr s e))))
+    (java.util.ArrayList. (.subList arr s e))))
 
 (defn nex-array-take [arr n]
   (let [n (nex-int->number n)
-        len #?(:clj (.size arr) :cljs (.-length arr))
+        len (.size arr)
         end (-> n (max 0) (min len))]
-    #?(:clj (java.util.ArrayList. (.subList arr 0 end))
-       :cljs (.slice arr 0 end))))
+    (java.util.ArrayList. (.subList arr 0 end))))
 
 (defn nex-array-drop [arr n]
   (let [n (nex-int->number n)
-        len #?(:clj (.size arr) :cljs (.-length arr))
+        len (.size arr)
         start (-> n (max 0) (min len))]
-    #?(:clj (java.util.ArrayList. (.subList arr start len))
-       :cljs (.slice arr start))))
+    (java.util.ArrayList. (.subList arr start len))))
 
 (defn nex-array-take-last [arr n]
   (let [n (nex-int->number n)
-        len #?(:clj (.size arr) :cljs (.-length arr))
+        len (.size arr)
         start (-> len (- (max 0 n)) (max 0))]
-    #?(:clj (java.util.ArrayList. (.subList arr start len))
-       :cljs (.slice arr start))))
+    (java.util.ArrayList. (.subList arr start len))))
 
 (defn nex-array-drop-last [arr n]
   (let [n (nex-int->number n)
-        len #?(:clj (.size arr) :cljs (.-length arr))
+        len (.size arr)
         end (-> len (- (max 0 n)) (max 0))]
-    #?(:clj (java.util.ArrayList. (.subList arr 0 end))
-       :cljs (.slice arr 0 end))))
+    (java.util.ArrayList. (.subList arr 0 end))))
 (defn nex-array-concat [arr other]
-  #?(:clj (doto (java.util.ArrayList. arr)
-            (.addAll other))
-     :cljs (.concat arr other)))
+  (doto (java.util.ArrayList. arr)
+            (.addAll other)))
 (defn nex-array-str [formatter arr]
-  (str "[" (str/join ", " (map formatter #?(:clj arr :cljs (array-seq arr)))) "]"))
+  (str "[" (str/join ", " (map formatter arr)) "]"))
 
 ;; ---------------------------------------------------------------------------
 ;; Value semantics for Set/Map: equality and hashing are injected so the
@@ -129,7 +111,7 @@
 (defn- portable-map? [v] (and (map? v) (= (:nex-builtin-type v) :NexMap)))
 (defn nex-map? [v]
   (or (portable-map? v)
-      #?(:clj (instance? java.util.HashMap v) :cljs (instance? js/Map v))))
+      (instance? java.util.HashMap v)))
 
 (defn- map-find-pair [state k]
   (some #(when (value-equals? (first %) k) %)
@@ -140,18 +122,17 @@
   [m]
   (if (portable-map? m)
     (let [s @(:state m)] (map #(map-find-pair s %) (:keys s)))
-    #?(:clj (map (fn [^java.util.Map$Entry e] [(.getKey e) (.getValue e)])
-                 (.entrySet ^java.util.Map m))
-       :cljs (map vec (es6-iterator-seq (.entries m))))))
+    (map (fn [^java.util.Map$Entry e] [(.getKey e) (.getValue e)])
+                 (.entrySet ^java.util.Map m))))
 
 (defn nex-map-get [m k]
   (if (portable-map? m)
     (when-let [pair (map-find-pair @(:state m) k)] (second pair))
-    #?(:clj (.get ^java.util.Map m k) :cljs (.get m k))))
+    (.get ^java.util.Map m k)))
 (defn nex-map-contains-key [m k]
   (if (portable-map? m)
     (boolean (map-find-pair @(:state m) k))
-    #?(:clj (.containsKey ^java.util.Map m k) :cljs (.has m k))))
+    (.containsKey ^java.util.Map m k)))
 
 (defn nex-map-put [m k v]
   (if (portable-map? m)
@@ -165,7 +146,7 @@
                  (-> s
                      (update :keys conj k)
                      (assoc-in [:index h] (conj bucket [k v])))))))
-    #?(:clj (.put ^java.util.Map m k v) :cljs (.set m k v)))
+    (.put ^java.util.Map m k v))
   nil)
 
 (defn nex-map-remove [m k]
@@ -177,17 +158,17 @@
                (-> s
                    (assoc :keys (filterv #(not (value-equals? % k)) keys))
                    (assoc :index (if (seq new-bucket) (assoc index h new-bucket) (dissoc index h)))))))
-    #?(:clj (.remove ^java.util.Map m k) :cljs (.delete m k)))
+    (.remove ^java.util.Map m k))
   nil)
 
 (defn nex-map-size [m]
   (if (portable-map? m)
     (count (:keys @(:state m)))
-    #?(:clj (.size ^java.util.Map m) :cljs (.-size m))))
+    (.size ^java.util.Map m)))
 (defn nex-map-empty? [m]
   (if (portable-map? m)
     (empty? (:keys @(:state m)))
-    #?(:clj (.isEmpty ^java.util.Map m) :cljs (zero? (.-size m)))))
+    (.isEmpty ^java.util.Map m)))
 (defn nex-map-keys [m] (nex-array-from (map first (nex-map-entries m))))
 (defn nex-map-values [m] (nex-array-from (map second (nex-map-entries m))))
 (defn nex-map-from [pairs]
@@ -197,8 +178,7 @@
 (defn nex-host-map-from
   "Build a host-backed map (the representation the compiled backend uses)."
   [pairs]
-  #?(:clj (let [m (java.util.HashMap.)] (doseq [[k v] pairs] (.put m k v)) m)
-     :cljs (let [m (js/Map.)] (doseq [[k v] pairs] (.set m k v)) m)))
+  (let [m (java.util.HashMap.)] (doseq [[k v] pairs] (.put m k v)) m))
 (defn nex-map-str [formatter m]
   (str "{"
        (str/join ", " (map (fn [[k v]] (str (formatter k) ": " (formatter v)))
@@ -225,7 +205,7 @@
 (defn- portable-set? [v] (and (map? v) (= (:nex-builtin-type v) :NexSet)))
 (defn nex-set? [v]
   (or (portable-set? v)
-      #?(:clj (instance? java.util.LinkedHashSet v) :cljs (instance? js/Set v))))
+      (instance? java.util.LinkedHashSet v)))
 
 (defn- set-bucket-member? [index v]
   (boolean (some #(value-equals? % v) (get index (value-hash v)))))
@@ -242,14 +222,13 @@
 (defn nex-host-set-from
   "Build a host-backed set (the representation the compiled backend uses)."
   [coll]
-  #?(:clj (let [s (java.util.LinkedHashSet.)] (doseq [e coll] (.add s e)) s)
-     :cljs (let [s (js/Set.)] (doseq [e coll] (.add s e)) s)))
+  (let [s (java.util.LinkedHashSet.)] (doseq [e coll] (.add s e)) s))
 (defn nex-set-seq
   "The set's elements as a seq, in insertion order."
   [s]
   (if (portable-set? s)
     (:items s)
-    #?(:clj (seq s) :cljs (es6-iterator-seq (.values s)))))
+    (seq s)))
 (defn nex-set-contains [s v]
   (if (portable-set? s)
     (set-bucket-member? (:index s) v)
@@ -257,11 +236,11 @@
 (defn nex-set-size [s]
   (if (portable-set? s)
     (count (:items s))
-    #?(:clj (.size ^java.util.Set s) :cljs (.-size s))))
+    (.size ^java.util.Set s)))
 (defn nex-set-empty? [s]
   (if (portable-set? s)
     (empty? (:items s))
-    #?(:clj (.isEmpty ^java.util.Set s) :cljs (zero? (.-size s)))))
+    (.isEmpty ^java.util.Set s)))
 (defn nex-set-union [a b]
   (nex-set-from (concat (:items a) (:items b))))
 (defn nex-set-difference [a b]
@@ -283,12 +262,10 @@
 (defn- int32 [n]
   ;; Truncate, never range-check: values outside int32 keep their low 32 bits
   ;; (`(int n)` would raise), matching the compiled backend's l2i truncation.
-  #?(:clj (unchecked-int (long n))
-     :cljs (bit-or (js/Number n) 0)))
+  (unchecked-int (long n)))
 
 (defn- bit-index [n]
-  #?(:clj (bit-and (unchecked-int (long n)) 31)
-     :cljs (bit-and (js/Number n) 31)))
+  (bit-and (unchecked-int (long n)) 31))
 
 (defn- i32->int [v] (->nex-integer v))
 
@@ -300,25 +277,16 @@
 
 (defn nex-bitwise-logical-right-shift [n shift]
   (i32->int
-    #?(:clj (long (bit-shift-right (bit-and 0xFFFFFFFF (long (int32 n)))
-                                   (bit-index shift)))
-       :cljs (js* "(~{} >>> ~{})" (int32 n) (bit-index shift)))))
+    (long (bit-shift-right (bit-and 0xFFFFFFFF (long (int32 n)))
+                                   (bit-index shift)))))
 
 (defn nex-bitwise-rotate-left [n shift]
   (i32->int
-    #?(:clj (Integer/rotateLeft (int32 n) (bit-index shift))
-       :cljs (let [x (int32 n)
-                   s (bit-index shift)]
-               (int32 (bit-or (bit-shift-left x s)
-                              (js* "(~{} >>> ~{})" x (- 32 s))))))))
+    (Integer/rotateLeft (int32 n) (bit-index shift))))
 
 (defn nex-bitwise-rotate-right [n shift]
   (i32->int
-    #?(:clj (Integer/rotateRight (int32 n) (bit-index shift))
-       :cljs (let [x (int32 n)
-                   s (bit-index shift)]
-               (int32 (bit-or (js* "(~{} >>> ~{})" x s)
-                              (bit-shift-left x (- 32 s))))))))
+    (Integer/rotateRight (int32 n) (bit-index shift))))
 
 (defn nex-bitwise-and [n other]
   (i32->int (int32 (bit-and (int32 n) (int32 other)))))
@@ -344,7 +312,7 @@
 (defn nex-abs [n]
   (if (neg? n) (- n) n))
 
-(defn nex-round [n] #?(:clj (Math/round (double n)) :cljs (js/Math.round n)))
+(defn nex-round [n] (Math/round (double n)))
 
 ;; ---------------------------------------------------------------------------
 ;; Integer (Int64) representation
@@ -363,20 +331,18 @@
 (defn nex-integer?
   "True when v is a Nex Integer value in this host's representation."
   [v]
-  #?(:clj (integer? v)
-     :cljs (js* "typeof ~{} === 'bigint'" v)))
+  (integer? v))
 
 (defn ->nex-integer
   "Coerce a number, numeric string, or Integer to the host Integer representation."
   [v]
-  #?(:clj (if (string? v) (Long/parseLong v) (long v))
-     :cljs (js/BigInt v)))
+  (if (string? v) (Long/parseLong v) (long v)))
 
 (defn nex-int->number
   "Convert a Nex Integer to a plain host number — for JS array indices, char
    codepoints, and other positions that require a 32/53-bit number."
   [v]
-  #?(:clj v :cljs (js/Number v)))
+  v)
 
 (defn nex-hash-code
   "A host-stable hash code for a Nex scalar value, used to bucket Set elements.
@@ -384,42 +350,30 @@
    hashed via their (canonical) string form. Hashes need only be consistent within
    one host, not identical across hosts."
   [v]
-  #?(:clj (hash v)
-     :cljs (if (nex-integer? v) (hash (str v)) (hash v))))
+  (hash v))
 
 (defn ->nex-real
   "Coerce a Nex numeric (Integer or Real) to the host Real (floating) value."
   [v]
-  #?(:clj (double v)
-     :cljs (if (nex-integer? v) (js/Number v) v)))
+  (double v))
 
 (defn nex-numeric?
   "True for any Nex number — Integer or Real — in this host's representation."
   [v]
-  #?(:clj (number? v)
-     :cljs (or (number? v) (nex-integer? v))))
-
-#?(:cljs
-   (defn- check-int64!
-     "Raise if v has escaped the signed 64-bit range (BigInt arithmetic is
-      unbounded); otherwise return v. Mirrors the JVM's checked long arithmetic."
-     [v]
-     (if (js* "~{} === ~{}" v (js/BigInt.asIntN 64 v))
-       v
-       (throw (ex-info "integer overflow" {:value (str v)})))))
+  (number? v))
 
 ;; cljs `zero?` tests `=== 0` against a *number*, so it is always false for a
 ;; BigInt; compare against a BigInt zero instead. (`<`/`>`/`neg?`/`pos?` are fine —
 ;; JS allows BigInt/number ordering — only `zero?`, `even?`, `odd?` need help.)
-(defn nex-int-zero? [a] #?(:clj (zero? a) :cljs (js* "~{} === 0n" a)))
+(defn nex-int-zero? [a] (zero? a))
 
-(defn nex-int-add [a b] #?(:clj (+ a b)    :cljs (check-int64! (+ a b))))
-(defn nex-int-sub [a b] #?(:clj (- a b)    :cljs (check-int64! (- a b))))
-(defn nex-int-mul [a b] #?(:clj (* a b)    :cljs (check-int64! (* a b))))
-(defn nex-int-neg [a]   #?(:clj (- a)      :cljs (check-int64! (- a))))
+(defn nex-int-add [a b] (+ a b))
+(defn nex-int-sub [a b] (- a b))
+(defn nex-int-mul [a b] (* a b))
+(defn nex-int-neg [a]   (- a))
 ;; Truncating integer division (toward zero), like quot / BigInt `/`.
 ;; Raw — no zero or overflow check; nex-int-div is the checked entry point.
-(defn nex-int-quot [a b] #?(:clj (quot a b) :cljs (js* "~{} / ~{}" a b)))
+(defn nex-int-quot [a b] (quot a b))
 
 (defn nex-int-div
   "Checked Integer division: raises on a zero divisor and on the one
@@ -428,10 +382,9 @@
   [a b]
   (when (nex-int-zero? b)
     (throw (ex-info "Division by zero" {:left a :right b})))
-  #?(:clj (if (and (= a Long/MIN_VALUE) (= b -1))
+  (if (and (= a Long/MIN_VALUE) (= b -1))
             (throw (ArithmeticException. "long overflow"))
-            (quot a b))
-     :cljs (check-int64! (js* "~{} / ~{}" a b))))
+            (quot a b)))
 
 ;; Truncated remainder (sign of the dividend), like Java % / BigInt %.
 ;; Nex `%` is truncated in every backend — the JVM's LREM/DREM and JS's `%`
@@ -441,18 +394,16 @@
   [a b]
   (when (nex-int-zero? b)
     (throw (ex-info "Division by zero" {:left a :right b})))
-  #?(:clj (rem a b)
-     :cljs (js* "~{} % ~{}" a b)))
+  (rem a b))
 
 (defn nex-real-rem
   "Truncated remainder on Reals (IEEE `%`, sign of the dividend), matching the
    JVM's DREM and JS's `%`; x % 0.0 is NaN."
   [a b]
-  #?(:clj (let [d (double b)]
-            (if (zero? d) Double/NaN (rem (double a) d)))
-     :cljs (js-mod a b)))
+  (let [d (double b)]
+            (if (zero? d) Double/NaN (rem (double a) d))))
 (defn nex-int-odd? [a]
-  #?(:clj (odd? a) :cljs (js* "(~{} & 1n) === 1n" a)))
+  (odd? a))
 
 (defn nex-numeric-compare
   "Three-way compare of two Nex numbers. Integers compare in their own
@@ -511,16 +462,15 @@
           acc'
           (recur acc' (nex-int-mul b b) e'))))))
 
-(defn nex-console-print [msg] #?(:clj (print msg) :cljs (.write js/process.stdout (str msg))))
-(defn nex-console-println [msg] #?(:clj (println msg) :cljs (js/console.log msg)))
-(defn nex-console-error [msg] #?(:clj (binding [*out* *err*] (println msg)) :cljs (js/console.error msg)))
-(defn nex-console-newline [] #?(:clj (println) :cljs (js/console.log "")))
-(defn nex-console-flush [] #?(:clj (flush) :cljs (.write js/process.stdout "")))
+(defn nex-console-print [msg] (print msg))
+(defn nex-console-println [msg] (println msg))
+(defn nex-console-error [msg] (binding [*out* *err*] (println msg)))
+(defn nex-console-newline [] (println))
+(defn nex-console-flush [] (flush))
 (defn nex-console-read-line []
-  #?(:clj (do
+  (do
             (flush)
-            (read-line))
-     :cljs (throw (ex-info "read-line not supported in ClojureScript" {}))))
+            (read-line)))
 
 (defn nex-parse-integer64-string [s]
   (let [trimmed (str/trim s)
@@ -534,34 +484,27 @@
                          :else [10 normalized])
         ;; cljs parses via js/BigInt (which understands 0x/0o/0b prefixes) so
         ;; values above 2^53 are exact — js/parseInt would round through a double.
-        parsed #?(:clj (->nex-integer (Long/parseLong digits radix))
-                  :cljs (js/BigInt normalized))]
+        parsed (->nex-integer (Long/parseLong digits radix))]
     (if negative? (- parsed) parsed)))
 
 ;; Integer is 64-bit, so to_integer no longer truncates to 32 bits.
 (defn nex-parse-integer [s] (nex-parse-integer64-string s))
-(defn nex-parse-real [s] #?(:clj (Double/parseDouble (.trim s)) :cljs (js/parseFloat s)))
+(defn nex-parse-real [s] (Double/parseDouble (.trim s)))
 
-(defn nex-file-read [path] #?(:clj (slurp path) :cljs (.toString (.readFileSync (js/require "fs") path "utf8"))))
-(defn nex-file-write [path content] #?(:clj (spit path content) :cljs (.writeFileSync (js/require "fs") path content "utf8")))
-(defn nex-file-append [path content] #?(:clj (spit path content :append true) :cljs (.appendFileSync (js/require "fs") path content "utf8")))
+(defn nex-file-read [path] (slurp path))
+(defn nex-file-write [path content] (spit path content))
+(defn nex-file-append [path content] (spit path content :append true))
 (defn path-exists? [path]
-  #?(:clj (.exists (java.io.File. path))
-     :cljs (.existsSync (js/require "fs") path)))
+  (.exists (java.io.File. path)))
 
 (defn path-is-file? [path]
-  #?(:clj (.isFile (java.io.File. path))
-     :cljs (let [fs (js/require "fs")]
-             (and (.existsSync fs path) (.isFile (.statSync fs path))))))
+  (.isFile (java.io.File. path)))
 
 (defn path-is-directory? [path]
-  #?(:clj (.isDirectory (java.io.File. path))
-     :cljs (let [fs (js/require "fs")]
-             (and (.existsSync fs path) (.isDirectory (.statSync fs path))))))
+  (.isDirectory (java.io.File. path)))
 
 (defn path-name [path]
-  #?(:clj (.getName (java.io.File. path))
-     :cljs (.basename (js/require "path") path)))
+  (.getName (java.io.File. path)))
 
 (defn path-extension [path]
   (let [name (path-name path)
@@ -578,75 +521,49 @@
       (subs name 0 dot-index))))
 
 (defn path-absolute [path]
-  #?(:clj (.getAbsolutePath (java.io.File. path))
-     :cljs (.resolve (js/require "path") path)))
+  (.getAbsolutePath (java.io.File. path)))
 
 (defn path-normalize [path]
-  #?(:clj (.normalize (.toPath (java.io.File. path)))
-     :cljs (.normalize (js/require "path") path)))
+  (.normalize (.toPath (java.io.File. path))))
 
 (defn path-size [path]
-  #?(:clj (.length (java.io.File. path))
-     :cljs (let [fs (js/require "fs")]
-             (if (.existsSync fs path)
-               (.size (.statSync fs path))
-               0))))
+  (.length (java.io.File. path)))
 
 (defn path-modified-time [path]
-  #?(:clj (.lastModified (java.io.File. path))
-     :cljs (let [fs (js/require "fs")]
-             (if (.existsSync fs path)
-               (.mtimeMs (.statSync fs path))
-               0))))
+  (.lastModified (java.io.File. path)))
 
 (defn path-parent [path]
-  #?(:clj (.getParent (java.io.File. path))
-     :cljs (let [p (.dirname (js/require "path") path)]
-             (if (= p path) nil p))))
+  (.getParent (java.io.File. path)))
 
 (defn path-child [path child-name]
-  #?(:clj (.getPath (java.io.File. ^String path ^String child-name))
-     :cljs (.join (js/require "path") path child-name)))
+  (.getPath (java.io.File. ^String path ^String child-name)))
 
 (defn path-create-file [path]
-  #?(:clj (.createNewFile (java.io.File. path))
-     :cljs (let [fs (js/require "fs")]
-             (when-not (.existsSync fs path)
-               (.writeFileSync fs path "" "utf8"))))
+  (.createNewFile (java.io.File. path))
   nil)
 
 (defn path-create-directory [path]
-  #?(:clj (.mkdir (java.io.File. path))
-     :cljs (.mkdirSync (js/require "fs") path #js {:recursive false}))
+  (.mkdir (java.io.File. path))
   nil)
 
 (defn path-create-directories [path]
-  #?(:clj (.mkdirs (java.io.File. path))
-     :cljs (.mkdirSync (js/require "fs") path #js {:recursive true}))
+  (.mkdirs (java.io.File. path))
   nil)
 
 (defn path-delete [path]
-  #?(:clj (let [f (java.io.File. path)]
+  (let [f (java.io.File. path)]
             (when (.exists f)
               (if (.isDirectory f)
                 (throw (ex-info "path_delete does not remove directories" {:path path}))
                 (.delete f))))
-     :cljs (let [fs (js/require "fs")]
-             (when (.existsSync fs path)
-               (let [stat (.statSync fs path)]
-                 (if (.isDirectory stat)
-                   (throw (ex-info "path_delete does not remove directories" {:path path}))
-                   (.unlinkSync fs path))))))
   nil)
 
-#?(:clj
-   (defn- delete-tree-clj! [^java.io.File f]
+(defn- delete-tree-clj! [^java.io.File f]
      (when (.exists f)
        (doseq [child (reverse (clojure.core/file-seq f))]
-         (.delete ^java.io.File child)))))
+         (.delete ^java.io.File child))))
 
-#?(:clj
-   (defn- copy-tree-clj! [^java.io.File source ^java.io.File target]
+(defn- copy-tree-clj! [^java.io.File source ^java.io.File target]
      (if (.isDirectory source)
        (do
          (.mkdirs target)
@@ -658,40 +575,20 @@
          (java.nio.file.Files/copy (.toPath source)
                                    (.toPath target)
                                    (into-array java.nio.file.CopyOption
-                                               [java.nio.file.StandardCopyOption/REPLACE_EXISTING]))))))
+                                               [java.nio.file.StandardCopyOption/REPLACE_EXISTING])))))
 
 (defn path-delete-tree [path]
-  #?(:clj (delete-tree-clj! (java.io.File. path))
-     :cljs (let [fs (js/require "fs")]
-             (when (.existsSync fs path)
-               (.rmSync fs path #js {:recursive true :force true}))))
+  (delete-tree-clj! (java.io.File. path))
   nil)
 
 (defn path-copy [source-path target-path]
-  #?(:clj (copy-tree-clj! (java.io.File. source-path) (java.io.File. target-path))
-     :cljs (let [fs (js/require "fs")
-                 pathmod (js/require "path")
-                 copy! (fn copy! [src dst]
-                         (let [stat (.statSync fs src)]
-                           (if (.isDirectory stat)
-                             (do
-                               (.mkdirSync fs dst #js {:recursive true})
-                               (doseq [name (js->clj (.readdirSync fs src))]
-                                 (copy! (.join pathmod src name) (.join pathmod dst name))))
-                             (do
-                               (.mkdirSync fs (.dirname pathmod dst) #js {:recursive true})
-                               (.copyFileSync fs src dst)))))]
-             (copy! source-path target-path)))
+  (copy-tree-clj! (java.io.File. source-path) (java.io.File. target-path))
   nil)
 
 (defn path-move [source-path target-path]
-  #?(:clj (do
+  (do
             (path-copy source-path target-path)
             (path-delete-tree source-path))
-     :cljs (let [fs (js/require "fs")
-                 pathmod (js/require "path")]
-             (.mkdirSync fs (.dirname pathmod target-path) #js {:recursive true})
-             (.renameSync fs source-path target-path)))
   nil)
 
 (defn path-read-text [path]
@@ -706,190 +603,87 @@
   nil)
 
 (defn path-list [path]
-  #?(:clj (let [dir (java.io.File. path)
+  (let [dir (java.io.File. path)
                 files (.listFiles dir)]
-            (nex-array-from (mapv #(.getPath ^java.io.File %) (or files []))))
-     :cljs (let [fs (js/require "fs")
-                 pathmod (js/require "path")]
-             (nex-array-from
-              (mapv #(.join pathmod path %)
-                    (js->clj (.readdirSync fs path)))))))
+            (nex-array-from (mapv #(.getPath ^java.io.File %) (or files [])))))
 
-#?(:clj
-   (defn text-file-open-read [path]
+(defn text-file-open-read [path]
      {:nex-builtin-type :TextFileHandle
       :mode :read
       :reader (java.io.BufferedReader. (java.io.InputStreamReader. (java.io.FileInputStream. path) java.nio.charset.StandardCharsets/UTF_8))
-      :writer nil}))
+      :writer nil})
 
-#?(:cljs
-   (defn text-file-open-read [path]
-     (let [content (.toString (.readFileSync (js/require "fs") path "utf8"))
-           lines (vec (str/split content #"\r?\n"))]
-       {:nex-builtin-type :TextFileHandle
-        :mode :read
-        :lines (atom lines)
-        :index (atom 0)
-        :writer nil})))
-
-#?(:clj
-   (defn text-file-open-write [path]
+(defn text-file-open-write [path]
      {:nex-builtin-type :TextFileHandle
       :mode :write
       :reader nil
-      :writer (java.io.BufferedWriter. (java.io.OutputStreamWriter. (java.io.FileOutputStream. path false) java.nio.charset.StandardCharsets/UTF_8))}))
+      :writer (java.io.BufferedWriter. (java.io.OutputStreamWriter. (java.io.FileOutputStream. path false) java.nio.charset.StandardCharsets/UTF_8))})
 
-#?(:cljs
-   (defn text-file-open-write [path]
-     (do
-       (.writeFileSync (js/require "fs") path "" "utf8")
-       {:nex-builtin-type :TextFileHandle
-        :mode :write
-        :path path})))
-
-#?(:clj
-   (defn text-file-open-append [path]
+(defn text-file-open-append [path]
      {:nex-builtin-type :TextFileHandle
       :mode :append
       :reader nil
-      :writer (java.io.BufferedWriter. (java.io.OutputStreamWriter. (java.io.FileOutputStream. path true) java.nio.charset.StandardCharsets/UTF_8))}))
-
-#?(:cljs
-   (defn text-file-open-append [path]
-     {:nex-builtin-type :TextFileHandle
-      :mode :append
-      :path path}))
+      :writer (java.io.BufferedWriter. (java.io.OutputStreamWriter. (java.io.FileOutputStream. path true) java.nio.charset.StandardCharsets/UTF_8))})
 
 (defn text-file-read-line [handle]
-  #?(:clj (.readLine ^java.io.BufferedReader (:reader handle))
-     :cljs (let [idx @(:index handle)
-                 lines @(:lines handle)]
-             (when (< idx (count lines))
-               (let [line (nth lines idx)]
-                 (swap! (:index handle) inc)
-                 line)))))
+  (.readLine ^java.io.BufferedReader (:reader handle)))
 
 (defn text-file-write [handle text]
-  #?(:clj (do (.write ^java.io.BufferedWriter (:writer handle) (str text))
+  (do (.write ^java.io.BufferedWriter (:writer handle) (str text))
               (.flush ^java.io.BufferedWriter (:writer handle)))
-     :cljs (let [fs (js/require "fs")
-                 path (:path handle)]
-             (if (= (:mode handle) :write)
-               (.appendFileSync fs path (str text) "utf8")
-               (.appendFileSync fs path (str text) "utf8"))))
   nil)
 
 (defn text-file-close [handle]
-  #?(:clj (do
+  (do
             (when-let [r (:reader handle)] (.close ^java.io.BufferedReader r))
             (when-let [w (:writer handle)] (.close ^java.io.BufferedWriter w)))
-     :cljs nil)
   nil)
 
-#?(:clj
-   (defn- bytes->int-array [^bytes bs]
-     (nex-array-from (mapv #(bit-and (int %) 0xFF) bs))))
+(defn- bytes->int-array [^bytes bs]
+     (nex-array-from (mapv #(bit-and (int %) 0xFF) bs)))
 
-#?(:cljs
-   (defn- bytes->int-array [buf]
-     (nex-array-from (mapv identity (js->clj (js/Array.from buf))))))
-
-#?(:clj
-   (defn- int-array->bytes [values]
+(defn- int-array->bytes [values]
      (byte-array (map (fn [v]
                         (when (or (neg? v) (> v 255))
                           (throw (ex-info "Binary byte values must be in range 0..255" {:value v})))
                         (byte v))
-                      values))))
+                      values)))
 
-#?(:cljs
-   (defn- int-array->bytes [values]
-     (js/Buffer.from
-      (to-array
-       (map (fn [v]
-              (when (or (neg? v) (> v 255))
-                (throw (ex-info "Binary byte values must be in range 0..255" {:value v})))
-              v)
-            values)))))
-
-#?(:cljs
-   (defn- binary-file-fs []
-     (js/require "fs")))
-
-#?(:clj
-   (defn- make-binary-file-handle
+(defn- make-binary-file-handle
      [mode ^java.io.RandomAccessFile raf]
      {:nex-builtin-type :BinaryFileHandle
       :mode mode
       :index (atom (.getFilePointer raf))
-      :raf raf}))
+      :raf raf})
 
-#?(:cljs
-   (defn- make-binary-file-handle
-     [mode fd index]
-     {:nex-builtin-type :BinaryFileHandle
-      :mode mode
-      :index (atom index)
-      :fd fd}))
-
-#?(:clj
-   (defn binary-file-open-read [path]
+(defn binary-file-open-read [path]
      (make-binary-file-handle :read
-                              (java.io.RandomAccessFile. path "r"))))
+                              (java.io.RandomAccessFile. path "r")))
 
-#?(:cljs
-   (defn binary-file-open-read [path]
-     (make-binary-file-handle :read
-                              (.openSync (binary-file-fs) path "r")
-                              0)))
-
-#?(:clj
-   (defn binary-file-open-write [path]
+(defn binary-file-open-write [path]
      (let [raf (java.io.RandomAccessFile. path "rw")]
        (.setLength raf 0)
        (.seek raf 0)
-        (make-binary-file-handle :write raf))))
+        (make-binary-file-handle :write raf)))
 
-#?(:cljs
-   (defn binary-file-open-write [path]
-     (make-binary-file-handle :write
-                              (.openSync (binary-file-fs) path "w+")
-                              0)))
-
-#?(:clj
-   (defn binary-file-open-append [path]
+(defn binary-file-open-append [path]
      (let [raf (java.io.RandomAccessFile. path "rw")
            size (.length raf)]
        (.seek raf size)
-       (make-binary-file-handle :append raf))))
-
-#?(:cljs
-   (defn binary-file-open-append [path]
-     (let [fs (binary-file-fs)]
-       (when-not (.existsSync fs path)
-         (.writeFileSync fs path (js/Buffer.alloc 0)))
-       (let [fd (.openSync fs path "r+")
-             size (.-size (.fstatSync fs fd))]
-         (make-binary-file-handle :append fd size)))))
+       (make-binary-file-handle :append raf)))
 
 (defn binary-file-read-all [handle]
-  #?(:clj (let [^java.io.RandomAccessFile raf (:raf handle)
+  (let [^java.io.RandomAccessFile raf (:raf handle)
                 pos (.getFilePointer raf)
                 size (int (.length raf))
                 data (byte-array size)]
             (.seek raf 0)
             (.readFully raf data)
             (.seek raf pos)
-            (bytes->int-array data))
-     :cljs (let [fs (binary-file-fs)
-                 fd (:fd handle)
-                 size (.-size (.fstatSync fs fd))
-                 out (js/Buffer.alloc size)]
-             (.readSync fs fd out 0 size 0)
-             (bytes->int-array out))))
+            (bytes->int-array data)))
 
 (defn binary-file-read [handle count]
-  #?(:clj (let [^java.io.RandomAccessFile raf (:raf handle)
+  (let [^java.io.RandomAccessFile raf (:raf handle)
                 idx @(:index handle)
                 size (.length raf)
                 bytes-to-read (int (max 0 (min count (- size idx))))
@@ -898,30 +692,15 @@
             (when (pos? bytes-to-read)
               (.readFully raf out))
             (reset! (:index handle) (+ idx bytes-to-read))
-            (bytes->int-array out))
-     :cljs (let [fs (binary-file-fs)
-                 fd (:fd handle)
-                 idx @(:index handle)
-                 size (.-size (.fstatSync fs fd))
-                 bytes-to-read (max 0 (min count (- size idx)))
-                 out (js/Buffer.alloc bytes-to-read)]
-             (.readSync fs fd out 0 bytes-to-read idx)
-             (reset! (:index handle) (+ idx bytes-to-read))
-             (bytes->int-array out))))
+            (bytes->int-array out)))
 
 (defn binary-file-write [handle values]
-  #?(:clj (let [^java.io.RandomAccessFile raf (:raf handle)
+  (let [^java.io.RandomAccessFile raf (:raf handle)
                 idx @(:index handle)
                 data ^bytes (int-array->bytes values)]
             (.seek raf idx)
             (.write raf data)
             (reset! (:index handle) (+ idx (alength data))))
-     :cljs (let [fs (binary-file-fs)
-                 fd (:fd handle)
-                 idx @(:index handle)
-                 data (int-array->bytes values)]
-             (.writeSync fs fd data 0 (.-length data) idx)
-             (reset! (:index handle) (+ idx (.-length data)))))
   nil)
 
 (defn binary-file-position [handle]
@@ -931,27 +710,21 @@
   (when (neg? offset)
     (throw (ex-info "binary file position must be non-negative" {:offset offset})))
   (reset! (:index handle) offset)
-  #?(:clj (when-let [^java.io.RandomAccessFile raf (:raf handle)]
+  (when-let [^java.io.RandomAccessFile raf (:raf handle)]
             (.seek raf offset))
-     :cljs nil)
   nil)
 
 (defn binary-file-close [handle]
-  #?(:clj (when-let [^java.io.RandomAccessFile raf (:raf handle)]
+  (when-let [^java.io.RandomAccessFile raf (:raf handle)]
             (.close raf))
-     :cljs (when-let [fd (:fd handle)]
-             (.closeSync (binary-file-fs) fd)))
   nil)
 
 (defn nex-process-getenv [name]
-  #?(:clj (System/getenv name)
-     :cljs (aget (.-env js/process) name)))
+  (System/getenv name))
 (defn nex-process-setenv [name value]
-  #?(:clj (throw (ex-info "Setting env vars not supported on JVM" {}))
-     :cljs (aset (.-env js/process) name value)))
+  (throw (ex-info "Setting env vars not supported on JVM" {})))
 (defn nex-process-command-line []
-  #?(:clj (nex-array-from (into [] (.getInputArguments (java.lang.management.ManagementFactory/getRuntimeMXBean))))
-     :cljs (nex-array-from (vec (.-argv js/process)))))
+  (nex-array-from (into [] (.getInputArguments (java.lang.management.ManagementFactory/getRuntimeMXBean)))))
 
 (defn nex-console? [v] (and (map? v) (= (:nex-builtin-type v) :Console)))
 (defn nex-process? [v] (and (map? v) (= (:nex-builtin-type v) :Process)))
@@ -972,8 +745,7 @@
   (cond
     (nex-array? coll) (nex-array-get coll idx)
     (nex-map? coll) (nex-map-get coll idx)
-    :else #?(:clj (.get coll idx) :cljs (aget coll idx))))
+    :else (.get coll idx)))
 
 (defn nex-char? [v]
-  #?(:clj (char? v)
-     :cljs (and (string? v) (== (.-length v) 1))))
+  (char? v))

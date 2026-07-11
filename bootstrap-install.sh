@@ -16,7 +16,7 @@ This script downloads a Nex source archive from GitHub and runs the
 project's install.sh script locally.
 
 Usage:
-  ./bootstrap-install.sh [jvm|nodejs] [--install-deps] [--ref <git-ref>] [--prefix <dir>]
+  ./bootstrap-install.sh [jvm] [--install-deps] [--ref <git-ref>] [--prefix <dir>]
 
 Examples:
   ./bootstrap-install.sh
@@ -61,7 +61,7 @@ download_archive() {
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            jvm|nodejs)
+            jvm)
                 TARGET="$1"
                 PASS_THROUGH_ARGS+=("$1")
                 shift

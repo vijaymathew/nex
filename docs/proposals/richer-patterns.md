@@ -31,9 +31,9 @@ Two separate constructs exist:
 
 - `match <e> of when <Type> as <v> then <block> … [else <block>] end` — dispatches
   on the runtime class and binds the *whole* value to `v`
-  (`grammar/nexlang.g4` `matchClause`; `interpreter.cljc` `eval-node :match`;
+  (`grammar/nexlang.g4` `matchClause`; `interpreter.clj` `eval-node :match`;
   lowered to a chain of `convert`-based instanceof checks in
-  `lower.cljc` `lower-match-clauses`).
+  `lower.clj` `lower-match-clauses`).
 - `case <e> of <lit>, … then <stmt> … [else] end` — dispatches on literal
   *values* (`caseClause`).
 
@@ -103,7 +103,7 @@ dispatch and exhaustiveness.
 
 Simple destructuring never fails: if the type matches, the bindings always
 succeed. So `when Placed(id, total) then <body>` desugars in the walker
-(`:matchClause`, `walker.cljc:1102`) to the existing whole-value form plus
+(`:matchClause`, `walker.clj:1102`) to the existing whole-value form plus
 leading `let`s:
 
 ```nex
@@ -125,13 +125,13 @@ when Placed as __m0 then
 A guard can fail after a type match, so control must fall through to the *next*
 clause — which plain nesting cannot express. Guards need real dispatch support:
 
-- **Interpreter** (`eval-node :match`, `interpreter.cljc`): after a clause's type
+- **Interpreter** (`eval-node :match`, `interpreter.clj`): after a clause's type
   matches and its bindings are made, evaluate the guard in that scope; if false,
   continue to the next clause instead of committing.
-- **Lowering** (`lower-match-clauses`, `lower.cljc:1121`): fold the guard into the
+- **Lowering** (`lower-match-clauses`, `lower.clj:1121`): fold the guard into the
   per-clause condition — `if (convert … to v:T) and <guard> then body else
   <next>` — reusing the existing convert-chain shape.
-- **Exhaustiveness** (`check-match`, `typechecker.cljc:2994`): a guarded clause no
+- **Exhaustiveness** (`check-match`, `typechecker.clj:2994`): a guarded clause no
   longer guarantees its variant is covered, so it must *not* count toward
   exhaustiveness. A sealed match whose only clause for a variant is guarded now
   requires an unguarded clause, a wildcard, or `else`.

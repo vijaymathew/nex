@@ -1,6 +1,7 @@
 #!/bin/bash
 # Download ANTLR4 JAR if not present
-# This is only needed for generating JavaScript parsers (advanced use case)
+# Only needed for standalone parser generation from grammar/nexlang.g4 (advanced
+# use case); the JVM build parses via clj-antlr and does not require this jar.
 
 ANTLR_VERSION="4.13.1"
 ANTLR_JAR="antlr-${ANTLR_VERSION}-complete.jar"

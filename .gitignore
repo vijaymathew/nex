@@ -1,12 +1,7 @@
 # Build outputs
 target/
-.shadow-cljs/
 .cpcache/
 *.class
-
-# Node.js
-node_modules/
-npm-debug.log*
 
 # ANTLR
 antlr-*.jar
@@ -31,6 +26,5 @@ docs/book/Beyond-Code----Building-Software-Systems-That-Last.tex
 # REPL history
 .nex_history
 
-public/js
 notes.txt
 .codex

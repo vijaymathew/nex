@@ -1,11 +1,10 @@
 # Networking Libraries
 
-The networking library surface under `lib/net` is target-specific:
+The networking library surface under `lib/net` runs on the JVM:
 
-- `Tcp_Socket` and `Server_Socket` are JVM-only.
-- `Http_Client` is available in the JVM interpreter and in generated JVM and JavaScript code.
-- `Http_Server` is available in the JVM interpreter and in generated JVM and Node.js code.
-- `Http_Server` is not available in the browser JavaScript target.
+- `Tcp_Socket` and `Server_Socket` are available in the JVM interpreter and in generated JVM code.
+- `Http_Client` is available in the JVM interpreter and in generated JVM code.
+- `Http_Server` is available in the JVM interpreter and in generated JVM code.
 
 ## `net/Http_Client`
 
@@ -30,7 +29,6 @@ The loader accepts these common layouts:
 |---|---|
 | JVM REPL / interpreter | Yes |
 | Generated JVM code | Yes |
-| Generated JavaScript / Node | Yes |
 
 ### Construction
 
@@ -76,8 +74,7 @@ print(response.status())
 
 ### Notes
 
-- The JVM interpreter uses Java's built-in HTTP client.
-- Generated JavaScript uses `fetch`.
+- The JVM interpreter and compiled code use Java's built-in HTTP client.
 - The public Nex API lives in `lib/net/http_client.nex`; the host-specific request work lives in the runtime built-ins.
 - Response headers are exposed as `Map[String, String]`, keeping the first value for each header name.
 - Network failures are raised as runtime errors.
@@ -98,8 +95,6 @@ intern net/Http_Server
 |---|---|
 | JVM REPL / interpreter | Yes |
 | Generated JVM code | Yes |
-| Generated JavaScript / Node | Yes |
-| Browser JavaScript target | No |
 
 ### Types
 
@@ -170,8 +165,7 @@ print(server.port)
 - Supported verbs are `GET`, `POST`, `PUT`, and `DELETE`.
 - Query strings are parsed into `req.query()` and `req.query_param("name")`.
 - Route handlers are ordinary Nex function values.
-- The JVM interpreter uses JDK `HttpServer`.
-- Generated JavaScript support is intended for Node.js and uses the built-in `http` module.
+- The JVM interpreter and compiled code use JDK `HttpServer`.
 
 ## `net/Tcp_Socket`
 

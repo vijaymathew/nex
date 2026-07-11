@@ -1,5 +1,5 @@
 (ns nex.types.json
-  (:require #?(:clj [clojure.data.json :as json])
+  (:require [clojure.data.json :as json]
             [nex.types.runtime :as rt]))
 
 (defn json-value->nex
@@ -9,8 +9,7 @@
     (or (string? value) (boolean? value) (char? value)) value
     (integer? value)
     (let [n (long value)]
-      (if #?(:clj (<= Integer/MIN_VALUE n Integer/MAX_VALUE)
-             :cljs true)
+      (if (<= Integer/MIN_VALUE n Integer/MAX_VALUE)
         (int n)
         n))
     (number? value) (double value)
@@ -38,12 +37,10 @@
     :else (throw (ex-info (str "Value is not JSON-serializable: " (pr-str (type value)))
                           {:value value}))))
 
-#?(:clj
-   (defn nex-json-parse
+(defn nex-json-parse
      [text]
-     (json-value->nex (json/read-str (str text)))))
+     (json-value->nex (json/read-str (str text))))
 
-#?(:clj
-   (defn nex-json-stringify
+(defn nex-json-stringify
      [value]
-     (json/write-str (nex-value->json value))))
+     (json/write-str (nex-value->json value)))

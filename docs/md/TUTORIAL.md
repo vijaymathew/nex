@@ -297,9 +297,7 @@ end
 
 `select` uses channel readiness checks for channels and `is_done` checks for tasks. Task clauses use `Task.await`, but only become selectable after the task has already completed. If no clause is ready and there is no `else`, `select` waits until one becomes ready. If a `timeout` clause is present, that body runs once the timeout expires.
 
-On the JavaScript target, the source syntax is unchanged, but generated code uses async/await under the hood. That means `spawn`, `Task.await`, `Channel.send`, and `Channel.receive` are lowered to Promise-based operations in generated JavaScript.
-
-For the precise concurrency semantics, target differences, and runtime design, see [CONCURRENCY.md](CONCURRENCY.md).
+For the precise concurrency semantics and runtime design, see [CONCURRENCY.md](CONCURRENCY.md).
 
 ## 8. Classes and Objects
 
@@ -529,11 +527,10 @@ end
 
 ## 13. Modules and Interop
 
-### 13.1 Import external Java/JavaScript symbols
+### 13.1 Import external Java symbols
 
 ```nex
 import java.util.Scanner
-import Math from './math.js'
 ```
 
 ### 13.2 Load Nex classes from other files
