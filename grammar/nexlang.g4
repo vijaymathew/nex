@@ -29,7 +29,7 @@ classDecl
 
 // Concise sum-type declaration. Desugars in the walker to a
 // `sealed deferred class` parent plus one `class ... inherit Parent`
-// per variant (see src/nex/walker.cljc :unionDecl). Payloads become
+// per variant (see src/nex/walker.clj :unionDecl). Payloads become
 // feature fields plus an auto-generated `make` constructor.
 unionDecl
     : UNION IDENTIFIER genericParams?
@@ -52,7 +52,7 @@ declareFunctionDecl
 
 // `declare type X = Base` is a structural alias. With an optional `where`
 // predicate it becomes a refinement type: Base narrowed by a boolean predicate,
-// checked at narrowing boundaries (see the refinement pass in walker.cljc).
+// checked at narrowing boundaries (see the refinement pass in walker.clj).
 declareTypeDecl
     : DECLARE TYPE_KW IDENTIFIER EQUAL type (WHERE IDENTIFIER ':' expression)?
     ;

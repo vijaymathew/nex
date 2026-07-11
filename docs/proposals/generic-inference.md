@@ -32,7 +32,7 @@ arguments), so nothing below touches a backend's value representation.
 
 ## Finding 1 — construction ignores its arguments
 
-`check-create` (`typechecker.cljc:2504`, the user-class branch) computes:
+`check-create` (`typechecker.clj:2504`, the user-class branch) computes:
 
 ```clojure
 target-type (if (seq generic-args)
@@ -47,7 +47,7 @@ later assignment to `Result[Integer, String]` then fails because a raw `Ok` is n
 seen as `Result[Integer, String]`.
 
 The fix already exists elsewhere. The **function/method call** path
-(`typechecker.cljc:2235`) infers a type-map from the argument types:
+(`typechecker.clj:2235`) infers a type-map from the argument types:
 
 ```clojure
 generic-names     (set (map :name (:generic-params class-def)))
@@ -55,7 +55,7 @@ inferred-type-map (reduce … (infer-generic-type-map-from-arg
                               env generic-names (:type param) arg-type) …)
 ```
 
-`infer-generic-type-map-from-arg` (`typechecker.cljc:1326`) already unifies a
+`infer-generic-type-map-from-arg` (`typechecker.clj:1326`) already unifies a
 parameter type against an argument type structurally (e.g. param `Option[T]` vs
 arg `Option[Integer]` yields `{T → Integer}`). Construction just never calls it.
 
@@ -83,7 +83,7 @@ inference is partial or the caller wants a specific instantiation.
 
 ## Finding 2 — `match` discards the subject's type arguments
 
-`check-match` (`typechecker.cljc:3010`) binds the clause variable to the bare
+`check-match` (`typechecker.clj:3010`) binds the clause variable to the bare
 clause class name:
 
 ```clojure

@@ -6,8 +6,7 @@ These are library classes, not core built-in classes. Load them with `intern`.
 
 ## Platform Scope
 
-- `text/Regex`: JVM interpreter, generated JVM, generated JavaScript/Node
-- Retired browser interpreter path: not supported
+- `text/Regex`: JVM interpreter, generated JVM
 
 ## Load
 

@@ -9,8 +9,8 @@ The sequences below are schematic. They omit some boxing, unboxing, casts, and l
 
 The compiled JVM path has three layers:
 
-- lowering in [`src/nex/lower.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/lower.cljc)
-- IR definitions in [`src/nex/ir.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/ir.cljc)
+- lowering in [`src/nex/lower.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/lower.clj)
+- IR definitions in [`src/nex/ir.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/ir.clj)
 - bytecode emission in [`src/nex/compiler/jvm/emit.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/emit.clj)
 
 This appendix starts at the last of these. Each section answers the same question: once lowering has decided that a construct stays on the compiled path, what bytecode pattern does the emitter actually write?
@@ -621,8 +621,8 @@ This structure is why the file compiler can share so much code with the compiled
 
 For actual code reading, the most efficient order is:
 
-1. Read the lowering rule in [`src/nex/lower.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/lower.cljc) for the construct you care about.
-2. Find the corresponding IR shape in [`src/nex/ir.cljc`](https://github.com/vijaymathew/nex/blob/main/src/nex/ir.cljc).
+1. Read the lowering rule in [`src/nex/lower.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/lower.clj) for the construct you care about.
+2. Find the corresponding IR shape in [`src/nex/ir.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/ir.clj).
 3. Jump to the matching `:op` branch or helper in [`src/nex/compiler/jvm/emit.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/emit.clj).
 4. Check [`src/nex/compiler/jvm/runtime.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/compiler/jvm/runtime.clj) only if emission routes through a runtime helper.
 

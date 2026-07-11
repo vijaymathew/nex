@@ -135,7 +135,7 @@ Let `R` be a refinement of base `B` with predicate `P`.
 ### `convert` is the explicit narrowing primitive
 
 `convert` already returns a boolean and binds the name on success
-(`docs/md/SYNTAX.md` §"Type Conversion"; `interpreter.cljc:2182`). That is exactly
+(`docs/md/SYNTAX.md` §"Type Conversion"; `interpreter.clj:2182`). That is exactly
 the safe, non-throwing narrowing operator a refinement type wants:
 
 ```nex
@@ -157,21 +157,21 @@ Three front-to-middle layers; **codegen value representation is untouched.**
 
 1. **Grammar / walker** — add the optional `WHERE IDENTIFIER ':' expression` (and
    `DISTINCT`) to `declareTypeDecl` (`grammar/nexlang.g4`,
-   `walker.cljc:935`). The walker records `{:type :refinement-type :name … :base …
+   `walker.clj:935`). The walker records `{:type :refinement-type :name … :base …
    :binder … :predicate …}` (or keeps `:type-alias` when there is no `where`).
 2. **Type checker** — register refinement names in the type environment beside
    classes and aliases. Teach `class-subtype?`/`types-compatible?`
-   (`typechecker.cljc:549`/`577`) the widen-free / narrow-checked rules, and mark
+   (`typechecker.clj:549`/`577`) the widen-free / narrow-checked rules, and mark
    each narrowing site so lowering knows to inject a check. `expand-type-aliases`
-   (`typechecker.cljc:401`) must *not* erase a refinement to its base the way it
+   (`typechecker.clj:401`) must *not* erase a refinement to its base the way it
    erases a plain alias — the name has to survive checking so narrowing is
    detected.
 3. **Lowering** — at each marked narrowing site, inject a predicate assertion that
    reuses the existing contract path (`check-assertions` /
-   `report-contract-violation`, `interpreter.cljc:763`) and is elided under
-   `skip-contracts` exactly like `require`/`ensure`/`invariant`
-   (`javascript.clj:1666`). No new runtime primitive; no change to how Integers,
-   Reals, or Strings are represented on the JVM or in JS.
+   `report-contract-violation`, `interpreter.clj:763`) and is elided under
+   `skip-contracts` exactly like `require`/`ensure`/`invariant`. No new runtime
+   primitive; no change to how Integers, Reals, or Strings are represented on the
+   JVM.
 
 The contrast with the `union` proposal is deliberate: `union` needed no
 typechecker changes because it desugared to constructs the checker already

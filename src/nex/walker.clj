@@ -118,15 +118,13 @@
                          (str/starts-with? clean "0o") [8 (subs clean 2)]
                          (str/starts-with? clean "0x") [16 (subs clean 2)]
                          :else [10 clean])]
-    #?(:clj (Long/parseLong digits radix)
-       :cljs (js/parseInt digits radix))))
+    (Long/parseLong digits radix)))
 
 (defn- codepoint->string [cp]
-  #?(:clj (String/valueOf (Character/toChars cp))
-     :cljs (js/String.fromCodePoint cp)))
+  (String/valueOf (Character/toChars cp)))
 
 (defn- parse-hex [s]
-  #?(:clj (Integer/parseInt s 16) :cljs (js/parseInt s 16)))
+  (Integer/parseInt s 16))
 
 (defn- interpret-string-escapes
   "Interpret the backslash escapes of a double-quoted string's content. The
@@ -1670,8 +1668,7 @@
    :realLiteral
    (fn [[_ value]]
      {:type :real
-      :value #?(:clj (Double/parseDouble value)
-                :cljs (js/parseFloat value))})
+      :value (Double/parseDouble value)})
 
    :booleanLiteral
    (fn [[_ value]]
@@ -1689,8 +1686,7 @@
            v (if is-code v0 (maybe-transform-special-char v0))]
        {:type :char
         :value (if is-code
-                 #?(:clj (char (Integer/parseInt v))
-                    :cljs (.fromCharCode js/String (js/parseInt v)))
+                 (char (Integer/parseInt v))
                  (first v))}))
 
    :arrayLiteral
@@ -1839,9 +1835,8 @@
   [parse-tree]
   (try
     (transform-node parse-tree)
-    (catch #?(:clj Exception :cljs :default) e
-      (let [err-message #?(:clj (.getMessage e)
-                           :cljs (.-message e))]
+    (catch Exception e
+      (let [err-message (.getMessage e)]
         (throw (ex-info err-message
                         {:parse-tree parse-tree
                          :cause err-message}

@@ -1,8 +1,7 @@
 (ns nex.import-test
   "Tests for import statement to use Java and JavaScript classes"
   (:require [clojure.test :refer [deftest is testing]]
-            [nex.parser :as p]
-            [nex.generator.javascript :as js]))
+            [nex.parser :as p]))
 
 (deftest import-parsing-test
   (testing "Parse Java import statement"
@@ -46,38 +45,6 @@
       (is (nil? (:source (first imports))))
       (is (= "Lodash" (:qualified-name (second imports))))
       (is (= "'./lodash.js'" (:source (second imports)))))))
-
-(deftest javascript-import-generation-test
-  (testing "Generate JavaScript import"
-    (let [code "import Math from './utils.js'\n\nclass Main feature test() do print(\"x\") end end"
-          js-code (-> code p/ast js/translate-ast)]
-      (is (.contains js-code "import Math from './utils.js';"))
-      (is (.contains js-code "class Main"))))
-
-  (testing "Generate multiple JavaScript imports"
-    (let [code "import React from './react.js'\nimport Lodash from './lodash.js'\n\nclass Main feature test() do print(\"x\") end end"
-          js-code (-> code p/ast js/translate-ast)]
-      (is (.contains js-code "import React from './react.js';"))
-      (is (.contains js-code "import Lodash from './lodash.js';"))))
-
-  (testing "JavaScript generator ignores Java imports"
-    (let [code "import java.util.Scanner\n\nclass Main feature test() do print(\"x\") end end"
-          js-code (-> code p/ast js/translate-ast)]
-      (is (not (.contains js-code "import")))
-      (is (.contains js-code "class Main")))))
-
-(deftest javascript-import-filtering-test
-  (testing "JavaScript generator filters mixed imports correctly"
-    (let [code "import java.util.Scanner
-import React from './react.js'
-import java.io.File
-
-class Main feature test() do print(\"x\") end end"
-          js-code (-> code p/ast js/translate-ast)]
-      (is (.contains js-code "import React from './react.js';"))
-      (is (not (.contains js-code "java.util")))
-      (is (not (.contains js-code "java.io"))))))
-
 
 (deftest import-with-intern-test
   (testing "Import and intern can coexist"

@@ -14,9 +14,9 @@
             [nex.types.regex :as regex-types]
             [nex.types.http :as http]
             [nex.types.concurrency :as conc])
-  #?(:clj (:import [java.nio.charset StandardCharsets]
+  (:import [java.nio.charset StandardCharsets]
                    [java.util.concurrent CompletableFuture ExecutionException TimeUnit TimeoutException CancellationException]
-                   [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference])))
+                   [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference]))
 
 (declare nex-format-value)
 (declare call-builtin-method)
@@ -31,9 +31,6 @@
 (def queue-conj conc/queue-conj)
 (def queue-pop conc/queue-pop)
 (def make-task conc/make-task)
-#?(:cljs (def promise? conc/promise?))
-#?(:cljs (def ->promise conc/->promise))
-#?(:cljs (def promise-all conc/promise-all))
 (def make-channel conc/make-channel)
 (def task-await conc/task-await)
 (def task-done? conc/task-done?)
@@ -221,7 +218,7 @@
 
     (nex-array? v)
     (hash (mapv nex-structural-hash
-                #?(:clj (seq v) :cljs (array-seq v))))
+                (seq v)))
 
     (nex-set? v)
     (reduce + 0 (map nex-structural-hash (nex-set-seq v)))
@@ -257,13 +254,13 @@
   ([ctx arr elem]
    (boolean
     (some #(membership-equals? ctx % elem)
-          #?(:clj (seq arr) :cljs (array-seq arr))))))
+          (seq arr)))))
 
 (defn nex-array-index-of-value
   ([arr elem] (nex-array-index-of-value nil arr elem))
   ([ctx arr elem]
    (loop [idx 0
-          values #?(:clj (seq arr) :cljs (seq (array-seq arr)))]
+          values (seq arr)]
      (cond
        (nil? values) -1
        (membership-equals? ctx (first values) elem) idx
@@ -308,14 +305,11 @@
 
 (defn nex-array-sort-with-ctx
   ([ctx arr]
-   #?(:clj (let [out (java.util.ArrayList. arr)]
+   (let [out (java.util.ArrayList. arr)]
              (.sort out (reify java.util.Comparator
                           (compare [_ a b]
                             (int (nex-value-compare ctx a b)))))
-             out)
-      :cljs (let [out (.slice arr)]
-              (.sort out (fn [a b] (nex-value-compare ctx a b)))
-              out)))
+             out))
   ([ctx arr comparator]
    (let [compare-fn (fn [a b]
                       (let [result (if (fn? comparator)
@@ -325,14 +319,11 @@
                           result
                           (throw (ex-info "Array.sort comparator must return Integer"
                                           {:left a :right b :result result})))))]
-     #?(:clj (let [out (java.util.ArrayList. arr)]
+     (let [out (java.util.ArrayList. arr)]
                (.sort out (reify java.util.Comparator
                             (compare [_ a b]
                               (compare-fn a b))))
-               out)
-        :cljs (let [out (.slice arr)]
-                (.sort out compare-fn)
-                out)))))
+               out))))
 
 (defn make-min-heap
   [comparator]
@@ -345,26 +336,22 @@
   ;; 64-bit, matching Nex Integer (Int64). Previously AtomicInteger, which
   ;; silently truncated values above 2^31 (see NUMERIC_TOWER.md).
   {:nex-builtin-type :AtomicInteger
-   :state #?(:clj (AtomicLong. (long initial))
-             :cljs (atom (->nex-integer initial)))})
+   :state (AtomicLong. (long initial))})
 
 (defn make-atomic-integer64
   [initial]
   {:nex-builtin-type :AtomicInteger64
-   :state #?(:clj (AtomicLong. (long initial))
-             :cljs (atom initial))})
+   :state (AtomicLong. (long initial))})
 
 (defn make-atomic-boolean
   [initial]
   {:nex-builtin-type :AtomicBoolean
-   :state #?(:clj (AtomicBoolean. (boolean initial))
-             :cljs (atom initial))})
+   :state (AtomicBoolean. (boolean initial))})
 
 (defn make-atomic-reference
   [initial]
   {:nex-builtin-type :AtomicReference
-   :state #?(:clj (AtomicReference. initial)
-             :cljs (atom initial))})
+   :state (AtomicReference. initial)})
 
 (defn deep-equals-runtime?
   [a b]
@@ -372,22 +359,14 @@
 
 (defn atomic-reference-cas!
   [atomic expected update]
-  #?(:clj (loop []
+  (loop []
             (let [^AtomicReference state (:state atomic)
                   current (.get state)]
               (if (deep-equals-runtime? current expected)
                 (if (.compareAndSet state current update)
                   true
                   (recur))
-                false)))
-     :cljs (let [state (:state atomic)]
-             (loop []
-               (let [current @state]
-                 (if (deep-equals-runtime? current expected)
-                   (do
-                     (reset! state update)
-                     true)
-                   false))))))
+                false))))
 
 (defn heap-compare
   [ctx heap left right]
@@ -487,7 +466,7 @@
           (neg? c) -1
           (pos? c) 1
           :else 0))
-      (catch #?(:clj Exception :cljs :default) _
+      (catch Exception _
         (let [sx (str x)
               sy (str y)]
           (cond
@@ -530,8 +509,7 @@
     "to_lower"    (fn [s & _] (str/lower-case s))
     "to_integer"  (fn [s & _] (nex-parse-integer s))
     "to_integer64" (fn [s & _] (nex-parse-integer64-string s))
-    "to_real"     (fn [s & _] #?(:clj (Double/parseDouble (str/trim s))
-                                 :cljs (js/parseFloat (str/trim s))))
+    "to_real"     (fn [s & _] (Double/parseDouble (str/trim s)))
     "contains"    (fn [s substr & _] (str/includes? s substr))
     "starts_with" (fn [s prefix & _] (str/starts-with? s prefix))
     "ends_with"   (fn [s suffix & _] (str/ends-with? s suffix))
@@ -545,12 +523,9 @@
                     (nex-array-from
                      (mapv #(get s %) (range (count s)))))
     "to_bytes"    (fn [s & _]
-                    #?(:clj (nex-array-from
+                    (nex-array-from
                              (mapv #(->nex-integer (bit-and (int %) 0xFF))
-                                   (.getBytes ^String s StandardCharsets/UTF_8)))
-                       :cljs (nex-array-from
-                              (mapv ->nex-integer
-                                    (js->clj (.encode (js/TextEncoder.) s))))))
+                                   (.getBytes ^String s StandardCharsets/UTF_8))))
     "split"       (fn [s delim & _] (nex-array-from (str/split s (re-pattern delim))))
     "join"        (fn [s arr & _] (str/join s arr))
     ;; String operator methods
@@ -594,8 +569,7 @@
     "minus"             (fn [n other & _] (nex-int-sub n other))
     "times"             (fn [n other & _] (nex-int-mul n other))
     ;; divided_by is typed to return Real, so it is real division on both hosts.
-    "divided_by"        (fn [n other & _] #?(:clj (/ (double n) (double other))
-                                             :cljs (/ (->nex-real n) (->nex-real other))))
+    "divided_by"        (fn [n other & _] (/ (double n) (double other)))
     ;; Comparison operator methods
     "equals"            (fn [n other & _] (nex-numeric-equals? n other))
     "not_equals"        (fn [n other & _] (not (nex-numeric-equals? n other)))
@@ -603,7 +577,7 @@
     "less_than_or_equal" (fn [n other & _] (not (pos? (nex-numeric-compare n other))))
     "greater_than"      (fn [n other & _] (pos? (nex-numeric-compare n other)))
     "greater_than_or_equal" (fn [n other & _] (not (neg? (nex-numeric-compare n other))))
-    "to_char"           (fn [n & _] #?(:clj (char (int n)) :cljs (.fromCharCode js/String (nex-int->number n))))
+    "to_char"           (fn [n & _] (char (int n)))
     "compare"           (fn [n other & _] (nex-compare n other))
     "hash"              (fn [n & _] (hash n))}
 
@@ -615,25 +589,19 @@
     "round"             (fn [n & _] (->nex-integer (nex-round n)))
     "to_fixed"          (fn [n places & _]
                           (let [places (nex-int->number places)]
-                            #?(:clj  (double (.setScale (bigdec n) (int places) java.math.RoundingMode/HALF_UP))
-                               :cljs (js/parseFloat (.toFixed n places)))))
+                            (double (.setScale (bigdec n) (int places) java.math.RoundingMode/HALF_UP))))
     ;; IEEE-754 inspection: with Real division now honestly IEEE, these let
     ;; callers detect the special values it can produce (see NUMERIC_TOWER.md).
-    "is_nan"            (fn [n & _] #?(:clj (Double/isNaN (double n))
-                                       :cljs (js/Number.isNaN n)))
-    "is_infinite"       (fn [n & _] #?(:clj (Double/isInfinite (double n))
-                                       :cljs (and (not (js/Number.isFinite n))
-                                                  (not (js/Number.isNaN n)))))
-    "is_finite"         (fn [n & _] #?(:clj (and (not (Double/isNaN (double n)))
-                                                 (not (Double/isInfinite (double n))))
-                                       :cljs (js/Number.isFinite n)))
+    "is_nan"            (fn [n & _] (Double/isNaN (double n)))
+    "is_infinite"       (fn [n & _] (Double/isInfinite (double n)))
+    "is_finite"         (fn [n & _] (and (not (Double/isNaN (double n)))
+                                                 (not (Double/isInfinite (double n)))))
     ;; Arithmetic operator methods
     "plus"              (fn [n other & _] (+ n other))
     "minus"             (fn [n other & _] (- n other))
     "times"             (fn [n other & _] (* n other))
     ;; IEEE division (see the boxed-double note on the "/" operator).
-    "divided_by"        (fn [n other & _] #?(:clj (/ (double n) (double other))
-                                             :cljs (/ n other)))
+    "divided_by"        (fn [n other & _] (/ (double n) (double other)))
     ;; Comparison operator methods
     "equals"            (fn [n other & _] (= n other))
     "not_equals"        (fn [n other & _] (not= n other))
@@ -648,7 +616,7 @@
    {"to_string"   (fn [c & _] (str c))
     "to_upper"    (fn [c & _] (str/upper-case (str c)))
     "to_lower"    (fn [c & _] (str/lower-case (str c)))
-    "to_integer"  (fn [c & _] (->nex-integer #?(:clj (int c) :cljs (.charCodeAt c 0))))
+    "to_integer"  (fn [c & _] (->nex-integer (int c)))
     "compare"     (fn [c other & _] (nex-compare c other))
     "hash"        (fn [c & _] (hash c))}
 
@@ -765,80 +733,51 @@
    ;; must use the BigInt-safe primitives — `inc`/`dec`/`+` mix BigInt and number
    ;; and throw.
    :Atomic_Integer
-   {"load"            (fn [atomic & _] #?(:clj (.get ^AtomicLong (:state atomic))
-                                          :cljs @(:state atomic)))
+   {"load"            (fn [atomic & _] (.get ^AtomicLong (:state atomic)))
     "store"           (fn [atomic value & _]
-                        #?(:clj (.set ^AtomicLong (:state atomic) (long value))
-                           :cljs (reset! (:state atomic) (->nex-integer value)))
+                        (.set ^AtomicLong (:state atomic) (long value))
                         nil)
     "compare_and_set" (fn [atomic expected update & _]
-                        #?(:clj (.compareAndSet ^AtomicLong (:state atomic) (long expected) (long update))
-                           :cljs (if (= @(:state atomic) expected)
-                                   (do (reset! (:state atomic) update) true)
-                                   false)))
+                        (.compareAndSet ^AtomicLong (:state atomic) (long expected) (long update)))
     "get_and_add"     (fn [atomic delta & _]
-                        #?(:clj (.getAndAdd ^AtomicLong (:state atomic) (long delta))
-                           :cljs (let [current @(:state atomic)]
-                                   (swap! (:state atomic) nex-int-add delta)
-                                   current)))
+                        (.getAndAdd ^AtomicLong (:state atomic) (long delta)))
     "add_and_get"     (fn [atomic delta & _]
-                        #?(:clj (.addAndGet ^AtomicLong (:state atomic) (long delta))
-                           :cljs (swap! (:state atomic) nex-int-add delta)))
+                        (.addAndGet ^AtomicLong (:state atomic) (long delta)))
     "increment"       (fn [atomic & _]
-                        #?(:clj (.incrementAndGet ^AtomicLong (:state atomic))
-                           :cljs (swap! (:state atomic) nex-int-add (->nex-integer 1))))
+                        (.incrementAndGet ^AtomicLong (:state atomic)))
     "decrement"       (fn [atomic & _]
-                        #?(:clj (.decrementAndGet ^AtomicLong (:state atomic))
-                           :cljs (swap! (:state atomic) nex-int-sub (->nex-integer 1))))}
+                        (.decrementAndGet ^AtomicLong (:state atomic)))}
 
    :Atomic_Integer64
-   {"load"            (fn [atomic & _] #?(:clj (.get ^AtomicLong (:state atomic))
-                                          :cljs @(:state atomic)))
+   {"load"            (fn [atomic & _] (.get ^AtomicLong (:state atomic)))
     "store"           (fn [atomic value & _]
-                        #?(:clj (.set ^AtomicLong (:state atomic) (long value))
-                           :cljs (reset! (:state atomic) (->nex-integer value)))
+                        (.set ^AtomicLong (:state atomic) (long value))
                         nil)
     "compare_and_set" (fn [atomic expected update & _]
-                        #?(:clj (.compareAndSet ^AtomicLong (:state atomic) (long expected) (long update))
-                           :cljs (if (= @(:state atomic) expected)
-                                   (do (reset! (:state atomic) update) true)
-                                   false)))
+                        (.compareAndSet ^AtomicLong (:state atomic) (long expected) (long update)))
     "get_and_add"     (fn [atomic delta & _]
-                        #?(:clj (.getAndAdd ^AtomicLong (:state atomic) (long delta))
-                           :cljs (let [current @(:state atomic)]
-                                   (swap! (:state atomic) nex-int-add delta)
-                                   current)))
+                        (.getAndAdd ^AtomicLong (:state atomic) (long delta)))
     "add_and_get"     (fn [atomic delta & _]
-                        #?(:clj (.addAndGet ^AtomicLong (:state atomic) (long delta))
-                           :cljs (swap! (:state atomic) nex-int-add delta)))
+                        (.addAndGet ^AtomicLong (:state atomic) (long delta)))
     "increment"       (fn [atomic & _]
-                        #?(:clj (.incrementAndGet ^AtomicLong (:state atomic))
-                           :cljs (swap! (:state atomic) nex-int-add (->nex-integer 1))))
+                        (.incrementAndGet ^AtomicLong (:state atomic)))
     "decrement"       (fn [atomic & _]
-                        #?(:clj (.decrementAndGet ^AtomicLong (:state atomic))
-                           :cljs (swap! (:state atomic) nex-int-sub (->nex-integer 1))))}
+                        (.decrementAndGet ^AtomicLong (:state atomic)))}
 
    :Atomic_Boolean
-   {"load"            (fn [atomic & _] #?(:clj (.get ^AtomicBoolean (:state atomic))
-                                          :cljs @(:state atomic)))
+   {"load"            (fn [atomic & _] (.get ^AtomicBoolean (:state atomic)))
     "store"           (fn [atomic value & _]
-                        #?(:clj (.set ^AtomicBoolean (:state atomic) (boolean value))
-                           :cljs (reset! (:state atomic) value))
+                        (.set ^AtomicBoolean (:state atomic) (boolean value))
                         nil)
     "compare_and_set" (fn [atomic expected update & _]
-                        #?(:clj (.compareAndSet ^AtomicBoolean (:state atomic)
+                        (.compareAndSet ^AtomicBoolean (:state atomic)
                                                 (boolean expected)
-                                                (boolean update))
-                           :cljs (if (= @(:state atomic) expected)
-                                   (do (reset! (:state atomic) update) true)
-                                   false)))}
+                                                (boolean update)))}
 
    :Atomic_Reference
-   {"load"            (fn [atomic & _] #?(:clj (.get ^AtomicReference (:state atomic))
-                                          :cljs @(:state atomic)))
+   {"load"            (fn [atomic & _] (.get ^AtomicReference (:state atomic)))
     "store"           (fn [atomic value & _]
-                        #?(:clj (.set ^AtomicReference (:state atomic) value)
-                           :cljs (reset! (:state atomic) value))
+                        (.set ^AtomicReference (:state atomic) value)
                         nil)
     "compare_and_set" (fn [atomic expected update & _]
                         (atomic-reference-cas! atomic expected update))}
@@ -850,8 +789,7 @@
                                  (task-await t))]
                     (if (= result task-timeout-signal) nil result)))
     "cancel"   (fn [t & _] (task-cancel t))
-    "is_done"  (fn [t & _] #?(:clj (.isDone ^CompletableFuture (:future t))
-                              :cljs @(:done? t)))
+    "is_done"  (fn [t & _] (.isDone ^CompletableFuture (:future t)))
     "is_cancelled" (fn [t & _] (task-cancelled? t))}
 
    :Channel
@@ -869,8 +807,7 @@
     "is_closed" (fn [ch & _] (:closed? @(:state ch)))
     "capacity"  (fn [ch & _] (:capacity @(:state ch)))
     "size"      (fn [ch & _]
-                  #?(:clj (count (:buffer @(:state ch)))
-                     :cljs (count (:buffer @(:state ch)))))}
+                  (count (:buffer @(:state ch))))}
 
    :Console
    {"print"        ^{:returns "Void"} (fn [_ msg & _] (nex-console-print (nex-display-value msg)) nil)
@@ -1032,28 +969,24 @@
 (defn runtime-type-is? [ctx target-type value]
   (typeinfo/runtime-type-is? runtime-type-name is-parent? ctx target-type value))
 
-#?(:clj
-   (defn java-http-request
+(defn java-http-request
      [method url body timeout-ms]
-     (http/java-http-request make-object method url body timeout-ms)))
+     (http/java-http-request make-object method url body timeout-ms))
 
-#?(:clj
-   (defn make-http-server-handle
+(defn make-http-server-handle
      [port]
-     (http/make-http-server-handle port)))
+     (http/make-http-server-handle port))
 
-#?(:clj
-   (defn start-http-server!
+(defn start-http-server!
      [ctx handle]
      (http/start-http-server!
       make-object
       (fn [inner-ctx handler request-obj]
         (eval-call inner-ctx handler "call1" [request-obj]))
       ctx
-      handle)))
+      handle))
 
-#?(:clj
-   (defn resolve-imported-java-class
+(defn resolve-imported-java-class
      "Resolve a Java class name using imports in the context."
      [ctx class-name]
      (let [imports @(:imports ctx)
@@ -1066,23 +999,21 @@
            qualified (or match class-name)]
        (try
          (Class/forName qualified)
-         (catch Exception _ nil)))))
+         (catch Exception _ nil))))
 
-#?(:clj
-   (defn java-create-object
+(defn java-create-object
      "Create a Java object via reflection."
      [ctx class-name arg-values]
      (let [klass (resolve-imported-java-class ctx class-name)]
        (when-not klass
          (throw (ex-info (str "Undefined class: " class-name)
                          {:class-name class-name})))
-       (clojure.lang.Reflector/invokeConstructor klass (to-array arg-values)))))
+       (clojure.lang.Reflector/invokeConstructor klass (to-array arg-values))))
 
-#?(:clj
-   (defn java-call-method
+(defn java-call-method
      "Call a Java method via reflection."
      [target method-name arg-values]
-     (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array arg-values))))
+     (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array arg-values)))
 
 (def builtins
   {"print"
@@ -1147,19 +1078,16 @@
      (when (not= (count args) 1)
        (throw (ex-info "sleep expects exactly 1 argument"
                        {:function "sleep" :expected 1 :actual (count args)})))
-     #?(:clj (do
+     (do
                (Thread/sleep (long (first args)))
-               nil)
-        :cljs (js/Promise. (fn [resolve _reject]
-                             (js/setTimeout #(resolve nil) (long (first args)))))))
+               nil))
 
    "hint_spin"
    (fn [_ctx & args]
      (when (not= (count args) 0)
        (throw (ex-info "hint_spin expects exactly 0 arguments"
                        {:function "hint_spin" :expected 0 :actual (count args)})))
-     #?(:clj (Thread/onSpinWait)
-        :cljs nil)
+     (Thread/onSpinWait)
      nil)
 
    "random_real"
@@ -1175,9 +1103,7 @@
        (throw (ex-info "http_get expects 1 or 2 arguments"
                        {:function "http_get" :expected "1 or 2" :actual (count args)})))
      (let [[url timeout-ms] args]
-       #?(:clj (java-http-request "GET" (str url) nil timeout-ms)
-          :cljs (throw (ex-info "http_get is not supported in the ClojureScript interpreter"
-                                {:function "http_get"})))))
+       (java-http-request "GET" (str url) nil timeout-ms)))
 
    "http_post"
    (fn [_ctx & args]
@@ -1185,219 +1111,165 @@
        (throw (ex-info "http_post expects 2 or 3 arguments"
                        {:function "http_post" :expected "2 or 3" :actual (count args)})))
      (let [[url body timeout-ms] args]
-       #?(:clj (java-http-request "POST" (str url) (str body) timeout-ms)
-          :cljs (throw (ex-info "http_post is not supported in the ClojureScript interpreter"
-                                {:function "http_post"})))))
+       (java-http-request "POST" (str url) (str body) timeout-ms)))
 
    "json_parse"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "json_parse expects exactly 1 argument"
                        {:function "json_parse" :expected 1 :actual (count args)})))
-     #?(:clj (json-types/nex-json-parse (first args))
-        :cljs (throw (ex-info "json_parse is not supported in the ClojureScript interpreter"
-                              {:function "json_parse"}))))
+     (json-types/nex-json-parse (first args)))
 
    "json_stringify"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "json_stringify expects exactly 1 argument"
                        {:function "json_stringify" :expected 1 :actual (count args)})))
-     #?(:clj (json-types/nex-json-stringify (first args))
-        :cljs (throw (ex-info "json_stringify is not supported in the ClojureScript interpreter"
-                              {:function "json_stringify"}))))
+     (json-types/nex-json-stringify (first args)))
 
    "regex_validate"
    (fn [_ctx & args]
      (when (not= (count args) 2)
        (throw (ex-info "regex_validate expects exactly 2 arguments" {:function "regex_validate"})))
-     #?(:clj (regex-types/regex-validate (first args) (second args))
-        :cljs (throw (ex-info "regex_validate is not supported in the ClojureScript interpreter"
-                              {:function "regex_validate"}))))
+     (regex-types/regex-validate (first args) (second args)))
 
    "regex_matches"
    (fn [_ctx & args]
      (when (not= (count args) 3)
        (throw (ex-info "regex_matches expects exactly 3 arguments" {:function "regex_matches"})))
-     #?(:clj (apply regex-types/regex-matches? args)
-        :cljs (throw (ex-info "regex_matches is not supported in the ClojureScript interpreter"
-                              {:function "regex_matches"}))))
+     (apply regex-types/regex-matches? args))
 
    "regex_find"
    (fn [_ctx & args]
      (when (not= (count args) 3)
        (throw (ex-info "regex_find expects exactly 3 arguments" {:function "regex_find"})))
-     #?(:clj (apply regex-types/regex-find args)
-        :cljs (throw (ex-info "regex_find is not supported in the ClojureScript interpreter"
-                              {:function "regex_find"}))))
+     (apply regex-types/regex-find args))
 
    "regex_find_all"
    (fn [_ctx & args]
      (when (not= (count args) 3)
        (throw (ex-info "regex_find_all expects exactly 3 arguments" {:function "regex_find_all"})))
-     #?(:clj (apply regex-types/regex-find-all args)
-        :cljs (throw (ex-info "regex_find_all is not supported in the ClojureScript interpreter"
-                              {:function "regex_find_all"}))))
+     (apply regex-types/regex-find-all args))
 
    "regex_replace"
    (fn [_ctx & args]
      (when (not= (count args) 4)
        (throw (ex-info "regex_replace expects exactly 4 arguments" {:function "regex_replace"})))
-     #?(:clj (apply regex-types/regex-replace args)
-        :cljs (throw (ex-info "regex_replace is not supported in the ClojureScript interpreter"
-                              {:function "regex_replace"}))))
+     (apply regex-types/regex-replace args))
 
    "regex_split"
    (fn [_ctx & args]
      (when (not= (count args) 3)
        (throw (ex-info "regex_split expects exactly 3 arguments" {:function "regex_split"})))
-     #?(:clj (apply regex-types/regex-split args)
-        :cljs (throw (ex-info "regex_split is not supported in the ClojureScript interpreter"
-                              {:function "regex_split"}))))
+     (apply regex-types/regex-split args))
 
    "datetime_now"
    (fn [_ctx & args]
      (when (not= (count args) 0)
        (throw (ex-info "datetime_now expects exactly 0 arguments" {:function "datetime_now"})))
-     #?(:clj (dt/datetime-now)
-        :cljs (throw (ex-info "datetime_now is not supported in the ClojureScript interpreter"
-                              {:function "datetime_now"}))))
+     (dt/datetime-now))
 
    "datetime_from_epoch_millis"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "datetime_from_epoch_millis expects exactly 1 argument" {:function "datetime_from_epoch_millis"})))
-     #?(:clj (dt/datetime-from-epoch-millis (first args))
-        :cljs (throw (ex-info "datetime_from_epoch_millis is not supported in the ClojureScript interpreter"
-                              {:function "datetime_from_epoch_millis"}))))
+     (dt/datetime-from-epoch-millis (first args)))
 
    "datetime_parse_iso"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "datetime_parse_iso expects exactly 1 argument" {:function "datetime_parse_iso"})))
-     #?(:clj (dt/datetime-parse-iso (first args))
-        :cljs (throw (ex-info "datetime_parse_iso is not supported in the ClojureScript interpreter"
-                              {:function "datetime_parse_iso"}))))
+     (dt/datetime-parse-iso (first args)))
 
    "datetime_make"
    (fn [_ctx & args]
      (when (not= (count args) 6)
        (throw (ex-info "datetime_make expects exactly 6 arguments" {:function "datetime_make"})))
-     #?(:clj (apply dt/datetime-make args)
-        :cljs (throw (ex-info "datetime_make is not supported in the ClojureScript interpreter"
-                              {:function "datetime_make"}))))
+     (apply dt/datetime-make args))
 
    "datetime_year"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "datetime_year expects exactly 1 argument" {:function "datetime_year"})))
-     #?(:clj (dt/datetime-year (first args))
-        :cljs (throw (ex-info "datetime_year is not supported in the ClojureScript interpreter"
-                              {:function "datetime_year"}))))
+     (dt/datetime-year (first args)))
 
    "datetime_month"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "datetime_month expects exactly 1 argument" {:function "datetime_month"})))
-     #?(:clj (dt/datetime-month (first args))
-        :cljs (throw (ex-info "datetime_month is not supported in the ClojureScript interpreter"
-                              {:function "datetime_month"}))))
+     (dt/datetime-month (first args)))
 
    "datetime_day"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "datetime_day expects exactly 1 argument" {:function "datetime_day"})))
-     #?(:clj (dt/datetime-day (first args))
-        :cljs (throw (ex-info "datetime_day is not supported in the ClojureScript interpreter"
-                              {:function "datetime_day"}))))
+     (dt/datetime-day (first args)))
 
    "datetime_weekday"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "datetime_weekday expects exactly 1 argument" {:function "datetime_weekday"})))
-     #?(:clj (dt/datetime-weekday (first args))
-        :cljs (throw (ex-info "datetime_weekday is not supported in the ClojureScript interpreter"
-                              {:function "datetime_weekday"}))))
+     (dt/datetime-weekday (first args)))
 
    "datetime_day_of_year"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "datetime_day_of_year expects exactly 1 argument" {:function "datetime_day_of_year"})))
-     #?(:clj (dt/datetime-day-of-year (first args))
-        :cljs (throw (ex-info "datetime_day_of_year is not supported in the ClojureScript interpreter"
-                              {:function "datetime_day_of_year"}))))
+     (dt/datetime-day-of-year (first args)))
 
    "datetime_hour"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "datetime_hour expects exactly 1 argument" {:function "datetime_hour"})))
-     #?(:clj (dt/datetime-hour (first args))
-        :cljs (throw (ex-info "datetime_hour is not supported in the ClojureScript interpreter"
-                              {:function "datetime_hour"}))))
+     (dt/datetime-hour (first args)))
 
    "datetime_minute"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "datetime_minute expects exactly 1 argument" {:function "datetime_minute"})))
-     #?(:clj (dt/datetime-minute (first args))
-        :cljs (throw (ex-info "datetime_minute is not supported in the ClojureScript interpreter"
-                              {:function "datetime_minute"}))))
+     (dt/datetime-minute (first args)))
 
    "datetime_second"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "datetime_second expects exactly 1 argument" {:function "datetime_second"})))
-     #?(:clj (dt/datetime-second (first args))
-        :cljs (throw (ex-info "datetime_second is not supported in the ClojureScript interpreter"
-                              {:function "datetime_second"}))))
+     (dt/datetime-second (first args)))
 
    "datetime_epoch_millis"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "datetime_epoch_millis expects exactly 1 argument" {:function "datetime_epoch_millis"})))
-     #?(:clj (dt/datetime-epoch-millis (first args))
-        :cljs (throw (ex-info "datetime_epoch_millis is not supported in the ClojureScript interpreter"
-                              {:function "datetime_epoch_millis"}))))
+     (dt/datetime-epoch-millis (first args)))
 
    "datetime_add_millis"
    (fn [_ctx & args]
      (when (not= (count args) 2)
        (throw (ex-info "datetime_add_millis expects exactly 2 arguments" {:function "datetime_add_millis"})))
-     #?(:clj (apply dt/datetime-add-millis args)
-        :cljs (throw (ex-info "datetime_add_millis is not supported in the ClojureScript interpreter"
-                              {:function "datetime_add_millis"}))))
+     (apply dt/datetime-add-millis args))
 
    "datetime_diff_millis"
    (fn [_ctx & args]
      (when (not= (count args) 2)
        (throw (ex-info "datetime_diff_millis expects exactly 2 arguments" {:function "datetime_diff_millis"})))
-     #?(:clj (apply dt/datetime-diff-millis args)
-        :cljs (throw (ex-info "datetime_diff_millis is not supported in the ClojureScript interpreter"
-                              {:function "datetime_diff_millis"}))))
+     (apply dt/datetime-diff-millis args))
 
    "datetime_truncate_to_day"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "datetime_truncate_to_day expects exactly 1 argument" {:function "datetime_truncate_to_day"})))
-     #?(:clj (dt/datetime-truncate-to-day (first args))
-        :cljs (throw (ex-info "datetime_truncate_to_day is not supported in the ClojureScript interpreter"
-                              {:function "datetime_truncate_to_day"}))))
+     (dt/datetime-truncate-to-day (first args)))
 
    "datetime_truncate_to_hour"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "datetime_truncate_to_hour expects exactly 1 argument" {:function "datetime_truncate_to_hour"})))
-     #?(:clj (dt/datetime-truncate-to-hour (first args))
-        :cljs (throw (ex-info "datetime_truncate_to_hour is not supported in the ClojureScript interpreter"
-                              {:function "datetime_truncate_to_hour"}))))
+     (dt/datetime-truncate-to-hour (first args)))
 
    "datetime_format_iso"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "datetime_format_iso expects exactly 1 argument" {:function "datetime_format_iso"})))
-     #?(:clj (dt/datetime-format-iso (first args))
-        :cljs (throw (ex-info "datetime_format_iso is not supported in the ClojureScript interpreter"
-                              {:function "datetime_format_iso"}))))
+     (dt/datetime-format-iso (first args)))
 
    "path_exists"
    (fn [_ctx & args]
@@ -1632,9 +1504,7 @@
      (when (not= (count args) 1)
        (throw (ex-info "http_server_create expects exactly 1 argument"
                        {:function "http_server_create" :expected 1 :actual (count args)})))
-     #?(:clj (make-http-server-handle (int (first args)))
-        :cljs (throw (ex-info "http_server_create is not supported in the ClojureScript interpreter"
-                              {:function "http_server_create"}))))
+     (make-http-server-handle (int (first args))))
 
    "http_server_get"
    (fn [_ctx & args]
@@ -1642,12 +1512,10 @@
        (throw (ex-info "http_server_get expects exactly 3 arguments"
                        {:function "http_server_get" :expected 3 :actual (count args)})))
      (let [[handle path handler] args]
-       #?(:clj (do
+       (do
                  (swap! (get-in handle [:routes "GET"]) conj {:path-pattern (str path)
                                                               :handler handler})
-                 nil)
-          :cljs (throw (ex-info "http_server_get is not supported in the ClojureScript interpreter"
-                                {:function "http_server_get"})))))
+                 nil)))
 
    "http_server_post"
    (fn [_ctx & args]
@@ -1655,12 +1523,10 @@
        (throw (ex-info "http_server_post expects exactly 3 arguments"
                        {:function "http_server_post" :expected 3 :actual (count args)})))
      (let [[handle path handler] args]
-       #?(:clj (do
+       (do
                  (swap! (get-in handle [:routes "POST"]) conj {:path-pattern (str path)
                                                                :handler handler})
-                 nil)
-          :cljs (throw (ex-info "http_server_post is not supported in the ClojureScript interpreter"
-                                {:function "http_server_post"})))))
+                 nil)))
 
    "http_server_put"
    (fn [_ctx & args]
@@ -1668,12 +1534,10 @@
        (throw (ex-info "http_server_put expects exactly 3 arguments"
                        {:function "http_server_put" :expected 3 :actual (count args)})))
      (let [[handle path handler] args]
-       #?(:clj (do
+       (do
                  (swap! (get-in handle [:routes "PUT"]) conj {:path-pattern (str path)
                                                               :handler handler})
-                 nil)
-          :cljs (throw (ex-info "http_server_put is not supported in the ClojureScript interpreter"
-                                {:function "http_server_put"})))))
+                 nil)))
 
    "http_server_delete"
    (fn [_ctx & args]
@@ -1681,43 +1545,35 @@
        (throw (ex-info "http_server_delete expects exactly 3 arguments"
                        {:function "http_server_delete" :expected 3 :actual (count args)})))
      (let [[handle path handler] args]
-       #?(:clj (do
+       (do
                  (swap! (get-in handle [:routes "DELETE"]) conj {:path-pattern (str path)
                                                                  :handler handler})
-                 nil)
-          :cljs (throw (ex-info "http_server_delete is not supported in the ClojureScript interpreter"
-                                {:function "http_server_delete"})))))
+                 nil)))
 
    "http_server_start"
    (fn [ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "http_server_start expects exactly 1 argument"
                        {:function "http_server_start" :expected 1 :actual (count args)})))
-     #?(:clj (start-http-server! ctx (first args))
-        :cljs (throw (ex-info "http_server_start is not supported in the ClojureScript interpreter"
-                              {:function "http_server_start"}))))
+     (start-http-server! ctx (first args)))
 
    "http_server_stop"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "http_server_stop expects exactly 1 argument"
                        {:function "http_server_stop" :expected 1 :actual (count args)})))
-     #?(:clj (let [handle (first args)
+     (let [handle (first args)
                    server @(:server handle)]
                (when server
                  (.stop ^com.sun.net.httpserver.HttpServer server 0)
                  (reset! (:server handle) nil))
-               nil)
-        :cljs (throw (ex-info "http_server_stop is not supported in the ClojureScript interpreter"
-                              {:function "http_server_stop"}))))
+               nil))
 
    "http_server_is_running"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "http_server_is_running expects exactly 1 argument"
                        {:function "http_server_is_running" :expected 1 :actual (count args)})))
-     #?(:clj (some? @(:server (first args)))
-        :cljs (throw (ex-info "http_server_is_running is not supported in the ClojureScript interpreter"
-                              {:function "http_server_is_running"}))))
+     (some? @(:server (first args))))
 
    })

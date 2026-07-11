@@ -29,9 +29,9 @@ These commitments are in tension. Contracts add syntax. A clean core resists the
 
 **Chapter 2** covers the front half of the implementation: the grammar and parser, AST construction, and the tree-walking interpreter. The interpreter is where the semantics of the language actually live, and understanding it is the prerequisite for everything that follows.
 
-**Chapter 3** covers static checking and the two code generators — JVM bytecode and JavaScript. The static checker enforces the type system and contract structure before execution; the code generators translate the verified AST into runnable form.
+**Chapter 3** covers static checking and the JVM bytecode compiler. The static checker enforces the type system and contract structure before execution; the compiler translates the verified AST into runnable form.
 
-**Chapter 4** covers extension and integration: how Nex programs call Java and JavaScript libraries, how the module system is organised, and how goroutine and channel concurrency is implemented on top of the JVM and JS runtimes.
+**Chapter 4** covers extension and integration: how Nex programs call Java libraries, how the module system is organised, and how goroutine and channel concurrency is implemented on top of the JVM runtime.
 
 **Chapter 5** is a translation reference for the JVM bytecode backend: how major Nex constructs are lowered, when the backend emits direct bytecode, when it uses runtime helpers, and where the mixed compiled/deopt boundary still matters.
 

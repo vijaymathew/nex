@@ -49,7 +49,7 @@ The same principle governs the implementation. Nex tends to prefer explicit data
 
 If Nex existed only as a vehicle for chapters and exercises, it would not need files, processes, host imports, or concurrency. A clean teaching language can be entirely self-contained. But then the line between "the language students learn" and "the tools they use in practice" would be too wide, and the habits formed in one would not transfer to the other.
 
-Nex includes practical facilities because the educational story is stronger when it reaches real systems. Collections handle ordinary data work. Files and processes support scripting and system interaction. HTTP and networking libraries support service-style programs. Tasks and channels support modern concurrent programming. Host interop connects Nex programs to the JVM and JavaScript ecosystems, where the majority of practical libraries live.
+Nex includes practical facilities because the educational story is stronger when it reaches real systems. Collections handle ordinary data work. Files and processes support scripting and system interaction. HTTP and networking libraries support service-style programs. Tasks and channels support modern concurrent programming. Host interop connects Nex programs to the JVM ecosystem, where the majority of practical libraries live.
 
 These are not concessions to practicality at the expense of the teaching mission. They are part of it. A student who builds a program that reads files, calls a web API, and processes the result concurrently has learned something that a student who builds only in-memory examples has not.
 

@@ -45,7 +45,7 @@ Enhancement suggestions are welcome! Please include:
 - **Language features**: New syntax, operators, or constructs
 - **Standard library**: Built-in classes and methods
 - **Editor support**: VS Code, Vim, IntelliJ plugins
-- **Code generators**: Improvements to Java/JavaScript output
+- **JVM backend**: Improvements to bytecode generation and the compiled runtime
 - **Documentation**: Examples, tutorials, API docs
 - **Testing**: More comprehensive test cases
 - **Bug fixes**: Check issues labeled `good-first-issue`
@@ -89,9 +89,7 @@ nex/
 │   ├── interpreter.clj   # Runtime interpreter
 │   ├── typechecker.clj   # Static type checker
 │   ├── fmt.clj           # Code formatter
-│   └── generator/        # Code generators
-│       ├── java.clj      # Java code generator
-│       └── javascript.clj # JavaScript code generator
+│   └── compiler/jvm/     # JVM bytecode compiler backend
 ├── test/nex/             # Test suite
 ├── docs/                 # Documentation
 ├── editor/               # Editor integrations
@@ -161,19 +159,21 @@ Tests use Clojure's `clojure.test` framework:
 (ns nex.my-feature-test
   (:require [clojure.test :refer [deftest testing is]]
             [nex.parser :as p]
-            [nex.generator.java :as java]))
+            [nex.interpreter :as interp]))
 
 (deftest my-feature-test
   (testing "Description of what you're testing"
     (let [code "class Test
                   feature
-                    demo() do
-                      print(42)
+                    demo(): Integer do
+                      result := 42
                     end
                 end"
-          java-code (java/translate code)]
-      (is (str/includes? java-code "System.out.println(42)"))
-      (is (str/includes? java-code "public class Test")))))
+          ast (p/ast code)
+          ctx (interp/make-context)]
+      (interp/eval-node ctx ast)
+      (is (= 42 (interp/eval-node ctx {:type :call :target nil
+                                       :method "demo" :args []}))))))
 ```
 
 ### Test Guidelines

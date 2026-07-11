@@ -1,7 +1,5 @@
 (ns nex.integer-literals-test
-  (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
-            [nex.generator.javascript :as js]
+  (:require [clojure.test :refer [deftest is testing]]
             [nex.interpreter :as interp]
             [nex.parser :as p]
             [nex.typechecker :as tc]))
@@ -79,20 +77,6 @@ end")
     end
 end")]
       (is (= ["11" "9" "17"] output)))))
-
-(deftest prefixed-integer-javascript-generation
-  (testing "JavaScript generation emits normalized integer values"
-    (let [js-code (js/translate "class Test
-  feature
-    demo() do
-      let mask: Integer := 0b1010
-      let perms: Integer := 0o10
-      let color: Integer := 0xFF
-    end
-end")]
-      (is (str/includes? js-code "let mask = 10;"))
-      (is (str/includes? js-code "let perms = 8;"))
-      (is (str/includes? js-code "let color = 255;")))))
 
 (deftest integer-literal-member-call-parses-as-call
   (testing "integer literal followed by .identifier parses as member access, not a real literal"

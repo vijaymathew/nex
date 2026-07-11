@@ -1,21 +1,12 @@
 (ns nex.exception-test
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.string :as str]
             [nex.parser :as p]
             [nex.interpreter :as interp]
-            [nex.typechecker :as tc]
-            [nex.generator.javascript :as js-gen]))
+            [nex.typechecker :as tc]))
 
 ;; Helper to get AST
 (defn parse [code]
   (p/ast code))
-
-(defn js-method-section
-  [js method-name]
-  (let [needle (str "async " method-name "(")
-        start (str/index-of js needle)]
-    (when start
-      (subs js start))))
 
 (defn execute-method [code]
   (let [ast (p/ast code)
@@ -237,57 +228,3 @@ end"))]
     end
 end"))]
       (is (:success result)))))
-
-;; ===== JavaScript Generator Tests =====
-
-;; ===== JavaScript Generator Tests =====
-
-(deftest js-raise-test
-  (testing "raise generates throw in JavaScript"
-    (let [ast (parse "class Test
-  feature
-    demo() do
-      raise \"error\"
-    end
-end")
-          js (js-gen/translate-ast ast {:skip-contracts true})]
-      (is (re-find #"throw \"error\";" js)))))
-
-(deftest js-rescue-retry-test
-  (testing "rescue with retry generates while/try/catch in JavaScript"
-    (let [ast (parse "class Test
-  feature
-    demo() do
-      do
-        raise \"oops\"
-      rescue
-        retry
-      end
-    end
-end")
-          js (js-gen/translate-ast ast {:skip-contracts true})
-          method-js (js-method-section js "demo")]
-      (is (re-find #"while \(true\)" method-js))
-      (is (re-find #"try \{" method-js))
-      (is (re-find #"catch \(_nex_e\)" method-js))
-      (is (re-find #"continue;" method-js))
-      (is (re-find #"break;" method-js)))))
-
-(deftest js-rescue-no-retry-test
-  (testing "rescue without retry generates try/catch recovery in JavaScript"
-    (let [ast (parse "class Test
-  feature
-    demo() do
-      do
-        raise \"oops\"
-      rescue
-        print(exception)
-      end
-    end
-end")
-          js (js-gen/translate-ast ast {:skip-contracts true})
-          method-js (js-method-section js "demo")]
-      (is (re-find #"try \{" method-js))
-      (is (re-find #"catch \(_nex_e\)" method-js))
-      (is (not (re-find #"throw _nex_e;" method-js)))
-      (is (not (re-find #"while \(true\)" method-js))))))

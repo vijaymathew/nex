@@ -9,7 +9,7 @@ Bash script that provides the full Nex CLI using the JVM/Clojure runtime.
 
 **Features:**
 - REPL
-- Compile to standalone JVM jar / JavaScript
+- Compile to standalone JVM jar
 - Format Nex files
 - Generate documentation
 - Evaluate code snippets
@@ -22,21 +22,6 @@ Bash script that provides the full Nex CLI using the JVM/Clojure runtime.
 ./nex format file.nex
 ./nex doc file.nex output.md
 ./nex eval 'print("Hello")'
-```
-
-### `nex-node.js` (Node.js version)
-Node.js script that provides limited Nex functionality using the ClojureScript runtime.
-
-**Limitations:**
-- Cannot parse Nex source (requires JVM)
-- Cannot compile (requires JVM)
-- Cannot format (requires JVM)
-- Cannot generate docs (requires JVM)
-- Can only execute pre-parsed AST
-
-**Usage:**
-```bash
-./nex-node.js help
 ```
 
 ## Running Without Installation
@@ -57,7 +42,7 @@ Or use the helper scripts in the project root:
 
 ## After Installation
 
-After running `./install.sh`, the appropriate executable will be installed to `/usr/local/bin/nex` (or your custom prefix).
+After running `./install.sh`, the `nex` executable will be installed to `/usr/local/bin/nex` (or your custom prefix).
 
 You can then run:
 

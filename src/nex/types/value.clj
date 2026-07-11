@@ -33,7 +33,7 @@
     (string? value)
     (str \" value \")
 
-    #?(:clj (ratio? value) :cljs false)
+    (ratio? value)
     (str (double value))
 
     ;; Nex Integer (a BigInt on JS, which `number?` does not recognize). `str`
@@ -45,10 +45,7 @@
     ;; stringifies as "9", but the JVM renders the double as "9.0" — match it so
     ;; the two backends print identically.
     (number? value)
-    #?(:clj (str value)
-       :cljs (if (and (js/Number.isFinite value) (js/Number.isInteger value))
-               (str value ".0")
-               (str value)))
+    (str value)
 
     (boolean? value)
     (str value)
@@ -83,7 +80,7 @@
                  (:closure-env value))
 
     (rt/nex-array? value)
-    (rt/nex-array-from (map (partial nex-clone-value nex-object? make-object) #?(:clj value :cljs (array-seq value))))
+    (rt/nex-array-from (map (partial nex-clone-value nex-object? make-object) value))
 
     (rt/nex-map? value)
     (let [pairs (map (fn [[k v]] [(nex-clone-value nex-object? make-object k)
@@ -127,8 +124,8 @@
     (and (rt/nex-array? a) (rt/nex-array? b))
     (and (= (rt/nex-array-size a) (rt/nex-array-size b))
          (every? true? (map (partial nex-deep-equals? nex-object?)
-                            #?(:clj a :cljs (array-seq a))
-                            #?(:clj b :cljs (array-seq b)))))
+                            a
+                            b)))
 
     (and (rt/nex-map? a) (rt/nex-map? b))
     (and (= (rt/nex-map-size a) (rt/nex-map-size b))
