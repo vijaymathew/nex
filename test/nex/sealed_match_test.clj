@@ -184,3 +184,64 @@ end
   (testing "a sealed deferred class is accepted"
     (let [result (typecheck result-hierarchy)]
       (is (:success result)))))
+
+(deftest recursive-self-call-in-method-invoked-on-complex-target
+  (testing "a bare recursive self-call inside a method must terminate even when the
+            enclosing method was invoked on a non-variable target (e.g. `ok.value.m()`).
+            The self-call routes through `:current-target`, which is nil for a
+            non-variable target; the interpreter must then dispatch on the current
+            object rather than rewriting with a nil target, which used to recurse
+            forever (StackOverflowError in nex-object?/eval-node)."
+    (let [src "
+union Term
+  Var(name: String)
+  Const(val: String)
+end
+
+union Result
+  Ok(value: Substitution)
+  Err(msg: String)
+end
+
+class Substitution
+  feature bindings: Map[String, Term]
+  create make() do
+    bindings := create Map[String, Term]
+  end
+  feature bind(k: String, t: Term): Substitution do
+    bindings.put(k, t)
+    result := this
+  end
+  feature resolve(t: Term): Term do
+    match t of
+      when Var as v then
+        if bindings.contains_key(v.name) then
+          result := resolve(bindings.get(v.name))
+        else
+          result := t
+        end
+      when Const as c then
+        result := t
+    end
+  end
+end
+
+function go(): Result do
+  let s: Substitution := create Substitution.make()
+  s.bind(\"W\", create Const.make(\"done\"))
+  result := create Ok.make(s)
+end
+
+match go() of
+  when Ok as ok then
+    match ok.value.resolve(create Var.make(\"W\")) of
+      when Const as c then
+        print(\"const \" + c.val)
+      else
+        print(\"other\")
+    end
+  when Err as e then
+    print(\"err \" + e.msg)
+end
+"]
+      (is (= ["\"const done\""] (parse-and-run src))))))

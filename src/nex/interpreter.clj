@@ -1917,18 +1917,30 @@
                                         (:fields current-obj)
                                         all-fields)
                   updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
-                  _ (when-let [target-name (:current-target ctx)]
-                      (env-set! (-> ctx :current-env :parent) target-name updated-obj))
-                  result (eval-node ctx {:type :call
-                                         :target (:current-target ctx)
-                                         :method method
-                                         :args args})
-                  called-obj (when-let [target-name (:current-target ctx)]
-                               (env-lookup (-> ctx :current-env :parent) target-name))
-                  _ (when called-obj
-                      (doseq [[field-name field-val] (:fields called-obj)]
-                        (env-set! current-env (name field-name) field-val)))]
-              result)
+                  target-name (:current-target ctx)]
+              (if (string? target-name)
+                ;; The enclosing method was invoked on a plain variable, so route
+                ;; the self-call back through that variable to propagate any
+                ;; field mutations to the caller.
+                (let [_ (env-set! (-> ctx :current-env :parent) target-name updated-obj)
+                      result (eval-node ctx {:type :call
+                                             :target target-name
+                                             :method method
+                                             :args args})
+                      called-obj (env-lookup (-> ctx :current-env :parent) target-name)
+                      _ (when called-obj
+                          (doseq [[field-name field-val] (:fields called-obj)]
+                            (env-set! current-env (name field-name) field-val)))]
+                  result)
+                ;; The enclosing method was invoked on a non-variable target
+                ;; (e.g. `a.b.m()`), so there is no caller variable to route
+                ;; through. Dispatch straight to the current object; rewriting
+                ;; with a nil target would re-enter this branch forever
+                ;; (StackOverflow).
+                (eval-node ctx {:type :call
+                                :target {:type :literal :value updated-obj}
+                                :method method
+                                :args args})))
                 (if-let [builtin (get builtins method)]
                   (apply builtin ctx arg-values)
                   (throw (ex-info (str "Undefined method: " method)
@@ -2347,9 +2359,14 @@
                                                                   0
                                                                   current-class-name)]
                 (if method-lookup
-                  ;; It's a method - invoke it (implicit this)
+                  ;; It's a method - invoke it (implicit this). Route through the
+                  ;; caller variable when the enclosing method was invoked on one;
+                  ;; otherwise dispatch straight to the current object (a nil
+                  ;; target would re-enter this branch forever -- StackOverflow).
                   (eval-node ctx {:type :call
-                                  :target (:current-target ctx)
+                                  :target (if (string? (:current-target ctx))
+                                            (:current-target ctx)
+                                            {:type :literal :value current-obj})
                                   :method name
                                   :args []})
                   (throw (ex-info (str "Undefined variable: " name)
