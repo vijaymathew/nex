@@ -160,6 +160,31 @@ let str_box: Box [String] := create Box.make("hello")
 str_box.print_value   -- Prints: hello
 ```
 
+### Sum Types and Pattern Matching
+
+```nex
+declare type Quantity = Integer where n: n > 0   -- a refinement type
+
+union Shape
+  Circle(radius: Real)
+  Rectangle(width: Real, height: Real)
+  Empty
+end
+
+function area(s: Shape): Real do
+  match s of
+    when Circle(radius)           then result := 3.14159 * radius * radius
+    when Rectangle(width, height) then result := width * height
+    when Empty                    then result := 0.0
+  end
+end
+
+let q: Quantity := 3                            -- checked at the boundary: 3 > 0
+print(area(create Rectangle.make(2.0, 5.0)))    -- 10.0
+```
+
+A `union` declares a closed set of variants; `match` dispatches over them, and the compiler checks that every case is handled. Patterns destructure a variant's fields by name, may rename or ignore them, and may carry an `if` guard. A refinement type (`declare type … where`) narrows a base type by a predicate, checked wherever a value is narrowed in — a positive `Quantity` without the ceremony of a class. For success-or-failure and presence-or-absence values, the standard library ships `Result` and `Option` (`intern data/Result`, `intern data/Option`).
+
 ---
 
 ## Code Generation
@@ -360,6 +385,8 @@ clojure examples/demo_skip_contracts.clj
 
 - **Scalar types:** `Integer`, `Integer64`, `Real`, `Decimal`, `Char`, `String`, `Boolean`
 - **Generic types:** Parameterized classes with optional constraints — `List [G]`, `Map [K -> Hashable, V]`
+- **Sum types:** `union` declares a closed set of data variants; a `match` over one is checked for exhaustiveness. The standard library ships `Result` and `Option` on top of this.
+- **Refinement types:** `declare type Quantity = Integer where n: n > 0` narrows a base type by a predicate, checked at the boundary and erased to the base representation.
 - **Nil-safety:** Types are non-nullable by default. Detachable references use `?T` and require nil-guards before feature access.
 - **Uniform access:** Fields and parameterless methods share the same call syntax — `obj.field` and `obj.method` are indistinguishable to the caller.
 
@@ -373,6 +400,7 @@ clojure examples/demo_skip_contracts.clj
 
 - Conditionals: `if ... then ... elseif ... then ... else ... end`
 - Loops: `from ... invariant ... variant ... until ... do ... end`
+- Pattern matching: `match ... of when ... then ... end`, with field destructuring and `if` guards; `case` for literal-value dispatch
 - Scoped blocks: `do ... end` with lexical scoping and variable shadowing
 - Exceptions: `raise`, `rescue`, `retry`
 

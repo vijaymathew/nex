@@ -1,7 +1,49 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-07-11
 
+- **New: `union` declarations** — a concise syntax for sum types. `union Name`
+  followed by a list of named variants (`Placed(id: String, total: Real)`, or a
+  bare name for a payload-free variant) declares a closed family of data
+  variants. It desugars to the existing `sealed deferred class` parent plus one
+  inheriting class per variant with an auto-generated `make` constructor, so
+  construction, generics, `match`, and exhaustiveness checking are unchanged. A
+  `union` declares data only; a variant needing methods, invariants, or a
+  constructor contract stays in the explicit sealed-class form. `union` is a
+  soft keyword (it remains usable as a member name such as `Set.union`).
+- **New: refinement types** — `declare type Quantity = Integer where n: n > 0`
+  narrows a base type by a predicate. A refinement is not a class: it is erased
+  to the base representation (a `Quantity` *is* an `Integer`, usable in any
+  arithmetic), and the predicate is checked only where a base value is narrowed
+  in — a typed `let`, a parameter, a return, or a `convert`. Widening is free,
+  operations on refinements yield the base type, and the checks are elided under
+  `skip-contracts` like every other contract. `where` is a soft keyword.
+- **New: richer pattern matching** — a `match` clause can now destructure a
+  variant's fields by name (`when Placed(id, total)`), rename a field
+  (`when Shipped(tracking: t)`), ignore one (`_`), require a literal field
+  value, match nested patterns, and carry an `if` guard evaluated after the
+  structural match. Guarded, literal, and nested clauses do not count toward
+  exhaustiveness, so a variant covered only by such a clause still needs an
+  unguarded clause, a wildcard, or `else`. Destructuring is pure walker sugar;
+  guards, literals, and nesting run on the JVM and interpreter backends.
+- **New: standard `Result` and `Option`** — `intern data/Result` and
+  `intern data/Option` ship `Result[T, E]` (`Ok` / `Err`, with independent
+  value and error types so errors thread up without rewrapping) and `Option[T]`
+  (`Some` / `None`). Query and unwrap are methods (`is_ok`/`is_err`/`unwrap_or`,
+  `is_some`/`is_none`/`get_or`); the transforming combinators are free functions
+  (`result_map`/`result_and_then`/`result_map_err`,
+  `option_map`/`option_and_then`/`option_filter`). Three enabling changes made
+  this possible: `intern` now exports a library's free functions (not only its
+  classes) to the typechecker and compiled backend; `match` dispatches on a
+  generic sealed class's base name at runtime; and an exhaustive `match` with no
+  `else` now satisfies definite assignment (a combinator whose whole body is
+  such a match no longer needs a dummy default).
+- Fixed a compiled-backend lowering failure ("Unable to infer expression type
+  during lowering") on a nested `match` whose inner subject is a method call on
+  a value of a generic type parameter (e.g. `ok.value.resolve(…)`); the program
+  type-checked but could not be lowered, though it ran under `--interpret`.
+- Fixed a `StackOverflowError` in the interpreter (`nex.types.builtins/nex-object?`)
+  triggered by the same nested-match-over-a-recursive-method construct.
 - **Breaking:** the **JavaScript backend has been removed**, leaving a single
   JVM implementation. The Nex→JavaScript generator (`nex.generator.javascript`),
   the ClojureScript/Node interpreter runtime (shadow-cljs, `package.json`,

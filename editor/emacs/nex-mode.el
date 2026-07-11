@@ -4,7 +4,7 @@
 
 ;; Author: Nex Contributors
 ;; Keywords: languages, nex, design-by-contract
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "24.3"))
 ;; URL: https://github.com/vijaymathew/nex
 
@@ -127,7 +127,8 @@
     "let" "as" "and" "or" "not" "fn" "deferred" "convert" "to"
     "old" "create" "private" "note" "with" "import" "intern" "function"
     "raise" "rescue" "retry" "repeat" "across" "case" "of"
-    "spawn" "select" "timeout" "declare" "sealed" "once" "match" "type")
+    "spawn" "select" "timeout" "declare" "sealed" "once" "match" "type"
+    "union" "where")
   "Nex language keywords.")
 
 (defconst nex-types
@@ -169,6 +170,9 @@
     ;; Class names (after "class" keyword)
     ("\\<class\\s-+\\([A-Z][a-zA-Z0-9_]*\\)" 1 font-lock-type-face)
 
+    ;; Union type names (after "union" keyword)
+    ("\\<union\\s-+\\([A-Z][a-zA-Z0-9_]*\\)" 1 font-lock-type-face)
+
     ;; Method/function definitions
     ("\\<\\([a-z_][a-z0-9_]*\\)\\s-*(" 1 font-lock-function-name-face)
 
@@ -199,7 +203,7 @@
   "Regexp matching a Nex method/feature declaration line (name, optional args, optional return type).")
 
 (defconst nex-section-keyword-re
-  (regexp-opt '("class" "feature" "create" "inherit" "invariant"
+  (regexp-opt '("class" "union" "feature" "create" "inherit" "invariant"
                 "do" "end" "require" "ensure" "rescue" "from" "until"
                 "if" "then" "else" "elseif" "when" "select" "timeout"
                 "repeat" "across" "case" "of" "deferred" "sealed" "once"
@@ -298,22 +302,27 @@ are correctly ignored."
   "Return t if the previous line should increase indentation."
   (save-excursion
     (forward-line -1)
-    (end-of-line)
-    (skip-chars-backward " \t")
-    (or
-     ;; Keywords that start indented blocks
-     (looking-back
-      (regexp-opt '("class" "do" "then" "else" "elseif" "require" "ensure"
-                    "from" "until" "inherit" "invariant" "variant"
-                    "rescue" "of" "select" "when" "timeout")
-                  'words)
-      (line-beginning-position))
+    ;; A 'union' declaration opener indents its variant list one level, the way
+    ;; 'feature' indents a class body.  The line ends with the union's name
+    ;; rather than a keyword, so it is matched at the start of the line.
+    (if (save-excursion (beginning-of-line) (looking-at "[ \t]*union\\b"))
+        t
+      (end-of-line)
+      (skip-chars-backward " \t")
+      (or
+       ;; Keywords that start indented blocks
+       (looking-back
+        (regexp-opt '("class" "do" "then" "else" "elseif" "require" "ensure"
+                      "from" "until" "inherit" "invariant" "variant"
+                      "rescue" "of" "select" "when" "timeout")
+                    'words)
+        (line-beginning-position))
      ;; Section keywords that contain items (feature, create)
      (looking-back
       (regexp-opt '("feature" "create") 'words)
       (line-beginning-position))
      ;; Handle "private feature" specially
-     (looking-back "\\bprivate\\s-+feature\\b" (line-beginning-position)))))
+     (looking-back "\\bprivate\\s-+feature\\b" (line-beginning-position))))))
 
 (defun nex-in-contract-block-p ()
   "Return t if point is in a contract block (after require/ensure)."
