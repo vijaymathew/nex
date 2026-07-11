@@ -708,3 +708,55 @@ print(m().v)")
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-method-call-on-generic-type-param-field-as-nested-match-scrutinee-test
+  (testing "a method call on a generic type-parameter field (`s.value` where
+            `Some[T].value: T`) used as a nested-match scrutinee must lower and run.
+            The match binding `Some as s` has to carry the subject `Wrap[Box]`'s
+            type argument onto `s` so `s.value` resolves to `Box` (not the erased
+            `T`); otherwise the compiled backend fails lowering with 'Unable to
+            infer expression type'. Regression guard for that fix -- the whole-
+            program path throws on lowering failure rather than deoptimizing, so a
+            clean run here proves the program lowered."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-generic-nested-match")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "union Color
+  Red
+  Blue(shade: String)
+end
+
+class Box
+  create make() do end
+  feature pick(): Color do
+    result := create Blue.make(\"navy\")
+  end
+end
+
+union Wrap[T]
+  Some(value: T)
+  None
+end
+
+let w: Wrap[Box] := create Some[Box].make(create Box.make())
+match w of
+  when Some as s then
+    match s.value.pick() of
+      when Blue as b then
+        print(\"blue \" + b.shade)
+      else
+        print(\"other\")
+    end
+  when None then
+    print(\"none\")
+end")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))]
+          (is (= 0 exit) err)
+          ;; `print` of a String renders it quoted, matching --interpret.
+          (is (= "\"blue navy\"" (str/trim out))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
