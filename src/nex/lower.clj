@@ -1120,6 +1120,19 @@
        [(ir/if-stmt-node test-expr then-body else-body)]])
     (lower-scoped-statements env else-stmts)))
 
+(defn- match-clause-binding-type
+  "Compute a match clause's binding type, carrying the subject's generic
+  arguments onto the bound variable (so `s.value` resolves with the real
+  element type). Mirrors the typechecker so the compiled backend agrees with
+  --interpret; an explicit `when C[...]` on the clause wins over inference."
+  [env subject-type class-name generic-args]
+  (if (seq generic-args)
+    {:base-type class-name :type-args generic-args}
+    (let [type-env (tc/make-type-env)]
+      (doseq [[cn cd] (visible-class-map env)]
+        (tc/env-add-class type-env cn cd))
+      (tc/match-clause-binding-type type-env subject-type class-name))))
+
 (defn- lower-match-clauses
   "Lower match clauses as a chain of convert-based instanceof checks. Destructure
   `:bindings` run in the matched scope; a `:guard`, when present, is tested after
@@ -1128,9 +1141,8 @@
   (if-let [clause (first clauses)]
     (let [{:keys [class-name var-name body generic-args bindings guard]} clause
           bindings (vec (or bindings []))
-          target-type (if generic-args
-                        {:base-type class-name :type-args generic-args}
-                        class-name)
+          subject-type (infer-type env {:type :identifier :name match-tmp-name})
+          target-type (match-clause-binding-type env subject-type class-name generic-args)
           synthetic-convert {:type :convert
                              :value {:type :identifier :name match-tmp-name}
                              :var-name var-name

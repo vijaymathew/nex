@@ -3004,7 +3004,7 @@
        (map :name)
        set))
 
-(defn- match-clause-binding-type
+(defn match-clause-binding-type
   "Reconstruct a match clause's type with generic arguments carried over from the
   matched subject. Given subject `Parent[A…]` and clause class `C` declared
   `C[G…] inherit Parent[P…]`, map each `Gᵢ` to the subject arg at the position
