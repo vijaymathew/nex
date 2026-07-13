@@ -92,6 +92,18 @@ code.
    more natural. (See also the interpreter object value-semantics divergence
    already tracked in the spec-conformance notes.)
 
+9. **User classes cannot participate in arithmetic operators.** The book's
+   `Money` is assumed to support `+ - = < <= > >=`. Comparisons are achievable
+   today (implement `Comparable`'s `compare`), and `=` dispatches to a user
+   `equals` — but `check-binary-op` restricts `+`/`-`/`*`/`/` to numeric (or
+   String for `+`) operands, so `balance - amount` on a real `Money` class is a
+   compile-time type error. This makes Ch 2's `Account`/`sum_totals`, Ch 12's
+   `Price_Range` construction sites, and Appendix B's `sum_of` unimplementable
+   as written against any actual `Money` class. **Proposal:** an `Addable`-style
+   protocol mirroring `Comparable` (e.g. `plus`/`minus` backing `+`/`-`), or
+   restrict the book's `Money` to method calls (much noisier). Found 2026-07-13
+   while verifying the book's examples against the current implementation.
+
 ---
 
 ## B. Gap sidebars removed from the chapters (relocated here)
@@ -135,3 +147,18 @@ advertise language gaps. Each is a candidate library or language feature.
 - **Ch 1 — device removed.** The book originally framed these as a recurring "Nex
   Note" sidebar recording what the book stretched. That framing is gone from the
   reader-facing text; this file is its replacement.
+
+---
+
+## C. Implementation bugs exposed by the book's code (2026-07-13 audit)
+
+- **FIXED (2026-07-13, verified against the installed `nex`): a non-generic
+  class inheriting an instantiated generic was not assignable to the parent
+  type.** `class Over_Amount inherit Spec[Draft]` typechecked as a declaration,
+  but `let s: Spec[Draft] := create Over_Amount.make(m)` — and equivalently
+  passing it to a `Spec[Draft]` parameter — failed with
+  `Cannot assign Over_Amount to variable 's' of type Spec[Draft]` (the
+  generic-subclass shape `class Over[T] inherit Spec[T]` always worked). Both
+  shapes now typecheck and run. With this fix the book's Ch 7 primitives
+  (`Over_Amount`/`Domestic` : `Spec[Placed]`), Ch 10's `When` condition
+  argument, and Appendix B's rule assembly are valid as written.

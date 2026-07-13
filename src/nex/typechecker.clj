@@ -579,6 +579,64 @@
                     false)))]
           (sub? sub #{}))))))
 
+(declare types-compatible?)
+
+(defn- substitute-type-params
+  "Replace generic parameter names in `t` using `subst` (param name -> type)."
+  [t subst]
+  (let [t (normalize-type t)]
+    (cond
+      (string? t) (get subst t t)
+      (and (map? t) (:type-params t))
+      (assoc t :type-params (mapv #(substitute-type-params % subst) (:type-params t)))
+      :else t)))
+
+(defn- ancestor-instantiation
+  "Walk `sub`'s inheritance chain looking for `super-name`, substituting generic
+   arguments through each `inherit` clause. Returns the type arguments `sub`
+   supplies to `super-name` (a vector, possibly empty), or nil when `super-name`
+   is not an ancestor.
+
+   This is what lets a non-generic heir of an instantiated generic conform to its
+   parent: `class Over_Amount inherit Spec[Draft]` carries no arguments of its
+   own, yet instantiates `Spec` at `[Draft]`. It equally handles arguments that
+   are threaded (`C[T] inherit P[T]`), reordered, or nested (`C[T] inherit
+   P[Array[T]]`)."
+  [env sub-name sub-args super-name seen]
+  (cond
+    (= sub-name super-name) (vec sub-args)
+    (contains? seen sub-name) nil
+    :else
+    (when-let [class-def (env-lookup-class env sub-name)]
+      (let [gparams (map #(type-name-string (:name %)) (:generic-params class-def))
+            subst (zipmap gparams sub-args)
+            seen (conj seen sub-name)]
+        (some (fn [{:keys [parent generic-args]}]
+                (ancestor-instantiation
+                 env parent
+                 (mapv #(substitute-type-params % subst) generic-args)
+                 super-name seen))
+              (:parents class-def))))))
+
+(defn- generic-class-conforms?
+  "Does class type `a1` conform to the parameterized class type `a2`, given the
+   generic arguments `a1` supplies to `a2`'s base class along its inheritance
+   chain? `a1` may be a bare class name (a non-generic heir) or parameterized."
+  [env a1 a2]
+  (let [b1 (if (map? a1) (:base-type a1) a1)
+        args1 (if (map? a1) (vec (:type-params a1)) [])
+        b2 (:base-type a2)
+        args2 (vec (:type-params a2))]
+    (boolean
+     (when (and (string? b1) (string? b2) (seq args2)
+                (not= b1 "Function") (not= b2 "Function"))
+       (when-let [inst (ancestor-instantiation env b1 args1 b2 #{})]
+         (and (= (count inst) (count args2))
+              (every? true? (map (fn [p1 p2]
+                                   (or (= p1 "Any") (= p2 "Any")
+                                       (types-compatible? env p1 p2)))
+                                 inst args2))))))))
+
 (defn types-compatible?
   "Check if two types are compatible (including inheritance)."
   [env type1 type2]
@@ -641,18 +699,21 @@
                    (types-compatible? env (:return-type a1) (:return-type a2))))
           (and (string? a1) (string? a2) (class-subtype? env a1 a2))
           (and (map? a1) (string? a2) (class-subtype? env (:base-type a1) a2))
-          ;; Generic class conformance. Function types are excluded here: their
+          ;; Conformance to a parameterized target through an instantiated
+          ;; generic parent. A non-generic heir (`class Over_Amount inherit
+          ;; Spec[Draft]`) has a bare class name as its type but still conforms
+          ;; to `Spec[Draft]`, so the source may be a string here; the arguments
+          ;; come from the inherit clause rather than from the source type.
+          (and (map? a2) (or (string? a1) (map? a1))
+               (generic-class-conforms? env a1 a2))
+          ;; Same-base-type conformance. Function types are excluded here: their
           ;; conformance is decided solely by the function-signature branch above
           ;; (contravariant params, covariant return), so two distinct function
           ;; signatures are NOT silently accepted as a no-type-params class match.
-          (and (map? a1) (map? a2)
-               (not= (:base-type a1) "Function") (not= (:base-type a2) "Function")
-               (class-subtype? env (:base-type a1) (:base-type a2))
-               (= (count (:type-params a1)) (count (:type-params a2)))
-               (every? true? (map (fn [p1 p2]
-                                    (or (= p1 "Any") (= p2 "Any")
-                                        (types-compatible? env p1 p2)))
-                                  (:type-params a1) (:type-params a2))))
+          ;; Inheritance between *different* base types is handled by the
+          ;; generic-class-conforms? branch above, which resolves the heir's
+          ;; arguments through its inherit clause instead of assuming they line up
+          ;; positionally with the parent's.
           (and (map? a1) (map? a2)
                (not= (:base-type a1) "Function") (not= (:base-type a2) "Function")
                (= (:base-type a1) (:base-type a2))
