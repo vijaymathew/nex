@@ -225,6 +225,193 @@ print(box.changes())"
       (is (:success typecheck-result))
       (is (= ["7" "11" "2"] output)))))
 
+(def ^:private instantiated-generic-parent-prelude
+  "class Draft
+  create
+    make() do
+    end
+end
+
+class Final
+  create
+    make() do
+    end
+end
+
+class Spec [T]
+  create
+    make() do
+    end
+  feature
+    item: T
+    get_item(): T do
+      result := item
+    end
+    describe(): String do
+      result := \"spec\"
+    end
+end
+
+class Pair [A, B]
+  create
+    make() do
+    end
+  feature
+    first: A
+    get_first(): A do
+      result := first
+    end
+end
+
+-- Non-generic heir of an instantiated generic: carries no type arguments of its
+-- own, but still conforms to Spec[Draft].
+class Over_Amount inherit Spec[Draft]
+  create
+    make() do
+      Spec.make()
+    end
+  feature
+    describe(): String do
+      result := \"over amount\"
+    end
+end
+
+class Runner
+  feature
+    use(s: Spec[Draft]): String do
+      result := s.describe()
+    end
+    use_final(s: Spec[Final]): String do
+      result := s.describe()
+    end
+    use_pair(p: Pair[Draft, Final]): String do
+      result := \"pair\"
+    end
+end
+")
+
+(deftest non-generic-heir-of-instantiated-generic-test
+  (testing "A non-generic class inheriting Spec[Draft] is assignable to Spec[Draft]"
+    (let [code (str instantiated-generic-parent-prelude
+                    "let r: Runner := create Runner
+let a: Over_Amount := create Over_Amount.make()
+print(r.use(a))")
+          ast (p/ast code)
+          typecheck-result (tc/type-check ast)
+          ctx (interp/interpret ast)]
+      (is (:success typecheck-result))
+      ;; and the override dispatches through the Spec[Draft] parameter
+      (is (= ["\"over amount\""] @(:output ctx))))))
+
+(deftest non-generic-heir-conforms-transitively-test
+  (testing "An indirect non-generic heir still conforms to the instantiated parent"
+    (let [code (str instantiated-generic-parent-prelude
+                    "class Deep inherit Over_Amount
+  create
+    make() do
+      Over_Amount.make()
+    end
+end
+
+let r: Runner := create Runner
+let d: Deep := create Deep.make()
+print(r.use(d))")]
+      (is (:success (tc/type-check (p/ast code)))))))
+
+(deftest non-generic-heir-rejects-wrong-type-argument-test
+  (testing "A heir of Spec[Draft] does NOT conform to Spec[Final]"
+    (let [code (str instantiated-generic-parent-prelude
+                    "let r: Runner := create Runner
+let a: Over_Amount := create Over_Amount.make()
+print(r.use_final(a))")
+          result (tc/type-check (p/ast code))]
+      (is (not (:success result)))
+      (is (seq (:errors result))))))
+
+(deftest generic-heir-resolves-reordered-parent-arguments-test
+  (testing "Type arguments are resolved through the inherit clause, not positionally"
+    (let [code "class Swapped [X, Y] inherit Pair[Y, X]
+  create
+    make() do
+      Pair.make()
+    end
+end
+"]
+      ;; Swapped[Final, Draft] IS a Pair[Draft, Final]
+      (is (:success (tc/type-check
+                     (p/ast (str instantiated-generic-parent-prelude code
+                                 "let r: Runner := create Runner
+let s: Swapped[Final, Draft] := create Swapped[Final, Draft].make()
+print(r.use_pair(s))")))))
+      ;; ...and Swapped[Draft, Final] is a Pair[Final, Draft], so it is not.
+      (is (not (:success (tc/type-check
+                          (p/ast (str instantiated-generic-parent-prelude code
+                                      "let r: Runner := create Runner
+let s: Swapped[Draft, Final] := create Swapped[Draft, Final].make()
+print(r.use_pair(s))")))))))))
+
+(def ^:private swapped-heir
+  "class Swapped [X, Y] inherit Pair[Y, X]
+  create
+    make() do
+      Pair.make()
+    end
+end
+")
+
+(deftest inherited-generic-member-resolves-through-inherit-clause-test
+  (testing "An inherited member's type is resolved in its declaring class's parameters"
+    ;; Over_Amount inherit Spec[Draft], so the inherited get_item(): T is a Draft.
+    (is (:success (tc/type-check
+                   (p/ast (str instantiated-generic-parent-prelude
+                               "let a: Over_Amount := create Over_Amount.make()
+let d: Draft := a.get_item()")))))
+    ;; Swapped[Final, Draft] IS a Pair[Draft, Final], so the inherited first: A
+    ;; and get_first(): A are Drafts — not Finals — even though the heir renames
+    ;; and reorders its parent's parameters.
+    (is (:success (tc/type-check
+                   (p/ast (str instantiated-generic-parent-prelude swapped-heir
+                               "let s: Swapped[Final, Draft] := create Swapped[Final, Draft].make()
+let d: Draft := s.get_first()
+let e: Draft := s.first")))))))
+
+(deftest inherited-generic-member-rejects-wrong-type-test
+  (testing "An inherited member's type is not a wildcard: the wrong type is rejected"
+    ;; Before the inherit clause was resolved, these member types stayed as the
+    ;; parent's raw parameter name (T / A), which conformed to anything.
+    (is (not (:success (tc/type-check
+                        (p/ast (str instantiated-generic-parent-prelude
+                                    "let a: Over_Amount := create Over_Amount.make()
+let f: Final := a.get_item()"))))))
+    (is (not (:success (tc/type-check
+                        (p/ast (str instantiated-generic-parent-prelude swapped-heir
+                                    "let s: Swapped[Final, Draft] := create Swapped[Final, Draft].make()
+let f: Final := s.get_first()"))))))
+    (is (not (:success (tc/type-check
+                        (p/ast (str instantiated-generic-parent-prelude swapped-heir
+                                    "let s: Swapped[Final, Draft] := create Swapped[Final, Draft].make()
+let f: Final := s.first"))))))))
+
+(deftest inherited-generic-field-resolves-inside-heir-test
+  (testing "Inside the heir, an inherited generic field binds to the supplied argument"
+    (let [heir "class Fixed inherit Pair[Draft, Final]
+  create
+    make() do
+      Pair.make()
+    end
+  feature
+    peek(): Draft do
+      result := first
+    end
+end
+"]
+      (is (:success (tc/type-check
+                     (p/ast (str instantiated-generic-parent-prelude heir)))))
+      ;; ...and it is a Draft, not a Final.
+      (is (not (:success (tc/type-check
+                          (p/ast (str instantiated-generic-parent-prelude
+                                      (str/replace heir "peek(): Draft" "peek(): Final"))))))))))
+
 (deftest create-generic-without-constructor-test
   (testing "Create generic class without constructor"
     (let [code "class Holder [T]

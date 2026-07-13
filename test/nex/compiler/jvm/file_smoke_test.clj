@@ -760,3 +760,78 @@ end")
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-inherited-generic-members-through-inherit-clause-test
+  (testing "members inherited through a renamed/reordered/instantiated inherit clause compile and link"
+    ;; An inherited member's types are declared in the *parent's* generic
+    ;; parameters. Resolving them against the heir's own parameters left the
+    ;; parent's `A` unbound, and it was emitted as a phantom class named "A", so
+    ;; the program failed to link (NoClassDefFoundError) at run time.
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-generic-inherit")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "class Draft
+create
+  make() do end
+feature
+  label(): String do
+    result := \"draft\"
+  end
+end
+
+class Note
+create
+  make() do end
+end
+
+class Pair [A, B]
+create
+  make(a: A, b: B) do
+    first := a
+    second := b
+  end
+feature
+  first: A
+  second: B
+
+  get_first(): A do
+    result := first
+  end
+end
+
+-- renames AND reorders its parent's parameters: Swapped[X, Y] IS a Pair[Y, X]
+class Swapped [X, Y] inherit Pair[Y, X]
+create
+  make(y: Y, x: X) do
+    Pair.make(y, x)
+  end
+end
+
+-- non-generic heir: the parent's arguments are fixed in the inherit clause
+class Fixed inherit Pair[Draft, Note]
+create
+  make() do
+    Pair.make(create Draft.make(), create Note.make())
+  end
+feature
+  peek(): String do
+    let d: Draft := first
+    result := d.label()
+  end
+end
+
+let s: Swapped[Note, Draft] := create Swapped[Note, Draft].make(create Draft.make(), create Note.make())
+let d: Draft := s.get_first()
+print(d.label())
+
+let f: Fixed := create Fixed.make()
+print(f.peek())")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))]
+          (is (= 0 exit) err)
+          (is (= ["\"draft\"" "\"draft\""] (str/split-lines (str/trim out)))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))

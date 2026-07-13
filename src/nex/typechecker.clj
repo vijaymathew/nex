@@ -579,6 +579,64 @@
                     false)))]
           (sub? sub #{}))))))
 
+(declare types-compatible?)
+
+(defn- substitute-type-params
+  "Replace generic parameter names in `t` using `subst` (param name -> type)."
+  [t subst]
+  (let [t (normalize-type t)]
+    (cond
+      (string? t) (get subst t t)
+      (and (map? t) (:type-params t))
+      (assoc t :type-params (mapv #(substitute-type-params % subst) (:type-params t)))
+      :else t)))
+
+(defn- ancestor-instantiation
+  "Walk `sub`'s inheritance chain looking for `super-name`, substituting generic
+   arguments through each `inherit` clause. Returns the type arguments `sub`
+   supplies to `super-name` (a vector, possibly empty), or nil when `super-name`
+   is not an ancestor.
+
+   This is what lets a non-generic heir of an instantiated generic conform to its
+   parent: `class Over_Amount inherit Spec[Draft]` carries no arguments of its
+   own, yet instantiates `Spec` at `[Draft]`. It equally handles arguments that
+   are threaded (`C[T] inherit P[T]`), reordered, or nested (`C[T] inherit
+   P[Array[T]]`)."
+  [env sub-name sub-args super-name seen]
+  (cond
+    (= sub-name super-name) (vec sub-args)
+    (contains? seen sub-name) nil
+    :else
+    (when-let [class-def (env-lookup-class env sub-name)]
+      (let [gparams (map #(type-name-string (:name %)) (:generic-params class-def))
+            subst (zipmap gparams sub-args)
+            seen (conj seen sub-name)]
+        (some (fn [{:keys [parent generic-args]}]
+                (ancestor-instantiation
+                 env parent
+                 (mapv #(substitute-type-params % subst) generic-args)
+                 super-name seen))
+              (:parents class-def))))))
+
+(defn- generic-class-conforms?
+  "Does class type `a1` conform to the parameterized class type `a2`, given the
+   generic arguments `a1` supplies to `a2`'s base class along its inheritance
+   chain? `a1` may be a bare class name (a non-generic heir) or parameterized."
+  [env a1 a2]
+  (let [b1 (if (map? a1) (:base-type a1) a1)
+        args1 (if (map? a1) (vec (:type-params a1)) [])
+        b2 (:base-type a2)
+        args2 (vec (:type-params a2))]
+    (boolean
+     (when (and (string? b1) (string? b2) (seq args2)
+                (not= b1 "Function") (not= b2 "Function"))
+       (when-let [inst (ancestor-instantiation env b1 args1 b2 #{})]
+         (and (= (count inst) (count args2))
+              (every? true? (map (fn [p1 p2]
+                                   (or (= p1 "Any") (= p2 "Any")
+                                       (types-compatible? env p1 p2)))
+                                 inst args2))))))))
+
 (defn types-compatible?
   "Check if two types are compatible (including inheritance)."
   [env type1 type2]
@@ -641,18 +699,21 @@
                    (types-compatible? env (:return-type a1) (:return-type a2))))
           (and (string? a1) (string? a2) (class-subtype? env a1 a2))
           (and (map? a1) (string? a2) (class-subtype? env (:base-type a1) a2))
-          ;; Generic class conformance. Function types are excluded here: their
+          ;; Conformance to a parameterized target through an instantiated
+          ;; generic parent. A non-generic heir (`class Over_Amount inherit
+          ;; Spec[Draft]`) has a bare class name as its type but still conforms
+          ;; to `Spec[Draft]`, so the source may be a string here; the arguments
+          ;; come from the inherit clause rather than from the source type.
+          (and (map? a2) (or (string? a1) (map? a1))
+               (generic-class-conforms? env a1 a2))
+          ;; Same-base-type conformance. Function types are excluded here: their
           ;; conformance is decided solely by the function-signature branch above
           ;; (contravariant params, covariant return), so two distinct function
           ;; signatures are NOT silently accepted as a no-type-params class match.
-          (and (map? a1) (map? a2)
-               (not= (:base-type a1) "Function") (not= (:base-type a2) "Function")
-               (class-subtype? env (:base-type a1) (:base-type a2))
-               (= (count (:type-params a1)) (count (:type-params a2)))
-               (every? true? (map (fn [p1 p2]
-                                    (or (= p1 "Any") (= p2 "Any")
-                                        (types-compatible? env p1 p2)))
-                                  (:type-params a1) (:type-params a2))))
+          ;; Inheritance between *different* base types is handled by the
+          ;; generic-class-conforms? branch above, which resolves the heir's
+          ;; arguments through its inherit clause instead of assuming they line up
+          ;; positionally with the parent's.
           (and (map? a1) (map? a2)
                (not= (:base-type a1) "Function") (not= (:base-type a2) "Function")
                (= (:base-type a1) (:base-type a2))
@@ -868,7 +929,11 @@
                                            (or (nil? feature-member)
                                                (= caller-class-name cn)
                                                (public-member? feature-member)))
-                                  method-sig)]
+                                  ;; Record where the routine was declared: an
+                                  ;; inherited routine's signature is written in
+                                  ;; its declaring class's generic parameters, so
+                                  ;; callers need that class to resolve them.
+                                  (assoc method-sig :declaring-class cn))]
                  (or own-method
                      (when class-def
                        (some (fn [{:keys [parent]}]
@@ -1099,19 +1164,32 @@
   "Bind fields visible inside class-name into target-env.
    Own fields are always visible; inherited fields must be public."
   [target-env env class-name]
-  (letfn [(bind-fields [cn visited inherited?]
+  (letfn [(bind-fields [cn subst visited inherited?]
             (when (and cn (not (contains? visited cn)))
               (when-let [class-def (env-lookup-class env cn)]
                 (let [visited' (conj visited cn)]
-                  (doseq [{:keys [parent]} (:parents class-def)]
-                    (bind-fields parent visited' true))
+                  (doseq [{:keys [parent generic-args]} (:parents class-def)]
+                    ;; Restate the parent's generic parameters in this class's terms
+                    ;; before descending, so a field declared `first: A` in
+                    ;; `Pair[A, B]` binds as `Y` inside `C[X, Y] inherit Pair[Y, X]`
+                    ;; and as `Draft` inside `class C inherit Pair[Draft, Final]`.
+                    (let [parent-def (env-lookup-class env parent)
+                          parent-params (map #(type-name-string (:name %))
+                                             (:generic-params parent-def))
+                          parent-args (mapv #(substitute-type-params % subst)
+                                            (or generic-args []))]
+                      (bind-fields parent (zipmap parent-params parent-args)
+                                   visited' true)))
                   (doseq [member (feature-members class-def)]
                     (when (and (= (:type member) :field)
                                (not (:constant? member))
                                (or (not inherited?)
                                    (public-member? member)))
-                      (env-add-var target-env (:name member) (:field-type member))))))))]
-    (bind-fields class-name #{} false)))
+                      (env-add-var target-env (:name member)
+                                   (if (seq subst)
+                                     (substitute-type-params (:field-type member) subst)
+                                     (:field-type member)))))))))]
+    (bind-fields class-name {} #{} false)))
 
 (defn check-identifier
   "Check the type of an identifier"
@@ -1296,6 +1374,39 @@
                    [(:name param) (or arg "Any")])
                  generic-params
                  (concat type-args (repeat "Any")))))))
+
+(defn build-member-generic-type-map
+  "Build the type-map for resolving a member declared in `declaring-class`, as seen
+   through the receiver type `target-type`.
+
+   An inherited member's signature is written in *its declaring class's* generic
+   parameters, which need not line up with the heir's: `C[X, Y] inherit P[Y, X]`
+   renames and reorders them, and `class C inherit P[Draft]` supplies them outright
+   while having none of its own. Resolving the receiver's arguments along the
+   inherit chain binds the declaring class's parameters to whatever the heir
+   actually supplies. Falls back to the receiver's own map when the member is not
+   inherited, or when the chain cannot be resolved."
+  [env target-type declaring-class]
+  (let [base-name (cond
+                    (map? target-type) (:base-type target-type)
+                    (string? target-type) target-type
+                    :else nil)
+        type-args (when (map? target-type)
+                    (or (:type-args target-type) (:type-params target-type)))]
+    (or (when (and declaring-class base-name (not= declaring-class base-name))
+          (when-let [inst (ancestor-instantiation env base-name (vec type-args)
+                                                  declaring-class #{})]
+            (build-generic-type-map env {:base-type declaring-class
+                                         :type-args inst})))
+        (build-generic-type-map env target-type))))
+
+(defn- member-type-map
+  "The type-map to resolve `member`'s declared types against, given receiver type
+   `target-type`. Builtin signatures carry no declaring class and keep `fallback`."
+  [env target-type fallback member]
+  (if-let [declaring-class (:declaring-class member)]
+    (build-member-generic-type-map env target-type declaring-class)
+    fallback))
 
 (defn- merge-inferred-generic-bindings
   [env left right]
@@ -1738,7 +1849,9 @@
                                  (not= current-class base-type)
                                  (class-subtype? env current-class base-type)
                                  (lookup-class-method env base-type method 0 current-class))]
-          (check-call-signature env method [] method-sig type-map :arg-types [])
+          (check-call-signature env method [] method-sig
+                                (member-type-map env target-type type-map method-sig)
+                                :arg-types [])
           "Any"))
 
       (and (= base-type "Array") (= method "sort"))
@@ -1786,13 +1899,15 @@
         (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
                                 (builtin-method-signature "Any" method (count args) type-map)
                                 (lookup-class-method env base-type method (count args) current-class))]
-          (check-call-signature env method args method-sig type-map)
+          (check-call-signature env method args method-sig
+                                (member-type-map env target-type type-map method-sig))
           (let [arg-types (mapv #(check-expression env %) args)]
             (if-let [java-method-sig (reflected-java-method-signature env base-type method arg-types class-target)]
               (check-call-signature env method args java-method-sig {} :arg-types arg-types)
               (if (false? has-parens)
-                (if-let [field-type (lookup-class-field env base-type method current-class)]
-                  (resolve-generic-type field-type type-map)
+                (if-let [field-member (lookup-class-field-member env base-type method current-class)]
+                  (resolve-generic-type (:field-type field-member)
+                                        (member-type-map env target-type type-map field-member))
                   (if with-java?
                     "Any"
                     (if (and class-def (not (:import class-def)))

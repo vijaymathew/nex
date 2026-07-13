@@ -535,7 +535,6 @@
                                  (not java-static-owner))
                         (infer-type env target-expr))
           base-type (base-type-name target-type)
-          type-map (generic-type-map env target-type)
           class-def (or (when class-target-name
                           (get (visible-class-map env) class-target-name))
                         (get (visible-class-map env) base-type))
@@ -547,7 +546,11 @@
                        (if (= (:type target-expr) :this)
                          (or (class-method-def class-def (:method expr) (count (:args expr)))
                              (inherited-method-def env class-def (:method expr) (count (:args expr))))
-                         (accessible-method-def env class-def (:method expr) (count (:args expr)))))]
+                         (accessible-method-def env class-def (:method expr) (count (:args expr)))))
+          ;; Built once the member is known: an inherited member's types are stated
+          ;; in its declaring class's generic params, not the receiver's.
+          type-map (generic-type-map env target-type
+                                     (:declaring-class (or method-def field-def)))]
       (or
        (when across-item-type
          (case (:method expr)
@@ -1407,11 +1410,18 @@
          :target-type target-type}))))
 
 (defn- generic-type-map
-  [env target-type]
-  (let [type-env (tc/make-type-env)]
-    (doseq [[class-name class-def] (visible-class-map env)]
-      (tc/env-add-class type-env class-name class-def))
-    (tc/build-generic-type-map type-env target-type)))
+  "Type-map for resolving a member's declared types against receiver `target-type`.
+   When the member is inherited, `declaring-class` names the class that declared it;
+   its generic parameters are resolved through the inherit chain rather than assumed
+   to line up with the heir's."
+  ([env target-type] (generic-type-map env target-type nil))
+  ([env target-type declaring-class]
+   (let [type-env (tc/make-type-env)]
+     (doseq [[class-name class-def] (visible-class-map env)]
+       (tc/env-add-class type-env class-name class-def))
+     (if declaring-class
+       (tc/build-member-generic-type-map type-env target-type declaring-class)
+       (tc/build-generic-type-map type-env target-type)))))
 
 (defn- current-class-def
   [env]
@@ -1531,7 +1541,10 @@
                                                       (= (:name member) method-name)
                                                       (= (count (or (:params member) [])) arity)
                                                       (member-visible? env member cn))
-                                             member))
+                                             ;; Remember the declaring class: an
+                                             ;; inherited routine's types are
+                                             ;; written in *its* generic params.
+                                             (assoc member :declaring-class cn)))
                                          (feature-members class-def)))]
                   (or own-method
                       (when class-def
@@ -1565,10 +1578,24 @@
 
 (defn- direct-parent-field-map
   [env class-def]
-  (reduce (fn [m {:keys [parent]}]
+  (reduce (fn [m {:keys [parent generic-args]}]
             (if-let [parent-def (and (get (:compiled-classes env) parent)
                                      (get (visible-class-map env) parent))]
-              (let [composition-field (str "_parent_" parent)]
+              (let [composition-field (str "_parent_" parent)
+                    parent-params (mapv :name (:generic-params parent-def))
+                    ;; An inherited field is declared in the parent's generic
+                    ;; parameters, which need not match the heir's: restate it in
+                    ;; this class's terms, so `first: A` of `Pair[A, B]` is a `Y`
+                    ;; inside `C[X, Y] inherit Pair[Y, X]` and a `Draft` inside
+                    ;; `class C inherit Pair[Draft, Final]`.
+                    subst (zipmap parent-params (or generic-args []))
+                    ;; The JVM descriptor, though, stays the one the parent really
+                    ;; declares: inside `Pair` its own parameters are erased to
+                    ;; Object, and GETFIELD/PUTFIELD must name that descriptor to
+                    ;; link. Resolving with the parent's parameters in scope keeps
+                    ;; them erased instead of emitting a phantom class named `A`.
+                    parent-env (update env :generic-param-names
+                                       #(into (set %) parent-params))]
                 (reduce (fn [m2 field]
                           (if (or (:constant? field)
                                   (contains? m2 (:name field)))
@@ -1579,8 +1606,10 @@
                                     :field (:name field)
                                     :carrier-owner (:name class-def)
                                     :carrier-field composition-field
-                                    :nex-type (:field-type field)
-                                    :jvm-type (resolve-jvm-type env (:field-type field))
+                                    :nex-type (if (seq subst)
+                                                (tc/resolve-generic-type (:field-type field) subst)
+                                                (:field-type field))
+                                    :jvm-type (resolve-jvm-type parent-env (:field-type field))
                                     :carrier-jvm-type (exact-class-jvm-type env parent)})))
                         m
                         (class-fields parent-def)))
@@ -1597,7 +1626,8 @@
                         (let [parent-def (get class-map parent)
                               visited' (conj visited parent)]
                           (or (when parent-def
-                                (class-method-def parent-def method-name arity))
+                                (some-> (class-method-def parent-def method-name arity)
+                                        (assoc :declaring-class parent)))
                               (when parent-def
                                 (lookup-method (:parents parent-def) visited'))))))
                     parents))]
@@ -2414,7 +2444,6 @@
   [env target-expr method args has-parens]
   (let [target-type (infer-type env target-expr)
         base-type (base-type-name target-type)
-        type-map (generic-type-map env target-type)
         target-ir (lower-expression env target-expr)
         class-def (get (visible-class-map env) base-type)
         field-def (when (and class-def (false? has-parens))
@@ -2425,7 +2454,11 @@
                      (if (= (:type target-expr) :this)
                        (or (class-method-def class-def method (count args))
                            (inherited-method-def env class-def method (count args)))
-                       (accessible-method-def env class-def method (count args))))]
+                       (accessible-method-def env class-def method (count args))))
+        ;; Built once the member is known: an inherited member's types are stated
+        ;; in its declaring class's generic params, not the receiver's.
+        type-map (generic-type-map env target-type
+                                   (:declaring-class (or method-def field-def)))]
     (cond
       (and (= (:type target-expr) :this)
            (if-let [{:keys [owner field carrier-owner carrier-field nex-type jvm-type carrier-jvm-type]}
