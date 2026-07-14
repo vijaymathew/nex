@@ -1410,8 +1410,17 @@
      (string-literal-value (token-text string-literal)))
 
    :aliasClause
-   (fn [[_ _alias-kw string-literal]]
-     (let [op (string-literal-value (token-text string-literal))]
+   (fn [[_ alias-kw string-literal]]
+     ;; `alias` is a soft keyword: the grammar accepts any identifier here (see
+     ;; nexlang.g4), so the spelling is checked now. Anything else in this
+     ;; position is a typo, and saying so beats a bare parse error.
+     (let [kw (token-text alias-kw)
+           op (string-literal-value (token-text string-literal))]
+       (when-not (= kw "alias")
+         (throw (ex-info (str "Unexpected " (pr-str kw) " in a routine signature")
+                         {:error (str "Expected 'alias' before an operator string, got '"
+                                      kw "'. A routine binds itself to an operator with, "
+                                      "for example, alias \"-\".")})))
        (when-not (aliasable-operators op)
          (throw (ex-info (str "Cannot alias " (pr-str op))
                          {:error (str "'" op "' is not an aliasable operator. "

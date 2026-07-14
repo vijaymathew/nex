@@ -96,6 +96,30 @@ Concrete runtime cursor types are documented in [Cursor Types](cursor-types.md).
 |---|---|---|---|
 | `compare` | `a: Any` | `Integer` | Return negative/zero/positive ordering result. |
 
+A class that inherits `Comparable` and defines `compare` gets the `<`, `<=`, `>`,
+and `>=` operators on its values.
+
+`Comparable` is also the most common *generic bound*. Writing `[T -> Comparable]`
+constrains a type parameter, and the body may then use the bound's routines — here,
+the ordering operators — on a value of type `T`:
+
+```nex
+function largest[T -> Comparable](xs: Array[T], seed: T): T do
+  result := seed
+  across xs as x do
+    if x > result then
+      result := x
+    end
+  end
+end
+
+print(largest([3, 9, 4], 0))          -- 9
+print(largest(["a", "z", "m"], ""))   -- "z"
+```
+
+Any class may serve as a bound, not only the built-in ones; a routine deferred in
+the bound dispatches to the runtime subclass.
+
 ## `Hashable` (deferred)
 
 | Method | Arguments | Returns | Description |
@@ -113,6 +137,69 @@ let n := 42
 print(n.compare(10))               -- positive
 print(n.hash())
 ```
+
+## Operators and the Routines They Denote
+
+Every operator in Nex is shorthand for a routine, so a class earns an operator by
+defining the routine behind it.
+
+| Operator | Routine | How a class gets it |
+|---|---|---|
+| `=` `/=` | `equals` | Override `equals` (and `hash`) — see `Any`, above. |
+| `==` `!=` | none | Reference identity; not overridable. |
+| `<` `<=` `>` `>=` | `compare` | Inherit `Comparable` and define `compare`. |
+| `+` `-` `*` `/` `%` `^` | any one-argument routine | Bind it with an `alias` clause (below). |
+
+### `alias`
+
+A one-argument routine may bind itself to an arithmetic operator with an `alias`
+clause. The operator is then exactly sugar for the call, so the routine's
+contracts hold at the operator too.
+
+```nex
+class Money
+  inherit
+    Comparable
+  feature
+    once amount: Integer
+    once currency: String
+
+    minus(other: Money): Money
+      alias "-"
+      require
+        same_currency: currency = other.currency
+      do
+        result := create Money.make(amount - other.amount, currency)
+      end
+
+    compare(other: Any): Integer do
+      if convert other to m: Money then
+        result := amount - m.amount
+      else
+        raise "Money.compare: not a Money"
+      end
+    end
+  create
+    make(a: Integer, c: String) do amount := a  currency := c end
+end
+
+let owed := create Money.make(100, "USD")
+let paid := create Money.make(30, "USD")
+print((owed - paid).amount)          -- 70, via minus
+print(owed > paid)                   -- true, via compare
+print(owed - create Money.make(5, "EUR"))
+                                     -- Precondition violation: same_currency
+```
+
+Only `+ - * / % ^` may be aliased — no new operator symbols can be invented — and
+only arithmetic: ordering goes through `Comparable` and equality through `equals`,
+not through an alias. An alias is never consulted for numeric operands (or, for
+`+`, strings), so no class can change what `+` means on `Integer` or `Real`.
+Aliases are inherited: a routine aliased in a deferred class gives the operator to
+every heir, dispatching to the heir's implementation.
+
+`alias` is a soft keyword: it means this only in the position shown, and remains
+usable as an ordinary name for a variable, field, parameter, or routine.
 
 ## Class Modifiers
 

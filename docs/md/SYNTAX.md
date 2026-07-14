@@ -511,6 +511,14 @@ overloading usually is:
 An alias is inherited: if a deferred parent declares `plus … alias "+"`, then `+`
 works on any descendant, dispatching to its override.
 
+`alias` is a **soft keyword**, like `union` and `where`: it carries this meaning
+only in the position above, and stays available as an ordinary name.
+
+```nex
+let alias := "vj"          -- still a perfectly good variable
+print(u.alias)             -- and a perfectly good field
+```
+
 A class whose values are compared with `=` — including in a postcondition like
 `ensure reduced: balance = old balance - amount` — should also override `equals`
 (and `hash`), or `=` compares object identity rather than value.

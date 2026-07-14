@@ -20,6 +20,10 @@
   that declares no alias, the emitted bytecode is byte-for-byte identical to
   before, and lowering costs one set-membership test per binary node.
 
+  `alias` is a soft keyword (like `union` and `where`): it means this only in a
+  routine signature, and remains usable as the name of a variable, field,
+  parameter, or routine. Nothing that parsed before this change stops parsing.
+
   Also fixed: `nex format` now preserves an `alias` clause instead of dropping it.
 
 - **Fixed: constrained generics now compile.** `function f[T -> Bound](…)` could

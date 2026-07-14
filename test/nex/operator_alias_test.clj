@@ -128,6 +128,55 @@ let r := p - q")]
       (is (not (:success result)))
       (is (re-find #"numeric" (pr-str (:errors result)))))))
 
+(deftest alias-is-a-soft-keyword
+  (testing "`alias` remains usable as an ordinary name — local, field, parameter,
+            routine, and member access — so adding the clause reserved nothing"
+    (is (= ["\"vj\"" "\"vijay\"" "6"]
+           (run-output
+            "class User
+  feature
+    alias: String
+    set_alias(alias: String) do
+      this.alias := alias
+    end
+  create
+    make(n: String) do alias := n end
+end
+
+class Money
+  feature
+    once amount: Integer
+    minus(other: Money): Money
+      alias \"-\"
+      do
+        result := create Money.make(amount - other.amount)
+      end
+  create
+    make(a: Integer) do amount := a end
+end
+
+let alias := \"vj\"
+print(alias)
+let u := create User.make(\"v\")
+u.set_alias(\"vijay\")
+print(u.alias)
+print((create Money.make(10) - create Money.make(4)).amount)")))))
+
+(deftest a-misspelled-alias-clause-is-reported-as-such
+  (testing "since the grammar accepts any identifier there, the walker must name the typo"
+    (is (thrown-with-msg?
+         Exception #"Unexpected \"aliaz\""
+         (p/ast "class Weird
+  feature
+    minus(other: Weird): Weird
+      aliaz \"-\"
+      do
+        result := other
+      end
+  create
+    make() do end
+end")))))
+
 (deftest only-the-fixed-operator-set-may-be-aliased
   (testing "a symbol outside the operator set is rejected at parse time"
     (is (thrown-with-msg?
