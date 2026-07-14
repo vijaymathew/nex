@@ -468,6 +468,53 @@ class Dog
 end
 ```
 
+## Operator Aliases
+
+A feature can bind itself to an arithmetic operator with an `alias` clause. The
+operator is then exactly sugar for the call: `a - b` *is* `a.minus(b)`, so the
+feature's preconditions and postconditions apply at the operator too.
+
+```nex
+class Money
+  feature
+    once amount: Integer
+    once currency: String
+
+    minus(other: Money): Money
+      alias "-"
+      require
+        same_currency: currency = other.currency
+      do
+        result := create Money.make(amount - other.amount, currency)
+      end
+  create
+    make(a: Integer, c: String) do amount := a  currency := c end
+end
+
+let owed: Money := create Money.make(100, "USD")
+let paid: Money := create Money.make(30, "USD")
+let rest: Money := owed - paid          -- calls minus, checks same_currency
+```
+
+Three rules keep this from becoming the licence to invent notation that operator
+overloading usually is:
+
+- **The operator set is closed.** Only `+`, `-`, `*`, `/`, `%`, and `^` can be
+  aliased. No program can introduce a symbol a reader has never seen.
+- **Only arithmetic.** Ordering already dispatches through `Comparable`'s
+  `compare`, and `=` through `equals`; a class gets `<`, `<=`, `>`, `>=`, and
+  `=` by inheriting `Comparable` and overriding those, not by aliasing.
+- **Built-in arithmetic wins, always.** An alias is consulted only where the
+  operands are not numeric (or String, for `+`), so no class can change what
+  `+` means on `Integer` or `Real`.
+
+An alias is inherited: if a deferred parent declares `plus … alias "+"`, then `+`
+works on any descendant, dispatching to its override.
+
+A class whose values are compared with `=` — including in a postcondition like
+`ensure reduced: balance = old balance - amount` — should also override `equals`
+(and `hash`), or `=` compares object identity rather than value.
+
 ## Once Fields
 
 A field declared with `once` can be set in a constructor but never reassigned afterward.

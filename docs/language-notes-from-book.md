@@ -103,6 +103,54 @@ code.
    protocol mirroring `Comparable` (e.g. `plus`/`minus` backing `+`/`-`), or
    restrict the book's `Money` to method calls (much noisier). Found 2026-07-13
    while verifying the book's examples against the current implementation.
+   **FIXED IN THE LANGUAGE 2026-07-14** via **operator aliases**: a feature binds
+   itself to an operator with `alias "-"`, Eiffel-style, and the operator is sugar
+   for the call — so `balance - amount` now carries `minus`'s `require
+   same_currency` with it. Chosen over an `Addable` protocol because a nominal
+   protocol's payoff is generic algorithms (one `sum` over anything addable), and
+   Nex's generics cannot express the self-bound `[T -> Addable[T]]` that would
+   require (see #11). The operator set is closed (`+ - * / % ^`); comparisons
+   still go through `Comparable`. Integer/Real arithmetic is unaffected — emitted
+   bytecode for alias-free programs is byte-for-byte identical.
+
+10. **No class-level (static) members.** There is no way to declare a constant or
+    routine on a *class* rather than an instance. `once` is an immutable
+    *instance* field, not a shared one. So the book's `Money.zero` — used in
+    contracts throughout (Ch 2, 9, 12, 15, App A, App B) — does not exist: it
+    parses, but lowering fails with "Unsupported class-target access during
+    lowering", and the typechecker cannot resolve fields on it. The workaround in
+    the book is a *constructor*, `create Money.zero(currency)`, plus sign
+    predicates `is_negative()`/`is_positive()` so that contracts like
+    `quote >= Money.zero` become `not quote.is_negative()` and never need to
+    conjure a zero value at all. That is arguably better domain modelling (a zero
+    amount is still denominated in a currency), but it is a workaround, not a
+    design: named constants on a value type are an ordinary thing to want.
+    **Proposal:** class-level `once` features (shared, initialized on first use),
+    which would also give the stdlib somewhere to put things like `Integer.max`.
+    Found 2026-07-14 while rewriting the book's `Money` off operator overloading.
+
+11. **Generic bounds cannot be self-referential (no F-bounds).** Nex *does* have
+    Eiffel-style constrained genericity — `function total[T -> Addable](…)` — and
+    the typechecker resolves methods through the bound. But the grammar
+    (`genericParam` in `nexlang.g4`) allows only a bare identifier as the bound,
+    so `[T -> Addable[T]]` is a syntax error. Without it, a protocol whose
+    operations return the implementing type (`plus(other: T): T`) cannot be
+    expressed: you degrade to `plus(other: Any): Any` plus a `convert`, which
+    discards the type safety that motivated the protocol. This is what killed the
+    `Addable` design and made operator aliases (#9) the right answer instead. It
+    will block any future `Numeric`/`Monoid`-style abstraction too.
+    **Proposal:** allow a parameterized type as a generic bound.
+    Found 2026-07-14 while weighing the `Addable` protocol against aliases.
+
+12. **BUG: the JVM backend cannot lower a call on a bound-constrained type
+    parameter.** With `function total[T -> Addable](xs: Array[T], seed: T): T`,
+    the body `result := result.plus_any(x)` type-checks and *runs correctly on the
+    interpreter*, but compiling it fails with "Unsupported target call expression
+    for lowering". So constrained genericity is currently half-implemented:
+    accepted by the typechecker, rejected by the default backend. Independent of
+    the operator question, but it will bite anyone who uses a generic bound.
+    Found 2026-07-14; minimal repro is a bounded generic calling a method of its
+    bound.
 
 ---
 

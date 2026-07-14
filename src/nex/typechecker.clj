@@ -885,6 +885,7 @@
 (declare convert-guard-binding)
 (declare convert-guard-bindings)
 (declare resolve-generic-type)
+(declare build-generic-type-map)
 (declare lookup-class-field-member)
 
 (defn check-literal
@@ -1233,6 +1234,47 @@
                                         ", got " (display-type arg-type)))})))))
     (resolve-generic-type (:return-type method-sig) type-map)))
 
+(defn lookup-operator-alias
+  "The feature on `class-name` (or an ancestor) bound to `operator` by an `alias`
+   clause, as {:name … :sig …}. Only one-argument features can back a binary
+   operator. Returns nil when the class aliases nothing to `operator` — callers
+   then report the ordinary 'requires numeric operands' error."
+  [env class-name operator]
+  (letfn [(search [cn visited]
+            (when (and cn (string? cn) (not (contains? visited cn)))
+              (when-let [class-def (env-lookup-class env cn)]
+                (or (some (fn [member]
+                            (when (and (= (:type member) :method)
+                                       (= (:alias member) operator)
+                                       (= 1 (count (or (:params member) []))))
+                              {:name (:name member)
+                               :declaring-class cn
+                               :sig (env-lookup-method env cn (:name member) 1)}))
+                          (feature-members class-def))
+                    (some (fn [{:keys [parent]}] (search parent (conj visited cn)))
+                          (:parents class-def))))))]
+    (search class-name #{})))
+
+(defn operator-alias-target
+  "Resolve `operator` against the left operand's type, or nil if that type is not
+   a user class that aliases it. This is consulted only after the numeric and
+   String paths have declined, so it can never shadow built-in arithmetic."
+  [env left-type operator]
+  (let [class-name (let [t (attachable-type left-type)]
+                     (if (map? t) (:base-type t) t))]
+    (when (and (string? class-name) (env-lookup-class env class-name))
+      (lookup-operator-alias env class-name operator))))
+
+(defn check-aliased-operator
+  "Type an operator that a user class has bound to a feature with `alias`. The
+   operator is exactly sugar for the call, so the argument is checked against the
+   feature's parameter and the operator's type is the feature's return type.
+   Returns nil when no alias applies, leaving the caller to raise its own error."
+  [env expr operator left-type right]
+  (when-let [{:keys [name sig]} (operator-alias-target env left-type operator)]
+    (let [type-map (build-generic-type-map env left-type)]
+      (check-call-signature env name [right] sig type-map))))
+
 (defn check-binary-op
   "Check the type of a binary operation"
   [env {:keys [operator left right] :as expr}]
@@ -1255,34 +1297,38 @@
         (numeric-result-type left-type right-type)
 
         :else
-        (throw (ex-info (str "Operator " operator " requires numeric or String operands")
-                        {:error (type-error
-                                 (str "Operator " operator " requires numeric or String operands, got "
-                                      (display-type left-type) " and " (display-type right-type)))})))
+        (or (check-aliased-operator env expr operator left-type right)
+            (throw (ex-info (str "Operator " operator " requires numeric or String operands")
+                            {:error (type-error
+                                     (str "Operator " operator " requires numeric or String operands, got "
+                                          (display-type left-type) " and " (display-type right-type)))}))))
 
       ("/")
       (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
         (division-result-type left-type right-type)
-        (throw (ex-info (str "Operator " operator " requires numeric operands")
-                        {:error (type-error
-                                 (str "Operator " operator " requires numeric operands, got "
-                                      (display-type left-type) " and " (display-type right-type)))})))
+        (or (check-aliased-operator env expr operator left-type right)
+            (throw (ex-info (str "Operator " operator " requires numeric operands")
+                            {:error (type-error
+                                     (str "Operator " operator " requires numeric operands, got "
+                                          (display-type left-type) " and " (display-type right-type)))}))))
 
       ("-" "*" "%")
       (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
         (numeric-result-type left-type right-type)
-        (throw (ex-info (str "Operator " operator " requires numeric operands")
-                        {:error (type-error
-                                 (str "Operator " operator " requires numeric operands, got "
-                                      (display-type left-type) " and " (display-type right-type)))})))
+        (or (check-aliased-operator env expr operator left-type right)
+            (throw (ex-info (str "Operator " operator " requires numeric operands")
+                            {:error (type-error
+                                     (str "Operator " operator " requires numeric operands, got "
+                                          (display-type left-type) " and " (display-type right-type)))}))))
 
       ("^")
       (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
         (power-result-type left-type right-type)
-        (throw (ex-info (str "Operator " operator " requires numeric operands")
-                        {:error (type-error
-                                 (str "Operator " operator " requires numeric operands, got "
-                                      (display-type left-type) " and " (display-type right-type)))})))
+        (or (check-aliased-operator env expr operator left-type right)
+            (throw (ex-info (str "Operator " operator " requires numeric operands")
+                            {:error (type-error
+                                     (str "Operator " operator " requires numeric operands, got "
+                                          (display-type left-type) " and " (display-type right-type)))}))))
 
       ("=" "/=" "==" "!=")
       (if (or (= left-type "Nil")
@@ -3703,7 +3749,8 @@
         (when (= (:type member) :method)
           (env-add-method env name (:name member)
                          {:params (:params member)
-                          :return-type (:return-type member)})))
+                          :return-type (:return-type member)
+                          :alias (:alias member)})))
 
       (= (:type section) :constructors)
       (doseq [ctor (:constructors section)]

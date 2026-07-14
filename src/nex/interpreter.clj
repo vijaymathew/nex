@@ -1,6 +1,7 @@
 (ns nex.interpreter
   (:require [clojure.string :as str]
             [nex.parser :as parser]
+            [nex.walker :as walker]
             [nex.types.runtime :as rt]
             [nex.types.concurrency :as conc]
             [nex.types.builtins :as bi]
@@ -1218,6 +1219,26 @@
                          :method "hash"
                          :args []}))))))
 
+(defn operator-alias-target
+  "The name of the feature that `v`'s class (or an ancestor) binds to `operator`
+   with an `alias` clause, or nil. Only objects can carry aliases, so a numeric
+   operand never reaches this."
+  [ctx v operator]
+  (when (and ctx (nex-object? v))
+    (letfn [(search [class-def seen]
+              (when (and class-def (not (contains? seen (:name class-def))))
+                (or (->> (feature-members class-def)
+                         (filter #(and (= (:type %) :method)
+                                       (= (:alias %) operator)
+                                       (= 1 (count (or (:params %) [])))))
+                         first
+                         :name)
+                    (some (fn [{:keys [parent]}]
+                            (search (lookup-class ctx parent)
+                                    (conj seen (:name class-def))))
+                          (:parents class-def)))))]
+      (search (lookup-class ctx (:class-name v)) #{}))))
+
 (defn value-equality-fn
   "Equality over Nex values bound into the runtime collections for the dynamic
    extent of a program run: a class's `equals` override when present, structural
@@ -2289,8 +2310,17 @@
         (let [eq (nex-objects-equal? ctx left-val right-val)]
           (if (= operator "=") eq (not eq)))
 
+        ;; An arithmetic operator on an object is sugar for the feature the class
+        ;; aliased to it. Routing through :call means the feature's contracts run
+        ;; exactly as they would at an explicit call site.
         :else
-        (apply-binary-op operator left-val right-val)))))
+        (if-let [feature (and (walker/aliasable-operators operator)
+                              (operator-alias-target ctx left-val operator))]
+          (eval-node ctx {:type :call
+                          :target {:type :literal :value left-val}
+                          :method feature
+                          :args [{:type :literal :value right-val}]})
+          (apply-binary-op operator left-val right-val))))))
 
 (defmethod eval-node :unary
   [ctx {:keys [operator expr]}]

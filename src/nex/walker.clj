@@ -6,6 +6,13 @@
 ;; Utilities
 ;;
 
+(def aliasable-operators
+  "Operators a class feature may bind itself to with `alias`. Arithmetic only:
+   ordering already dispatches through Comparable and `=` through `equals`, and
+   the set is closed so that no program can invent a symbol the reader has never
+   seen."
+  #{"+" "-" "*" "/" "%" "^"})
+
 (defn token-text
   "Extract text from a token node (strings pass through)."
   [node]
@@ -925,6 +932,9 @@
            block (first (filter #(and (sequential? %)
                                       (= :block (first %)))
                                cleaned))
+           alias-clause (first (filter #(and (sequential? %)
+                                             (= :aliasClause (first %)))
+                                      cleaned))
            ;; A method is deferred when no body is present (body-less syntax)
            ;; or when the explicit 'deferred' keyword was used
            deferred? (or (nil? block) (some #(= "deferred" %) rest))]
@@ -932,6 +942,7 @@
         :name (token-text name)
         :params (when params (transform-node params))
         :return-type (when return-type (transform-node return-type))
+        :alias (when alias-clause (transform-node alias-clause))
         :note (when note-clause (transform-node note-clause))
         :require (when require-clause (transform-node require-clause))
         :body (when-not deferred? (transform-node block))
@@ -1397,6 +1408,18 @@
    :noteClause
    (fn [[_ _note-kw string-literal]]
      (string-literal-value (token-text string-literal)))
+
+   :aliasClause
+   (fn [[_ _alias-kw string-literal]]
+     (let [op (string-literal-value (token-text string-literal))]
+       (when-not (aliasable-operators op)
+         (throw (ex-info (str "Cannot alias " (pr-str op))
+                         {:error (str "'" op "' is not an aliasable operator. "
+                                      "Nex has a fixed operator set; a feature may be "
+                                      "aliased to one of: "
+                                      (str/join " " (sort aliasable-operators))
+                                      ". New operator symbols cannot be invented.")})))
+       op))
 
    :assertion
    (fn [[_ label _colon expr]]

@@ -247,6 +247,17 @@
     {:type :identifier :name target}
     target))
 
+(defn- declared-alias-operators
+  "The set of operators bound by an `alias` clause anywhere in `class-defs`.
+   Empty for every program that does not use the feature, which is what keeps
+   built-in arithmetic free of any lookup cost."
+  [class-defs]
+  (into #{}
+        (comp (mapcat tc/feature-members)
+              (filter #(= (:type %) :method))
+              (keep :alias))
+        class-defs))
+
 (defn make-lowering-env
   "Create the first lowering environment.
 
@@ -282,6 +293,11 @@
     :state-slot (or state-slot 0)
     :next-slot (or next-slot 1)
     :classes (vec (or classes []))
+    ;; Which operators any visible class binds with `alias`. Computed once here so
+    ;; that lowering an ordinary `a + b` on Integer costs one set membership test
+    ;; — and, in the overwhelming case of a program that aliases nothing, the set
+    ;; is empty and no operand type is ever inferred for this purpose.
+    :aliased-operators (declared-alias-operators (or classes []))
     :functions (vec (or functions []))
     :imports (vec (or imports []))
     :var-types (or var-types {})
@@ -1388,6 +1404,28 @@
     (doseq [[class-name class-def] (visible-class-map env)]
       (tc/env-add-class type-env class-name class-def))
     type-env))
+
+(defn- operator-alias-feature
+  "The feature that the static type of `left` binds to `operator` with an `alias`
+   clause, or nil. Gated on the env's precomputed alias set, so a program that
+   aliases nothing (every program written before this feature existed) pays only
+   a set-membership test per binary node and never infers an operand type here."
+  [env operator left]
+  (when (contains? (:aliased-operators env) operator)
+    (let [class-map (visible-class-map env)]
+      (letfn [(search [cn seen]
+                (when-let [class-def (and (string? cn)
+                                          (not (contains? seen cn))
+                                          (get class-map cn))]
+                  (or (->> (tc/feature-members class-def)
+                           (filter #(and (= (:type %) :method)
+                                         (= (:alias %) operator)
+                                         (= 1 (count (or (:params %) [])))))
+                           first
+                           :name)
+                      (some (fn [{:keys [parent]}] (search parent (conj seen cn)))
+                            (:parents class-def)))))]
+        (search (base-type-name (infer-type env left)) #{})))))
 
 (defn- cursor-compatible-type?
   [env nex-type]
@@ -2636,84 +2674,93 @@
                       {:expr expr})))
 
     :binary
-    (let [op (:operator expr)
-          [left-ir right-ir]
-          (case op
-            "and"
-            (let [[left-env left-ir] (lower-boolean-condition env (:left expr))
-                  right-input-env (refine-condition-branch-env left-env (:left expr) :then)
-                  [_right-env right-ir] (lower-boolean-condition right-input-env (:right expr))]
-              [left-ir right-ir])
+    ;; An arithmetic operator whose left operand is a class that aliased it is
+    ;; sugar for the call: lower the invocation it stands for, contracts and all.
+    ;; The check runs only for :binary nodes and short-circuits on the operator
+    ;; set, so built-in Integer/Real arithmetic is unaffected.
+    (if-let [aliased (operator-alias-feature env (:operator expr) (:left expr))]
+      (lower-expression env {:type :call
+                             :target (:left expr)
+                             :method aliased
+                             :args [(:right expr)]})
+      (let [op (:operator expr)
+            [left-ir right-ir]
+            (case op
+              "and"
+              (let [[left-env left-ir] (lower-boolean-condition env (:left expr))
+                    right-input-env (refine-condition-branch-env left-env (:left expr) :then)
+                    [_right-env right-ir] (lower-boolean-condition right-input-env (:right expr))]
+                [left-ir right-ir])
 
-            "or"
-            (let [[_left-env left-ir] (lower-boolean-condition env (:left expr))
-                  [_right-env right-ir] (lower-boolean-condition env (:right expr))]
-              [left-ir right-ir])
+              "or"
+              (let [[_left-env left-ir] (lower-boolean-condition env (:left expr))
+                    [_right-env right-ir] (lower-boolean-condition env (:right expr))]
+                [left-ir right-ir])
 
-            [(lower-expression env (:left expr))
-             (lower-expression env (:right expr))])
-          inferred-type (infer-type env expr)
-          nex-type (if (= "Any" inferred-type)
-                     (cond
-                       (#{"+" "-" "*" "/" "%"} (:operator expr))
-                       (:nex-type left-ir)
+              [(lower-expression env (:left expr))
+               (lower-expression env (:right expr))])
+            inferred-type (infer-type env expr)
+            nex-type (if (= "Any" inferred-type)
+                       (cond
+                         (#{"+" "-" "*" "/" "%"} (:operator expr))
+                         (:nex-type left-ir)
 
-                       (#{"and" "or" "=" "/=" "==" "!=" "<" "<=" ">" ">="} (:operator expr))
-                       "Boolean"
+                         (#{"and" "or" "=" "/=" "==" "!=" "<" "<=" ">" ">="} (:operator expr))
+                         "Boolean"
 
-                       :else inferred-type)
-                     inferred-type)
-          jvm-type (resolve-jvm-type env nex-type)]
-      (cond
-        (and (= "+" op) (= "String" nex-type))
-        (ir/call-runtime-node "op:string-concat" [left-ir right-ir] nex-type jvm-type)
+                         :else inferred-type)
+                       inferred-type)
+            jvm-type (resolve-jvm-type env nex-type)]
+        (cond
+          (and (= "+" op) (= "String" nex-type))
+          (ir/call-runtime-node "op:string-concat" [left-ir right-ir] nex-type jvm-type)
 
-        (= "^" op)
-        (ir/call-runtime-node (case jvm-type
-                                :int "op:pow-int"
-                                :long "op:pow-long"
-                                :double "op:pow-double"
-                                (throw (ex-info "Unsupported power lowering type"
-                                                {:expr expr :jvm-type jvm-type})))
-                              [left-ir right-ir]
-                              nex-type
-                              jvm-type)
+          (= "^" op)
+          (ir/call-runtime-node (case jvm-type
+                                  :int "op:pow-int"
+                                  :long "op:pow-long"
+                                  :double "op:pow-double"
+                                  (throw (ex-info "Unsupported power lowering type"
+                                                  {:expr expr :jvm-type jvm-type})))
+                                [left-ir right-ir]
+                                nex-type
+                                jvm-type)
 
-        ;; Integer / and % go through checked runtime helpers (like op:pow-*):
-        ;; raw LDIV/LREM would leak the host's "/ by zero" message and silently
-        ;; wrap MIN_LONG / -1 instead of raising like the interpreter.
-        (and (#{"/" "%"} op) (#{:int :long} jvm-type))
-        (ir/call-runtime-node (case [op jvm-type]
-                                ["/" :int] "op:div-int"
-                                ["/" :long] "op:div-long"
-                                ["%" :int] "op:mod-int"
-                                ["%" :long] "op:mod-long")
-                              [left-ir right-ir]
-                              nex-type
-                              jvm-type)
+          ;; Integer / and % go through checked runtime helpers (like op:pow-*):
+          ;; raw LDIV/LREM would leak the host's "/ by zero" message and silently
+          ;; wrap MIN_LONG / -1 instead of raising like the interpreter.
+          (and (#{"/" "%"} op) (#{:int :long} jvm-type))
+          (ir/call-runtime-node (case [op jvm-type]
+                                  ["/" :int] "op:div-int"
+                                  ["/" :long] "op:div-long"
+                                  ["%" :int] "op:mod-int"
+                                  ["%" :long] "op:mod-long")
+                                [left-ir right-ir]
+                                nex-type
+                                jvm-type)
 
-        (#{"+" "-" "*" "/" "%" "and" "or"} op)
-        (ir/binary-node (get {"+" :add
-                              "-" :sub
-                              "*" :mul
-                              "/" :div
-                              "%" :mod
-                              "and" :and
-                              "or" :or}
-                             op)
-                        left-ir right-ir nex-type jvm-type)
+          (#{"+" "-" "*" "/" "%" "and" "or"} op)
+          (ir/binary-node (get {"+" :add
+                                "-" :sub
+                                "*" :mul
+                                "/" :div
+                                "%" :mod
+                                "and" :and
+                                "or" :or}
+                               op)
+                          left-ir right-ir nex-type jvm-type)
 
-        :else
-        (ir/compare-node (get {">" :gt
-                               ">=" :gte
-                               "<" :lt
-                               "<=" :lte
-                               "=" :eq
-                               "/=" :neq
-                               "==" :ident-eq
-                               "!=" :ident-neq}
-                              op)
-                         left-ir right-ir nex-type jvm-type)))
+          :else
+          (ir/compare-node (get {">" :gt
+                                 ">=" :gte
+                                 "<" :lt
+                                 "<=" :lte
+                                 "=" :eq
+                                 "/=" :neq
+                                 "==" :ident-eq
+                                 "!=" :ident-neq}
+                                op)
+                           left-ir right-ir nex-type jvm-type))))
 
     :unary
     (let [operand-ir (lower-expression env (:expr expr))
