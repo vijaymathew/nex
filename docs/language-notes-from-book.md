@@ -142,15 +142,21 @@ code.
     **Proposal:** allow a parameterized type as a generic bound.
     Found 2026-07-14 while weighing the `Addable` protocol against aliases.
 
-12. **BUG: the JVM backend cannot lower a call on a bound-constrained type
-    parameter.** With `function total[T -> Addable](xs: Array[T], seed: T): T`,
-    the body `result := result.plus_any(x)` type-checks and *runs correctly on the
-    interpreter*, but compiling it fails with "Unsupported target call expression
-    for lowering". So constrained genericity is currently half-implemented:
-    accepted by the typechecker, rejected by the default backend. Independent of
-    the operator question, but it will bite anyone who uses a generic bound.
-    Found 2026-07-14; minimal repro is a bounded generic calling a method of its
-    bound.
+12. **~~BUG: the JVM backend cannot lower a call on a bound-constrained type
+    parameter.~~ FIXED 2026-07-14.** With `function total[T -> Addable](xs: Array[T],
+    seed: T): T`, the body `result := result.plus_any(x)` type-checked and ran on
+    the interpreter, but compiling it failed with "Unsupported target call
+    expression for lowering". Constrained genericity was half-implemented:
+    `lower-call-expr` had a branch for a generic parameter whose bound was a
+    *builtin* (`T -> Comparable`), but a **user-class bound fell through to the
+    catch-all throw**. Fixed by resolving the routine on the bound's class
+    (`accessible-method-def`) and emitting the ordinary dynamic `user-method:`
+    dispatch — the receiver is a Nex object at runtime, so a virtual call is all
+    that was needed. Field access through a bound (`accessible-field-def` →
+    `user-field-get:`) is handled too, and a paren-less no-arg call (`x.describe`)
+    now dispatches as a *routine* rather than being misread as a field: resolution,
+    not punctuation, decides. Both backends agree. Covered by
+    `test/nex/bounded_generics_test.clj`.
 
 ---
 

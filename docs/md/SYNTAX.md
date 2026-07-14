@@ -956,6 +956,31 @@ end
 print(id(42))                   -- 42
 ```
 
+### Constrained Generics
+
+`T -> Bound` constrains a generic parameter to a type, and the body may then use
+the routines and fields of that bound on a value of type `T`. The bound may be a
+builtin such as `Comparable`, or any class you declare:
+
+```nex
+deferred class Shape
+  feature
+    area(): Integer deferred
+    name: String
+end
+
+function total_area[T -> Shape](xs: Array[T]): Integer do
+  result := 0
+  across xs as s do
+    result := result + s.area()     -- a routine of the bound
+  end
+end
+```
+
+Calls through a bound dispatch dynamically, so a deferred routine resolves to the
+runtime subclass's override. The bound itself must be a plain type name: a
+parameterized bound (`[T -> Addable[T]]`) is not yet supported.
+
 ## Assignment
 
 ```nex

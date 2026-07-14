@@ -3437,6 +3437,44 @@
                                       nex-type
                                       jvm-type))
 
+              ;; Generic type parameter constrained by a *user* class
+              ;; (e.g. `[T -> Addable]`). The receiver is an ordinary Nex object
+              ;; at runtime, so dispatch dynamically the way any user-class call
+              ;; does; the constraint supplies the routine's declared signature,
+              ;; which is what the typechecker already checked the call against.
+              (when-let [constraint-def (some->> (get (:generic-param-constraints env)
+                                                     (base-type-name target-type))
+                                                (get (visible-class-map env)))]
+                (or (accessible-method-def env constraint-def (:method expr)
+                                           (count (:args expr)))
+                    (accessible-field-def env constraint-def (:method expr))))
+              (let [constraint-def (->> (get (:generic-param-constraints env)
+                                             (base-type-name target-type))
+                                        (get (visible-class-map env)))
+                    method-def (accessible-method-def env constraint-def (:method expr)
+                                                      (count (:args expr)))
+                    field-def (when-not method-def
+                                (accessible-field-def env constraint-def (:method expr)))
+                    target-ir (lower-expression env target-expr)
+                    nex-type (or (if method-def
+                                   (function-return-type method-def)
+                                   (:field-type field-def))
+                                 (infer-call-type env expr)
+                                 "Any")
+                    jvm-type (resolve-jvm-type env nex-type)]
+                ;; A routine of the bound dispatches as a routine even when written
+                ;; without parentheses (Nex allows `x.describe` for a no-arg call),
+                ;; so resolution — not punctuation — decides method vs field.
+                (if method-def
+                  (ir/call-runtime-node (str "user-method:" (:method expr))
+                                        (into [target-ir] arg-irs)
+                                        nex-type
+                                        jvm-type)
+                  (ir/call-runtime-node (str "user-field-get:" (:method expr))
+                                        [target-ir]
+                                        nex-type
+                                        jvm-type)))
+
               :else
               (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
                   (throw (ex-info "Unsupported target call expression for lowering"

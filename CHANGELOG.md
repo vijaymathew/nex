@@ -22,6 +22,15 @@
 
   Also fixed: `nex format` now preserves an `alias` clause instead of dropping it.
 
+- **Fixed: constrained generics now compile.** `function f[T -> Bound](…)` could
+  call the routines of `Bound` on a `T` only when `Bound` was a builtin such as
+  `Comparable`; a user-class bound type-checked and ran on the interpreter but
+  failed to compile with "Unsupported target call expression for lowering". The
+  receiver is an ordinary Nex object at runtime, so it now lowers to the same
+  dynamic dispatch any user-class call uses. Reading a *field* through a bound
+  works as well, and a no-arg routine written without parentheses (`x.describe`)
+  dispatches as a routine rather than being misread as a field access.
+
 ## 0.2.0 - 2026-07-11
 
 - **New: `union` declarations** — a concise syntax for sum types. `union Name`
