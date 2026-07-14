@@ -2,6 +2,16 @@
 
 This reference documents the interpreter-level built-ins currently defined in `src/nex/interpreter.clj`.
 
+> **The published reference is not generated from these files.**
+> The site at `vijaymathew.github.io/nex/docs/ref` is maintained by editing its
+> HTML **directly**. It was once rendered from this Markdown with Quarto, but that
+> link was cut long ago and the two have since diverged. The Quarto config
+> (`_quarto.yml`) and `Makefile` have been deleted so that nobody re-renders the
+> site from here and silently reverts hand-edits made to the HTML.
+>
+> When you change the reference, edit the published HTML. Update the Markdown here
+> too if you want the two to agree — but nothing checks that they do.
+
 ## Contents
 
 - [Built-in Functions](functions.md)

@@ -109,8 +109,20 @@ constructorDecl
     ;
 
 methodDecl
-    : IDENTIFIER ('(' paramList? ')')? (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
-    | IDENTIFIER '(' paramList? ')' (':' type)? noteClause? DEFERRED?
+    : IDENTIFIER ('(' paramList? ')')? (':' type)? aliasClause? noteClause? requireClause? DO block ensureClause? rescueClause? END
+    | IDENTIFIER '(' paramList? ')' (':' type)? aliasClause? noteClause? DEFERRED?
+    ;
+
+// Binds an operator symbol to this feature, e.g. `alias "-"`. The operator is
+// then sugar for the call, contracts and all. Only the fixed operator set may be
+// aliased; no new symbols can be invented.
+//
+// `alias` is a SOFT keyword: it is matched here as a plain IDENTIFIER (nothing
+// else may appear at this position, so there is no ambiguity) and the walker
+// checks the spelling. That keeps `alias` usable as an ordinary name — a
+// variable, field, parameter, or routine — which a reserved word would forbid.
+aliasClause
+    : IDENTIFIER STRING
     ;
 
 paramList

@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+- **New: operator aliases** — a class feature can bind itself to an arithmetic
+  operator with an `alias` clause (`minus(other: Money): Money alias "-"`). The
+  operator becomes exactly sugar for the call, so the feature's `require` and
+  `ensure` clauses hold at the operator too: `a - b` checks `same_currency` just
+  as `a.minus(b)` does. Aliases are inherited, so an operator declared on a
+  deferred parent dispatches to a descendant's override.
+
+  The mechanism is deliberately narrow. Only `+ - * / % ^` may be aliased — no
+  new symbols can be invented — and only arithmetic: ordering already dispatches
+  through `Comparable`'s `compare` and `=` through `equals`, so a class earns the
+  comparison operators by inheriting `Comparable`, not by aliasing. An alias is
+  consulted only after the numeric (and, for `+`, String) paths decline, so it
+  can never shadow built-in arithmetic.
+
+  Built-in `Integer`/`Real` arithmetic is unaffected at runtime: for a program
+  that declares no alias, the emitted bytecode is byte-for-byte identical to
+  before, and lowering costs one set-membership test per binary node.
+
+  `alias` is a soft keyword (like `union` and `where`): it means this only in a
+  routine signature, and remains usable as the name of a variable, field,
+  parameter, or routine. Nothing that parsed before this change stops parsing.
+
+  Also fixed: `nex format` now preserves an `alias` clause instead of dropping it.
+
+- **Fixed: constrained generics now compile.** `function f[T -> Bound](…)` could
+  call the routines of `Bound` on a `T` only when `Bound` was a builtin such as
+  `Comparable`; a user-class bound type-checked and ran on the interpreter but
+  failed to compile with "Unsupported target call expression for lowering". The
+  receiver is an ordinary Nex object at runtime, so it now lowers to the same
+  dynamic dispatch any user-class call uses. Reading a *field* through a bound
+  works as well, and a no-arg routine written without parentheses (`x.describe`)
+  dispatches as a routine rather than being misread as a field access.
+
 ## 0.2.0 - 2026-07-11
 
 - **New: `union` declarations** — a concise syntax for sum types. `union Name`

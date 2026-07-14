@@ -165,18 +165,24 @@
 
 (defn format-method
   "Format a method declaration"
-  [{:keys [name params return-type note require body ensure]} level]
+  [{:keys [name params return-type note require body ensure] :as method} level]
   (let [ind (indent level)
+        ;; `alias` binds this feature to an operator; dropping it would silently
+        ;; change the program's meaning, so it must survive a round-trip.
+        operator-alias (:alias method)
         ;; Methods without params don't have parentheses, with params they do
         param-str (cond
                     (nil? params) "()"
                     (empty? params) "()"
                     :else (str "(" (str/join ", " (map format-param params)) ")"))
-        ;; If there are contracts or notes, do goes on separate line; otherwise same line
-        has-contracts-or-note? (or note require ensure)
+        ;; If there are contracts, notes or an alias, do goes on separate line;
+        ;; otherwise same line
+        has-contracts-or-note? (or note require ensure operator-alias)
         signature (str ind name param-str
                        (when return-type (str ": " (format-type return-type))))
-        ;; Note is indented one level deeper than method name
+        ;; Alias and note are indented one level deeper than the method name
+        alias-line (when operator-alias
+                     (str (indent (inc level)) "alias \"" operator-alias "\""))
         note-line (when note
                     (str (indent (inc level)) "note \"" note "\""))
         do-line (if has-contracts-or-note?
@@ -187,6 +193,7 @@
     (str/join "\n"
               (remove empty?
                       [first-line
+                       alias-line
                        note-line
                        (when require
                          ;; require aligns with method name, conditions indented under it
