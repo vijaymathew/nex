@@ -2022,6 +2022,37 @@ end"
              (tc/infer-expression-type
               (first (:statements (p/ast "g.call1(10)"))) opts))))))
 
+(deftest infer-expression-type-is-class-order-independent
+  ;; collect-class-info type-checks each constant initializer eagerly, so a class
+  ;; whose constant reads another class must be collected after it. The best-effort
+  ;; env used during lowering receives classes in arbitrary (hash) order; a
+  ;; fixpoint collection retries blocked classes, so a bad order no longer swallows
+  ;; the result as nil (which surfaced downstream as "Unable to infer expression
+  ;; type during lowering").
+  (testing "inference does not depend on the order classes are supplied in"
+    (let [cs (:classes (p/ast "class Point
+  feature
+    once x: Integer
+  create make(px: Integer) do x := px end
+end
+class Holder
+  feature
+    ORIGIN = create Point.make(0)
+end"))
+          point  (first (filter #(= "Point" (:name %)) cs))
+          holder (first (filter #(= "Holder" (:name %)) cs))]
+      ;; [holder point] is the failing order: the constant reader precedes its class.
+      (doseq [order [[point holder] [holder point]]]
+        (is (= "Integer"
+               (tc/infer-expression-type {:type :integer :value 255} {:classes order}))
+            (str "literal must infer regardless of order: " (mapv :name order)))
+        (is (= "Point"
+               (tc/infer-expression-type
+                {:type :create :class-name "Point" :constructor "make"
+                 :args [{:type :integer :value 0}]}
+                {:classes order}))
+            (str "create must infer regardless of order: " (mapv :name order)))))))
+
 (deftest test-type-alias-function-parameter
   (testing "a parameter declared with a Function-alias type can be invoked, and
             the function can be called with a matching argument"

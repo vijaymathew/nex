@@ -115,3 +115,32 @@ print(Derived.C)")
   (testing "a constant may reference an in-scope (own/inherited) constant"
     (is (= ["15" "16"] (run-compiled inherited-constant-program)))
     (is (= ["15" "16"] (run-interpreted inherited-constant-program)))))
+
+(def mixed-constant-kinds-program
+  "class Point
+  feature
+    once x: Integer
+    once y: Integer
+  create make(px: Integer, py: Integer) do x := px  y := py end
+end
+
+class Palette
+  feature
+    MAX    = 255
+    ORIGIN = create Point.make(0, 0)
+    NAMED  = [\"red\", \"green\", \"blue\"]
+end
+print(Palette.MAX)
+print(Palette.ORIGIN.x)
+print(Palette.NAMED.length())")
+
+(deftest mixed-constant-kinds-lower
+  ;; A scalar constant alongside an object constant whose constructor forward-
+  ;; references another class used to lower nondeterministically: the scalar's
+  ;; type inference fell through to the typechecker's best-effort env, which
+  ;; threw "Undefined class" when the referenced class was collected later, and
+  ;; the swallowed failure surfaced as "Unable to infer expression type". A
+  ;; literal's type is now resolved directly, so the mix compiles deterministically.
+  (testing "scalar + object + collection constants lower together on the compiled backend"
+    (dotimes [_ 5]
+      (is (= ["255" "0" "3"] (run-compiled mixed-constant-kinds-program))))))
