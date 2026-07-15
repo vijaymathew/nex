@@ -559,6 +559,40 @@ class Box
 end
 ```
 
+## Class Constants
+
+A feature written `NAME = expression` (with an initializer, no constructor) is a
+class-level constant, shared by all instances and read through the class name:
+
+```nex
+class Screen
+  feature
+    WIDTH  = 1920
+    HEIGHT = 1080
+    AREA   = WIDTH * HEIGHT      -- may reference an earlier constant
+end
+
+print(Screen.WIDTH)             -- 1920
+print(Screen.AREA)              -- 2073600
+```
+
+The initializer is any expression, including an object or a collection — not only
+a scalar. A constant is **interned**: evaluated once for the whole run, so every
+read returns the same value.
+
+```nex
+class Origin
+  feature
+    POINT = create Point.make(0, 0)
+end
+
+print(Origin.POINT.x)                 -- 0
+print(Origin.POINT == Origin.POINT)   -- true: the one canonical value
+```
+
+- The initializer may reference an earlier constant of the same class or an
+  inherited one; a forward or cyclic reference is a compile-time error.
+
 ## Design by Contract
 
 Tell Nex what must be true before, after, and always:
@@ -663,6 +697,33 @@ end
 - Because a `union` *is* a sealed hierarchy after desugaring, `match` exhaustiveness is checked exactly as in the previous section — a missing variant is a compile-time error.
 
 The `union` form is deliberately data-only. When a variant needs its own contracts, invariants, or methods, write the explicit `sealed deferred class` form above; both compile to the same thing.
+
+### Enumerations (`enum union`)
+
+When every variant is payload-free, prefix the declaration with `enum` to get an enumeration — a closed set of named, ordered, canonical values:
+
+```nex
+enum union Color
+  Red
+  Green
+  Blue
+end
+```
+
+On top of the plain `union` desugaring (a sealed hierarchy plus `match` exhaustiveness), `enum` adds three things:
+
+```nex
+print(Color.Red == Color.Red)        -- true: interned, one canonical value
+print(Color.Red < Color.Green)       -- true: ordered by declaration order
+print(Color.values.length())         -- 3: an Array[Color] of every member
+across Color.values as c do print(c.ordinal) end   -- 0  1  2
+```
+
+- **Members** are interned constants on the type: `Color.Red` is *the* one `Red`, so `==` (reference identity) holds — no allocation per use.
+- **Ordering** comes from `Comparable`: members compare by the order they are written.
+- **`values`** is an `Array[Color]` of all members, in declaration order.
+
+`enum` is allowed only when every variant is payload-free and the union is non-generic — its members are canonical constants, which need a concrete type. A variant may not be named `values`, `ordinal`, or `compare` (those back the generated members). Plain `union` never gains any of this; the enrichment is opt-in.
 
 ## Standard Result and Option
 

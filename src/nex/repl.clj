@@ -37,7 +37,7 @@
 (defonce ^:dynamic *compiled-repl-session* (atom (compiled-repl/make-session)))
 
 (def nex-keywords
-  ["class" "deferred" "declare" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
+  ["class" "enum" "deferred" "declare" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
    "when" "from" "until" "invariant" "variant" "require" "ensure"
    "let" "create" "convert" "to" "fn" "function" "and" "or" "old" "this" "note"
    "with" "import" "intern" "private" "raise" "rescue" "retry" "spawn" "select" "timeout" "repeat" "across" "case" "of"

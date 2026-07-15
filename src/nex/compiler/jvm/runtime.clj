@@ -1676,6 +1676,37 @@
   [a b]
   (value/nex-deep-equals? interp/nex-object? a b))
 
+(declare value-equals)
+
+(defn- compiled-object?
+  "True when `value` is a compiled Nex object — an instance of a generated class,
+   not an interpreter-shaped object map or a builtin. Only these need reflective
+   structural comparison; everything else is handled by `deep-equals`."
+  [state value]
+  (and (some? value)
+       (not (interp/nex-object? value))
+       (some? (compiled-runtime-class-name state value))))
+
+(defn- structural-equals
+  "State-aware structural equality that also understands compiled Nex object
+   instances. Two compiled objects are equal when they share a runtime class and
+   every effective field is `value-equals` (so nested `equals` overrides and
+   nested compiled objects are honoured — matching the interpreter's
+   `nex-deep-equals?`). Everything else falls back to the structural walk."
+  [state a b]
+  (if (and (compiled-object? state a) (compiled-object? state b))
+    (let [na (compiled-runtime-class-name state a)
+          nb (compiled-runtime-class-name state b)]
+      (and (= na nb)
+           (let [class-def (class-def-by-name state na)
+                 field-names (collect-effective-field-names state class-def)]
+             (every? (fn [field-name]
+                       (value-equals state
+                                     (get-user-field a field-name)
+                                     (get-user-field b field-name)))
+                     field-names))))
+    (deep-equals a b)))
+
 (defn value-equals
   "Value equality for the `=`/`/=` operators. Honours a class's `equals` override
    (a compiled user method, dispatched reflectively) when present; otherwise falls
@@ -1684,7 +1715,7 @@
   (if (and (some? a)
            (find-user-method a (lowered-instance-method-name "equals" 1)))
     (boolean (invoke-user-method state a "equals" [b]))
-    (deep-equals a b)))
+    (structural-equals state a b)))
 
 (defn- scalar-identity-value?
   [v]

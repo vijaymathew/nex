@@ -113,21 +113,33 @@ code.
    still go through `Comparable`. Integer/Real arithmetic is unaffected — emitted
    bytecode for alias-free programs is byte-for-byte identical.
 
-10. **No class-level (static) members.** There is no way to declare a constant or
-    routine on a *class* rather than an instance. `once` is an immutable
-    *instance* field, not a shared one. So the book's `Money.zero` — used in
-    contracts throughout (Ch 2, 9, 12, 15, App A, App B) — does not exist: it
-    parses, but lowering fails with "Unsupported class-target access during
-    lowering", and the typechecker cannot resolve fields on it. The workaround in
-    the book is a *constructor*, `create Money.zero(currency)`, plus sign
-    predicates `is_negative()`/`is_positive()` so that contracts like
-    `quote >= Money.zero` become `not quote.is_negative()` and never need to
-    conjure a zero value at all. That is arguably better domain modelling (a zero
-    amount is still denominated in a currency), but it is a workaround, not a
-    design: named constants on a value type are an ordinary thing to want.
-    **Proposal:** class-level `once` features (shared, initialized on first use),
-    which would also give the stdlib somewhere to put things like `Integer.max`.
-    Found 2026-07-14 while rewriting the book's `Money` off operator overloading.
+10. **No class-level (static) *routines* or shared `once` features.** `once` is an
+    immutable *instance* field, not a shared one, and there is still no way to
+    declare a routine on a *class* rather than an instance. **Partly resolved:**
+    class-level **constants** now do work. Scalar constants (`MAX = 450`,
+    `HELLO: String = "hi"`) always compiled and read as `Class.NAME`; as of
+    2026-07-15 object- and collection-valued constants do too — `ORIGIN = create
+    Point.make(0)`, `ALL = [1, 2, 3]`. Those previously failed: the compiled
+    `<clinit>` emitted the initializer with the state slot hardcoded to 0, so an
+    object constructor call became an `aload_0` in a static method (a VerifyError
+    that fell back to the interpreter), and *neither* backend interned the value —
+    it was re-evaluated per read, so `C.K == C.K` was false. Now the compiled
+    `<clinit>` bootstraps a session state to build it and writes it once (a
+    canonical, interned instance), and the interpreter memoizes per
+    (class, constant); both backends agree (`test/nex/class_constant_interning_test.clj`).
+
+    So the book's `Money.zero` is *nearly* expressible now — a currency-less
+    canonical zero could be a class constant. The remaining gaps are (a) a
+    *currency-denominated* `Money.zero(currency)`, which wants a shared **lazy**
+    `once` (initialized on first use), and (b) class-level **routines** and a place
+    for stdlib slots like `Integer.max`. The book still uses the *constructor*
+    workaround `create Money.zero(currency)` plus sign predicates
+    `is_negative()`/`is_positive()`, so that `quote >= Money.zero` becomes
+    `not quote.is_negative()` and never conjures a zero value at all — arguably
+    better domain modelling (a zero amount is still denominated in a currency).
+    **Proposal:** class-level `once` features (shared, initialized on first use)
+    and class routines. Found 2026-07-14 while rewriting the book's `Money` off
+    operator overloading; constants closed 2026-07-15.
 
 11. **Generic bounds cannot be self-referential (no F-bounds).** Nex *does* have
     Eiffel-style constrained genericity — `function total[T -> Addable](…)` — and

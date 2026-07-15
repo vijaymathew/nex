@@ -4527,8 +4527,23 @@
           (let [simple-name (last (str/split qualified-name #"\."))]
             (env-add-class env simple-name {:name simple-name :body [] :import qualified-name}))))
       (register-builtin-methods env)
-      (doseq [class-def visible-classes]
-        (collect-class-info env class-def))
+      ;; collect-class-info type-checks each constant initializer eagerly, and one
+      ;; that reads another class (e.g. `= create Other.make(...)`) needs that
+      ;; class already collected. The whole-program check gets this from source
+      ;; order (dependencies first); here `visible-classes` arrives in arbitrary
+      ;; order, so collecting a dependent class first would throw. Collect to a
+      ;; fixpoint instead: keep the classes that fail and retry them while any
+      ;; still make progress, so a dependency collected on a later pass unblocks
+      ;; its dependents. Anything still failing is a genuine error, left for the
+      ;; outer best-effort catch.
+      (loop [pending (vec visible-classes)]
+        (when (seq pending)
+          (let [failed (reduce (fn [acc class-def]
+                                 (try (collect-class-info env class-def) acc
+                                      (catch Exception _ (conj acc class-def))))
+                               [] pending)]
+            (when (< (count failed) (count pending))
+              (recur failed)))))
       (register-visible-generic-classes! env visible-classes visible-var-types)
       (doseq [fn-def normalized-functions]
         (env-add-var env (:name fn-def) (:class-name fn-def)))

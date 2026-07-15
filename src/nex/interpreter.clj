@@ -338,7 +338,7 @@
 ;; Runtime Context (holds classes, globals, current environment)
 ;;
 
-(defrecord Context [classes globals current-env output imports specialized-classes compiled-state])
+(defrecord Context [classes globals current-env output imports specialized-classes compiled-state constant-cache])
 
 (declare register-class)
 
@@ -360,7 +360,8 @@
                (atom [])           ; output accumulator
                (atom [])           ; imports registry
                (atom {})           ; specialized classes cache
-               (atom nil))]        ; compiled runtime state for fallback dispatch
+               (atom nil)          ; compiled runtime state for fallback dispatch
+               (atom {}))]         ; evaluated class-constant cache (interning)
       ;; Register built-in base classes
       (register-class ctx (build-any-base-class))
       (register-class ctx (build-function-base-class))
@@ -988,23 +989,43 @@
                          {:class-name (:name class-def)
                           :constant constant-name})))
         (let [source-class (:declaring-class constant class-def)
-              const-env (make-env (:globals ctx))
-              next-visiting (conj visiting visit-key)
-              eval-ctx (assoc ctx
-                              :current-env const-env
-                              :current-class-name (:name source-class)
-                              :constant-visiting next-visiting)]
-         (eval-node eval-ctx (:value constant)))))))
+              cache-key [(:name source-class) constant-name]
+              cache (:constant-cache ctx)]
+          ;; A class constant denotes one canonical value for the whole run, so
+          ;; evaluate its initializer once and intern the result. Without this an
+          ;; object-valued constant would allocate a fresh instance per read
+          ;; (`C.K == C.K` would be false); the compiled backend interns via a
+          ;; write-once static field, and this matches it.
+          (if (and cache (contains? @cache cache-key))
+            (get @cache cache-key)
+            (let [const-env (make-env (:globals ctx))
+                  next-visiting (conj visiting visit-key)
+                  eval-ctx (assoc ctx
+                                  :current-env const-env
+                                  :current-class-name (:name source-class)
+                                  :constant-visiting next-visiting)
+                  value (eval-node eval-ctx (:value constant))]
+              (when cache (swap! cache assoc cache-key value))
+              value)))))))
 
 (defn bind-class-constants!
-  "Bind all constants visible from class-def into env."
+  "Bind all constants visible from class-def into env. Constants of a class that is
+   currently mid-evaluation (some constant of it is in `:constant-visiting`) are
+   left unbound rather than forced: an enum-style constant whose initializer is
+   `create Variant.make()` constructs a subclass of the constant's own class, and
+   construction re-binds the inherited constants — forcing them here would re-enter
+   the in-flight constant (a false self-cycle). Skipped constants stay resolvable
+   on demand via the identifier path (which memoizes), and genuine constant-to-
+   constant cycles are still caught in eval-class-constant's reference path."
   [ctx env class-def]
-  (doseq [constant (get-all-constants ctx class-def)]
-    (env-define env
-                (:name constant)
-                (eval-class-constant ctx
-                                     (:declaring-class constant class-def)
-                                     (:name constant)))))
+  (let [visiting (or (:constant-visiting ctx) #{})
+        in-flight-classes (into #{} (map first) visiting)]
+    (doseq [constant (get-all-constants ctx class-def)]
+      (let [decl (:declaring-class constant class-def)]
+        (when-not (contains? in-flight-classes (:name decl))
+          (env-define env
+                      (:name constant)
+                      (eval-class-constant ctx decl (:name constant))))))))
 
 (defn combine-assertions
   "Combine assertions from parent and child methods (for contracts)."
@@ -1238,6 +1259,17 @@
                                     (conj seen (:name class-def))))
                           (:parents class-def)))))]
       (search (lookup-class ctx (:class-name v)) #{}))))
+
+(defn object-defines-compare?
+  "True when `v` is an object whose class (or an ancestor) provides a
+   single-argument `compare` — i.e. it participates in Comparable. Ordering
+   operators dispatch through that `compare` rather than falling back to
+   structural (printed-form) ordering."
+  [ctx v]
+  (boolean
+   (and ctx (nex-object? v)
+        (when-let [class-def (lookup-class-if-exists ctx (:class-name v))]
+          (lookup-method-with-inheritance ctx class-def "compare" 1)))))
 
 (defn value-equality-fn
   "Equality over Nex values bound into the runtime collections for the dynamic
@@ -2309,6 +2341,19 @@
              (or (nex-object? left-val) (nex-object? right-val)))
         (let [eq (nex-objects-equal? ctx left-val right-val)]
           (if (= operator "=") eq (not eq)))
+
+        ;; Ordering on a Comparable object dispatches through its `compare`
+        ;; feature (result vs 0), matching the JVM backend. Without this the
+        ;; operand would fall to `nex-ordering-compare`, which lexically orders
+        ;; the object's printed form — giving results unrelated to `compare`.
+        (and (#{"<" "<=" ">" ">="} operator)
+             (object-defines-compare? ctx left-val))
+        (let [c (nex-value-compare ctx left-val right-val)]
+          (case operator
+            "<"  (neg? c)
+            "<=" (not (pos? c))
+            ">"  (pos? c)
+            ">=" (not (neg? c))))
 
         ;; An arithmetic operator on an object is sugar for the feature the class
         ;; aliased to it. Routing through :call means the feature's contracts run

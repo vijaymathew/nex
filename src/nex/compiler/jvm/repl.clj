@@ -715,10 +715,17 @@
                                                     :functions visible-functions
                                                     :imports visible-imports
                                                     :source-file source-id}))
-                compiled-class-defs)]
+                compiled-class-defs)
+          ;; A class with an object-/collection-valued constant bootstraps a
+          ;; session state in its <clinit> to build it, so it needs the same
+          ;; class/import metadata the launcher gets — here the union of the
+          ;; session's known classes and the batch being defined.
+          bootstrap-edn {:classes-edn (pr-str (vec (concat (vals @(:class-asts session))
+                                                           actual-classes)))
+                         :imports-edn (pr-str visible-imports)}]
         (doseq [class-def compiled-class-defs]
           (let [lowered (some #(when (= (:name %) (:name class-def)) %) lowered-classes)
-                bytecode (emit/compile-user-class->bytes lowered)]
+                bytecode (emit/compile-user-class->bytes lowered bootstrap-edn)]
             (loader/define-class! (:loader session)
                                   (desc/binary-class-name (:jvm-name lowered))
                                   bytecode)))

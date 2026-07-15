@@ -433,6 +433,16 @@
                                env'))
         direct-type
         (case (:type expr)
+          ;; A literal's type is context-free — resolve it directly rather than
+          ;; through tc/infer-expression-type, whose best-effort env can throw
+          ;; (and silently yield nil) on unrelated classes, e.g. a sibling
+          ;; constant that forward-references a not-yet-collected class.
+          :integer "Integer"
+          :real    "Real"
+          :string  "String"
+          :boolean "Boolean"
+          :char    "Char"
+
           :identifier
           (or (get-in (:locals env) [(:name expr) :nex-type])
               (get-in (:fields env) [(:name expr) :nex-type])

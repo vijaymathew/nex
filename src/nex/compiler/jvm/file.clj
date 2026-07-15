@@ -161,6 +161,8 @@
                                                   :var-types {}})
            class-asts (vec (concat (user-class-defs prepared-ast)
                                    (lower/collect-anonymous-class-defs prepared-ast)))
+           classes-edn (pr-str class-asts)
+           imports-edn (pr-str (:imports prepared-ast))
            class-bytes (into {(desc/binary-class-name program-internal-name)
                               (emit/compile-unit->bytes unit)
                               (desc/binary-class-name launcher-internal-name)
@@ -169,11 +171,17 @@
                                 :binary-name (desc/binary-class-name launcher-internal-name)
                                 :source-file source-id
                                 :program-internal-name program-internal-name
-                                :classes-edn (pr-str class-asts)
-                                :imports-edn (pr-str (:imports prepared-ast))})}
+                                :classes-edn classes-edn
+                                :imports-edn imports-edn})}
                              (map (fn [lowered-class]
+                                    ;; A class's <clinit> bootstraps a session state
+                                    ;; to build object-valued constants, so it needs
+                                    ;; the same class/import metadata as the launcher.
                                     [(desc/binary-class-name (:jvm-name lowered-class))
-                                     (emit/compile-user-class->bytes lowered-class)])
+                                     (emit/compile-user-class->bytes
+                                      lowered-class
+                                      {:classes-edn classes-edn
+                                       :imports-edn imports-edn})])
                                   (:classes unit)))]
        {:program-class (desc/binary-class-name program-internal-name)
         :main-class (desc/binary-class-name launcher-internal-name)

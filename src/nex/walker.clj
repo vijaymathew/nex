@@ -388,8 +388,14 @@
 
   variant-node is a parsed (:unionVariant IDENTIFIER '(' paramList? ')') tree.
   generic-params is the parent's already-transformed generic-param vector, shared
-  verbatim by every variant so payload types can reference them (e.g. Ok[T])."
-  [variant-node parent-name generic-params]
+  verbatim by every variant so payload types can reference them (e.g. Ok[T]).
+
+  When `enum-ordinal` is supplied (an all-payload-free / enum union), the variant
+  carries no payload; its nullary `make` sets the inherited `ordinal` field to the
+  variant's declaration index, which backs Comparable ordering on the parent."
+  ([variant-node parent-name generic-params]
+   (union-variant->class variant-node parent-name generic-params nil))
+  ([variant-node parent-name generic-params enum-ordinal]
   (let [var-name (token-text (second variant-node))
         param-list-node (first (filter #(and (sequential? %)
                                              (= :paramList (first %)))
@@ -416,12 +422,16 @@
                             {:name (str "arg__" (inc i))
                              :type type})
                           payload))
-        ctor-body (vec (map-indexed
-                        (fn [i {:keys [name]}]
-                          {:type :assign
-                           :target name
-                           :value {:type :identifier :name (str "arg__" (inc i))}})
-                        payload))
+        ctor-body (if enum-ordinal
+                    [{:type :assign
+                      :target "ordinal"
+                      :value {:type :integer :value enum-ordinal}}]
+                    (vec (map-indexed
+                          (fn [i {:keys [name]}]
+                            {:type :assign
+                             :target name
+                             :value {:type :identifier :name (str "arg__" (inc i))}})
+                          payload)))
         feature-section (when (seq fields)
                           {:type :feature-section
                            :visibility {:type :public}
@@ -445,6 +455,69 @@
      :body (if feature-section
              [feature-section constructors]
              [constructors])
+     :invariant nil})))
+
+(defn- payload-free-variant?
+  "A variant with no `(payload)` — an enum-style tag."
+  [variant-node]
+  (not (some #(and (sequential? %) (= :paramList (first %)))
+             (drop 2 variant-node))))
+
+(def ^:private enum-reserved-member-names
+  "Names the enum enrichment generates on the parent, so a variant cannot claim
+   them (it would collide with the ordinal field, the compare routine, or the
+   values array)."
+  #{"ordinal" "compare" "values"})
+
+(defn- enum-parent-class
+  "Parent class for an all-payload-free union — the enum enrichment. It is the
+  same `sealed deferred` closed type the plain desugaring builds, plus: it is
+  `Comparable` by declaration order (an `ordinal` field the variants set, and a
+  `compare` over it), one interned constant per member (`P.Red` is the one
+  canonical Red — a write-once class constant, not a fresh allocation), and a
+  `values` array of all members. `values` references the member *constants*, so
+  its elements are all typed `P` — a homogeneous `Array[P]`, sidestepping the
+  heterogeneous-literal check that a list of `create Red.make()` calls would hit."
+  [parent-name variant-names note]
+  (let [ordinal-field {:type :field :name "ordinal" :field-type "Integer"
+                       :once? false :constant? false :value nil :note nil}
+        compare-method {:type :method :name "compare"
+                        :params [{:name "other__" :type parent-name}]
+                        :return-type "Integer" :alias nil :note nil :require nil
+                        :body [{:type :assign :target "result"
+                                :value {:type :binary :operator "-"
+                                        :left {:type :identifier :name "ordinal"}
+                                        :right {:type :call :target "other__"
+                                                :method "ordinal" :args []
+                                                :has-parens false}}}]
+                        :declaration-only? false :ensure nil :rescue nil}
+        member-constants (mapv (fn [vname]
+                                 {:type :field :name vname :field-type parent-name
+                                  :once? false :constant? true
+                                  :value {:type :create :class-name vname
+                                          :generic-args nil :constructor "make"
+                                          :args []}
+                                  :note nil})
+                               variant-names)
+        values-constant {:type :field :name "values"
+                         :field-type {:base-type "Array" :type-args [parent-name]}
+                         :once? false :constant? true
+                         :value {:type :array-literal
+                                 :elements (mapv (fn [vname]
+                                                   {:type :identifier :name vname})
+                                                 variant-names)}
+                         :note nil}]
+    {:type :class
+     :name parent-name
+     :deferred? true
+     :sealed? true
+     :generic-params nil
+     :note note
+     :parents [{:parent "Comparable"}]
+     :body [{:type :feature-section :visibility {:type :public}
+             :members [ordinal-field compare-method]}
+            {:type :feature-section :visibility {:type :public}
+             :members (conj member-constants values-constant)}]
      :invariant nil}))
 
 ;;
@@ -707,8 +780,15 @@
         :invariant (when invariant-clause (transform-node invariant-clause))}))
 
    :unionDecl
-   (fn [[_ _union-kw name & rest]]
-     (let [generic-params-node (first (filter #(and (sequential? %)
+   (fn [[_ & parts]]
+     ;; `enum union …` (the ENUM keyword is present) enriches the enumeration;
+     ;; plain `union …` keeps the bare sum-type desugaring even when every variant
+     ;; is payload-free — the enrichment is opt-in, never inferred.
+     (let [enum? (= "enum" (token-text (first parts)))
+           parts (if enum? (rest parts) parts)
+           name (second parts)
+           rest (drop 2 parts)
+           generic-params-node (first (filter #(and (sequential? %)
                                                     (= :genericParams (first %)))
                                               rest))
            note-clause (first (filter #(and (sequential? %)
@@ -719,20 +799,49 @@
                                        (= :unionVariant (first %)))
                                  rest)
            parent-name (token-text name)
-           parent {:type :class
-                   :name parent-name
-                   :deferred? true
-                   :sealed? true
-                   :generic-params generic-params
-                   :note (when note-clause (transform-node note-clause))
-                   :parents nil
-                   :body []
-                   :invariant nil}
-           variant-classes (mapv #(union-variant->class % parent-name generic-params)
-                                 variant-nodes)]
-       {:type :union
-        :name parent-name
-        :classes (into [parent] variant-classes)}))
+           note (when note-clause (transform-node note-clause))]
+       (if enum?
+         (let [variant-names (mapv #(token-text (second %)) variant-nodes)]
+           (when generic-params
+             (let [msg (str "enum union " parent-name " cannot be generic: its members are "
+                            "canonical constants, which need a concrete type. Use a plain "
+                            "generic 'union' for a tagged sum type.")]
+               (throw (ex-info msg {:error msg}))))
+           (when-not (every? payload-free-variant? variant-nodes)
+             (let [msg (str "enum union " parent-name " variants cannot carry a payload — an "
+                            "enum is a set of tags. Drop 'enum' for a tagged sum type with "
+                            "per-variant fields.")]
+               (throw (ex-info msg {:error msg}))))
+           (when-let [bad (some enum-reserved-member-names variant-names)]
+             (let [msg (str "'" bad "' is a reserved member name in enum union " parent-name
+                            " (the enrichment generates ordinal/compare/values). Rename the "
+                            "variant.")]
+               (throw (ex-info msg {:error msg}))))
+           (let [variant-classes (vec (map-indexed
+                                       (fn [i vn]
+                                         (union-variant->class vn parent-name nil i))
+                                       variant-nodes))]
+             {:type :union
+              :name parent-name
+              ;; Variants first, parent last: the parent's member constants name
+              ;; the variant classes, which must already be in scope.
+              :classes (conj variant-classes (enum-parent-class parent-name
+                                                                variant-names
+                                                                note))}))
+         (let [parent {:type :class
+                       :name parent-name
+                       :deferred? true
+                       :sealed? true
+                       :generic-params generic-params
+                       :note note
+                       :parents nil
+                       :body []
+                       :invariant nil}
+               variant-classes (mapv #(union-variant->class % parent-name generic-params)
+                                     variant-nodes)]
+           {:type :union
+            :name parent-name
+            :classes (into [parent] variant-classes)}))))
 
    :functionDecl
    (fn [[_ _function-kw name & rest]]

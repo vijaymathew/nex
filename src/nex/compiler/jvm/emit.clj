@@ -90,7 +90,8 @@
                    (:functions unit))))})
 
 (defn user-class-spec
-  [class-spec]
+  ([class-spec] (user-class-spec class-spec {}))
+  ([class-spec {:keys [classes-edn imports-edn]}]
   {:internal-name (:internal-name class-spec)
    :binary-name (desc/binary-class-name (:jvm-name class-spec))
    :source-file (:source-file class-spec)
@@ -144,7 +145,9 @@
                 :flags (+ Opcodes/ACC_STATIC)
                 :kind :class-initializer
                 :owner (:internal-name class-spec)
-                :constants (:constants class-spec)}]
+                :constants (:constants class-spec)
+                :classes-edn classes-edn
+                :imports-edn imports-edn}]
               (map (fn [fn-node]
                      {:name (:emitted-name fn-node)
                       :descriptor (repl-fn-method-descriptor)
@@ -159,7 +162,7 @@
                          :flags Opcodes/ACC_PUBLIC
                          :kind :instance-fn
                          :fn-node fn-node}))
-                    (:methods class-spec))))})
+                    (:methods class-spec))))}))
 
 (defn launcher-class-spec
   [{:keys [internal-name binary-name source-file program-internal-name classes-edn imports-edn]}]
@@ -2391,9 +2394,30 @@
     (.visitEnd fv)))
 
 (defn- emit-class-initializer!
-  [^ClassWriter cw {:keys [name descriptor flags owner constants]}]
-  (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
+  [^ClassWriter cw {:keys [name descriptor flags owner constants classes-edn imports-edn]}]
+  (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)
+        ;; A scalar constant lowers to a `:const` (LDC) that never touches the
+        ;; state slot. An object- or collection-valued constant dispatches a
+        ;; constructor/call and needs a session state. `<clinit>` is static and
+        ;; receives none, so we bootstrap a throwaway one (as the launcher's main
+        ;; does) into local slot 0. Because <clinit> runs exactly once per class
+        ;; load, the resulting PUTSTATIC interns the value: every read of the
+        ;; constant yields the same instance.
+        needs-state? (some (fn [{:keys [value]}] (not= :const (:op value))) constants)]
+    (when (and needs-state? (or (nil? classes-edn) (nil? imports-edn)))
+      (throw (ex-info "Object-valued class constant needs class metadata to bootstrap its <clinit> state"
+                      {:owner owner
+                       :constants (mapv :name constants)})))
     (.visitCode mv)
+    (when needs-state?
+      (emit-runtime-call! mv "make-repl-state" [])
+      (.visitTypeInsn mv Opcodes/CHECKCAST repl-state-internal-name)
+      (.visitVarInsn mv Opcodes/ASTORE 0)
+      (emit-runtime-call! mv "bootstrap-compiled-state!"
+                          [(fn [] (.visitVarInsn mv Opcodes/ALOAD 0))
+                           (fn [] (.visitLdcInsn mv ^String classes-edn))
+                           (fn [] (.visitLdcInsn mv ^String imports-edn))])
+      (.visitInsn mv Opcodes/POP))
     (doseq [{:keys [name jvm-type value]} constants]
       (emit-expr! mv value 0)
       (.visitFieldInsn mv
@@ -2449,8 +2473,9 @@
   (emit-class (minimal-class-spec unit)))
 
 (defn compile-user-class->bytes
-  [class-spec]
-  (emit-class (user-class-spec class-spec)))
+  ([class-spec] (compile-user-class->bytes class-spec {}))
+  ([class-spec bootstrap-edn]
+   (emit-class (user-class-spec class-spec bootstrap-edn))))
 
 (defn compile-launcher->bytes
   [launcher-spec]
