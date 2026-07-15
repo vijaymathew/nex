@@ -1009,14 +1009,23 @@
               value)))))))
 
 (defn bind-class-constants!
-  "Bind all constants visible from class-def into env."
+  "Bind all constants visible from class-def into env. Constants of a class that is
+   currently mid-evaluation (some constant of it is in `:constant-visiting`) are
+   left unbound rather than forced: an enum-style constant whose initializer is
+   `create Variant.make()` constructs a subclass of the constant's own class, and
+   construction re-binds the inherited constants — forcing them here would re-enter
+   the in-flight constant (a false self-cycle). Skipped constants stay resolvable
+   on demand via the identifier path (which memoizes), and genuine constant-to-
+   constant cycles are still caught in eval-class-constant's reference path."
   [ctx env class-def]
-  (doseq [constant (get-all-constants ctx class-def)]
-    (env-define env
-                (:name constant)
-                (eval-class-constant ctx
-                                     (:declaring-class constant class-def)
-                                     (:name constant)))))
+  (let [visiting (or (:constant-visiting ctx) #{})
+        in-flight-classes (into #{} (map first) visiting)]
+    (doseq [constant (get-all-constants ctx class-def)]
+      (let [decl (:declaring-class constant class-def)]
+        (when-not (contains? in-flight-classes (:name decl))
+          (env-define env
+                      (:name constant)
+                      (eval-class-constant ctx decl (:name constant))))))))
 
 (defn combine-assertions
   "Combine assertions from parent and child methods (for contracts)."
