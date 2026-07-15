@@ -1239,6 +1239,17 @@
                           (:parents class-def)))))]
       (search (lookup-class ctx (:class-name v)) #{}))))
 
+(defn object-defines-compare?
+  "True when `v` is an object whose class (or an ancestor) provides a
+   single-argument `compare` — i.e. it participates in Comparable. Ordering
+   operators dispatch through that `compare` rather than falling back to
+   structural (printed-form) ordering."
+  [ctx v]
+  (boolean
+   (and ctx (nex-object? v)
+        (when-let [class-def (lookup-class-if-exists ctx (:class-name v))]
+          (lookup-method-with-inheritance ctx class-def "compare" 1)))))
+
 (defn value-equality-fn
   "Equality over Nex values bound into the runtime collections for the dynamic
    extent of a program run: a class's `equals` override when present, structural
@@ -2309,6 +2320,19 @@
              (or (nex-object? left-val) (nex-object? right-val)))
         (let [eq (nex-objects-equal? ctx left-val right-val)]
           (if (= operator "=") eq (not eq)))
+
+        ;; Ordering on a Comparable object dispatches through its `compare`
+        ;; feature (result vs 0), matching the JVM backend. Without this the
+        ;; operand would fall to `nex-ordering-compare`, which lexically orders
+        ;; the object's printed form — giving results unrelated to `compare`.
+        (and (#{"<" "<=" ">" ">="} operator)
+             (object-defines-compare? ctx left-val))
+        (let [c (nex-value-compare ctx left-val right-val)]
+          (case operator
+            "<"  (neg? c)
+            "<=" (not (pos? c))
+            ">"  (pos? c)
+            ">=" (not (neg? c))))
 
         ;; An arithmetic operator on an object is sugar for the feature the class
         ;; aliased to it. Routing through :call means the feature's contracts run

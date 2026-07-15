@@ -438,7 +438,14 @@ Class-level keywords should align with 'class' at column 0."
          ;; the 'from'-balancing scan rather than `nex-in-from-block-p', which
          ;; only sees a loop 'invariant' written after 'until'.
          (not (and (looking-at "\\binvariant\\b")
-                   (nex-loop-from-indent))))))
+                   (nex-loop-from-indent)))
+         ;; A 'create' creation instruction (e.g. "create Account.open(x)") is
+         ;; NOT the class-level 'create' clause.  The clause stands alone on its
+         ;; line or lists lowercase feature names; the instruction is followed
+         ;; by an uppercase type name (or a "{TYPE}" cast).  Only the latter is
+         ;; a statement inside a body and must indent with the body, not align
+         ;; to the class.
+         (not (looking-at "\\bcreate\\s-+[A-Z{]")))))
 
 (defun nex-find-class-indent ()
   "Find the indentation level of the enclosing class.

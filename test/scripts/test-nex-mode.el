@@ -237,6 +237,40 @@ class level.  Bare-'from' init statements still indent one level under 'from'."
               "end")
             "\n"))))
 
+(ert-deftest nex-indent-standalone-do-block-with-create ()
+  "A standalone do..rescue..end block indents its body, even when the first
+statement is a 'create' creation instruction (regression: 'create X.f(...)'
+was mistaken for the class-level 'create' clause and pinned to column 0)."
+  (should (string=
+           (nex-test--reindent
+            "do\ncreate Account.open(neg)\nrescue\nprint(\"Expected error: \" + exception)\nend")
+           (string-join
+            '("do"
+              "  create Account.open(neg)"
+              "rescue"
+              "  print(\"Expected error: \" + exception)"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-create-clause-vs-instruction ()
+  "The class-level 'create' clause aligns with the class and indents its feature
+list, while a 'create' creation instruction in a method body indents with the
+body."
+  (should (string=
+           (nex-test--reindent
+            "class Account\ncreate\nmake\nfeature\nopen()\ndo\ncreate Path.make(\"x\")\nend\nend")
+           (string-join
+            '("class Account"
+              "create"
+              "  make"
+              "feature"
+              "  open()"
+              "  do"
+              "    create Path.make(\"x\")"
+              "  end"
+              "end")
+            "\n"))))
+
 (ert-deftest nex-indent-method-body-do-with-contracts ()
   "A method body do/require/ensure still align with the method, not deeper."
   (should (string=
