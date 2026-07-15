@@ -338,7 +338,7 @@
 ;; Runtime Context (holds classes, globals, current environment)
 ;;
 
-(defrecord Context [classes globals current-env output imports specialized-classes compiled-state])
+(defrecord Context [classes globals current-env output imports specialized-classes compiled-state constant-cache])
 
 (declare register-class)
 
@@ -360,7 +360,8 @@
                (atom [])           ; output accumulator
                (atom [])           ; imports registry
                (atom {})           ; specialized classes cache
-               (atom nil))]        ; compiled runtime state for fallback dispatch
+               (atom nil)          ; compiled runtime state for fallback dispatch
+               (atom {}))]         ; evaluated class-constant cache (interning)
       ;; Register built-in base classes
       (register-class ctx (build-any-base-class))
       (register-class ctx (build-function-base-class))
@@ -988,13 +989,24 @@
                          {:class-name (:name class-def)
                           :constant constant-name})))
         (let [source-class (:declaring-class constant class-def)
-              const-env (make-env (:globals ctx))
-              next-visiting (conj visiting visit-key)
-              eval-ctx (assoc ctx
-                              :current-env const-env
-                              :current-class-name (:name source-class)
-                              :constant-visiting next-visiting)]
-         (eval-node eval-ctx (:value constant)))))))
+              cache-key [(:name source-class) constant-name]
+              cache (:constant-cache ctx)]
+          ;; A class constant denotes one canonical value for the whole run, so
+          ;; evaluate its initializer once and intern the result. Without this an
+          ;; object-valued constant would allocate a fresh instance per read
+          ;; (`C.K == C.K` would be false); the compiled backend interns via a
+          ;; write-once static field, and this matches it.
+          (if (and cache (contains? @cache cache-key))
+            (get @cache cache-key)
+            (let [const-env (make-env (:globals ctx))
+                  next-visiting (conj visiting visit-key)
+                  eval-ctx (assoc ctx
+                                  :current-env const-env
+                                  :current-class-name (:name source-class)
+                                  :constant-visiting next-visiting)
+                  value (eval-node eval-ctx (:value constant))]
+              (when cache (swap! cache assoc cache-key value))
+              value)))))))
 
 (defn bind-class-constants!
   "Bind all constants visible from class-def into env."
