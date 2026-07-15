@@ -463,6 +463,12 @@
   (not (some #(and (sequential? %) (= :paramList (first %)))
              (drop 2 variant-node))))
 
+(def ^:private enum-reserved-member-names
+  "Names the enum enrichment generates on the parent, so a variant cannot claim
+   them (it would collide with the ordinal field, the compare routine, or the
+   values array)."
+  #{"ordinal" "compare" "values"})
+
 (defn- enum-parent-class
   "Parent class for an all-payload-free union — the enum enrichment. It is the
   same `sealed deferred` closed type the plain desugaring builds, plus: it is
@@ -774,8 +780,15 @@
         :invariant (when invariant-clause (transform-node invariant-clause))}))
 
    :unionDecl
-   (fn [[_ _union-kw name & rest]]
-     (let [generic-params-node (first (filter #(and (sequential? %)
+   (fn [[_ & parts]]
+     ;; `enum union …` (the ENUM keyword is present) enriches the enumeration;
+     ;; plain `union …` keeps the bare sum-type desugaring even when every variant
+     ;; is payload-free — the enrichment is opt-in, never inferred.
+     (let [enum? (= "enum" (token-text (first parts)))
+           parts (if enum? (rest parts) parts)
+           name (second parts)
+           rest (drop 2 parts)
+           generic-params-node (first (filter #(and (sequential? %)
                                                     (= :genericParams (first %)))
                                               rest))
            note-clause (first (filter #(and (sequential? %)
@@ -786,27 +799,35 @@
                                        (= :unionVariant (first %)))
                                  rest)
            parent-name (token-text name)
-           note (when note-clause (transform-node note-clause))
-           ;; An all-payload-free, non-generic union is an enumeration: enrich it
-           ;; with interned members, declaration-order Comparable, and `values`.
-           ;; Any payload (or a generic parameter) means a real tagged sum type,
-           ;; which keeps the plain desugaring.
-           enum? (and (nil? generic-params)
-                      (seq variant-nodes)
-                      (every? payload-free-variant? variant-nodes))]
+           note (when note-clause (transform-node note-clause))]
        (if enum?
-         (let [variant-names (mapv #(token-text (second %)) variant-nodes)
-               variant-classes (vec (map-indexed
-                                     (fn [i vn]
-                                       (union-variant->class vn parent-name nil i))
-                                     variant-nodes))]
-           {:type :union
-            :name parent-name
-            ;; Variants first, parent last: the parent's member constants name the
-            ;; variant classes, which must already be in scope.
-            :classes (conj variant-classes (enum-parent-class parent-name
-                                                              variant-names
-                                                              note))})
+         (let [variant-names (mapv #(token-text (second %)) variant-nodes)]
+           (when generic-params
+             (let [msg (str "enum union " parent-name " cannot be generic: its members are "
+                            "canonical constants, which need a concrete type. Use a plain "
+                            "generic 'union' for a tagged sum type.")]
+               (throw (ex-info msg {:error msg}))))
+           (when-not (every? payload-free-variant? variant-nodes)
+             (let [msg (str "enum union " parent-name " variants cannot carry a payload — an "
+                            "enum is a set of tags. Drop 'enum' for a tagged sum type with "
+                            "per-variant fields.")]
+               (throw (ex-info msg {:error msg}))))
+           (when-let [bad (some enum-reserved-member-names variant-names)]
+             (let [msg (str "'" bad "' is a reserved member name in enum union " parent-name
+                            " (the enrichment generates ordinal/compare/values). Rename the "
+                            "variant.")]
+               (throw (ex-info msg {:error msg}))))
+           (let [variant-classes (vec (map-indexed
+                                       (fn [i vn]
+                                         (union-variant->class vn parent-name nil i))
+                                       variant-nodes))]
+             {:type :union
+              :name parent-name
+              ;; Variants first, parent last: the parent's member constants name
+              ;; the variant classes, which must already be in scope.
+              :classes (conj variant-classes (enum-parent-class parent-name
+                                                                variant-names
+                                                                note))}))
          (let [parent {:type :class
                        :name parent-name
                        :deferred? true

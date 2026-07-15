@@ -31,8 +31,12 @@ classDecl
 // `sealed deferred class` parent plus one `class ... inherit Parent`
 // per variant (see src/nex/walker.clj :unionDecl). Payloads become
 // feature fields plus an auto-generated `make` constructor.
+//
+// The optional leading `enum` keyword — allowed only when every variant is
+// payload-free — enriches the enumeration with interned members, declaration-
+// order Comparable, and a `values` array (see enum-parent-class in the walker).
 unionDecl
-    : UNION IDENTIFIER genericParams?
+    : ENUM? UNION IDENTIFIER genericParams?
       noteClause?
       unionVariant+
       END
@@ -479,6 +483,7 @@ setLiteral
 
 CLASS        : 'class';
 UNION        : 'union';
+ENUM         : 'enum';
 WHERE        : 'where';
 SEALED       : 'sealed';
 DEFERRED     : 'deferred';

@@ -32,7 +32,7 @@
   {:compiled (run-compiled code) :interpreted (run-interpreted code)})
 
 (def color-enum
-  "union Color
+  "enum union Color
   Red
   Green
   Blue
@@ -115,3 +115,53 @@ match a of
 end"]
       (is (= ["3"] (run-compiled prog)))
       (is (= ["3"] (run-interpreted prog))))))
+
+(deftest enrichment-is-opt-in
+  (testing "a plain payload-free `union` is NOT enriched — no members, no values"
+    ;; The whole point of the `enum` keyword: enrichment (and its declaration-order
+    ;; ordering) is a deliberate choice, never inferred from payload-free-ness.
+    (is (thrown? Exception
+                 (run-interpreted "union Color
+  Red
+  Green
+end
+print(Color.Red)")))
+    (is (thrown? Exception
+                 (run-interpreted "union Color
+  Red
+  Green
+end
+print(Color.values.length())")))))
+
+(deftest enum-keyword-is-reserved
+  (testing "`enum` is a hard keyword and cannot be used as an identifier"
+    (is (thrown? Exception (p/ast "let enum := 5")))))
+
+(deftest enum-union-rejects-payload
+  (testing "a payload on an enum variant is a clear error, not a silent sum type"
+    (is (thrown-with-msg?
+         Exception #"cannot carry a payload"
+         (p/ast "enum union Bad
+  Circle(r: Real)
+  Square
+end")))))
+
+(deftest enum-union-rejects-generic
+  (testing "a generic enum union is rejected — members need a concrete type"
+    (is (thrown-with-msg?
+         Exception #"cannot be generic"
+         (p/ast "enum union Box[T]
+  A
+  B
+end")))))
+
+(deftest enum-union-rejects-reserved-member-names
+  (testing "a variant named like a generated member is a clear error"
+    (doseq [reserved ["values" "ordinal" "compare"]]
+      (is (thrown-with-msg?
+           Exception #"reserved member name"
+           (p/ast (str "enum union Bad
+  Red
+  " reserved "
+end")))
+          (str "variant named " reserved " should be rejected")))))
