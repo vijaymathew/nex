@@ -268,8 +268,11 @@
 
 (defn java-create-object
   [state class-name args]
-  (let [ctx (rebuild-interpreter-ctx state)]
-    (bi/java-create-object ctx class-name args)))
+  ;; Resolve the host class off `state` directly (like java-call-static), rather
+  ;; than rebuilding an interpreter context just to read the imports. This also
+  ;; resolves fully-qualified and java.lang.* names, not only imported ones.
+  (let [^Class klass (resolve-java-host-class state class-name)]
+    (clojure.lang.Reflector/invokeConstructor klass (to-array args))))
 
 (defn java-call-static
   [state class-name method-name args]
