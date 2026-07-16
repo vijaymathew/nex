@@ -689,6 +689,34 @@ end")
       (is (some? bad-default-create-ex))
       (is (re-find #"Class invariant violation: positive" (str bad-default-create-ex))))))
 
+(def ^:private reentrant-invariant-program
+  ;; The invariant calls a public method on `this`. That method's exit would
+  ;; itself trigger invariant validation, so without a re-entrancy guard the
+  ;; native __invariant would recurse forever. The guard (matching the historical
+  ;; *validating-object-state* semantics) must let the outer check run and the
+  ;; inner call proceed without re-validating.
+  "class Acct
+feature
+  bal: Integer
+  doubled(): Integer do result := bal + bal end
+  set(n: Integer): Integer do this.bal := n  result := this.bal end
+create make(n: Integer) do this.bal := n end
+invariant
+  consistent: doubled() = bal + bal
+end")
+
+(deftest compiled-invariant-reentrancy-test
+  (testing "an invariant that calls a public method on this does not recurse"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval!
+                         session
+                         (p/ast (str reentrant-invariant-program
+                                     "\n\n"
+                                     "let a: Acct := create Acct.make(5)\n"
+                                     "a.set(10)")))]
+      (is (:compiled? define-result))
+      (is (= 10 (:result define-result))))))
+
 (deftest compiled-inherited-class-invariants-smoke-test
   (testing "compiled helper validates inherited invariants through the composition model"
     (let [session (compiled-repl/make-session)
@@ -713,6 +741,117 @@ end")
       (is (re-find #"Class invariant violation: parent_positive" (str bad-local-ex)))
       (is (some? bad-delegated-ex))
       (is (re-find #"Class invariant violation: parent_positive" (str bad-delegated-ex))))))
+
+(def ^:private object-equality-invariant-program
+  ;; An invariant comparing two object-typed fields with `=` must use structural
+  ;; equality, like `=` does everywhere else on the compiled backend. Class
+  ;; invariants are evaluated through the interpreter, which did not recognise
+  ;; the compiled field instances as objects and so compared them by identity —
+  ;; a violation for distinct-but-equal values. Kind is an enum field so the
+  ;; comparison also spans a nested (enum) object.
+  "enum union Kind
+  A
+  B
+end
+
+class Money
+feature
+  amount: Real
+  kind: Kind
+create make(a: Real, k: Kind) do amount := a  kind := k end
+end
+
+class Holder
+feature
+  x: Money
+  y: Money
+create make(a: Money, b: Money) do x := a  y := b end
+invariant
+  consistent: x = y
+end")
+
+(deftest compiled-class-invariant-object-equality-test
+  (testing "a class invariant comparing object fields with `=` uses structural equality"
+    (let [session (compiled-repl/make-session)
+          ;; Distinct Money instances with equal value + kind: the invariant
+          ;; `x = y` must hold (previously failed as an identity comparison).
+          ok-result (compiled-repl/compile-and-eval!
+                     session
+                     (p/ast (str object-equality-invariant-program
+                                 "\n\n"
+                                 "let m1: Money := create Money.make(22.2, Kind.A)\n"
+                                 "let m2: Money := create Money.make(22.2, Kind.A)\n"
+                                 "let h: Holder := create Holder.make(m1, m2)\n"
+                                 "h.x.amount")))
+          ;; Genuinely unequal object fields must still trip the invariant.
+          bad-ex (try
+                   (compiled-repl/compile-and-eval!
+                    session
+                    (p/ast "let n1: Money := create Money.make(1.0, Kind.A)
+                            let n2: Money := create Money.make(2.0, Kind.A)
+                            let bad: Holder := create Holder.make(n1, n2)"))
+                   nil
+                   (catch Throwable t (root-cause t)))]
+      (is (:compiled? ok-result))
+      (is (= 22.2 (:result ok-result)))
+      (is (some? bad-ex))
+      (is (re-find #"Class invariant violation: consistent" (str bad-ex))))))
+
+(def ^:private inherited-only-invariant-program
+  ;; Derived declares no invariant of its own but inherits Base's. Validation is
+  ;; gated on whether the hierarchy declares *any* invariant, so the gate must
+  ;; still fire for Derived — otherwise the inherited invariant would silently
+  ;; stop being enforced. Plain has no invariant anywhere and must construct
+  ;; freely (the gate skips the interpreter-context rebuild for it).
+  "class Base
+feature
+  v: Integer
+  set_v(n: Integer): Integer
+  do
+    this.v := n
+    result := this.v
+  end
+create make(n: Integer) do this.v := n end
+invariant
+  positive: v > 0
+end
+
+class Derived inherit Base
+feature
+  tag: Integer
+create make2(n: Integer) do Base.make(n) end
+end
+
+class Plain
+feature
+  w: Integer
+create make(n: Integer) do this.w := n end
+end")
+
+(deftest compiled-invariant-gating-inherited-still-enforced-test
+  (testing "gating validation on invariant presence still enforces inherited invariants"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval!
+                         session
+                         (p/ast (str inherited-only-invariant-program
+                                     "\n\n"
+                                     "let d: Derived := create Derived.make2(5)\n"
+                                     "d.v")))
+          ;; Invariant-free class: constructs with any value, no false violation.
+          plain-result (compiled-repl/compile-and-eval!
+                        session (p/ast "let p: Plain := create Plain.make(0)\np.w"))
+          ;; Derived declares no invariant, but constructing it in violation of
+          ;; Base's inherited invariant must still raise.
+          bad-ex (try
+                   (compiled-repl/compile-and-eval!
+                    session (p/ast "let bad: Derived := create Derived.make2(0)"))
+                   nil
+                   (catch Throwable t (root-cause t)))]
+      (is (:compiled? define-result))
+      (is (= 5 (:result define-result)))
+      (is (= 0 (:result plain-result)))
+      (is (some? bad-ex))
+      (is (re-find #"Class invariant violation: positive" (str bad-ex))))))
 
 (deftest compiled-loop-contracts-smoke-test
   (testing "compiled helper enforces loop invariants and variants"

@@ -268,8 +268,11 @@
 
 (defn java-create-object
   [state class-name args]
-  (let [ctx (rebuild-interpreter-ctx state)]
-    (bi/java-create-object ctx class-name args)))
+  ;; Resolve the host class off `state` directly (like java-call-static), rather
+  ;; than rebuilding an interpreter context just to read the imports. This also
+  ;; resolves fully-qualified and java.lang.* names, not only imported ones.
+  (let [^Class klass (resolve-java-host-class state class-name)]
+    (clojure.lang.Reflector/invokeConstructor klass (to-array args))))
 
 (defn java-call-static
   [state class-name method-name args]
@@ -993,48 +996,38 @@
            distinct
            vec))))
 
+(def ^:private invariant-method-present-cache
+  "Per-Class cache of whether a compiled class carries the synthetic `__invariant`
+   method, so the reflective lookup runs once per class rather than per call."
+  (java.util.concurrent.ConcurrentHashMap.))
+
+(defn- has-invariant-method?
+  "Whether `value` is a compiled object whose class defines `__invariant` (the
+   synthesized native invariant check). Interpreter objects have no compiled
+   method and validate their own invariants when constructed, so they are skipped."
+  [value]
+  (and (some? value)
+       (not (interp/nex-object? value))
+       (.computeIfAbsent invariant-method-present-cache
+                         (.getClass value)
+                         (reify java.util.function.Function
+                           (apply [_ _]
+                             (boolean (find-user-method value (lowered-instance-method-name "__invariant" 0))))))))
+
 (defn validate-object-state
-  [state class-name value]
-  (if *validating-object-state*
-    value
+  "Validate an object's class invariant after construction or a public call.
+   The invariant is compiled to a native `__invariant` method (structural `=`,
+   no interpreter round-trip); this only dispatches it, guarded so an invariant
+   that calls a public method does not re-enter (matching the historical
+   `*validating-object-state*` semantics). Returns the object unchanged. The
+   `class-name` argument is retained for the call convention but no longer used —
+   dispatch is virtual off the runtime object."
+  [state _class-name value]
+  (when (and (not *validating-object-state*)
+             (has-invariant-method? value))
     (binding [*validating-object-state* true]
-      (when-not (some? value)
-        (throw (ex-info "Cannot validate nil object on compiled path"
-                        {:class-name class-name})))
-      (let [class-def (class-def-by-name state class-name)]
-        (when-not class-def
-          (throw (ex-info "Missing compiled class metadata for object validation"
-                          {:class-name class-name})))
-        (let [ctx (rebuild-interpreter-ctx state)
-              runtime-name (runtime-type-name state value)
-              compatible? (and (string? class-name)
-                               (string? runtime-name)
-                               (runtime-compatible-with? state runtime-name class-name))]
-          (when-not compatible?
-            (throw (ex-info "Compiled object model mismatch"
-                            {:expected class-name
-                             :runtime runtime-name})))
-          (let [inv-env (interp/make-env (:current-env ctx))]
-            (doseq [field-name (collect-effective-field-names state class-def)]
-              (interp/env-define inv-env field-name (get-user-field value field-name)))
-            (interp/env-define (:current-env ctx) "this" value)
-            (interp/env-define (:current-env ctx) "__compiled_this" value)
-            (interp/env-define inv-env "this" value)
-            (interp/env-define inv-env "__compiled_this" value)
-            (interp/check-class-invariant
-             (assoc ctx
-                    :current-env inv-env
-                    :current-object (interp/make-object
-                                     class-name
-                                     (into {}
-                                           (map (fn [field-name]
-                                                  [(keyword field-name)
-                                                   (get-user-field value field-name)]))
-                                           (collect-effective-field-names state class-def)))
-                    :current-target "__compiled_this"
-                    :current-class-name class-name)
-             class-def))
-          value)))))
+      (invoke-user-method state value "__invariant" [])))
+  value)
 
 (defn- concat-string-value
   [state value]
@@ -1151,8 +1144,14 @@
 
 (defn- runtime-type-is
   [state target-type value]
-  (let [ctx (rebuild-interpreter-ctx state)]
-    (typeinfo/runtime-type-is? #(runtime-type-name state %) interp/is-parent? ctx target-type value)))
+  ;; The only hierarchy-aware step is is-parent?; the compiled backend already
+  ;; walks the parent chain natively off `state` (compiled-is-parent?), so there
+  ;; is no need to rebuild an interpreter context for every `type_is` test.
+  (typeinfo/runtime-type-is? #(runtime-type-name state %)
+                             (fn [_ctx child parent] (compiled-is-parent? state child parent))
+                             nil
+                             target-type
+                             value))
 
 (defn builtin-type-is
   [state target-type value]
@@ -1687,17 +1686,28 @@
        (not (interp/nex-object? value))
        (some? (compiled-runtime-class-name state value))))
 
+(defn- object-like?
+  "True when value is a Nex object of either model: an interpreter object map or
+   a compiled generated-class instance."
+  [state value]
+  (or (interp/nex-object? value)
+      (compiled-object? state value)))
+
 (defn- structural-equals
-  "State-aware structural equality that also understands compiled Nex object
-   instances. Two compiled objects are equal when they share a runtime class and
-   every effective field is `value-equals` (so nested `equals` overrides and
-   nested compiled objects are honoured — matching the interpreter's
-   `nex-deep-equals?`). Everything else falls back to the structural walk."
+  "State-aware structural equality spanning both object models. Two objects
+   — compiled, interpreter, or one of each — are equal when they share a runtime
+   class and every effective field is `value-equals` (so nested `equals`
+   overrides and nested objects are honoured, matching the interpreter's
+   `nex-deep-equals?`). `get-user-field` reads fields from either model, so a
+   compiled object compares equal to an interpreter-built one of the same class
+   and field values — the case a class invariant hits when it compares a stored
+   field to a freshly constructed value. Everything else falls back to the
+   structural walk."
   [state a b]
-  (if (and (compiled-object? state a) (compiled-object? state b))
-    (let [na (compiled-runtime-class-name state a)
-          nb (compiled-runtime-class-name state b)]
-      (and (= na nb)
+  (if (and (object-like? state a) (object-like? state b))
+    (let [na (runtime-type-name state a)
+          nb (runtime-type-name state b)]
+      (and (some? na) (= na nb)
            (let [class-def (class-def-by-name state na)
                  field-names (collect-effective-field-names state class-def)]
              (every? (fn [field-name]
@@ -1854,19 +1864,13 @@
                                     {:left a :right b :result result})))))))
      out)))
 
-(defn array-join
-  [state values sep]
-  (let [ctx (rebuild-interpreter-ctx state)
-        result (bi/call-builtin-method ctx values values "join" [sep])]
-    (reset! (:output state) @(:output ctx))
-    result))
-
 (defn collection-cursor
-  [state kind value]
-  (let [ctx (rebuild-interpreter-ctx state)
-        result (bi/call-builtin-method ctx value value "cursor" [])]
-    (reset! (:output state) @(:output ctx))
-    result))
+  [_state _kind value]
+  ;; The `cursor` builtin just wraps the collection with an index atom and
+  ;; ignores its context (and produces no output), so there is no need to rebuild
+  ;; an interpreter context per `across` entry — pass nil, as the to_string path
+  ;; already does.
+  (bi/call-builtin-method nil value value "cursor" []))
 
 (defn array-to-string
   [values]
@@ -2020,29 +2024,35 @@
     (= name "op:pow-double")
     (Math/pow (double (first args)) (double (second args)))
 
+    ;; The native dispatch fallbacks — user method calls and field get/set — work
+    ;; off `state` directly (invoke-user-method/get-user-field/set-user-field!),
+    ;; so they need no interpreter context. `obj.method()` and `obj.field` on a
+    ;; non-`this` target lower to these, making them among the hottest runtime
+    ;; calls; rebuilding a context for them was pure waste. The rebuild is
+    ;; deferred into the two branches that actually use it (builtin methods and
+    ;; top-level builtins).
+    (str/starts-with? name "user-method:")
+    (invoke-user-method state (first args) (subs name (count "user-method:")) (rest args))
+
+    (str/starts-with? name "user-field-get:")
+    (get-user-field (first args) (subs name (count "user-field-get:")))
+
+    (str/starts-with? name "user-field-set:")
+    (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
+
+    (str/starts-with? name "method:")
+    (let [ctx (rebuild-interpreter-ctx state)
+          method-name (subs name (count "method:"))
+          target (first args)
+          result (bi/call-builtin-method ctx target target method-name (rest args))]
+      (reset! (:output state) @(:output ctx))
+      result)
+
     :else
-    (let [ctx (rebuild-interpreter-ctx state)]
-      (if (str/starts-with? name "method:")
-      (let [method-name (subs name (count "method:"))
-            target (first args)
-            method-args (rest args)
-            result (bi/call-builtin-method ctx target target method-name method-args)]
+    (let [ctx (rebuild-interpreter-ctx state)
+          builtin-fn (get bi/builtins name)]
+      (when-not builtin-fn
+        (throw (ex-info (str "Undefined compiled builtin: " name) {:name name})))
+      (let [result (apply builtin-fn ctx args)]
         (reset! (:output state) @(:output ctx))
-        result)
-      (cond
-        (str/starts-with? name "user-method:")
-        (invoke-user-method state (first args) (subs name (count "user-method:")) (rest args))
-
-        (str/starts-with? name "user-field-get:")
-        (get-user-field (first args) (subs name (count "user-field-get:")))
-
-        (str/starts-with? name "user-field-set:")
-        (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
-
-        :else
-      (let [builtin-fn (get bi/builtins name)]
-        (when-not builtin-fn
-          (throw (ex-info (str "Undefined compiled builtin: " name) {:name name})))
-        (let [result (apply builtin-fn ctx args)]
-          (reset! (:output state) @(:output ctx))
-          result)))))))
+        result))))
