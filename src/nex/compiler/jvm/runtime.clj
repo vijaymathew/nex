@@ -1869,11 +1869,12 @@
     result))
 
 (defn collection-cursor
-  [state kind value]
-  (let [ctx (rebuild-interpreter-ctx state)
-        result (bi/call-builtin-method ctx value value "cursor" [])]
-    (reset! (:output state) @(:output ctx))
-    result))
+  [_state _kind value]
+  ;; The `cursor` builtin just wraps the collection with an index atom and
+  ;; ignores its context (and produces no output), so there is no need to rebuild
+  ;; an interpreter context per `across` entry — pass nil, as the to_string path
+  ;; already does.
+  (bi/call-builtin-method nil value value "cursor" []))
 
 (defn array-to-string
   [values]
