@@ -204,13 +204,27 @@
     (mapv #(normalize-function-def class-lookup %) functions)))
 
 (defn- class-defs-by-name-last-wins
+  "Deduplicate class defs by name (a later definition wins) while preserving the
+   original ordering. Ordering matters: the first collection pass type-checks
+   constant initializers eagerly and relies on a class's dependencies appearing
+   before it — e.g. an `enum union` emits its variant classes before the parent
+   whose constants read them (`P.Red = create Red.make()`). Reducing into a hash
+   map and taking `vals` reordered classes into hash-bucket order, which broke
+   that invariant for some class-name sets (the parent could land before its
+   variants). Keep each name at its first appearance, but use the last-defined
+   value for that name."
   [class-defs]
-  (->> class-defs
-       (reduce (fn [acc class-def]
-                 (assoc acc (:name class-def) class-def))
-               {})
-       vals
-       vec))
+  (let [last-def (reduce (fn [m class-def]
+                           (assoc m (:name class-def) class-def))
+                         {} class-defs)]
+    (->> class-defs
+         (reduce (fn [[seen out] class-def]
+                   (let [nm (:name class-def)]
+                     (if (contains? seen nm)
+                       [seen out]
+                       [(conj seen nm) (conj out (last-def nm))])))
+                 [#{} []])
+         second)))
 
 (defn- function-class-defs
   [functions]

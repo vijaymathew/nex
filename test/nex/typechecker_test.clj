@@ -2114,3 +2114,50 @@ end"))
           (is (seq (:errors result)))
           (is (some #(str/includes? (:message %) "boom") (:errors result))
               (pr-str (:errors result))))))))
+
+(deftest test-enum-parent-constant-resolves-regardless-of-class-set
+  (testing "an enum union whose parent constants read its variants type-checks alongside sibling classes"
+    ;; The first collection pass type-checks constant initializers eagerly and
+    ;; relies on dependency-first ordering. An `enum union` desugars to variant
+    ;; classes (INR, USD) followed by the parent Currency, whose auto-generated
+    ;; constants read them (`Currency.INR = create INR.make()`). Deduplicating the
+    ;; class list through a hash map + `vals` reordered classes into hash-bucket
+    ;; order, so for some class-name sets the parent landed before its variants and
+    ;; the constant failed with "Undefined class: INR". The class names below are a
+    ;; set that triggered that ordering; ordering is now preserved.
+    (let [code "enum union Currency
+                  INR
+                  USD
+                end
+
+                class Money
+                feature
+                  value: Real
+                  currency: Currency
+                create make(c: Currency, v: Real) do value := v  currency := c end
+                end
+
+                function sum_of(): Money
+                do
+                  result := create Money.make(Currency.INR, 1.0)
+                end
+
+                sealed deferred class Order
+                  feature
+                    tag: Integer
+                  create init(t: Integer) do tag := t end
+                end
+
+                class Draft inherit Order create make() do Order.init(0) end end
+
+                class Placed
+                  inherit Order
+                  feature
+                    total: Money
+                  create make(t: Money) do Order.init(1)  total := t end
+                end
+
+                class Shipped inherit Order create make() do Order.init(2) end end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result) (pr-str (:errors result)))
+      (is (empty? (:errors result))))))
