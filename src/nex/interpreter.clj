@@ -2328,20 +2328,8 @@
 
     :else
     (let [left-val (eval-node ctx left)
-          right-val (eval-node ctx right)
-          ;; When the compiled backend evaluates a class invariant through the
-          ;; interpreter, the operands are compiled instances the interpreter
-          ;; does not see as its own objects, so structural `=` would fall to
-          ;; identity. The hook (when bound) supplies object-aware equality and
-          ;; returns nil for non-object operands, leaving scalar/numeric `=`
-          ;; untouched.
-          eq-hook (when (and rt/*operator-equals-hook*
-                             (or (= operator "=") (= operator "/=")))
-                    (rt/*operator-equals-hook* left-val right-val))]
+          right-val (eval-node ctx right)]
       (cond
-        (some? eq-hook)
-        (if (= operator "=") eq-hook (not eq-hook))
-
         (and (= operator "+")
              (or (string? left-val) (string? right-val)))
         (str (concat-string-value ctx left-val)

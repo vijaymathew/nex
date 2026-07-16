@@ -689,6 +689,34 @@ end")
       (is (some? bad-default-create-ex))
       (is (re-find #"Class invariant violation: positive" (str bad-default-create-ex))))))
 
+(def ^:private reentrant-invariant-program
+  ;; The invariant calls a public method on `this`. That method's exit would
+  ;; itself trigger invariant validation, so without a re-entrancy guard the
+  ;; native __invariant would recurse forever. The guard (matching the historical
+  ;; *validating-object-state* semantics) must let the outer check run and the
+  ;; inner call proceed without re-validating.
+  "class Acct
+feature
+  bal: Integer
+  doubled(): Integer do result := bal + bal end
+  set(n: Integer): Integer do this.bal := n  result := this.bal end
+create make(n: Integer) do this.bal := n end
+invariant
+  consistent: doubled() = bal + bal
+end")
+
+(deftest compiled-invariant-reentrancy-test
+  (testing "an invariant that calls a public method on this does not recurse"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval!
+                         session
+                         (p/ast (str reentrant-invariant-program
+                                     "\n\n"
+                                     "let a: Acct := create Acct.make(5)\n"
+                                     "a.set(10)")))]
+      (is (:compiled? define-result))
+      (is (= 10 (:result define-result))))))
+
 (deftest compiled-inherited-class-invariants-smoke-test
   (testing "compiled helper validates inherited invariants through the composition model"
     (let [session (compiled-repl/make-session)

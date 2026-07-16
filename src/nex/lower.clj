@@ -4366,6 +4366,94 @@
                           class-validation])
                  :override? false})))
 
+(def ^:private invariant-method-def
+  "The synthetic, no-argument method each class with invariants carries; its body
+   validates the class's own invariant clauses (and chains to invariant-bearing
+   parents). Compiled by the ordinary method pipeline, so it uses native field
+   access, calls, and structural `=` — no interpreter round-trip."
+  {:name "__invariant" :params []})
+
+(defn- class-declares-invariant-in-hierarchy?
+  "Whether `class-name` or any ancestor resolvable in `class-map` (name ->
+   class-def) declares a class invariant — the set the runtime must validate."
+  [class-map class-name]
+  (letfn [(walk [name seen]
+            (boolean
+             (when-let [cd (and name (not (contains? seen name)) (get class-map name))]
+               (or (seq (:invariant cd))
+                   (some #(walk (:parent %) (conj seen name)) (:parents cd))))))]
+    (walk class-name #{})))
+
+(defn- lower-invariant-method
+  "Synthesize the `__invariant` instance method for a class that has invariants
+   (its own and/or inherited). Body: call each invariant-bearing parent's
+   `__invariant` on its composition carrier (parent-first, mirroring the
+   interpreter's collect-invariants), then assert this class's own clauses via
+   the shared assertion lowering. Built as a bare fn-node (not through
+   lower-function) so it is not itself wrapped with an invariant check — no
+   self-recursion."
+  [unit-name visible-functions visible-imports visible-classes class-def compiled-classes]
+  (let [class-name (:name class-def)
+        generic-param-names (set (map :name (:generic-params class-def)))
+        env (make-lowering-env {:classes visible-classes
+                                :functions visible-functions
+                                :imports visible-imports
+                                :var-types (field-type-map class-def)
+                                :compiled-classes compiled-classes
+                                :current-class class-name
+                                :generic-param-names generic-param-names
+                                :generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
+                                :generic-runtime-values (generic-runtime-field-bindings
+                                                         {:compiled-classes compiled-classes}
+                                                         class-name
+                                                         (:generic-params class-def))
+                                :fields (field-info-map {:compiled-classes compiled-classes
+                                                         :classes visible-classes
+                                                         :generic-param-names generic-param-names}
+                                                        class-def)
+                                :this-type class-name
+                                :top-level? false
+                                :repl? true
+                                :state-slot 1
+                                :next-slot 3})
+        class-internal (:internal-name (class-jvm-meta env class-name))
+        this-jvm (exact-class-jvm-type {:compiled-classes compiled-classes} class-name)
+        class-map (visible-class-map env)
+        invariant-descriptor (desc/repl-instance-method-descriptor)
+        invariant-emitted-name (lowered-instance-method-name invariant-method-def)
+        parent-calls
+        (->> (resolve-parent-metas env class-def)
+             (filter (fn [{:keys [nex-name]}]
+                       (class-declares-invariant-in-hierarchy? class-map nex-name)))
+             (mapv (fn [{:keys [nex-name internal-name composition-field]}]
+                     (let [carrier-jvm (exact-class-jvm-type {:compiled-classes compiled-classes} nex-name)]
+                       (ir/pop-node
+                        (ir/call-virtual-node internal-name
+                                              invariant-emitted-name
+                                              invariant-descriptor
+                                              (ir/field-get-node class-internal
+                                                                 composition-field
+                                                                 (ir/this-node class-name this-jvm)
+                                                                 nex-name
+                                                                 carrier-jvm)
+                                              []
+                                              nex-name
+                                              (ir/object-jvm-type "java/lang/Object")))))))
+        own-asserts (mapv #(assertion-ir env :class-invariant %) (:invariant class-def))
+        body (vec (concat parent-calls
+                          own-asserts
+                          [(ir/return-node (ir/this-node class-name this-jvm)
+                                           class-name
+                                           (ir/object-jvm-type "java/lang/Object"))]))]
+    (ir/fn-node {:name (:name invariant-method-def)
+                 :owner unit-name
+                 :emitted-name invariant-emitted-name
+                 :params []
+                 :return-type class-name
+                 :return-jvm-type (ir/object-jvm-type "java/lang/Object")
+                 :locals (vec (vals (:locals env)))
+                 :body body})))
+
 (defn- assert-distinct-lowered-methods!
   "Nex mangles routine and constructor names by name+arity, so two of them that
    share both would emit duplicate JVM methods and fail at `defineClass`. Reject
@@ -4452,7 +4540,14 @@
                                                                     class-name
                                                                     compiled-classes
                                                                     %)))
-        methods (vec (concat own-methods delegation-methods))
+        invariant-methods (when (class-declares-invariant-in-hierarchy? (visible-class-map env) class-name)
+                            [(lower-invariant-method (:jvm-name class-meta)
+                                                     visible-functions
+                                                     visible-imports
+                                                     (:classes opts)
+                                                     class-def
+                                                     compiled-classes)])
+        methods (vec (concat own-methods delegation-methods invariant-methods))
         fields (mapv (fn [field]
                        {:name (:name field)
                         :nex-type (:field-type field)

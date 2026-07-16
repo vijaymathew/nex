@@ -87,17 +87,6 @@
   "Hash used to bucket Set elements and Map keys. nil => structural host hash."
   nil)
 
-(def ^:dynamic *operator-equals-hook*
-  "Object-aware equality for the `=`/`/=` operators, bound by the compiled
-   backend when it evaluates a class invariant through the interpreter (the
-   invariant's operands are compiled instances the interpreter does not
-   recognise as its own objects). A fn [a b] returning a Boolean when at least
-   one operand is a user object of either model — dispatching structural /
-   `equals` comparison that understands compiled instances — and nil otherwise,
-   so scalar and numeric equality keep their normal path. nil => no hook, the
-   ordinary case for interpreter-only runs."
-  nil)
-
 (defn value-equals? [a b] (if *value-equals* (*value-equals* a b) (= a b)))
 (defn value-hash [v] (if *value-hash* (*value-hash* v) (nex-hash-code v)))
 

@@ -27,7 +27,6 @@
 (declare runtime-compatible-with?)
 (declare invoke-user-method)
 (declare runtime-compare-values)
-(declare make-operator-equals-hook)
 
 (def ^:dynamic *validating-object-state* false)
 
@@ -994,77 +993,38 @@
            distinct
            vec))))
 
-(defn- hierarchy-declares-invariant?
-  "Whether `class-name` or any ancestor declares a class invariant — the exact
-   set `check-class-invariant` collects (walking `:parents` and concatenating
-   each class-def's `:invariant`). When false, validation has nothing to check,
-   so `validate-object-state` can skip the interpreter-context rebuild entirely —
-   the dominant per-construction / per-public-call cost. Unresolvable ancestor
-   names (builtin roots such as Any/Function) contribute no invariant, matching
-   the runtime's own resolution."
-  [state class-name]
-  (letfn [(walk [current seen]
-            (boolean
-             (when (and current (not (contains? seen current)))
-               (when-let [class-def (or (class-def-by-name state current)
-                                        (get @builtin-base-class-defs current))]
-                 (let [seen' (conj seen current)]
-                   (or (seq (:invariant class-def))
-                       (some #(walk (:parent %) seen') (:parents class-def))))))))]
-    (walk class-name #{})))
+(def ^:private invariant-method-present-cache
+  "Per-Class cache of whether a compiled class carries the synthetic `__invariant`
+   method, so the reflective lookup runs once per class rather than per call."
+  (java.util.concurrent.ConcurrentHashMap.))
+
+(defn- has-invariant-method?
+  "Whether `value` is a compiled object whose class defines `__invariant` (the
+   synthesized native invariant check). Interpreter objects have no compiled
+   method and validate their own invariants when constructed, so they are skipped."
+  [value]
+  (and (some? value)
+       (not (interp/nex-object? value))
+       (.computeIfAbsent invariant-method-present-cache
+                         (.getClass value)
+                         (reify java.util.function.Function
+                           (apply [_ _]
+                             (boolean (find-user-method value (lowered-instance-method-name "__invariant" 0))))))))
 
 (defn validate-object-state
-  [state class-name value]
-  (if *validating-object-state*
-    value
+  "Validate an object's class invariant after construction or a public call.
+   The invariant is compiled to a native `__invariant` method (structural `=`,
+   no interpreter round-trip); this only dispatches it, guarded so an invariant
+   that calls a public method does not re-enter (matching the historical
+   `*validating-object-state*` semantics). Returns the object unchanged. The
+   `class-name` argument is retained for the call convention but no longer used —
+   dispatch is virtual off the runtime object."
+  [state _class-name value]
+  (when (and (not *validating-object-state*)
+             (has-invariant-method? value))
     (binding [*validating-object-state* true]
-      (when-not (some? value)
-        (throw (ex-info "Cannot validate nil object on compiled path"
-                        {:class-name class-name})))
-      (let [class-def (class-def-by-name state class-name)]
-        (when-not class-def
-          (throw (ex-info "Missing compiled class metadata for object validation"
-                          {:class-name class-name})))
-        (if-not (hierarchy-declares-invariant? state class-name)
-          ;; No invariant anywhere in the hierarchy: nothing to validate, so skip
-          ;; the interpreter-context rebuild (the dominant cost). Behaviour is
-          ;; unchanged — check-class-invariant would have collected nothing.
-          value
-          (let [ctx (rebuild-interpreter-ctx state)
-              runtime-name (runtime-type-name state value)
-              compatible? (and (string? class-name)
-                               (string? runtime-name)
-                               (runtime-compatible-with? state runtime-name class-name))]
-          (when-not compatible?
-            (throw (ex-info "Compiled object model mismatch"
-                            {:expected class-name
-                             :runtime runtime-name})))
-          (let [inv-env (interp/make-env (:current-env ctx))]
-            (doseq [field-name (collect-effective-field-names state class-def)]
-              (interp/env-define inv-env field-name (get-user-field value field-name)))
-            (interp/env-define (:current-env ctx) "this" value)
-            (interp/env-define (:current-env ctx) "__compiled_this" value)
-            (interp/env-define inv-env "this" value)
-            (interp/env-define inv-env "__compiled_this" value)
-            ;; The invariant is evaluated by the interpreter, but its operands are
-            ;; compiled instances; bind object-aware `=`/`/=` so structural
-            ;; comparison (not identity) is used, matching the compiled backend's
-            ;; native `value-equals`.
-            (binding [rt/*operator-equals-hook* (make-operator-equals-hook state)]
-              (interp/check-class-invariant
-               (assoc ctx
-                      :current-env inv-env
-                      :current-object (interp/make-object
-                                       class-name
-                                       (into {}
-                                             (map (fn [field-name]
-                                                    [(keyword field-name)
-                                                     (get-user-field value field-name)]))
-                                             (collect-effective-field-names state class-def)))
-                      :current-target "__compiled_this"
-                      :current-class-name class-name)
-               class-def)))
-          value))))))
+      (invoke-user-method state value "__invariant" [])))
+  value)
 
 (defn- concat-string-value
   [state value]
@@ -1757,16 +1717,6 @@
            (find-user-method a (lowered-instance-method-name "equals" 1)))
     (boolean (invoke-user-method state a "equals" [b]))
     (structural-equals state a b)))
-
-(defn make-operator-equals-hook
-  "Build the fn bound to `rt/*operator-equals-hook*` while a class invariant is
-   evaluated through the interpreter. Returns object-aware equality (`value-equals`)
-   when at least one operand is a user object of either model, and nil otherwise
-   so the interpreter keeps its own scalar/numeric equality for `=`/`/=`."
-  [state]
-  (fn [a b]
-    (when (or (object-like? state a) (object-like? state b))
-      (value-equals state a b))))
 
 (defn- scalar-identity-value?
   [v]
