@@ -4263,7 +4263,6 @@
                           :return-type {:base-type "Array" :type-params ["T"]}}
            "first"       {:params [] :return-type "T"}
            "last"        {:params [] :return-type "T"}
-           "join"        {:params [{:name "sep" :type "String"}] :return-type "String"}
            "to_string"   {:params [] :return-type "String"}
            "equals"      {:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}] :return-type "Boolean"}
            "clone"       {:params [] :return-type {:base-type "Array" :type-params ["T"]}}

@@ -1861,13 +1861,6 @@
                                     {:left a :right b :result result})))))))
      out)))
 
-(defn array-join
-  [state values sep]
-  (let [ctx (rebuild-interpreter-ctx state)
-        result (bi/call-builtin-method ctx values values "join" [sep])]
-    (reset! (:output state) @(:output ctx))
-    result))
-
 (defn collection-cursor
   [_state _kind value]
   ;; The `cursor` builtin just wraps the collection with an index atom and

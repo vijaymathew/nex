@@ -1296,15 +1296,6 @@
         (emit-unbox-or-cast! mv jvm-type)
         jvm-type)
 
-      "join"
-      (do
-        (emit-runtime-call! mv "array-join"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-expr! mv (first args) state-slot))])
-        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
-        jvm-type)
-
       "to_string"
       (do
         (emit-runtime-call! mv "array-to-string"
