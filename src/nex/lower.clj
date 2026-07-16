@@ -4370,8 +4370,14 @@
   "The synthetic, no-argument method each class with invariants carries; its body
    validates the class's own invariant clauses (and chains to invariant-bearing
    parents). Compiled by the ordinary method pipeline, so it uses native field
-   access, calls, and structural `=` — no interpreter round-trip."
-  {:name "__invariant" :params []})
+   access, calls, and structural `=` — no interpreter round-trip.
+
+   The name contains `$`, which the grammar forbids in identifiers
+   (`[a-zA-Z_][a-zA-Z_0-9]*`), so it cannot collide with any user-declared
+   feature — a user 0-arg feature named e.g. `__invariant` mangles to a
+   different JVM method (`__method___invariant$arity0`) and is left an
+   ordinary method (see runtime `has-invariant-method?`)."
+  {:name "$invariant" :params []})
 
 (defn- class-declares-invariant-in-hierarchy?
   "Whether `class-name` or any ancestor resolvable in `class-map` (name ->

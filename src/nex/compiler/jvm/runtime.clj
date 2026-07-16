@@ -996,15 +996,21 @@
            distinct
            vec))))
 
+(def ^:private synthetic-invariant-method-name
+  "Feature name of the synthetic invariant method (see lower/`invariant-method-def`).
+   Contains `$`, which the grammar forbids in identifiers, so it never collides
+   with a user-declared feature."
+  "$invariant")
+
 (def ^:private invariant-method-present-cache
-  "Per-Class cache of whether a compiled class carries the synthetic `__invariant`
+  "Per-Class cache of whether a compiled class carries the synthetic invariant
    method, so the reflective lookup runs once per class rather than per call."
   (java.util.concurrent.ConcurrentHashMap.))
 
 (defn- has-invariant-method?
-  "Whether `value` is a compiled object whose class defines `__invariant` (the
-   synthesized native invariant check). Interpreter objects have no compiled
-   method and validate their own invariants when constructed, so they are skipped."
+  "Whether `value` is a compiled object whose class defines the synthetic
+   invariant method. Interpreter objects have no compiled method and validate
+   their own invariants when constructed, so they are skipped."
   [value]
   (and (some? value)
        (not (interp/nex-object? value))
@@ -1012,11 +1018,11 @@
                          (.getClass value)
                          (reify java.util.function.Function
                            (apply [_ _]
-                             (boolean (find-user-method value (lowered-instance-method-name "__invariant" 0))))))))
+                             (boolean (find-user-method value (lowered-instance-method-name synthetic-invariant-method-name 0))))))))
 
 (defn validate-object-state
   "Validate an object's class invariant after construction or a public call.
-   The invariant is compiled to a native `__invariant` method (structural `=`,
+   The invariant is compiled to a native invariant method (structural `=`,
    no interpreter round-trip); this only dispatches it, guarded so an invariant
    that calls a public method does not re-enter (matching the historical
    `*validating-object-state*` semantics). Returns the object unchanged. The
@@ -1026,7 +1032,7 @@
   (when (and (not *validating-object-state*)
              (has-invariant-method? value))
     (binding [*validating-object-state* true]
-      (invoke-user-method state value "__invariant" [])))
+      (invoke-user-method state value synthetic-invariant-method-name [])))
   value)
 
 (defn- concat-string-value
