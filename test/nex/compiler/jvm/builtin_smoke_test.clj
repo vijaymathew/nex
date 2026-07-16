@@ -78,3 +78,25 @@
       (is (:compiled? result))
       (is (= ["3"] (:output result)))
       (is (= "Array" (:result result))))))
+
+(deftest compiled-type-is-hierarchy-smoke-test
+  (testing "compiled type_is checks exact, parent, Any and builtin relations natively"
+    ;; type_is walks the class hierarchy for the parent case. The compiled
+    ;; backend now does this walk natively (compiled-is-parent?) instead of
+    ;; rebuilding an interpreter context per call; results must match the
+    ;; interpreter exactly, including the parent (Shape) relation.
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (parser/ast
+                   (str "sealed deferred class Shape end\n"
+                        "class Circle inherit Shape feature r: Real create make(x: Real) do r := x end end\n"
+                        "let c: Shape := create Circle.make(1.0)\n"
+                        "print(type_is(\"Circle\", c))\n"
+                        "print(type_is(\"Shape\", c))\n"
+                        "print(type_is(\"Any\", c))\n"
+                        "print(type_is(\"Integer\", 5))\n"
+                        "print(type_is(\"String\", 5))\n"
+                        "print(type_is(\"Shape\", 5))")))]
+      (is (:compiled? result))
+      (is (= ["true" "true" "true" "true" "false" "false"] (:output result))))))

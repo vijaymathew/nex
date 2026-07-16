@@ -1141,8 +1141,14 @@
 
 (defn- runtime-type-is
   [state target-type value]
-  (let [ctx (rebuild-interpreter-ctx state)]
-    (typeinfo/runtime-type-is? #(runtime-type-name state %) interp/is-parent? ctx target-type value)))
+  ;; The only hierarchy-aware step is is-parent?; the compiled backend already
+  ;; walks the parent chain natively off `state` (compiled-is-parent?), so there
+  ;; is no need to rebuild an interpreter context for every `type_is` test.
+  (typeinfo/runtime-type-is? #(runtime-type-name state %)
+                             (fn [_ctx child parent] (compiled-is-parent? state child parent))
+                             nil
+                             target-type
+                             value))
 
 (defn builtin-type-is
   [state target-type value]
