@@ -128,7 +128,7 @@
     "old" "create" "private" "note" "with" "import" "intern" "function"
     "raise" "rescue" "retry" "repeat" "across" "case" "of"
     "spawn" "select" "timeout" "declare" "sealed" "once" "match" "type"
-    "union" "where")
+    "enum" "union" "where")
   "Nex language keywords.")
 
 (defconst nex-types
@@ -142,7 +142,7 @@
 
 (defconst nex-builtins
   '("print" "println" "result" "exception" "sleep"
-    "type_of" "type_is" "await_any" "await_all")
+    "type_of" "type_is" "await_any" "await_all" "alias")
   "Nex built-in functions and special variables.")
 
 (defvar nex-font-lock-keywords
@@ -304,8 +304,10 @@ are correctly ignored."
     (forward-line -1)
     ;; A 'union' declaration opener indents its variant list one level, the way
     ;; 'feature' indents a class body.  The line ends with the union's name
-    ;; rather than a keyword, so it is matched at the start of the line.
-    (if (save-excursion (beginning-of-line) (looking-at "[ \t]*union\\b"))
+    ;; rather than a keyword, so it is matched at the start of the line.  An
+    ;; 'enum union' opener indents its members the same way.
+    (if (save-excursion (beginning-of-line)
+                        (looking-at "[ \t]*\\(enum[ \t]+\\)?union\\b"))
         t
       (end-of-line)
       (skip-chars-backward " \t")
