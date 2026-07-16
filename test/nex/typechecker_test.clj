@@ -2161,3 +2161,84 @@ end"))
           result (tc/type-check (p/ast code))]
       (is (:success result) (pr-str (:errors result)))
       (is (empty? (:errors result))))))
+
+;;
+;; Undefined-type validation
+;;
+
+(defn- error-messages [result]
+  (mapv :message (:errors result)))
+
+(deftest test-undefined-type-reported-in-every-position
+  (testing "an undefined type name is a compiler error wherever it is written"
+    ;; Each annotation position names a distinct undefined type so the messages
+    ;; are unambiguous. Positions (12): generic constraint, parent type-arg (on a
+    ;; known generic parent), field, detachable field, method param, method
+    ;; return, method local, constructor param, function param, function return,
+    ;; function local, and a top-level let. A bare undefined parent is covered
+    ;; separately by test-undefined-parent-class.
+    (let [code "class Base[X] feature slot: X create make(v: X) do slot := v end end
+
+                class Bad[T -> Bogus1] inherit Base[Bogus3]
+                feature
+                  fld: Bogus4
+                  opt: ?Bogus5
+                  meth(p: Bogus6): Bogus7
+                  do
+                    let loc: Bogus8 := p
+                  end
+                create make(c: Bogus9) do end end
+
+                function helper(x: Bogus10): Bogus11
+                do
+                  let z: Bogus12 := x
+                end
+
+                let top: Bogus13 := 1"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)
+          expected [1 3 4 5 6 7 8 9 10 11 12 13]]
+      (is (false? (:success result)))
+      ;; Every position surfaces at once (not just the first).
+      (is (= (count expected) (count msgs)) (pr-str msgs))
+      (doseq [n expected]
+        (is (some #(str/includes? % (str "Undefined type: Bogus" n)) msgs)
+            (str "missing Bogus" n " in " (pr-str msgs)))))))
+
+(deftest test-undefined-type-error-bound
+  (testing ":max-undefined-type-errors caps how many undefined types are collected"
+    (let [code "class A
+                feature
+                  a: Bogus1
+                  b: Bogus2
+                  c: Bogus3
+                  d: Bogus4
+                create make() do end end"
+          result (tc/type-check (p/ast code) {:max-undefined-type-errors 2})]
+      (is (false? (:success result)))
+      (is (= 2 (count (:errors result)))))))
+
+(deftest test-known-types-not-flagged-as-undefined
+  (testing "builtins, defined classes, generic params, aliases and detachables pass"
+    (let [code "declare type Id = Integer
+
+                class Container[T -> Comparable] inherit Any
+                feature
+                  item: T
+                  tag: Id
+                  maybe: ?String
+                  nums: Array[Integer]
+                  pair: Map[String, T]
+                  peer: ?Container[T]
+                  swap(other: Container[T]): T
+                  do
+                    let tmp: T := item
+                    result := tmp
+                  end
+                create make(v: T) do item := v end
+                end
+
+                let box: Container[Integer] := create Container.make(1)"
+          result (tc/type-check (p/ast code))]
+      (is (:success result) (pr-str (:errors result)))
+      (is (empty? (:errors result))))))
