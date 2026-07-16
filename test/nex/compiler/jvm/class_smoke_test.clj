@@ -714,6 +714,61 @@ end")
       (is (some? bad-delegated-ex))
       (is (re-find #"Class invariant violation: parent_positive" (str bad-delegated-ex))))))
 
+(def ^:private object-equality-invariant-program
+  ;; An invariant comparing two object-typed fields with `=` must use structural
+  ;; equality, like `=` does everywhere else on the compiled backend. Class
+  ;; invariants are evaluated through the interpreter, which did not recognise
+  ;; the compiled field instances as objects and so compared them by identity —
+  ;; a violation for distinct-but-equal values. Kind is an enum field so the
+  ;; comparison also spans a nested (enum) object.
+  "enum union Kind
+  A
+  B
+end
+
+class Money
+feature
+  amount: Real
+  kind: Kind
+create make(a: Real, k: Kind) do amount := a  kind := k end
+end
+
+class Holder
+feature
+  x: Money
+  y: Money
+create make(a: Money, b: Money) do x := a  y := b end
+invariant
+  consistent: x = y
+end")
+
+(deftest compiled-class-invariant-object-equality-test
+  (testing "a class invariant comparing object fields with `=` uses structural equality"
+    (let [session (compiled-repl/make-session)
+          ;; Distinct Money instances with equal value + kind: the invariant
+          ;; `x = y` must hold (previously failed as an identity comparison).
+          ok-result (compiled-repl/compile-and-eval!
+                     session
+                     (p/ast (str object-equality-invariant-program
+                                 "\n\n"
+                                 "let m1: Money := create Money.make(22.2, Kind.A)\n"
+                                 "let m2: Money := create Money.make(22.2, Kind.A)\n"
+                                 "let h: Holder := create Holder.make(m1, m2)\n"
+                                 "h.x.amount")))
+          ;; Genuinely unequal object fields must still trip the invariant.
+          bad-ex (try
+                   (compiled-repl/compile-and-eval!
+                    session
+                    (p/ast "let n1: Money := create Money.make(1.0, Kind.A)
+                            let n2: Money := create Money.make(2.0, Kind.A)
+                            let bad: Holder := create Holder.make(n1, n2)"))
+                   nil
+                   (catch Throwable t (root-cause t)))]
+      (is (:compiled? ok-result))
+      (is (= 22.2 (:result ok-result)))
+      (is (some? bad-ex))
+      (is (re-find #"Class invariant violation: consistent" (str bad-ex))))))
+
 (deftest compiled-loop-contracts-smoke-test
   (testing "compiled helper enforces loop invariants and variants"
     (let [session (compiled-repl/make-session)

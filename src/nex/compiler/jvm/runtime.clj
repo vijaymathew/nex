@@ -27,6 +27,7 @@
 (declare runtime-compatible-with?)
 (declare invoke-user-method)
 (declare runtime-compare-values)
+(declare make-operator-equals-hook)
 
 (def ^:dynamic *validating-object-state* false)
 
@@ -1021,19 +1022,24 @@
             (interp/env-define (:current-env ctx) "__compiled_this" value)
             (interp/env-define inv-env "this" value)
             (interp/env-define inv-env "__compiled_this" value)
-            (interp/check-class-invariant
-             (assoc ctx
-                    :current-env inv-env
-                    :current-object (interp/make-object
-                                     class-name
-                                     (into {}
-                                           (map (fn [field-name]
-                                                  [(keyword field-name)
-                                                   (get-user-field value field-name)]))
-                                           (collect-effective-field-names state class-def)))
-                    :current-target "__compiled_this"
-                    :current-class-name class-name)
-             class-def))
+            ;; The invariant is evaluated by the interpreter, but its operands are
+            ;; compiled instances; bind object-aware `=`/`/=` so structural
+            ;; comparison (not identity) is used, matching the compiled backend's
+            ;; native `value-equals`.
+            (binding [rt/*operator-equals-hook* (make-operator-equals-hook state)]
+              (interp/check-class-invariant
+               (assoc ctx
+                      :current-env inv-env
+                      :current-object (interp/make-object
+                                       class-name
+                                       (into {}
+                                             (map (fn [field-name]
+                                                    [(keyword field-name)
+                                                     (get-user-field value field-name)]))
+                                             (collect-effective-field-names state class-def)))
+                      :current-target "__compiled_this"
+                      :current-class-name class-name)
+               class-def)))
           value)))))
 
 (defn- concat-string-value
@@ -1687,17 +1693,28 @@
        (not (interp/nex-object? value))
        (some? (compiled-runtime-class-name state value))))
 
+(defn- object-like?
+  "True when value is a Nex object of either model: an interpreter object map or
+   a compiled generated-class instance."
+  [state value]
+  (or (interp/nex-object? value)
+      (compiled-object? state value)))
+
 (defn- structural-equals
-  "State-aware structural equality that also understands compiled Nex object
-   instances. Two compiled objects are equal when they share a runtime class and
-   every effective field is `value-equals` (so nested `equals` overrides and
-   nested compiled objects are honoured — matching the interpreter's
-   `nex-deep-equals?`). Everything else falls back to the structural walk."
+  "State-aware structural equality spanning both object models. Two objects
+   — compiled, interpreter, or one of each — are equal when they share a runtime
+   class and every effective field is `value-equals` (so nested `equals`
+   overrides and nested objects are honoured, matching the interpreter's
+   `nex-deep-equals?`). `get-user-field` reads fields from either model, so a
+   compiled object compares equal to an interpreter-built one of the same class
+   and field values — the case a class invariant hits when it compares a stored
+   field to a freshly constructed value. Everything else falls back to the
+   structural walk."
   [state a b]
-  (if (and (compiled-object? state a) (compiled-object? state b))
-    (let [na (compiled-runtime-class-name state a)
-          nb (compiled-runtime-class-name state b)]
-      (and (= na nb)
+  (if (and (object-like? state a) (object-like? state b))
+    (let [na (runtime-type-name state a)
+          nb (runtime-type-name state b)]
+      (and (some? na) (= na nb)
            (let [class-def (class-def-by-name state na)
                  field-names (collect-effective-field-names state class-def)]
              (every? (fn [field-name]
@@ -1716,6 +1733,16 @@
            (find-user-method a (lowered-instance-method-name "equals" 1)))
     (boolean (invoke-user-method state a "equals" [b]))
     (structural-equals state a b)))
+
+(defn make-operator-equals-hook
+  "Build the fn bound to `rt/*operator-equals-hook*` while a class invariant is
+   evaluated through the interpreter. Returns object-aware equality (`value-equals`)
+   when at least one operand is a user object of either model, and nil otherwise
+   so the interpreter keeps its own scalar/numeric equality for `=`/`/=`."
+  [state]
+  (fn [a b]
+    (when (or (object-like? state a) (object-like? state b))
+      (value-equals state a b))))
 
 (defn- scalar-identity-value?
   [v]
