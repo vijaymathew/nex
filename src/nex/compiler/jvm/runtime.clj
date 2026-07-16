@@ -2021,29 +2021,35 @@
     (= name "op:pow-double")
     (Math/pow (double (first args)) (double (second args)))
 
+    ;; The native dispatch fallbacks — user method calls and field get/set — work
+    ;; off `state` directly (invoke-user-method/get-user-field/set-user-field!),
+    ;; so they need no interpreter context. `obj.method()` and `obj.field` on a
+    ;; non-`this` target lower to these, making them among the hottest runtime
+    ;; calls; rebuilding a context for them was pure waste. The rebuild is
+    ;; deferred into the two branches that actually use it (builtin methods and
+    ;; top-level builtins).
+    (str/starts-with? name "user-method:")
+    (invoke-user-method state (first args) (subs name (count "user-method:")) (rest args))
+
+    (str/starts-with? name "user-field-get:")
+    (get-user-field (first args) (subs name (count "user-field-get:")))
+
+    (str/starts-with? name "user-field-set:")
+    (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
+
+    (str/starts-with? name "method:")
+    (let [ctx (rebuild-interpreter-ctx state)
+          method-name (subs name (count "method:"))
+          target (first args)
+          result (bi/call-builtin-method ctx target target method-name (rest args))]
+      (reset! (:output state) @(:output ctx))
+      result)
+
     :else
-    (let [ctx (rebuild-interpreter-ctx state)]
-      (if (str/starts-with? name "method:")
-      (let [method-name (subs name (count "method:"))
-            target (first args)
-            method-args (rest args)
-            result (bi/call-builtin-method ctx target target method-name method-args)]
+    (let [ctx (rebuild-interpreter-ctx state)
+          builtin-fn (get bi/builtins name)]
+      (when-not builtin-fn
+        (throw (ex-info (str "Undefined compiled builtin: " name) {:name name})))
+      (let [result (apply builtin-fn ctx args)]
         (reset! (:output state) @(:output ctx))
-        result)
-      (cond
-        (str/starts-with? name "user-method:")
-        (invoke-user-method state (first args) (subs name (count "user-method:")) (rest args))
-
-        (str/starts-with? name "user-field-get:")
-        (get-user-field (first args) (subs name (count "user-field-get:")))
-
-        (str/starts-with? name "user-field-set:")
-        (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
-
-        :else
-      (let [builtin-fn (get bi/builtins name)]
-        (when-not builtin-fn
-          (throw (ex-info (str "Undefined compiled builtin: " name) {:name name})))
-        (let [result (apply builtin-fn ctx args)]
-          (reset! (:output state) @(:output ctx))
-          result)))))))
+        result))))
