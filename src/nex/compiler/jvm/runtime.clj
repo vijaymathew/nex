@@ -994,6 +994,25 @@
            distinct
            vec))))
 
+(defn- hierarchy-declares-invariant?
+  "Whether `class-name` or any ancestor declares a class invariant — the exact
+   set `check-class-invariant` collects (walking `:parents` and concatenating
+   each class-def's `:invariant`). When false, validation has nothing to check,
+   so `validate-object-state` can skip the interpreter-context rebuild entirely —
+   the dominant per-construction / per-public-call cost. Unresolvable ancestor
+   names (builtin roots such as Any/Function) contribute no invariant, matching
+   the runtime's own resolution."
+  [state class-name]
+  (letfn [(walk [current seen]
+            (boolean
+             (when (and current (not (contains? seen current)))
+               (when-let [class-def (or (class-def-by-name state current)
+                                        (get @builtin-base-class-defs current))]
+                 (let [seen' (conj seen current)]
+                   (or (seq (:invariant class-def))
+                       (some #(walk (:parent %) seen') (:parents class-def))))))))]
+    (walk class-name #{})))
+
 (defn validate-object-state
   [state class-name value]
   (if *validating-object-state*
@@ -1006,7 +1025,12 @@
         (when-not class-def
           (throw (ex-info "Missing compiled class metadata for object validation"
                           {:class-name class-name})))
-        (let [ctx (rebuild-interpreter-ctx state)
+        (if-not (hierarchy-declares-invariant? state class-name)
+          ;; No invariant anywhere in the hierarchy: nothing to validate, so skip
+          ;; the interpreter-context rebuild (the dominant cost). Behaviour is
+          ;; unchanged — check-class-invariant would have collected nothing.
+          value
+          (let [ctx (rebuild-interpreter-ctx state)
               runtime-name (runtime-type-name state value)
               compatible? (and (string? class-name)
                                (string? runtime-name)
@@ -1040,7 +1064,7 @@
                       :current-target "__compiled_this"
                       :current-class-name class-name)
                class-def)))
-          value)))))
+          value))))))
 
 (defn- concat-string-value
   [state value]

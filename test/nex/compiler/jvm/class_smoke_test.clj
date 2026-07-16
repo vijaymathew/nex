@@ -769,6 +769,62 @@ end")
       (is (some? bad-ex))
       (is (re-find #"Class invariant violation: consistent" (str bad-ex))))))
 
+(def ^:private inherited-only-invariant-program
+  ;; Derived declares no invariant of its own but inherits Base's. Validation is
+  ;; gated on whether the hierarchy declares *any* invariant, so the gate must
+  ;; still fire for Derived — otherwise the inherited invariant would silently
+  ;; stop being enforced. Plain has no invariant anywhere and must construct
+  ;; freely (the gate skips the interpreter-context rebuild for it).
+  "class Base
+feature
+  v: Integer
+  set_v(n: Integer): Integer
+  do
+    this.v := n
+    result := this.v
+  end
+create make(n: Integer) do this.v := n end
+invariant
+  positive: v > 0
+end
+
+class Derived inherit Base
+feature
+  tag: Integer
+create make2(n: Integer) do Base.make(n) end
+end
+
+class Plain
+feature
+  w: Integer
+create make(n: Integer) do this.w := n end
+end")
+
+(deftest compiled-invariant-gating-inherited-still-enforced-test
+  (testing "gating validation on invariant presence still enforces inherited invariants"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval!
+                         session
+                         (p/ast (str inherited-only-invariant-program
+                                     "\n\n"
+                                     "let d: Derived := create Derived.make2(5)\n"
+                                     "d.v")))
+          ;; Invariant-free class: constructs with any value, no false violation.
+          plain-result (compiled-repl/compile-and-eval!
+                        session (p/ast "let p: Plain := create Plain.make(0)\np.w"))
+          ;; Derived declares no invariant, but constructing it in violation of
+          ;; Base's inherited invariant must still raise.
+          bad-ex (try
+                   (compiled-repl/compile-and-eval!
+                    session (p/ast "let bad: Derived := create Derived.make2(0)"))
+                   nil
+                   (catch Throwable t (root-cause t)))]
+      (is (:compiled? define-result))
+      (is (= 5 (:result define-result)))
+      (is (= 0 (:result plain-result)))
+      (is (some? bad-ex))
+      (is (re-find #"Class invariant violation: positive" (str bad-ex))))))
+
 (deftest compiled-loop-contracts-smoke-test
   (testing "compiled helper enforces loop invariants and variants"
     (let [session (compiled-repl/make-session)
