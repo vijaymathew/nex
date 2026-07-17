@@ -868,9 +868,17 @@ end
 ```
 
 - Like a guard, a type pattern is a test, so a clause constrained by one does
-  not count toward exhaustiveness.
-- The type may be a builtin (`total: Integer`), a user class, or a
-  parameterized type (`items: Array[String]`).
+  not count toward exhaustiveness. A test against the field's *declared* type is
+  therefore a no-op that only costs you the exhaustiveness check — narrow a wider
+  type (`content: Any` down to `Circle`); do not restate a known one.
+- The type may be a builtin (`total: Integer`), a user class, a parameterized
+  type (`items: Array[String]`), or a `declare type` alias, which is tested as
+  the type it names.
+- A **refinement** (`declare type Quantity = Integer where n: n > 0`) may *not*
+  be used here, and is rejected. A type pattern is a runtime test, and a
+  refinement's predicate is erased at runtime — the test could only check
+  `Integer` and would match values `Quantity` excludes. Test the base type and
+  put the predicate in a guard, or narrow with a typed `let`, which does run it.
 
 ### Nested patterns
 

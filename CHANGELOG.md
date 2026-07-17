@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Fixed: a `declare type` alias in a runtime type test never matched.**
+  `convert` — and the `field: Type` patterns that desugar to it — tests a runtime
+  type, and an alias names none, so the test silently always failed:
+
+  ```nex
+  declare type Count = Integer
+  let x: Any := 5
+  if convert x to y: Count then ... else ... end   -- always took the else
+  ```
+
+  Nothing warned: the checker sees `Count` as related to the value's type and
+  accepts it. Aliases are now resolved to the type they name before either
+  backend sees the convert.
+
+  A **refinement** (`= Integer where n: n > 0`) cannot be resolved that way — its
+  predicate is erased, so a test against it could only check `Integer` and would
+  match values the refinement excludes. Rather than silently weaken it, a
+  refinement in a type-test position is now rejected, with an error naming the
+  base type to test and the guard to check the predicate in. Refinement checks at
+  the real narrowing sites (typed `let`, parameter, return) are unchanged.
+
 - **Fixed: class field names were global variables.** Declaring any class made
   every one of its field names — private ones included — a readable *and
   assignable* global initialized to nil:
