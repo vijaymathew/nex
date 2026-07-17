@@ -626,7 +626,10 @@
   [var-name field-patterns]
   (reduce
    (fn [acc {:keys [kind field] :as fp}]
-     (let [fr {:type :call :target var-name :method field :args [] :has-parens false}]
+     (let [fr {:type :call :target var-name :method field :args [] :has-parens false
+               ;; Provenance: a field name that does not exist is reported as
+               ;; the pattern the user wrote, not as the field read it becomes.
+               :from-pattern true}]
        (case kind
          :bind (if (= "_" field)
                  acc
@@ -638,11 +641,22 @@
                        conv {:type :convert :value fr :var-name sub-var
                              :target-type (if (:generic-args fp)
                                             {:base-type (:type fp) :type-args (:generic-args fp)}
-                                            (:type fp))}
-                       sub (process-field-patterns sub-var (:subpatterns fp))]
+                                            (:type fp))
+                             ;; Provenance: lets the checker report a bad type
+                             ;; test as the pattern the user wrote rather than
+                             ;; as the `convert` it desugars to.
+                             :from-pattern field}
+                       sub (process-field-patterns sub-var (:subpatterns fp))
+                       ;; A bare `field: T` binds the narrowed field under its
+                       ;; own name; it depends on the convert, so it is a
+                       ;; body-bind like the sub-pattern binds.
+                       own-bind (when-let [b (:bind fp)]
+                                  (when-not (= "_" b)
+                                    [{:type :let :name b :var-type nil
+                                      :value {:type :identifier :name sub-var}}]))]
                    (-> acc
                        (update :guards #(vec (concat % [conv] (:guards sub))))
-                       (update :body-binds #(vec (concat % (:bindings sub) (:body-binds sub)))))))))
+                       (update :body-binds #(vec (concat % own-bind (:bindings sub) (:body-binds sub)))))))))
    {:bindings [] :guards [] :body-binds []}
    field-patterns))
 
@@ -1253,34 +1267,44 @@
         :clauses clauses
         :else (or explicit-else (when wildcard (:body wildcard)))}))
 
+   :patternType
+   (fn [[_ name-node & rest]]
+     ;; A builtin type arrives as a bare token, a user type as a :typeName node.
+     (let [type-args-node (first (filter #(and (sequential? %) (= :typeArgs (first %))) rest))]
+       {:type-name (if (sequential? name-node)
+                     (transform-node name-node)
+                     (token-text name-node))
+        :generic-args (when type-args-node (transform-node type-args-node))}))
+
    :fieldPattern
    (fn [[_ & toks]]
      ;; `id`         -> bind field `id` to local `id`
-     ;; `id: x`      -> bind field `id` to local `x`
+     ;; `id as x`    -> bind field `id` to local `x`
      ;; `id: 0`      -> require field `id` to equal the literal 0
+     ;; `id: T`      -> require field `id` to be a `T`, binding it as `id`
      ;; `id: T(...)` -> require field `id` to be a `T`, matching the sub-patterns
      (let [field (token-text (first toks))
-           has-colon? (some #(= ":" %) toks)
-           after (rest (drop-while #(not= ":" %) toks))]
+           node-of (fn [tag] (first (filter #(and (sequential? %) (= tag (first %))) toks)))
+           ptype (node-of :patternType)
+           lit (node-of :literal)]
        (cond
-         (not has-colon?)
-         {:kind :bind :field field :bind field}
+         ptype
+         (let [{:keys [type-name generic-args]} (transform-node ptype)]
+           {:kind :nested :field field :type type-name :generic-args generic-args
+            :subpatterns (mapv transform-node
+                               (filter #(and (sequential? %) (= :fieldPattern (first %))) toks))
+            ;; `id: T` has no sub-patterns to reach the narrowed value through,
+            ;; so it binds that value itself; `id: T(...)` binds through them.
+            :bind (when-not (some #(= "(" %) toks) field)})
 
-         (some #(= "(" %) toks)
-         (let [tn (first after)
-               type-name (if (sequential? tn) (transform-node tn) (token-text tn))
-               type-args-node (first (filter #(and (sequential? %) (= :typeArgs (first %))) after))
-               subpats (mapv transform-node
-                             (filter #(and (sequential? %) (= :fieldPattern (first %))) after))]
-           {:kind :nested :field field :type type-name
-            :generic-args (when type-args-node (transform-node type-args-node))
-            :subpatterns subpats})
+         lit
+         {:kind :literal :field field :value (transform-node lit)}
 
-         (some sequential? after)
-         {:kind :literal :field field :value (transform-node (first (filter sequential? after)))}
+         (some #(= "as" %) toks)
+         {:kind :bind :field field :bind (token-text (last toks))}
 
          :else
-         {:kind :bind :field field :bind (token-text (first (filter string? after)))})))
+         {:kind :bind :field field :bind field})))
 
    :matchClause
    (fn [[_ _when-kw class-name & rest]]

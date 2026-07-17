@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- **Breaking: in a `match` field pattern, `:` constrains and `as` renames.**
+  A field pattern's colon used to do three unrelated jobs — pin a field to a
+  literal (`Move(dx: 0)`), narrow it to a type (`Ok(inner: Some(value))`), and,
+  with a bare identifier, *rename* it (`Shipped(tracking: t)`). The rename reads
+  exactly like the type annotation `x: T` is everywhere else in Nex while
+  meaning the opposite, and it collided with the type form: dropping the parens
+  from a working nested pattern silently flipped "test the type" into "rename to
+  a local". A builtin type name in that position was not even spellable —
+  `String` is a keyword token, not an identifier, so `when Err(s: String)` was a
+  *syntax* error.
+
+  Now the name left of the colon is always a field, `:` always constrains it
+  (to a literal or a type), and renaming moves to `as`, which already means
+  "bind under this name" at clause level:
+
+  ```nex
+  when Shipped(tracking as t)   then track(t)         -- was: tracking: t
+  when Box(content: Circle)     then use(content)     -- narrows and binds
+  when Box(content: String)     then say(content)     -- builtins now spellable
+  when Ok(inner: Some[Integer](value as x)) then use(x)
+  ```
+
+  A bare `field: Type` narrows the field and binds it under its own name; with
+  sub-patterns you reach the value through them, so the field itself is not
+  bound. Like guards and literal patterns, a type pattern is a test and does not
+  count toward exhaustiveness. To ignore a field, simply do not name it.
+
+  **Migration.** The old spellings are rejected, not reinterpreted, and the error
+  names the fix: `` `t` is not a type. To bind the field to a local named `t`,
+  write `tracking as t` ``. For `field: _`, it says to omit the field instead.
+
 - **New: operator aliases** — a class feature can bind itself to an arithmetic
   operator with an `alias` clause (`minus(other: Money): Money alias "-"`). The
   operator becomes exactly sugar for the call, so the feature's `require` and

@@ -16,7 +16,7 @@ Addresses **Deficiency #4** in `docs/language-notes-from-book.md`:
 > guarded clauses from exhaustiveness. Guards are rejected by the JS backend
 > (out of scope). Phase 3 **literal** field patterns (`field: 0`) are implemented
 > as equality guards (walker sugar over Phase 2). Phase 3 **nested** patterns
-> (`field: Some[Integer](value: x)`) are now **implemented** too, after landing
+> (`field: Some[Integer](value as x)`) are now **implemented** too, after landing
 > Finding 2 of `generic-inference.md` (match binding carries the subject's type
 > args) plus fixing generic `convert` in the interpreter and lowering a
 > `convert`-in-guard on the JVM. A nested field pattern desugars to a
@@ -52,17 +52,25 @@ match order of
   when Draft                     then note_draft()
   when Placed(id, total)         then charge(id, total)      -- destructure by field name
   when Placed(id, total) if total > 1000 then flag(id)       -- guard
-  when Shipped(tracking: t)      then track(t)               -- rename a field
+  when Shipped(tracking as t)    then track(t)               -- rename a field
+  when Shipped(at: Integer)      then noop()                 -- require a field's type
   when Cancelled(_)              then noop()                 -- ignore a field
   when _                         then reject()               -- wildcard (catch-all)
 end
 ```
 
 - **Destructuring** `Placed(id, total)` binds the payload fields named `id` and
-  `total` to locals of the same name (struct-shorthand style). `Placed(id: x)`
-  renames a field into `x`; `_` in a field position ignores it. Field access is
-  by name, matching how variant payloads are already named fields — so order does
-  not matter and the pattern is self-documenting.
+  `total` to locals of the same name (struct-shorthand style). `Placed(id as x)`
+  renames a field into `x`; `_` in a field position ignores it, as does simply
+  not naming the field. Field access is by name, matching how variant payloads
+  are already named fields — so order does not matter and the pattern is
+  self-documenting.
+- **`:` always constrains, `as` always renames.** The name left of the colon is
+  always a field; `field: <literal>` requires a value, `field: <Type>` requires a
+  type. Renaming originally shared the colon (`Placed(id: x)`), which read as the
+  type annotation it is everywhere else in the language while meaning the
+  opposite, and made `field: T` ambiguous with the nested/type forms. Renaming
+  moved to `as`, which already means "bind under this name" at clause level.
 - **`as`** still binds the whole matched value and composes with destructuring
   (`when Placed(id, total) as p then …`), keeping every existing `match` valid.
 - **Guards** `if <bool>` run after a structural match; a false guard falls through

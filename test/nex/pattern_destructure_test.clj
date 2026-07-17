@@ -43,13 +43,13 @@ print(d(create Draft.make()))
 print(d(create Shipped.make(\"Z9\", 3)))"))))))
 
 (deftest destructure-rename-and-skip
-  (testing "field: local renames; _ ignores a field"
+  (testing "`field as local` renames; an unnamed field is ignored"
     (is (= ["\"Z9\""]
            (run (str order-decl
                      "function d(o: Order): String do
   result := \"?\"
   match o of
-    when Shipped(tracking: t, at: _) then result := t
+    when Shipped(tracking as t) then result := t
     when _                           then result := \"?\"
   end
 end
@@ -268,7 +268,7 @@ print(f(create Full[Integer].make(42)))")))))
                      "function f(r: Result[Integer]): Integer do
   result := -1
   match r of
-    when Ok(inner: Some[Integer](value: x)) then result := x
+    when Ok(inner: Some[Integer](value as x)) then result := x
     when _                                  then result := -1
   end
 end
@@ -284,7 +284,7 @@ print(f(create Bad[Integer].make()))"))))))
          (str opt-result-decl
               "function f(r: Result[Integer]): Integer do
   match r of
-    when Ok(inner: Some[Integer](value: x)) then result := x
+    when Ok(inner: Some[Integer](value as x)) then result := x
     when Bad                                then result := 0
   end
 end
@@ -302,3 +302,196 @@ print(f(create Bad[Integer].make()))")))))
   end
 end
 print(d(create Draft.make()))"))))))
+
+;; ─── `:` constrains, `as` renames ────────────────────────────────────────────
+;;
+;; A field pattern's colon originally did three unrelated jobs: pin a field to a
+;; literal (`total: 0`), narrow it to a type (`inner: Some(...)`), and — with a
+;; bare identifier — *rename* it (`tracking: t`). The last one reads exactly like
+;; the type annotation `x: T` is everywhere else in Nex while meaning the
+;; opposite, and it collided with the type form: dropping the parens from a
+;; working nested pattern silently flipped "test the type" into "rename to a
+;; local". Worse, a builtin type name there was a *parse* error (`String` is a
+;; keyword token, not an IDENTIFIER), so `when Err(s: String)` — the annotation a
+;; reader would most expect to work — could not even be spelled.
+;;
+;; Now `:` always constrains the named field and `as` always renames it.
+
+(defn- type-error-messages [code]
+  (let [result (tc/type-check (p/ast code))]
+    (map #(if (map? %) (:message %) (str %)) (:errors result))))
+
+(def ^:private box-decl
+  "class Circle
+  feature radius: Integer
+  create make(r: Integer) do radius := r end
+end
+union Shape
+  Box(content: Any)
+  Empty
+end
+")
+
+(deftest type-pattern-narrows-and-binds-the-field
+  (testing "`field: T` requires the field to be a T and binds it, narrowed"
+    ;; `content` is declared Any; reading `.radius` off it only type-checks if
+    ;; the pattern narrowed the binding to Circle, so this pins the type too.
+    (is (= ["\"circle 7\"" "\"other\""]
+           (run (str box-decl
+                     "function d(s: Shape): String do
+  result := \"?\"
+  match s of
+    when Box(content: Circle) then result := \"circle \" + content.radius.to_string
+    when Box(content)         then result := \"other\"
+    when Empty                then result := \"empty\"
+  end
+end
+print(d(create Box.make(create Circle.make(7))))
+print(d(create Box.make(\"hello\")))")))))) 
+
+(deftest type-pattern-accepts-a-builtin-type-name
+  (testing "a builtin type keyword is spellable in a pattern"
+    ;; `String`/`Integer` are keyword tokens (STRING_TYPE, INTEGER_TYPE), not
+    ;; IDENTIFIERs; the rename-only colon made this a syntax error.
+    (is (= ["\"str hi\"" "\"int 3\""]
+           (run (str box-decl
+                     "function d(s: Shape): String do
+  result := \"?\"
+  match s of
+    when Box(content: String)  then result := \"str \" + content
+    when Box(content: Integer) then result := \"int \" + content.to_string
+    when Box(content)          then result := \"other\"
+    when Empty                 then result := \"empty\"
+  end
+end
+print(d(create Box.make(\"hi\")))
+print(d(create Box.make(3)))"))))))
+
+(deftest type-pattern-does-not-cover-its-variant
+  (testing "a type pattern is a test, so it does not make the match exhaustive"
+    (is (type-error?
+         (str box-decl
+              "function d(s: Shape): String do
+  match s of
+    when Box(content: Circle) then result := \"circle\"
+    when Empty                then result := \"empty\"
+  end
+end
+print(d(create Empty.make()))")))))
+
+(deftest as-renames-a-field
+  (testing "`field as local` binds the field under a different name"
+    (is (= ["\"Z9\""]
+           (run (str order-decl
+                     "function d(o: Order): String do
+  result := \"?\"
+  match o of
+    when Shipped(tracking as t) then result := t
+    when _                      then result := \"?\"
+  end
+end
+print(d(create Shipped.make(\"Z9\", 3)))"))))))
+
+(deftest unnamed-fields-are-ignored
+  (testing "a field the pattern does not name is simply not bound"
+    (is (= ["\"A-100\""]
+           (run (str order-decl
+                     "function d(o: Order): String do
+  result := \"?\"
+  match o of
+    when Placed(id) then result := id
+    when _          then result := \"?\"
+  end
+end
+print(d(create Placed.make(\"A-100\", 42.0)))"))))))
+
+(deftest old-rename-spelling-names-the-fix
+  (testing "`field: local` is rejected, and the error gives the `as` spelling"
+    ;; The migration case. It must not be silently reinterpreted as a type test
+    ;; against a type that happens not to exist.
+    (let [msgs (type-error-messages
+                (str order-decl
+                     "function d(o: Order): String do
+  result := \"?\"
+  match o of
+    when Shipped(tracking: t) then result := t
+    when _                    then result := \"?\"
+  end
+end
+print(d(create Shipped.make(\"Z9\", 3)))"))]
+      (is (some #(re-find #"`t` is not a type" %) msgs)
+          (str "expected a pattern-type error, got: " (pr-str msgs)))
+      (is (some #(re-find #"write `tracking as t`" %) msgs)
+          (str "error should name the `as` spelling, got: " (pr-str msgs))))))
+
+(deftest old-skip-spelling-names-the-fix
+  (testing "`field: _` is rejected, and the error says to omit the field"
+    (let [msgs (type-error-messages
+                (str order-decl
+                     "function d(o: Order): String do
+  result := \"?\"
+  match o of
+    when Shipped(tracking, at: _) then result := tracking
+    when _                        then result := \"?\"
+  end
+end
+print(d(create Shipped.make(\"Z9\", 3)))"))]
+      (is (some #(re-find #"omit `at` to ignore it" %) msgs)
+          (str "error should say to omit the field, got: " (pr-str msgs))))))
+
+(deftest literal-field-pattern-still-uses-the-colon
+  (testing "`field: <literal>` is unchanged by the colon's narrowing"
+    (is (= ["\"none\"" "\"some\""]
+           (run (str order-decl
+                     "function d(o: Order): String do
+  result := \"?\"
+  match o of
+    when Shipped(at: 0) then result := \"none\"
+    when Shipped(at)    then result := \"some\"
+    when _              then result := \"?\"
+  end
+end
+print(d(create Shipped.make(\"Z9\", 0)))
+print(d(create Shipped.make(\"Z9\", 3)))"))))))
+
+(deftest undefined-field-in-pattern-names-the-variants-fields
+  (testing "a field the variant does not have is reported with the real fields"
+    ;; "Undefined field: q" alone is unreadable when the writer believes `q` is
+    ;; a binding rather than a field — the mistake this syntax invites.
+    (let [msgs (type-error-messages
+                (str order-decl
+                     "function d(o: Order): String do
+  result := \"?\"
+  match o of
+    when Shipped(q: Integer) then result := \"?\"
+    when _                   then result := \"?\"
+  end
+end
+print(d(create Draft.make()))"))]
+      (is (some #(re-find #"Undefined field: q on Shipped" %) msgs)
+          (str "error should name the variant, got: " (pr-str msgs)))
+      (is (some #(re-find #"Accessible fields: at, tracking" %) msgs)
+          (str "error should list the real fields, got: " (pr-str msgs)))
+      (is (some #(re-find #"write `<field> as q`" %) msgs)
+          (str "error should give the binding form, got: " (pr-str msgs))))))
+
+(deftest undefined-field-outside-a-pattern-omits-the-pattern-hint
+  (testing "a plain field typo names the class and its fields, with no pattern advice"
+    (let [msgs (type-error-messages
+                "class P
+  feature x: Integer
+  private feature secret: Integer
+  create make(v: Integer) do
+    x := v
+    secret := 0
+  end
+end
+print(create P.make(1).z)")]
+      (is (some #(re-find #"Undefined field: z on P\. Accessible fields: x\." %) msgs)
+          (str "got: " (pr-str msgs)))
+      ;; The listing follows the same visibility rules as the lookup, so a
+      ;; private field is not disclosed to a caller that could not read it.
+      (is (not-any? #(re-find #"secret" %) msgs)
+          (str "must not leak private fields, got: " (pr-str msgs)))
+      (is (not-any? #(re-find #"In a pattern" %) msgs)
+          (str "no pattern hint outside a pattern, got: " (pr-str msgs))))))

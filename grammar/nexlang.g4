@@ -237,10 +237,24 @@ matchClause
     : WHEN typeName typeArgs? ('(' fieldPattern (',' fieldPattern)* ')')? (AS IDENTIFIER)? (IF expression)? THEN block
     ;
 
+// In every alternative the identifier *before* the colon names a field of the
+// variant; `:` always constrains that field, and `as` always renames it.
 fieldPattern
     : IDENTIFIER ':' literal          // field must equal a literal value
-    | IDENTIFIER ':' typeName typeArgs? '(' (fieldPattern (',' fieldPattern)*)? ')'   // nested variant pattern
-    | IDENTIFIER (':' IDENTIFIER)?     // bind field to a local (rename with `:`)
+    | IDENTIFIER ':' patternType ('(' (fieldPattern (',' fieldPattern)*)? ')')?   // field must be a patternType, optionally matching its payload
+    | IDENTIFIER AS IDENTIFIER        // bind field to a differently-named local
+    | IDENTIFIER                      // bind field to a local of the same name
+    ;
+
+// The types nameable in a pattern: a runtime type test, so no `?T` (a test for
+// "possibly nil" is not one) and no structural function type.
+patternType
+    : INTEGER_TYPE
+    | REAL_TYPE
+    | CHAR_TYPE
+    | BOOLEAN_TYPE
+    | STRING_TYPE
+    | typeName typeArgs?
     ;
 
 selectStatement

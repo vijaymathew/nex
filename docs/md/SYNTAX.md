@@ -790,15 +790,20 @@ binding the whole object and reading `.field`:
 
 ```nex
 match order of
-  when Draft                       then print("draft")
-  when Placed(id, total)           then print(id)        -- bind fields id, total
-  when Shipped(tracking: t, at: _) then print(t)         -- rename tracking→t, ignore at
+  when Draft                   then print("draft")
+  when Placed(id, total)       then print(id)        -- bind fields id, total
+  when Shipped(tracking as t)  then print(t)         -- rename tracking→t, ignore at
 end
 ```
 
 - `when Variant(a, b)` binds the payload fields named `a` and `b` to locals of the
-  same name; `Variant(a: x)` binds field `a` to a local `x`; `_` in a field
-  position ignores that field. Order does not matter — fields are matched by name.
+  same name; `Variant(a as x)` binds field `a` to a local `x`. Order does not
+  matter — fields are matched by name, and a field you do not name is ignored.
+- In a field pattern the name **before** the colon is always a field of the
+  variant, and `:` always *constrains* that field — to a literal
+  (`total: 0`), or to a type (`total: Integer`). Renaming is `as`. So
+  `Variant(a: x)` does not bind `x`; it requires field `a` to be an `x`, and is
+  an error unless `x` names a type.
 - `as` still binds the whole value and composes with destructuring
   (`when Placed(id, total) as p then …`). A clause may bind neither (`when Draft`).
 - `when _` is a catch-all, equivalent to `else`, and likewise suppresses the
@@ -848,21 +853,42 @@ A literal field pattern is sugar for an equality guard (`Move(dx: 0, …)` ≡
 does not count toward exhaustiveness. Literals combine with binds and an explicit
 `if` guard in the same clause.
 
+### Type patterns
+
+A field pattern may pin a field to a *type* with `field: Type`; the clause
+matches only when the field is one at runtime, and binds the narrowed field
+under its own name:
+
+```nex
+match shape of
+  when Box(content: Circle) then print(content.radius)   -- content is a Circle here
+  when Box(content)         then print("not a circle")
+end
+```
+
+- Like a literal pattern, a type pattern is a test, so a clause constrained by
+  one does not count toward exhaustiveness.
+- The type may be a builtin (`total: Integer`), a user class, or a
+  parameterized type (`items: Array[String]`).
+
 ### Nested patterns
 
-A field pattern may itself be a variant pattern, `field: Type(sub-patterns)`,
-which narrows the field to `Type` and matches its payload:
+A type pattern may go on to match the narrowed field's payload —
+`field: Type(sub-patterns)`:
 
 ```nex
 match result of
-  when Ok(inner: Some[Integer](value: x)) then use(x)   -- Ok whose inner is a Some
-  when _                                  then fallback()
+  when Ok(inner: Some[Integer](value as x)) then use(x)   -- Ok whose inner is a Some
+  when _                                    then fallback()
 end
 ```
 
 - The field is narrowed with a runtime type test; if it is not that variant, the
   clause falls through (so, like a guard, a nested pattern does not count toward
   exhaustiveness).
+- With sub-patterns you reach the value through them, so the field itself is not
+  bound; without them (`inner: Some[Integer]`) the narrowed field binds as
+  `inner`.
 - Sub-patterns are matched **by field name** and nest arbitrarily deep. Give the
   nested type its arguments (`Some[Integer]`) for the bound sub-fields to keep
   their element type; without them the sub-fields bind as `Any`.

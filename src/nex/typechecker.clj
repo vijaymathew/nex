@@ -1124,6 +1124,46 @@
   [member]
   (not= :private (-> member :visibility :type)))
 
+(defn- visible-field-names
+  "Names of the fields readable on CLASS-NAME from CALLER-CLASS-NAME, parents
+   included — the same reachability `lookup-class-field-member` applies."
+  [env class-name caller-class-name]
+  (letfn [(walk [cn visited]
+            (when (and cn (not (contains? visited cn)))
+              (when-let [class-def (env-lookup-class env cn)]
+                (concat
+                 (keep (fn [m]
+                         (when (and (= (:type m) :field)
+                                    (not (:constant? m))
+                                    (or (= caller-class-name cn)
+                                        (public-member? m)))
+                           (:name m)))
+                       (feature-members class-def))
+                 (mapcat (fn [{:keys [parent]}] (walk parent (conj visited cn)))
+                         (:parents class-def))))))]
+    (distinct (walk class-name #{}))))
+
+(defn- undefined-field-message
+  "\"Undefined field: q\" alone leaves the reader to guess what the field is
+   called. Name the class and list what it does have. FROM-PATTERN adds the
+   rule a `match` clause is most often tripping over: the name before the colon
+   is a field, not a new binding.
+
+   The listing is visibility-filtered, so it never discloses a private field to
+   a caller that could not read one — hence \"accessible\" rather than a flat
+   claim about what the class has: a class whose every field is private has
+   fields, just not for this reader."
+  [env class-name field-name caller-class-name from-pattern]
+  (let [fields (visible-field-names env class-name caller-class-name)]
+    (str "Undefined field: " field-name " on " class-name
+         (if (seq fields)
+           (str ". Accessible fields: " (str/join ", " (sort fields)) ".")
+           ". It has no accessible fields.")
+         (when from-pattern
+           (str " In a pattern the name before `:` is a field of the variant;"
+                " to bind a field to a local named `" field-name "`, write"
+                " `<field> as " field-name "`.")))))
+
 (defn- field-write-error
   [field-name declaring-class]
   (type-error
@@ -1611,12 +1651,41 @@
       (assoc n :detachable true)
       {:base-type n :detachable true})))
 
+(defn- check-pattern-type
+  "A field pattern's `field: T` names a type to test against. When T names no
+   type the likeliest cause is the pre-`as` rename spelling (`field: local`,
+   which now means \"field must be a `local`\"), so name the fix. Only reachable
+   for a convert the walker synthesized from a pattern."
+  [env field target-type]
+  (let [base (let [t (normalize-type target-type)]
+               (if (map? t) (:base-type t) t))]
+    ;; An unknown *capitalized* name is indistinguishable from a generic param
+    ;; here (is-generic-type-param? accepts any), so only a name that cannot be
+    ;; a type at all is diagnosed. That is the migration case: locals are
+    ;; lowercase, types are not.
+    (when (and (string? base)
+               (not (env-lookup-class env base))
+               (not (builtin-type? base))
+               (not (env-lookup-type-alias env base))
+               (not (is-generic-type-param? env base)))
+      (throw (ex-info "Invalid pattern type"
+                      {:error (type-error
+                               (str "In the pattern for field `" field "`: `" base
+                                    "` is not a type. "
+                                    (if (= base "_")
+                                      (str "Fields are matched by name, so omit `"
+                                           field "` to ignore it.")
+                                      (str "To bind the field to a local named `"
+                                           base "`, write `" field " as " base "`."))))})))))
+
 (defn check-convert
   "Type-check convert expression:
    convert <value> to <var>:<Type>
    Returns Boolean and binds <var> as detachable <Type> in current scope."
-  [env {:keys [value var-name target-type]}]
+  [env {:keys [value var-name target-type from-pattern]}]
   (validate-type-annotation env target-type)
+  (when from-pattern
+    (check-pattern-type env from-pattern target-type))
   (let [value-type (check-expression env value)
         target-type (normalize-type target-type)
         base-name (fn [t] (if (map? t) (:base-type t) t))
@@ -1854,7 +1923,7 @@
     nil))
 
 (defn- check-target-call
-  [env {:keys [target method args has-parens]}]
+  [env {:keys [target method args has-parens from-pattern]}]
   (let [target-name (when (string? target) target)
         across-item-type (and target-name
                               (env-lookup-across-cursor env target-name))
@@ -2004,7 +2073,10 @@
                                                       " requires " (count (:params method-sig))
                                                       " argument(s); zero-argument access is invalid"))}))
                         (throw (ex-info (str "Undefined field: " method)
-                                        {:error (type-error (str "Undefined field: " method))})))
+                                        {:error (type-error
+                                                 (undefined-field-message
+                                                  env base-type method current-class
+                                                  from-pattern))})))
                       "Any")))
                 (if with-java?
                   "Any"
@@ -3345,7 +3417,9 @@
                 val-type (check-expression env (:value stmt))]
             (when-not field-type
               (throw (ex-info (str "Undefined field: " field-name)
-                              {:error (type-error (str "Undefined field: " field-name))})))
+                              {:error (type-error
+                                       (undefined-field-message
+                                        env class-name field-name current-class nil))})))
             (when-not (= current-class (:declaring-class field-member))
               (throw (ex-info (str "Cannot assign to field " field-name)
                               {:error (field-write-error field-name (:declaring-class field-member))})))
