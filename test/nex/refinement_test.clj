@@ -268,3 +268,27 @@ print(q)"))
     (is (= ["5"] (both "declare type Quantity = Integer where n: n > 0
 let q: Quantity := 5
 print(q)")))))
+
+(deftest alias-resolves-in-every-target-shape
+  (testing "a plain, parameterized, or detachable alias all resolve"
+    ;; The first pass at this only handled a bare name, so `?Count` still
+    ;; silently never matched — the same bug, one shape short. `?Integer`
+    ;; matched all along, so the gap was in alias resolution, not detachability.
+    (is (= ["\"plain\"" "\"parameterized\"" "\"detachable\""]
+           (both "declare type Count = Integer
+declare type Ints = Array[Integer]
+let a: Any := 5
+if convert a to x: Count then print(\"plain\") else print(\"plain NO\") end
+let b: Any := [1, 2]
+if convert b to y: Ints then print(\"parameterized\") else print(\"parameterized NO\") end
+let c: Any := 7
+if convert c to z: ?Count then print(\"detachable\") else print(\"detachable NO\") end")))))
+
+(deftest detachable-refinement-is-rejected-too
+  (testing "`?Refinement` is rejected like the bare form, and names the alias"
+    (let [msg (walker-error "declare type Quantity = Integer where n: n > 0
+let a: Any := 5
+if convert a to y: ?Quantity then print(y) end")]
+      (is (some? msg) "?Quantity must be rejected")
+      (is (re-find #"`Quantity` is a refinement type" msg)
+          (str "should name the alias, not the `?` shape, got: " msg)))))

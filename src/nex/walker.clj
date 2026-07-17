@@ -607,26 +607,43 @@
 ;; match -5. That one is rejected instead.
 
 (defn- alias-target-name
-  "The alias name a convert target refers to, or nil. Parameterized and
-  detachable targets never name an alias."
+  "The alias name a convert target refers to, or nil. `Count` and `?Count` both
+  name one; a parameterized target does not, since an alias cannot be generic."
   [target-type]
-  (when (string? target-type) target-type))
+  (cond
+    (string? target-type) target-type
+    (and (map? target-type)
+         (:detachable target-type)
+         (string? (:base-type target-type))
+         (not (:type-args target-type)))
+    (:base-type target-type)
+    :else nil))
+
+(defn- detach
+  "TYPE-EXPR as a detachable type, whatever shape it arrived in."
+  [type-expr]
+  (if (string? type-expr)
+    {:base-type type-expr :detachable true}
+    (assoc type-expr :detachable true)))
 
 (defn- resolve-convert-alias
   [{:keys [target-type] :as node} aliases]
-  (if-let [{:keys [type-expr refinement]} (get aliases (alias-target-name target-type))]
-    (if refinement
-      (let [base (if (string? type-expr)
-                   type-expr
-                   (or (:base-type type-expr) (pr-str type-expr)))
-            msg (str "`" target-type "` is a refinement type, so it cannot be used as a"
-                     " runtime type test: its predicate is erased, so the test could only"
-                     " check `" base "` and would match values `" target-type "` excludes."
-                     " Test `" base "` and check the predicate in a guard, or narrow with a"
-                     " typed `let`, which does run the predicate.")]
-        (throw (ex-info msg {:error msg})))
-      (assoc node :target-type type-expr))
-    node))
+  (let [alias-name (alias-target-name target-type)]
+    (if-let [{:keys [type-expr refinement]} (get aliases alias-name)]
+      (if refinement
+        (let [base (if (string? type-expr)
+                     type-expr
+                     (or (:base-type type-expr) (pr-str type-expr)))
+              msg (str "`" alias-name "` is a refinement type, so it cannot be used as a"
+                       " runtime type test: its predicate is erased, so the test could only"
+                       " check `" base "` and would match values `" alias-name "` excludes."
+                       " Test `" base "` and check the predicate in a guard, or narrow with a"
+                       " typed `let`, which does run the predicate.")]
+          (throw (ex-info msg {:error msg})))
+        (assoc node :target-type (if (and (map? target-type) (:detachable target-type))
+                                   (detach type-expr)
+                                   type-expr)))
+      node)))
 
 (defn- resolve-convert-aliases
   "Rewrite every `convert` whose target names a plain alias to name the alias's
