@@ -522,6 +522,13 @@
             "not" "Boolean"
             nil)
 
+          ;; `old e` is e's value on entry, so it is e's type. Without this the
+          ;; fallback below had to infer `old balance` from an env with no class
+          ;; context, and only resolved the field because collect-class-info
+          ;; leaked every field name into it as a global.
+          :old
+          (infer-type env (:expr expr))
+
           :array-literal
           (let [elements (:elements expr)
                 elem-type (or (some-> elements first (infer-type env))
@@ -1815,7 +1822,16 @@
   [env constant]
   (or (:field-type constant)
       (when-let [value-expr (:value constant)]
-        (infer-type env value-expr))))
+        ;; An unannotated constant's type comes from its initializer, and that
+        ;; initializer may name a sibling or inherited constant (`B = A + 5`).
+        ;; Such a name resolves only in the class that declares it — never in
+        ;; whatever scope happens to be *reading* the constant, which for
+        ;; `print(Base.B)` is the top level. `lookup-class-constant` records the
+        ;; declaring class; infer there.
+        (infer-type (if-let [owner (:declaring-class constant)]
+                      (assoc env :current-class owner)
+                      env)
+                    value-expr))))
 
 (defn- lowered-deferred-method?
   [class-def method-def]

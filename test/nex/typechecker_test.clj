@@ -103,7 +103,13 @@
           ast (p/ast code)
           result (tc/type-check ast)]
       (is (not (:success result)))
-      (is (some #(= "Undefined field: count" (:message %)) (:errors result))))))
+      ;; `count` is private, so from outside it is simply not there. The message
+      ;; must not disclose it as an alternative — "no accessible fields" rather
+      ;; than naming the very field being hidden.
+      (is (some #(= (str "Undefined field: count on Counter."
+                         " It has no accessible fields.")
+                    (:message %))
+                (:errors result))))))
 
 (deftest test-map-put-typechecks-inside-function-body
   (testing "Map.put type-checks for typed map values inside top-level functions"

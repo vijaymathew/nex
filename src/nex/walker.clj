@@ -593,6 +593,72 @@
                                      (when ret-check [ret-check]))))
       node)))
 
+;; `convert` (and the type patterns that desugar to it) tests a *runtime* type.
+;; A `declare type` alias names no runtime type, so the test could never match:
+;; `convert x to y: Count` with `declare type Count = Integer` took the else
+;; branch for x = 5, and `when Holds(content: Count)` fell straight through —
+;; silently, since the checker sees Count as related to the value's type and
+;; accepts it. Resolve the alias to what it actually is before either backend
+;; sees it, so the test is against Integer.
+;;
+;; A refinement (`= Integer where n: n > 0`) is not resolvable this way. Its
+;; predicate is erased and cannot be evaluated by a type test, so resolving it to
+;; its base would silently *weaken* the test — `content: Quantity` would happily
+;; match -5. That one is rejected instead.
+
+(defn- alias-target-name
+  "The alias name a convert target refers to, or nil. `Count` and `?Count` both
+  name one; a parameterized target does not, since an alias cannot be generic."
+  [target-type]
+  (cond
+    (string? target-type) target-type
+    (and (map? target-type)
+         (:detachable target-type)
+         (string? (:base-type target-type))
+         (not (:type-args target-type)))
+    (:base-type target-type)
+    :else nil))
+
+(defn- detach
+  "TYPE-EXPR as a detachable type, whatever shape it arrived in."
+  [type-expr]
+  (if (string? type-expr)
+    {:base-type type-expr :detachable true}
+    (assoc type-expr :detachable true)))
+
+(defn- resolve-convert-alias
+  [{:keys [target-type] :as node} aliases]
+  (let [alias-name (alias-target-name target-type)]
+    (if-let [{:keys [type-expr refinement]} (get aliases alias-name)]
+      (if refinement
+        (let [base (if (string? type-expr)
+                     type-expr
+                     (or (:base-type type-expr) (pr-str type-expr)))
+              msg (str "`" alias-name "` is a refinement type, so it cannot be used as a"
+                       " runtime type test: its predicate is erased, so the test could only"
+                       " check `" base "` and would match values `" alias-name "` excludes."
+                       " Test `" base "` and check the predicate in a guard, or narrow with a"
+                       " typed `let`, which does run the predicate.")]
+          (throw (ex-info msg {:error msg})))
+        (assoc node :target-type (if (and (map? target-type) (:detachable target-type))
+                                   (detach type-expr)
+                                   type-expr)))
+      node)))
+
+(defn- resolve-convert-aliases
+  "Rewrite every `convert` whose target names a plain alias to name the alias's
+  base type, and reject one whose target names a refinement."
+  [program]
+  (let [aliases (into {} (map (juxt :name identity) (:type-aliases program)))]
+    (if (empty? aliases)
+      program
+      (walk/postwalk
+       (fn [n]
+         (if (and (map? n) (= :convert (:type n)))
+           (resolve-convert-alias n aliases)
+           n))
+       program))))
+
 (defn inject-refinement-checks
   "Rewrite a walked program, injecting predicate checks at every refinement
   narrowing site (let bindings, parameters, returns) throughout the tree."
@@ -618,7 +684,7 @@
   "Desugar a variant's field patterns against a bound variable `var-name`.
   Returns {:bindings :guards :body-binds}:
    - :bindings   safe `let`s (direct field binds), run before the guard;
-   - :guards     boolean conjuncts (literal equalities, nested `convert`s);
+   - :guards     boolean conjuncts (the `convert` of each type/nested pattern);
    - :body-binds `let`s that depend on a nested `convert` succeeding, so they run
                  in the body after the guard.
   Nested patterns recurse: the field is narrowed with `convert … to __nest: T` in
@@ -626,23 +692,35 @@
   [var-name field-patterns]
   (reduce
    (fn [acc {:keys [kind field] :as fp}]
-     (let [fr {:type :call :target var-name :method field :args [] :has-parens false}]
+     (let [fr {:type :call :target var-name :method field :args [] :has-parens false
+               ;; Provenance: a field name that does not exist is reported as
+               ;; the pattern the user wrote, not as the field read it becomes.
+               :from-pattern true}]
        (case kind
          :bind (if (= "_" field)
                  acc
                  (update acc :bindings conj
                          {:type :let :name (:bind fp) :var-type nil :value fr}))
-         :literal (update acc :guards conj
-                          {:type :binary :operator "==" :left fr :right (:value fp)})
          :nested (let [sub-var (str "__nest_" (swap! next-fn-id inc) "__")
                        conv {:type :convert :value fr :var-name sub-var
                              :target-type (if (:generic-args fp)
                                             {:base-type (:type fp) :type-args (:generic-args fp)}
-                                            (:type fp))}
-                       sub (process-field-patterns sub-var (:subpatterns fp))]
+                                            (:type fp))
+                             ;; Provenance: lets the checker report a bad type
+                             ;; test as the pattern the user wrote rather than
+                             ;; as the `convert` it desugars to.
+                             :from-pattern field}
+                       sub (process-field-patterns sub-var (:subpatterns fp))
+                       ;; A bare `field: T` binds the narrowed field under its
+                       ;; own name; it depends on the convert, so it is a
+                       ;; body-bind like the sub-pattern binds.
+                       own-bind (when-let [b (:bind fp)]
+                                  (when-not (= "_" b)
+                                    [{:type :let :name b :var-type nil
+                                      :value {:type :identifier :name sub-var}}]))]
                    (-> acc
                        (update :guards #(vec (concat % [conv] (:guards sub))))
-                       (update :body-binds #(vec (concat % (:bindings sub) (:body-binds sub)))))))))
+                       (update :body-binds #(vec (concat % own-bind (:bindings sub) (:body-binds sub)))))))))
    {:bindings [] :guards [] :body-binds []}
    field-patterns))
 
@@ -681,17 +759,21 @@
            ;; `union` declarations desugar to a sealed parent + variant classes.
            union-classes (mapcat :classes (filter #(= :union (:type %)) transformed))
            all-classes (vec (concat classes function-classes union-classes))]
-       (inject-refinement-checks
-        {:type :program
-         :imports (vec imports)
-         :interns (vec interns)
-         :type-aliases (vec type-aliases)
-         :classes all-classes
-         :functions (vec functions)
-         :duplicate-functions duplicate-functions
-         :function-signature-conflicts signature-conflicts
-         :statements (vec statements)
-         :calls (vec calls)})))
+       ;; Aliases are resolved before the refinement pass so that pass sees only
+       ;; the narrowing sites it owns (let/param/return), never a `convert`
+       ;; target that was really an alias.
+       (-> {:type :program
+            :imports (vec imports)
+            :interns (vec interns)
+            :type-aliases (vec type-aliases)
+            :classes all-classes
+            :functions (vec functions)
+            :duplicate-functions duplicate-functions
+            :function-signature-conflicts signature-conflicts
+            :statements (vec statements)
+            :calls (vec calls)}
+           resolve-convert-aliases
+           inject-refinement-checks)))
 
    :internStmt
    (fn [[_ _intern-kw & tokens]]
@@ -1253,34 +1335,52 @@
         :clauses clauses
         :else (or explicit-else (when wildcard (:body wildcard)))}))
 
+   :patternType
+   (fn [[_ name-node & rest]]
+     ;; A builtin type arrives as a bare token, a user type as a :typeName node.
+     (let [type-args-node (first (filter #(and (sequential? %) (= :typeArgs (first %))) rest))]
+       {:type-name (if (sequential? name-node)
+                     (transform-node name-node)
+                     (token-text name-node))
+        :generic-args (when type-args-node (transform-node type-args-node))}))
+
    :fieldPattern
    (fn [[_ & toks]]
      ;; `id`         -> bind field `id` to local `id`
-     ;; `id: x`      -> bind field `id` to local `x`
-     ;; `id: 0`      -> require field `id` to equal the literal 0
+     ;; `id as x`    -> bind field `id` to local `x`
+     ;; `id: T`      -> require field `id` to be a `T`, binding it as `id`
      ;; `id: T(...)` -> require field `id` to be a `T`, matching the sub-patterns
      (let [field (token-text (first toks))
-           has-colon? (some #(= ":" %) toks)
-           after (rest (drop-while #(not= ":" %) toks))]
+           node-of (fn [tag] (first (filter #(and (sequential? %) (= tag (first %))) toks)))
+           ptype (node-of :patternType)
+           lit (node-of :literal)]
        (cond
-         (not has-colon?)
-         {:kind :bind :field field :bind field}
+         ptype
+         (let [{:keys [type-name generic-args]} (transform-node ptype)]
+           {:kind :nested :field field :type type-name :generic-args generic-args
+            :subpatterns (mapv transform-node
+                               (filter #(and (sequential? %) (= :fieldPattern (first %))) toks))
+            ;; `id: T` has no sub-patterns to reach the narrowed value through,
+            ;; so it binds that value itself; `id: T(...)` binds through them.
+            :bind (when-not (some #(= "(" %) toks) field)})
 
-         (some #(= "(" %) toks)
-         (let [tn (first after)
-               type-name (if (sequential? tn) (transform-node tn) (token-text tn))
-               type-args-node (first (filter #(and (sequential? %) (= :typeArgs (first %))) after))
-               subpats (mapv transform-node
-                             (filter #(and (sequential? %) (= :fieldPattern (first %))) after))]
-           {:kind :nested :field field :type type-name
-            :generic-args (when type-args-node (transform-node type-args-node))
-            :subpatterns subpats})
+         ;; Literal field patterns were sugar for an equality guard, and the
+         ;; sugar cost more than it saved: it gave `:` a second meaning, and it
+         ;; did not bind the field it named, so `when Ok(value: 10) then
+         ;; print(value)` printed nil. Say what to write instead.
+         lit
+         (let [msg (str "Literal field patterns were removed: `" field ": <literal>`"
+                        " no longer matches a value. Write the comparison as a guard —"
+                        " `when <Variant>(" field ") if " field " = <literal> then …` —"
+                        " which is what this desugared to. In a field pattern `:` now"
+                        " means only \"this field has this type\".")]
+           (throw (ex-info msg {:error msg})))
 
-         (some sequential? after)
-         {:kind :literal :field field :value (transform-node (first (filter sequential? after)))}
+         (some #(= "as" %) toks)
+         {:kind :bind :field field :bind (token-text (last toks))}
 
          :else
-         {:kind :bind :field field :bind (token-text (first (filter string? after)))})))
+         {:kind :bind :field field :bind field})))
 
    :matchClause
    (fn [[_ _when-kw class-name & rest]]

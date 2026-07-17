@@ -187,3 +187,108 @@ print(q.to_string)")))))
 let t: Tid := \"TRK-1\"
 let n: Integer := t.length
 print(n + 1)")))))
+
+;; ─── Aliases and refinements in a runtime type test ──────────────────────────
+;;
+;; `convert` — and the `field: Type` patterns that desugar to it — tests a
+;; *runtime* type. A `declare type` alias names no runtime type, so the test
+;; silently never matched: `convert x to y: Count` took the else branch for
+;; x = 5, and `when Holds(content: Count)` fell straight through. Nothing warned,
+;; because the checker sees Count as related to the value's type and accepts it.
+;; Aliases are now resolved to their base before either backend sees the convert.
+;;
+;; A refinement cannot be resolved that way. Its predicate is erased, so a test
+;; against `Quantity = Integer where n > 0` could only ever check `Integer` —
+;; silently matching -5. Rejected rather than silently weakened.
+
+(defn- walker-error [code]
+  (try (p/ast code) nil (catch clojure.lang.ExceptionInfo e (ex-message e))))
+
+(deftest plain-alias-resolves-in-a-convert
+  (testing "convert to an alias tests the alias's base type"
+    (is (= ["\"matched 5\""]
+           (both "declare type Count = Integer
+let x: Any := 5
+if convert x to y: Count then
+  print(\"matched \" + y.to_string)
+else
+  print(\"no match\")
+end")))))
+
+(deftest plain-alias-resolves-in-a-type-pattern
+  (testing "a `field: Alias` pattern tests the alias's base type"
+    ;; Before, this fell past the Count clause into the Integer one.
+    (is (= ["\"a Count\"" "\"other\""]
+           (both "declare type Count = Integer
+union Box
+  Holds(content: Any)
+  Empty
+end
+function d(b: Box): String do
+  result := \"?\"
+  match b of
+    when Holds(content: Count) then result := \"a Count\"
+    when Holds(content)        then result := \"other\"
+    when Empty                 then result := \"empty\"
+  end
+end
+print(d(create Holds.make(5)))
+print(d(create Holds.make(\"hi\")))")))))
+
+(deftest refinement-in-a-type-test-is-rejected
+  (testing "a refinement cannot be a runtime type test, and the error says why"
+    (let [msg (walker-error "declare type Quantity = Integer where n: n > 0
+let x: Any := 5
+if convert x to y: Quantity then print(y) end")]
+      (is (some? msg) "convert to a refinement must be rejected")
+      (is (re-find #"refinement type" msg) msg)
+      (is (re-find #"predicate is erased" msg) msg)
+      (is (re-find #"Test `Integer`" msg)
+          (str "should name the base type to test instead, got: " msg)))))
+
+(deftest refinement-in-a-field-pattern-is-rejected
+  (testing "the same rejection reaches type patterns, which desugar to convert"
+    (let [msg (walker-error "declare type Quantity = Integer where n: n > 0
+union Box
+  Holds(content: Any)
+  Empty
+end
+match create Holds.make(5) of
+  when Holds(content: Quantity) then print(content)
+  when _                        then print(0)
+end")]
+      (is (some? msg) "a refinement type pattern must be rejected")
+      (is (re-find #"`Quantity` is a refinement type" msg) msg))))
+
+(deftest refinement-still-checked-at-its-narrowing-sites
+  (testing "rejecting the type test does not disturb let/param/return checks"
+    (is (violates? "declare type Quantity = Integer where n: n > 0
+let q: Quantity := -3
+print(q)"))
+    (is (= ["5"] (both "declare type Quantity = Integer where n: n > 0
+let q: Quantity := 5
+print(q)")))))
+
+(deftest alias-resolves-in-every-target-shape
+  (testing "a plain, parameterized, or detachable alias all resolve"
+    ;; The first pass at this only handled a bare name, so `?Count` still
+    ;; silently never matched — the same bug, one shape short. `?Integer`
+    ;; matched all along, so the gap was in alias resolution, not detachability.
+    (is (= ["\"plain\"" "\"parameterized\"" "\"detachable\""]
+           (both "declare type Count = Integer
+declare type Ints = Array[Integer]
+let a: Any := 5
+if convert a to x: Count then print(\"plain\") else print(\"plain NO\") end
+let b: Any := [1, 2]
+if convert b to y: Ints then print(\"parameterized\") else print(\"parameterized NO\") end
+let c: Any := 7
+if convert c to z: ?Count then print(\"detachable\") else print(\"detachable NO\") end")))))
+
+(deftest detachable-refinement-is-rejected-too
+  (testing "`?Refinement` is rejected like the bare form, and names the alias"
+    (let [msg (walker-error "declare type Quantity = Integer where n: n > 0
+let a: Any := 5
+if convert a to y: ?Quantity then print(y) end")]
+      (is (some? msg) "?Quantity must be rejected")
+      (is (re-find #"`Quantity` is a refinement type" msg)
+          (str "should name the alias, not the `?` shape, got: " msg)))))

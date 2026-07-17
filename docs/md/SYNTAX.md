@@ -790,15 +790,20 @@ binding the whole object and reading `.field`:
 
 ```nex
 match order of
-  when Draft                       then print("draft")
-  when Placed(id, total)           then print(id)        -- bind fields id, total
-  when Shipped(tracking: t, at: _) then print(t)         -- rename tracking→t, ignore at
+  when Draft                   then print("draft")
+  when Placed(id, total)       then print(id)        -- bind fields id, total
+  when Shipped(tracking as t)  then print(t)         -- rename tracking→t, ignore at
 end
 ```
 
 - `when Variant(a, b)` binds the payload fields named `a` and `b` to locals of the
-  same name; `Variant(a: x)` binds field `a` to a local `x`; `_` in a field
-  position ignores that field. Order does not matter — fields are matched by name.
+  same name; `Variant(a as x)` binds field `a` to a local `x`. Order does not
+  matter — fields are matched by name, and a field you do not name is ignored.
+- In a field pattern the name **before** the colon is always a field of the
+  variant, and `:` means exactly one thing: *this field has this type*
+  (`total: Integer`). Renaming is `as`. So `Variant(a: x)` does not bind `x`; it
+  requires field `a` to be an `x`, and is an error unless `x` names a type.
+  To compare a field to a value, use a guard.
 - `as` still binds the whole value and composes with destructuring
   (`when Placed(id, total) as p then …`). A clause may bind neither (`when Draft`).
 - `when _` is a catch-all, equivalent to `else`, and likewise suppresses the
@@ -829,40 +834,70 @@ end
 
 Guards run on the JVM (compiled) and interpreter backends.
 
-### Literal field patterns
+### Comparing a field to a value
 
-A field pattern may pin a field to a literal value with `field: <literal>`; the
-clause matches only when the field equals it, falling through otherwise:
+Use a guard. There is no literal field pattern: `Move(dx: 0)` was once sugar for
+`Move(dx) if dx == 0`, and it is now rejected, with an error naming the guard to
+write.
 
 ```nex
 match cmd of
-  when Move(dx: 0, dy: 0) then stay()
-  when Move(dx, dy)       then move(dx, dy)
-  when Say(text: "quit")  then bye()
-  when Say(text)          then say(text)
+  when Move(dx, dy) if dx = 0 and dy = 0 then stay()
+  when Move(dx, dy)                      then move(dx, dy)
+  when Say(text) if text = "quit"        then bye()
+  when Say(text)                         then say(text)
 end
 ```
 
-A literal field pattern is sugar for an equality guard (`Move(dx: 0, …)` ≡
-`Move(dx, …) if dx == 0`), so — like guards — a clause constrained by a literal
-does not count toward exhaustiveness. Literals combine with binds and an explicit
-`if` guard in the same clause.
+The guard is not merely the surviving spelling — it is the better one. It binds
+the field it constrains (the literal form did not, so a body naming that field
+silently saw `nil`), and it leaves `:` with exactly one meaning in a field
+pattern: *this field has this type*.
+
+### Type patterns
+
+A field pattern may pin a field to a *type* with `field: Type`; the clause
+matches only when the field is one at runtime, and binds the narrowed field
+under its own name:
+
+```nex
+match shape of
+  when Box(content: Circle) then print(content.radius)   -- content is a Circle here
+  when Box(content)         then print("not a circle")
+end
+```
+
+- Like a guard, a type pattern is a test, so a clause constrained by one does
+  not count toward exhaustiveness. A test against the field's *declared* type is
+  therefore a no-op that only costs you the exhaustiveness check — narrow a wider
+  type (`content: Any` down to `Circle`); do not restate a known one.
+- The type may be a builtin (`total: Integer`), a user class, a parameterized
+  type (`items: Array[String]`), or a `declare type` alias, which is tested as
+  the type it names.
+- A **refinement** (`declare type Quantity = Integer where n: n > 0`) may *not*
+  be used here, and is rejected. A type pattern is a runtime test, and a
+  refinement's predicate is erased at runtime — the test could only check
+  `Integer` and would match values `Quantity` excludes. Test the base type and
+  put the predicate in a guard, or narrow with a typed `let`, which does run it.
 
 ### Nested patterns
 
-A field pattern may itself be a variant pattern, `field: Type(sub-patterns)`,
-which narrows the field to `Type` and matches its payload:
+A type pattern may go on to match the narrowed field's payload —
+`field: Type(sub-patterns)`:
 
 ```nex
 match result of
-  when Ok(inner: Some[Integer](value: x)) then use(x)   -- Ok whose inner is a Some
-  when _                                  then fallback()
+  when Ok(inner: Some[Integer](value as x)) then use(x)   -- Ok whose inner is a Some
+  when _                                    then fallback()
 end
 ```
 
 - The field is narrowed with a runtime type test; if it is not that variant, the
   clause falls through (so, like a guard, a nested pattern does not count toward
   exhaustiveness).
+- With sub-patterns you reach the value through them, so the field itself is not
+  bound; without them (`inner: Some[Integer]`) the narrowed field binds as
+  `inner`.
 - Sub-patterns are matched **by field name** and nest arbitrarily deep. Give the
   nested type its arguments (`Some[Integer]`) for the bound sub-fields to keep
   their element type; without them the sub-fields bind as `Any`.

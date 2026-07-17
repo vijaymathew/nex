@@ -237,10 +237,29 @@ matchClause
     : WHEN typeName typeArgs? ('(' fieldPattern (',' fieldPattern)* ')')? (AS IDENTIFIER)? (IF expression)? THEN block
     ;
 
+// The identifier *before* the colon always names a field of the variant; `:`
+// means "this field has this type", and `as` renames the field's binding.
+//
+// `IDENTIFIER ':' literal` is kept only to diagnose it: literal field patterns
+// were removed in favour of the guard they desugared to, and the walker rejects
+// this alternative with the guard spelling. Deleting it here instead would make
+// `when Move(dx: 0)` an opaque "no viable alternative" parse error.
 fieldPattern
-    : IDENTIFIER ':' literal          // field must equal a literal value
-    | IDENTIFIER ':' typeName typeArgs? '(' (fieldPattern (',' fieldPattern)*)? ')'   // nested variant pattern
-    | IDENTIFIER (':' IDENTIFIER)?     // bind field to a local (rename with `:`)
+    : IDENTIFIER ':' literal          // removed — rejected in the walker
+    | IDENTIFIER ':' patternType ('(' (fieldPattern (',' fieldPattern)*)? ')')?   // field must be a patternType, optionally matching its payload
+    | IDENTIFIER AS IDENTIFIER        // bind field to a differently-named local
+    | IDENTIFIER                      // bind field to a local of the same name
+    ;
+
+// The types nameable in a pattern: a runtime type test, so no `?T` (a test for
+// "possibly nil" is not one) and no structural function type.
+patternType
+    : INTEGER_TYPE
+    | REAL_TYPE
+    | CHAR_TYPE
+    | BOOLEAN_TYPE
+    | STRING_TYPE
+    | typeName typeArgs?
     ;
 
 selectStatement

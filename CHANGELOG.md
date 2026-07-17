@@ -2,6 +2,96 @@
 
 ## Unreleased
 
+- **Fixed: a `declare type` alias in a runtime type test never matched.**
+  `convert` — and the `field: Type` patterns that desugar to it — tests a runtime
+  type, and an alias names none, so the test silently always failed:
+
+  ```nex
+  declare type Count = Integer
+  let x: Any := 5
+  if convert x to y: Count then ... else ... end   -- always took the else
+  ```
+
+  Nothing warned: the checker sees `Count` as related to the value's type and
+  accepts it. Aliases are now resolved to the type they name before either
+  backend sees the convert.
+
+  A **refinement** (`= Integer where n: n > 0`) cannot be resolved that way — its
+  predicate is erased, so a test against it could only check `Integer` and would
+  match values the refinement excludes. Rather than silently weaken it, a
+  refinement in a type-test position is now rejected, with an error naming the
+  base type to test and the guard to check the predicate in. Refinement checks at
+  the real narrowing sites (typed `let`, parameter, return) are unchanged.
+
+- **Fixed: class field names were global variables.** Declaring any class made
+  every one of its field names — private ones included — a readable *and
+  assignable* global initialized to nil:
+
+  ```nex
+  class Account
+    feature balance: Integer
+    create make(v: Integer) do balance := v end
+  end
+  print(balance)          -- typechecked; printed nil
+  ```
+
+  The first pass (`collect-class-info`) binds field names as variables so a
+  constant's initializer can name a sibling constant (`B = A + 1`); it bound them
+  into the caller's env, which at top level is the program's global scope. That
+  is a void-safety hole in the place the language makes its strongest promise,
+  and it quietly absorbed typos: any misspelling colliding with a field name
+  anywhere in the program became nil instead of a compile error. The scope is now
+  local to the pass and seeded with inherited *constants* only. Field access
+  inside a class is unaffected — `check-class` binds fields properly, honouring
+  visibility and generic substitution.
+
+  Two things had come to lean on the leak, both now fixed at the root: lowering
+  had no `:old` case and inferred `old balance` from an env with no class
+  context, and `constant-nex-type` inferred a constant's initializer in the
+  reader's scope rather than the declaring class's (so `print(Base.B)` with
+  `B = A + 5` resolved `A` only via the leak).
+
+- **Breaking: in a `match` field pattern, `:` means a type and `as` renames.**
+  A field pattern's colon used to do three unrelated jobs — pin a field to a
+  literal (`Move(dx: 0)`), narrow it to a type (`Ok(inner: Some(value))`), and,
+  with a bare identifier, *rename* it (`Shipped(tracking: t)`). The rename reads
+  exactly like the type annotation `x: T` is everywhere else in Nex while
+  meaning the opposite, and it collided with the type form: dropping the parens
+  from a working nested pattern silently flipped "test the type" into "rename to
+  a local". A builtin type name in that position was not even spellable —
+  `String` is a keyword token, not an identifier, so `when Err(s: String)` was a
+  *syntax* error.
+
+  Now the name left of the colon is always a field, `:` means only "this field
+  has this type", and renaming moves to `as`, which already means "bind under
+  this name" at clause level:
+
+  ```nex
+  when Shipped(tracking as t)   then track(t)         -- was: tracking: t
+  when Box(content: Circle)     then use(content)     -- narrows and binds
+  when Box(content: String)     then say(content)     -- builtins now spellable
+  when Ok(inner: Some[Integer](value as x)) then use(x)
+  ```
+
+  A bare `field: Type` narrows the field and binds it under its own name; with
+  sub-patterns you reach the value through them, so the field itself is not
+  bound. Like a guard, a type pattern is a test and does not count toward
+  exhaustiveness. To ignore a field, simply do not name it.
+
+  **Literal field patterns are removed.** `Move(dx: 0)` was sugar for
+  `Move(dx) if dx == 0`. It gave `:` a second meaning, and — alone among the ways
+  of naming a field — it did not *bind* the field it named, so
+  `when Ok(value: 10) then print(value)` printed nil. Write the guard:
+
+  ```nex
+  when Move(dx, dy) if dx = 0 and dy = 0 then stay()
+  ```
+
+  **Migration.** Every old spelling is rejected rather than reinterpreted, and
+  each error names its replacement: `` `t` is not a type. To bind the field to a
+  local named `t`, write `tracking as t` ``; for `field: _`, omit the field; for
+  `field: <literal>`, the guard form.
+
 - **New: operator aliases** — a class feature can bind itself to an arithmetic
   operator with an `alias` clause (`minus(other: Money): Money alias "-"`). The
   operator becomes exactly sugar for the call, so the feature's `require` and
