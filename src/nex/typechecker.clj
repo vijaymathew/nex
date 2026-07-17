@@ -1968,9 +1968,21 @@
 
       :else
       (let [class-def (env-lookup-class env base-type)]
+        ;; Resolution order is what makes an override an override. The receiver's
+        ;; own declaration must beat the universal "Any" protocol, or a class
+        ;; redefining a protocol member is checked against the *protocol's*
+        ;; signature instead of its own: `clone: M` was typed by Any's
+        ;; `clone: Any`, so `m.clone.v` — the whole point of overriding it —
+        ;; failed with "Undefined field: v" while the override itself ran
+        ;; correctly at runtime. `to_string`/`equals` hid the bug because the
+        ;; signature you would override them with matches Any's already.
+        ;;
+        ;; The receiver's *builtin* signature still comes first: for Task,
+        ;; Channel, Cursor and friends that table is the authority, and it is
+        ;; keyed on the real base type rather than a fallback.
         (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
-                                (builtin-method-signature "Any" method (count args) type-map)
-                                (lookup-class-method env base-type method (count args) current-class))]
+                                (lookup-class-method env base-type method (count args) current-class)
+                                (builtin-method-signature "Any" method (count args) type-map))]
           (check-call-signature env method args method-sig
                                 (member-type-map env target-type type-map method-sig))
           (let [arg-types (mapv #(check-expression env %) args)]

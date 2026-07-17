@@ -178,6 +178,78 @@ end")))
     (is (= ["10" "20"] (both "across [10, 20] as x do\n  print(x)\nend")))
     (is (= ["#a" "#b"] (both "across \"ab\" as c do\n  print(c)\nend")))))
 
+;; ─── Overriding a protocol member ────────────────────────────────────────────
+;;
+;; Resolution order decides whether an override is really an override. The
+;; universal "Any" signatures used to be consulted before the receiver's own
+;; declaration, so a class redefining a protocol member was checked against the
+;; protocol's signature rather than its own. `to_string`/`equals` hid this —
+;; the signature you would override them with is what Any already declares —
+;; but `clone: M` was typed by Any's `clone: Any`, so reaching into the result
+;; (the entire point) failed to typecheck while the override ran fine.
+
+(def ^:private overrides-clone
+  "class M
+  feature v: Integer
+  create make(x: Integer) do v := x end
+  feature
+    to_string: String do result := \"M(\" + v.to_string + \")\" end
+    clone: M do result := create M.make(v + 100) end
+end
+")
+
+(deftest clone-override-keeps-its-declared-type
+  (testing "an overridden `clone: M` types as M, so the result is usable"
+    (is (= ["101"] (both (str overrides-clone
+                              "let m := create M.make(1)
+print(m.clone.v)"))))))
+
+(deftest clone-override-runs-on-both-backends
+  (testing "the override's body is what produces the clone"
+    (is (= ["M(101)"] (both (str overrides-clone
+                                 "print(create M.make(1).clone)"))))))
+
+(deftest to-string-and-equals-overrides-keep-working
+  (testing "the members whose Any signature matches an override are unaffected"
+    (is (= ["\"M(3)\"" "M(3)"]
+           (both (str overrides-clone
+                      "let m := create M.make(3)
+print(m.to_string)
+print(m)"))))
+    (is (= ["true" "true" "false"]
+           (both "class E
+  feature v: Integer
+  create make(x: Integer) do v := x end
+  feature
+    equals(o: E): Boolean do result := true end
+    hash: Integer do result := 1 end
+end
+let a := create E.make(1)
+let b := create E.make(2)
+print(a.equals(b))
+print(a = b)
+print(a /= b)")))))
+
+(deftest builtin-clone-keeps-its-declared-type
+  (testing "a collection's own `clone` beats Any's, so the result stays typed"
+    ;; Array/Map/Set each declare clone returning themselves; Any declares it
+    ;; returning Any. Consulting Any first made `[1, 2].clone.length` a type
+    ;; error on the language's own collections.
+    (is (= ["2"] (both "print([1, 2].clone.length)")))
+    (is (= ["2"] (both "print(#{1, 2}.clone.size)")))
+    (is (= ["1"] (both "print({\"a\": 1}.clone.size)")))))
+
+(deftest builtin-equals-honours-its-declared-parameter
+  (testing "`equals` on a typed collection agrees with what `=` already allowed"
+    ;; `[1, 2] = "x"` was always a type error ("Cannot compare"); the method
+    ;; form accepted it and returned false, because Any's `equals(other: Any)`
+    ;; was consulted before Array's `equals(other: Array[T])`.
+    (is (seq (type-errors "print([1, 2].equals(\"x\"))")))
+    (is (nil? (type-errors "print([1, 2].equals([1, 2]))")))
+    ;; An Any-typed receiver still compares against anything: there the
+    ;; universal signature is the receiver's own.
+    (is (nil? (type-errors "let a: Any := [1, 2]\nprint(a.equals(\"x\"))")))))
+
 (deftest user-class-cursor-still-dispatches
   (testing "a class declaring its own `cursor` resolves to its own signature"
     (is (= ["false"]
