@@ -4680,7 +4680,7 @@
 (defn infer-expression-type
   "Infer the type of an expression AST node.
    opts: :classes - seq of class defs, :functions - seq of function defs,
-   :var-types - {name type} map.
+   :var-types - {name type} map, :type-aliases - {name type-expr} map.
    Returns the type (string or map) or nil on failure."
   [expr opts]
   (try
@@ -4689,6 +4689,15 @@
           function-classes (vec (function-class-defs normalized-functions))
           visible-classes (vec (concat (:classes opts) function-classes))
           visible-var-types (or (:var-types opts) {})]
+      ;; Registered before any class or expression is looked at: a declared
+      ;; alias may name the type of a field or of a var in `visible-var-types`
+      ;; (`let t: Tid := ...`), and an env whose alias registry is empty cannot
+      ;; tell that `Tid` is a `String` — it resolves to no class and no builtin,
+      ;; so every method on it infers as nil. The whole-program check registers
+      ;; these from source order; a caller inferring one expression in isolation
+      ;; (the compiler's lowering pass) has to supply them.
+      (doseq [[alias-name type-expr] (:type-aliases opts)]
+        (env-add-type-alias env alias-name type-expr))
       (doseq [{:keys [qualified-name source]} (:imports opts)]
         (when (nil? source)
           (let [simple-name (last (str/split qualified-name #"\."))]

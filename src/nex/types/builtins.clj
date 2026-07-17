@@ -489,15 +489,15 @@
   (letfn [(nex-compare [x y]
             (nex-ordering-compare x y))]
     {:Any
-   {"to_string"   (fn [v & _] (nex-format-value v))
+   {"to_string"   ^{:returns "String"} (fn [v & _] (nex-format-value v))
     ;; Default equality is structural (deep, field-by-field). A class may
     ;; override `equals` to change this; the `=`/`/=` operators then honour the
     ;; override. Identity comparison remains available through `==`/`!=`.
-    "equals"      (fn [v other & _] (nex-deep-equals? v other))
+    "equals"      ^{:returns "Boolean"} (fn [v other & _] (nex-deep-equals? v other))
     ;; Default hash is structural and consistent with the structural `equals`
     ;; above. A class that overrides `equals` should override `hash` too.
-    "hash"        (fn [v & _] (->nex-integer (nex-structural-hash v)))
-    "clone"       (fn [v & _] (nex-clone-value v))}
+    "hash"        ^{:returns "Integer"} (fn [v & _] (->nex-integer (nex-structural-hash v)))
+    "clone"       ^{:returns "Any"} (fn [v & _] (nex-clone-value v))}
 
    :String
    {"length"      (fn [s & _] (->nex-integer (count s)))

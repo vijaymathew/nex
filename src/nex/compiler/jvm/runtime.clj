@@ -1035,6 +1035,17 @@
       (invoke-user-method state value synthetic-invariant-method-name [])))
   value)
 
+(defn- nex-object-render
+  "The generic `#<Class object>` rendering a Nex object has when its class
+   defines no `to_string` (spec Any protocol), or nil when `value` is not a
+   compiled object. `bi/nex-format-value` only recognizes the interpreter's
+   object *maps*, so a compiled object — an instance of a generated class —
+   falls through its cond to Clojure's `#object[nex.file.m.P 0x... ]` form.
+   This restores the interpreter's rendering for the compiled object model."
+  [state value]
+  (when-let [class-name (compiled-runtime-class-name state value)]
+    (str "#<" class-name " object>")))
+
 (defn- concat-string-value
   [state value]
   (cond
@@ -1055,7 +1066,8 @@
                 result
                 (bi/nex-format-value result)))
             (catch Exception _
-              (bi/call-builtin-method nil nil value "to_string" [])))]
+              (or (nex-object-render state value)
+                  (bi/call-builtin-method nil nil value "to_string" []))))]
       (if (string? string-value)
         string-value
         (bi/nex-format-value string-value)))))
@@ -1075,7 +1087,18 @@
   (if (or (interp/nex-object? value)
           (has-user-to-string? value))
     (concat-string-value state value)
-    (format-value value)))
+    (or (nex-object-render state value)
+        (format-value value))))
+
+(defn any-to-string
+  "The `to_string` that the Any protocol gives every value, for a receiver whose
+   *static* type declares none. Resolution is on the runtime value, not the
+   static type, because the two differ under dynamic dispatch: with
+   `let o: Order := create Placed.make(...)` the static `Order` may declare no
+   `to_string` while the runtime `Placed` does, and the override must still win
+   — which is exactly what `print` already does for the same value."
+  [state value]
+  (print-value state value))
 
 (defn- object-field-value
   [value field-name]
@@ -1733,6 +1756,15 @@
     (boolean (invoke-user-method state a "equals" [b]))
     (structural-equals state a b)))
 
+(defn any-equals
+  "The `equals` that the Any protocol gives every value, for a receiver whose
+   *static* type declares none. `value-equals` honours an `equals` override
+   found on the runtime value (which, under dynamic dispatch, may be a subclass
+   of the static type) and otherwise compares structurally — matching both the
+   interpreter and the `=` operator."
+  [state a b]
+  (boolean (value-equals state a b)))
+
 (defn- scalar-identity-value?
   [v]
   (or (nil? v)
@@ -2045,6 +2077,19 @@
 
     (str/starts-with? name "user-field-set:")
     (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
+
+    ;; The Any protocol on a receiver whose static type declares no such method.
+    ;; Kept apart from the "method:" helper below: that one routes to
+    ;; `bi/call-builtin-method`, whose :Any defaults are written against the
+    ;; interpreter's object maps and silently misread a compiled object (an
+    ;; instance of a generated class) — `equals` on two equal objects returns
+    ;; false, `to_string` renders `#object[...]`. These two understand both
+    ;; object models.
+    (= name "any:to_string")
+    (any-to-string state (first args))
+
+    (= name "any:equals")
+    (any-equals state (first args) (second args))
 
     (str/starts-with? name "method:")
     (let [ctx (rebuild-interpreter-ctx state)

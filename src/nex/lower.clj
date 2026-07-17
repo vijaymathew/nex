@@ -535,7 +535,12 @@
         (tc/infer-expression-type expr {:classes (:classes env)
                                         :functions (:functions env)
                                         :imports (:imports env)
-                                        :var-types (env-visible-var-types env)})
+                                        :var-types (env-visible-var-types env)
+                                        ;; Without these an aliased receiver
+                                        ;; (`let t: Tid := ...`; `Tid = String`)
+                                        ;; infers as nil here and lowering fails
+                                        ;; with "Unable to infer expression type".
+                                        :type-aliases *type-aliases*})
         (throw (ex-info "Unable to infer expression type during lowering"
                         {:expr expr})))))
 
@@ -557,9 +562,15 @@
             (some-> (inherited-method-def env parent-def (:method expr) (count (:args expr)))
                     function-return-type))))
     (let [java-static-owner (java-host-class-root-name env target-expr)
+          ;; Through the alias: a receiver declared with an alias or a
+          ;; refinement (`declare type Tracking_Id = String where ...`) carries
+          ;; the *alias* name here, which names no class and no builtin. The
+          ;; underlying type is what owns the method, and what the value
+          ;; actually is at runtime — refinements are erased by lowering time,
+          ;; their checks already inserted at the narrowing sites.
           target-type (when (and (not class-target-name)
                                  (not java-static-owner))
-                        (infer-type env target-expr))
+                        (resolve-type-alias (infer-type env target-expr)))
           base-type (base-type-name target-type)
           class-def (or (when class-target-name
                           (get (visible-class-map env) class-target-name))
@@ -2490,7 +2501,7 @@
 
 (defn- lower-instance-dispatch
   [env target-expr method args has-parens]
-  (let [target-type (infer-type env target-expr)
+  (let [target-type (resolve-type-alias (infer-type env target-expr))
         base-type (base-type-name target-type)
         target-ir (lower-expression env target-expr)
         class-def (get (visible-class-map env) base-type)
@@ -2585,6 +2596,28 @@
                                                                      [method (count args)]))
                                                  carrier-jvm-type)
                               (mapv #(lower-expression env %) args)
+                              nex-type
+                              jvm-type))
+
+      ;; A universal method the class does not declare. The typechecker admits
+      ;; the Any protocol on *every* receiver (the "Any" case of its
+      ;; `builtin-method-signature`), so `p.total.to_string` typechecks against
+      ;; a class that never defines `to_string` and must therefore also lower.
+      ;;
+      ;; Only the members the compiled object model actually implements are
+      ;; routed here. `clone` and `hash` are deliberately excluded: their :Any
+      ;; defaults (`bi/nex-clone-value`, `bi/nex-structural-hash`) only
+      ;; understand the interpreter's object maps and would quietly return the
+      ;; *same* object from `clone` rather than a copy. Falling through to the
+      ;; error below keeps them an honest "not supported yet" — which is what
+      ;; they were before this branch existed — instead of a silent wrong
+      ;; answer. Same for the typechecker's `cursor`/`start`/`item`/`next`/
+      ;; `at_end`, which have no Any default at all.
+      (and class-def (contains? #{"to_string" "equals"} method))
+      (let [nex-type (or (bi/builtin-type-method-return-type :Any method) "Any")
+            jvm-type (resolve-jvm-type env nex-type)]
+        (ir/call-runtime-node (str "any:" method)
+                              (into [target-ir] (mapv #(lower-expression env %) args))
                               nex-type
                               jvm-type))
 
@@ -3307,8 +3340,12 @@
 
           :else
           (let [java-static-owner (java-host-class-root-name env target-expr)
+                ;; Resolved through aliases for the same reason as in
+                ;; `infer-target-call-type`: the branches below choose a
+                ;; dispatch strategy by receiver type, and an alias/refinement
+                ;; name matches none of them.
                 target-type (when-not java-static-owner
-                              (infer-type env target-expr))]
+                              (resolve-type-alias (infer-type env target-expr)))]
             (cond
               java-static-owner
               (let [nex-type (or (infer-call-type env expr) "Any")
