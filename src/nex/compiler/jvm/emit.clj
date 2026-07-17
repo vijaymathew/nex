@@ -103,7 +103,18 @@
              [{:name "__outer__"
                :descriptor "Ljava/lang/Object;"
                :flags Opcodes/ACC_PUBLIC
-               :jvm-type (ir/object-jvm-type "java/lang/Object")}]
+               :jvm-type (ir/object-jvm-type "java/lang/Object")}
+              ;; The state that created this object, so the emitted `equals`/
+              ;; `hashCode` below can reach Nex semantics. Java hands those two
+              ;; methods nothing but the receiver, yet answering them means
+              ;; dispatching to a class's `equals`/`hash` override, whose lowered
+              ;; form takes a NexReplState as its first argument. Set at the
+              ;; `:new` site (see emit-expr! :new), which is the only place a
+              ;; user object is constructed with state in scope.
+              {:name "__state__"
+               :descriptor (str "L" repl-state-internal-name ";")
+               :flags Opcodes/ACC_PUBLIC
+               :jvm-type (ir/object-jvm-type repl-state-internal-name)}]
              (map (fn [{:keys [name jvm-type]}]
                     {:name name
                      :descriptor (desc/jvm-type->descriptor jvm-type)
@@ -147,7 +158,23 @@
                 :owner (:internal-name class-spec)
                 :constants (:constants class-spec)
                 :classes-edn classes-edn
-                :imports-edn imports-edn}]
+                :imports-edn imports-edn}
+               ;; Java's equality, delegating to Nex's. Set and Map are a
+               ;; LinkedHashSet and a HashMap on this backend, so membership,
+               ;; dedup and key lookup are decided by these two methods and
+               ;; nothing else — without them a class's `equals`/`hash` override
+               ;; is ignored the moment its instances go into a collection, and
+               ;; `#{a, b}` keeps two objects the program considers one.
+               {:name "equals"
+                :descriptor "(Ljava/lang/Object;)Z"
+                :flags Opcodes/ACC_PUBLIC
+                :kind :object-equals
+                :owner (:internal-name class-spec)}
+               {:name "hashCode"
+                :descriptor "()I"
+                :flags Opcodes/ACC_PUBLIC
+                :kind :object-hash-code
+                :owner (:internal-name class-spec)}]
               (map (fn [fn-node]
                      {:name (:emitted-name fn-node)
                       :descriptor (repl-fn-method-descriptor)
@@ -1692,6 +1719,12 @@
       (.visitTypeInsn mv Opcodes/NEW (:class expr))
       (.visitInsn mv Opcodes/DUP)
       (.visitMethodInsn mv Opcodes/INVOKESPECIAL (:class expr) "<init>" "()V" false)
+      ;; Hand the object the state that made it (see the __state__ field): the
+      ;; emitted equals/hashCode need it and Java gives them no way to obtain it.
+      (.visitInsn mv Opcodes/DUP)
+      (.visitVarInsn mv Opcodes/ALOAD state-slot)
+      (.visitFieldInsn mv Opcodes/PUTFIELD (:class expr) "__state__"
+                       (str "L" repl-state-internal-name ";"))
       (:jvm-type expr))
 
     :top-get
@@ -2420,9 +2453,48 @@
     (.visitMaxs mv 0 0)
     (.visitEnd mv)))
 
+(defn- emit-object-state-arg!
+  "Load `this.__state__` — the argument the runtime helpers need and that Java's
+   equals/hashCode contract does not provide."
+  [^MethodVisitor mv owner]
+  (.visitVarInsn mv Opcodes/ALOAD 0)
+  (.visitFieldInsn mv Opcodes/GETFIELD owner "__state__"
+                   (str "L" repl-state-internal-name ";")))
+
+(defn- emit-object-equals!
+  "public boolean equals(Object other) { return Runtime.object_equals(__state__, this, other); }"
+  [^ClassWriter cw {:keys [name descriptor flags owner]}]
+  (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
+    (.visitCode mv)
+    (emit-runtime-call! mv "object-equals"
+                        [(fn [] (emit-object-state-arg! mv owner))
+                         (fn [] (.visitVarInsn mv Opcodes/ALOAD 0))
+                         (fn [] (.visitVarInsn mv Opcodes/ALOAD 1))])
+    (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
+    (.visitInsn mv Opcodes/IRETURN)
+    (.visitMaxs mv 0 0)
+    (.visitEnd mv)))
+
+(defn- emit-object-hash-code!
+  "public int hashCode() { return Runtime.object_hash_code(__state__, this); }"
+  [^ClassWriter cw {:keys [name descriptor flags owner]}]
+  (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
+    (.visitCode mv)
+    (emit-runtime-call! mv "object-hash-code"
+                        [(fn [] (emit-object-state-arg! mv owner))
+                         (fn [] (.visitVarInsn mv Opcodes/ALOAD 0))])
+    (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Integer")
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Integer" "intValue" "()I" false)
+    (.visitInsn mv Opcodes/IRETURN)
+    (.visitMaxs mv 0 0)
+    (.visitEnd mv)))
+
 (defn emit-method!
   [^ClassWriter cw method-spec]
   (case (:kind method-spec)
+    :object-equals (emit-object-equals! cw method-spec)
+    :object-hash-code (emit-object-hash-code! cw method-spec)
     :default-constructor (emit-default-constructor! cw method-spec)
     :launcher-main (emit-launcher-main! cw method-spec)
     :user-default-constructor (emit-user-default-constructor! cw method-spec)
