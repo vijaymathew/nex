@@ -3813,13 +3813,48 @@
 ;; Class Type Checking
 ;;
 
+(defn- bind-inherited-constants!
+  "Seed TARGET-ENV with the constants CLASS-DEF inherits, nearest parent last so
+   it wins. A constant's initializer may name one — `class Derived inherit Base`
+   with `C = B + 1` — which is the only reason an initializer needs to see
+   anything beyond its own class. Constants only: an inherited *field* has no
+   value at collect time and is not in scope here."
+  [target-env env class-def]
+  (letfn [(walk [cn visited]
+            (when (and cn (not (contains? visited cn)))
+              (when-let [cd (env-lookup-class env cn)]
+                (let [visited' (conj visited cn)]
+                  (doseq [{:keys [parent]} (:parents cd)]
+                    (walk parent visited'))
+                  (doseq [m (feature-members cd)]
+                    (when (and (= (:type m) :field)
+                               (:constant? m)
+                               (public-member? m)
+                               (:field-type m))
+                      (env-add-var target-env (:name m) (:field-type m))))))))]
+    (doseq [{:keys [parent]} (:parents class-def)]
+      (walk parent #{}))))
+
 (defn collect-class-info
   "Collect class information (first pass)"
   [env {:keys [name body] :as class-def}]
   (env-add-class env name class-def)
 
   ;; Collect fields/constants and infer constant types.
-  (let [updated-body
+  ;;
+  ;; A constant's initializer may name an earlier constant of the same class
+  ;; (`feature A = 1  B = A + 1`), so the names must be in scope to infer its
+  ;; type — but only *here*. Binding them into `env` would make every field name
+  ;; in the program, private ones included, a readable and assignable global
+  ;; initialized to nil: `class Account feature balance: Integer end` was enough
+  ;; to make a bare `print(balance)` typecheck at top level and evaluate to nil,
+  ;; which is exactly the void the type system exists to rule out. Field access
+  ;; inside a class is bound properly by `bind-visible-class-fields!` in
+  ;; `check-class`, which also honours inherited-field visibility and generic
+  ;; substitution — neither of which this pass could.
+  (let [const-env (doto (make-type-env env)
+                    (bind-inherited-constants! env class-def))
+        updated-body
         (mapv (fn [section]
                 (if (= (:type section) :feature-section)
                   (update section :members
@@ -3830,21 +3865,21 @@
                                                    (assoc member :visibility (:visibility section)))]
                                       (if (= (:type member) :field)
                                         (if (:constant? member)
-                                          (let [inferred-type (check-expression env (:value member))
+                                          (let [inferred-type (check-expression const-env (:value member))
                                                 final-type (or (:field-type member) inferred-type)]
                                             (when (:field-type member)
-                                              (validate-type-annotation env (:field-type member))
-                                              (when-not (types-compatible? env inferred-type (:field-type member))
+                                              (validate-type-annotation const-env (:field-type member))
+                                              (when-not (types-compatible? const-env inferred-type (:field-type member))
                                                 (throw (ex-info (str "Type mismatch in constant " (:name member))
                                                                 {:error (type-error
                                                                          (str "Cannot assign " (display-type inferred-type)
                                                                               " to constant '" (:name member)
                                                                               "' of type "
                                                                               (display-type (:field-type member))))}))))
-                                            (env-add-var env (:name member) final-type)
+                                            (env-add-var const-env (:name member) final-type)
                                             (assoc member :field-type final-type))
                                           (do
-                                            (env-add-var env (:name member) (:field-type member))
+                                            (env-add-var const-env (:name member) (:field-type member))
                                             member))
                                         member)))
                                   members)))

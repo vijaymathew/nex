@@ -176,7 +176,14 @@ print(c(create Draft.make()))"))))))
 end
 print(c(create Placed.make(\"a\", 1.0)))")))))
 
-;; --- Phase 3: literal field patterns ---
+;; --- Literal field patterns: removed in favour of the guard they desugared to
+;;
+;; `Move(dx: 0)` was sugar for `Move(dx) if dx == 0`. The sugar cost more than it
+;; saved. It gave `:` a second meaning in a position where the type reading is
+;; the obvious one, and — unlike every other way of naming a field in a pattern —
+;; it did not *bind* the field it named, so `when Ok(value: 10) then print(value)`
+;; printed nil instead of 10. The guard form binds, reads the same, and is the
+;; only spelling now.
 
 (def ^:private cmd-decl
   "union Cmd
@@ -185,49 +192,41 @@ print(c(create Placed.make(\"a\", 1.0)))")))))
 end
 ")
 
-(deftest literal-field-pattern-matches-value
-  (testing "a `field: literal` pattern matches only when the field equals the literal"
-    (is (= ["\"stay\"" "\"move\"" "\"bye\"" "\"say hello\""]
+(defn- walker-error [code]
+  (try (p/ast code) nil (catch clojure.lang.ExceptionInfo e (ex-message e))))
+
+(deftest literal-field-pattern-is-rejected
+  (testing "`field: <literal>` names the guard to write instead"
+    ;; Kept parseable purely to say this: deleting the grammar alternative would
+    ;; make it an opaque "no viable alternative" parse error.
+    (let [msg (walker-error (str cmd-decl
+                                 "match create Move.make(0, 0) of
+  when Move(dx: 0, dy) then print(dy)
+  when _               then print(1)
+end"))]
+      (is (some? msg) "`dx: 0` must be rejected")
+      (is (re-find #"Literal field patterns were removed" msg) msg)
+      (is (re-find #"if dx = <literal>" msg)
+          (str "should name the guard spelling for this field, got: " msg)))))
+
+(deftest guard-replaces-a-literal-pattern
+  (testing "the guard form matches what the literal pattern used to, and binds"
+    ;; Same four cases the literal-pattern test covered — plus each body now uses
+    ;; the constrained field, which the literal form left unbound.
+    (is (= ["\"stay 0\"" "\"move 1\"" "\"bye quit\"" "\"say hello\""]
            (run (str cmd-decl
                      "function r(c: Cmd): String do
   match c of
-    when Move(dx: 0, dy: 0) then result := \"stay\"
-    when Move(dx, dy)       then result := \"move\"
-    when Say(text: \"quit\")  then result := \"bye\"
-    when Say(text)          then result := \"say \" + text
+    when Move(dx, dy) if dx = 0 and dy = 0 then result := \"stay \" + dx.to_string
+    when Move(dx, dy)                      then result := \"move \" + dx.to_string
+    when Say(text) if text = \"quit\"        then result := \"bye \" + text
+    when Say(text)                         then result := \"say \" + text
   end
 end
 print(r(create Move.make(0, 0)))
 print(r(create Move.make(1, 2)))
 print(r(create Say.make(\"quit\")))
 print(r(create Say.make(\"hello\")))"))))))
-
-(deftest literal-and-explicit-guard-combine
-  (testing "literal field patterns AND with an explicit if-guard"
-    (is (= ["\"up-far\"" "\"other\"" "\"other\""]
-           (run (str cmd-decl
-                     "function r(c: Cmd): String do
-  match c of
-    when Move(dx: 0, dy) if dy > 5 then result := \"up-far\"
-    when Move(dx, dy)              then result := \"other\"
-    when Say(text)                then result := text
-  end
-end
-print(r(create Move.make(0, 10)))
-print(r(create Move.make(0, 2)))
-print(r(create Move.make(3, 10)))"))))))
-
-(deftest literal-clause-does-not-cover-its-variant
-  (testing "a variant handled only by a literal-constrained clause is not exhaustive"
-    (is (type-error?
-         (str cmd-decl
-              "function r(c: Cmd): String do
-  match c of
-    when Move(dx: 0, dy: 0) then result := \"stay\"
-    when Say(text)          then result := text
-  end
-end
-print(r(create Say.make(\"x\")))")))))
 
 ;; --- match generic-argument propagation + nested patterns ---
 
@@ -439,20 +438,23 @@ print(d(create Shipped.make(\"Z9\", 3)))"))]
       (is (some #(re-find #"omit `at` to ignore it" %) msgs)
           (str "error should say to omit the field, got: " (pr-str msgs))))))
 
-(deftest literal-field-pattern-still-uses-the-colon
-  (testing "`field: <literal>` is unchanged by the colon's narrowing"
-    (is (= ["\"none\"" "\"some\""]
-           (run (str order-decl
-                     "function d(o: Order): String do
+(deftest colon-in-a-field-pattern-means-only-a-type
+  (testing "`:` has exactly one meaning left: the field has this type"
+    ;; The point of removing literal patterns. Every remaining `:` in a field
+    ;; position is a type test, so there is nothing left to disambiguate.
+    (is (= ["\"int 3\"" "\"str hi\""]
+           (run (str box-decl
+                     "function d(s: Shape): String do
   result := \"?\"
-  match o of
-    when Shipped(at: 0) then result := \"none\"
-    when Shipped(at)    then result := \"some\"
-    when _              then result := \"?\"
+  match s of
+    when Box(content: Integer) then result := \"int \" + content.to_string
+    when Box(content: String)  then result := \"str \" + content
+    when Box(content)          then result := \"other\"
+    when Empty                 then result := \"empty\"
   end
 end
-print(d(create Shipped.make(\"Z9\", 0)))
-print(d(create Shipped.make(\"Z9\", 3)))"))))))
+print(d(create Box.make(3)))
+print(d(create Box.make(\"hi\")))"))))))
 
 (deftest undefined-field-in-pattern-names-the-variants-fields
   (testing "a field the variant does not have is reported with the real fields"

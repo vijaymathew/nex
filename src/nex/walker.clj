@@ -618,7 +618,7 @@
   "Desugar a variant's field patterns against a bound variable `var-name`.
   Returns {:bindings :guards :body-binds}:
    - :bindings   safe `let`s (direct field binds), run before the guard;
-   - :guards     boolean conjuncts (literal equalities, nested `convert`s);
+   - :guards     boolean conjuncts (the `convert` of each type/nested pattern);
    - :body-binds `let`s that depend on a nested `convert` succeeding, so they run
                  in the body after the guard.
   Nested patterns recurse: the field is narrowed with `convert … to __nest: T` in
@@ -635,8 +635,6 @@
                  acc
                  (update acc :bindings conj
                          {:type :let :name (:bind fp) :var-type nil :value fr}))
-         :literal (update acc :guards conj
-                          {:type :binary :operator "==" :left fr :right (:value fp)})
          :nested (let [sub-var (str "__nest_" (swap! next-fn-id inc) "__")
                        conv {:type :convert :value fr :var-name sub-var
                              :target-type (if (:generic-args fp)
@@ -1280,7 +1278,6 @@
    (fn [[_ & toks]]
      ;; `id`         -> bind field `id` to local `id`
      ;; `id as x`    -> bind field `id` to local `x`
-     ;; `id: 0`      -> require field `id` to equal the literal 0
      ;; `id: T`      -> require field `id` to be a `T`, binding it as `id`
      ;; `id: T(...)` -> require field `id` to be a `T`, matching the sub-patterns
      (let [field (token-text (first toks))
@@ -1297,8 +1294,17 @@
             ;; so it binds that value itself; `id: T(...)` binds through them.
             :bind (when-not (some #(= "(" %) toks) field)})
 
+         ;; Literal field patterns were sugar for an equality guard, and the
+         ;; sugar cost more than it saved: it gave `:` a second meaning, and it
+         ;; did not bind the field it named, so `when Ok(value: 10) then
+         ;; print(value)` printed nil. Say what to write instead.
          lit
-         {:kind :literal :field field :value (transform-node lit)}
+         (let [msg (str "Literal field patterns were removed: `" field ": <literal>`"
+                        " no longer matches a value. Write the comparison as a guard —"
+                        " `when <Variant>(" field ") if " field " = <literal> then …` —"
+                        " which is what this desugared to. In a field pattern `:` now"
+                        " means only \"this field has this type\".")]
+           (throw (ex-info msg {:error msg})))
 
          (some #(= "as" %) toks)
          {:kind :bind :field field :bind (token-text (last toks))}

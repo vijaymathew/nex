@@ -800,10 +800,10 @@ end
   same name; `Variant(a as x)` binds field `a` to a local `x`. Order does not
   matter — fields are matched by name, and a field you do not name is ignored.
 - In a field pattern the name **before** the colon is always a field of the
-  variant, and `:` always *constrains* that field — to a literal
-  (`total: 0`), or to a type (`total: Integer`). Renaming is `as`. So
-  `Variant(a: x)` does not bind `x`; it requires field `a` to be an `x`, and is
-  an error unless `x` names a type.
+  variant, and `:` means exactly one thing: *this field has this type*
+  (`total: Integer`). Renaming is `as`. So `Variant(a: x)` does not bind `x`; it
+  requires field `a` to be an `x`, and is an error unless `x` names a type.
+  To compare a field to a value, use a guard.
 - `as` still binds the whole value and composes with destructuring
   (`when Placed(id, total) as p then …`). A clause may bind neither (`when Draft`).
 - `when _` is a catch-all, equivalent to `else`, and likewise suppresses the
@@ -834,24 +834,25 @@ end
 
 Guards run on the JVM (compiled) and interpreter backends.
 
-### Literal field patterns
+### Comparing a field to a value
 
-A field pattern may pin a field to a literal value with `field: <literal>`; the
-clause matches only when the field equals it, falling through otherwise:
+Use a guard. There is no literal field pattern: `Move(dx: 0)` was once sugar for
+`Move(dx) if dx == 0`, and it is now rejected, with an error naming the guard to
+write.
 
 ```nex
 match cmd of
-  when Move(dx: 0, dy: 0) then stay()
-  when Move(dx, dy)       then move(dx, dy)
-  when Say(text: "quit")  then bye()
-  when Say(text)          then say(text)
+  when Move(dx, dy) if dx = 0 and dy = 0 then stay()
+  when Move(dx, dy)                      then move(dx, dy)
+  when Say(text) if text = "quit"        then bye()
+  when Say(text)                         then say(text)
 end
 ```
 
-A literal field pattern is sugar for an equality guard (`Move(dx: 0, …)` ≡
-`Move(dx, …) if dx == 0`), so — like guards — a clause constrained by a literal
-does not count toward exhaustiveness. Literals combine with binds and an explicit
-`if` guard in the same clause.
+The guard is not merely the surviving spelling — it is the better one. It binds
+the field it constrains (the literal form did not, so a body naming that field
+silently saw `nil`), and it leaves `:` with exactly one meaning in a field
+pattern: *this field has this type*.
 
 ### Type patterns
 
@@ -866,8 +867,8 @@ match shape of
 end
 ```
 
-- Like a literal pattern, a type pattern is a test, so a clause constrained by
-  one does not count toward exhaustiveness.
+- Like a guard, a type pattern is a test, so a clause constrained by one does
+  not count toward exhaustiveness.
 - The type may be a builtin (`total: Integer`), a user class, or a
   parameterized type (`items: Array[String]`).
 
