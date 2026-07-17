@@ -47,11 +47,61 @@
   (binding [*out* *err*]
     (println (str "Warning: falling back to the tree-walking interpreter: " reason))))
 
+(def ^:private issue-url "https://github.com/vijaymathew/nex/issues")
+
+(def ^:private diagnostic-detail-keys
+  "ex-data keys worth naming in a compile diagnostic, in the order shown. The
+   message alone says a construct is unsupported without saying *which* — these
+   turn \"Unsupported user-defined target access\" into the actionable
+   \"to_string on Money\"."
+  [:node-type :method :target-type :class-name :constructor :field :name])
+
+(defn- diagnostic-details
+  [e]
+  (let [data (ex-data e)]
+    (->> diagnostic-detail-keys
+         (keep (fn [k]
+                 (when-let [v (get data k)]
+                   (str (name k) " " (pr-str v)))))
+         (str/join ", ")
+         not-empty)))
+
+(defn- diagnostic-location
+  "\"at line N, column M\" for the failing node, or nil. `compile-ast` has
+   already resolved this into :errors by walking the ex-data for debug info."
+  [e]
+  (some-> (first (:errors (ex-data e)))
+          (str/replace #"^At " "at ")))
+
+(defn- compile-error-message
+  "Report a compile failure as what it actually is.
+
+   A marked gap (`:nex/unsupported`) is a valid program the backend cannot yet
+   handle: --interpret is a real workaround. Anything else reaching here is a
+   compiler defect — the typechecker already accepted this program — so asking
+   the user to work around it silently would be wrong; it should be reported.
+   Both name the construct and the line where they can."
+  [e]
+  (let [detail (str/join " " (remove nil? [(ex-message e)
+                                           (some->> (diagnostic-details e)
+                                                    (format "(%s)"))
+                                           (diagnostic-location e)]))]
+    (if (:nex/unsupported (ex-data e))
+      (str "this program uses a construct the compiled backend does not support"
+           " yet: " detail
+           "\n  Run it with --interpret to use the tree-walking interpreter.")
+      (str "internal error in the compiled backend: " detail
+           "\n  This is a defect in Nex, not in your program — please report it"
+           " at " issue-url
+           "\n  Meanwhile, --interpret runs the program on the tree-walking"
+           " interpreter."))))
+
 (defn- try-compile
   "Compile the whole program with the JVM backend. Returns {:compiled result} or,
    when the program is outside the compilable subset, {:compile-error e}. Type
    errors are caught earlier by `type-check-ast!`, so a failure here means an
-   unsupported construct (or a compiler defect)."
+   unsupported construct (or a compiler defect) — `compile-error-message` tells
+   the two apart."
   [source-id ast]
   (try
     {:compiled (jvm-file/compile-ast source-id ast {:skip-type-check true})}
@@ -119,11 +169,7 @@
     (run-interpreted source-id ast)
     (let [{:keys [compiled compile-error]} (try-compile source-id ast)]
       (if compile-error
-        (throw (ex-info (str "this program uses a construct the compiled backend"
-                             " does not support yet ("
-                             (or (ex-message compile-error) (str compile-error))
-                             "); run it with --interpret to use the tree-walking"
-                             " interpreter")
+        (throw (ex-info (compile-error-message compile-error)
                         {:type :not-compilable}
                         compile-error))
         (if-let [{:keys [backend-defect]} (run-compiled compiled)]

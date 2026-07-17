@@ -1699,6 +1699,28 @@
 (defn- builtin-method-signature
   [base-type method argc type-map]
   (case base-type
+    ;; The universal protocol: what *every* value has, whatever its type. This
+    ;; case is consulted for every receiver (see `check-target-call`), so a name
+    ;; listed here typechecks against a class that never declares it — which is
+    ;; a promise only worth making for names that have a default implementation
+    ;; behind them. It must therefore stay in step with the two things that
+    ;; provide those defaults: the "Any" protocol class registered in
+    ;; `register-builtin-methods`, and `builtin-type-methods` :Any in
+    ;; nex.types.builtins. All three now list the same names.
+    ;;
+    ;; The cursor protocol (`cursor`/`start`/`item`/`next`/`at_end`) used to be
+    ;; here and is deliberately not: there is no universal default for it, so
+    ;; listing it promised an iteration protocol on every value in the language
+    ;; and delivered it on none — `p.cursor` on a plain class typechecked and
+    ;; then failed at runtime ("Method not found") or refused to compile. Each
+    ;; of those names is now owned by the types that actually implement it: the
+    ;; "Cursor" case below, the `across` loop's cursor path in
+    ;; `check-target-call`, Array/Map/Set/String in `register-builtin-methods`,
+    ;; and any user class that declares its own.
+    ;;
+    ;; `hash` is intentionally absent even though the other two tables carry it:
+    ;; a class opts into hashing by inheriting Hashable. Adding it here would
+    ;; typecheck `p.hash` on any class, which the compiled backend cannot lower.
     "Any"
     (case method
       "to_string" (when (= argc 0)
@@ -1707,16 +1729,6 @@
                  {:params [{:name "other" :type "Any"}] :return-type "Boolean"})
       "clone" (when (= argc 0)
                 {:params [] :return-type "Any"})
-      "cursor" (when (= argc 0)
-                 {:params [] :return-type "Cursor"})
-      "start" (when (= argc 0)
-                {:params [] :return-type "Void"})
-      "item" (when (= argc 0)
-               {:params [] :return-type "Any"})
-      "next" (when (= argc 0)
-               {:params [] :return-type "Void"})
-      "at_end" (when (= argc 0)
-                 {:params [] :return-type "Boolean"})
       nil)
 
     "Task"
@@ -1956,9 +1968,21 @@
 
       :else
       (let [class-def (env-lookup-class env base-type)]
+        ;; Resolution order is what makes an override an override. The receiver's
+        ;; own declaration must beat the universal "Any" protocol, or a class
+        ;; redefining a protocol member is checked against the *protocol's*
+        ;; signature instead of its own: `clone: M` was typed by Any's
+        ;; `clone: Any`, so `m.clone.v` — the whole point of overriding it —
+        ;; failed with "Undefined field: v" while the override itself ran
+        ;; correctly at runtime. `to_string`/`equals` hid the bug because the
+        ;; signature you would override them with matches Any's already.
+        ;;
+        ;; The receiver's *builtin* signature still comes first: for Task,
+        ;; Channel, Cursor and friends that table is the authority, and it is
+        ;; keyed on the real base type rather than a fallback.
         (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
-                                (builtin-method-signature "Any" method (count args) type-map)
-                                (lookup-class-method env base-type method (count args) current-class))]
+                                (lookup-class-method env base-type method (count args) current-class)
+                                (builtin-method-signature "Any" method (count args) type-map))]
           (check-call-signature env method args method-sig
                                 (member-type-map env target-type type-map method-sig))
           (let [arg-types (mapv #(check-expression env %) args)]
@@ -3929,6 +3953,65 @@
                        (str "Class '" class-name "' overrides 'hash' but not 'equals'. "
                             "A custom 'hash' is only meaningful alongside a matching 'equals'.")))))
 
+(defn- constructor-statements
+  "STMT and every statement nested inside it. Void-safety asks two questions of
+   a constructor body — which fields it assigns, and which parent constructors it
+   calls — and both mean \"anywhere the constructor might run\", so both walk
+   this. Note a branch counts even when only one arm takes it: the check is a
+   guard against forgetting to initialize a field, not a proof that every path
+   does."
+  [stmt]
+  (cons stmt
+        (case (:type stmt)
+          :if (mapcat constructor-statements
+                      (concat (:then stmt)
+                              (mapcat :then (:elseif stmt))
+                              (:else stmt)))
+          :loop (mapcat constructor-statements (concat (:init stmt) (:body stmt)))
+          :scoped-block (mapcat constructor-statements
+                                (concat (:body stmt) (:rescue stmt)))
+          :with (mapcat constructor-statements (:body stmt))
+          ;; A case clause's body is a single statement; a match clause's is a block.
+          :case (mapcat constructor-statements
+                        (concat (keep :body (:clauses stmt))
+                                (when-let [e (:else stmt)] [e])))
+          :match (mapcat constructor-statements
+                         (concat (mapcat :body (:clauses stmt)) (:else stmt)))
+          nil)))
+
+(defn- attachable-init-field-names
+  "Names of the fields declared in BODY that a constructor must initialize: the
+   attached (non-detachable) ones of a user-defined class type. A builtin scalar
+   has a zero value and a detachable field is allowed to be void, so neither
+   needs one."
+  [env body]
+  (->> body
+       (filter #(= :feature-section (:type %)))
+       (mapcat :members)
+       (filter #(and (= :field (:type %)) (not (:constant? %))))
+       (filter (fn [{:keys [field-type]}]
+                 (let [t (normalize-type field-type)
+                       a (attachable-type t)
+                       base (if (map? a) (:base-type a) a)]
+                   (and (not (detachable-type? t))
+                        (string? base)
+                        (some? (env-lookup-class env base))
+                        (not (builtin-type? base))))))
+       (map :name)
+       set))
+
+(defn- needs-constructor-init?
+  "True when CLASS-NAME declares an attachable field, or inherits one. Used to
+   decide whether a subclass constructor has to chain to a parent's."
+  ([env class-name] (needs-constructor-init? env class-name #{}))
+  ([env class-name seen]
+   (boolean
+    (when-not (contains? seen class-name)
+      (when-let [class-def (env-lookup-class env class-name)]
+        (or (seq (attachable-init-field-names env (:body class-def)))
+            (some #(needs-constructor-init? env (:parent %) (conj seen class-name))
+                  (:parents class-def))))))))
+
 (defn check-class
   "Check a class definition"
   [env {:keys [name body invariant parents generic-params] :as class-def}]
@@ -3986,65 +4069,61 @@
         (check-constructor class-env name ctor))))
 
   ;; Void-safety: attachable class-object fields must be initialized by all ctors.
-  (let [fields (->> body
-                    (filter #(= :feature-section (:type %)))
-                    (mapcat :members)
-                    (filter #(and (= :field (:type %))
-                                  (not (:constant? %)))))
-        constructors (->> body
+  (let [constructors (->> body
                           (filter #(= :constructors (:type %)))
                           (mapcat :constructors))
-        required-fields
-        (->> fields
-             (filter (fn [{:keys [field-type]}]
-                       (let [t (normalize-type field-type)
-                             a (attachable-type t)
-                             base (if (map? a) (:base-type a) a)]
-                         (and (not (detachable-type? t))
-                              (string? base)
-                              ;; Enforce for user-defined class objects.
-                              (some? (env-lookup-class env base))
-                              (not (builtin-type? base))))))
-             (map :name)
-             set)
-        collect-assigned
-        (fn collect-assigned [stmt]
-          (case (:type stmt)
-            :assign #{(:target stmt)}
-            :member-assign #{(:field stmt)}
-            :if (reduce set/union #{}
-                        (concat
-                         (map collect-assigned (:then stmt))
-                         (mapcat #(map collect-assigned (:then %)) (:elseif stmt))
-                         (map collect-assigned (:else stmt))))
-            :loop (reduce set/union #{}
-                          (concat (map collect-assigned (:init stmt))
-                                  (map collect-assigned (:body stmt))))
-            :scoped-block (reduce set/union #{}
-                                  (concat (map collect-assigned (:body stmt))
-                                          (map collect-assigned (:rescue stmt))))
-            :with (reduce set/union #{} (map collect-assigned (:body stmt)))
-            :case (reduce set/union #{}
-                          (concat (map #(collect-assigned (:body %)) (:clauses stmt))
-                                  (when-let [e (:else stmt)] [(collect-assigned e)])))
-            :match (reduce set/union #{}
-                           (concat (mapcat #(map collect-assigned (:body %)) (:clauses stmt))
-                                   (map collect-assigned (:else stmt))))
-            #{}))]
-    (when (seq required-fields)
-      (when (empty? constructors)
+        required-fields (attachable-init-field-names env body)
+        ;; Parents that hold attachable fields of their own. A subclass cannot
+        ;; assign an inherited field directly ("Cannot assign to field a outside
+        ;; of class B"), so the only way it can initialize one is by calling that
+        ;; parent's constructor — and the parent's own check guarantees every one
+        ;; of its constructors initializes its fields, which makes checking the
+        ;; direct parents enough to cover the whole chain.
+        parents-needing-init (->> parents
+                                  (map :parent)
+                                  (filter #(needs-constructor-init? env %))
+                                  set)]
+    (when (or (seq required-fields) (seq parents-needing-init))
+      (when (and (seq required-fields) (empty? constructors))
         (throw (ex-info (str "Class " name " has attachable fields that require constructor initialization")
                         {:error (type-error
                                  (str "Attachable fields must be initialized by constructors in class "
                                       name ": " (str/join ", " (sort required-fields))))})))
-      (doseq [{:keys [name body]} constructors]
-        (let [assigned (reduce set/union #{} (map collect-assigned body))
-              missing (sort (seq (set/difference required-fields assigned)))]
+      ;; A class that declares no constructors of its own inherits its parent's,
+      ;; which already initialize the inherited fields — nothing to check.
+      (doseq [{ctor-name :name ctor-body :body} constructors]
+        (let [statements (mapcat constructor-statements ctor-body)
+              assigned (->> statements
+                            (keep (fn [stmt]
+                                    (case (:type stmt)
+                                      :assign (:target stmt)
+                                      :member-assign (:field stmt)
+                                      nil)))
+                            set)
+              missing (sort (seq (set/difference required-fields assigned)))
+              called-parents (->> statements
+                                  (keep (fn [stmt]
+                                          (when (= :call (:type stmt))
+                                            (:target stmt))))
+                                  set)
+              uninitialized-parents (sort (seq (set/difference parents-needing-init
+                                                               called-parents)))]
           (when (seq missing)
-            (throw (ex-info (str "Constructor " name " does not initialize all attachable fields")
+            (throw (ex-info (str "Constructor " ctor-name " does not initialize all attachable fields")
                             {:error (type-error
-                                     (str "Constructor " name " must initialize attachable fields: "
-                                          (str/join ", " missing)))})))))))))
+                                     (str "Constructor " ctor-name " must initialize attachable fields: "
+                                          (str/join ", " missing)))})))
+          (when (seq uninitialized-parents)
+            (throw (ex-info (str "Constructor " ctor-name " does not initialize its inherited attachable fields")
+                            {:error (type-error
+                                     (str "Constructor " ctor-name " in class " name
+                                          " must call a constructor of "
+                                          (str/join ", " uninitialized-parents)
+                                          " to initialize inherited attachable field(s): "
+                                          (str/join ", "
+                                                    (sort (mapcat #(attachable-init-field-names
+                                                                    env (:body (env-lookup-class env %)))
+                                                                  uninitialized-parents)))))})))))))))
 
 ;;
 ;; Program Type Checking
@@ -4193,7 +4272,13 @@
            "split"       {:params [{:name "delimiter" :type "String"}]
                           :return-type {:base-type "Array" :type-params ["String"]}}
            "join"        {:params [{:name "parts" :type {:base-type "Array" :type-params ["String"]}}]
-                          :return-type "String"}}]
+                          :return-type "String"}
+           ;; A String iterates over its Chars, exactly as Array/Map/Set iterate
+           ;; over their elements. It reached this through the universal "Any"
+           ;; fallback until that stopped promising the cursor protocol on every
+           ;; value; the capability is real, so it is declared where the other
+           ;; cursor-bearing builtins declare theirs.
+           "cursor"      {:params [] :return-type "Cursor"}}]
     (env-add-method env "String" method-name sig))
   (doseq [[method-name sig]
           {"print" {:params [{:name "msg" :type "String"}] :return-type "Void"}
@@ -4680,7 +4765,7 @@
 (defn infer-expression-type
   "Infer the type of an expression AST node.
    opts: :classes - seq of class defs, :functions - seq of function defs,
-   :var-types - {name type} map.
+   :var-types - {name type} map, :type-aliases - {name type-expr} map.
    Returns the type (string or map) or nil on failure."
   [expr opts]
   (try
@@ -4689,6 +4774,15 @@
           function-classes (vec (function-class-defs normalized-functions))
           visible-classes (vec (concat (:classes opts) function-classes))
           visible-var-types (or (:var-types opts) {})]
+      ;; Registered before any class or expression is looked at: a declared
+      ;; alias may name the type of a field or of a var in `visible-var-types`
+      ;; (`let t: Tid := ...`), and an env whose alias registry is empty cannot
+      ;; tell that `Tid` is a `String` — it resolves to no class and no builtin,
+      ;; so every method on it infers as nil. The whole-program check registers
+      ;; these from source order; a caller inferring one expression in isolation
+      ;; (the compiler's lowering pass) has to supply them.
+      (doseq [[alias-name type-expr] (:type-aliases opts)]
+        (env-add-type-alias env alias-name type-expr))
       (doseq [{:keys [qualified-name source]} (:imports opts)]
         (when (nil? source)
           (let [simple-name (last (str/split qualified-name #"\."))]

@@ -237,6 +237,105 @@ class level.  Bare-'from' init statements still indent one level under 'from'."
               "end")
             "\n"))))
 
+(ert-deftest nex-indent-match-clauses ()
+  "'when' clauses indent one level inside their 'match', and the closing 'end'
+aligns with the 'match' (regression: 'when' was treated as a plain de-dent
+measured from the previous line — the preceding clause's body — which flattened
+every clause to the 'match' column and dragged the 'end' with it)."
+  (should (string=
+           (nex-test--reindent
+            "function describe(o: Order): String\ndo\nmatch o of\nwhen Draft as d then\nresult := \"draft\"\nwhen Placed as p then\nresult := p.total.to_string\nend\nend")
+           (string-join
+            '("function describe(o: Order): String"
+              "do"
+              "  match o of"
+              "    when Draft as d then"
+              "      result := \"draft\""
+              "    when Placed as p then"
+              "      result := p.total.to_string"
+              "  end"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-match-else-and-nested-block ()
+  "A match 'else' aligns with the 'when' clauses, and an 'if' nested in a clause
+body keeps its own 'end' — the clause that follows still anchors to the 'match',
+not to the nested block."
+  (should (string=
+           (nex-test--reindent
+            "function f(r: Result): Integer\ndo\nmatch r of\nwhen Ok as ok then\nif ok.value > 0 then\nprint(ok.value)\nend\nprint(\"done\")\nelse\nprint(\"not ok\")\nend\nend")
+           (string-join
+            '("function f(r: Result): Integer"
+              "do"
+              "  match r of"
+              "    when Ok as ok then"
+              "      if ok.value > 0 then"
+              "        print(ok.value)"
+              "      end"
+              "      print(\"done\")"
+              "    else"
+              "      print(\"not ok\")"
+              "  end"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-nested-match ()
+  "A 'match' inside a clause body owns its own clauses and 'end'; the outer
+clause list resumes at the outer 'match' level afterwards."
+  (should (string=
+           (nex-test--reindent
+            "function outer(o: Order): String\ndo\nmatch o of\nwhen Ok as k then\nmatch k.v of\nwhen Draft as d then\nprint(\"d\")\nend\nprint(\"after\")\nwhen Err as e then\nprint(\"e\")\nend\nend")
+           (string-join
+            '("function outer(o: Order): String"
+              "do"
+              "  match o of"
+              "    when Ok as k then"
+              "      match k.v of"
+              "        when Draft as d then"
+              "          print(\"d\")"
+              "      end"
+              "      print(\"after\")"
+              "    when Err as e then"
+              "      print(\"e\")"
+              "  end"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-select-clauses ()
+  "'select' takes the same clause skeleton as 'match': 'when' and 'timeout'
+indent one level in, the 'end' aligns with 'select'."
+  (should (string=
+           (nex-test--reindent
+            "function f(): Integer\ndo\nselect\nwhen ch_a.receive as msg then\nprint(msg)\ntimeout 100 then\nprint(\"timed out\")\nend\nend")
+           (string-join
+            '("function f(): Integer"
+              "do"
+              "  select"
+              "    when ch_a.receive as msg then"
+              "      print(msg)"
+              "    timeout 100 then"
+              "      print(\"timed out\")"
+              "  end"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-case-else ()
+  "A 'case' 'else' aligns with the literal clauses rather than de-denting to the
+'case' itself."
+  (should (string=
+           (nex-test--reindent
+            "function f(d: String): Integer\ndo\ncase d of\n\"up\" then print(\"going up\")\n\"down\" then print(\"going down\")\nelse print(\"standing still\")\nend\nend")
+           (string-join
+            '("function f(d: String): Integer"
+              "do"
+              "  case d of"
+              "    \"up\" then print(\"going up\")"
+              "    \"down\" then print(\"going down\")"
+              "    else print(\"standing still\")"
+              "  end"
+              "end")
+            "\n"))))
+
 (ert-deftest nex-indent-standalone-do-block-with-create ()
   "A standalone do..rescue..end block indents its body, even when the first
 statement is a 'create' creation instruction (regression: 'create X.f(...)'

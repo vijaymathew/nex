@@ -163,6 +163,29 @@
 ;; nested function/method/constructor lowering picks it up automatically.
 (def ^:dynamic *type-aliases* {})
 
+(defn- unsupported
+  "An ex-info marking a construct the compiled backend does not implement yet.
+
+   The distinction this draws is the one the user needs: by the time lowering
+   runs, the typechecker has already accepted the program. So a failure here is
+   either
+
+   - a *gap* — the program is valid and the backend is merely incomplete, in
+     which case `--interpret` is a genuine workaround and there is nothing to
+     fix in the program. Those throw through this fn; and
+   - a *defect* — an invariant broke, or the typechecker admitted something it
+     should have rejected (`Constructor not found`, `Unknown local`, `Unable to
+     infer expression type`: all of these describe a program the typechecker
+     already validated, so reaching them means the compiler is wrong, not the
+     program). Those stay plain `ex-info`.
+
+   Reporting both as \"your program uses an unsupported construct\" sends the
+   reader hunting for a workaround to a bug that should be reported instead.
+   Unmarked is the safer default: an unreported gap gets told \"please report
+   this\", which is how it comes to be marked."
+  [msg data]
+  (ex-info msg (assoc data :nex/unsupported true)))
+
 (defn- resolve-type-alias
   "Expand a declared type alias to its underlying type expression, following
    chains (`H -> G -> Function(...)`). Non-alias types are returned unchanged."
@@ -535,7 +558,12 @@
         (tc/infer-expression-type expr {:classes (:classes env)
                                         :functions (:functions env)
                                         :imports (:imports env)
-                                        :var-types (env-visible-var-types env)})
+                                        :var-types (env-visible-var-types env)
+                                        ;; Without these an aliased receiver
+                                        ;; (`let t: Tid := ...`; `Tid = String`)
+                                        ;; infers as nil here and lowering fails
+                                        ;; with "Unable to infer expression type".
+                                        :type-aliases *type-aliases*})
         (throw (ex-info "Unable to infer expression type during lowering"
                         {:expr expr})))))
 
@@ -557,9 +585,15 @@
             (some-> (inherited-method-def env parent-def (:method expr) (count (:args expr)))
                     function-return-type))))
     (let [java-static-owner (java-host-class-root-name env target-expr)
+          ;; Through the alias: a receiver declared with an alias or a
+          ;; refinement (`declare type Tracking_Id = String where ...`) carries
+          ;; the *alias* name here, which names no class and no builtin. The
+          ;; underlying type is what owns the method, and what the value
+          ;; actually is at runtime — refinements are erased by lowering time,
+          ;; their checks already inserted at the narrowing sites.
           target-type (when (and (not class-target-name)
                                  (not java-static-owner))
-                        (infer-type env target-expr))
+                        (resolve-type-alias (infer-type env target-expr)))
           base-type (base-type-name target-type)
           class-def (or (when class-target-name
                           (get (visible-class-map env) class-target-name))
@@ -1117,7 +1151,7 @@
      :else else-branch}
     (let [else-body (or else-branch [])]
       (when-not (= 1 (count else-body))
-        (throw (ex-info "Only expression-shaped or result-assignment if branches are supported in lowering"
+        (throw (unsupported "Only expression-shaped or result-assignment if branches are supported in lowering"
                         {:branch else-body})))
       (if-branch-expression env else-body))))
 
@@ -1331,10 +1365,10 @@
                             then-body
                             [])])
 
-        (throw (ex-info "Unsupported select channel clause during lowering"
+        (throw (unsupported "Unsupported select channel clause during lowering"
                         {:clause clause})))
 
-      (throw (ex-info "Unsupported select clause target during lowering"
+      (throw (unsupported "Unsupported select clause target during lowering"
                       {:clause clause})))))
 
 (defn lower-select
@@ -2490,7 +2524,7 @@
 
 (defn- lower-instance-dispatch
   [env target-expr method args has-parens]
-  (let [target-type (infer-type env target-expr)
+  (let [target-type (resolve-type-alias (infer-type env target-expr))
         base-type (base-type-name target-type)
         target-ir (lower-expression env target-expr)
         class-def (get (visible-class-map env) base-type)
@@ -2588,9 +2622,38 @@
                               nex-type
                               jvm-type))
 
+      ;; A universal method the class does not declare. The typechecker admits
+      ;; the Any protocol on *every* receiver (the "Any" case of its
+      ;; `builtin-method-signature`), so `p.total.to_string` typechecks against
+      ;; a class that never defines `to_string` and must therefore also lower.
+      ;;
+      ;; Only the members the compiled object model actually implements are
+      ;; routed here. `clone` and `hash` are deliberately excluded: their :Any
+      ;; defaults (`bi/nex-clone-value`, `bi/nex-structural-hash`) only
+      ;; understand the interpreter's object maps and would quietly return the
+      ;; *same* object from `clone` rather than a copy. Falling through to the
+      ;; error below keeps them an honest "not supported yet" — which is what
+      ;; they were before this branch existed — instead of a silent wrong
+      ;; answer. Same for the typechecker's `cursor`/`start`/`item`/`next`/
+      ;; `at_end`, which have no Any default at all.
+      (and class-def (contains? #{"to_string" "equals"} method))
+      (let [nex-type (or (bi/builtin-type-method-return-type :Any method) "Any")
+            jvm-type (resolve-jvm-type env nex-type)]
+        (ir/call-runtime-node (str "any:" method)
+                              (into [target-ir] (mapv #(lower-expression env %) args))
+                              nex-type
+                              jvm-type))
+
       class-def
-      (throw (ex-info "Unsupported user-defined target access during lowering"
-                      {:target-type target-type :method method :has-parens has-parens}))
+      (throw (unsupported "Unsupported user-defined target access during lowering"
+                          ;; `:expr` carries the receiver only so the diagnostic
+                          ;; can find a line number (see `debug-location`); the
+                          ;; call itself is not threaded down here, and the two
+                          ;; are on the same line in any case.
+                          {:expr target-expr
+                           :target-type target-type
+                           :method method
+                           :has-parens has-parens}))
 
       :else
       nil)))
@@ -2730,7 +2793,7 @@
                                   :int "op:pow-int"
                                   :long "op:pow-long"
                                   :double "op:pow-double"
-                                  (throw (ex-info "Unsupported power lowering type"
+                                  (throw (unsupported "Unsupported power lowering type"
                                                   {:expr expr :jvm-type jvm-type})))
                                 [left-ir right-ir]
                                 nex-type
@@ -2794,7 +2857,7 @@
             else-expr (elseif->else-expr else-env elseif else-branch)]
         (when (or (nil? then-expr)
                   (nil? else-expr))
-          (throw (ex-info "Only expression-shaped or result-assignment if branches are supported in lowering"
+          (throw (unsupported "Only expression-shaped or result-assignment if branches are supported in lowering"
                           {:expr expr})))
         (let [then-ir (lower-expression then-env then-expr)
               else-ir (lower-expression else-env else-expr)
@@ -2859,7 +2922,7 @@
 
     :call (lower-call-expr env expr)
 
-    (throw (ex-info "Unsupported expression node for lowering"
+    (throw (unsupported "Unsupported expression node for lowering"
                     {:expr expr :node-type (:type expr)}))))
 
 (defn- lower-create-expr [env expr]
@@ -2910,7 +2973,7 @@
                                   nex-type
                                   (resolve-jvm-type env nex-type)))
 
-          (throw (ex-info "Unsupported Channel constructor in compiled lowering"
+          (throw (unsupported "Unsupported Channel constructor in compiled lowering"
                           {:expr expr
                            :constructor (:constructor expr)}))))
 
@@ -2938,7 +3001,7 @@
                                   nex-type
                                   (resolve-jvm-type env nex-type)))
 
-          (throw (ex-info "Unsupported Array constructor in compiled lowering"
+          (throw (unsupported "Unsupported Array constructor in compiled lowering"
                           {:expr expr
                            :constructor (:constructor expr)}))))
 
@@ -2975,14 +3038,14 @@
                                   nex-type
                                   (resolve-jvm-type env nex-type)))
 
-          (throw (ex-info "Unsupported Min_Heap constructor in compiled lowering"
+          (throw (unsupported "Unsupported Min_Heap constructor in compiled lowering"
                           {:expr expr
                            :constructor (:constructor expr)}))))
 
       (= class-name "Atomic_Integer")
       (let [nex-type (infer-type env expr)]
         (when-not (= "make" (:constructor expr))
-          (throw (ex-info "Unsupported Atomic_Integer constructor in compiled lowering"
+          (throw (unsupported "Unsupported Atomic_Integer constructor in compiled lowering"
                           {:expr expr :constructor (:constructor expr)})))
         (when-not (= 1 (count (:args expr)))
           (throw (ex-info "Atomic_Integer.make expects exactly 1 argument in compiled lowering"
@@ -2995,7 +3058,7 @@
       (= class-name "Atomic_Integer64")
       (let [nex-type (infer-type env expr)]
         (when-not (= "make" (:constructor expr))
-          (throw (ex-info "Unsupported Atomic_Integer64 constructor in compiled lowering"
+          (throw (unsupported "Unsupported Atomic_Integer64 constructor in compiled lowering"
                           {:expr expr :constructor (:constructor expr)})))
         (when-not (= 1 (count (:args expr)))
           (throw (ex-info "Atomic_Integer64.make expects exactly 1 argument in compiled lowering"
@@ -3008,7 +3071,7 @@
       (= class-name "Atomic_Boolean")
       (let [nex-type (infer-type env expr)]
         (when-not (= "make" (:constructor expr))
-          (throw (ex-info "Unsupported Atomic_Boolean constructor in compiled lowering"
+          (throw (unsupported "Unsupported Atomic_Boolean constructor in compiled lowering"
                           {:expr expr :constructor (:constructor expr)})))
         (when-not (= 1 (count (:args expr)))
           (throw (ex-info "Atomic_Boolean.make expects exactly 1 argument in compiled lowering"
@@ -3021,7 +3084,7 @@
       (= class-name "Atomic_Reference")
       (let [nex-type (infer-type env expr)]
         (when-not (= "make" (:constructor expr))
-          (throw (ex-info "Unsupported Atomic_Reference constructor in compiled lowering"
+          (throw (unsupported "Unsupported Atomic_Reference constructor in compiled lowering"
                           {:expr expr :constructor (:constructor expr)})))
         (when-not (= 1 (count (:args expr)))
           (throw (ex-info "Atomic_Reference.make expects exactly 1 argument in compiled lowering"
@@ -3052,7 +3115,7 @@
               (throw (ex-info "create Map takes no arguments in compiled lowering"
                               {:expr expr})))
             (ir/map-literal-node [] nex-type (resolve-jvm-type env nex-type)))
-          (throw (ex-info "Unsupported Map constructor in compiled lowering"
+          (throw (unsupported "Unsupported Map constructor in compiled lowering"
                           {:expr expr :constructor (:constructor expr)}))))
 
       (= class-name "Set")
@@ -3075,13 +3138,13 @@
                                   nex-type
                                   (resolve-jvm-type env nex-type)))
 
-          (throw (ex-info "Unsupported Set constructor in compiled lowering"
+          (throw (unsupported "Unsupported Set constructor in compiled lowering"
                           {:expr expr :constructor (:constructor expr)}))))
 
       :else
       (do
         (when-not compiled
-          (throw (ex-info "Create of non-compiled class is not supported in lowering"
+          (throw (unsupported "Create of non-compiled class is not supported in lowering"
                           {:expr expr :class-name class-name})))
         (when (:deferred? class-def)
           (throw (ex-info "Unsupported create of deferred class in compiled lowering"
@@ -3109,7 +3172,7 @@
                                     (resolve-jvm-type env created-type)))
             (do
               (when (seq (:args expr))
-                (throw (ex-info "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
+                (throw (unsupported "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
                                 {:expr expr})))
               (if (seq (:generic-params class-def))
                 (ir/call-virtual-node (:internal-name compiled)
@@ -3301,14 +3364,18 @@
                                         (:name constant)
                                         nex-type
                                         jvm-type))
-            (throw (ex-info "Unsupported class-target access during lowering"
+            (throw (unsupported "Unsupported class-target access during lowering"
                             {:expr expr
                              :target-class class-target-name})))
 
           :else
           (let [java-static-owner (java-host-class-root-name env target-expr)
+                ;; Resolved through aliases for the same reason as in
+                ;; `infer-target-call-type`: the branches below choose a
+                ;; dispatch strategy by receiver type, and an alias/refinement
+                ;; name matches none of them.
                 target-type (when-not java-static-owner
-                              (infer-type env target-expr))]
+                              (resolve-type-alias (infer-type env target-expr)))]
             (cond
               java-static-owner
               (let [nex-type (or (infer-call-type env expr) "Any")
@@ -3487,7 +3554,7 @@
 
               :else
               (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
-                  (throw (ex-info "Unsupported target call expression for lowering"
+                  (throw (unsupported "Unsupported target call expression for lowering"
                                   {:expr expr
                                    :target-type target-type})))))))))))
 
@@ -3678,7 +3745,7 @@
           [env (ir/pop-node (lower-expression env stmt))]
 
           :else
-          (throw (ex-info "Unsupported statement node for lowering"
+          (throw (unsupported "Unsupported statement node for lowering"
                           {:stmt stmt :node-type (:type stmt)})))]
     [env' (with-stmt-debug lowered stmt)]))
 

@@ -211,6 +211,63 @@
               'words)
   "Regexp matching Nex keywords that cannot be method names.")
 
+(defconst nex-block-delimiter-re
+  (regexp-opt '("do" "if" "match" "select" "case" "class" "union" "end") 'words)
+  "Regexp matching the keywords that open or close an `end'-terminated block.
+Every Nex construct closed by `end' is opened by exactly one of these (see
+grammar/nexlang.g4).  Compound headers contribute only their `do': a loop is
+\"from ... until ... do ... end\", so `from' is deliberately absent here — the
+`do' is what pairs with the `end'.  Likewise for repeat/across/with/spawn/fn and
+routine bodies.  A `deferred' method has no `end' and so opens nothing.")
+
+(defun nex-match-opener-indent ()
+  "Return the indentation of the match/select/case whose clause list encloses
+point, or nil when point is not directly inside one.
+Scans backward over `nex-block-delimiter-re' balancing `end' against openers, so
+the first opener still unclosed at point is the block point sits in.  If that
+block is a match/select/case its indentation is returned; any other opener (a
+routine body `do', an `if', ...) means point is nested inside a clause rather
+than between clauses, and yields nil.  Matches inside strings and comments are
+ignored.  Clause bodies need no balancing of their own: a `when ... then block'
+has no `end', so the enclosing match is reached directly."
+  (save-excursion
+    (beginning-of-line)
+    (let ((depth 0))
+      (catch 'found
+        (while (re-search-backward nex-block-delimiter-re nil t)
+          (unless (nth 8 (syntax-ppss))  ; skip keywords in strings or comments
+            (let ((kw (match-string 1)))
+              (cond
+               ((string= kw "end")
+                (setq depth (1+ depth)))
+               ((> depth 0)
+                (setq depth (1- depth)))
+               ((member kw '("match" "select" "case"))
+                (throw 'found (current-indentation)))
+               ;; An unclosed opener that is not a match/select/case encloses
+               ;; point: whatever is on this line belongs to that block.
+               (t (throw 'found nil))))))
+        nil))))
+
+(defun nex-match-clause-indent ()
+  "Indentation column for a line that belongs to a match/select/case skeleton.
+The clause keywords \\='when\\=', \\='timeout\\=' and \\='else\\=' indent one
+level inside their opener; the \\='end\\=' that closes the construct aligns with
+it.  Return nil when the current line is neither, or when the construct
+enclosing it is not a match/select/case (an `else' of an `if', say).  Anchoring
+to the opener rather than to the previous line is what keeps sibling clauses
+aligned: the previous line is usually the last statement of the preceding
+clause's body, one level too deep."
+  (save-excursion
+    (beginning-of-line)
+    (skip-chars-forward " \t")
+    (let ((clause (looking-at (regexp-opt '("when" "timeout" "else") 'words)))
+          (closer (looking-at "\\bend\\b")))
+      (when (or clause closer)
+        (let ((opener (nex-match-opener-indent)))
+          (when opener
+            (if clause (+ opener nex-indent-offset) opener)))))))
+
 (defun nex-bracket-continuation-indent ()
   "Indentation column when point's line continues a multi-line bracket literal.
 Return the column to indent to when the start of the current line is inside an
@@ -253,7 +310,8 @@ are correctly ignored."
                 (is-note-after-method (nex-is-note-after-method))
                 (is-contract-after-method (nex-is-contract-after-method))
                 (is-loop-do (nex-is-loop-do))
-                (is-loop-clause (nex-loop-clause-keyword-p)))
+                (is-loop-clause (nex-loop-clause-keyword-p))
+                (match-clause-indent (nex-match-clause-indent)))
             (setq indent-col
                   (cond
                    ;; Class-level keywords: align with class (usually 0)
@@ -273,6 +331,14 @@ are correctly ignored."
                    ;; (block form) or inline ("until cond", "variant expr").
                    ((or is-loop-clause is-loop-do)
                     (or (nex-loop-from-indent) prev-indent))
+                   ;; Clause keywords of a match/select/case ('when'/'timeout'/
+                   ;; 'else') and the 'end' that closes it anchor to their
+                   ;; opener.  Must precede the `should-decrease' rule, which
+                   ;; also matches 'when'/'else'/'end' but measures from the
+                   ;; previous line — the preceding clause's body — and so lands
+                   ;; a level short.
+                   (match-clause-indent
+                    match-clause-indent)
                    ;; Closing keywords: decrease indent
                    (should-decrease
                     (max 0 (- prev-indent nex-indent-offset)))
@@ -413,7 +479,10 @@ align with the loop's 'from': 'until', 'variant', or a loop (non-class)
     (beginning-of-line)
     (skip-chars-forward " \t")
     (or
-     ;; 'end', 'else', 'elseif', 'rescue', 'when', 'timeout' close/open siblings
+     ;; 'end', 'else', 'elseif', 'rescue', 'when', 'timeout' close/open siblings.
+     ;; NB: inside a match/select/case these are anchored to their opener by
+     ;; `nex-match-clause-indent', which runs first; this is the fallback for
+     ;; every other block.
      (looking-at (regexp-opt '("end" "else" "elseif" "rescue" "when" "timeout") 'words))
      ;; 'do' aligns with require/ensure if inside contract block
      (and (looking-at "\\bdo\\b")

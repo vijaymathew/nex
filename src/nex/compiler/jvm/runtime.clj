@@ -668,6 +668,11 @@
       (let [^Class cls (resolve-owner-class state binary-name)
             ctor (.getDeclaredConstructor cls (into-array Class []))
             instance (.newInstance ctor (object-array 0))]
+        ;; The other construction path (emit-expr! :new) sets this inline; this
+        ;; one has to do it by hand, or the object's equals/hashCode would find
+        ;; no state and degrade to identity.
+        (when-let [^Field state-field (reflected-field cls "__state__")]
+          (.set state-field instance state))
         (doseq [[field-name field-value] field-values]
           (when-let [^Field field (reflected-field cls (name field-name))]
             (.set field instance field-value)))
@@ -1035,6 +1040,17 @@
       (invoke-user-method state value synthetic-invariant-method-name [])))
   value)
 
+(defn- nex-object-render
+  "The generic `#<Class object>` rendering a Nex object has when its class
+   defines no `to_string` (spec Any protocol), or nil when `value` is not a
+   compiled object. `bi/nex-format-value` only recognizes the interpreter's
+   object *maps*, so a compiled object — an instance of a generated class —
+   falls through its cond to Clojure's `#object[nex.file.m.P 0x... ]` form.
+   This restores the interpreter's rendering for the compiled object model."
+  [state value]
+  (when-let [class-name (compiled-runtime-class-name state value)]
+    (str "#<" class-name " object>")))
+
 (defn- concat-string-value
   [state value]
   (cond
@@ -1055,7 +1071,8 @@
                 result
                 (bi/nex-format-value result)))
             (catch Exception _
-              (bi/call-builtin-method nil nil value "to_string" [])))]
+              (or (nex-object-render state value)
+                  (bi/call-builtin-method nil nil value "to_string" []))))]
       (if (string? string-value)
         string-value
         (bi/nex-format-value string-value)))))
@@ -1075,7 +1092,18 @@
   (if (or (interp/nex-object? value)
           (has-user-to-string? value))
     (concat-string-value state value)
-    (format-value value)))
+    (or (nex-object-render state value)
+        (format-value value))))
+
+(defn any-to-string
+  "The `to_string` that the Any protocol gives every value, for a receiver whose
+   *static* type declares none. Resolution is on the runtime value, not the
+   static type, because the two differ under dynamic dispatch: with
+   `let o: Order := create Placed.make(...)` the static `Order` may declare no
+   `to_string` while the runtime `Placed` does, and the override must still win
+   — which is exactly what `print` already does for the same value."
+  [state value]
+  (print-value state value))
 
 (defn- object-field-value
   [value field-name]
@@ -1733,6 +1761,89 @@
     (boolean (invoke-user-method state a "equals" [b]))
     (structural-equals state a b)))
 
+(defn any-equals
+  "The `equals` that the Any protocol gives every value, for a receiver whose
+   *static* type declares none. `value-equals` honours an `equals` override
+   found on the runtime value (which, under dynamic dispatch, may be a subclass
+   of the static type) and otherwise compares structurally — matching both the
+   interpreter and the `=` operator."
+  [state a b]
+  (boolean (value-equals state a b)))
+
+;; ---------------------------------------------------------------------------
+;; Java equality for compiled objects.
+;;
+;; Set and Map are a java.util.LinkedHashSet and a java.util.HashMap here, so
+;; membership, dedup and key lookup go through Object.equals/hashCode and
+;; nothing else — no hook can reach inside `.add` or `.put`. Generated classes
+;; therefore emit both (see emit-object-equals!/emit-object-hash-code!), and
+;; these are what they call.
+;;
+;; The semantics are the interpreter's, which is the definition of correct here:
+;; a class's `equals`/`hash` override when it has one, structural comparison and
+;; hashing otherwise (cf. `value-equality-fn`/`value-hash-fn` in nex.interpreter,
+;; bound over a run there for the same reason). Getting these right also makes
+;; the defaults in nex.types.runtime correct for free: `value-equals?` falls back
+;; to `=` and `value-hash` to `nex-hash-code`, which are exactly these methods.
+;; ---------------------------------------------------------------------------
+
+(defn- structural-hash-of-compiled-object
+  "A structural hash over the object's effective fields, agreeing with
+   `structural-equals`: it hashes the same fields that comparison reads, so
+   values that compare equal hash equal. The shape mirrors
+   `bi/nex-structural-hash` — class name, then each field name paired with its
+   hash, in sorted order — so an interpreter-built object and a compiled one of
+   the same class and field values land in the same bucket, which is the case
+   `structural-equals` already goes out of its way to support."
+  [state v]
+  (let [class-name (runtime-type-name state v)
+        class-def (class-def-by-name state class-name)
+        field-names (if class-def (collect-effective-field-names state class-def) [])]
+    (hash (into [class-name]
+                (map (fn [field-name]
+                       [field-name (bi/nex-structural-hash (get-user-field v field-name))])
+                     (sort field-names))))))
+
+(defn object-equals
+  "Object.equals for a compiled object, in Nex terms. STATE is the object's
+   `__state__`; when it is nil the object was built somewhere that had no state
+   to give it, and there is no way to reach an override — fall back to identity,
+   which is what this backend did before these methods existed, and which
+   `object-hash-code` agrees with.
+
+   The non-object cases are answered here rather than delegated, and must be:
+   `value-equals` ends at `deep-equals` for any pair that is not two objects,
+   `deep-equals` ends at Clojure `=`, and `=` on a compiled object now calls
+   *this* — so handing it `(obj, nil)` would loop until the stack ran out. It is
+   a short cycle and an easy one to reintroduce; the guards below are load-
+   bearing, not defensive. Answering directly is also what the semantics say:
+   an object is never equal to a non-object, void included."
+  [state a b]
+  (Boolean/valueOf
+   (cond
+     (identical? a b) true
+     (nil? state) false
+     (nil? b) false
+     (not (object-like? state b)) false
+     :else (boolean (value-equals state a b)))))
+
+(defn object-hash-code
+  "Object.hashCode for a compiled object, consistent with `object-equals`: a
+   class's `hash` override when present, else the structural hash over the same
+   fields comparison uses.
+
+   A class that overrides `equals` without `hash` gets its override honoured
+   here and a structural hash — the pairing the type checker warns about, and
+   the same combination the interpreter produces, so the two backends misbehave
+   identically rather than differently."
+  [state v]
+  (Integer/valueOf
+   (int (if (nil? state)
+          (System/identityHashCode v)
+          (if-let [[_ ^Method m] (find-user-method v (lowered-instance-method-name "hash" 0))]
+            (rt/nex-int->number (invoke-user-method state v "hash" []))
+            (structural-hash-of-compiled-object state v))))))
+
 (defn- scalar-identity-value?
   [v]
   (or (nil? v)
@@ -2045,6 +2156,19 @@
 
     (str/starts-with? name "user-field-set:")
     (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
+
+    ;; The Any protocol on a receiver whose static type declares no such method.
+    ;; Kept apart from the "method:" helper below: that one routes to
+    ;; `bi/call-builtin-method`, whose :Any defaults are written against the
+    ;; interpreter's object maps and silently misread a compiled object (an
+    ;; instance of a generated class) — `equals` on two equal objects returns
+    ;; false, `to_string` renders `#object[...]`. These two understand both
+    ;; object models.
+    (= name "any:to_string")
+    (any-to-string state (first args))
+
+    (= name "any:equals")
+    (any-equals state (first args) (second args))
 
     (str/starts-with? name "method:")
     (let [ctx (rebuild-interpreter-ctx state)
