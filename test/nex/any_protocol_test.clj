@@ -20,6 +20,19 @@
             [clojure.test :refer [deftest is testing]]
             [nex.eval :as e]))
 
+(defn- type-errors
+  "The type errors CODE produces, or nil when it type-checks. Reported the same
+   way for both backends — type checking runs before either of them."
+  [code]
+  (let [f (java.io.File/createTempFile "any_protocol" ".nex")]
+    (try
+      (spit f code)
+      (try (with-out-str (e/eval-file (.getPath f) {}))
+           nil
+           (catch clojure.lang.ExceptionInfo ex
+             (:errors (ex-data ex))))
+      (finally (.delete f)))))
+
 (defn- run-backend
   [code interpret?]
   (let [f (java.io.File/createTempFile "any_protocol" ".nex")]
@@ -108,3 +121,70 @@ print(Currency.INR.to_string)")))))
            (both (str plain-class
                       "let p := create P.make(1)
 print(\"total \" + p.to_string)"))))))
+
+;; ─── What the universal protocol does *not* include ──────────────────────────
+;;
+;; The Any case of `builtin-method-signature` is consulted for every receiver,
+;; so anything listed there typechecks against a class that never declares it.
+;; That is only honest for names with a default implementation behind them.
+;; The cursor protocol has none, so listing it promised iteration on every value
+;; in the language and delivered it on none: `p.cursor` typechecked, then failed
+;; at runtime ("Method not found") or refused to compile. It now belongs to the
+;; types that implement it. docs/ref/foundational-classes.md has always
+;; documented Any as to_string/equals/hash/clone; this is the checker agreeing.
+
+(deftest cursor-protocol-is-not-universal
+  (testing "cursor protocol names are rejected on a class that declares none"
+    (doseq [m ["cursor" "start" "item" "next" "at_end"]]
+      (let [errs (type-errors (str plain-class "print(create P.make(1)." m ")"))]
+        (is (some #(re-find (re-pattern (str "Undefined field: " m)) %) errs)
+            (str m " should be a type error on a plain class, got: " (pr-str errs)))))))
+
+(deftest cursor-protocol-rejected-on-any-typed-receiver
+  (testing "`cursor` on an Any-typed receiver is rejected, as `length` already was"
+    ;; Any is a strict type whose members are the universal protocol; `x.length`
+    ;; was always an error here, so admitting `x.cursor` was the inconsistency.
+    (is (seq (type-errors "let x: Any := \"abc\"\nprint(x.cursor)")))
+    (is (seq (type-errors "let x: Any := \"abc\"\nprint(x.length)")))))
+
+(deftest universal-protocol-still-universal
+  (testing "to_string/equals/clone remain callable on a class declaring none"
+    (is (nil? (type-errors (str plain-class "print(create P.make(1).to_string)"))))
+    (is (nil? (type-errors (str plain-class
+                                "print(create P.make(1).equals(create P.make(1)))"))))
+    (is (nil? (type-errors (str plain-class "let c: Any := create P.make(1).clone"))))))
+
+(deftest builtins_that_have_a_cursor_keep_it
+  (testing "Array/Map/Set/String iterate through their own declared cursor"
+    (is (= ["1" "2"]
+           (both "let c := [1, 2].cursor
+from c.start until c.at_end do
+  print(c.item)
+  c.next
+end")))
+    ;; String had no `cursor` of its own and reached it through the Any
+    ;; fallback; it needed declaring when that fallback stopped promising it.
+    (is (= ["#a" "#b"]
+           (both "let c := \"ab\".cursor
+from c.start until c.at_end do
+  print(c.item)
+  c.next
+end")))
+    (is (nil? (type-errors "print(#{1}.cursor.at_end)")))
+    (is (nil? (type-errors "print({\"a\": 1}.cursor.at_end)")))))
+
+(deftest across-still-iterates
+  (testing "`across` over each cursor-bearing builtin is unaffected"
+    (is (= ["10" "20"] (both "across [10, 20] as x do\n  print(x)\nend")))
+    (is (= ["#a" "#b"] (both "across \"ab\" as c do\n  print(c)\nend")))))
+
+(deftest user-class-cursor-still-dispatches
+  (testing "a class declaring its own `cursor` resolves to its own signature"
+    (is (= ["false"]
+           (both "class Ints
+  feature
+    i: Integer
+    cursor: Cursor do result := [1, 2].cursor end
+  create make() do i := 0 end
+end
+print(create Ints.make().cursor.at_end)")))))

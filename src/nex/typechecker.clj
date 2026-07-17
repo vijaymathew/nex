@@ -1699,6 +1699,28 @@
 (defn- builtin-method-signature
   [base-type method argc type-map]
   (case base-type
+    ;; The universal protocol: what *every* value has, whatever its type. This
+    ;; case is consulted for every receiver (see `check-target-call`), so a name
+    ;; listed here typechecks against a class that never declares it — which is
+    ;; a promise only worth making for names that have a default implementation
+    ;; behind them. It must therefore stay in step with the two things that
+    ;; provide those defaults: the "Any" protocol class registered in
+    ;; `register-builtin-methods`, and `builtin-type-methods` :Any in
+    ;; nex.types.builtins. All three now list the same names.
+    ;;
+    ;; The cursor protocol (`cursor`/`start`/`item`/`next`/`at_end`) used to be
+    ;; here and is deliberately not: there is no universal default for it, so
+    ;; listing it promised an iteration protocol on every value in the language
+    ;; and delivered it on none — `p.cursor` on a plain class typechecked and
+    ;; then failed at runtime ("Method not found") or refused to compile. Each
+    ;; of those names is now owned by the types that actually implement it: the
+    ;; "Cursor" case below, the `across` loop's cursor path in
+    ;; `check-target-call`, Array/Map/Set/String in `register-builtin-methods`,
+    ;; and any user class that declares its own.
+    ;;
+    ;; `hash` is intentionally absent even though the other two tables carry it:
+    ;; a class opts into hashing by inheriting Hashable. Adding it here would
+    ;; typecheck `p.hash` on any class, which the compiled backend cannot lower.
     "Any"
     (case method
       "to_string" (when (= argc 0)
@@ -1707,16 +1729,6 @@
                  {:params [{:name "other" :type "Any"}] :return-type "Boolean"})
       "clone" (when (= argc 0)
                 {:params [] :return-type "Any"})
-      "cursor" (when (= argc 0)
-                 {:params [] :return-type "Cursor"})
-      "start" (when (= argc 0)
-                {:params [] :return-type "Void"})
-      "item" (when (= argc 0)
-               {:params [] :return-type "Any"})
-      "next" (when (= argc 0)
-               {:params [] :return-type "Void"})
-      "at_end" (when (= argc 0)
-                 {:params [] :return-type "Boolean"})
       nil)
 
     "Task"
@@ -4193,7 +4205,13 @@
            "split"       {:params [{:name "delimiter" :type "String"}]
                           :return-type {:base-type "Array" :type-params ["String"]}}
            "join"        {:params [{:name "parts" :type {:base-type "Array" :type-params ["String"]}}]
-                          :return-type "String"}}]
+                          :return-type "String"}
+           ;; A String iterates over its Chars, exactly as Array/Map/Set iterate
+           ;; over their elements. It reached this through the universal "Any"
+           ;; fallback until that stopped promising the cursor protocol on every
+           ;; value; the capability is real, so it is declared where the other
+           ;; cursor-bearing builtins declare theirs.
+           "cursor"      {:params [] :return-type "Cursor"}}]
     (env-add-method env "String" method-name sig))
   (doseq [[method-name sig]
           {"print" {:params [{:name "msg" :type "String"}] :return-type "Void"}
