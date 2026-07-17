@@ -14,8 +14,11 @@ Addresses **Deficiency #4** in `docs/language-notes-from-book.md`:
 > and `:guard`; the interpreter and JVM lowering bind → run bindings → test guard
 > → body-or-fall-through; the type checker requires a Boolean guard and excludes
 > guarded clauses from exhaustiveness. Guards are rejected by the JS backend
-> (out of scope). Phase 3 **literal** field patterns (`field: 0`) are implemented
-> as equality guards (walker sugar over Phase 2). Phase 3 **nested** patterns
+> (out of scope). Phase 3 **literal** field patterns (`field: 0`) shipped as
+> equality guards and were then **removed**: the sugar gave `:` a second meaning
+> in a position where the type reading is the obvious one, and it did not bind
+> the field it named (`when Ok(value: 10) then print(value)` printed nil). The
+> guard it desugared to is now the only spelling, and it binds. Phase 3 **nested** patterns
 > (`field: Some[Integer](value as x)`) are now **implemented** too, after landing
 > Finding 2 of `generic-inference.md` (match binding carries the subject's type
 > args) plus fixing generic `convert` in the interpreter and lowering a
@@ -65,18 +68,20 @@ end
   not naming the field. Field access is by name, matching how variant payloads
   are already named fields — so order does not matter and the pattern is
   self-documenting.
-- **`:` always constrains, `as` always renames.** The name left of the colon is
-  always a field; `field: <literal>` requires a value, `field: <Type>` requires a
-  type. Renaming originally shared the colon (`Placed(id: x)`), which read as the
-  type annotation it is everywhere else in the language while meaning the
-  opposite, and made `field: T` ambiguous with the nested/type forms. Renaming
-  moved to `as`, which already means "bind under this name" at clause level.
+- **`:` means a type, `as` renames.** The name left of the colon is always a
+  field; `field: <Type>` requires that field to be a `Type`. Renaming originally
+  shared the colon (`Placed(id: x)`), which read as the type annotation it is
+  everywhere else in the language while meaning the opposite, and made `field: T`
+  ambiguous with the nested/type forms. Renaming moved to `as`, which already
+  means "bind under this name" at clause level. The colon's third job — matching
+  a literal — is gone too (write the guard), leaving it a single meaning.
 - **`as`** still binds the whole matched value and composes with destructuring
   (`when Placed(id, total) as p then …`), keeping every existing `match` valid.
 - **Guards** `if <bool>` run after a structural match; a false guard falls through
   to the next clause.
-- **Literal patterns** in a field position: `when Line(qty, 0)` matches only when
-  the second field equals `0`. (Whole-value literal dispatch stays the job of
+- **Literal patterns** in a field position were proposed and shipped, then
+  removed — write the guard (`when Line(qty) if qty = 0`), which is what they
+  desugared to. See the status note above. (Whole-value literal dispatch stays the job of
   `case`; literals in `match` are for field and nested positions.)
 - **Nested patterns** `when Ok(Some(x))` apply a pattern to a field's value.
 - **Wildcard** `_` as a top-level pattern is a catch-all (a spelling of `else`).
@@ -144,13 +149,16 @@ clause — which plain nesting cannot express. Guards need real dispatch support
   exhaustiveness. A sealed match whose only clause for a variant is guarded now
   requires an unguarded clause, a wildcard, or `else`.
 
-### Phase 3 — literal and nested field patterns
+### Phase 3 — literal (since removed) and nested field patterns
 
 These share the same fall-through machinery as guards, applied to sub-values:
 
 - A literal field pattern desugars to a guard: `Line(qty, 0)` ≡
   `Line(qty, __f1) if __f1 == 0`. Once Phase 2 exists, literals are mostly a
-  walker rewrite into a binding + an equality guard.
+  walker rewrite into a binding + an equality guard. **Removed after shipping**:
+  being sugar for a guard was the whole case against it — it bought a little
+  brevity for a second meaning of `:`, and the rewrite dropped the binding, so
+  the named field read as nil in the body.
 - A nested type pattern `Ok(Some(x))` desugars to a bind plus an inner structural
   test that can fail: bind the field, then require it to match `Some(x)` — a
   nested match that, on failure, falls through to the outer clause's successor.
@@ -187,7 +195,8 @@ These share the same fall-through machinery as guards, applied to sub-values:
 2. **Phase 2**: guard syntax; interpreter + lowering dispatch; exhaustiveness
    treats guarded clauses as non-covering; tests for fall-through and for the
    "guarded-only ⇒ needs else" error.
-3. **Phase 3**: literal field patterns (desugar to equality guards) and one level,
+3. **Phase 3**: literal field patterns (desugar to equality guards; later
+   removed in favour of writing the guard) and one level,
    then arbitrary nesting, of nested type patterns; exhaustiveness and
    reachability tests.
 4. Docs: extend `SYNTAX.md` "Match Statement" with the pattern grammar and the
