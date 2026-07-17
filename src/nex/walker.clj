@@ -593,6 +593,55 @@
                                      (when ret-check [ret-check]))))
       node)))
 
+;; `convert` (and the type patterns that desugar to it) tests a *runtime* type.
+;; A `declare type` alias names no runtime type, so the test could never match:
+;; `convert x to y: Count` with `declare type Count = Integer` took the else
+;; branch for x = 5, and `when Holds(content: Count)` fell straight through —
+;; silently, since the checker sees Count as related to the value's type and
+;; accepts it. Resolve the alias to what it actually is before either backend
+;; sees it, so the test is against Integer.
+;;
+;; A refinement (`= Integer where n: n > 0`) is not resolvable this way. Its
+;; predicate is erased and cannot be evaluated by a type test, so resolving it to
+;; its base would silently *weaken* the test — `content: Quantity` would happily
+;; match -5. That one is rejected instead.
+
+(defn- alias-target-name
+  "The alias name a convert target refers to, or nil. Parameterized and
+  detachable targets never name an alias."
+  [target-type]
+  (when (string? target-type) target-type))
+
+(defn- resolve-convert-alias
+  [{:keys [target-type] :as node} aliases]
+  (if-let [{:keys [type-expr refinement]} (get aliases (alias-target-name target-type))]
+    (if refinement
+      (let [base (if (string? type-expr)
+                   type-expr
+                   (or (:base-type type-expr) (pr-str type-expr)))
+            msg (str "`" target-type "` is a refinement type, so it cannot be used as a"
+                     " runtime type test: its predicate is erased, so the test could only"
+                     " check `" base "` and would match values `" target-type "` excludes."
+                     " Test `" base "` and check the predicate in a guard, or narrow with a"
+                     " typed `let`, which does run the predicate.")]
+        (throw (ex-info msg {:error msg})))
+      (assoc node :target-type type-expr))
+    node))
+
+(defn- resolve-convert-aliases
+  "Rewrite every `convert` whose target names a plain alias to name the alias's
+  base type, and reject one whose target names a refinement."
+  [program]
+  (let [aliases (into {} (map (juxt :name identity) (:type-aliases program)))]
+    (if (empty? aliases)
+      program
+      (walk/postwalk
+       (fn [n]
+         (if (and (map? n) (= :convert (:type n)))
+           (resolve-convert-alias n aliases)
+           n))
+       program))))
+
 (defn inject-refinement-checks
   "Rewrite a walked program, injecting predicate checks at every refinement
   narrowing site (let bindings, parameters, returns) throughout the tree."
@@ -693,17 +742,21 @@
            ;; `union` declarations desugar to a sealed parent + variant classes.
            union-classes (mapcat :classes (filter #(= :union (:type %)) transformed))
            all-classes (vec (concat classes function-classes union-classes))]
-       (inject-refinement-checks
-        {:type :program
-         :imports (vec imports)
-         :interns (vec interns)
-         :type-aliases (vec type-aliases)
-         :classes all-classes
-         :functions (vec functions)
-         :duplicate-functions duplicate-functions
-         :function-signature-conflicts signature-conflicts
-         :statements (vec statements)
-         :calls (vec calls)})))
+       ;; Aliases are resolved before the refinement pass so that pass sees only
+       ;; the narrowing sites it owns (let/param/return), never a `convert`
+       ;; target that was really an alias.
+       (-> {:type :program
+            :imports (vec imports)
+            :interns (vec interns)
+            :type-aliases (vec type-aliases)
+            :classes all-classes
+            :functions (vec functions)
+            :duplicate-functions duplicate-functions
+            :function-signature-conflicts signature-conflicts
+            :statements (vec statements)
+            :calls (vec calls)}
+           resolve-convert-aliases
+           inject-refinement-checks)))
 
    :internStmt
    (fn [[_ _intern-kw & tokens]]
