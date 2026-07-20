@@ -202,6 +202,14 @@
   "\\b[a-z_][a-z0-9_]*\\s-*\\(([^)]*)\\)?\\s-*\\(?::\\s-*[A-Z][a-zA-Z0-9_]*\\)?\\s-*$"
   "Regexp matching a Nex method/feature declaration line (name, optional args, optional return type).")
 
+(defconst nex-free-function-re
+  "\\bfunction\\b"
+  "Regexp matching the header line of a free (top-level) function definition.
+Such a line owns the routine's `do'/`require'/`ensure' clauses exactly as a
+class-level feature signature does, but it does not match
+`nex-method-signature-re' (the name is preceded by the `function' keyword),
+so the backward scans that look for a routine's anchor must test for it too.")
+
 (defconst nex-section-keyword-re
   (regexp-opt '("class" "union" "feature" "create" "inherit" "invariant"
                 "do" "end" "require" "ensure" "rescue" "from" "until"
@@ -605,10 +613,14 @@ CUR-KW is the contract keyword on the current line."
                   (skip-chars-forward " \t")
                   (or (looking-at "^\\s-*$")
                       (looking-at "\\bnote\\b")
-                      ;; Skip body statements and section keywords when looking for method indent
-                      (or (looking-at nex-section-keyword-re)
-                          (and (not (looking-at nex-method-signature-re))
-                               (not (looking-at "\\b\\(do\\|require\\|ensure\\)\\b")))))))
+                      ;; Skip body statements and section keywords when looking for method indent.
+                      ;; A free function's `function' header is the anchor for its
+                      ;; own clauses, so stop there instead of scanning past it into
+                      ;; whatever precedes the definition.
+                      (and (not (looking-at nex-free-function-re))
+                           (or (looking-at nex-section-keyword-re)
+                               (and (not (looking-at nex-method-signature-re))
+                                    (not (looking-at "\\b\\(do\\|require\\|ensure\\)\\b"))))))))
       (forward-line -1))
     ;; Should be at method name or contract keyword line now
     (current-indentation)))
