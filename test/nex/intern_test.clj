@@ -342,3 +342,14 @@ end")
                    (repl/eval-code ctx "print(rx.to_string())"))]
       (is (not (.contains output "Cannot find intern file for text/Regex")))
       (is (.contains output "\"Regex(/[a-z]+/)\"")))))
+
+(deftest repl-intern-brings-module-free-functions-into-later-cells
+  (testing "REPL keeps an interned module's free functions callable in later cells"
+    (let [ctx (repl/init-repl-context)
+          output (with-out-str
+                   (repl/eval-code ctx "intern data/Result")
+                   (repl/eval-code ctx "let r: Result[Integer, String] := create Ok[Integer, String].make(21)")
+                   (repl/eval-code ctx "let d: Result[Integer, String] := result_map(r, fn (x: Integer): Integer do result := x * 2 end)")
+                   (repl/eval-code ctx "print(d.unwrap_or(0))"))]
+      (is (not (.contains output "Undefined function: result_map")))
+      (is (.contains output "42")))))

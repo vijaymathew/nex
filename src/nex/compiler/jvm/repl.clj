@@ -384,10 +384,18 @@
   [session source-id ast]
   (let [ast' (normalize-program-ast ast)
         intern-classes (interp/resolve-interned-classes source-id ast')
-        merged-imports (merge-import-like-nodes @(:import-asts session) (:imports ast'))]
+        ;; A module's free functions come into scope alongside its classes; the
+        ;; cell that runs the `intern` must carry them so remember-top-level-ast!
+        ;; records them for later cells (the file path does the same).
+        intern-functions (interp/resolve-interned-functions source-id ast')
+        intern-imports (interp/resolve-interned-imports source-id ast')
+        merged-imports (merge-import-like-nodes
+                        (merge-import-like-nodes @(:import-asts session) intern-imports)
+                        (:imports ast'))]
     (assoc ast'
            :imports merged-imports
-           :classes (vec (concat intern-classes (:classes ast'))))))
+           :classes (vec (concat intern-classes (:classes ast')))
+           :functions (vec (concat intern-functions (:functions ast'))))))
 
 (defn- initial-eligibility-ctx
   [session ast]
