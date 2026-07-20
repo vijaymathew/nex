@@ -364,12 +364,25 @@ are correctly ignored."
       (move-to-column indent-col))))
 
 (defun nex-previous-line-indent ()
-  "Return the indentation of the previous non-blank line."
+  "Return the indentation of the previous non-blank line.
+When that line is a continuation of a multi-line bracketed expression -- an
+argument list or array/map literal split across lines -- return the
+indentation of the line that *opened* the expression instead.  Continuation
+lines are themselves indented relative to the opener (see
+`nex-bracket-continuation-indent'), so measuring the next statement from one
+would carry that extra level over to every line that follows."
   (save-excursion
     (forward-line -1)
     (while (and (not (bobp))
                 (looking-at "^\\s-*$"))
       (forward-line -1))
+    (beginning-of-line)
+    ;; The 10th ppss element lists the positions of the currently open
+    ;; brackets, outermost first; the statement starts on the outermost one's
+    ;; line.  Brackets inside strings and comments are correctly ignored.
+    (let ((openers (nth 9 (syntax-ppss (point)))))
+      (when openers
+        (goto-char (car openers))))
     (current-indentation)))
 
 (defun nex-should-increase-indent ()
