@@ -94,6 +94,90 @@ print(a.name())")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(defn- generate-classes
+  "Source for `n` trivial classes named `<prefix>0`..`<prefix>{n-1}`, each with a
+   `v()` returning its index."
+  [prefix n]
+  (str/join "\n"
+            (for [i (range n)]
+              (str "class " prefix i "\nfeature\n  v(): Integer\n  do\n    result := " i "\n  end\nend"))))
+
+(defn- prepared-class-asts
+  "The class-AST vector that would be embedded for `program`, as `compile-ast`
+   builds it (user classes + anonymous closure classes), before trimming."
+  [nex-path program]
+  (let [ast (p/ast program)
+        module (#'file/augment-ast-with-interns nex-path ast)
+        prepared (lower/prepare-program-for-closures
+                  module {:classes (:classes module) :functions (:functions module)
+                          :imports (:imports module) :var-types {}})]
+    (vec (concat (#'file/user-class-defs prepared)
+                 (lower/collect-anonymous-class-defs prepared)))))
+
+(defn- edn-utf8-bytes [x] (count (.getBytes ^String (pr-str x) "UTF-8")))
+
+(deftest compile-file-with-oversized-class-table-runs
+  (testing "a program whose embedded class table exceeds the 65535-byte
+            CONSTANT_Utf8 limit still compiles: the table is emitted as chunked
+            LDC + StringBuilder and the reconstructed EDN parses so the program
+            runs. The fixture captures a variable in a sort-comparator closure,
+            making it interpreter-reachable, so the structural trim is correctly
+            skipped and the full (oversized) table is what gets chunked.
+            Regression against 'UTF8 string too large'."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-large-table-test")
+          nex-file (io/file tmp-dir "big.nex")
+          out-dir (io/file tmp-dir "out")
+          n 200
+          ;; The closure captures `base`, so it becomes a runtime object — the
+          ;; program can reach the tree-walker and the table must NOT be trimmed.
+          program (str (generate-classes "C" n)
+                       "\n\nlet base: Integer := 10"
+                       "\nlet data: Array[Integer] := [3, 1, 2]"
+                       "\nlet _ := data.sort(fn(a, b: Integer): Integer do result := (a + base).compare(b + base) end)"
+                       "\nlet c: C" (dec n) " := create C" (dec n)
+                       "\nprint(c.v())")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file program)
+        (let [class-asts (prepared-class-asts (.getPath nex-file) program)]
+          (is (#'file/interpreter-reachable? class-asts)
+              "fixture must be interpreter-reachable so the trim is skipped")
+          (let [emitted-bytes (edn-utf8-bytes (#'file/maybe-trim-class-table class-asts))]
+            (is (> emitted-bytes 65535)
+                (str "emitted table must exceed the CONSTANT_Utf8 limit; got " emitted-bytes " bytes"))))
+        (let [result (file/compile-file (.getPath nex-file) (.getPath out-dir) {})]
+          (is (= (str (dec n))
+                 (str/trim (invoke-main! out-dir (:main-class result))))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-file-trims-class-table-when-interpreter-unreachable
+  (testing "a whole-file program with no runtime closures cannot reach the
+            tree-walker, so its embedded class table is trimmed to structural
+            metadata: the blob shrinks and behaviour is unchanged."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-trim-table-test")
+          nex-file (io/file tmp-dir "trim.nex")
+          out-dir (io/file tmp-dir "out")
+          n 60
+          program (str (generate-classes "D" n)
+                       "\n\nlet d: D" (dec n) " := create D" (dec n) "\nprint(d.v())")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file program)
+        (let [class-asts (prepared-class-asts (.getPath nex-file) program)]
+          (is (not (#'file/interpreter-reachable? class-asts))
+              "fixture must be interpreter-unreachable so the trim applies")
+          (is (< (edn-utf8-bytes (#'file/maybe-trim-class-table class-asts))
+                 (edn-utf8-bytes class-asts))
+              "trim must shrink the embedded table"))
+        (let [result (file/compile-file (.getPath nex-file) (.getPath out-dir) {})]
+          (is (= (str (dec n))
+                 (str/trim (invoke-main! out-dir (:main-class result))))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-produces-standalone-runnable-jar
   (testing "compile-jar builds a standalone runnable jar"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-test")
