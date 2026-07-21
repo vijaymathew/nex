@@ -15,6 +15,66 @@
   (:import [java.io ByteArrayInputStream File FileInputStream]
            [java.util.jar JarEntry JarFile JarOutputStream Manifest]))
 
+;; --- Structural trim of the embedded class table -------------------------
+;; A whole-file artifact embeds every class's AST as `classes-edn` (below) so
+;; the runtime can (a) answer reflection/subtype/field queries and (b) on the
+;; deopt path, run a method on an interpreter-produced object through the
+;; tree-walker. Only (b) needs executable bodies; (a) needs just signatures and
+;; the inheritance/field structure. Dropping the bodies shrinks the blob to
+;; ~40% — which, ahead of the chunker, keeps most programs to a single LDC.
+;;
+;; Soundness (see `interpreter-reachable?`): the ONLY seed of an interpreter
+;; object in a whole-file compile is a closure that becomes a runtime object
+;; (compiled code mints it via runtime/make-captured-function-object). Every
+;; other deopt site is gated on an already-existing interpreter object. So if
+;; the program has no runtime-closure class, the tree-walker never runs and the
+;; bodies are dead metadata; if it has one, the interpreter can construct and
+;; dispatch objects of ANY user class, so trimming must be all-or-nothing. This
+;; path is whole-file only — the REPL compiles through its own entry point and
+;; never reaches here.
+
+(defn- trim-class-member [m]
+  (case (:type m)
+    :method (dissoc m :body :require :ensure :rescue :note :dbg/line :dbg/col)
+    :field  (dissoc m :value :note :dbg/line :dbg/col)
+    m))
+
+(defn- trim-class-body-item [item]
+  (case (:type item)
+    :feature-section (update item :members #(mapv trim-class-member %))
+    :constructors    (update item :constructors
+                             (fn [cs] (mapv #(dissoc % :body :require :ensure :rescue
+                                                     :note :dbg/line :dbg/col)
+                                            cs)))
+    item))
+
+(defn- structural-trim-class
+  "Strip executable payloads (method/constructor bodies + contracts, field
+   initializers, invariants) while keeping every signature and the inheritance
+   and field structure the runtime's reflection walks read."
+  [c]
+  (-> c
+      (dissoc :invariant :note :dbg/line :dbg/col)
+      (update :body #(mapv trim-class-body-item %))))
+
+(defn- interpreter-reachable?
+  "True when the whole-file program can spin up the tree-walking interpreter at
+   runtime, which happens iff some class in the table is a closure that becomes
+   a runtime object. When false, no interpreter object can ever exist, so every
+   embedded method body is unreachable and the table can be trimmed to
+   structural metadata."
+  [class-asts]
+  (boolean (some :closure-runtime-object? class-asts)))
+
+(defn- maybe-trim-class-table
+  "Trim the embedded class table to structural metadata when it is provably
+   safe (no interpreter reachability). Applied before serialization so the
+   chunker only has to split whatever remains oversized."
+  [class-asts]
+  (if (interpreter-reachable? class-asts)
+    class-asts
+    (mapv structural-trim-class class-asts)))
+
 (defn- sanitize-stem
   [path]
   (let [stem (-> (io/file path)
@@ -161,7 +221,10 @@
                                                   :var-types {}})
            class-asts (vec (concat (user-class-defs prepared-ast)
                                    (lower/collect-anonymous-class-defs prepared-ast)))
-           classes-edn (pr-str class-asts)
+           ;; Shrink the embedded table to structural metadata when the program
+           ;; cannot reach the interpreter, then let the chunker (emit-string-
+           ;; constant!) split whatever is still over the 65535-byte LDC cap.
+           classes-edn (pr-str (maybe-trim-class-table class-asts))
            imports-edn (pr-str (:imports prepared-ast))
            class-bytes (into {(desc/binary-class-name program-internal-name)
                               (emit/compile-unit->bytes unit)

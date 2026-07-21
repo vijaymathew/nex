@@ -29,6 +29,34 @@
 (declare emit-runtime-call!)
 (declare emit-expression!)
 
+(defn- emit-string-constant!
+  "Push a String onto the stack. A plain LDC references a single CONSTANT_Utf8
+   entry, which the class-file format caps at 65535 bytes — a limit large
+   programs hit when the whole class table is serialized into one blob (see
+   `classes-edn` in file.clj). When the string is large enough to risk the cap,
+   split it into fixed char chunks and rebuild it with StringBuilder at runtime.
+
+   Chunks are 16384 chars: modified UTF-8 uses at most 3 bytes per char, so a
+   chunk is at most 49152 bytes — safely under 65535. Splitting by char index is
+   exact even when a boundary falls between the halves of a surrogate pair, since
+   the appends reassemble the identical string."
+  [^MethodVisitor mv ^String s]
+  ;; Fast path guards well below the cap so the multi-byte worst case can never
+  ;; push a single-chunk string over it.
+  (if (< (count s) 21000)
+    (.visitLdcInsn mv s)
+    (do
+      (.visitTypeInsn mv Opcodes/NEW "java/lang/StringBuilder")
+      (.visitInsn mv Opcodes/DUP)
+      (.visitMethodInsn mv Opcodes/INVOKESPECIAL "java/lang/StringBuilder"
+                        "<init>" "()V" false)
+      (doseq [chunk (map (partial apply str) (partition-all 16384 s))]
+        (.visitLdcInsn mv ^String chunk)
+        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/StringBuilder"
+                          "append" "(Ljava/lang/String;)Ljava/lang/StringBuilder;" false))
+      (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/StringBuilder"
+                        "toString" "()Ljava/lang/String;" false))))
+
 (defn eval-method-descriptor
   []
   (desc/method-descriptor
@@ -286,8 +314,8 @@
 
       (emit-runtime-call! mv "bootstrap-compiled-state!"
                           [(fn [] (.visitVarInsn mv Opcodes/ALOAD 1))
-                           (fn [] (.visitLdcInsn mv ^String classes-edn))
-                           (fn [] (.visitLdcInsn mv ^String imports-edn))])
+                           (fn [] (emit-string-constant! mv classes-edn))
+                           (fn [] (emit-string-constant! mv imports-edn))])
       (.visitInsn mv Opcodes/POP)
 
       (emit-runtime-call! mv "state-set-immediate-output!"
@@ -2439,8 +2467,8 @@
       (.visitVarInsn mv Opcodes/ASTORE 0)
       (emit-runtime-call! mv "bootstrap-compiled-state!"
                           [(fn [] (.visitVarInsn mv Opcodes/ALOAD 0))
-                           (fn [] (.visitLdcInsn mv ^String classes-edn))
-                           (fn [] (.visitLdcInsn mv ^String imports-edn))])
+                           (fn [] (emit-string-constant! mv classes-edn))
+                           (fn [] (emit-string-constant! mv imports-edn))])
       (.visitInsn mv Opcodes/POP))
     (doseq [{:keys [name jvm-type value]} constants]
       (emit-expr! mv value 0)
