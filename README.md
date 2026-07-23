@@ -361,11 +361,13 @@ clojure -M:test test/scripts/run_tests.clj
 ### Running Examples
 
 ```bash
-clojure examples/demo_gcd.clj
-clojure examples/demo_complete_dbc.clj
-clojure examples/demo_complete_inheritance.clj
-clojure examples/demo_skip_contracts.clj
+nex examples/basics_example.nex
+nex examples/gcd_example.nex
+nex examples/contracts_example.nex
+nex examples/inheritance_example.nex
 ```
+
+See [examples/README.md](examples/README.md) for the full list.
 
 ---
 

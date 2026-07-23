@@ -1,0 +1,178 @@
+-- Inheritance Example
+--
+-- Single inheritance with overriding, calls back into the parent's version
+-- of a feature (`Parent.feature(...)`), and multiple inheritance.
+--
+-- Run:  nex inheritance_example.nex
+
+-- 1. A bank account hierarchy -------------------------------------------
+
+class Account
+  create
+    make(owner_name: String, opening: Real) do
+      owner := owner_name
+      balance := opening
+    end
+
+  feature
+    owner: String
+    balance: Real
+
+    deposit(amount: Real)
+      require
+        positive: amount > 0.0
+      do
+        balance := balance + amount
+      ensure
+        increased: balance = old balance + amount
+      end
+
+    withdraw(amount: Real)
+      require
+        positive: amount > 0.0
+        sufficient: amount <= balance
+      do
+        balance := balance - amount
+      ensure
+        decreased: balance = old balance - amount
+      end
+
+    describe(): String do
+      result := "Account(" + owner + ", " + balance.to_string + ")"
+    end
+
+  invariant
+    non_negative: balance >= 0.0
+end
+
+class SavingsAccount
+  inherit
+    Account
+
+  create
+    make(owner_name: String, opening, rate: Real) do
+      -- Call the parent's creation procedure to initialize inherited state.
+      Account.make(owner_name, opening)
+      interest_rate := rate
+      deposit_count := 0
+    end
+
+  feature
+    interest_rate: Real
+    deposit_count: Integer
+
+    -- Redefines the inherited deposit and delegates to the parent's version.
+    -- A redefinition inherits the parent's contracts, so this body must still
+    -- satisfy `increased: balance = old balance + amount` -- it may add work
+    -- of its own, but it may not change what deposit promises about balance.
+    deposit(amount: Real) do
+      Account.deposit(amount)
+      deposit_count := deposit_count + 1
+    end
+
+    apply_interest() do
+      balance := balance + balance * interest_rate
+    end
+
+    -- Redefines describe(); inherited fields are read directly.
+    describe(): String do
+      result := "SavingsAccount(" + owner + ", " + balance.to_string +
+                ", rate " + interest_rate.to_string +
+                ", deposits " + deposit_count.to_string + ")"
+    end
+
+  invariant
+    valid_rate: interest_rate >= 0.0 and interest_rate <= 1.0
+end
+
+-- 2. Multiple inheritance ------------------------------------------------
+
+class Engine
+  feature
+    running: Boolean
+
+    start() do
+      running := true
+    end
+
+    stop() do
+      running := false
+    end
+end
+
+class GPS
+  feature
+    destination: String
+
+    navigate(dest: String) do
+      destination := dest
+    end
+end
+
+-- Car inherits from both: it gets start/stop from Engine, navigate from
+-- GPS, and adds a feature of its own.
+class Car
+  inherit
+    Engine,
+    GPS
+
+  create
+    make(car_model: String) do
+      model := car_model
+      running := false
+      destination := "nowhere"
+    end
+
+  feature
+    model: String
+
+    status(): String do
+      let state: String := "parked"
+      if running then
+        state := "driving to " + destination
+      end
+      result := model + " is " + state
+    end
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- Overriding: the same call reaches a different body per class.
+  c.print_line("1. single inheritance and overriding")
+  let plain: Account := create Account.make("Ada", 1000.0)
+  plain.deposit(100.0)
+  c.print_line("  " + plain.describe)          -- 1100.0
+
+  let savings: SavingsAccount := create SavingsAccount.make("Grace", 1000.0, 0.05)
+  savings.deposit(100.0)                       -- same effect, plus bookkeeping
+  c.print_line("  " + savings.describe)        -- 1100.0, 1 deposit
+
+  -- Features inherited unchanged are simply available.
+  c.print_line("2. inherited features")
+  savings.withdraw(105.0)
+  c.print_line("  after withdraw(105): " + savings.describe)
+  savings.apply_interest()
+  c.print_line("  after apply_interest: " + savings.describe)
+
+  -- Inherited contracts still hold on the descendant.
+  c.print_line("3. inherited contracts")
+  do
+    savings.withdraw(1000000.0)
+    c.print_line("  large withdrawal succeeded -- unexpected!")
+  rescue
+    c.print_line("  withdraw(1000000) rejected by Account's require sufficient")
+  end
+
+  -- Multiple inheritance: Car pulls features from two parents.
+  c.print_line("4. multiple inheritance")
+  let car: Car := create Car.make("Roadster")
+  c.print_line("  " + car.status)
+  car.start()                                  -- from Engine
+  car.navigate("the coast")                    -- from GPS
+  c.print_line("  " + car.status)
+  car.stop()                                   -- from Engine
+  c.print_line("  " + car.status)
+end
+
+main()

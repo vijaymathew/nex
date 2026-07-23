@@ -76,55 +76,57 @@ feature
 end
 
 function main() do
+  let c: Console := create Console
+
   -- ========================================================================
   -- DELIVERY: before — failure is an in-band magic string the caller may use
   --           as if it were a real stop.        after — illegal states blocked.
   -- ========================================================================
-  print("### DELIVERY ###")
+  c.print_line("### DELIVERY ###")
   let flat_d: Delivery_Tiny := create Delivery_Tiny
-  print("before: next_stop(\"X\",\"C\") = " + flat_d.next_stop("X", "C"))  -- "UNREACHABLE"
-  print("        ^ a String, indistinguishable from a real stop name")
+  c.print_line("before: next_stop(\"X\",\"C\") = " + flat_d.next_stop("X", "C"))  -- "UNREACHABLE"
+  c.print_line("        ^ a String, indistinguishable from a real stop name")
 
   let r: Route := create Route.make("RT-AC", ["A", "B", "C"])
   let task: Delivery_Task := create Delivery_Task.pending("T001", r)
   do
     task.advance()                 -- still PENDING (never assigned)
-    print("after:  BUG — moved an unassigned task")
+    c.print_line("after:  BUG — moved an unassigned task")
   rescue
-    print("after:  blocked — " + exception + " (an unassigned task cannot move)")
+    c.print_line("after:  blocked — " + exception + " (an unassigned task cannot move)")
   end
 
   -- ========================================================================
   -- KNOWLEDGE: before — "NOT_FOUND" sentinel shares the String type with real
   --            note ids.   after — real entities + a link that cannot be invalid.
   -- ========================================================================
-  print("### KNOWLEDGE ###")
+  c.print_line("### KNOWLEDGE ###")
   let flat_n: Notes_Tiny := create Notes_Tiny
-  print("before: find_by_tag(\"unknown\") = " + flat_n.find_by_tag("unknown")) -- "NOT_FOUND"
-  print("        ^ in-band failure; same type as find_by_tag(\"graphs\") = " + flat_n.find_by_tag("graphs"))
+  c.print_line("before: find_by_tag(\"unknown\") = " + flat_n.find_by_tag("unknown")) -- "NOT_FOUND"
+  c.print_line("        ^ in-band failure; same type as find_by_tag(\"graphs\") = " + flat_n.find_by_tag("graphs"))
 
   let good: Doc_Link := create Doc_Link.make("D1", "D2", "references")
-  print("after:  valid link D1->D2 references, is_valid = " + good.is_valid())
+  c.print_line("after:  valid link D1->D2 references, is_valid = " + good.is_valid())
   do
     let bad: Doc_Link := create Doc_Link.make("D1", "D1", "references")
-    print("after:  BUG — built a self-link")
+    c.print_line("after:  BUG — built a self-link")
   rescue
-    print("after:  blocked — " + exception + " (a document cannot link to itself)")
+    c.print_line("after:  blocked — " + exception + " (a document cannot link to itself)")
   end
 
   -- ========================================================================
   -- WORLD: before — an already-out-of-bounds position is silently clamped, so
   --        the bug is invisible.   after — such an object cannot be created.
   -- ========================================================================
-  print("### WORLD ###")
+  c.print_line("### WORLD ###")
   let flat_w: World_Tiny := create World_Tiny
-  print("before: step(-5, 0, 10) = " + flat_w.step(-5, 0, 10) + "  (invalid input -5 silently became 0)")
+  c.print_line("before: step(-5, 0, 10) = " + flat_w.step(-5, 0, 10) + "  (invalid input -5 silently became 0)")
 
   do
     let obj: World_Object := create World_Object.make("o1", -5, 0, 10)
-    print("after:  BUG — created an out-of-bounds object")
+    c.print_line("after:  BUG — created an out-of-bounds object")
   rescue
-    print("after:  blocked — " + exception + " (cannot place an object out of bounds)")
+    c.print_line("after:  blocked — " + exception + " (cannot place an object out of bounds)")
   end
 end
 

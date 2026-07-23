@@ -1,0 +1,130 @@
+-- Design by Contract Example
+--
+-- The Date class from the specification, with every contract form working
+-- together:
+--
+--   require    preconditions -- the caller's obligation
+--   ensure     postconditions -- the supplier's promise, may use `old`
+--   invariant  class invariants -- true of every object between calls
+--
+-- A violated contract raises, so each call below is wrapped in a
+-- `do ... rescue ... end` block to show which ones the contracts reject.
+--
+-- Run:  nex contracts_example.nex
+
+class Date
+  create
+    make(a_day, a_hour: Integer)
+      require
+        valid_day: a_day >= 1 and a_day <= 31
+        valid_hour: a_hour >= 0 and a_hour <= 23
+      do
+        day := a_day
+        hour := a_hour
+      ensure
+        day_set: day = a_day
+        hour_set: hour = a_hour
+      end
+
+  feature
+    day: Integer
+    hour: Integer
+
+    set_day(a_day: Integer)
+      require
+        valid_argument: a_day >= 1 and a_day <= 31
+      do
+        day := a_day
+      ensure
+        day_set: day = a_day
+      end
+
+    set_hour(a_hour: Integer)
+      require
+        valid_argument: a_hour >= 0 and a_hour <= 23
+      do
+        hour := a_hour
+      ensure
+        hour_set: hour = a_hour
+      end
+
+    -- `old` names the value a field had on entry, so a postcondition can
+    -- talk about the change rather than just the final state.
+    advance_hours(n: Integer)
+      require
+        positive: n > 0
+        no_overflow: hour + n <= 23
+      do
+        hour := hour + n
+      ensure
+        advanced: hour = old hour + n
+      end
+
+    to_text(): String do
+      result := "day " + day.to_string + ", hour " + hour.to_string
+    end
+
+  invariant
+    valid_day: day >= 1 and day <= 31
+    valid_hour: hour >= 0 and hour <= 23
+end
+
+-- Try to build a Date, reporting whether the creation contract accepted it.
+function try_create(c: Console, d, h: Integer) do
+  do
+    let dt: Date := create Date.make(d, h)
+    c.print_line("  make(" + d.to_string + ", " + h.to_string + ") -> " +
+                 dt.to_text)
+  rescue
+    c.print_line("  make(" + d.to_string + ", " + h.to_string + ") -> rejected")
+  end
+end
+
+-- Try to move a Date's day, reporting whether set_day accepted it.
+function try_set_day(c: Console, dt: Date, d: Integer) do
+  do
+    dt.set_day(d)
+    c.print_line("  set_day(" + d.to_string + ") -> " + dt.to_text)
+  rescue
+    c.print_line("  set_day(" + d.to_string + ") -> rejected")
+  end
+end
+
+function try_advance(c: Console, dt: Date, n: Integer) do
+  do
+    dt.advance_hours(n)
+    c.print_line("  advance_hours(" + n.to_string + ") -> " + dt.to_text)
+  rescue
+    c.print_line("  advance_hours(" + n.to_string + ") -> rejected")
+  end
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1. The creation procedure's precondition guards the invariant: an
+  --    object can never come into existence in a state that breaks it.
+  c.print_line("1. creation preconditions")
+  try_create(c, 15, 12)     -- valid
+  try_create(c, 50, 12)     -- day out of range
+  try_create(c, 15, 25)     -- hour out of range
+  try_create(c, 1, 0)       -- lower boundary
+  try_create(c, 31, 23)     -- upper boundary
+
+  -- 2. Preconditions on ordinary features.
+  c.print_line("2. feature preconditions")
+  let dt: Date := create Date.make(15, 12)
+  try_set_day(c, dt, 20)
+  try_set_day(c, dt, 0)
+  try_set_day(c, dt, 32)
+  c.print_line("  unchanged after the rejected calls: " + dt.to_text)
+
+  -- 3. `old` in a postcondition.
+  c.print_line("3. postconditions with old")
+  try_advance(c, dt, 5)     -- 12 -> 17
+  try_advance(c, dt, 6)     -- 17 -> 23, the boundary
+  try_advance(c, dt, 1)     -- would leave the valid range
+  try_advance(c, dt, 0)     -- not positive
+end
+
+main()
