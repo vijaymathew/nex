@@ -1,7 +1,7 @@
 #!/bin/bash
 # Nex Language Command-Line Interface (JVM)
 
-VERSION="0.2.0"
+VERSION="0.3.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_NEX_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -16,7 +16,7 @@ fi
 # Helper functions
 show_help() {
     cat <<'EOF'
-Nex Language v0.2.0 - A high-level language for design and implementation
+Nex Language v0.3.0 - A high-level language for design and implementation
 
 USAGE:
     nex [NEX_SCRIPT | COMMAND] [OPTIONS]

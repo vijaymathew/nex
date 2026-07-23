@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-07-23
+
+- **New: class constants** — a feature written `NAME = expression`, with an
+  initializer and no constructor, is a class-level constant shared by every
+  instance and read through the class name (`Screen.WIDTH`). The initializer is
+  any expression, not only a scalar, and it is **interned**: evaluated once for
+  the whole run, so `Origin.POINT == Origin.POINT` holds by identity. A constant
+  may reference an earlier constant of the same class or an inherited one; a
+  forward or cyclic reference is a compile-time error.
+
+- **New: `enum union`** — when every variant of a `union` is payload-free,
+  prefixing the declaration with `enum` makes it an enumeration:
+
+  ```nex
+  enum union Color
+    Red
+    Green
+    Blue
+  end
+  ```
+
+  On top of the plain `union` desugaring (a sealed hierarchy plus `match`
+  exhaustiveness), `enum` adds three things: members are interned constants on
+  the type, so `Color.Red == Color.Red` holds with no allocation per use; members
+  inherit `Comparable` and order by declaration order (`Color.Red < Color.Green`);
+  and `Color.values` is an `Array[Color]` of every member in declaration order,
+  each with an `ordinal`.
+
+- **New: the `Any` protocol works end to end on the JVM.** Overriding
+  `to_string`, `equals`, or `clone` on a user class now takes effect in compiled
+  code — the lowerer routes to state-aware runtime helpers when the receiver's
+  class declares none, and to the override when it does. `Set` and `Map` honour
+  `equals`/`hash` overrides on the JVM with exact interpreter parity, so an
+  object used as a key behaves the same on both backends.
+
 - **Fixed: a `declare type` alias in a runtime type test never matched.**
   `convert` — and the `field: Type` patterns that desugar to it — tests a runtime
   type, and an alias names none, so the test silently always failed:
@@ -124,6 +159,46 @@
   dynamic dispatch any user-class call uses. Reading a *field* through a bound
   works as well, and a no-arg routine written without parentheses (`x.describe`)
   dispatches as a routine rather than being misread as a field access.
+
+- **Fixed: a subclass constructor could leave an inherited field void.** Void
+  safety checked that a constructor initializes the attachable fields a class
+  *declares*, but not the ones it inherits: a subclass constructor that never
+  reached the parent's left the parent's attachable field nil, in the one place
+  the language promises it cannot be. A constructor that does not reach its
+  parent's is now rejected, with an error naming the field — the constructor
+  looks complete on its own, and what is missing comes from elsewhere in the
+  file. Checking direct parents covers a chain, since each link's own check
+  already guarantees it reaches the next. A detachable (`?A`) field may be void
+  and forces nothing; neither does a builtin-typed field, which has a zero value.
+  A subclass that declares no constructor of its own inherits the parent's, which
+  already initialize.
+
+- **Fixed: an undefined type name in an annotation was not reported.** A new
+  validation pass runs once every class, alias, and import is known but before
+  body checking, so an undefined type is named directly instead of spraying
+  unrelated errors from the code that uses it. Error collection is bounded. A
+  bare undefined *parent class* is left to the dedicated inheritance check, which
+  gives a clearer message.
+
+- **Fixed: a non-generic class inheriting an instantiated generic was not
+  assignable to the parent type** — `class IntBox inherit Box[Integer]` did not
+  satisfy a `Box[Integer]` parameter. The compiled backend now handles inherited
+  generics directly as well, so these programs no longer fall back to the
+  interpreter.
+
+- **Fixed: `old` now compares structurally.** An `ensure` clause comparing `old
+  state` to the current one compared by reference, so a mutated object looked
+  unchanged.
+
+- **Fixed: a user feature may be named with a `__` prefix.** The synthetic
+  invariant method was emitted as `__invariant`, which a user feature of that
+  name collided with. It is now `$invariant`; `$` is forbidden in identifiers by
+  the grammar, so the synthetic name cannot collide with anything spellable.
+
+- **Fixed: type-checker and intern ordering bugs**, including intern handling in
+  the REPL. Invariants now compile to bytecode rather than round-tripping through
+  the interpreter, and validation is gated on a class actually declaring one.
+  Compiled output no longer embeds unreachable class definitions.
 
 ## 0.2.0 - 2026-07-11
 
