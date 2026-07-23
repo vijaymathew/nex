@@ -22,7 +22,7 @@ Examples:
   ./bootstrap-install.sh
   ./bootstrap-install.sh jvm --install-deps
   ./bootstrap-install.sh jvm --prefix "$HOME/.local"
-  ./bootstrap-install.sh jvm --ref v0.2.0
+  ./bootstrap-install.sh jvm --ref v0.3.0
 
 Environment overrides:
   NEX_REPO_OWNER   GitHub owner/user (default: vijaymathew)
