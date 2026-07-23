@@ -1,0 +1,107 @@
+-- GCD with Loop Contracts
+--
+-- The subtraction GCD, written with the full loop construct:
+--
+--   from      -- initialization
+--   invariant -- must hold before and after every iteration
+--   variant   -- a non-negative integer that strictly decreases: proves
+--                the loop terminates
+--   until     -- exit condition
+--   do        -- body
+--   end
+--
+-- It also shows the grouped parameter syntax: `gcd(a, b: Integer)` declares
+-- two Integer parameters, and means the same as `gcd(a: Integer, b: Integer)`.
+--
+-- Run:  nex gcd_example.nex
+
+class Math
+  feature
+    -- Grouped parameters: a and b are both Integer.
+    gcd(a, b: Integer): Integer
+      require
+        a_positive: a > 0
+        b_positive: b > 0
+      do
+        -- Declared outside the loop so the result survives it: names
+        -- introduced in `from` are scoped to the loop.
+        let x: Integer := 0
+        let y: Integer := 0
+        from
+          x := a
+          y := b
+        invariant
+          x_positive: x > 0
+          y_positive: y > 0
+        variant
+          x + y
+        until
+          x = y
+        do
+          if x > y then
+            x := x - y
+          else
+            y := y - x
+          end
+        end
+        result := x
+      ensure
+        divides_a: a % result = 0
+        divides_b: b % result = 0
+      end
+
+    -- Three parameters of one type, then one of another.
+    clamp(value, low, high: Integer): Integer
+      require
+        ordered: low <= high
+      do
+        if value < low then
+          result := low
+        elseif value > high then
+          result := high
+        else
+          result := value
+        end
+      ensure
+        in_range: result >= low and result <= high
+      end
+end
+
+function check(c: Console, m: Math, a, b, expected: Integer) do
+  let g: Integer := m.gcd(a, b)
+  let mark: String := "ok"
+  if g /= expected then
+    mark := "MISMATCH"
+  end
+  c.print_line("  gcd(" + a.to_string + ", " + b.to_string + ") = " +
+               g.to_string + "   expected " + expected.to_string +
+               "   " + mark)
+end
+
+function main() do
+  let c: Console := create Console
+  let m: Math := create Math
+
+  c.print_line("loop contracts -- gcd")
+  check(c, m, 48, 18, 6)
+  check(c, m, 24, 18, 6)
+  check(c, m, 100, 35, 5)
+  check(c, m, 17, 19, 1)     -- coprime
+  check(c, m, 54, 24, 6)
+
+  c.print_line("grouped parameters -- clamp(value, low, high: Integer)")
+  c.print_line("  clamp(5, 1, 10)   = " + m.clamp(5, 1, 10).to_string)
+  c.print_line("  clamp(-3, 1, 10)  = " + m.clamp(-3, 1, 10).to_string)
+  c.print_line("  clamp(99, 1, 10)  = " + m.clamp(99, 1, 10).to_string)
+
+  -- The precondition rejects a call the loop could not terminate on.
+  c.print_line("preconditions")
+  do
+    let bad: Integer := m.gcd(0, 5)
+    c.print_line("  gcd(0, 5) returned " + bad.to_string + " -- unexpected!")
+  rescue
+    c.print_line("  gcd(0, 5) rejected by require a_positive")
+  end
+end
+
+main()

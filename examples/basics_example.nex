@@ -1,0 +1,78 @@
+-- Basics Example
+--
+-- A tour of the core expression language: arithmetic, comparison and logical
+-- operators, unary minus, strings, operator precedence, and a small class.
+--
+-- Run:  nex basics_example.nex
+
+class Point
+  create
+    make(px, py: Real) do
+      x := px
+      y := py
+    end
+
+  feature
+    x: Real
+    y: Real
+
+    show(c: Console) do
+      c.print_line("Point(" + x.to_string + ", " + y.to_string + ")")
+    end
+
+    translate(dx, dy: Real) do
+      x := x + dx
+      y := y + dy
+    end
+end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1. Arithmetic. Integer division truncates; mixing in a Real widens.
+  c.print_line("1. arithmetic")
+  c.print_line("   3 + 4 * 2   = " + (3 + 4 * 2).to_string)      -- 11
+  c.print_line("   10 - 6 / 2  = " + (10 - 6 / 2).to_string)     -- 7
+  c.print_line("   7 / 2       = " + (7 / 2).to_string)          -- 3
+  c.print_line("   7.0 / 2     = " + (7.0 / 2).to_string)        -- 3.5
+  c.print_line("   7 % 2       = " + (7 % 2).to_string)          -- 1 (remainder)
+  c.print_line("   2 ^ 10      = " + (2 ^ 10).to_string)         -- 1024
+
+  -- 2. Comparison and logical operators. Equality is `=`, inequality `/=`.
+  c.print_line("2. comparison and logic")
+  c.print_line("   5 > 3            = " + (5 > 3).to_string)
+  c.print_line("   2 < 1            = " + (2 < 1).to_string)
+  c.print_line("   5 = 5            = " + (5 = 5).to_string)
+  c.print_line("   3 /= 4           = " + (3 /= 4).to_string)
+  c.print_line("   true and false   = " + (true and false).to_string)
+  c.print_line("   true or false    = " + (true or false).to_string)
+  c.print_line("   not true         = " + (not true).to_string)
+
+  -- 3. Unary minus.
+  c.print_line("3. unary minus")
+  c.print_line("   -42       = " + (-42).to_string)
+  c.print_line("   -(-10)    = " + (-(-10)).to_string)
+  c.print_line("   -(5 + 3)  = " + (-(5 + 3)).to_string)
+
+  -- 4. Strings. `+` concatenates.
+  c.print_line("4. strings")
+  let greeting: String := "Hello" + ", " + "Nex!"
+  c.print_line("   " + greeting)
+  c.print_line("   length = " + greeting.length.to_string)
+
+  -- 5. Precedence: `*` binds tighter than `+`, parentheses override.
+  c.print_line("5. precedence")
+  c.print_line("   2 + 3 * 4    = " + (2 + 3 * 4).to_string)     -- 14
+  c.print_line("   (2 + 3) * 4  = " + ((2 + 3) * 4).to_string)   -- 20
+
+  -- 6. A class: fields, a creation procedure, and two features.
+  c.print_line("6. objects")
+  let p: Point := create Point.make(1.0, 2.0)
+  c.print("   ")
+  p.show(c)
+  p.translate(3.0, 4.0)
+  c.print("   after translate(3, 4): ")
+  p.show(c)
+end
+
+main()

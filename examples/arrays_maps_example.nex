@@ -1,5 +1,15 @@
 -- Arrays and Maps Example
--- Demonstrates collection types with subscript access
+--
+-- Collection types and the literal syntax for them:
+--
+--   Array [Integer]                [1, 2, 3]
+--   Map [String, Real]             {"apple": 1.50}
+--   Array [Array [Integer]]        [[1, 2], [3, 4]]
+--   Map [String, Array [Integer]]  {"Alice": [95, 87]}
+--
+-- Elements come out with get(); arrays grow with add().
+--
+-- Run:  nex arrays_maps_example.nex
 
 class NumberList
   feature
@@ -11,52 +21,35 @@ class NumberList
     end
 
   feature
-    get_first() do
-      print(numbers.get(0))
+    get_at(index: Integer): Integer do
+      result := numbers.get(index)
     end
 
-    get_at(index: Integer) do
-      print(numbers.get(index))
-    end
-
-    show_all() do
-      let i := 0
+    sum(): Integer do
+      result := 0
       from
-        i := 0
+        let i: Integer := 0
       until
-        i >= 5
+        i >= numbers.length
       do
-        print(numbers.get(i))
+        result := result + numbers.get(i)
         i := i + 1
       end
     end
-end
 
-class PriceList
-  feature
-    prices: Map [String, Real]
-
-  create
-    make() do
-      prices := {
-        "apple": 1.50,
-        "banana": 0.75,
-        "orange": 1.25
-      }
-    end
-
-  feature
-    get_price(item: String) do
-      print(prices.get(item))
-    end
-
-    show_all() do
-      print("Apple: ")
-      print(prices.get("apple"))
-      print("Banana: ")
-      print(prices.get("banana"))
-      print("Orange: ")
-      print(prices.get("orange"))
+    to_text(): String do
+      result := ""
+      from
+        let i: Integer := 0
+      until
+        i >= numbers.length
+      do
+        if i > 0 then
+          result := result + ", "
+        end
+        result := result + numbers.get(i).to_string
+        i := i + 1
+      end
     end
 end
 
@@ -74,45 +67,38 @@ class Store
     end
 
   feature
-    show_inventory() do
-      let i := 0
+    price_of(item: String): Real do
+      result := prices.get(item)
+    end
+
+    show_inventory(c: Console) do
       from
-        i := 0
+        let i: Integer := 0
       until
-        i >= 3
+        i >= items.length
       do
-        let item := items.get(i)
-        let price := prices.get(item)
-        let count := inventory.get(item)
-        print(item)
-        print(": $")
-        print(price)
-        print(" (")
-        print(count)
-        print(" in stock)")
+        let item: String := items.get(i)
+        c.print_line("    " + item + ": $" + prices.get(item).to_string +
+                     " (" + inventory.get(item).to_string + " in stock)")
         i := i + 1
       end
     end
 
-    get_total_value() do
-      let total := 0.0
-      let i := 0
+    total_value(): Real do
+      result := 0.0
       from
-        i := 0
+        let i: Integer := 0
       until
-        i >= 3
+        i >= items.length
       do
-        let item := items.get(i)
-        let price := prices.get(item)
-        let count := inventory.get(item)
-        total := total + (price * count)
+        let item: String := items.get(i)
+        result := result + prices.get(item) * inventory.get(item)
         i := i + 1
       end
-      print("Total inventory value: $")
-      print(total)
     end
 end
 
+-- An array of arrays: the outer get() yields a row, the inner a cell.
 class Grid
   feature
     matrix: Array [Array [Integer]]
@@ -127,17 +113,33 @@ class Grid
     end
 
   feature
-    get_cell(row, col: Integer) do
-      print(matrix.get(row).get(col))
+    cell(row, col: Integer): Integer do
+      result := matrix.get(row).get(col)
     end
 
-    show_row(row: Integer) do
-      print(matrix.get(row).get(0))
-      print(matrix.get(row).get(1))
-      print(matrix.get(row).get(2))
+    show(c: Console) do
+      from
+        let r: Integer := 0
+      until
+        r >= matrix.length
+      do
+        let row: Array [Integer] := matrix.get(r)
+        let line: String := "   "
+        from
+          let k: Integer := 0
+        until
+          k >= row.length
+        do
+          line := line + " " + row.get(k).to_string
+          k := k + 1
+        end
+        c.print_line(line)
+        r := r + 1
+      end
     end
 end
 
+-- A map whose values are arrays.
 class StudentGrades
   feature
     grades: Map [String, Array [Integer]]
@@ -152,62 +154,51 @@ class StudentGrades
     end
 
   feature
-    get_grade(student: String, test: Integer) do
-      print(grades.get(student).get(test))
+    score(student: String, test: Integer): Integer do
+      result := grades.get(student).get(test)
     end
 
-    show_student(student: String) do
-      let tests := grades.get(student)
-      print(student)
-      print(": ")
-      print(tests.get(0))
-      print(", ")
-      print(tests.get(1))
-      print(", ")
-      print(tests.get(2))
-    end
-end
-
-class Categories
-  feature
-    items: Map [String, Array [String]]
-
-  create
-    make() do
-      items := {
-        "fruits": ["apple", "banana", "orange"],
-        "vegetables": ["carrot", "broccoli", "spinach"],
-        "grains": ["rice", "wheat", "oats"]
-      }
-    end
-
-  feature
-    get_category(name: String) do
-      let category := items.get(name)
-      print(category)
-    end
-
-    get_item(category: String, index: Integer) do
-      print(items.get(category).get(index))
-    end
-
-    show_category(name: String) do
-      let category := items.get(name)
-      let i := 0
-      print(name)
-      print(": ")
+    average(student: String): Real do
+      let tests: Array [Integer] := grades.get(student)
+      let total: Integer := 0
       from
-        i := 0
+        let i: Integer := 0
       until
-        i >= 3
+        i >= tests.length
       do
-        print(category.get(i))
-        if i < 2 then
-          print(", ")
-        else
-          print("")
-        end
+        total := total + tests.get(i)
         i := i + 1
       end
+      -- Integer / Integer truncates, so widen one side to get a Real.
+      result := total * 1.0 / tests.length
     end
 end
+
+function main() do
+  let c: Console := create Console
+
+  c.print_line("1. Array [Integer]")
+  let numbers: NumberList := create NumberList.make
+  c.print_line("    contents  = " + numbers.to_text)
+  c.print_line("    get(2)    = " + numbers.get_at(2).to_string)
+  c.print_line("    sum       = " + numbers.sum.to_string)
+
+  c.print_line("2. Map [String, Real] and Map [String, Integer]")
+  let store: Store := create Store.make
+  store.show_inventory(c)
+  c.print_line("    price of a banana = $" + store.price_of("banana").to_string)
+  c.print_line("    total value       = $" + store.total_value.to_string)
+
+  c.print_line("3. Array [Array [Integer]]")
+  let grid: Grid := create Grid.make
+  grid.show(c)
+  c.print_line("    cell(1, 2) = " + grid.cell(1, 2).to_string)
+
+  c.print_line("4. Map [String, Array [Integer]]")
+  let sg: StudentGrades := create StudentGrades.make
+  c.print_line("    Alice's second test = " + sg.score("Alice", 1).to_string)
+  c.print_line("    Alice's average     = " + sg.average("Alice").to_string)
+  c.print_line("    Bob's average       = " + sg.average("Bob").to_string)
+end
+
+main()

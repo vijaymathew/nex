@@ -1,22 +1,39 @@
 -- Object Creation Example
--- Demonstrates the use of the 'create' keyword
+--
+-- `create` names the procedures that may be used to build an object. A class
+-- may declare several, so callers pick the one that fits what they know:
+-- `create Account.with_balance(100)` or `create Account.with_owner("Ada", 100)`.
+-- A class with no create clause is built with a bare `create Point`, and its
+-- fields start at their type's default (0, "", false).
+--
+-- A creation procedure's precondition is what keeps an object from ever
+-- existing in a state its invariant rejects.
+--
+-- Run:  nex create_example.nex
 
+-- No create clause: fields take default values.
 class Point
   feature
     x: Integer
     y: Integer
 
-    distance_from_origin() do
-      print(x * x + y * y)
+    distance_squared(): Integer do
+      result := x * x + y * y
+    end
+
+    to_text(): String do
+      result := "Point(" + x.to_string + ", " + y.to_string + ")"
     end
 end
 
+-- Two creation procedures for the same class.
 class Account
   create
     with_balance(initial: Integer)
       require
         non_negative: initial >= 0
       do
+        owner := "unnamed"
         balance := initial
       ensure
         balance_set: balance = initial
@@ -43,17 +60,14 @@ class Account
         positive: amount > 0
       do
         balance := balance + amount
-      ensure
-        increased: balance >= 0
       end
 
-    show() do
-      print("Account(owner=")
-      print(owner)
-      print(", balance=")
-      print(balance)
-      print(")")
+    to_text(): String do
+      result := "Account(owner=" + owner + ", balance=" + balance.to_string + ")"
     end
+
+  invariant
+    non_negative_balance: balance >= 0
 end
 
 class Rectangle
@@ -74,11 +88,59 @@ class Rectangle
     width: Integer
     height: Integer
 
-    area() do
-      print(width * height)
+    area(): Integer do
+      result := width * height
     end
 
-    perimeter() do
-      print(2 * (width + height))
+    perimeter(): Integer do
+      result := 2 * (width + height)
     end
 end
+
+function main() do
+  let c: Console := create Console
+
+  -- 1. No create clause: `create Point` gives zeroed fields.
+  c.print_line("1. default initialization")
+  let origin: Point := create Point
+  c.print_line("  " + origin.to_text +
+               "  distance_squared = " + origin.distance_squared.to_string)
+
+  -- 2. Choosing among several creation procedures.
+  c.print_line("2. multiple creation procedures")
+  let a: Account := create Account.with_balance(100)
+  c.print_line("  with_balance(100)        -> " + a.to_text)
+  let b: Account := create Account.with_owner("Ada", 250)
+  c.print_line("  with_owner(\"Ada\", 250)   -> " + b.to_text)
+  b.deposit(50)
+  c.print_line("  after deposit(50)        -> " + b.to_text)
+
+  -- 3. A creation precondition rejects an object that would be born invalid.
+  c.print_line("3. creation preconditions")
+  do
+    let bad: Account := create Account.with_balance(-10)
+    c.print_line("  with_balance(-10) succeeded -- unexpected! " + bad.to_text)
+  rescue
+    c.print_line("  with_balance(-10) rejected by require non_negative")
+  end
+  do
+    let bad: Account := create Account.with_owner("", 100)
+    c.print_line("  with_owner(\"\", 100) succeeded -- unexpected! " + bad.to_text)
+  rescue
+    c.print_line("  with_owner(\"\", 100) rejected by require has_name")
+  end
+
+  -- 4. Postconditions on a creation procedure.
+  c.print_line("4. a fully specified constructor")
+  let r: Rectangle := create Rectangle.make(3, 4)
+  c.print_line("  Rectangle.make(3, 4): area = " + r.area.to_string +
+               ", perimeter = " + r.perimeter.to_string)
+  do
+    let bad: Rectangle := create Rectangle.make(0, 4)
+    c.print_line("  make(0, 4) succeeded -- unexpected!")
+  rescue
+    c.print_line("  make(0, 4) rejected by require positive_width")
+  end
+end
+
+main()

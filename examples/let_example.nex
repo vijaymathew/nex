@@ -1,0 +1,70 @@
+-- Local Variables Example
+--
+-- `let` introduces a new local; `:=` assigns to one that already exists.
+-- The type annotation is optional -- omit it and the type is inferred from
+-- the initializer.
+--
+-- Run:  nex let_example.nex
+
+function main() do
+  let c: Console := create Console
+
+  -- 1. Untyped let: the type is inferred.
+  c.print_line("1. inferred types")
+  let x := 42
+  let name := "Nex"
+  let ratio := 0.5
+  let ready := true
+  c.print_line("   x=" + x.to_string + " name=" + name +
+               " ratio=" + ratio.to_string + " ready=" + ready.to_string)
+
+  -- 2. Typed let: the annotation is checked against the initializer.
+  c.print_line("2. explicit types")
+  let count: Integer := 10
+  let label: String := "items"
+  let rate: Real := 1.5
+  c.print_line("   " + count.to_string + " " + label + " at " + rate.to_string)
+
+  -- 3. Locals build on earlier locals.
+  c.print_line("3. locals in expressions")
+  let a := 5 + 3
+  let b := a * 2
+  let d := b - 4
+  c.print_line("   a=" + a.to_string + " b=" + b.to_string + " d=" + d.to_string)
+
+  let width := 10
+  let height := 20
+  let area := width * height
+  let perimeter := 2 * (width + height)
+  c.print_line("   area=" + area.to_string + " perimeter=" + perimeter.to_string)
+
+  -- 4. `let` declares, `:=` re-assigns. Declaring is a one-time act.
+  c.print_line("4. declaration vs assignment")
+  let counter := 10
+  c.print_line("   after let:  " + counter.to_string)
+  counter := 20
+  c.print_line("   after :=    " + counter.to_string)
+
+  -- 5. Booleans are values like any other, so they can be named.
+  c.print_line("5. named booleans")
+  let low := 5
+  let high := 10
+  let greater := low > high
+  let equal := low = high
+  let either := greater or equal
+  c.print_line("   greater=" + greater.to_string +
+               " equal=" + equal.to_string +
+               " either=" + either.to_string)
+
+  -- 6. A local may be declared anywhere in a body, not just at the top.
+  c.print_line("6. declarations interleave with statements")
+  c.print_line("   " + 1.to_string)
+  let p := 2
+  c.print_line("   " + p.to_string)
+  let q := p + 1
+  c.print_line("   " + q.to_string)
+  let r := q * 2
+  c.print_line("   " + r.to_string)
+end
+
+main()
