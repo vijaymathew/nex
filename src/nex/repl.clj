@@ -1,6 +1,7 @@
 (ns nex.repl
   "Interactive REPL for the Nex programming language"
   (:require [nex.parser :as p]
+            [nex.walker :as walker]
             [nex.interpreter :as interp]
             [nex.compiler.jvm.repl :as compiled-repl]
             [nex.compiler.jvm.runtime :as compiled-runtime]
@@ -1318,6 +1319,29 @@
   [input]
   (re-matches #"^\s*[a-zA-Z_][a-zA-Z0-9_]*\s*$" input))
 
+(defn- inject-session-refinements
+  "Re-run refinement-check injection on a freshly parsed REPL cell for refinements
+   declared in EARLIER cells. Refinement narrowing checks are injected at parse
+   time (nex.walker), which only sees the current cell's `declare type ... where`;
+   a `let x: R := v` whose refinement R was declared on a previous line would
+   otherwise carry no check. The current cell's own refinements are already
+   injected by the parser, so they are excluded here to avoid a duplicate check.
+   `prior-aliases` is the session alias map, which at call time holds only earlier
+   cells' aliases (the current cell's are recorded afterwards)."
+  [ast prior-aliases]
+  (let [current-names (set (map :name (:type-aliases ast)))
+        prior-refinements (->> (vals prior-aliases)
+                               (filter :refinement)
+                               (remove #(contains? current-names (:name %)))
+                               vec)]
+    (if (empty? prior-refinements)
+      ast
+      (let [orig-aliases (:type-aliases ast)]
+        (-> ast
+            (assoc :type-aliases prior-refinements)
+            walker/inject-refinement-checks
+            (assoc :type-aliases orig-aliases))))))
+
 (defn eval-code
   ([ctx input]
    (eval-code ctx input "<repl>"))
@@ -1391,7 +1415,12 @@
                                 ;; All attempts failed - throw the ORIGINAL error
                                 ;; so line numbers reference the user's actual code
                                 (throw e)))))
-                        (throw e))))))]
+                        (throw e))))))
+            ;; Inject refinement checks for types declared on earlier lines, so a
+            ;; `let x: R := v` is checked even when `declare type R ... where` ran
+            ;; in a previous cell. *repl-type-aliases* here holds only prior cells'
+            ;; aliases; the current cell's are recorded further below.
+            ast (inject-session-refinements ast @*repl-type-aliases*)]
         (sync-compiled-session-into-interpreter! exec-ctx)
         ;; Persist any type aliases declared in this input so later REPL lines
         ;; (and the type checker) can resolve them by name.

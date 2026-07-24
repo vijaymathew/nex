@@ -163,6 +163,14 @@
 ;; nested function/method/constructor lowering picks it up automatically.
 (def ^:dynamic *type-aliases* {})
 
+;; Program top-level `let` globals (name -> nex-type), bound once at the lowering
+;; entry point. Readable from the static world (§7): an otherwise-unknown
+;; identifier in a non-top-level body that names a global lowers to a `top-get`
+;; against the live session state. Threaded as a dynamic var (like *type-aliases*)
+;; so nested function/method/constructor lowering picks it up without every call
+;; site passing it through.
+(def ^:dynamic *top-level-globals* {})
+
 (defn- unsupported
   "An ex-info marking a construct the compiled backend does not implement yet.
 
@@ -309,7 +317,7 @@
   ([{:keys [locals top-level? repl? state-slot next-slot classes functions imports var-types
             compiled-classes current-class fields this-type old-field-locals
             generic-param-names generic-param-constraints generic-runtime-values
-            with-java? across-cursors] :as opts}]
+            with-java? across-cursors globals] :as opts}]
    {:locals (or locals {})
     :top-level? (if (contains? opts :top-level?) top-level? true)
     :repl? (if (contains? opts :repl?) repl? true)
@@ -335,7 +343,12 @@
     :generic-param-constraints (or generic-param-constraints {})
     :generic-runtime-values (or generic-runtime-values {})
     :with-java? (boolean with-java?)
-    :across-cursors (or across-cursors {})}))
+    :across-cursors (or across-cursors {})
+    ;; Top-level `let` globals (name -> nex-type), readable from the static world
+    ;; (§7). In a non-top-level body an otherwise-unknown identifier that names a
+    ;; global lowers to a `top-get` against the live session state. Defaults to the
+    ;; program-wide dynamic var so nested body envs pick globals up automatically.
+    :globals (or globals *top-level-globals*)}))
 
 (defn- string-jvm-type
   []
@@ -480,7 +493,9 @@
               (some-> (and (:current-class env)
                            (lookup-class-constant env (:current-class env) (:name expr)))
                       (#(constant-nex-type env %)))
-              (get (:var-types env) (:name expr)))
+              (get (:var-types env) (:name expr))
+              ;; A readable top-level global (§7).
+              (get (:globals env) (:name expr)))
 
           :create
           (if (seq (:generic-args expr))
@@ -565,7 +580,13 @@
         (tc/infer-expression-type expr {:classes (:classes env)
                                         :functions (:functions env)
                                         :imports (:imports env)
-                                        :var-types (env-visible-var-types env)
+                                        ;; Globals (§7) are visible to this fallback
+                                        ;; too, so a chain rooted at a global
+                                        ;; receiver (`con.read_line.to_integer`)
+                                        ;; whose tail the primary path can't type
+                                        ;; still resolves. Locals win over globals.
+                                        :var-types (merge (:globals env)
+                                                          (env-visible-var-types env))
                                         ;; Without these an aliased receiver
                                         ;; (`let t: Tid := ...`; `Tid = String`)
                                         ;; infers as nil here and lowering fails
@@ -2747,10 +2768,14 @@
                                    :method (:name expr)
                                    :args []
                                    :has-parens true})
-            (let [nex-type (or (get (:var-types env) (:name expr))
+            (let [global? (contains? (:globals env) (:name expr))
+                  nex-type (or (get (:var-types env) (:name expr))
+                               (get (:globals env) (:name expr))
                                (infer-type env expr))
                   jvm-type (resolve-jvm-type env nex-type)]
-              (if (:top-level? env)
+              ;; A readable top-level global (§7) lowers to a `top-get` against
+              ;; the live session state even inside a method/function body.
+              (if (or (:top-level? env) global?)
                 (ir/top-get-node (:name expr) nex-type jvm-type)
                 (throw (ex-info "Unknown local in non-top-level lowering"
                                 {:name (:name expr)}))))))))
@@ -4687,6 +4712,26 @@
      :constructors constructors
      :methods methods}))
 
+(defn- compute-top-level-globals
+  "Infer the nex-type of each direct top-level `let` (a program global), in source
+   order, so the static world can read them (§7). Seeds with `seed-var-types`
+   (prior top-level state, e.g. earlier REPL cells) so cross-cell globals resolve
+   too. Only *direct* top-level lets are globals, matching the typechecker."
+  [base-env seed-var-types statements]
+  (loop [ss statements
+         vt (or seed-var-types {})
+         acc (or seed-var-types {})]
+    (if (empty? ss)
+      acc
+      (let [stmt (first ss)]
+        (if (and (map? stmt) (= :let (:type stmt)))
+          (let [e (assoc base-env :var-types vt :top-level? true)
+                ty (or (:var-type stmt)
+                       (try (infer-type e (:value stmt)) (catch Exception _ nil))
+                       "Any")]
+            (recur (rest ss) (assoc vt (:name stmt) ty) (assoc acc (:name stmt) ty)))
+          (recur (rest ss) vt acc))))))
+
 (defn lower-repl-cell
   "Lower a narrow REPL/program body to a first compiler unit."
   [program opts]
@@ -4722,6 +4767,7 @@
                                 :state-slot 0
                                 :next-slot 1})
         statements (vec (:statements program))
+        globals-map (compute-top-level-globals env (:var-types opts) statements)
         tail-stmt (last statements)
         return-tail? (repl-tail-returns-value? env tail-stmt)
         leading-statements (if return-tail? (pop statements) statements)
@@ -4762,7 +4808,8 @@
                  "Any"
                  (ir/object-jvm-type "java/lang/Object"))))]
     {:env env''
-     :unit (ir/unit {:name (or (:name opts) "nex/repl/Cell_0001")
+     :unit (binding [*top-level-globals* globals-map]
+             (ir/unit {:name (or (:name opts) "nex/repl/Cell_0001")
                      :kind :repl-cell
                      :source-file (:source-file opts)
                      :locals (vec (vals (:locals env'')))
@@ -4780,4 +4827,4 @@
                                                               :compiled-classes (:compiled-classes opts)))
                                       (remove :declaration-only? (:functions program)))
                      :body lowered-body''
-                     :result-jvm-type (ir/object-jvm-type "java/lang/Object")})})))
+                     :result-jvm-type (ir/object-jvm-type "java/lang/Object")}))})))
