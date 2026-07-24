@@ -580,7 +580,13 @@
         (tc/infer-expression-type expr {:classes (:classes env)
                                         :functions (:functions env)
                                         :imports (:imports env)
-                                        :var-types (env-visible-var-types env)
+                                        ;; Globals (§7) are visible to this fallback
+                                        ;; too, so a chain rooted at a global
+                                        ;; receiver (`con.read_line.to_integer`)
+                                        ;; whose tail the primary path can't type
+                                        ;; still resolves. Locals win over globals.
+                                        :var-types (merge (:globals env)
+                                                          (env-visible-var-types env))
                                         ;; Without these an aliased receiver
                                         ;; (`let t: Tid := ...`; `Tid = String`)
                                         ;; infers as nil here and lowering fails
