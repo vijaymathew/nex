@@ -323,9 +323,14 @@ localVarDecl
     : LET IDENTIFIER (':' type)? ASSIGN expression
     ;
 
+// A statement-position call. A *bare* identifier (`show`, a parameterless call
+// without parentheses) is deliberately NOT an alternative here: it would match
+// `a` in `a - 100` and leave `- 100` to parse as a separate unary-minus
+// statement (only `-` among the binary operators has a prefix form, so only it
+// splits). Instead a bare identifier statement falls through to `expression`
+// and the walker restores its parameterless-call shape in statement position.
 methodCall
     : primary callChain
-    | IDENTIFIER
     ;
 
 callChain
