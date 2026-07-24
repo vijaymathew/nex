@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+## 0.3.1 - 2026-07-24
+
+- **New: top-level globals are readable from functions and classes.** A value
+  bound by a top-level `let` can now be read inside any free function or class
+  routine, not only from the top-level statements that follow it. Globals are
+  read-only from this static world — assigning to one from a function or class
+  body is a compile-time error — and a def-before-use rule rejects a program that
+  could read a global before its `let` has run: every global a body reads must be
+  initialized before the first top-level call into user code. Both backends
+  support it; see the manual, §7.4.
+
+- **Fixed: a chained method call on a global receiver failed to compile.** A body
+  that read a global and then called through it more than once — for example
+  `con.read_line.to_integer` — aborted with an "Unable to infer expression type
+  during lowering" internal error. The compiler's fallback type inference now
+  sees globals, so the whole chain resolves.
+
+- **Fixed: a refinement type declared on an earlier REPL line is now enforced.**
+  A `declare type Quantity = Integer where n: n > 0` on one line followed by
+  `let q: Quantity := -1` on a later line silently accepted the invalid value:
+  the narrowing check is injected at parse time, which saw only the current
+  line's declarations. The REPL now re-applies refinement checks for types
+  declared on earlier lines. In a script, where the whole program is one parse
+  unit, this already worked.
+
+- **Fixed: `a - 100` now parses as a subtraction.** Because `-` is the only
+  binary operator with a prefix (unary) form, `a - 100` used to split into two
+  statements — a parameterless call `a`, then a separate `-100` — while `a + 10`
+  and the rest parsed as one expression. A bare identifier no longer stands as a
+  statement-level call when a `-` follows: it is one subtraction, at the REPL and
+  in scripts. To call a parameterless routine and then negate, write `a()` or
+  `(a)`.
+
 ## 0.3.0 - 2026-07-23
 
 - **New: class constants** — a feature written `NAME = expression`, with an
