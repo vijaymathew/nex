@@ -3,6 +3,7 @@
             [clojure.test :refer [deftest is testing]]
             [nex.eval :as e]
             [nex.parser :as p]
+            [nex.repl :as repl]
             [nex.interpreter :as interp]))
 
 ;; Refinement types (`declare type X = Base where n: <pred>`) register as an
@@ -292,3 +293,24 @@ if convert a to y: ?Quantity then print(y) end")]
       (is (some? msg) "?Quantity must be rejected")
       (is (re-find #"`Quantity` is a refinement type" msg)
           (str "should name the alias, not the `?` shape, got: " msg)))))
+
+;; Refinement checks are injected at parse time, which sees only the current REPL
+;; cell's `declare type`. A `let x: R := v` typed on a *later* line than its
+;; `declare type R ... where` must still be checked — the REPL re-injects for
+;; refinements declared in earlier cells. (Regression: previously such a binding
+;; carried no check, so `let q: Quantity := -1` was silently accepted.)
+(deftest refinement-from-earlier-repl-cell-is-enforced
+  (testing "a refinement declared on a previous REPL line checks a later binding"
+    (let [ctx (repl/init-repl-context)
+          out (with-out-str
+                (repl/eval-code ctx "declare type Quantity = Integer where n: n > 0")
+                (repl/eval-code ctx "let bad: Quantity := -1")
+                (repl/eval-code ctx "let zero: Quantity := 0")
+                (repl/eval-code ctx "let ok: Quantity := 5")
+                (repl/eval-code ctx "ok"))]
+      (is (str/includes? out "Refinement Quantity violated")
+          "a negative binding on a later line must be rejected")
+      ;; The two invalid bindings each raise; the valid one is accepted and echoes.
+      (is (= 2 (count (re-seq #"Refinement Quantity violated" out)))
+          "both -1 and 0 must be rejected, 5 accepted")
+      (is (str/includes? out "5")))))

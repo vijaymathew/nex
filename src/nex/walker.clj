@@ -1289,7 +1289,17 @@
 
    :statement
    (fn [[_ stmt]]
-     (transform-node stmt))
+     (let [node (transform-node stmt)]
+       ;; A bare identifier in statement position is a parameterless call
+       ;; (`show`), not a value expression. The grammar no longer matches it as a
+       ;; call (so `a - 100` parses as one subtraction rather than `a` then
+       ;; `-100`); it arrives here as an `:identifier` via `expression`, and we
+       ;; restore the parameterless-call shape it has everywhere else.
+       (if (and (map? node) (= :identifier (:type node)))
+         (merge (select-keys node [:dbg/line :dbg/col])
+                {:type :call :target nil :method (:name node)
+                 :args [] :has-parens false})
+         node)))
 
    :scopedBlock
    (fn [[_ _do-kw & rest]]

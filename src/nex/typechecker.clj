@@ -31,7 +31,11 @@
     :let-names (atom #{})
     ;; Non-fatal diagnostics surfaced to the user (e.g. equals/hash mismatch).
     ;; Lives on the root env; children share it via env-add-warning.
-    :warnings (atom [])}))
+    :warnings (atom [])
+    ;; Top-level `let` globals, readable (not assignable) from the static world
+    ;; (function and class bodies). Populated by a pre-pass before body checking;
+    ;; consulted via the root env by env-lookup-global. See §7 of the spec.
+    :globals (atom {})}))
 
 (defn env-add-warning
   "Record a non-fatal type-checker warning on the root environment."
@@ -52,6 +56,21 @@
   "Add a variable to the environment"
   [env name type]
   (swap! (:vars env) assoc name type))
+
+(defn- env-root
+  [env]
+  (loop [e env] (if (:parent e) (recur (:parent e)) e)))
+
+(defn env-lookup-global
+  "Look up a top-level global's type. Globals live on the root env and are
+   readable from anywhere in the static world (function and class bodies)."
+  [env name]
+  (get @(:globals (env-root env)) name))
+
+(defn env-add-global
+  "Register a top-level global's type on the root env."
+  [env name type]
+  (swap! (:globals (env-root env)) assoc name type))
 
 (defn env-set!
   "Update a variable type in the nearest environment where it is defined."
@@ -1264,8 +1283,12 @@
           (:field-type constant)
           (if-let [method-sig (lookup-class-method env current-class name)]
             (or (:return-type method-sig) "Void")
-            (throw (ex-info (str "Undefined variable: " name)
-                            {:error (type-error (str "Undefined variable: " name))})))))
+            ;; Inside the static world, an otherwise-unknown name may be a
+            ;; readable top-level global (§7).
+            (if-let [global-type (env-lookup-global env name)]
+              global-type
+              (throw (ex-info (str "Undefined variable: " name)
+                              {:error (type-error (str "Undefined variable: " name))}))))))
       (throw (ex-info (str "Undefined variable: " name)
                       {:error (type-error (str "Undefined variable: " name))})))))
 
@@ -1942,7 +1965,11 @@
                        (if (string? target)
                          (or (env-lookup-var env target)
                              (when current-class
-                               (lookup-class-field env current-class target)))
+                               (or (lookup-class-field env current-class target)
+                                   ;; A readable top-level global (§7). Gated on
+                                   ;; being in the static world so top-level
+                                   ;; source-order threading is preserved.
+                                   (env-lookup-global env target))))
                          (check-expression env target))))
         normalized-target (normalize-type target-type)
         target-detachable? (detachable-type? normalized-target)
@@ -3050,8 +3077,14 @@
                    (check-expression-with-expected env value var-type)
                    (check-expression env value))]
     (when-not var-type
-      (throw (ex-info (str "Undefined variable: " target)
-                      {:error (type-error (str "Undefined variable: " target))})))
+      (if (and (env-lookup-var env "__current_class__")
+               (env-lookup-global env target))
+        (throw (ex-info (str "Cannot assign to global: " target)
+                        {:error (type-error
+                                 (str "'" target "' is a top-level global and is read-only "
+                                      "inside a function or class body."))}))
+        (throw (ex-info (str "Undefined variable: " target)
+                        {:error (type-error (str "Undefined variable: " target))}))))
     (when-not (types-compatible? env val-type var-type)
       (throw (ex-info (str "Type mismatch in assignment to " target)
                       {:error (type-error
@@ -4744,6 +4777,147 @@
       (check! (str "variable '" name "'") line var-type))
     @errs))
 
+(defn- collect-top-level-globals!
+  "Infer the type of each direct top-level `let` (a program global) and register
+   it on the root env so function and class bodies can read it (§7). Runs before
+   body checking, in source order. Uses a scratch env that shares the class,
+   method and alias registries but keeps its own vars/warnings, so this
+   inference neither pollutes top-level source-order threading nor double-reports
+   diagnostics. Only *direct* top-level lets count as globals; lets nested inside
+   top-level control flow are block-scoped and are not registered."
+  [env statements]
+  (let [scratch (assoc (make-type-env)
+                       :classes (:classes env)
+                       :methods (:methods env)
+                       :type-aliases (:type-aliases env)
+                       :globals (:globals env))]
+    (doseq [stmt statements
+            :when (and (map? stmt) (= :let (:type stmt)))]
+      (let [nm (:name stmt)
+            declared (:var-type stmt)
+            ty (or (when declared (expand-type-aliases env (normalize-type declared)))
+                   (try (check-expression scratch (:value stmt))
+                        (catch Exception _ "Any")))]
+        (env-add-var scratch nm (or ty "Any"))
+        (env-add-global env nm (or ty "Any"))))))
+
+(defn- body-let-names
+  "Names bound by a `let` anywhere in `body` — locals that shadow a like-named
+   global. Includes lets synthesized into a body (e.g. a refinement predicate
+   inlined as `let s := t; if not (s...) ...`), so those do not read as globals."
+  [body]
+  (into #{}
+        (comp (filter #(and (map? %) (= :let (:type %))))
+              (keep :name))
+        (tree-seq coll? seq body)))
+
+(defn- body-bound-names
+  "Names that shadow a global within `body`: its params, the enclosing class's
+   field names, and any `let`-bound local. A shadowed name is not a global read."
+  [params field-names body]
+  (-> (set (map :name params))
+      (into field-names)
+      (into (body-let-names body))))
+
+(defn- body-global-refs
+  "Set of global names read anywhere in `body`, excluding names in `bound`.
+   Reads appear either as a bare `:identifier` or as a string call receiver
+   (`x.m(...)` parses the receiver `x` to a string target)."
+  [globals bound body]
+  (let [refs (volatile! #{})
+        consider! (fn [nm]
+                    (when (and (contains? globals nm)
+                               (not (contains? bound nm)))
+                      (vswap! refs conj nm)))]
+    (doseq [node (tree-seq coll? seq body)]
+      (when (map? node)
+        (cond
+          (and (= :call (:type node)) (string? (:target node)))
+          (consider! (:target node))
+          (= :identifier (:type node))
+          (consider! (:name node)))))
+    @refs))
+
+(defn- class-field-names
+  [class-def]
+  (into #{}
+        (for [section (:body class-def)
+              :when (= (:type section) :feature-section)
+              member (:members section)
+              :when (= (:type member) :field)]
+          (:name member))))
+
+(defn- statement-enters-static-world?
+  "True if a top-level statement can transfer control into user-written code:
+   it calls a user free function, or creates a user-defined class (running its
+   constructor). Method calls need not be considered: the receiver object must
+   have been created first, so a `create` always precedes the first method call."
+  [fn-names user-class-names stmt]
+  (some (fn [node]
+          (and (map? node)
+               (or (and (= :call (:type node))
+                        (nil? (:target node))
+                        (contains? fn-names (:method node)))
+                   (and (= :create (:type node))
+                        (contains? user-class-names (:class-name node))))))
+        (tree-seq coll? seq stmt)))
+
+(defn- check-global-watermark
+  "Enforce the def-before-use watermark for readable globals (§7): every global
+   referenced by any function or class body must be initialized before the first
+   top-level statement that enters user code. Returns a vector of TypeError."
+  [statements normalized-functions classes globals-map]
+  (let [global-names (set (keys globals-map))]
+    (if (empty? global-names)
+      []
+      (let [fn-names (set (map :name normalized-functions))
+            user-class-names (set (map :name classes))
+            ;; Earliest top-level statement index that enters user code.
+            watermark (first (keep-indexed
+                              (fn [i s]
+                                (when (statement-enters-static-world?
+                                       fn-names user-class-names s)
+                                  i))
+                              statements))
+            ;; Position (top-level statement index) where each global is defined.
+            global-pos (reduce (fn [m [i s]]
+                                 (if (and (map? s) (= :let (:type s))
+                                          (contains? global-names (:name s))
+                                          (not (contains? m (:name s))))
+                                   (assoc m (:name s) i)
+                                   m))
+                               {}
+                               (map-indexed vector statements))
+            ;; Globals read anywhere in the static world.
+            used (apply set/union
+                        (concat
+                         (for [f normalized-functions]
+                           (body-global-refs global-names
+                                             (body-bound-names (:params f) #{} (:body f))
+                                             (:body f)))
+                         (for [c classes
+                               :let [fields (class-field-names c)]
+                               section (:body c)
+                               :when (#{:feature-section :constructors} (:type section))
+                               member (concat (:members section) (:constructors section))
+                               :when (:body member)]
+                           (body-global-refs global-names
+                                             (body-bound-names (:params member) fields (:body member))
+                                             (:body member)))))]
+        (if (nil? watermark)
+          ;; No statement ever enters user code, so no body runs: nothing to check.
+          []
+          (vec (keep (fn [g]
+                       (let [pos (get global-pos g)]
+                         (when (or (nil? pos) (>= pos watermark))
+                           (type-error
+                            (str "Global '" g "' is read by a function or class body but is "
+                                 "not initialized before the first call into user code"
+                                 (when-let [wl (:dbg/line (nth statements watermark nil))]
+                                   (str " (line " wl ")"))
+                                 ". Move its `let` above that point.")))))
+                     (sort used))))))))
+
 (defn check-program
   "Type check a complete program.
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
@@ -4826,6 +5000,19 @@
                                       (str "Function " (:name fn-def)
                                            " must have at most 32 parameters"))}))))
          (env-add-var env (:name fn-def) (:class-name fn-def)))
+
+       ;; Register top-level `let` globals so class and function bodies can read
+       ;; them (§7), and enforce the def-before-use watermark before those bodies
+       ;; are checked (so an undefined global surfaces as an init-order error,
+       ;; not a downstream "Undefined variable").
+       (when (seq statements)
+         (collect-top-level-globals! env statements)
+         (let [watermark-errors (check-global-watermark
+                                 statements normalized-functions classes
+                                 @(:globals env))]
+           (when (seq watermark-errors)
+             (throw (ex-info "Global initialized after first use"
+                             {:errors watermark-errors})))))
 
        ;; Second pass: check class bodies, including normalized function classes.
        (doseq [class-def visible-classes]

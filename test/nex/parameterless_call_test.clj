@@ -268,3 +268,32 @@ end"
                                                 :method "a"
                                                 :args []})]
         (is (= 10 result))))))
+
+;; `a - 100` must parse as one subtraction, not as a parameterless call `a`
+;; followed by a separate `-100` statement. Among the binary operators only `-`
+;; has a prefix (unary) form, so only it could split this way; the grammar no
+;; longer lets a bare identifier stand as a statement-level call, and the walker
+;; restores the parameterless-call shape for a genuinely bare identifier.
+(deftest minus-after-identifier-is-subtraction-not-a-split
+  (testing "`a - 100` is a single binary subtraction"
+    (let [stmts (:statements (p/ast "a - 100"))]
+      (is (= 1 (count stmts)) "must be one statement, not `a` then `-100`")
+      (is (= :binary (:type (first stmts))))
+      (is (= "-" (:operator (first stmts))))))
+  (testing "no spaces parses the same way"
+    (let [stmts (:statements (p/ast "a-100"))]
+      (is (= 1 (count stmts)))
+      (is (= :binary (:type (first stmts))))))
+  (testing "a bare identifier statement is still a parameterless call"
+    (let [stmts (:statements (p/ast "show"))]
+      (is (= 1 (count stmts)))
+      (is (= :call (:type (first stmts))))
+      (is (= "show" (:method (first stmts))))
+      (is (nil? (:target (first stmts))))
+      (is (false? (:has-parens (first stmts)))))))
+
+(deftest subtraction-from-a-variable-evaluates
+  (testing "the interpreter computes `x - n` (regression: it echoed -n)"
+    (let [ctx (interp/make-context)]
+      (interp/eval-node ctx (p/ast "let x := 2\nprint(x - 100)"))
+      (is (= ["-98"] (mapv str @(:output ctx)))))))
