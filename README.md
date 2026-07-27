@@ -75,6 +75,8 @@ end
 
 The `require` clause states the caller's obligation. The `ensure` clause states the routine's guarantee. The `invariant` block states what must be true of every instance at all times. None of these are comments — they are checked at runtime and reported with their label when violated.
 
+Those clauses speak about boundaries. The `assert` statement states what must be true at one point inside a body — `assert non_empty: items.length > 0`, or `assert i < n` when a name would add nothing — and fails the same way. Assertions always run; there is no build that strips them.
+
 ### Loop Contracts
 
 ```nex
@@ -405,6 +407,7 @@ See [examples/README.md](examples/README.md) for the full list.
 - Pattern matching: `match ... of when ... then ... end`, with field destructuring and `if` guards; `case` for literal-value dispatch
 - Scoped blocks: `do ... end` with lexical scoping and variable shadowing
 - Exceptions: `raise`, `rescue`, `retry`
+- Mid-body assertions: `assert label: condition`, or `assert condition`
 
 ---
 

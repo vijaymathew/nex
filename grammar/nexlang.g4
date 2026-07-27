@@ -211,6 +211,7 @@ statement
     | withStatement
     | raiseStatement
     | retryStatement
+    | assertStatement
     | caseStatement
     | matchStatement
     | selectStatement
@@ -304,6 +305,21 @@ raiseStatement
 
 retryStatement
     : RETRY
+    ;
+
+// A mid-body assertion. `require` / `ensure` state what holds at a routine's
+// boundaries and `invariant` what holds around a loop; `assert` states what
+// holds at one point inside a body, which no other clause can express.
+//
+// The labelled form reuses the same `assertion` rule as those clauses, so a
+// failure reports a name:  assert non_empty: items.length > 0
+// The bare form takes a plain expression and reports the line instead:
+//                          assert i < n
+// Both lower to the same contract-violation check the other clauses emit.
+// `assertion+` is tried first: only a labelled assertion can have an
+// IDENTIFIER followed by ':', so the two forms never collide.
+assertStatement
+    : ASSERT (assertion+ | expression)
     ;
 
 spawnExpression
@@ -537,6 +553,7 @@ VARIANT      : 'variant';
 REQUIRE      : 'require';
 ENSURE       : 'ensure';
 INVARIANT    : 'invariant';
+ASSERT       : 'assert';
 OLD          : 'old';
 THIS         : 'this';
 NOTE         : 'note';

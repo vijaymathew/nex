@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **New: the `assert` statement.** `require`, `ensure`, and `invariant` state
+  what holds at a routine's boundaries or around a loop; `assert` states what
+  holds at one point *inside* a body, which no other clause could express.
+  It takes either a named assertion in the same form as the other clauses —
+  `assert non_empty: items.length > 0` — or a bare expression, `assert i < n`,
+  whose failure reports the source line instead of a name. Several named
+  assertions may sit under one `assert`, as with `require`. A failure raises the
+  same contract violation the other clauses raise; assertions always run, and
+  there is no mode that strips them. Both backends support it.
+
+  `assert` is now a reserved word and can no longer be used as an identifier.
+
 ## 0.3.1 - 2026-07-24
 
 - **New: top-level globals are readable from functions and classes.** A value

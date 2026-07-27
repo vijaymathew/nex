@@ -482,6 +482,9 @@ Pause on failures:
 :breakon contract filter invariant
 ```
 
+The contract filter takes `pre`, `post`, `invariant`, or `assert` — or any
+substring to match against the violation message.
+
 Save and restore debugger state:
 
 ```text
@@ -505,6 +508,25 @@ w.spend(2) -- Error: Precondition violation: enough
 ```
 
 Use contracts to state assumptions (`require`), guarantees (`ensure`), and global consistency rules (`invariant`).
+
+Those three speak about a routine's boundaries or a whole class. To state
+something that must hold *part way through* a body, use `assert`:
+
+```nex
+assert enough_left: money >= 0.0   -- named: the failure reports the name
+assert money >= 0.0                -- bare: the failure reports the line
+```
+
+A failed `assert` reports a contract violation exactly as `require` and `ensure`
+do, which makes it the natural way to write checks in a test routine:
+
+```nex
+function test_spend() do
+  let w: Wallet := create Wallet.with_balance(10.0)
+  w.spend(4.0)
+  assert spent: w.money = 6.0
+end
+```
 
 ## 12. Errors and Recovery
 

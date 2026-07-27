@@ -1620,6 +1620,19 @@
    (fn [[_ _retry-kw]]
      {:type :retry})
 
+   :assertStatement
+   (fn [[_ _assert-kw & body]]
+     ;; Two shapes share this rule (see nexlang.g4): one or more labelled
+     ;; `assertion`s, or a single bare expression. Normalise both to the
+     ;; assertion list the contract clauses already produce, leaving :label nil
+     ;; for the bare form so backends can fall back to the source line.
+     {:type :assert
+      :assertions (if (and (= 1 (count body))
+                           (not (and (sequential? (first body))
+                                     (= :assertion (first (first body))))))
+                    [{:label nil :condition (transform-node (first body))}]
+                    (mapv transform-node body))})
+
    :invariantClause
    (fn [[_ _invariant-kw & assertions]]
      (mapv transform-node assertions))

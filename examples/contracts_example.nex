@@ -6,6 +6,7 @@
 --   require    preconditions -- the caller's obligation
 --   ensure     postconditions -- the supplier's promise, may use `old`
 --   invariant  class invariants -- true of every object between calls
+--   assert     mid-body checks -- true at one point inside a body
 --
 -- A violated contract raises, so each call below is wrapped in a
 -- `do ... rescue ... end` block to show which ones the contracts reject.
@@ -125,6 +126,20 @@ function main() do
   try_advance(c, dt, 6)     -- 17 -> 23, the boundary
   try_advance(c, dt, 1)     -- would leave the valid range
   try_advance(c, dt, 0)     -- not positive
+
+  -- 4. `assert` states what holds part way through a body, where no
+  --    require/ensure/invariant can reach. Named or bare; both raise the
+  --    same contract violation the clauses above raise.
+  c.print_line("4. mid-body assertions")
+  assert survived_the_rejections: dt.day = 20 and dt.hour = 23
+  assert dt.day >= 1
+  do
+    assert deliberately_false: dt.hour = 0
+    c.print_line("  not reached")
+  rescue
+    c.print_line("  a failed assert raises, like any other contract")
+  end
+  c.print_line("  assertions passed: " + dt.to_text)
 end
 
 main()

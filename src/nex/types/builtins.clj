@@ -183,13 +183,22 @@
 (def Postcondition "Postcondition")
 (def Loop-invariant "Loop invariant")
 (def Class-invariant "Class invariant")
+(def Assertion "Assertion")
 
 (defn report-contract-violation
-  [contract-type label condition]
-  (throw (ex-info (str contract-type " violation: " label)
-                  {:contract-type contract-type
-                   :label label
-                   :condition condition})))
+  "Throw a contract violation. Every clause names its assertion, so `label` is
+   normally present; a bare `assert expr` has none, and reports its source line
+   instead."
+  ([contract-type label condition]
+   (report-contract-violation contract-type label condition nil))
+  ([contract-type label condition line]
+   (throw (ex-info (cond
+                     label (str contract-type " violation: " label)
+                     line  (str contract-type " violation (line " line ")")
+                     :else (str contract-type " violation"))
+                   {:contract-type contract-type
+                    :label label
+                    :condition condition}))))
 
 (defn nex-format-value [value]
   (value/nex-format-value nex-object? nex-map-str nex-array-str nex-set-str value))

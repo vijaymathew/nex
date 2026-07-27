@@ -563,6 +563,7 @@
                     (every? (partial supported-stmt-in-ctx? ctx) (:else stmt))))
     :raise (supported-expr-in-ctx? ctx (:value stmt))
     :retry (:retry-allowed? ctx)
+    :assert (every? #(supported-expr-in-ctx? ctx (:condition %)) (:assertions stmt))
     :select (and (every? #(supported-select-clause-in-ctx? ctx %) (:clauses stmt))
                  (or (nil? (:timeout stmt))
                      (and (supported-expr-in-ctx? ctx (get-in stmt [:timeout :duration]))

@@ -3426,6 +3426,15 @@
           :match (check-match env stmt)
           :raise (check-expression env (:value stmt))
           :retry nil
+          :assert
+          (doseq [{:keys [label condition]} (:assertions stmt)]
+            (let [cond-type (check-expression env condition)]
+              (when-not (= cond-type "Boolean")
+                (throw (ex-info (str "assert condition must be Boolean"
+                                     (when label (str " in '" label "'")))
+                                {:error (type-error
+                                         (str "assert condition must be Boolean, got "
+                                              cond-type))})))))
           :member-assign
           (let [field-name (:field stmt)
                 target-expr (or (:object stmt) {:type :this})

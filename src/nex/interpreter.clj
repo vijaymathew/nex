@@ -707,7 +707,7 @@
 ;;
 
 (def ^:private debuggable-node-types
-  #{:call :member-assign :assign :let :if :case :match :loop :raise :retry :scoped-block})
+  #{:call :member-assign :assign :let :if :case :match :loop :raise :retry :assert :scoped-block})
 
 (defn debuggable-node?
   "Whether this node should trigger debugger pause checks."
@@ -2104,6 +2104,14 @@
   [ctx _node]
   (maybe-debug-pause ctx {:type :retry})
   (throw (ex-info "retry" {:type :nex-retry})))
+
+(defmethod eval-node :assert
+  [ctx node]
+  (maybe-debug-pause ctx node)
+  (doseq [{:keys [label condition]} (:assertions node)]
+    (when-not (eval-node ctx condition)
+      (report-contract-violation bi/Assertion label condition (:dbg/line node))))
+  nil)
 
 (defn eval-body-with-rescue
   "Execute body statements with rescue/retry support.

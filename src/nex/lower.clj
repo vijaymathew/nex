@@ -3782,6 +3782,16 @@
             (throw (ex-info "retry is only supported in compiled rescue blocks"
                             {:stmt stmt})))
 
+          (= :assert (:type stmt))
+          ;; Several assertions under one `assert` lower to one check each, in
+          ;; order. A bare `assert expr` has no label, so carry the statement's
+          ;; line down to each check for the failure message.
+          [env (ir/block-node
+                (mapv (fn [assertion]
+                        (cond-> (assertion-ir env :assert assertion)
+                          (:dbg/line stmt) (assoc :dbg/line (:dbg/line stmt))))
+                      (:assertions stmt)))]
+
           (contains? expression-node-types (:type stmt))
           [env (ir/pop-node (lower-expression env stmt))]
 
