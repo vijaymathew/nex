@@ -1594,7 +1594,11 @@
                 :value {:type :call
                         :target collection-ast
                         :method "cursor"
-                        :args []}}
+                        :args []
+                        ;; `cursor` is this desugaring's own invention. The flag
+                        ;; lets the typechecker report a failure in terms of the
+                        ;; `across` the programmer wrote (see check-target-call).
+                        :from-across true}}
                {:type :call
                 :target cursor-name
                 :method "start"

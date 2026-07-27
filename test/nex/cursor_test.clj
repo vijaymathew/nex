@@ -1,7 +1,8 @@
 (ns nex.cursor-test
   (:require [clojure.test :refer [deftest is testing]]
             [nex.parser :as p]
-            [nex.interpreter :as interp]))
+            [nex.interpreter :as interp]
+            [nex.typechecker :as tc]))
 
 (defn run-nex [code]
   (interp/interpret-and-get-output (p/ast code)))
@@ -289,3 +290,38 @@ main()")]
   (testing "Cursor class is registered in context"
     (let [ctx (interp/make-context)]
       (is (some? (interp/lookup-class-if-exists ctx "Cursor"))))))
+
+;; ============================================================================
+;; ACROSS DIAGNOSTICS
+;; ============================================================================
+
+(defn- type-errors [code]
+  (map :message (:errors (tc/type-check (p/ast code)))))
+
+(deftest across-over-a-non-iterable-names-across-not-cursor-test
+  ;; `across` desugars to `<target>.cursor`, so a target that cannot be iterated
+  ;; failed with "Method not found: cursor" — naming a method the programmer
+  ;; never wrote, in a program with no `cursor` in it.
+  (testing "a value typed Any says how to narrow it"
+    (let [errs (type-errors (str "let m: Map[String, Any] := {\"xs\": [1, 2]}\n"
+                                 "across m.get(\"xs\") as x do\n"
+                                 "  print(x)\n"
+                                 "end\n"))]
+      (is (= 1 (count errs)))
+      (is (re-find #"`across` needs an Array, Map, Set, String, or Cursor; this one is Any"
+                   (first errs)))
+      (is (re-find #"convert" (first errs)) "must point at the way out")
+      (is (not (re-find #"\bcursor\b" (first errs)))
+          "must not name the desugaring's own method (the type `Cursor` is fine)")))
+  (testing "another non-iterable names its own type and offers no narrowing"
+    (let [errs (type-errors "let n: Integer := 5\nacross n as x do\n  print(x)\nend\n")]
+      (is (= 1 (count errs)))
+      (is (re-find #"this one is Integer" (first errs)))
+      (is (not (re-find #"convert" (first errs))))))
+  (testing "the iterable targets are unaffected"
+    (doseq [code ["let xs: Array[Integer] := [1]\nacross xs as x do print(x) end"
+                  "across \"hi\" as c do print(c) end"
+                  "across #{1} as s do print(s) end"
+                  "across {\"k\": 1} as e do print(e.get(0)) end"
+                  "let xs: Array[Integer] := [1]\nacross xs.cursor as c do print(c) end"]]
+      (is (empty? (type-errors code)) code))))

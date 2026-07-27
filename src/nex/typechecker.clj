@@ -1945,8 +1945,19 @@
 
     nil))
 
+(defn- across-target-message
+  "The diagnostic for an `across` whose target cannot be iterated. `cursor` is
+   invented by the desugaring, so naming it would point at code the programmer
+   never wrote."
+  [base-type]
+  (str "`across` needs an Array, Map, Set, String, or Cursor; this one is "
+       base-type "."
+       (when (= "Any" base-type)
+         (str " Narrow it first, for example: if convert <expr> to"
+              " items: Array[Integer] then across items as x do ... end end"))))
+
 (defn- check-target-call
-  [env {:keys [target method args has-parens from-pattern]}]
+  [env {:keys [target method args has-parens from-pattern from-across]}]
   (let [target-name (when (string? target) target)
         across-item-type (and target-name
                               (env-lookup-across-cursor env target-name))
@@ -2107,10 +2118,14 @@
                       "Any")))
                 (if with-java?
                   "Any"
-                  (if (and class-def (not (:import class-def)))
-                  (throw (ex-info (str "Method not found: " method)
-                                  {:error (type-error (str "Method not found: " method))}))
-                  "Any"))))))))))
+                  (let [msg (if (and from-across (= "cursor" method))
+                              (across-target-message base-type)
+                              (str "Method not found: " method))]
+                    (if (and class-def (not (:import class-def)))
+                      (throw (ex-info msg {:error (type-error msg)}))
+                      (if (and from-across (= "cursor" method))
+                        (throw (ex-info msg {:error (type-error msg)}))
+                        "Any"))))))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Built-in free-function call checking.
