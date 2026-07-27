@@ -201,7 +201,6 @@ block
 
 statement
     : assignment
-    | methodCall
     | localVarDecl
     | scopedBlock
     | ifStatement
@@ -211,6 +210,7 @@ statement
     | withStatement
     | raiseStatement
     | retryStatement
+    | assertStatement
     | caseStatement
     | matchStatement
     | selectStatement
@@ -306,6 +306,21 @@ retryStatement
     : RETRY
     ;
 
+// A mid-body assertion. `require` / `ensure` state what holds at a routine's
+// boundaries and `invariant` what holds around a loop; `assert` states what
+// holds at one point inside a body, which no other clause can express.
+//
+// The labelled form reuses the same `assertion` rule as those clauses, so a
+// failure reports a name:  assert non_empty: items.length > 0
+// The bare form takes a plain expression and reports the line instead:
+//                          assert i < n
+// Both lower to the same contract-violation check the other clauses emit.
+// `assertion+` is tried first: only a labelled assertion can have an
+// IDENTIFIER followed by ':', so the two forms never collide.
+assertStatement
+    : ASSERT (assertion+ | expression)
+    ;
+
 spawnExpression
     : SPAWN DO block END
     ;
@@ -323,12 +338,24 @@ localVarDecl
     : LET IDENTIFIER (':' type)? ASSIGN expression
     ;
 
-// A statement-position call. A *bare* identifier (`show`, a parameterless call
-// without parentheses) is deliberately NOT an alternative here: it would match
-// `a` in `a - 100` and leave `- 100` to parse as a separate unary-minus
-// statement (only `-` among the binary operators has a prefix form, so only it
-// splits). Instead a bare identifier statement falls through to `expression`
-// and the walker restores its parameterless-call shape in statement position.
+// Calls in statement position are NOT matched here. They reach the walker
+// through `expression`, which restores their statement shapes (see
+// `statement-position-node` in walker.clj).
+//
+// The reason is that any call alternative of `statement` can match a proper
+// prefix of the statement and leave the rest to parse as a second statement.
+// A bare-identifier alternative matched `a` in `a - 100` and left `- 100` as a
+// unary-minus statement (only `-` among the binary operators has a prefix form,
+// so only it split), and was removed first. `primary callChain` had the same
+// defect through the optional argument list of `memberAccess`: in
+// `a.get(1) = 100` the parser saw that consuming `(1)` strands `= 100`, which
+// can begin no statement, so it matched `a.get` as a parameterless call and
+// left the statement `(1) = 100` — reporting a bogus "undefined field get".
+// Routing the whole statement through `expression` removes the escape hatch
+// that made the short match viable.
+//
+// These two rules are consequently unreferenced. They are kept because the
+// walker's handlers for them still build the call chain used elsewhere.
 methodCall
     : primary callChain
     ;
@@ -537,6 +564,7 @@ VARIANT      : 'variant';
 REQUIRE      : 'require';
 ENSURE       : 'ensure';
 INVARIANT    : 'invariant';
+ASSERT       : 'assert';
 OLD          : 'old';
 THIS         : 'this';
 NOTE         : 'note';

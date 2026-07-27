@@ -207,3 +207,39 @@ end"
 end"
           result (tc/type-check (p/ast code))]
       (is (:success result)))))
+
+;; ============================================================================
+;; OUTPUT ORDERING
+;; ============================================================================
+
+(deftest print-and-console-interleave-in-program-order-test
+  ;; `print` used to be collected on the context and echoed only after the run,
+  ;; while Console wrote straight to the stream. A program's own output then
+  ;; came out reordered against itself — all the Console lines, then all the
+  ;; print lines — and the compiled backend disagreed with the interpreter.
+  (testing "print and Console.print_line appear in the order the program ran them"
+    (let [code (str "let c: Console := create Console\n"
+                    "print(\"A\")\n"
+                    "c.print_line(\"B\")\n"
+                    "print(\"C\")\n"
+                    "c.print_line(\"D\")\n")
+          printed (with-out-str (interp/interpret-and-get-output (p/ast code)))]
+      (is (= ["\"A\"" "B" "\"C\"" "D"] (str/split-lines printed)))))
+  (testing "the run still reports what it printed"
+    (let [code "print(\"A\")\nprint(\"B\")"
+          captured (atom nil)
+          output (with-out-str
+                   (reset! captured (interp/interpret-and-get-output (p/ast code))))]
+      (is (= ["\"A\"" "\"B\""] (mapv str @captured)))
+      (is (= ["\"A\"" "\"B\""] (str/split-lines output)))))
+  (testing "a caller rendering a value rather than emitting output can withhold the write"
+    ;; The REPL wraps a bare expression as `print(expr)` to render it, then
+    ;; formats the line itself; that synthetic print must not also stream.
+    (let [code "print(1 + 2)"
+          printed (binding [interp/*echo-output* false]
+                    (with-out-str (interp/interpret-and-get-output (p/ast code))))]
+      (is (= "" printed)))
+    (let [code "print(1 + 2)"
+          captured (binding [interp/*echo-output* false]
+                     (interp/interpret-and-get-output (p/ast code)))]
+      (is (= ["3"] (mapv str captured))))))

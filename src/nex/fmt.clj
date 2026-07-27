@@ -144,6 +144,18 @@
                                 [(str ind "do")
                                  (str/join "\n" (map #(format-statement % (inc level)) (:body stmt)))
                                  (str ind "end")])
+        :assert (let [assertions (:assertions stmt)
+                      one-line (fn [{:keys [label condition]}]
+                                 (str (when label (str label ": "))
+                                      (format-expression condition)))]
+                  ;; A single assertion stays on the `assert` line; several line
+                  ;; up underneath it, the way `require` and `ensure` read.
+                  (if (= 1 (count assertions))
+                    (str ind "assert " (one-line (first assertions)))
+                    (str/join "\n"
+                              (cons (str ind "assert")
+                                    (map #(str (indent (inc level)) (one-line %))
+                                         assertions)))))
         ;; Default: return statement as-is
         (str ind stmt))
       :else (str ind stmt))))

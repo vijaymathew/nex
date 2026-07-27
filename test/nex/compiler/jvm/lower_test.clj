@@ -706,3 +706,58 @@ end")
       (is (= :field-get (-> convert-ir :target-runtime :op)))
       (is (= "__generic_type_T" (-> convert-ir :target-runtime :field)))
       (is (= :this (-> convert-ir :target-runtime :target :op))))))
+
+(deftest collection-literal-element-type-is-inferred-test
+  ;; The element type of an unannotated collection literal was lost: the
+  ;; threading macro passed the element as the *env* argument of `infer-type`
+  ;; (`some->` threads first, `infer-type` is [env expr]), so every literal
+  ;; inferred as Array[Any] / Map[Any, Any] / Set[Any]. Any later use of an
+  ;; element then aborted lowering with "Unable to infer expression type".
+  (testing "an array literal carries its element type"
+    (let [{:keys [env]} (lower/lower-repl-cell (p/ast "let words := [\"apple\", \"fig\"]")
+                                               {:name "nex/repl/Cell_0001"})]
+      (is (= {:base-type "Array" :type-params ["String"]}
+             (get (:var-types env) "words")))))
+  (testing "a map literal carries its key and value types"
+    (let [{:keys [env]} (lower/lower-repl-cell (p/ast "let m := {\"a\": 1}")
+                                               {:name "nex/repl/Cell_0001"})]
+      (is (= {:base-type "Map" :type-params ["String" "Integer"]}
+             (get (:var-types env) "m")))))
+  (testing "a map literal whose values disagree widens to Any, as check-map-literal does"
+    ;; Reading only the first entry typed {"label": "Total", "amount": 0} as
+    ;; Map[String, String], so `m.get("amount")` lowered as a String and any
+    ;; later use of it failed to type.
+    (let [{:keys [env]} (lower/lower-repl-cell
+                         (p/ast "let m := {\"label\": \"Total\", \"amount\": 0, \"children\": []}")
+                         {:name "nex/repl/Cell_0001"})]
+      (is (= {:base-type "Map" :type-params ["String" "Any"]}
+             (get (:var-types env) "m"))))
+    (testing "and a map whose values agree keeps their type"
+      (let [{:keys [env]} (lower/lower-repl-cell (p/ast "let n := {\"a\": 1, \"b\": 2}")
+                                                 {:name "nex/repl/Cell_0001"})]
+        (is (= {:base-type "Map" :type-params ["String" "Integer"]}
+               (get (:var-types env) "n"))))))
+  (testing "a set literal carries its element type"
+    (let [{:keys [env]} (lower/lower-repl-cell (p/ast "let s := #{1, 2}")
+                                               {:name "nex/repl/Cell_0001"})]
+      (is (= {:base-type "Set" :type-params ["Integer"]}
+             (get (:var-types env) "s")))))
+  (testing "an element of an unannotated literal can be used"
+    ;; This is what the user-visible failure looked like: lowering threw rather
+    ;; than compiling `w.length`.
+    (is (some? (lower/lower-repl-cell
+                (p/ast "let words := [\"apple\", \"fig\"]\nacross words as w do\n  print(w.length)\nend")
+                {:name "nex/repl/Cell_0001"})))
+    (is (some? (lower/lower-repl-cell
+                (p/ast "let nums := [1, 2]\nprint(nums.get(0) + 1)")
+                {:name "nex/repl/Cell_0001"})))
+    ;; A value read out of a heterogeneous map is Any, so narrowing it must be
+    ;; what typechecks — this is the shape that aborted lowering.
+    (is (some? (lower/lower-repl-cell
+                (p/ast (str "let m := {\"label\": \"Total\", \"children\": []}\n"
+                            "let n := when convert m.get(\"children\") to c: Array[Integer] then\n"
+                            "  c.length\n"
+                            "else\n"
+                            "  0\n"
+                            "end\n"))
+                {:name "nex/repl/Cell_0001"})))))

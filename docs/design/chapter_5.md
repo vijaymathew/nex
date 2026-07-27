@@ -309,6 +309,10 @@ Class invariants are enforced on the compiled path through runtime validation ho
 
 Preconditions and postconditions lower to assertion-like checks on the compiled path. They use the same runtime exception/contract-violation mechanism as the rest of the backend rather than inventing a second error model.
 
+### `assert`
+
+`assert` lowers to the same contract-violation check as `require` and `ensure`, one check per assertion, in source order. A bare `assert expr` carries no label, so the statement's line is passed down to the runtime and reported in its place; both backends word the message identically.
+
 ### `old`
 
 `old` is implemented through entry snapshots for the supported method/constructor postcondition cases. This is broader than the earliest field-snapshot prototype but still intentionally tied to the actual runtime object model.

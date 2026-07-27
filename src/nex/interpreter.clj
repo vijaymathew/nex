@@ -579,9 +579,25 @@
         (assoc :generic-params nil)
         (update :body #(substitute-in-body % type-map)))))
 
+(def ^:dynamic *echo-output*
+  "Whether `add-output` writes to the stream as well as recording.
+
+   False only where a caller synthesizes a `print` to render a value rather than
+   to emit program output — the REPL wraps a bare expression as `print(expr)`
+   and formats the result itself (see `wrap-expression` in repl.clj)."
+  true)
+
 (defn add-output
-  "Add output to the context (for print statements)."
+  "Emit a line of program output and record it on the context.
+
+   The write happens now, not when the program ends. `Console` writes straight
+   to the stream, so buffering `print` until the end reordered a program's own
+   output against itself — and a prompt written before a `read_line` appeared
+   only after the read. Callers still read `(:output ctx)` to know what a run
+   produced; they must not print it again."
   [ctx value]
+  (when *echo-output*
+    (rt/nex-console-println value))
   (swap! (:output ctx) conj value))
 
 ;;
@@ -707,7 +723,7 @@
 ;;
 
 (def ^:private debuggable-node-types
-  #{:call :member-assign :assign :let :if :case :match :loop :raise :retry :scoped-block})
+  #{:call :member-assign :assign :let :if :case :match :loop :raise :retry :assert :scoped-block})
 
 (defn debuggable-node?
   "Whether this node should trigger debugger pause checks."
@@ -1179,12 +1195,16 @@
     "%" (if (and (nex-integer? left) (nex-integer? right))
           (nex-int-mod left right)
           (nex-real-rem (->nex-real left) (->nex-real right)))
+    ;; Structural, not host, equality: the portable map is a record wrapping an
+    ;; atom, so Clojure's `=` compares that atom by identity and two equal maps
+    ;; never compared equal — including a map nested inside an array. Objects
+    ;; never reach here; `=` on them honours an `equals` override higher up.
     "=" (if (and (nex-numeric? left) (nex-numeric? right))
           (nex-numeric-equals? left right)
-          (= left right))
+          (nex-deep-equals? left right))
     "/=" (not (if (and (nex-numeric? left) (nex-numeric? right))
                 (nex-numeric-equals? left right)
-                (= left right)))
+                (nex-deep-equals? left right)))
     "==" (nex-identity-equals? left right)
     "!=" (not (nex-identity-equals? left right))
     ;; Numeric ordering takes the IEEE-correct fast path: a 3-way compare cannot
@@ -2105,6 +2125,14 @@
   (maybe-debug-pause ctx {:type :retry})
   (throw (ex-info "retry" {:type :nex-retry})))
 
+(defmethod eval-node :assert
+  [ctx node]
+  (maybe-debug-pause ctx node)
+  (doseq [{:keys [label condition]} (:assertions node)]
+    (when-not (eval-node ctx condition)
+      (report-contract-violation bi/Assertion label condition (:dbg/line node))))
+  nil)
+
 (defn eval-body-with-rescue
   "Execute body statements with rescue/retry support.
    If rescue contains retry, re-executes body.
@@ -2782,12 +2810,10 @@
     @(:output ctx)))
 
 (defn run
-  "Convenience function to interpret and print output."
+  "Interpret an AST, returning what it printed. The program's output has already
+   been written as it ran (see `add-output`); this only collects it."
   [ast]
-  (let [output (interpret-and-get-output ast)]
-    (doseq [line output]
-      (println line))
-    output))
+  (interpret-and-get-output ast))
 
 
 ;; ---------------------------------------------------------------------------

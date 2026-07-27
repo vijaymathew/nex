@@ -616,6 +616,21 @@ class Wallet
 end
 ```
 
+`require`, `ensure`, and `invariant` speak about a routine's boundaries or a
+class. `assert` states what must be true at one point *inside* a body:
+
+```nex
+assert enough_left: money >= 0.0   -- named: the failure reports the name
+assert money >= 0.0                -- bare: the failure reports the line
+
+assert                             -- several at once, like require
+  not_negative: money >= 0.0
+  under_limit: money <= 10000.0
+```
+
+A failed `assert` raises the same contract violation as a failed `require` or
+`ensure`. Assertions always run; there is no mode that strips them.
+
 ## Error Handling
 
 ```nex

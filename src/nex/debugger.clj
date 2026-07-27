@@ -669,6 +669,7 @@
       (str/includes? s "precondition") :pre
       (str/includes? s "postcondition") :post
       (str/includes? s "invariant") :invariant
+      (str/includes? s "assertion") :assert
       :else :contract)))
 
 (defn- contract-filter-match?

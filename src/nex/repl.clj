@@ -41,7 +41,7 @@
   ["class" "enum" "deferred" "declare" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
    "when" "from" "until" "invariant" "variant" "require" "ensure"
    "let" "create" "convert" "to" "fn" "function" "and" "or" "old" "this" "note"
-   "with" "import" "intern" "private" "raise" "rescue" "retry" "spawn" "select" "timeout" "repeat" "across" "case" "of"
+   "with" "import" "intern" "private" "raise" "rescue" "retry" "assert" "spawn" "select" "timeout" "repeat" "across" "case" "of"
    "true" "false" "nil"
    ;; strictly 'result' is not a keyword, but a pre-defined variable name.
    "result"])
@@ -481,6 +481,7 @@
       "pre" :pre
       "post" :post
       "invariant" :invariant
+      "assert" :assert
       s)))
 
 (defn- repl-cmd-help [ctx input]
@@ -1551,10 +1552,9 @@
             (let [top-nodes (if (seq statements) statements calls)
                   result (when (and (seq top-nodes) (empty? real-class-names) (empty? function-names))
                            (last (map #(interp/eval-node exec-ctx %) top-nodes)))
+                  ;; Already written as the statements ran; `output` is read
+                  ;; only to tell whether the cell printed anything.
                   output @(:output exec-ctx)]
-              (when (seq output)
-                (doseq [line output]
-                  (println line)))
               (when (and (some? result) (empty? output) (empty? real-class-names) (empty? function-names))
                 (if-let [type-str (when (seq calls)
                                     (infer-result-type exec-ctx (last calls)))]
@@ -1567,8 +1567,13 @@
         was-wrapped?
         (let [class-def (first (:classes ast))
               method-def (-> class-def :body first :members first)
-              ;; Execute directly in the current context (preserves global vars)
-              result (last (map #(interp/eval-node exec-ctx %) (:body method-def)))
+              ;; Execute directly in the current context (preserves global vars).
+              ;; A wrapped *expression* is a synthetic `print(expr)` this REPL
+              ;; built to render a value, so its line is displayed below rather
+              ;; than echoed as it runs; a wrapped *statement* is the user's own
+              ;; code and streams normally.
+              result (binding [interp/*echo-output* (not is-expression?)]
+                       (last (map #(interp/eval-node exec-ctx %) (:body method-def))))
               output @(:output exec-ctx)]
           ;; Persist variable types from let statements (for future type checking)
           (when @*type-checking-enabled*
@@ -1585,8 +1590,10 @@
           ;; Infer type of the result expression when typechecking is on
           (let [type-str (when is-expression?
                            (infer-result-type exec-ctx (-> method-def :body first :args first)))]
-            ;; Show output from print statements
-            (when (seq output)
+            ;; The rendered value of a wrapped expression, which was withheld
+            ;; from the stream above. A wrapped statement's own output has
+            ;; already been written, so there is nothing to show for it.
+            (when (and is-expression? (seq output))
               (if type-str
                 (println (str type-str " " (first output)))
                 (doseq [line output]
@@ -1632,11 +1639,9 @@
           (let [top-nodes (if (seq statements) statements calls)
                 result (when (and (seq top-nodes) (empty? real-class-names) (empty? function-names))
                          (last (map #(interp/eval-node exec-ctx %) top-nodes)))
+                ;; Already written as the statements ran; `output` is read
+                ;; only to tell whether the cell printed anything.
                 output @(:output exec-ctx)]
-            ;; Show any output
-            (when (seq output)
-              (doseq [line output]
-                (println line)))
             ;; Show result if it's not nil, not from a print, and no classes were defined
             ;; Always show false/0 results too.
             (when (and (some? result) (empty? output) (empty? real-class-names) (empty? function-names))
@@ -1650,11 +1655,9 @@
         ;; Single expression or statement
         :else
         (let [result (interp/eval-node exec-ctx ast)
+              ;; Already written as the expression ran; `output` is read only
+              ;; to tell whether it printed anything.
               output @(:output exec-ctx)]
-          ;; Show output from print statements
-          (when (seq output)
-            (doseq [line output]
-              (println line)))
           ;; Show result if it's not nil and not from a print
           ;; Always show false/0 results too.
           (when (and (some? result) (empty? output))

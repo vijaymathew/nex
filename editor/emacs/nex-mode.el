@@ -126,7 +126,7 @@
     "when" "from" "until" "invariant" "variant" "require" "ensure"
     "let" "as" "and" "or" "not" "fn" "deferred" "convert" "to"
     "old" "create" "private" "note" "with" "import" "intern" "function"
-    "raise" "rescue" "retry" "repeat" "across" "case" "of"
+    "raise" "rescue" "retry" "assert" "repeat" "across" "case" "of"
     "spawn" "select" "timeout" "declare" "sealed" "once" "match" "type"
     "enum" "union" "where")
   "Nex language keywords.")

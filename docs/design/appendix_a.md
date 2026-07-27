@@ -489,7 +489,7 @@ Bytecode shape:
 
 ### Contract Assertions
 
-Compiled preconditions, postconditions, invariants, and variants are ordinary guard checks that construct and throw a contract violation when false.
+Compiled preconditions, postconditions, invariants, variants, and `assert` statements are ordinary guard checks that construct and throw a contract violation when false.
 
 ```text
 Bytecode shape:
@@ -497,11 +497,14 @@ Bytecode shape:
   IFNE ok
   LDC "Postcondition"
   LDC "label"
+  LDC "line"                        -- the source line, or ACONST_NULL
   <runtime call make-contract-violation>
   CHECKCAST java/lang/Throwable
   ATHROW
 ok:
 ```
+
+The third argument is the statement's source line where one is known. The runtime uses it only as a fallback name: every clause labels its assertion, so the label wins whenever there is one, and only a bare `assert expr` — which pushes ACONST_NULL for the label — is reported by line.
 
 This directness is one of the strengths of the compiled backend. Contract checks are not magic metadata. They are visible control-flow.
 

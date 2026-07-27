@@ -926,13 +926,18 @@
     (object-array [(boolean ok?) (if ok? value nil)])))
 
 (defn make-contract-violation
-  [kind label]
-  (ex-info (if (= kind "Loop variant")
-             "Loop variant must decrease"
-             (str kind " violation: " label))
-           {:type :nex-contract-violation
-            :kind kind
-            :label label}))
+  ([kind label]
+   (make-contract-violation kind label nil))
+  ([kind label line]
+   (ex-info (cond
+              (= kind "Loop variant") "Loop variant must decrease"
+              label                   (str kind " violation: " label)
+              ;; Only a bare `assert expr` is unlabelled; name it by its line.
+              line                    (str kind " violation (line " line ")")
+              :else                   (str kind " violation"))
+            {:type :nex-contract-violation
+             :kind kind
+             :label label})))
 
 (defn- class-def-by-name
   [state class-name]

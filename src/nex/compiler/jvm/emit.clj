@@ -2153,7 +2153,7 @@
   (.visitInsn mv Opcodes/ATHROW))
 
 (defn- emit-assert!
-  [^MethodVisitor mv {:keys [kind label expr]} state-slot]
+  [^MethodVisitor mv {:keys [kind label expr] :as stmt} state-slot]
   (let [ok-label (Label.)
         expr-type (emit-expr! mv expr state-slot)
         kind-label (case kind
@@ -2162,15 +2162,24 @@
                      :invariant "Loop invariant"
                      :variant "Loop variant"
                      :class-invariant "Class invariant"
-                     (name kind))]
+                     :assert "Assertion"
+                     (name kind))
+        ;; Only a bare `assert expr` reaches here unlabelled; the runtime falls
+        ;; back to the line, passed as a string so no boxing is needed.
+        line (when-let [line (:dbg/line stmt)] (str line))]
     (when-not (= :boolean expr-type)
       (throw (ex-info "Assert emission requires boolean expression"
                       {:stmt {:kind kind :label label}
                        :jvm-type expr-type})))
     (.visitJumpInsn mv Opcodes/IFNE ok-label)
-    (.visitLdcInsn mv ^String kind-label)
-    (.visitLdcInsn mv ^String label)
-    (emit-runtime-invoke-2! mv "make-contract-violation")
+    (emit-runtime-call! mv "make-contract-violation"
+                        [(fn [] (.visitLdcInsn mv ^String kind-label))
+                         (fn [] (if label
+                                  (.visitLdcInsn mv ^String label)
+                                  (.visitInsn mv Opcodes/ACONST_NULL)))
+                         (fn [] (if line
+                                  (.visitLdcInsn mv ^String line)
+                                  (.visitInsn mv Opcodes/ACONST_NULL)))])
     (.visitTypeInsn mv Opcodes/CHECKCAST throwable-internal-name)
     (.visitInsn mv Opcodes/ATHROW)
     (.visitLabel mv ok-label)))
