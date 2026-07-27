@@ -1179,12 +1179,16 @@
     "%" (if (and (nex-integer? left) (nex-integer? right))
           (nex-int-mod left right)
           (nex-real-rem (->nex-real left) (->nex-real right)))
+    ;; Structural, not host, equality: the portable map is a record wrapping an
+    ;; atom, so Clojure's `=` compares that atom by identity and two equal maps
+    ;; never compared equal — including a map nested inside an array. Objects
+    ;; never reach here; `=` on them honours an `equals` override higher up.
     "=" (if (and (nex-numeric? left) (nex-numeric? right))
           (nex-numeric-equals? left right)
-          (= left right))
+          (nex-deep-equals? left right))
     "/=" (not (if (and (nex-numeric? left) (nex-numeric? right))
                 (nex-numeric-equals? left right)
-                (= left right)))
+                (nex-deep-equals? left right)))
     "==" (nex-identity-equals? left right)
     "!=" (not (nex-identity-equals? left right))
     ;; Numeric ordering takes the IEEE-correct fast path: a 3-way compare cannot
