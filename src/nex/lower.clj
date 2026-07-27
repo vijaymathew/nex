@@ -461,6 +461,18 @@
                       [name nex-type])
                     (:locals env)))))
 
+(declare infer-type)
+
+(defn- infer-type-or-any
+  "`infer-type`, but an expression it cannot type widens to Any instead of
+   aborting the compile. Used where a type is being *compared* rather than
+   relied on: one entry of a map literal whose type is unknown cannot be shown
+   to agree with the others, and Any is exactly that conclusion."
+  [env expr]
+  (try
+    (infer-type env expr)
+    (catch clojure.lang.ExceptionInfo _ "Any")))
+
 (defn- infer-type
   [env expr]
   (let [convert-branch-env (fn [env' condition]
@@ -551,10 +563,24 @@
             (array-type-of elem-type))
 
           :map-literal
+          ;; A map literal's value type is the entries' common type, widening to
+          ;; Any as soon as two disagree — the rule check-map-literal enforces.
+          ;; Taking the first entry's type instead lowered `{"label": "Total",
+          ;; "amount": 0}` as a Map[String, String], and every later read of it
+          ;; was typed as though the value were a String.
+          ;;
+          ;; Array and Set literals need no such widening: the typechecker
+          ;; rejects a mixed one outright, so the first element speaks for all.
           (let [entries (:entries expr)
                 key-type (or (some->> entries first :key (infer-type env))
                              "Any")
-                value-type (or (some->> entries first :value (infer-type env))
+                value-type (or (reduce (fn [acc entry]
+                                         (let [t (infer-type-or-any env (:value entry))]
+                                           (if (= (tc/normalize-type acc) (tc/normalize-type t))
+                                             acc
+                                             (reduced "Any"))))
+                                       (some->> entries first :value (infer-type-or-any env))
+                                       (rest entries))
                                "Any")]
             (map-type-of key-type value-type))
 
