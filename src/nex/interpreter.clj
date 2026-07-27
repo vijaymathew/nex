@@ -579,9 +579,25 @@
         (assoc :generic-params nil)
         (update :body #(substitute-in-body % type-map)))))
 
+(def ^:dynamic *echo-output*
+  "Whether `add-output` writes to the stream as well as recording.
+
+   False only where a caller synthesizes a `print` to render a value rather than
+   to emit program output — the REPL wraps a bare expression as `print(expr)`
+   and formats the result itself (see `wrap-expression` in repl.clj)."
+  true)
+
 (defn add-output
-  "Add output to the context (for print statements)."
+  "Emit a line of program output and record it on the context.
+
+   The write happens now, not when the program ends. `Console` writes straight
+   to the stream, so buffering `print` until the end reordered a program's own
+   output against itself — and a prompt written before a `read_line` appeared
+   only after the read. Callers still read `(:output ctx)` to know what a run
+   produced; they must not print it again."
   [ctx value]
+  (when *echo-output*
+    (rt/nex-console-println value))
   (swap! (:output ctx) conj value))
 
 ;;
@@ -2794,12 +2810,10 @@
     @(:output ctx)))
 
 (defn run
-  "Convenience function to interpret and print output."
+  "Interpret an AST, returning what it printed. The program's output has already
+   been written as it ran (see `add-output`); this only collects it."
   [ast]
-  (let [output (interpret-and-get-output ast)]
-    (doseq [line output]
-      (println line))
-    output))
+  (interpret-and-get-output ast))
 
 
 ;; ---------------------------------------------------------------------------

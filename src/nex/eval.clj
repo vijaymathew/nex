@@ -36,11 +36,10 @@
 (defn- run-interpreted
   [source-id ast]
   (let [ctx (assoc (interp/make-context) :debug-source source-id)]
+    ;; The program writes its own output as it runs, interleaved with `Console`
+    ;; in the order the program produced it; nothing is echoed afterwards.
     (interp/eval-node ctx ast)
-    (let [output @(:output ctx)]
-      (doseq [line output]
-        (println line))
-      output)))
+    @(:output ctx)))
 
 (defn- warn-fallback!
   [reason]
