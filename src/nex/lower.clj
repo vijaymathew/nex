@@ -546,21 +546,21 @@
 
           :array-literal
           (let [elements (:elements expr)
-                elem-type (or (some-> elements first (infer-type env))
+                elem-type (or (some->> elements first (infer-type env))
                               "Any")]
             (array-type-of elem-type))
 
           :map-literal
           (let [entries (:entries expr)
-                key-type (or (some-> entries first :key (infer-type env))
+                key-type (or (some->> entries first :key (infer-type env))
                              "Any")
-                value-type (or (some-> entries first :value (infer-type env))
+                value-type (or (some->> entries first :value (infer-type env))
                                "Any")]
             (map-type-of key-type value-type))
 
           :set-literal
           (let [elements (:elements expr)
-                elem-type (or (some-> elements first (infer-type env))
+                elem-type (or (some->> elements first (infer-type env))
                               "Any")]
             (set-type-of elem-type))
 
