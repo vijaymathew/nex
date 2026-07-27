@@ -251,14 +251,49 @@
            (string? (:target call-node))
            (:method call-node))
     (let [target-name (:target call-node)]
-      {:type :when
-       :condition {:type :binary
-                   :operator "/="
-                   :left {:type :identifier :name target-name}
-                   :right {:type :nil}}
-       :consequent (dissoc call-node :safe?)
-       :alternative {:type :nil}})
+      ;; The origin travels as metadata, so the node itself is unchanged for
+      ;; every consumer, but a safe call that turns out to be a whole statement
+      ;; can still be re-desugared to the guarded-block form; see the :statement
+      ;; handler.
+      (with-meta
+        {:type :when
+         :condition {:type :binary
+                     :operator "/="
+                     :left {:type :identifier :name target-name}
+                     :right {:type :nil}}
+         :consequent (dissoc call-node :safe?)
+         :alternative {:type :nil}}
+        {::safe-call call-node}))
     call-node))
+
+(defn- statement-position-node
+  "Adjust an expression that is standing alone as a statement.
+
+   Two forms reach statement position through `expression` rather than through a
+   rule of their own, and each has a statement shape to restore: a bare
+   identifier is a parameterless call, and a safe call is the guarded block
+   rather than the nil-yielding `when` (only the block narrows the receiver for
+   void safety)."
+  [node]
+  (cond
+    (not (map? node))
+    node
+
+    (= :identifier (:type node))
+    (merge (select-keys node [:dbg/line :dbg/col])
+           {:type :call :target nil :method (:name node)
+            :args [] :has-parens false})
+
+    (::safe-call (meta node))
+    (merge (select-keys node [:dbg/line :dbg/col])
+           (desugar-safe-call (::safe-call (meta node))))
+
+    (and (= :call (:type node)) (:safe? node))
+    (merge (select-keys node [:dbg/line :dbg/col])
+           (desugar-safe-call node))
+
+    :else
+    node))
 
 (defn- build-function-node
   [name rest declaration-only?]
@@ -1289,17 +1324,12 @@
 
    :statement
    (fn [[_ stmt]]
-     (let [node (transform-node stmt)]
-       ;; A bare identifier in statement position is a parameterless call
-       ;; (`show`), not a value expression. The grammar no longer matches it as a
-       ;; call (so `a - 100` parses as one subtraction rather than `a` then
-       ;; `-100`); it arrives here as an `:identifier` via `expression`, and we
-       ;; restore the parameterless-call shape it has everywhere else.
-       (if (and (map? node) (= :identifier (:type node)))
-         (merge (select-keys node [:dbg/line :dbg/col])
-                {:type :call :target nil :method (:name node)
-                 :args [] :has-parens false})
-         node)))
+     ;; Calls in statement position arrive here through `expression`, because a
+     ;; call alternative of `statement` can match a proper prefix and strand the
+     ;; rest (see the note above `methodCall` in nexlang.g4). What that costs is
+     ;; the statement shapes those alternatives used to build, which are restored
+     ;; here.
+     (statement-position-node (transform-node stmt)))
 
    :scopedBlock
    (fn [[_ _do-kw & rest]]

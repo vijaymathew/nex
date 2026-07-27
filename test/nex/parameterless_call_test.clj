@@ -292,6 +292,44 @@ end"
       (is (nil? (:target (first stmts))))
       (is (false? (:has-parens (first stmts)))))))
 
+(deftest call-followed-by-an-operator-is-one-statement
+  ;; Same defect as `a - 100`, through the optional argument list of
+  ;; memberAccess: the parser matched `a.get` as a parameterless call and left
+  ;; `(1) = 100` as a second statement, so the program failed with a bogus
+  ;; "Undefined field: get on Array".
+  (testing "`a.get(1) = 100` is a single comparison"
+    (let [stmts (:statements (p/ast "a.get(1) = 100"))]
+      (is (= 1 (count stmts)) "must be one statement, not `a.get` then `(1) = 100`")
+      (is (= :binary (:type (first stmts))))
+      (is (= "=" (:operator (first stmts))))
+      (let [left (:left (first stmts))]
+        (is (= :call (:type left)))
+        (is (= "get" (:method left)))
+        (is (= 1 (count (:args left))) "the argument must reach the call"))))
+  (testing "the same holds for an arithmetic operator"
+    (let [stmts (:statements (p/ast "a.get(1) + 2"))]
+      (is (= 1 (count stmts)))
+      (is (= :binary (:type (first stmts))))
+      (is (= "+" (:operator (first stmts))))))
+  (testing "a call that is the whole statement still parses as a call"
+    (let [stmts (:statements (p/ast "c.print_line(\"x\")"))]
+      (is (= 1 (count stmts)))
+      (is (= :call (:type (first stmts))))
+      (is (= "print_line" (:method (first stmts))))
+      (is (true? (:has-parens (first stmts))))))
+  (testing "a safe call in statement position keeps its guarded-block shape"
+    ;; It reaches the walker through `expression` now, where the nil-yielding
+    ;; `when` form would not narrow the receiver for void safety.
+    (let [stmts (:statements (p/ast "x?.m(1)"))]
+      (is (= 1 (count stmts)))
+      (is (= :scoped-block (:type (first stmts)))))))
+
+(deftest call-followed-by-an-operator-evaluates
+  (testing "the interpreter compares the call's result, not a bare receiver"
+    (let [ctx (interp/make-context)]
+      (interp/eval-node ctx (p/ast "let a := [100, 200]\nprint(a.get(1) = 100)\nprint(a.get(1) = 200)"))
+      (is (= ["false" "true"] (mapv str @(:output ctx)))))))
+
 (deftest subtraction-from-a-variable-evaluates
   (testing "the interpreter computes `x - n` (regression: it echoed -n)"
     (let [ctx (interp/make-context)]
