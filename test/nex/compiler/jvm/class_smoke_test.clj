@@ -1001,6 +1001,86 @@ end"))
         (is (nil? (:result result))))
       (is (= ["\"boom\""] (runtime/state-output (:state session)))))))
 
+;; ─── Exceptions thrown by a *free function* call, seen through `rescue` ─────
+;;
+;; A free-function call lowers to `:call-repl-fn` (emit.clj), which invokes it
+;; via `java.lang.reflect.Method/invoke` rather than a direct `invokevirtual`
+;; the way a method call does. Reflection wraps whatever the callee throws in
+;; an `InvocationTargetException` with no message of its own; `exception-value`
+;; and `retry-signal?` (runtime.clj) used to inspect that wrapper directly, so
+;; `exception` printed `nil` for a precondition violation and `retry` could
+;; never recognise a retry signal — both fixed by unwrapping down to the real
+;; cause first (`unwrap-reflective-exception`). A method call was never
+;; affected, since it never goes through reflection.
+
+(deftest compiled-free-function-precondition-violation-message-test
+  (testing "rescue sees the real message, not nil, for a failed function precondition"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (p/ast (str "function max_of(items: Array[Integer]): Integer\n"
+                              "require\n"
+                              "  not_empty: items.length > 0\n"
+                              "do\n"
+                              "  result := items.get(0)\n"
+                              "end\n"
+                              "do\n"
+                              "  max_of([])\n"
+                              "rescue\n"
+                              "  print(exception)\n"
+                              "end")))]
+      (is (:compiled? result))
+      (is (= ["\"Precondition violation: not_empty\""] (runtime/state-output (:state session)))))))
+
+(deftest compiled-free-function-raise-message-test
+  (testing "rescue sees the raised value, not nil, for a raise inside a free function"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (p/ast (str "function risky(): Integer do\n"
+                              "  raise \"custom failure\"\n"
+                              "end\n"
+                              "do\n"
+                              "  risky()\n"
+                              "rescue\n"
+                              "  print(exception)\n"
+                              "end")))]
+      (is (:compiled? result))
+      (is (= ["\"custom failure\""] (runtime/state-output (:state session)))))))
+
+(deftest compiled-free-function-retry-test
+  (testing "retry recognises a retry signal raised inside a free function"
+    (let [session (compiled-repl/make-session)
+          _ (compiled-repl/compile-and-eval!
+             session
+             (p/ast (str "class Counter\n"
+                         "create make() do n := 0 end\n"
+                         "feature\n"
+                         "  n: Integer\n"
+                         "  bump() do n := n + 1 end\n"
+                         "end")))
+          _ (compiled-repl/compile-and-eval!
+             session
+             (p/ast (str "function flaky(c: Counter): Integer do\n"
+                         "  c.bump()\n"
+                         "  if c.n < 3 then\n"
+                         "    raise \"not yet\"\n"
+                         "  end\n"
+                         "  result := c.n\n"
+                         "end")))
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (p/ast (str "let c := create Counter.make\n"
+                              "let final: Integer := 0\n"
+                              "do\n"
+                              "  final := flaky(c)\n"
+                              "rescue\n"
+                              "  retry\n"
+                              "end\n"
+                              "final")))]
+      (is (:compiled? result))
+      (is (= 3 (:result result))))))
+
 (deftest compiled-case-smoke-test
   (testing "compiled helper supports case statements with multiple literals per clause"
     (let [session (compiled-repl/make-session)

@@ -886,17 +886,39 @@
   []
   (ex-info "retry" {:type :nex-retry}))
 
+(defn- unwrap-reflective-exception
+  "A free function called via `:call-repl-fn` (see emit.clj) is invoked through
+   `java.lang.reflect.Method/invoke`, which wraps whatever it throws in an
+   `InvocationTargetException` with no message of its own — so a `do ...
+   rescue ... end` around such a call, inspecting the caught throwable
+   directly, saw a null message/no ex-data and printed `nil` for `exception`
+   instead of the real contract-violation or `raise`d value. A method call
+   (`:call-virtual`) never goes through reflection and never hit this.
+   Peels away that wrapper (and a same-shaped `ExceptionInInitializerError`,
+   for a static initializer that fails the same way) down to the real cause,
+   exactly as `nex.repl/unwrap-user-visible-exception` and
+   `nex.eval/run-compiled` already do outside the compiled program itself."
+  [^Throwable t]
+  (loop [t t]
+    (if (and (or (instance? InvocationTargetException t)
+                 (instance? ExceptionInInitializerError t))
+             (.getCause t))
+      (recur (.getCause t))
+      t)))
+
 (defn retry-signal?
   [throwable]
-  (and (instance? clojure.lang.ExceptionInfo throwable)
-       (= :nex-retry (:type (ex-data throwable)))))
+  (let [throwable (unwrap-reflective-exception throwable)]
+    (and (instance? clojure.lang.ExceptionInfo throwable)
+         (= :nex-retry (:type (ex-data throwable))))))
 
 (defn exception-value
   [throwable]
-  (if (and (instance? clojure.lang.ExceptionInfo throwable)
-           (= :nex-exception (:type (ex-data throwable))))
-    (:value (ex-data throwable))
-    (.getMessage ^Throwable throwable)))
+  (let [throwable (unwrap-reflective-exception throwable)]
+    (if (and (instance? clojure.lang.ExceptionInfo throwable)
+             (= :nex-exception (:type (ex-data throwable))))
+      (:value (ex-data throwable))
+      (.getMessage ^Throwable throwable))))
 
 (defn- compiled-runtime-class-name
   [state value]
