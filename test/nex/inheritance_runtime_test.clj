@@ -751,3 +751,74 @@ end"))
             radius-out (with-out-str (repl/eval-code ctx "ci.radius"))]
         (is (str/includes? colour-out "blue")  colour-out)
         (is (str/includes? radius-out "3.0")   radius-out)))))
+
+;; ─── A class that fails to compile no longer silently deopts to the interpreter ──
+;;
+;; Before this fix, any class/function definition whose body hit a compiled-
+;; backend gap (essentially any "Unsupported ..." lowering error, plus a few
+;; other messages) was silently re-run on the tree-walking interpreter by
+;; `nex.compiler.jvm.repl/compile-and-eval!` — no error, no warning. That
+;; interpreted class then stayed interpreted for the rest of the REPL session,
+;; and the interpreter has no implementation of `super.method()` calls (see
+;; `nex.this-super-test/super-method-call`), so a later, perfectly valid
+;; subclass calling `super` against it failed with a confusing "Undefined
+;; variable: super" — with nothing in the session pointing back at the real
+;; cause. These tests pin the fix: such a class now fails visibly at the point
+;; it's defined, and redefining an existing compiled class (the other way a
+;; class ends up interpreted) prints a visible warning instead of doing so
+;; silently.
+
+(defmacro ^:private with-err-str
+  "Like `clojure.core/with-out-str`, but captures `*err*` — where the REPL's
+   interpreter-fallback warning is printed (matching `nex.eval/warn-fallback!`'s
+   own convention of writing to stderr, not stdout)."
+  [& body]
+  `(let [s# (java.io.StringWriter.)]
+     (binding [*err* s#]
+       ~@body)
+     (str s#)))
+
+(def ^:private generic-class-calling-hash-on-unconstrained-param
+  "`.hash` on a value of unconstrained generic type `G` is a real, still-open
+   compiled-lowering gap (deliberately excluded when `to_string`/`equals` were
+   fixed for this same position — see lower.clj's `lower-instance-dispatch`,
+   the comment on the `any:` dispatch branch). Lowering it throws \"Unsupported
+   target call expression for lowering\", a reliable trigger for this test."
+  "class Box [G]
+  create make(v: G) do value := v end
+  feature
+    value: G
+    key(): Integer do result := value.hash end
+end")
+
+(deftest compiled-backend-gap-in-class-body-fails-visibly-test
+  (testing "the class definition itself reports the error, not silence"
+    (with-compiled-repl ctx
+      (let [out (with-out-str
+                  (repl/eval-code ctx generic-class-calling-hash-on-unconstrained-param))]
+        (is (str/includes? out "Error:") out)
+        (is (str/includes? out "Unsupported") out))))
+
+  (testing "and the class was never defined by either backend — no silent partial success"
+    (with-compiled-repl ctx
+      (with-out-str (repl/eval-code ctx generic-class-calling-hash-on-unconstrained-param))
+      (let [out (with-out-str (repl/eval-code ctx "let b := create Box[Integer].make(1)"))]
+        (is (str/includes? out "Error:") out)))))
+
+(deftest redefining-a-compiled-class-warns-visibly-test
+  (testing "redefining an already-compiled class prints a visible fallback warning, not silence"
+    (with-compiled-repl ctx
+      (with-out-str (repl/eval-code ctx "class Foo create make() do x := 1 end feature x: Integer end"))
+      (let [err (with-err-str
+                  (with-out-str (repl/eval-code ctx "class Foo create make() do x := 2 end feature x: Integer end")))]
+        (is (str/includes? err "Warning") err)
+        (is (str/includes? err "interpreter") err))))
+
+  (testing "and the redefinition still takes effect"
+    (with-compiled-repl ctx
+      (with-out-str (repl/eval-code ctx "class Foo create make() do x := 1 end feature x: Integer end"))
+      (with-err-str
+        (with-out-str (repl/eval-code ctx "class Foo create make() do x := 2 end feature x: Integer end")))
+      (with-out-str (repl/eval-code ctx "let f := create Foo.make"))
+      (let [out (with-out-str (repl/eval-code ctx "f.x"))]
+        (is (str/includes? out "2") out)))))
