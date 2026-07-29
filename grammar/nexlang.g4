@@ -438,6 +438,7 @@ primary
     | whenExpression
     | oldExpression
     | THIS
+    | SUPER
     | IDENTIFIER
     | '(' expression ')'
     ;
@@ -567,6 +568,7 @@ INVARIANT    : 'invariant';
 ASSERT       : 'assert';
 OLD          : 'old';
 THIS         : 'this';
+SUPER        : 'super';
 NOTE         : 'note';
 WITH         : 'with';
 CONVERT      : 'convert';

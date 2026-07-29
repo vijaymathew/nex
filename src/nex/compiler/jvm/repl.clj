@@ -27,17 +27,42 @@
      :function-asts (atom {})
      :class-asts (atom {})
      :import-asts (atom [])
-     :intern-asts (atom [])}))
+     :intern-asts (atom [])
+     ;; The message of the last exception `compile-and-eval!` swallowed to fall
+     ;; back to the interpreter for a plain statement/expression cell, or nil
+     ;; after a cell that didn't need to. `nex.repl` reads this to print a
+     ;; visible warning — see `deopt-compiled-exception?`.
+     :last-decline-reason (atom nil)}))
 
 (defn reset-session
   []
   (make-session))
 
+(defn- declares-class-or-function?
+  "True when AST introduces a new class or function definition, as opposed to
+   a plain top-level statement/expression cell.
+
+   The distinction matters because a class or function persists in the REPL
+   session: once one of them fails to compile and silently falls back to
+   `interp/eval-node` instead, it stays an *interpreted* definition for the
+   rest of the session, and the two backends can disagree on real features
+   (see docs/md/BACKEND_ALIGNMENT.md) — `super.method()` used to be exactly
+   such a gap until the interpreter grew a real implementation of it (see
+   `nex.this-super-test`). A one-off statement's fallback is contained to
+   that single evaluation and has no such lingering cost, so it is still
+   safe to swallow silently here."
+  [ast]
+  (boolean (or (seq (:classes ast)) (seq (:functions ast)))))
+
 (defn- deopt-compiled-exception?
-  [^Throwable t]
+  "True when `t` is a known compiled-backend gap safe to silently recover from
+   by re-running the cell on the tree-walking interpreter. Never true for a
+   class/function-declaring cell — see `declares-class-or-function?`."
+  [^Throwable t declaring?]
   (let [msg (.getMessage t)]
     (boolean
      (and msg
+          (not declaring?)
           (or (.contains msg "Unsupported")
               (.contains msg "Unable to infer expression type during lowering")
               (.contains msg "Only expression-shaped or result-assignment if branches are supported in lowering")
@@ -921,7 +946,14 @@
            (re-register-session-classes! session source-id))
          (re-register-session-functions! session source-id)
          (catch clojure.lang.ExceptionInfo e
-           (when-not (deopt-compiled-exception? e)
+           ;; Unlike `compile-and-eval!`, a failure here is a best-effort *re*-
+           ;; compile of a class/function the interpreter has already defined
+           ;; and already run successfully — declining just means it stays
+           ;; interpreted rather than also becoming compiled, not that it goes
+           ;; undefined. So `declaring?` is always false here: this call never
+           ;; needs the stricter, visible-failure behavior `compile-and-eval!`
+           ;; uses for a definition's *first* attempt.
+           (when-not (deopt-compiled-exception? e false)
              (throw e))))
        session))))
 
@@ -958,6 +990,7 @@
   ([session ast]
    (compile-and-eval! session ast nil))
   ([session ast source-id]
+   (reset! (:last-decline-reason session) nil)
    (let [module-ast (augment-ast-with-modules session source-id ast)
          prepared-ast (lower/prepare-program-for-closures
                        module-ast
@@ -966,34 +999,38 @@
                         :imports (:imports module-ast)
                         :var-types (session-var-types session)})]
      (when (eligible-ast? session prepared-ast)
-       (try
-         (let [class-name (next-class-name! session)
-               _ (compile-and-register-classes! session prepared-ast source-id)
-               _ (remember-top-level-ast! session prepared-ast)
-               {:keys [unit]} (lower/lower-repl-cell prepared-ast {:name class-name
-                                                                   :compiled-classes @(:compiled-classes session)
-                                                                   :classes (vals @(:class-asts session))
-                                                                   :functions (vals @(:function-asts session))
-                                                                   :imports (:imports prepared-ast)
-                                                                   :source-file source-id
-                                                                   :var-types (session-var-types session)})
-               bytecode (emit/compile-unit->bytes unit)
-               binary-name (desc/binary-class-name class-name)
-               cls (loader/define-class! (:loader session) binary-name bytecode)
-               state (:state session)
-               _ (rt/clear-output! state)
-               method (.getMethod cls "eval" (into-array Class [(class state)]))
-               result (.invoke method nil (object-array [state]))]
-           (sync-var-types-from-ast! session prepared-ast)
-           {:compiled? true
-            :session session
-            :output (rt/state-output state)
-            :result result})
-         (catch clojure.lang.ExceptionInfo e
-           (when-not (deopt-compiled-exception? e)
-             (throw e))
-           nil)
-         (catch Throwable t
-           (when-not (deopt-compiled-exception? t)
-             (throw t))
-           nil))))))
+       (let [declaring? (declares-class-or-function? prepared-ast)]
+         (try
+           (let [class-name (next-class-name! session)
+                 _ (compile-and-register-classes! session prepared-ast source-id)
+                 _ (remember-top-level-ast! session prepared-ast)
+                 {:keys [unit]} (lower/lower-repl-cell prepared-ast {:name class-name
+                                                                     :compiled-classes @(:compiled-classes session)
+                                                                     :classes (vals @(:class-asts session))
+                                                                     :functions (vals @(:function-asts session))
+                                                                     :imports (:imports prepared-ast)
+                                                                     :source-file source-id
+                                                                     :var-types (session-var-types session)})
+                 bytecode (emit/compile-unit->bytes unit)
+                 binary-name (desc/binary-class-name class-name)
+                 cls (loader/define-class! (:loader session) binary-name bytecode)
+                 state (:state session)
+                 _ (rt/clear-output! state)
+                 method (.getMethod cls "eval" (into-array Class [(class state)]))
+                 result (.invoke method nil (object-array [state]))]
+             (sync-var-types-from-ast! session prepared-ast)
+             (reset! (:last-decline-reason session) nil)
+             {:compiled? true
+              :session session
+              :output (rt/state-output state)
+              :result result})
+           (catch clojure.lang.ExceptionInfo e
+             (if (deopt-compiled-exception? e declaring?)
+               (do (reset! (:last-decline-reason session) (ex-message e))
+                   nil)
+               (throw e)))
+           (catch Throwable t
+             (if (deopt-compiled-exception? t declaring?)
+               (do (reset! (:last-decline-reason session) (ex-message t))
+                   nil)
+               (throw t)))))))))

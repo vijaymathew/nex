@@ -1177,11 +1177,32 @@
                      (uncompiled-user-function-call? node)))
                nodes)))))
 
+(defn- ast-declares-class-or-function?
+  "True when AST introduces a real class or function definition, as opposed to
+   a plain statement/expression cell (`__ReplTemp__` is the internal wrapper
+   class used to run a bare statement, not a user definition).
+
+   Mirrors `nex.compiler.jvm.repl/declares-class-or-function?` — kept as a
+   separate check here because this predicate runs on the *original* AST,
+   before `compile-and-eval!` augments it with prior-session context."
+  [ast]
+  (boolean (or (seq (remove #(= % "__ReplTemp__") (map :name (filter map? (:classes ast)))))
+               (seq (:functions ast)))))
+
 (defn- fallback-eligible-compiled-error?
-  [^clojure.lang.ExceptionInfo e]
-  (contains? #{"Only eq/neq object comparisons are supported"
-               "Array.sort requires Comparable elements"}
-             (.getMessage e)))
+  "True when E is a narrow, known-safe reason to silently re-run a cell on the
+   interpreter. Never true for a class/function-declaring cell: such a
+   definition persists for the rest of the session, and once it is only
+   defined on the interpreter, a subclass calling `super.method()` against it
+   throws \"Undefined variable: super\" (the interpreter does not implement
+   that call — see `nex.this-super-test/super-method-call`) with no earlier
+   warning that anything fell back. A declaring cell that hits this should
+   surface as a visible error instead, same as any other compiled-backend gap."
+  [^clojure.lang.ExceptionInfo e declaring?]
+  (and (not declaring?)
+       (contains? #{"Only eq/neq object comparisons are supported"
+                    "Array.sort requires Comparable elements"}
+                  (.getMessage e))))
 
 (defn- sync-compiled-session-into-interpreter!
   [ctx]
@@ -1514,14 +1535,15 @@
              (= :compiled @*repl-backend*)
              (not (ast-needs-interpreter-fallback? exec-ctx ast)))
         (if-let [{:keys [session result output]}
-                 (try
-                   (compiled-repl/compile-and-eval! @*compiled-repl-session*
-                                                    ast
-                                                    source-id)
-                   (catch clojure.lang.ExceptionInfo e
-                     (if (fallback-eligible-compiled-error? e)
-                       nil
-                       (throw e))))]
+                 (let [declaring? (ast-declares-class-or-function? ast)]
+                   (try
+                     (compiled-repl/compile-and-eval! @*compiled-repl-session*
+                                                      ast
+                                                      source-id)
+                     (catch clojure.lang.ExceptionInfo e
+                       (if (fallback-eligible-compiled-error? e declaring?)
+                         nil
+                         (throw e)))))]
           (do
             (reset! *compiled-repl-session* session)
             (let [{:keys [var-types]} (compiled-repl/sync-session->interpreter! session exec-ctx)]
@@ -1535,7 +1557,18 @@
                 (println (str type-str " " (format-value result)))
                 (println (format-value result))))
             exec-ctx)
-          (let [classes (:classes ast)
+          (let [_ (let [reason @(:last-decline-reason @*compiled-repl-session*)
+                        declaring? (ast-declares-class-or-function? ast)]
+                    (binding [*out* *err*]
+                      (println (str "Warning: falling back to the tree-walking interpreter for this input"
+                                    (when reason (str " (" reason ")"))
+                                    "."))
+                      (when declaring?
+                        (println (str "         Any class/function defined here runs on the interpreter for the"
+                                      " rest of this session — behavior can differ from the compiled backend"
+                                      " (see docs/md/BACKEND_ALIGNMENT.md) even though this definition itself"
+                                      " succeeded.")))))
+                classes (:classes ast)
                 functions (:functions ast)
                 interns (:interns ast)
                 imports (:imports ast)

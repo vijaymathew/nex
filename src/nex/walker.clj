@@ -2039,6 +2039,7 @@
        (let [child (first children)]
          (cond
            (= child "this") {:type :this}
+           (= child "super") {:type :super}
            (and (string? child) (not (.startsWith child "\"")))
            ;; It's an identifier (not a string literal)
            {:type :identifier :name child}

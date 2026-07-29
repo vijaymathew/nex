@@ -320,6 +320,28 @@
          ": " message)
     (str "Type error: " message)))
 
+(defn- resolve-super-parent-class-name
+  "The single direct parent of CURRENT-CLASS, i.e. what `super` resolves to —
+   mirrors `single-super-parent-name` in `nex.lower` (the compiled backend) and
+   `resolve-super-parent-name` in `nex.interpreter`, so all three agree.
+
+   `super` is an ordinary identifier at parse time (see `check-target-call`'s
+   exemption from the undefined-variable check below), so `super.field := v`
+   needs this to resolve which class's field access rules to check against —
+   without it, `check-expression` on a bare `super` throws \"Undefined
+   variable: super\" before ever reaching the field-assignment checks."
+  [env current-class]
+  (when-not current-class
+    (throw (ex-info "super used outside a method or constructor body"
+                    {:error (type-error "super used outside a method or constructor body")})))
+  (let [parents (mapv :parent (:parents (env-lookup-class env current-class)))]
+    (case (count parents)
+      1 (first parents)
+      0 (throw (ex-info "super requires a direct parent"
+                        {:error (type-error "super requires a direct parent")}))
+      (throw (ex-info "super is ambiguous with multiple direct parents"
+                      {:error (type-error "super is ambiguous with multiple direct parents")})))))
+
 (defn- location-from-node
   [node]
   (when (map? node)
@@ -1999,8 +2021,14 @@
                (nil? target-type)
                (not across-item-type)
                (not with-java?)
-               ;; `this`/`super`/`Current` are special call targets, not variables.
-               (not (#{"this" "super" "Current"} target))
+               ;; `this`/`Current` are special call targets, not variables (both
+               ;; reach here as their own node type, never as this bare-string
+               ;; `target`, so the `string? target` guard above already excludes
+               ;; them — kept only for `Current`, a vestigial alias with no
+               ;; grammar token or handling of its own anywhere in the codebase.
+               ;; `super` used to need the same treatment before it got its own
+               ;; node type too; now `(string? target)` alone excludes it.
+               (not (#{"this" "Current"} target))
                (not (and current-class
                          (lookup-class-method env current-class target 0 current-class))))
       (throw (ex-info (str "Undefined variable: " target)
@@ -3006,6 +3034,13 @@
           :convert (check-convert env expr)
           :spawn (check-spawn env expr)
           :this (or (env-lookup-var env "__current_class__") "Any")
+          ;; `super`'s type is its resolved parent class, so a call/field
+          ;; access through it type-checks through the ordinary machinery for
+          ;; a value of a known class type — the same one `this` uses above.
+          ;; Non-virtual dispatch to that parent's own implementation (rather
+          ;; than whatever overrides it) is a lowering/interpreter concern,
+          ;; not a typechecking one; see `resolve-super-parent-class-name`.
+          :super (resolve-super-parent-class-name env (env-lookup-var env "__current_class__"))
           "Any")
         :else "Any"))))
 
@@ -3452,20 +3487,36 @@
                                               cond-type))})))))
           :member-assign
           (let [field-name (:field stmt)
-                target-expr (or (:object stmt) {:type :this})
-                target-type (check-expression env target-expr)
-                base-target-type (attachable-type target-type)
-                class-name (if (map? base-target-type)
-                             (:base-type base-target-type)
-                             base-target-type)
+                object-expr (:object stmt)
                 current-class (env-lookup-var env "__current_class__")
+                ;; `super.field := v` — `super` has its own node type, like
+                ;; `this`. Detected directly here (rather than going through
+                ;; the generic `check-expression env target-expr` call below,
+                ;; which would now happily type it as the parent class — see
+                ;; the `:super` case in `check-expression`) because the
+                ;; field-access checks below must run as the resolved
+                ;; *parent*, not the lexically current class — the point of
+                ;; `super.field := v` is writing a field only that ancestor
+                ;; could otherwise touch directly.
+                super-target? (and (map? object-expr) (= :super (:type object-expr)))
+                super-parent-name (when super-target?
+                                    (resolve-super-parent-class-name env current-class))
+                target-expr (or object-expr {:type :this})
+                class-name (if super-target?
+                             super-parent-name
+                             (let [target-type (check-expression env target-expr)
+                                   base-target-type (attachable-type target-type)]
+                               (if (map? base-target-type)
+                                 (:base-type base-target-type)
+                                 base-target-type)))
+                caller-class (if super-target? super-parent-name current-class)
                 _ (when-not class-name
                     (throw (ex-info "Field assignment target must be an object"
                                     {:error (type-error "Field assignment target must be an object")})))
                 _ (when (lookup-class-constant env class-name field-name)
                     (throw (ex-info (str "Cannot assign to constant: " field-name)
                                     {:error (type-error (str "Cannot assign to constant: " field-name))})))
-                field-member (lookup-class-field-member env class-name field-name current-class)
+                field-member (lookup-class-field-member env class-name field-name caller-class)
                 _ (when (and (:once? field-member)
                              (not (env-lookup-var env "__in_constructor__")))
                     (throw (ex-info (str "Cannot assign to once field outside constructor: " field-name)
@@ -3476,8 +3527,8 @@
               (throw (ex-info (str "Undefined field: " field-name)
                               {:error (type-error
                                        (undefined-field-message
-                                        env class-name field-name current-class nil))})))
-            (when-not (= current-class (:declaring-class field-member))
+                                        env class-name field-name caller-class nil))})))
+            (when-not (= caller-class (:declaring-class field-member))
               (throw (ex-info (str "Cannot assign to field " field-name)
                               {:error (field-write-error field-name (:declaring-class field-member))})))
             (when-not (types-compatible? env val-type field-type)

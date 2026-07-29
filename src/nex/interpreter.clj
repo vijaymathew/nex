@@ -1660,6 +1660,31 @@
         (env-replace-object-aliases! (:current-env ctx) old-value value))
       updated?)))
 
+(defn- resolve-super-parent-name
+  "The single direct parent of the class whose method/constructor body is
+   currently executing (`:current-class-name` in ctx), i.e. what `super`
+   resolves to. `super` is otherwise just an ordinary identifier — see
+   `nex.typechecker/check-target-call`'s exemption from the undefined-variable
+   check — so this is the one place its actual meaning is decided, mirroring
+   `single-super-parent-name` in the compiled backend (`nex.lower`).
+
+   Throws when used outside a method/constructor body, when the class has no
+   parent, or when it has more than one (ambiguous for `super` — call the
+   intended parent by name instead, e.g. `Flyable.fly()`)."
+  [ctx]
+  (let [current-class-name (:current-class-name ctx)]
+    (when-not (and current-class-name (:current-object ctx))
+      (throw (ex-info "super used outside a method or constructor body" {})))
+    (let [current-def (lookup-class-if-exists ctx current-class-name)
+          parents (get-parent-classes ctx current-def)]
+      (case (count parents)
+        0 (throw (ex-info "super requires a direct parent"
+                          {:class-name current-class-name}))
+        1 (:parent (first parents))
+        (throw (ex-info "super is ambiguous with multiple direct parents"
+                        {:class-name current-class-name
+                         :parents (mapv :parent parents)}))))))
+
 (defn dispatch-parent-call
   "Dispatch a call to a specific parent class's method/constructor on the current object."
   [ctx current-obj parent-class-name method arg-values]
@@ -1753,13 +1778,24 @@
     (let [arg-values (mapv #(eval-node ctx %) args)]
       (if target
       (let [target-name (when (string? target) target)
+            ;; `super.method(...)`/`super.make(...)`: `super` has its own node
+            ;; type (like `this`), resolved to the current class's one direct
+            ;; parent rather than a literal name written at the call site.
+            super-target? (and (map? target) (= :super (:type target)))
+            super-parent-name (when super-target? (resolve-super-parent-name ctx))
             class-target (when target-name (lookup-class-if-exists ctx target-name))
-            ;; Check if target is a parent class name (parent-qualified call: A.method())
-            parent-class (when (and target-name (:current-object ctx))
-                           (let [cls (lookup-class-if-exists ctx target-name)]
-                             (when (and cls
-                                        (is-parent? ctx (:class-name (:current-object ctx)) target-name))
-                               cls)))
+            ;; Check if target is a parent class name (parent-qualified call:
+            ;; A.method()), or `super`, which resolves to the direct parent of
+            ;; the class whose body is currently executing rather than a
+            ;; literal name written at the call site.
+            parent-class (when (or target-name super-target?)
+                           (if super-target?
+                             (lookup-class-if-exists ctx super-parent-name)
+                             (when (:current-object ctx)
+                               (let [cls (lookup-class-if-exists ctx target-name)]
+                                 (when (and cls
+                                            (is-parent? ctx (:class-name (:current-object ctx)) target-name))
+                                   cls)))))
             ;; Check if target is a Java host class (only when inside with "java" block)
             java-class? (and (:with-java? ctx)
                              target-name
@@ -1790,9 +1826,11 @@
                (lookup-class-constant ctx class-target method))
           (eval-class-constant ctx class-target method)
 
-          ;; Parent-qualified call: A.method() where A is a parent class
+          ;; Parent-qualified call: A.method() where A is a parent class, or
+          ;; super.method()/super.make(...), where the parent is resolved from
+          ;; the current class rather than named at the call site.
           parent-class
-          (dispatch-parent-call ctx (:current-object ctx) target-name method arg-values)
+          (dispatch-parent-call ctx (:current-object ctx) (or super-parent-name target-name) method arg-values)
 
           (nex-object? obj)
           (let [class-def (lookup-class ctx (:class-name obj))
@@ -2027,15 +2065,47 @@
   [ctx _]
   (:current-object ctx))
 
+(defmethod eval-node :super
+  [ctx _]
+  ;; `super` in call-target and member-assign-target position is intercepted
+  ;; before it ever reaches here (see `:call`/`:member-assign` below), since
+  ;; those need non-virtual dispatch to the resolved parent rather than the
+  ;; object's own value. This handles the rest: `super` used as an ordinary
+  ;; expression (e.g. a stray `print(super)`) evaluates the same as `this` —
+  ;; there is only one underlying object either way.
+  (:current-object ctx))
+
 (defmethod eval-node :member-assign
   [ctx {:keys [object object-type field value]}]
   (maybe-debug-pause ctx {:type :member-assign :object object :object-type object-type :field field :value value})
-  (let [target-expr (or object (when (= object-type :this) {:type :this}))
-        target-obj (eval-node ctx target-expr)
-        class-name (or (:class-name target-obj) (:current-class-name ctx))
+  (let [;; `super.field := value`: like `this`, `super` has its own node type
+        ;; (`{:type :super}`), detected here rather than evaluated as a plain
+        ;; expression. It writes to the same object as `this` would (the
+        ;; field lives on the one object being built/mutated), but the access
+        ;; check below must run as the *parent* class — the whole point of
+        ;; `super.field := v` is assigning a field the current (sub)class
+        ;; alone isn't allowed to touch directly.
+        super-target? (and (map? object) (= :super (:type object)))
+        target-expr (or object (when (= object-type :this) {:type :this}))
+        target-obj (if super-target? (:current-object ctx) (eval-node ctx target-expr))
+        super-parent-name (when super-target? (resolve-super-parent-name ctx))
+        ;; `class-name` finds the class-def to look the field up on; `caller-
+        ;; class-name` is who's asking, for the access check below. Ordinarily
+        ;; those differ — a field write dispatches on the object's *actual*
+        ;; class, but the write is only allowed from the method body of the
+        ;; class that declares the field, which is `:current-class-name`, not
+        ;; necessarily the object's own class (that's exactly the this.x := x
+        ;; case inside an ancestor's constructor: target-obj is the *most-
+        ;; derived* object under construction, but the constructor executing
+        ;; right now is the ancestor's). For `super`, both collapse to the
+        ;; resolved parent, since that's the class we're asking to write as.
+        class-name (if super-target?
+                     super-parent-name
+                     (or (:class-name target-obj) (:current-class-name ctx)))
+        caller-class-name (if super-target? super-parent-name (:current-class-name ctx))
         class-def (when class-name (lookup-class-if-exists ctx class-name))
         field-def (when class-def
-                    (lookup-field-with-inheritance ctx class-def field (:current-class-name ctx)))]
+                    (lookup-field-with-inheritance ctx class-def field caller-class-name))]
     (when-not (nex-object? target-obj)
       (throw (ex-info "Field assignment target must be an object"
                       {:target target-expr :value target-obj})))
@@ -2048,18 +2118,18 @@
     (when-not field-def
       (throw (ex-info (str "Undefined field: " field)
                       {:field field :class-name class-name})))
-    (when-not (= (:current-class-name ctx) (:declaring-class field-def))
+    (when-not (= caller-class-name (:declaring-class field-def))
       (throw (ex-info (field-write-error-message field (:declaring-class field-def))
                       {:field field
                        :class-name class-name
                        :declaring-class (:declaring-class field-def)})))
     (let [val (eval-node ctx value)]
-      (if (and (= (:type target-expr) :this) (:current-object ctx))
+      (if (and (or super-target? (= (:type target-expr) :this)) (:current-object ctx))
         (do
           ;; Track that this field was explicitly modified via this.field :=
           (when-let [mf (:modified-fields ctx)]
             (swap! mf conj field))
-          ;; this.field sets the env variable
+          ;; this.field/super.field sets the env variable
           ;; (fields are tracked as env vars, extracted back to object after body)
           (env-set! (:current-env ctx) field val)
           val)

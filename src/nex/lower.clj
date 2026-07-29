@@ -623,8 +623,7 @@
 
 (defn- infer-target-call-type
   [env expr class-target-name across-item-type target-expr]
-  (if (and (= :identifier (:type target-expr))
-           (= "super" (:name target-expr)))
+  (if (= :super (:type target-expr))
     (let [parent-name (single-super-parent-name env)
           parent-def (get (visible-class-map env) parent-name)]
       (if (false? (:has-parens expr))
@@ -2690,6 +2689,14 @@
       ;; `builtin-method-signature`), so `p.total.to_string` typechecks against
       ;; a class that never defines `to_string` and must therefore also lower.
       ;;
+      ;; Also covers a receiver whose static type is an *unconstrained* generic
+      ;; parameter (e.g. `first: F` in `Pair[F, S]` calling `first.to_string`):
+      ;; the typechecker admits the same Any protocol there (there is no class
+      ;; to look up), so `class-def` is nil but the receiver still needs the
+      ;; same runtime dispatch — without this branch such a call fell through
+      ;; every case here and threw "Unsupported target call expression for
+      ;; lowering" at compile time.
+      ;;
       ;; Only the members the compiled object model actually implements are
       ;; routed here. `clone` and `hash` are deliberately excluded: their :Any
       ;; defaults (`bi/nex-clone-value`, `bi/nex-structural-hash`) only
@@ -2699,7 +2706,8 @@
       ;; they were before this branch existed — instead of a silent wrong
       ;; answer. Same for the typechecker's `cursor`/`start`/`item`/`next`/
       ;; `at_end`, which have no Any default at all.
-      (and class-def (contains? #{"to_string" "equals"} method))
+      (and (or class-def (contains? (:generic-param-names env) base-type))
+           (contains? #{"to_string" "equals"} method))
       (let [nex-type (or (bi/builtin-type-method-return-type :Any method) "Any")
             jvm-type (resolve-jvm-type env nex-type)]
         (ir/call-runtime-node (str "any:" method)
@@ -3343,8 +3351,7 @@
                 jvm-type (resolve-jvm-type env nex-type)]
             (ir/call-repl-fn-node (:method expr) arg-irs nex-type jvm-type)))
         (cond
-          (and (= :identifier (:type target-expr))
-               (= "super" (:name target-expr)))
+          (= :super (:type target-expr))
           (let [parent-name (single-super-parent-name env)
                 parent-def (get (visible-class-map env) parent-name)
                 parent-meta (class-jvm-meta env parent-name)
@@ -3829,25 +3836,27 @@
 (defn- lower-member-assign-stmt [env stmt]
   (let [field-name (:field stmt)
         target-expr (or (:object stmt) {:type :this})
-        super-target? (and (= :identifier (:type target-expr))
-                           (= "super" (:name target-expr)))
+        super-target? (= :super (:type target-expr))
         target-type (when-not super-target? (infer-type env target-expr))
         owner (base-type-name target-type)
         class-def (get (visible-class-map env) owner)
         field-def (when class-def (accessible-field-def env class-def field-name))
         value-ir (lower-expression env (:value stmt))]
     (cond
-      super-target?
-      (let [parent-name (single-super-parent-name env)]
-        (throw (ex-info (field-write-error-message field-name parent-name)
-                        {:field field-name
-                         :declaring-class parent-name
-                         :target target-expr})))
-
-      (and (= (:type target-expr) :this)
+      ;; `super.field := v` writes the same underlying object as `this` would
+      ;; (the composition carrier already reaches the parent's storage), but
+      ;; is only writable when the field's owner is the resolved *parent* —
+      ;; the whole point being to assign a field the current (sub)class alone
+      ;; isn't allowed to touch directly. Sharing this branch with `:this`
+      ;; (rather than the unconditional throw this used to be, before `super`
+      ;; field access could even reach lowering — see `resolve-super-parent-name`
+      ;; in `nex.interpreter` and `nex.typechecker` for the matching fix there)
+      ;; keeps the writability check and IR shape identical to `this.field`.
+      (and (or super-target? (= (:type target-expr) :this))
            (get (:fields env) field-name))
-      (let [field-info (get (:fields env) field-name)
-            writable? (= (:owner field-info) (:current-class env))]
+      (let [expected-owner (if super-target? (single-super-parent-name env) (:current-class env))
+            field-info (get (:fields env) field-name)
+            writable? (= (:owner field-info) expected-owner)]
         (when-not writable?
           (throw (ex-info (field-write-error-message field-name (:owner field-info))
                           {:field field-name
@@ -3868,6 +3877,13 @@
                                   value-ir
                                   (:nex-type field-info)
                                   (:jvm-type field-info))]))
+
+      super-target?
+      (let [parent-name (single-super-parent-name env)]
+        (throw (ex-info (field-write-error-message field-name parent-name)
+                        {:field field-name
+                         :declaring-class parent-name
+                         :target target-expr})))
 
       field-def
       (if (= (:current-class env) (:declaring-class field-def))
@@ -3918,16 +3934,8 @@
                    (:target stmt)
 
                    (and (:this-type env)
-                        (= "super" (:target stmt))
-                        (class-constructor-def (get (visible-class-map env) (single-super-parent-name env))
-                                               (:method stmt)
-                                               (count (:args stmt))))
-                   (single-super-parent-name env)
-
-                   (and (:this-type env)
                         (map? (:target stmt))
-                        (= :identifier (:type (:target stmt)))
-                        (= "super" (:name (:target stmt)))
+                        (= :super (:type (:target stmt)))
                         (class-constructor-def (get (visible-class-map env) (single-super-parent-name env))
                                                (:method stmt)
                                                (count (:args stmt))))
