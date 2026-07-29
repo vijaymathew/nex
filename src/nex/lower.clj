@@ -2690,6 +2690,14 @@
       ;; `builtin-method-signature`), so `p.total.to_string` typechecks against
       ;; a class that never defines `to_string` and must therefore also lower.
       ;;
+      ;; Also covers a receiver whose static type is an *unconstrained* generic
+      ;; parameter (e.g. `first: F` in `Pair[F, S]` calling `first.to_string`):
+      ;; the typechecker admits the same Any protocol there (there is no class
+      ;; to look up), so `class-def` is nil but the receiver still needs the
+      ;; same runtime dispatch — without this branch such a call fell through
+      ;; every case here and threw "Unsupported target call expression for
+      ;; lowering" at compile time.
+      ;;
       ;; Only the members the compiled object model actually implements are
       ;; routed here. `clone` and `hash` are deliberately excluded: their :Any
       ;; defaults (`bi/nex-clone-value`, `bi/nex-structural-hash`) only
@@ -2699,7 +2707,8 @@
       ;; they were before this branch existed — instead of a silent wrong
       ;; answer. Same for the typechecker's `cursor`/`start`/`item`/`next`/
       ;; `at_end`, which have no Any default at all.
-      (and class-def (contains? #{"to_string" "equals"} method))
+      (and (or class-def (contains? (:generic-param-names env) base-type))
+           (contains? #{"to_string" "equals"} method))
       (let [nex-type (or (bi/builtin-type-method-return-type :Any method) "Any")
             jvm-type (resolve-jvm-type env nex-type)]
         (ir/call-runtime-node (str "any:" method)

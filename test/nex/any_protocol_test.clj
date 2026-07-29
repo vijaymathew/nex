@@ -250,6 +250,44 @@ print(a /= b)")))))
     ;; universal signature is the receiver's own.
     (is (nil? (type-errors "let a: Any := [1, 2]\nprint(a.equals(\"x\"))")))))
 
+;; ─── The protocol on an unconstrained generic parameter ─────────────────────
+;;
+;; `first: F` in `class Pair [F, S]` has no class-def and no constraint to look
+;; up, so `first.to_string` used to fall through every case in
+;; `lower-instance-dispatch` and throw "Unsupported target call expression for
+;; lowering" at compile time — the only escape was `--interpret`. The
+;; typechecker already admitted this (the "Any" case of
+;; `builtin-method-signature` is consulted for every receiver, unconstrained
+;; generic parameters included), so the fix routes it through the same
+;; `any:to_string`/`any:equals` runtime dispatch as a class declaring neither.
+
+(deftest to-string-on-unconstrained-generic-parameter
+  (testing "a generic field with no constraint still gets to_string via Any"
+    ;; String's own to_string quotes itself (matching `print`'s quoting), so
+    ;; the concatenated result quotes "age" too — this is Nex's normal
+    ;; to_string behavior for String, not an artifact of the generic dispatch.
+    (is (= ["\"(\"age\", 30)\""]
+           (both "class Pair [F, S]
+  create make(a: F, b: S) do first := a  second := b end
+  feature
+    first: F
+    second: S
+    describe: String do result := \"(\" + first.to_string + \", \" + second.to_string + \")\" end
+end
+print(create Pair[String, Integer].make(\"age\", 30).describe)")))))
+
+(deftest equals-on-unconstrained-generic-parameter
+  (testing "equals on an unconstrained generic parameter compares structurally"
+    (is (= ["true" "false"]
+           (both "class Box [T]
+  create make(v: T) do value := v end
+  feature value: T
+end
+let a := create Box[Integer].make(1)
+let b := create Box[Integer].make(1)
+print(a.value.equals(b.value))
+print(a.value.equals(2))")))))
+
 (deftest user-class-cursor-still-dispatches
   (testing "a class declaring its own `cursor` resolves to its own signature"
     (is (= ["false"]
