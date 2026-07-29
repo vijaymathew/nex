@@ -300,7 +300,6 @@ nex> class Point
 nex> :help      -- available commands
 nex> :classes   -- list defined classes
 nex> :vars      -- list defined variables
-nex> :backend   -- show or change backend
 nex> :typecheck -- show or change REPL type checking
 nex> :quit      -- exit
 ```
@@ -352,7 +351,7 @@ end")
 
 The JVM compiler shades the current compiler classpath into the output jar. To
 include extra Java/Maven dependencies, launch the compiler with those deps on
-the classpath first. See [docs/md/CLI.md](/home/vijay/Projects/nex/docs/md/CLI.md) for exact CLI examples.
+the classpath first. Run `nex help` for the full list of CLI commands and examples.
 
 ### Running Tests
 
@@ -460,13 +459,10 @@ nex/
 |---|---|
 | [Syntax on a Postcard](docs/md/SYNTAX.md) | Core language syntax and quick reference |
 | [Tutorial](docs/md/TUTORIAL.md) | Step-by-step introduction to the language |
-| [CLI Guide](docs/md/CLI.md) | Command-line options and workflows |
-| [Debugger Guide](docs/md/DEBUGGER.md) | REPL debugger commands |
-| [Concurrency Guide](docs/md/CONCURRENCY.md) | Task, channel, select, and runtime semantics |
-| [Arrays and Maps](docs/md/ARRAYS_MAPS.md) | Collection operations and examples |
 | [Emacs Support](docs/md/EMACS.md) | Emacs mode setup and key bindings |
 | [Development Notes](docs/md/DEVELOPMENT.md) | Architecture and contribution notes |
 | [JVM Bytecode Translation Reference](docs/design/chapter_5.md) | How the current JVM backend lowers and emits Nex programs |
+| [Library Reference Index](docs/ref/index.md) | Standard library reference (collections, I/O, networking, time, ...) |
 
 ### Library Reference
 
