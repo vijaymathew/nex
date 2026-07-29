@@ -3846,17 +3846,20 @@
         field-def (when class-def (accessible-field-def env class-def field-name))
         value-ir (lower-expression env (:value stmt))]
     (cond
-      super-target?
-      (let [parent-name (single-super-parent-name env)]
-        (throw (ex-info (field-write-error-message field-name parent-name)
-                        {:field field-name
-                         :declaring-class parent-name
-                         :target target-expr})))
-
-      (and (= (:type target-expr) :this)
+      ;; `super.field := v` writes the same underlying object as `this` would
+      ;; (the composition carrier already reaches the parent's storage), but
+      ;; is only writable when the field's owner is the resolved *parent* —
+      ;; the whole point being to assign a field the current (sub)class alone
+      ;; isn't allowed to touch directly. Sharing this branch with `:this`
+      ;; (rather than the unconditional throw this used to be, before `super`
+      ;; field access could even reach lowering — see `resolve-super-parent-name`
+      ;; in `nex.interpreter` and `nex.typechecker` for the matching fix there)
+      ;; keeps the writability check and IR shape identical to `this.field`.
+      (and (or super-target? (= (:type target-expr) :this))
            (get (:fields env) field-name))
-      (let [field-info (get (:fields env) field-name)
-            writable? (= (:owner field-info) (:current-class env))]
+      (let [expected-owner (if super-target? (single-super-parent-name env) (:current-class env))
+            field-info (get (:fields env) field-name)
+            writable? (= (:owner field-info) expected-owner)]
         (when-not writable?
           (throw (ex-info (field-write-error-message field-name (:owner field-info))
                           {:field field-name
@@ -3877,6 +3880,13 @@
                                   value-ir
                                   (:nex-type field-info)
                                   (:jvm-type field-info))]))
+
+      super-target?
+      (let [parent-name (single-super-parent-name env)]
+        (throw (ex-info (field-write-error-message field-name parent-name)
+                        {:field field-name
+                         :declaring-class parent-name
+                         :target target-expr})))
 
       field-def
       (if (= (:current-class env) (:declaring-class field-def))

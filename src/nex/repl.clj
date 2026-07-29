@@ -1565,9 +1565,9 @@
                                     "."))
                       (when declaring?
                         (println (str "         Any class/function defined here runs on the interpreter for the"
-                                      " rest of this session — features it doesn't support yet (e.g. `super`"
-                                      " calling an overridden method) will fail even though this definition"
-                                      " itself succeeded.")))))
+                                      " rest of this session — behavior can differ from the compiled backend"
+                                      " (see docs/md/BACKEND_ALIGNMENT.md) even though this definition itself"
+                                      " succeeded.")))))
                 classes (:classes ast)
                 functions (:functions ast)
                 interns (:interns ast)
