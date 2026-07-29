@@ -128,7 +128,7 @@
     "old" "create" "private" "note" "with" "import" "intern" "function"
     "raise" "rescue" "retry" "assert" "repeat" "across" "case" "of"
     "spawn" "select" "timeout" "declare" "sealed" "once" "match" "type"
-    "enum" "union" "where")
+    "enum" "union" "where" "this" "super")
   "Nex language keywords.")
 
 (defconst nex-types
