@@ -45,12 +45,12 @@
    The distinction matters because a class or function persists in the REPL
    session: once one of them fails to compile and silently falls back to
    `interp/eval-node` instead, it stays an *interpreted* definition for the
-   rest of the session, and the two backends disagree on real features (a
-   subclass calling `super.method()` on an interpreted parent throws
-   \"Undefined variable: super\" — see `nex.this-super-test/super-method-call`,
-   which pins that gap as current, not incidental). A one-off statement's
-   fallback is contained to that single evaluation and has no such lingering
-   cost, so it is still safe to swallow silently here."
+   rest of the session, and the two backends can disagree on real features
+   (see docs/md/BACKEND_ALIGNMENT.md) — `super.method()` used to be exactly
+   such a gap until the interpreter grew a real implementation of it (see
+   `nex.this-super-test`). A one-off statement's fallback is contained to
+   that single evaluation and has no such lingering cost, so it is still
+   safe to swallow silently here."
   [ast]
   (boolean (or (seq (:classes ast)) (seq (:functions ast)))))
 

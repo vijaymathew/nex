@@ -1778,17 +1778,17 @@
     (let [arg-values (mapv #(eval-node ctx %) args)]
       (if target
       (let [target-name (when (string? target) target)
-            ;; `super.method(...)`/`super.make(...)`: `super` is a plain
-            ;; identifier target here (unlike `this`, which parses to its own
-            ;; node type), resolved to the current class's one direct parent.
-            super-target? (= target-name "super")
+            ;; `super.method(...)`/`super.make(...)`: `super` has its own node
+            ;; type (like `this`), resolved to the current class's one direct
+            ;; parent rather than a literal name written at the call site.
+            super-target? (and (map? target) (= :super (:type target)))
             super-parent-name (when super-target? (resolve-super-parent-name ctx))
             class-target (when target-name (lookup-class-if-exists ctx target-name))
             ;; Check if target is a parent class name (parent-qualified call:
             ;; A.method()), or `super`, which resolves to the direct parent of
             ;; the class whose body is currently executing rather than a
             ;; literal name written at the call site.
-            parent-class (when target-name
+            parent-class (when (or target-name super-target?)
                            (if super-target?
                              (lookup-class-if-exists ctx super-parent-name)
                              (when (:current-object ctx)
@@ -2065,19 +2065,27 @@
   [ctx _]
   (:current-object ctx))
 
+(defmethod eval-node :super
+  [ctx _]
+  ;; `super` in call-target and member-assign-target position is intercepted
+  ;; before it ever reaches here (see `:call`/`:member-assign` below), since
+  ;; those need non-virtual dispatch to the resolved parent rather than the
+  ;; object's own value. This handles the rest: `super` used as an ordinary
+  ;; expression (e.g. a stray `print(super)`) evaluates the same as `this` —
+  ;; there is only one underlying object either way.
+  (:current-object ctx))
+
 (defmethod eval-node :member-assign
   [ctx {:keys [object object-type field value]}]
   (maybe-debug-pause ctx {:type :member-assign :object object :object-type object-type :field field :value value})
-  (let [;; `super.field := value` parses to an ordinary `{:type :identifier
-        ;; :name "super"}` object (unlike `this`, which gets its own node
-        ;; type — see `nex.walker`'s `:assignment` transform), so it must be
-        ;; detected here rather than falling out of `(eval-node ctx target-expr)`
-        ;; as an undefined-variable lookup. It writes to the same object as
-        ;; `this` would (the field lives on the one object being built/mutated),
-        ;; but the access check below must run as the *parent* class — the
-        ;; whole point of `super.field := v` is assigning a field the current
-        ;; (sub)class alone isn't allowed to touch directly.
-        super-target? (and (map? object) (= :identifier (:type object)) (= "super" (:name object)))
+  (let [;; `super.field := value`: like `this`, `super` has its own node type
+        ;; (`{:type :super}`), detected here rather than evaluated as a plain
+        ;; expression. It writes to the same object as `this` would (the
+        ;; field lives on the one object being built/mutated), but the access
+        ;; check below must run as the *parent* class — the whole point of
+        ;; `super.field := v` is assigning a field the current (sub)class
+        ;; alone isn't allowed to touch directly.
+        super-target? (and (map? object) (= :super (:type object)))
         target-expr (or object (when (= object-type :this) {:type :this}))
         target-obj (if super-target? (:current-object ctx) (eval-node ctx target-expr))
         super-parent-name (when super-target? (resolve-super-parent-name ctx))

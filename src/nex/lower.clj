@@ -623,8 +623,7 @@
 
 (defn- infer-target-call-type
   [env expr class-target-name across-item-type target-expr]
-  (if (and (= :identifier (:type target-expr))
-           (= "super" (:name target-expr)))
+  (if (= :super (:type target-expr))
     (let [parent-name (single-super-parent-name env)
           parent-def (get (visible-class-map env) parent-name)]
       (if (false? (:has-parens expr))
@@ -3352,8 +3351,7 @@
                 jvm-type (resolve-jvm-type env nex-type)]
             (ir/call-repl-fn-node (:method expr) arg-irs nex-type jvm-type)))
         (cond
-          (and (= :identifier (:type target-expr))
-               (= "super" (:name target-expr)))
+          (= :super (:type target-expr))
           (let [parent-name (single-super-parent-name env)
                 parent-def (get (visible-class-map env) parent-name)
                 parent-meta (class-jvm-meta env parent-name)
@@ -3838,8 +3836,7 @@
 (defn- lower-member-assign-stmt [env stmt]
   (let [field-name (:field stmt)
         target-expr (or (:object stmt) {:type :this})
-        super-target? (and (= :identifier (:type target-expr))
-                           (= "super" (:name target-expr)))
+        super-target? (= :super (:type target-expr))
         target-type (when-not super-target? (infer-type env target-expr))
         owner (base-type-name target-type)
         class-def (get (visible-class-map env) owner)
@@ -3937,16 +3934,8 @@
                    (:target stmt)
 
                    (and (:this-type env)
-                        (= "super" (:target stmt))
-                        (class-constructor-def (get (visible-class-map env) (single-super-parent-name env))
-                                               (:method stmt)
-                                               (count (:args stmt))))
-                   (single-super-parent-name env)
-
-                   (and (:this-type env)
                         (map? (:target stmt))
-                        (= :identifier (:type (:target stmt)))
-                        (= "super" (:name (:target stmt)))
+                        (= :super (:type (:target stmt)))
                         (class-constructor-def (get (visible-class-map env) (single-super-parent-name env))
                                                (:method stmt)
                                                (count (:args stmt))))

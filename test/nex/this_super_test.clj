@@ -29,7 +29,7 @@ end"
       (is (= "x" (:field stmt))))))
 
 (deftest parse-super-field-assignment
-  (testing "super.field assignment now parses as a member assignment target"
+  (testing "super.field assignment parses as a member assignment target"
     (let [code "class B
   inherit A
   create
@@ -50,9 +50,29 @@ end"
                    first :constructors first)
           stmt (first (:body ctor))]
       (is (= :member-assign (:type stmt)))
-      (is (= :identifier (-> stmt :object :type)))
-      (is (= "super" (-> stmt :object :name)))
+      (is (= :super (-> stmt :object :type)))
       (is (= "x" (:field stmt))))))
+
+(deftest parse-super-call-target
+  (testing "super.method() parses to its own node type, like this.method()"
+    (let [ast (p/ast "class A
+  feature
+    show do
+      super.greet
+    end
+end")
+          stmt (-> ast :classes first :body first :members first :body first)]
+      (is (= :call (:type stmt)))
+      (is (= :super (-> stmt :target :type)))
+      (is (= "greet" (:method stmt))))))
+
+(deftest super-is-a-reserved-word
+  (testing "super cannot be used as an identifier anywhere IDENTIFIER is expected"
+    (doseq [code ["let super := 5"
+                  "class super create make() do end end"
+                  "class A feature super: Integer end"
+                  "function f(super: Integer): Integer do result := super end"]]
+      (is (thrown? clj_antlr.ParseError (p/ast code)) code))))
 
 (deftest parse-this-in-expression
   (testing "this parses to {:type :this} in primary position"
