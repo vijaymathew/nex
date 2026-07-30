@@ -8,7 +8,8 @@
             [nex.interpreter :as interp]
             [nex.lower :as lower]
             [nex.typechecker :as tc])
-  (:import [java.util HashMap]))
+  (:import [java.util HashMap]
+           [java.lang.reflect InvocationTargetException]))
 
 (defn- clone-hash-map
   [m]
@@ -54,21 +55,52 @@
   [ast]
   (boolean (or (seq (:classes ast)) (seq (:functions ast)))))
 
+(defn- unwrap-reflective-exception
+  "A class/function's `eval` method is invoked via `Method/invoke` (see
+   `compile-and-eval!` below), which wraps whatever it throws — including a
+   JVM linking failure that only surfaces the first time the generated
+   bytecode is actually run — in an `InvocationTargetException` (or, for a
+   failure during a class's static init, `ExceptionInInitializerError`) with
+   no message of its own. Peels away those wrappers down to the real cause,
+   same as `nex.repl/unwrap-user-visible-exception` and
+   `nex.compiler.jvm.runtime/unwrap-reflective-exception` do elsewhere."
+  [^Throwable t]
+  (loop [t t]
+    (if (and (or (instance? InvocationTargetException t)
+                 (instance? ExceptionInInitializerError t))
+             (.getCause t))
+      (recur (.getCause t))
+      t)))
+
 (defn- deopt-compiled-exception?
-  "True when `t` is a known compiled-backend gap safe to silently recover from
-   by re-running the cell on the tree-walking interpreter. Never true for a
-   class/function-declaring cell — see `declares-class-or-function?`."
+  "True when `t` is a known compiled-backend gap safe to recover from by
+   re-running the cell on the tree-walking interpreter. Never true for a
+   class/function-declaring cell — see `declares-class-or-function?` — except
+   for a `LinkageError`, which (like `nex.eval/run-ast`'s identical handling
+   for whole-file execution) is always a backend defect rather than the
+   program's own behavior, so it is always safe to recover from."
   [^Throwable t declaring?]
-  (let [msg (.getMessage t)]
-    (boolean
-     (and msg
-          (not declaring?)
-          (or (.contains msg "Unsupported")
-              (.contains msg "Unable to infer expression type during lowering")
-              (.contains msg "Only expression-shaped or result-assignment if branches are supported in lowering")
-              (.contains msg "Only eq/neq object comparisons are supported")
-              (.contains msg "Missing compiled class metadata during lowering")
-              (.contains msg "Create of non-compiled class is not supported in lowering"))))))
+  (if (instance? LinkageError (unwrap-reflective-exception t))
+    true
+    (let [msg (.getMessage t)]
+      (boolean
+       (and msg
+            (not declaring?)
+            (or (.contains msg "Unsupported")
+                (.contains msg "Unable to infer expression type during lowering")
+                (.contains msg "Only expression-shaped or result-assignment if branches are supported in lowering")
+                (.contains msg "Only eq/neq object comparisons are supported")
+                (.contains msg "Missing compiled class metadata during lowering")
+                (.contains msg "Create of non-compiled class is not supported in lowering")))))))
+
+(defn- decline-reason
+  "User-facing explanation for `t` to store as `:last-decline-reason`, read by
+   `nex.repl` to print a visible fallback warning."
+  [^Throwable t]
+  (let [cause (unwrap-reflective-exception t)]
+    (if (instance? LinkageError cause)
+      (str "compiled program failed to link (" (or (ex-message cause) (str cause)) ")")
+      (ex-message t))))
 
 (def ^:private relational-ops
   #{"=" "/=" "<" "<=" ">" ">="})
@@ -1026,11 +1058,11 @@
               :result result})
            (catch clojure.lang.ExceptionInfo e
              (if (deopt-compiled-exception? e declaring?)
-               (do (reset! (:last-decline-reason session) (ex-message e))
+               (do (reset! (:last-decline-reason session) (decline-reason e))
                    nil)
                (throw e)))
            (catch Throwable t
              (if (deopt-compiled-exception? t declaring?)
-               (do (reset! (:last-decline-reason session) (ex-message t))
+               (do (reset! (:last-decline-reason session) (decline-reason t))
                    nil)
                (throw t)))))))))

@@ -1467,6 +1467,7 @@
                                              (not (contains? referenced-anonymous-class-names (:name %)))))
                                    (vals @(:classes ctx)))
               intern-classes (interp/resolve-interned-classes source-id ast)
+              intern-functions (interp/resolve-interned-functions source-id ast)
               prev-imports @(:imports ctx)
               augmented-ast (cond
                               (and (seq prev-classes) (seq prev-imports) (seq intern-classes))
@@ -1498,8 +1499,9 @@
 
                               :else
                               ast)
-              augmented-ast (if (seq prev-functions)
-                              (update augmented-ast :functions #(vec (concat prev-functions %)))
+              augmented-ast (if (or (seq prev-functions) (seq intern-functions))
+                              (update augmented-ast :functions
+                                     #(vec (concat prev-functions intern-functions %)))
                               augmented-ast)
               ;; Make every type alias declared so far in the session visible to
               ;; the checker, not just any declared in the current input.
@@ -1576,19 +1578,27 @@
                 calls (:calls ast)
                 real-class-names (filter #(not= % "__ReplTemp__")
                                          (map :name (filter map? classes)))
-                function-names (map :name (filter map? functions))]
-            (when (or (seq imports) (seq interns) (seq real-class-names) (seq function-names))
+                function-names (map :name (filter map? functions))
+                ;; `eval-node` on a whole `:program` AST registers imports/
+                ;; interns/classes/functions AND executes its top-level
+                ;; statements/calls in one pass (see `interpreter.clj`'s
+                ;; `:program` method). So whenever this branch runs, the
+                ;; statements below have already executed once — replaying
+                ;; them again (as the plain-statements path below does) would
+                ;; run any side effects (e.g. `print`) a second time.
+                registered? (boolean (or (seq imports) (seq interns) (seq real-class-names) (seq function-names)))]
+            (when registered?
               (interp/eval-node exec-ctx ast)
               (when @*type-checking-enabled*
                 (doseq [fn-def (filter map? functions)]
                   (swap! *repl-var-types* assoc (:name fn-def) (:class-name fn-def)))))
             (let [top-nodes (if (seq statements) statements calls)
-                  result (when (and (seq top-nodes) (empty? real-class-names) (empty? function-names))
+                  result (when (and (not registered?) (seq top-nodes))
                            (last (map #(interp/eval-node exec-ctx %) top-nodes)))
                   ;; Already written as the statements ran; `output` is read
                   ;; only to tell whether the cell printed anything.
                   output @(:output exec-ctx)]
-              (when (and (some? result) (empty? output) (empty? real-class-names) (empty? function-names))
+              (when (and (some? result) (empty? output) (not registered?))
                 (if-let [type-str (when (seq calls)
                                     (infer-result-type exec-ctx (last calls)))]
                   (println (str type-str " " (format-value result)))
@@ -1659,25 +1669,34 @@
               calls (:calls ast)
               real-class-names (filter #(not= % "__ReplTemp__")
                                       (map :name (filter map? classes)))
-              function-names (map :name (filter map? functions))]
+              function-names (map :name (filter map? functions))
+              ;; `eval-node` on a whole `:program` AST registers imports/
+              ;; interns/classes/functions AND executes its top-level
+              ;; statements/calls in one pass (see `interpreter.clj`'s
+              ;; `:program` method). So whenever this branch runs, the
+              ;; statements below have already executed once — replaying
+              ;; them again (as the plain-statements path below does) would
+              ;; run any side effects (e.g. `print`) a second time.
+              registered? (boolean (or (seq imports) (seq interns) (seq real-class-names) (seq function-names)))]
           ;; If there are imports/interns/classes/functions, evaluate the program
           ;; as a whole so registration side effects happen.
-          (when (or (seq imports) (seq interns) (seq real-class-names) (seq function-names))
+          (when registered?
             (interp/eval-node exec-ctx ast)
             (when @*type-checking-enabled*
               (doseq [fn-def (filter map? functions)]
                 (swap! *repl-var-types* assoc (:name fn-def) (:class-name fn-def)))))
-          ;; If there are top-level statements and no classes/functions, evaluate them in order.
+          ;; If there are top-level statements and no classes/functions/imports/interns
+          ;; (i.e. the branch above did not already run them), evaluate them in order.
           ;; Fall back to legacy :calls-only programs when :statements is absent.
           (let [top-nodes (if (seq statements) statements calls)
-                result (when (and (seq top-nodes) (empty? real-class-names) (empty? function-names))
+                result (when (and (not registered?) (seq top-nodes))
                          (last (map #(interp/eval-node exec-ctx %) top-nodes)))
                 ;; Already written as the statements ran; `output` is read
                 ;; only to tell whether the cell printed anything.
                 output @(:output exec-ctx)]
             ;; Show result if it's not nil, not from a print, and no classes were defined
             ;; Always show false/0 results too.
-            (when (and (some? result) (empty? output) (empty? real-class-names) (empty? function-names))
+            (when (and (some? result) (empty? output) (not registered?))
               (if-let [type-str (when (seq calls)
                                   (infer-result-type exec-ctx (last calls)))]
                 (println (str type-str " " (format-value result)))
