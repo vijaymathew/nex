@@ -118,6 +118,16 @@
     "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Cursor" "Task" "Channel" "Console" "Process"})
 
+;; The only method names the compiled backend actually implements a
+;; "builtin-method:Any:*" runtime wrapper for (see the `def-builtin-method-
+;; wrapper builtin-method-any-*` forms in `nex.compiler.jvm.runtime`). Any
+;; other method call on an `Any`-typed receiver is not a Nex Any-protocol
+;; call — most commonly, in a with-"java" block, an actual Java method on
+;; whatever object the `Any` is holding at runtime — and must not be routed
+;; through the same table, or it resolves to a Var that was never defined.
+(def ^:private any-protocol-method-names
+  #{"to_string" "equals" "clone" "cursor" "start" "item" "next" "at_end" "get" "length"})
+
 (def ^:private next-synthetic-closure-id (atom 0))
 
 (def ^:private direct-integer-bitwise-method->op
@@ -3539,10 +3549,26 @@
               ;; docstring): a with-"java" block still contains ordinary Nex
               ;; calls (Console, collections, user classes), which must keep
               ;; their normal dispatch rather than fall into reflection.
+              ;;
+              ;; `Any` is a builtin-runtime-receiver-type too, and even a
+              ;; registered (synthetic) entry in `visible-class-map` — but it
+              ;; is also the static type every Java interop value carries
+              ;; (there is no way for the typechecker to know a real Java
+              ;; type), so the ordinary "unresolved target" tests below would
+              ;; wrongly send every interop call — `builder.append(s)` on a
+              ;; `builder: Any` holding a live `java.lang.StringBuilder`, say
+              ;; — into the fixed Any-protocol dispatch table instead, which
+              ;; only understands the handful of names in
+              ;; `any-protocol-method-names` and crashes on anything else with
+              ;; an unbound-Var error at runtime. Inside a with-"java" block,
+              ;; always treat any other method name on an `Any` receiver as
+              ;; host interop, regardless of those other tests.
               (and (:with-java? env)
-                   (not (builtin-runtime-receiver-type? env target-type))
-                   (not (get (visible-class-map env) (base-type-name target-type)))
-                   (not (get (:compiled-classes env) (base-type-name target-type))))
+                   (or (and (= "Any" (base-type-name target-type))
+                            (not (contains? any-protocol-method-names (:method expr))))
+                       (and (not (builtin-runtime-receiver-type? env target-type))
+                            (not (get (visible-class-map env) (base-type-name target-type)))
+                            (not (get (:compiled-classes env) (base-type-name target-type))))))
               (let [target-ir (lower-expression env target-expr)
                     nex-type (or (infer-call-type env expr) "Any")
                     jvm-type (resolve-jvm-type env nex-type)]
