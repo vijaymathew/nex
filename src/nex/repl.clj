@@ -1774,7 +1774,7 @@
 
 (defn show-banner []
   (println "╔════════════════════════════════════════════════════════════╗")
-  (println "║                   NEX REPL v0.3.1                          ║")
+  (println "║                   NEX REPL v0.3.2                          ║")
   (println "║     A high-level language for design and implementation    ║")
   (println "╚════════════════════════════════════════════════════════════╝")
   (println)
