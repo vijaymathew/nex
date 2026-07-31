@@ -608,6 +608,26 @@
             (or (some-> (:then expr) (if-branch-expression then-env) (infer-type then-env))
                 (some-> (:else expr) (if-branch-expression else-env) (infer-type else-env))))
 
+          ;; A `when ... then ... else ... end` expression's branches are plain
+          ;; expressions (not blocks), unlike `:if`'s `:then`/`:else` — no
+          ;; `if-branch-expression` unwrapping needed. Falling through to the
+          ;; generic `tc/infer-expression-type` fallback below used to be the
+          ;; only path here, but that fallback builds a fresh env with no
+          ;; current-class context, so a bare field reference in the condition
+          ;; or either branch (`total_seconds` meaning `this.total_seconds`)
+          ;; couldn't resolve and the whole inference silently failed.
+          :when
+          (let [then-env (refine-condition-branch-env (convert-branch-env env (:condition expr))
+                                                       (:condition expr)
+                                                       :then)
+                else-env (refine-condition-branch-env env (:condition expr) :else)
+                cons-type (infer-type-or-any then-env (:consequent expr))
+                alt-type (infer-type-or-any else-env (:alternative expr))]
+            (cond
+              (= alt-type "Nil") cons-type
+              (= cons-type "Nil") alt-type
+              :else cons-type))
+
           :call
           (infer-call-type env expr)
 
