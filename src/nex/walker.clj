@@ -1295,20 +1295,31 @@
         :type (when type-node (transform-node type-node))}))
 
    :declareTypeDecl
-   (fn [[_ _declare-kw _type-kw name _eq type-node & where-rest]]
+   (fn [[_ _declare-kw _type-kw name _eq type-node & rest]]
      ;; `declare type X = Base` is a structural alias. `... where n: <expr>`
      ;; makes it a refinement type: still an alias to Base for type checking, but
      ;; the predicate is recorded so the refinement pass can inject narrowing
      ;; checks. (Base is kept as :type-expr, so aliasing/transparency is free.)
      (let [base {:type :type-alias
                  :name (token-text name)
-                 :type-expr (transform-node type-node)}]
-       (if (and (seq where-rest)
-                (= "where" (token-text (first where-rest))))
-         (let [binder (token-text (nth where-rest 1))
-               predicate (transform-node (last (filter sequential? where-rest)))]
-           (assoc base :refinement {:binder binder :predicate predicate}))
+                 :type-expr (transform-node type-node)}
+           where-clause (first (filter #(and (sequential? %) (= :whereClause (first %))) rest))]
+       (if where-clause
+         (assoc base :refinement (transform-node where-clause))
          base)))
+
+   :whereClause
+   (fn [[_ where-kw binder _colon predicate]]
+     ;; `where` is a soft keyword: the grammar accepts any identifier here (see
+     ;; nexlang.g4), so the spelling is checked now. Anything else in this
+     ;; position is a typo, and saying so beats a bare parse error.
+     (let [kw (token-text where-kw)]
+       (when-not (= kw "where")
+         (throw (ex-info (str "Unexpected " (pr-str kw) " after a type")
+                         {:error (str "Expected 'where' to start a refinement predicate, got '"
+                                      kw "'. A refinement type is written, for example, "
+                                      "declare type Quantity = Integer where n: n > 0.")})))
+       {:binder (token-text binder) :predicate (transform-node predicate)}))
 
    :typeArgs
    (fn [[_ _open-bracket & args]]

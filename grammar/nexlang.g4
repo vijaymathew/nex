@@ -58,7 +58,15 @@ declareFunctionDecl
 // predicate it becomes a refinement type: Base narrowed by a boolean predicate,
 // checked at narrowing boundaries (see the refinement pass in walker.clj).
 declareTypeDecl
-    : DECLARE TYPE_KW IDENTIFIER EQUAL type (WHERE IDENTIFIER ':' expression)?
+    : DECLARE TYPE_KW IDENTIFIER EQUAL type whereClause?
+    ;
+
+// `where` is a SOFT keyword, matched the same way as `alias` (see aliasClause
+// below): a plain IDENTIFIER, with the spelling checked by the walker. That
+// keeps `where` usable as an ordinary name — a variable, field, parameter, or
+// routine — which a reserved word would forbid.
+whereClause
+    : IDENTIFIER IDENTIFIER ':' expression
     ;
 
 genericParams
@@ -331,7 +339,7 @@ variantClause
 
 assignment
     : IDENTIFIER ASSIGN expression
-    | primary '.' (IDENTIFIER | UNION | WHERE) ASSIGN expression
+    | primary '.' (IDENTIFIER | UNION) ASSIGN expression
     ;
 
 localVarDecl
@@ -417,12 +425,15 @@ postfixPart
     | callSuffix
     ;
 
-// `union`/`where` are soft keywords: reserved only in their declaration
-// positions (unionDecl, the `where` clause of declareTypeDecl). Everywhere a
-// member name is expected they stay usable as ordinary identifiers — notably
-// Set's `union` method (`s.union(...)`).
+// `union` is a soft keyword, reserved only in its declaration position
+// (unionDecl). It stays usable as a member name — notably Set's `union`
+// method (`s.union(...)`) — but, unlike `where` (see whereClause above),
+// there is no way for nex source to *declare* a member called `union`:
+// fieldDecl/methodDecl/constructorDecl only accept IDENTIFIER, so this
+// alternative exists solely to keep reading/calling built-in `union`
+// members legal.
 memberAccess
-    : QMARK? '.' (IDENTIFIER | UNION | WHERE) ('(' argumentList? ')')?
+    : QMARK? '.' (IDENTIFIER | UNION) ('(' argumentList? ')')?
     ;
 
 callSuffix
@@ -536,10 +547,10 @@ setLiteral
 CLASS        : 'class';
 UNION        : 'union';
 ENUM         : 'enum';
-WHERE        : 'where';
 SEALED       : 'sealed';
 DEFERRED     : 'deferred';
 ONCE         : 'once';
+
 MATCH        : 'match';
 DECLARE      : 'declare';
 FUNCTION     : 'function';
