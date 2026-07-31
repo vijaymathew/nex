@@ -511,13 +511,17 @@ overloading usually is:
 An alias is inherited: if a deferred parent declares `plus … alias "+"`, then `+`
 works on any descendant, dispatching to its override.
 
-`alias` is a **soft keyword**, like `union` and `where`: it carries this meaning
-only in the position above, and stays available as an ordinary name.
+`alias` is a **soft keyword**: it carries this meaning only in the position
+above, and stays available as an ordinary name anywhere else.
 
 ```nex
 let alias := "vj"          -- still a perfectly good variable
 print(u.alias)             -- and a perfectly good field
 ```
+
+`union` and `where` are soft keywords too, but narrower: each remains usable
+as a **member name** (`Set.union`, `u.where`), not as a general identifier —
+`let union := 5` does not parse.
 
 A class whose values are compared with `=` — including in a postcondition like
 `ensure reduced: balance = old balance - amount` — should also override `equals`

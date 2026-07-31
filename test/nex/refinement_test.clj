@@ -314,3 +314,39 @@ if convert a to y: ?Quantity then print(y) end")]
       (is (= 2 (count (re-seq #"Refinement Quantity violated" out)))
           "both -1 and 0 must be rejected, 5 accepted")
       (is (str/includes? out "5")))))
+
+;; `where` is matched the same way `alias` is (see operator_alias_test.clj):
+;; a plain IDENTIFIER at the one position it means something, spelling checked
+;; by the walker. That makes it usable everywhere else — local, field,
+;; parameter, routine, member access — unlike `union`, which stays a member-
+;; access-only soft keyword because no declaration rule accepts it.
+(deftest where-is-a-soft-keyword
+  (testing "`where` remains usable as an ordinary name — local, field, parameter,
+            routine, and member access — so the refinement clause reserved nothing"
+    (is (= ["6" "\"vj\"" "\"vijay\"" "true"]
+           (run "declare type Quantity = Integer where n: n > 0
+let q: Quantity := 5
+print(q + 1)
+
+class User
+  feature
+    where: String
+    set_where(where: String) do
+      this.where := where
+    end
+  create
+    make(n: String) do where := n end
+end
+
+let where := \"vj\"
+print(where)
+let u := create User.make(\"v\")
+u.set_where(\"vijay\")
+print(u.where)
+print(u.where = \"vijay\")")))))
+
+(deftest a-misspelled-where-clause-is-reported-as-such
+  (testing "since the grammar accepts any identifier there, the walker must name the typo"
+    (is (thrown-with-msg?
+         Exception #"Unexpected \"whree\""
+         (p/ast "declare type Quantity = Integer whree n: n > 0")))))
