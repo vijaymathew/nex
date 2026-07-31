@@ -1256,6 +1256,48 @@
                 (concat own inherited))))]
     (collect-ctors class-name #{})))
 
+(defn- class-own-constructor
+  "A constructor declared directly on class-name (not inherited) matching
+   ctor-name + arity. Mirrors `nex.lower`'s `class-constructor-def`: a
+   `super.ctor(...)` constructor-chaining call may only reach the *immediate*
+   super parent's own constructor, never a grandparent's — lowering has no
+   mechanism to skip past a parent lacking a matching constructor, so the
+   typechecker must not accept a call that only resolves further up."
+  [env class-name ctor-name arity]
+  (when-let [class-def (env-lookup-class env class-name)]
+    (some #(when (and (= (:name %) ctor-name)
+                      (= (count (or (:params %) [])) arity))
+             %)
+          (->> (:body class-def)
+               (filter #(= :constructors (:type %)))
+               (mapcat :constructors)))))
+
+(defn- lookup-super-feature-method
+  "A genuine feature-section method reachable from class-name or an ancestor,
+   by name + arity — mirrors `nex.lower`'s `class-method-def` +
+   `inherited-method-def`, which a `super.method(...)` call must agree with.
+   Unlike an ordinary call (`lookup-class-method`), this never matches a
+   constructor registered under the same name further up the chain — such a
+   match type-checks but has nothing for lowering to call, surfacing as an
+   opaque internal-error crash instead of a type error."
+  [env class-name method-name arity]
+  (letfn [(walk [cn visited]
+            (when (and cn (not (contains? visited cn)))
+              (let [class-def (env-lookup-class env cn)
+                    visited' (conj visited cn)
+                    own (when class-def
+                          (some (fn [m]
+                                  (when (and (= (:type m) :method)
+                                            (= (:name m) method-name)
+                                            (= (count (or (:params m) [])) arity))
+                                    m))
+                                (feature-members class-def)))]
+                (or own
+                    (when class-def
+                      (some (fn [{:keys [parent]}] (walk parent visited'))
+                            (:parents class-def)))))))]
+    (walk class-name #{})))
+
 (defn- bind-visible-class-fields!
   "Bind fields visible inside class-name into target-env.
    Own fields are always visible; inherited fields must be public."
@@ -2040,6 +2082,32 @@
                                     (display-type normalized-target)
                                     ". Wrap with: if <obj> /= nil then <obj>." method "(...) end"))})))
     (cond
+      ;; `super.method(...)` / `super.method` resolve against the immediate
+      ;; super parent only — never further up the chain for a constructor, and
+      ;; never falling back to a universal `Any` protocol signature — because
+      ;; that is exactly what `nex.lower` is able to call. The generic path
+      ;; below (via `lookup-class-method`) walks the whole ancestor chain
+      ;; looking for *any* matching-arity entry, constructors included; that
+      ;; lets an invalid super call (wrong arity, or naming a constructor that
+      ;; only some ancestor happens to have) pass type-checking, only to crash
+      ;; lowering with an opaque "internal error" instead of a real type error.
+      (and (map? target) (= :super (:type target)))
+      (if-let [ctor-def (class-own-constructor env base-type method (count args))]
+        (check-call-signature env method args
+                              {:params (:params ctor-def) :return-type base-type}
+                              {})
+        (if-let [method-sig (lookup-super-feature-method env base-type method (count args))]
+          (check-call-signature env method args method-sig {})
+          (if-let [field-member (and (false? has-parens)
+                                     (lookup-class-field-member env base-type method current-class))]
+            (resolve-generic-type (:field-type field-member) {})
+            (do
+              (doseq [arg args] (check-expression env arg))
+              (let [msg (str "Method not found: " method " on " base-type
+                             ". `super` only reaches " base-type
+                             "'s own features and constructor.")]
+                (throw (ex-info msg {:error (type-error msg)})))))))
+
       across-item-type
       (case method
         "item" across-item-type
