@@ -103,7 +103,7 @@
       (ex-message t))))
 
 (def ^:private relational-ops
-  #{"=" "/=" "<" "<=" ">" ">="})
+  #{"=" "/=" "==" "!=" "<" "<=" ">" ">="})
 
 (def ^:private builtin-function-names
   (set (keys interp/builtins)))
