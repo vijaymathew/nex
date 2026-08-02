@@ -402,7 +402,24 @@
                   (throw (ex-info (str "Cyclic inheritance detected: "
                                        (str/join " -> " path))
                                   {:class-name class-name
-                                   :cycle path}))))))]
+                                   :cycle path})))
+                ;; Extending a concrete Java class (Phase 2,
+                ;; docs/proposals/java-interop.md) real-subclasses at the JVM
+                ;; bytecode level (real `extends`, a real super-constructor
+                ;; call) — there is no cheap interpreter equivalent to the
+                ;; java.lang.reflect.Proxy trick Phase 1 uses for interfaces
+                ;; (Proxy only supports interfaces, not concrete classes), so
+                ;; this is compiled-backend-only. Checked here, not just at
+                ;; typecheck time, since the interpreter runs on its own AST
+                ;; path independent of nex.typechecker.
+                (when-not (lookup-class-if-exists ctx parent)
+                  (when-let [^Class klass (bi/resolve-imported-java-class ctx parent)]
+                    (when-not (.isInterface klass)
+                      (throw (ex-info (str "Class " class-name " extends Java class " parent
+                                           " — the interpreter does not support extending a Java "
+                                           "class (only implementing a Java interface). Run this "
+                                           "with the compiled backend (drop --interpret).")
+                                      {:class-name class-name :parent parent}))))))))]
     (let [class-name (:name class-def)
           previous (get @(:classes ctx) class-name)]
       (swap! (:classes ctx) assoc class-name class-def)

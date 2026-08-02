@@ -28,6 +28,8 @@
 (declare emit-const!)
 (declare emit-runtime-call!)
 (declare emit-expression!)
+(declare primitive-class->jvm-type)
+(declare primitive-box-info)
 
 (defn- emit-string-constant!
   "Push a String onto the stack. A plain LDC references a single CONSTANT_Utf8
@@ -123,7 +125,7 @@
   {:internal-name (:internal-name class-spec)
    :binary-name (desc/binary-class-name (:jvm-name class-spec))
    :source-file (:source-file class-spec)
-   :super-name "java/lang/Object"
+   :super-name (or (:java-super-class class-spec) "java/lang/Object")
    :interfaces (vec (:interfaces class-spec))
    :flags Opcodes/ACC_PUBLIC
    :fields (vec
@@ -175,7 +177,7 @@
                 :flags Opcodes/ACC_PUBLIC
                 :kind :user-default-constructor
                 :owner (:internal-name class-spec)
-                :super-name "java/lang/Object"
+                :super-name (or (:java-super-class class-spec) "java/lang/Object")
                 :composition-fields (:composition-fields class-spec)
                 :runtime-type-fields (:runtime-type-fields class-spec)
                 :fields (:fields class-spec)}
@@ -1858,6 +1860,28 @@
                         (:descriptor expr)
                         false)
       (emit-unbox-or-cast! mv (:jvm-type expr))
+      (:jvm-type expr))
+
+    :call-super-java
+    (do
+      (emit-expr! mv (:target expr) state-slot)
+      (.visitMethodInsn mv Opcodes/INVOKESPECIAL (:owner expr) (:method expr) (:descriptor expr) false)
+      (let [java-kind (get primitive-class->jvm-type (:java-return-class expr))]
+        (cond
+          (= java-kind :void)
+          ;; The internal calling convention represents Void as a null
+          ;; Object; a bare call statement pops it, an expression context
+          ;; sees the same nil any other Void-returning Nex call would.
+          (.visitInsn mv Opcodes/ACONST_NULL)
+
+          java-kind
+          (let [{:keys [box-owner box-desc]} (get primitive-box-info java-kind)]
+            (.visitMethodInsn mv Opcodes/INVOKESTATIC box-owner "valueOf" box-desc false))
+
+          ;; A reference return is already Object-shaped on the stack — no
+          ;; conversion needed, matching Nex's own boxed-everything internal
+          ;; representation.
+          :else nil))
       (:jvm-type expr))
 
     :call-runtime

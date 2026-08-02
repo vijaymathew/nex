@@ -617,6 +617,70 @@ end")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-extends-thread-override-and-inherited-call-smoke-test
+  (testing "a compiled Nex class extending Thread is a real subclass: overriding run() is what a real Thread.start() calls, and inherited (non-overridden) methods like start()/join() are callable from Nex"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-extend-thread")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.lang.Thread
+
+class My_Thread
+  inherit
+    Thread
+  feature
+    run() do
+      super.run()
+      print(\"ran\")
+    end
+end
+
+with \"java\" do
+  let t: My_Thread := create My_Thread
+  t.setName(\"worker\")
+  t.start()
+  t.join()
+  print(t.getName())
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["\"ran\"" "\"worker\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-extends-java-class-with-args-super-new-fails-with-clear-error-test
+  (testing "super.new(args) with real arguments is a named, honest gap on the compiled backend, not silent wrong behavior"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-extend-args-gap")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.lang.Thread
+
+class My_Thread
+  inherit
+    Thread
+create
+  make(name: String)
+  do
+    super.new(name)
+  end
+feature
+  run() do
+    print(\"ran\")
+  end
+end")
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"not supported yet"
+                              (file/compile-jar (.getPath main-file) (.getPath out-dir) {})))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-cursor-subclass-across-smoke-test
   (testing "compile-jar runs across over a value typed as Cursor when the runtime instance is a Cursor subclass"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-cursor")

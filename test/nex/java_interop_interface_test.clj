@@ -98,18 +98,5 @@ end")
       (is (not (:success result)))
       (is (some #(re-find #"does not implement" (:message %)) (:errors result))))))
 
-(deftest extending-concrete-java-class-fails-typecheck-with-clear-message-test
-  (testing "inheriting a concrete Java class (not yet implemented) is a clear compile error, not silent composition"
-    (let [ast (p/ast "import java.lang.Thread
-
-class My_Task
-  inherit
-    Thread
-  feature
-    run() do
-      print(\"nope\")
-    end
-end")
-          result (tc/type-check ast)]
-      (is (not (:success result)))
-      (is (some #(re-find #"Extending a Java class is not supported yet" (:message %)) (:errors result))))))
+;; Extending a concrete Java class (Phase 2 of docs/proposals/java-interop.md)
+;; has its own test file, test/nex/java_interop_extend_class_test.clj.

@@ -58,6 +58,9 @@
 (declare function-object-call?)
 (declare function-object-binding-type)
 (declare lower-select)
+(declare java-superclass-parent)
+(declare java-super-constructor-call?)
+(declare resolve-imported-java-type)
 
 (defn- invalid-bare-create-call-ex
   [class-name]
@@ -2746,6 +2749,24 @@
                               nex-type
                               jvm-type))
 
+      ;; A method not declared/inherited anywhere in the Nex chain, on a
+      ;; receiver whose class extends a Java class (Phase 2, docs/proposals/
+      ;; java-interop.md) — e.g. `t.start()` where My_Thread inherits Thread.
+      ;; The receiver is already a real instance of that Java type at the
+      ;; bytecode level (real `extends`), so the same reflective dispatch the
+      ;; "bare imported Java object" branch above uses (java-call-method)
+      ;; reaches it correctly, without hand-emitting a real-descriptor
+      ;; INVOKEVIRTUAL.
+      (and class-def has-parens (java-superclass-parent env class-def))
+      (let [nex-type "Any"
+            jvm-type (resolve-jvm-type env nex-type)]
+        (ir/call-runtime-node "java-call-method"
+                              (into [(ir/const-node method "String" (ir/object-jvm-type "java/lang/String"))
+                                     target-ir]
+                                    (mapv #(lower-expression env %) args))
+                              nex-type
+                              jvm-type))
+
       class-def
       (throw (unsupported "Unsupported user-defined target access during lowering"
                           ;; `:expr` carries the receiver only so the diagnostic
@@ -3385,7 +3406,39 @@
           (= :super (:type target-expr))
           (let [parent-name (single-super-parent-name env)
                 parent-def (get (visible-class-map env) parent-name)
-                parent-meta (class-jvm-meta env parent-name)
+                java-super-klass (when (:import parent-def)
+                                  (let [^Class klass (resolve-imported-java-type env parent-name)]
+                                    (when (and klass (not (.isInterface klass))) klass)))]
+            (if java-super-klass
+              ;; Phase 2 (docs/proposals/java-interop.md): super.<method>(...)
+              ;; reaching the real Java superclass implementation, bypassing
+              ;; this class's own override of it if any (see
+              ;; ir/call-super-java-node). `new` never reaches here — it's
+              ;; stripped from the constructor body earlier, in
+              ;; lower-constructor.
+              (if (seq (:args expr))
+                (throw (unsupported (str "super." (:method expr)
+                                         "(args) with arguments is not supported yet in compiled "
+                                         "lowering for a Java superclass — only zero-argument calls are")
+                                {:expr expr :parent parent-name}))
+                (let [^java.lang.reflect.Method m (some (fn [^java.lang.reflect.Method cand]
+                                                          (and (= (.getName cand) (:method expr))
+                                                               (zero? (alength (.getParameterTypes cand)))
+                                                               cand))
+                                                        (.getMethods java-super-klass))]
+                  (when-not m
+                    (throw (ex-info "Undefined super method call during lowering"
+                                    {:expr expr :parent parent-name})))
+                  (let [nex-type "Any"
+                        jvm-type (resolve-jvm-type env nex-type)]
+                    (ir/call-super-java-node (desc/internal-class-name (.getName java-super-klass))
+                                             (:method expr)
+                                             (Type/getMethodDescriptor m)
+                                             (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
+                                             (.getReturnType m)
+                                             nex-type
+                                             jvm-type))))
+          (let [parent-meta (class-jvm-meta env parent-name)
                 target-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
                                              (str "_parent_" parent-name)
                                              (ir/this-node (:this-type env)
@@ -3432,7 +3485,7 @@
                                         target-ir
                                         arg-irs
                                         nex-type
-                                        jvm-type)))))
+                                        jvm-type)))))))
 
           (and class-target-name
                (:this-type env)
@@ -4356,7 +4409,32 @@
 
 (defn- lower-constructor
   [unit-name visible-functions visible-imports visible-classes class-def ctor-def compiled-classes]
-  (let [class-name (:name class-def)
+  (let [ctor-def (if-let [{:keys [nex-name]} (java-superclass-parent {:classes visible-classes} class-def)]
+                   (let [first-stmt (first (:body ctor-def))]
+                     (if (java-super-constructor-call? nex-name first-stmt)
+                       (if (seq (:args first-stmt))
+                         ;; The typechecker validates arity against the Java
+                         ;; class's real constructors, but the compiled
+                         ;; backend does not yet forward arguments into the
+                         ;; real super constructor — only the implicit/no-arg
+                         ;; case is wired (real `<init>` always calls the
+                         ;; Java superclass's no-arg constructor; see
+                         ;; emit-user-default-constructor!). --interpret
+                         ;; doesn't help here either (Phase 2 is compiled-
+                         ;; backend-only), so this is a genuine, currently
+                         ;; unsupported construct.
+                         (throw (unsupported
+                                 "super.new(args)/<JavaClass>.new(args) with arguments is not supported yet in compiled lowering — only the implicit/no-arg Java superclass constructor is"
+                                 {:class-name (:name class-def) :constructor (:name ctor-def)}))
+                         ;; A zero-arg explicit call is exactly the implicit
+                         ;; case — drop the now-redundant statement so the
+                         ;; ordinary body-lowering below never sees a call to
+                         ;; the "new" selector, which is not an ordinary Nex
+                         ;; method.
+                         (update ctor-def :body rest))
+                       ctor-def))
+                   ctor-def)
+        class-name (:name class-def)
         generic-param-names (set (map :name (:generic-params class-def)))
         generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
         env0 (make-lowering-env {:classes visible-classes
@@ -4686,28 +4764,54 @@
    Object, either of which already satisfies the interface."
   #{["equals" 1] ["hashCode" 0] ["toString" 0]})
 
-(defn- resolve-imported-java-interface
+(defn- resolve-imported-java-type
   "The reflected Class for parent-name, when the `inherit` entry resolves to
-   an imported Java *interface* (docs/proposals/java-interop.md).
-   check-inheritance already rejects a concrete Java class parent at
-   typecheck time, so this only needs to tell a Nex class apart from a Java
-   interface, never classify further."
+   any imported Java type — an interface (Phase 1) or a concrete/abstract
+   class (Phase 2, docs/proposals/java-interop.md). Nil for a Nex class or an
+   unresolvable name."
   [env parent-name]
   (let [parent-def (get (visible-class-map env) parent-name)]
     (when (:import parent-def)
       (try
-        (let [^Class klass (Class/forName (:import parent-def))]
-          (when (.isInterface klass) klass))
+        (Class/forName (:import parent-def))
         (catch Exception _ nil)))))
 
+(defn- resolve-imported-java-interface
+  "resolve-imported-java-type, narrowed to an interface — nil for a
+   concrete/abstract Java class."
+  [env parent-name]
+  (when-let [^Class klass (resolve-imported-java-type env parent-name)]
+    (when (.isInterface klass) klass)))
+
 (defn- java-interface-parents
-  "Reflected Class objects for this class-def's Java-interface `inherit`
-   entries. Nex parents are excluded — those go through resolve-parent-metas
-   instead, on the composition path this doesn't touch."
+  "Reflected Class objects for this class-def's Java-*interface* `inherit`
+   entries. Nex parents, and a Java-*class* parent (java-superclass-parent),
+   are excluded."
   [env class-def]
   (->> (:parents class-def)
        (keep (fn [{:keys [parent]}] (resolve-imported-java-interface env parent)))
        distinct))
+
+(defn- java-superclass-parent
+  "{:klass ... :nex-name ...} for the concrete Java class this class-def's
+   `inherit` chain extends (Phase 2), walking through Nex ancestors — mirrors
+   nex.typechecker/class-java-superclass-name. nex-name is the literal name
+   written in `inherit` (the parent-qualified super-constructor-call form,
+   <JavaClassName>.new(args), matches against it). At most one exists
+   anywhere in the chain; check-inheritance enforces the JVM's
+   single-inheritance rule. Nil when class-def has no Java-class parent."
+  [env class-def]
+  (letfn [(walk [cn visited]
+            (when-let [cd (and (not (contains? visited cn)) (get (visible-class-map env) cn))]
+              (let [visited' (conj visited cn)]
+                (some (fn [{:keys [parent]}]
+                        (let [parent-cd (get (visible-class-map env) parent)]
+                          (if (and parent-cd (not (:import parent-cd)))
+                            (walk parent visited')
+                            (when-let [^Class klass (resolve-imported-java-type env parent)]
+                              (when-not (.isInterface klass) {:klass klass :nex-name parent})))))
+                      (:parents cd)))))]
+    (walk (:name class-def) #{})))
 
 (defn- bridge-jvm-kind
   "Collapse a resolved Nex jvm-type to the keyword emit-interface-bridge-
@@ -4717,6 +4821,19 @@
    Integer/Real)."
   [jvm-type]
   (if (#{:long :double :boolean :char} jvm-type) jvm-type :object))
+
+(defn- java-super-constructor-call?
+  "True when STMT is `super.new(args)` or `<JavaSuperclassName>.new(args)` —
+   the reserved selector (docs/proposals/java-interop.md) for forwarding to a
+   Java superclass's real constructor. Mirrors
+   nex.typechecker/java-super-constructor-call?, which already validated this
+   shape and position by the time lowering runs."
+  [super-nex-name stmt]
+  (and (map? stmt)
+       (= :call (:type stmt))
+       (= "new" (:method stmt))
+       (or (and (map? (:target stmt)) (= :super (:type (:target stmt))))
+           (= super-nex-name (:target stmt)))))
 
 (defn- java-interface-bridge-methods
   "One entry per abstract method (across all implemented interfaces) that a
@@ -4766,6 +4883,47 @@
                                          (:params method-def))
                   :return-nex-kind (bridge-jvm-kind
                                     (resolve-jvm-type env (function-return-type method-def)))})))))
+
+(defn- java-superclass-override-bridge-methods
+  "One bridge entry per (name, arity) the Nex class's own declared methods
+   share with an inherited Java superclass method — the real vtable slot a
+   Java caller dispatches through polymorphically (Thread.start() calling
+   this.run(), say; docs/proposals/java-interop.md Phase 2). Unlike
+   java-interface-bridge-methods (bridges every abstract interface method),
+   this only bridges methods the class actually redefines: the superclass's
+   other, untouched methods already work correctly through ordinary JVM
+   inheritance and need no bridge. Excludes static and final superclass
+   methods (a final method can't be overridden; a matching Nex method name
+   is coincidental, not an override)."
+  [env class-def super-klass]
+  (if-not super-klass
+    []
+    (->> (class-methods class-def)
+         (mapcat (fn [method-def]
+                   (let [arity (count (or (:params method-def) []))]
+                     (->> (.getMethods ^Class super-klass)
+                          (filter (fn [^java.lang.reflect.Method m]
+                                    (let [mods (.getModifiers m)]
+                                      (and (= (.getName m) (:name method-def))
+                                           (= (alength (.getParameterTypes m)) arity)
+                                           (not (java.lang.reflect.Modifier/isStatic mods))
+                                           (not (java.lang.reflect.Modifier/isFinal mods))))))
+                          (map (fn [^java.lang.reflect.Method m]
+                                 {:key [(.getName m) (Type/getMethodDescriptor m)]
+                                  :java-name (.getName m)
+                                  :descriptor (Type/getMethodDescriptor m)
+                                  :target-method-name (lowered-instance-method-name method-def)
+                                  :param-classes (vec (.getParameterTypes m))
+                                  :return-class (.getReturnType m)
+                                  :param-nex-kinds (mapv (fn [{:keys [type]}]
+                                                           (bridge-jvm-kind (resolve-jvm-type env type)))
+                                                         (:params method-def))
+                                  :return-nex-kind (bridge-jvm-kind
+                                                    (resolve-jvm-type env (function-return-type method-def)))}))))))
+         (map (fn [b] [(:key b) b]))
+         (into {})
+         vals
+         (mapv #(dissoc % :key)))))
 
 (defn- assert-distinct-lowered-methods!
   "Nex mangles routine and constructor names by name+arity, so two of them that
@@ -4907,8 +5065,13 @@
                                (resolve-parent-metas env class-def))
      :interfaces (mapv (fn [^Class klass] (desc/internal-class-name (.getName klass)))
                        (java-interface-parents env class-def))
-     :java-bridge-methods (java-interface-bridge-methods env class-def
-                                                          (java-interface-parents env class-def))
+     :java-super-class (when-let [{:keys [^Class klass]} (java-superclass-parent env class-def)]
+                         (desc/internal-class-name (.getName klass)))
+     :java-bridge-methods (into (java-interface-bridge-methods env class-def
+                                                                (java-interface-parents env class-def))
+                                (java-superclass-override-bridge-methods
+                                 env class-def
+                                 (:klass (java-superclass-parent env class-def))))
      :fields fields
      :runtime-type-fields runtime-type-fields
      :constants constants
