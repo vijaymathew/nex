@@ -1,0 +1,27 @@
+-- Re-test of finding 4 from NOTES.md (attempt b): a Nex class implementing
+-- java.lang.Runnable via `inherit`, handed to a real java.lang.Thread, which
+-- calls back into Nex code across a real JVM interface boundary.
+
+import java.lang.Runnable
+import java.lang.Thread
+
+class My_Task
+  inherit
+    Runnable
+  feature
+    run() do
+      print("My_Task.run() executed via real Thread callback")
+    end
+end
+
+function run() do
+  with "java" do
+    let task: My_Task := create My_Task
+    let t: Thread := Thread.new(task)
+    t.start()
+    t.join()
+    print("thread joined ok")
+  end
+end
+
+run()

@@ -1,0 +1,40 @@
+-- Narrowing 06e further: same JLabel-typed field on an interface-implementing
+-- class, but actionPerformed only mutates the Integer field (`count`) and
+-- never calls a Java method on the JLabel field at all. Does the link
+-- failure need the Java-method-call-on-a-Java-typed-field, or does merely
+-- *having* such a field on an interface-implementing class trigger it?
+
+import java.awt.event.ActionListener
+import java.awt.event.ActionEvent
+import javax.swing.JButton
+import javax.swing.JLabel
+
+class Click_Counter
+  inherit
+    ActionListener
+  create
+    make(label: JLabel) do
+      this.label := label
+      this.count := 0
+    end
+  feature
+    label: JLabel
+    count: Integer
+
+    actionPerformed(e: ActionEvent) do
+      count := count + 1
+    end
+end
+
+function run() do
+  with "java" do
+    let label: JLabel := JLabel.new("hello")
+    let button: JButton := JButton.new("Click me")
+    let counter: Click_Counter := create Click_Counter.make(label)
+    button.addActionListener(counter)
+    button.doClick()
+    print("count=" + counter.count)
+  end
+end
+
+run()

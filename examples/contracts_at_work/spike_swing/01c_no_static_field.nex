@@ -1,0 +1,17 @@
+-- Narrower isolation: does the JVM backend choke on static-field access
+-- (SwingConstants.CENTER) specifically?
+
+import javax.swing.JFrame
+import javax.swing.JLabel
+
+function run() do
+  with "java" do
+    let frame: JFrame := JFrame.new("Contracts at Work — Spike")
+    frame.setSize(300, 120)
+    let label: JLabel := JLabel.new("hello from Nex")
+    print("constructed ok: title=" + frame.getTitle())
+    print("label text=" + label.getText())
+  end
+end
+
+run()

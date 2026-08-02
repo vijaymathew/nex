@@ -1,0 +1,17 @@
+-- Confirms chained instance calls (frame.getContentPane().add(label)) work
+-- on the JVM backend once the static-field access is removed.
+
+import javax.swing.JFrame
+import javax.swing.JLabel
+
+function run() do
+  with "java" do
+    let frame: JFrame := JFrame.new("Contracts at Work — Spike")
+    frame.setSize(300, 120)
+    let label: JLabel := JLabel.new("hello from Nex")
+    frame.getContentPane().add(label)
+    print("chained call ok: title=" + frame.getTitle())
+  end
+end
+
+run()

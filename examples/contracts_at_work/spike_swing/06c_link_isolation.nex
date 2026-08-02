@@ -1,0 +1,36 @@
+-- Isolating the "compiled program failed to link (JLabel)" warning from 06:
+-- is it JLabel itself, or the combination of an interface-implementing class
+-- alongside JLabel in the same compiled program?
+
+import java.awt.event.ActionListener
+import java.awt.event.ActionEvent
+import javax.swing.JButton
+import javax.swing.JLabel
+
+class Click_Counter
+  inherit
+    ActionListener
+  create
+    make() do
+      this.count := 0
+    end
+  feature
+    count: Integer
+
+    actionPerformed(e: ActionEvent) do
+      count := count + 1
+    end
+end
+
+function run() do
+  with "java" do
+    let label: JLabel := JLabel.new("hello")
+    let button: JButton := JButton.new("Click me")
+    let counter: Click_Counter := create Click_Counter.make()
+    button.addActionListener(counter)
+    button.doClick()
+    print("label text=" + label.getText() + " count=" + counter.count)
+  end
+end
+
+run()

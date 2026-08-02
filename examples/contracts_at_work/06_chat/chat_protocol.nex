@@ -1,0 +1,16 @@
+-- The wire protocol shared by chat_server.nex and chat_client.nex: one line
+-- per message, "NAME: text\n". No framing beyond newlines — Tcp_Socket's
+-- read_line/send_line already give us that boundary, so the protocol is
+-- "trust the transport's line boundary" rather than anything more elaborate.
+-- Kept as its own tiny module because both the server and the client need
+-- to agree on it, and a shared module is how they stay in agreement instead
+-- of by convention across two files.
+
+class Chat_Protocol
+  create
+    make() do end
+  feature
+    format_message(sender: String, text: String): String do
+      result := sender + ": " + text
+    end
+end

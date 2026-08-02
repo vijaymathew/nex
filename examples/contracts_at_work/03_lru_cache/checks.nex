@@ -1,0 +1,75 @@
+-- Executable checks for Lru_Cache. Run: nex checks.nex
+
+intern Lru_Cache
+
+class Checker
+  create
+    make() do
+      passed := 0
+      failed := 0
+    end
+  feature
+    passed: Integer
+    failed: Integer
+
+    check(label: String, expected: String, actual: String) do
+      if expected = actual then
+        passed := passed + 1
+        print("PASS " + label)
+      else
+        failed := failed + 1
+        print("FAIL " + label + " expected=" + expected + " actual=" + actual)
+      end
+    end
+
+    summary() do
+      print("---")
+      print("" + passed + " passed, " + failed + " failed")
+    end
+end
+
+let c: Checker := create Checker.make()
+
+let cache: Lru_Cache [String, Integer] := create Lru_Cache.make(3)
+cache.put("a", 1)
+cache.put("b", 2)
+cache.put("c", 3)
+c.check("size after 3 puts", "3", "" + cache.size())
+
+-- touching "a" makes "b" the least-recently-used
+let a_val: ?Integer := cache.get("a")
+if a_val /= nil then
+  c.check("get a", "1", "" + a_val)
+else
+  c.check("get a found", "true", "false")
+end
+
+cache.put("d", 4)
+c.check("size stays at capacity", "3", "" + cache.size())
+c.check("b evicted", "false", "" + cache.contains("b"))
+c.check("a survives (was touched)", "true", "" + cache.contains("a"))
+c.check("c survives", "true", "" + cache.contains("c"))
+c.check("d present", "true", "" + cache.contains("d"))
+
+let missing: ?Integer := cache.get("nope")
+c.check("missing key returns nil", "true", "" + (missing = nil))
+
+-- overwriting an existing key doesn't grow the cache or evict anything
+cache.put("d", 40)
+c.check("overwrite keeps size", "3", "" + cache.size())
+let d_val: ?Integer := cache.get("d")
+if d_val /= nil then
+  c.check("overwrite updates value", "40", "" + d_val)
+else
+  c.check("overwrite value found", "true", "false")
+end
+
+-- a capacity-1 cache evicts on every new key
+let tiny: Lru_Cache [String, Integer] := create Lru_Cache.make(1)
+tiny.put("x", 1)
+tiny.put("y", 2)
+c.check("tiny cache size", "1", "" + tiny.size())
+c.check("tiny evicted x", "false", "" + tiny.contains("x"))
+c.check("tiny kept y", "true", "" + tiny.contains("y"))
+
+c.summary()

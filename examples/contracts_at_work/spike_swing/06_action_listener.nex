@@ -1,0 +1,55 @@
+-- The actual Part V use case: a Nex class implementing ActionListener,
+-- wired to a real JButton via addActionListener, with the click fired
+-- programmatically (button.doClick()) so this runs unattended. If
+-- actionPerformed prints, a real Swing callback reached Nex code.
+
+import java.awt.event.ActionListener
+import java.awt.event.ActionEvent
+import javax.swing.JFrame
+import javax.swing.JButton
+import javax.swing.JLabel
+
+class Click_Counter
+  inherit
+    ActionListener
+  create
+    make(label: JLabel) do
+      this.label := label
+      this.count := 0
+    end
+  feature
+    label: JLabel
+    count: Integer
+
+    actionPerformed(e: ActionEvent) do
+      count := count + 1
+      with "java" do
+        label.setText("clicks: " + count)
+      end
+      print("actionPerformed fired, count=" + count)
+    end
+end
+
+function run() do
+  with "java" do
+    let frame: JFrame := JFrame.new("Contracts at Work — Spike")
+    let label: JLabel := JLabel.new("clicks: 0")
+    let button: JButton := JButton.new("Click me")
+    let counter: Click_Counter := create Click_Counter.make(label)
+    button.addActionListener(counter)
+    frame.getContentPane().add(label)
+    frame.getContentPane().add(button)
+    frame.setSize(300, 150)
+    frame.setVisible(true)
+
+    button.doClick()
+    button.doClick()
+    button.doClick()
+
+    print("final label text=" + label.getText())
+    print("final counter.count=" + counter.count)
+    frame.dispose()
+  end
+end
+
+run()

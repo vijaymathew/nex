@@ -1,0 +1,76 @@
+-- Executable checks for radar_service. Builds a small directory with
+-- duplicate files, starts the service against it on an ephemeral port,
+-- and drives it with a real Http_Client. Run: nex checks.nex --interpret
+
+intern Radar_Service
+intern net/Http_Client
+intern text/Regex
+intern io/Directory
+intern io/Path
+
+class Checker
+  create
+    make() do
+      passed := 0
+      failed := 0
+    end
+  feature
+    passed: Integer
+    failed: Integer
+
+    check(label: String, expected: String, actual: String) do
+      if expected = actual then
+        passed := passed + 1
+        print("PASS " + label)
+      else
+        failed := failed + 1
+        print("FAIL " + label + " expected=" + expected + " actual=" + actual)
+      end
+    end
+
+    summary() do
+      print("---")
+      print("" + passed + " passed, " + failed + " failed")
+    end
+end
+
+let c: Checker := create Checker.make()
+
+let proc: Process := create Process
+let base_dir: String := proc.getenv("NEX_USER_DIR") + "/tmp_radar_check"
+let root: Directory := create Directory.make(base_dir)
+if root.exists() then
+  root.delete_tree()
+end
+root.create_tree()
+root.child_path("a.txt").write_text("duplicate content")
+root.child_path("b.txt").write_text("duplicate content")
+root.child_path("c.txt").write_text("unique content")
+
+let service: Radar_Service := create Radar_Service.make(0, base_dir)
+service.start()
+print("radar_service on port " + service.port())
+
+let client: Http_Client := create Http_Client.make()
+let ticks_rx: Regex := create Regex.compile('(?<="ticks":)[^,}]+')
+let groups_rx: Regex := create Regex.compile('(?<="duplicate_groups":)[^,}]+')
+let scans_rx: Regex := create Regex.compile('(?<="scan_count":)[^,}]+')
+
+let base: String := "http://localhost:" + service.port()
+let r1: Http_Response := client.get(base + "/status")
+c.check("status ok", "200", "" + r1.status())
+c.check("initial duplicate groups", "1", "" + groups_rx.find(r1.body()))
+c.check("initial scan count", "1", "" + scans_rx.find(r1.body()))
+
+-- add another duplicate group, then rescan
+root.child_path("d.txt").write_text("second duplicate")
+root.child_path("e.txt").write_text("second duplicate")
+
+let r2: Http_Response := client.post(base + "/rescan", "")
+c.check("rescan status ok", "200", "" + r2.status())
+c.check("rescan finds two groups", "2", "" + groups_rx.find(r2.body()))
+c.check("rescan count incremented", "2", "" + scans_rx.find(r2.body()))
+
+service.stop()
+root.delete_tree()
+c.summary()

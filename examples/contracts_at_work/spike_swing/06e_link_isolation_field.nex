@@ -1,0 +1,43 @@
+-- 06d (frame+label+button+listener, but label handled only in the outer
+-- `with "java"` block, not stored on the listener) linked cleanly. The
+-- remaining difference from 06: there, JLabel is a *field* of the
+-- interface-implementing class, and actionPerformed calls a Java method on
+-- it through a *nested* `with "java"` block. Isolating that combination.
+
+import java.awt.event.ActionListener
+import java.awt.event.ActionEvent
+import javax.swing.JButton
+import javax.swing.JLabel
+
+class Click_Counter
+  inherit
+    ActionListener
+  create
+    make(label: JLabel) do
+      this.label := label
+      this.count := 0
+    end
+  feature
+    label: JLabel
+    count: Integer
+
+    actionPerformed(e: ActionEvent) do
+      count := count + 1
+      with "java" do
+        label.setText("clicks: " + count)
+      end
+    end
+end
+
+function run() do
+  with "java" do
+    let label: JLabel := JLabel.new("hello")
+    let button: JButton := JButton.new("Click me")
+    let counter: Click_Counter := create Click_Counter.make(label)
+    button.addActionListener(counter)
+    button.doClick()
+    print("label text=" + label.getText() + " count=" + counter.count)
+  end
+end
+
+run()

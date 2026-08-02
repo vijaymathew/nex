@@ -1,0 +1,55 @@
+-- dashboard_main: a real, visible, event-driven Swing window. Four buttons
+-- (+, -, reset, quit) each wired to a real ActionListener that mutates
+-- Dashboard_State; a plain polling loop (no Task, just Thread.sleep) is the
+-- only code that ever touches the JLabel, reading state.count each tick.
+--
+-- Must run on the JVM backend, not --interpret — see README: mutable state
+-- mutated through a real interface-dispatched ActionListener does not
+-- persist on the interpreter (confirmed in the Swing spike and again in
+-- this project's own checks.nex).
+
+import javax.swing.JFrame
+import javax.swing.JButton
+import javax.swing.JLabel
+import java.lang.Thread
+
+intern Dashboard_State
+intern Dashboard_Listeners
+
+function main() do
+  let state: Dashboard_State := create Dashboard_State.make()
+
+  with "java" do
+    let frame: JFrame := JFrame.new("Contracts at Work — Dashboard")
+    let label: JLabel := JLabel.new("count: 0")
+    let inc_button: JButton := JButton.new("+")
+    let dec_button: JButton := JButton.new("-")
+    let reset_button: JButton := JButton.new("reset")
+    let quit_button: JButton := JButton.new("quit")
+
+    inc_button.addActionListener(create Increment_Listener.make(state))
+    dec_button.addActionListener(create Decrement_Listener.make(state))
+    reset_button.addActionListener(create Reset_Listener.make(state))
+    quit_button.addActionListener(create Quit_Listener.make(state))
+
+    frame.getContentPane().add(label)
+    frame.getContentPane().add(inc_button)
+    frame.getContentPane().add(dec_button)
+    frame.getContentPane().add(reset_button)
+    frame.getContentPane().add(quit_button)
+    frame.setSize(320, 160)
+    frame.setVisible(true)
+
+    from
+    until
+      state.should_quit
+    do
+      Thread.sleep(100)
+      label.setText("count: " + state.count)
+    end
+
+    frame.dispose()
+  end
+end
+
+main()

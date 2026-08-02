@@ -1,0 +1,54 @@
+-- Task: a single tracked item. Status is a closed union so "what states
+-- can a task be in" is answered by the type, not by a String someone has to
+-- remember the spelling of.
+--
+-- Priority is validated with a `require` clause rather than a `declare type
+-- ... where` refinement type: refinement types declared in a file are not
+-- resolved when that file is loaded via `intern` from another module (only
+-- when it's the root script) — see the repro in the book's top-level issues
+-- report. `require` is what this constraint would have been written as
+-- before refinement types existed, and it isn't affected by that bug.
+
+union Task_Status
+  Open
+  Done
+end
+
+class Task
+  create
+    make(id: Integer, text: String, priority: Integer)
+      require
+        valid_priority: priority >= 1 and priority <= 5
+      do
+        this.id := id
+        this.text := text
+        this.priority := priority
+        this.status := create Open.make()
+      end
+  feature
+    id: Integer
+    text: String
+    priority: Integer
+    status: Task_Status
+
+    mark_done() do
+      status := create Done.make()
+    end
+
+    is_done(): Boolean do
+      match status of
+        when Done then result := true
+        when Open then result := false
+      end
+    end
+
+    to_string(): String do
+      let mark: String := ""
+      if is_done() then
+        mark := "x"
+      else
+        mark := " "
+      end
+      result := "[" + mark + "] #" + id + " (p" + priority + ") " + text
+    end
+end

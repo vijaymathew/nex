@@ -1,0 +1,36 @@
+-- Dashboard_State: plain Nex state, no Java types anywhere in it. Kept
+-- deliberately separate from anything Swing-shaped, for the same reason the
+-- Swing feasibility spike settled on this split: a listener class can hold
+-- a field typed as a Nex class safely, but a field typed as an *imported
+-- Java* class on a class that also implements a Java interface fails to
+-- compile on the JVM backend (see examples/contracts_at_work/spike_swing/
+-- NOTES.md). Keeping all mutable state here, with no Java-typed field in
+-- sight, means the listener classes below stay on the safe side of that
+-- bug by construction, not by care.
+
+class Dashboard_State
+  create
+    make() do
+      count := 0
+      should_quit := false
+    end
+  feature
+    count: Integer
+    should_quit: Boolean
+
+    increment() do
+      count := count + 1
+    end
+
+    decrement() do
+      count := count - 1
+    end
+
+    reset() do
+      count := 0
+    end
+
+    quit() do
+      should_quit := true
+    end
+end

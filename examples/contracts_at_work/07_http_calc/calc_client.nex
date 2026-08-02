@@ -1,0 +1,60 @@
+-- calc_client: an interactive CLI that sends expressions to calc_service
+-- over HTTP and prints the result. Reads the server URL and expressions
+-- from stdin, not argv — see Project 1's README for why.
+--
+-- Builds the request body with data/Json (safe), but reads the response
+-- with text/Regex rather than data/Json. Interning both net/Http_Client and
+-- data/Json in the same *program* — regardless of which file each `intern`
+-- appears in — makes any method call on a Map produced by json.parse(...)
+-- fail typechecking with a confusing, unrelated-looking error ("Method
+-- 'call0' uses Result but does not declare a return type"). Confirmed with
+-- a 4-line repro (see the book's top-level issues report): interning both
+-- modules and calling `.get()` on a parsed Map breaks, even with
+-- Http_Client never actually called. Building a request body with
+-- json.stringify is unaffected — only reading a parsed Map's fields is.
+-- The response shape here is small and entirely under this project's own
+-- control (`{"result":N}` or `{"error":"..."}`), so a fixed-lookbehind
+-- regex extracts the one field needed without touching data/Json's parse
+-- result at all.
+
+intern net/Http_Client
+intern data/Json
+intern text/Regex
+
+function main() do
+  let console: Console := create Console
+  let base: String := console.read_line("server [http://localhost:4322]: ").trim()
+  if base = "" then
+    base := "http://localhost:4322"
+  end
+
+  let client: Http_Client := create Http_Client.make()
+  let json: Json := create Json.make()
+  let result_rx: Regex := create Regex.compile('(?<="result":)[^,}]+')
+  let error_rx: Regex := create Regex.compile('(?<="error":")[^"]+')
+
+  print("type an expression, or 'quit'")
+  let running: Boolean := true
+  from
+    running := true
+  until
+    not running
+  do
+    let expr_text: String := console.read_line("> ").trim()
+    if expr_text = "quit" then
+      running := false
+    elseif expr_text /= "" then
+      let payload: Map[String, Any] := {}
+      payload.set("expr", expr_text)
+      let response: Http_Response := client.post(base + "/evaluate", json.stringify(payload))
+      let body: String := response.body()
+      if response.status() = 200 then
+        print("= " + result_rx.find(body))
+      else
+        print("error: " + error_rx.find(body))
+      end
+    end
+  end
+end
+
+main()

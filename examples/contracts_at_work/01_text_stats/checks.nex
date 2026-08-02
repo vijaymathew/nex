@@ -1,0 +1,51 @@
+-- Executable checks for Word_Stats. Run: nex checks.nex
+
+intern Word_Stats
+
+class Checker
+  create
+    make() do
+      passed := 0
+      failed := 0
+    end
+  feature
+    passed: Integer
+    failed: Integer
+
+    check(label: String, expected: String, actual: String) do
+      if expected = actual then
+        passed := passed + 1
+        print("PASS " + label)
+      else
+        failed := failed + 1
+        print("FAIL " + label + " expected=" + expected + " actual=" + actual)
+      end
+    end
+
+    summary() do
+      print("---")
+      print("" + passed + " passed, " + failed + " failed")
+    end
+end
+
+let c: Checker := create Checker.make()
+
+let sample: String := "the quick brown fox\njumps over the lazy dog\nthe fox runs"
+let stats: Word_Stats := create Word_Stats.make(sample)
+
+c.check("line_count", "3", "" + stats.line_count())
+c.check("word_count", "12", "" + stats.word_count())
+
+let top2: Array[Count_Entry] := stats.top_words(2)
+c.check("top_words length", "2", "" + top2.length)
+c.check("top_words[0]", "the: 3", top2.get(0).to_string())
+c.check("top_words[1]", "fox: 2", top2.get(1).to_string())
+
+let empty_stats: Word_Stats := create Word_Stats.make("")
+c.check("empty line_count", "0", "" + empty_stats.line_count())
+c.check("empty word_count", "0", "" + empty_stats.word_count())
+
+let one_word: Word_Stats := create Word_Stats.make("hello")
+c.check("single line_count", "1", "" + one_word.line_count())
+
+c.summary()

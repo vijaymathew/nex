@@ -1,0 +1,51 @@
+-- calc_repl: an interactive calculator over the Expr library. Reads one
+-- expression per line, prints its value, keeps `let name := expr` bindings
+-- around for later lines.
+--
+-- Usage: type an expression, or `let x := 2 + 3`, or `quit`.
+
+intern Expr
+
+function main() do
+  let console: Console := create Console
+  let env: Map[String, Real] := {}
+
+  print("calc_repl — type an expression, `let name := expr`, or `quit`")
+  let running: Boolean := true
+  from
+    running := true
+  until
+    not running
+  do
+    let line: String := console.read_line("> ").trim()
+    if line = "quit" then
+      running := false
+    elseif line = "" then
+      -- ignore blank lines
+    elseif line.starts_with("let ") then
+      let rest: String := line.substring(4, line.length())
+      let eq: Integer := rest.index_of(":=")
+      if eq < 0 then
+        print("usage: let name := expr")
+      else
+        let name: String := rest.substring(0, eq).trim()
+        let expr_text: String := rest.substring(eq + 2, rest.length())
+        do
+          let v: Real := evaluate(expr_text, env)
+          env.set(name, v)
+          print(name + " = " + v)
+        rescue
+          print("error: " + exception)
+        end
+      end
+    else
+      do
+        print(evaluate(line, env))
+      rescue
+        print("error: " + exception)
+      end
+    end
+  end
+end
+
+main()

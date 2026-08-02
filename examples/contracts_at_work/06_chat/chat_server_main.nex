@@ -1,0 +1,28 @@
+-- chat_server_main: runs a real chat server on a fixed port, accepting up
+-- to 8 clients, until Shutdown is sent to the hub. Must run under
+-- --interpret — see README: Server_Socket.accept() is unusable on the JVM
+-- backend today (a stdlib bug, not this project's code).
+
+intern net/Server_Socket
+intern Chat_Server
+
+function main() do
+  let server: Server_Socket := create Server_Socket.make(4321)
+  server.open()
+  print("chat server listening on port " + server.port)
+
+  let events: Channel[Hub_Event] := create Channel[Hub_Event].with_capacity(64)
+  let hub: Chat_Hub := create Chat_Hub.make()
+  let hub_task: Task := spawn do
+    hub.run(events)
+  end
+
+  let chat_server: Chat_Server := create Chat_Server.make()
+  chat_server.accept_clients(server, 8, events)
+
+  events.send(create Shutdown.make())
+  hub_task.await()
+  server.close()
+end
+
+main()

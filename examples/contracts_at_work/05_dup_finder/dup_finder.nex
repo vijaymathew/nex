@@ -1,0 +1,129 @@
+-- A concurrent duplicate-file finder: walk a directory tree, read every
+-- file's content, and report groups of files whose content is identical.
+--
+-- The walk itself (collect_files) is ordinary sequential recursion — there's
+-- nothing to parallelize about listing directories. The actual I/O-bound
+-- work, reading every file's bytes, is fanned out one Task per file and
+-- fanned back in with await_all; grouping by content afterward is fast and
+-- stays single-threaded. Content equality (not just size or name) is the
+-- signature: two files are duplicates only if their text is identical.
+--
+-- Text files only — read_text() assumes UTF-8, so a tree of binary files
+-- is out of scope for this small a tool.
+--
+-- Everything lives as methods on Dup_Finder rather than loose top-level
+-- functions: `intern <Name>` requires a top-level declaration literally
+-- named <Name> in the snake_case-matched file (confirmed directly — see the
+-- book's top-level issues report), so a functions-only module can't be
+-- interned by a name that doesn't also label something in the file.
+
+intern io/Path
+intern io/Directory
+
+class File_Content
+  create
+    make(path: String, content: String) do
+      this.path := path
+      this.content := content
+    end
+  feature
+    path: String
+    content: String
+end
+
+class Dup_Finder
+  create
+    make() do end
+  feature
+    collect_files(dir: Directory): Array[Path] do
+      result := []
+      let fs: Array[Path] := dir.files()
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i = fs.length
+      do
+        result.add(fs.get(i))
+        i := i + 1
+      end
+
+      let subdirs: Array[Directory] := dir.directories()
+      i := 0
+      from
+        i := 0
+      until
+        i = subdirs.length
+      do
+        let nested: Array[Path] := collect_files(subdirs.get(i))
+        let j: Integer := 0
+        from
+          j := 0
+        until
+          j = nested.length
+        do
+          result.add(nested.get(j))
+          j := j + 1
+        end
+        i := i + 1
+      end
+    end
+
+    read_all_concurrently(files: Array[Path]): Array[File_Content] do
+      let tasks: Array[Task[File_Content]] := []
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i = files.length
+      do
+        let f: Path := files.get(i)
+        let t: Task[File_Content] := spawn do
+          result := create File_Content.make(f.to_string(), f.read_text())
+        end
+        tasks.add(t)
+        i := i + 1
+      end
+      result := await_all(tasks)
+    end
+
+    -- Only groups with more than one member are duplicates; the map key is
+    -- the shared file content itself.
+    find_duplicates(root_dir: String): Map[String, Array[String]] do
+      let dir: Directory := create Directory.make(root_dir)
+      let files: Array[Path] := collect_files(dir)
+      let contents: Array[File_Content] := read_all_concurrently(files)
+
+      let groups: Map[String, Array[String]] := {}
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i = contents.length
+      do
+        let fc: File_Content := contents.get(i)
+        if groups.contains_key(fc.content) then
+          groups.get(fc.content).add(fc.path)
+        else
+          groups.set(fc.content, [fc.path])
+        end
+        i := i + 1
+      end
+
+      result := {}
+      let keys: Array[String] := groups.keys()
+      i := 0
+      from
+        i := 0
+      until
+        i = keys.length
+      do
+        let k: String := keys.get(i)
+        let paths: Array[String] := groups.get(k)
+        if paths.length > 1 then
+          result.set(k, paths)
+        end
+        i := i + 1
+      end
+    end
+end

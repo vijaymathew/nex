@@ -1,0 +1,120 @@
+-- A small TCP chat server. One task per connected client reads lines and
+-- forwards them as events to a single "hub" task, which is the *only* code
+-- that ever touches the list of connected clients — no shared mutable state
+-- between tasks, no locks: every other task just sends events over a
+-- channel and lets the hub serialize access. Graceful disconnect: a client
+-- handler notices read_line() returning nil (end of stream) and tells the
+-- hub to drop it, rather than leaving a dead socket in the broadcast list.
+
+intern net/Server_Socket
+intern net/Tcp_Socket
+intern Chat_Protocol
+
+union Hub_Event
+  Client_Joined(sock: Tcp_Socket)
+  Broadcast(sender: Tcp_Socket, text: String)
+  Client_Left(sock: Tcp_Socket)
+  Shutdown
+end
+
+class Chat_Hub
+  create
+    make() do end
+  feature
+    -- The single owner of `clients`. Runs until it receives Shutdown.
+    run(events: Channel[Hub_Event]) do
+      let clients: Array[Tcp_Socket] := []
+      let running: Boolean := true
+      from
+        running := true
+      until
+        not running
+      do
+        let ev: Hub_Event := events.receive()
+        match ev of
+          when Client_Joined(sock) then
+            clients.add(sock)
+          when Client_Left(sock) then
+            let idx: Integer := clients.index_of(sock)
+            if idx >= 0 then
+              clients.remove(idx)
+            end
+          when Broadcast(sender, text) then
+            let i: Integer := 0
+            from
+              i := 0
+            until
+              i = clients.length
+            do
+              let member: Tcp_Socket := clients.get(i)
+              if member /= sender then
+                member.send_line(text)
+              end
+              i := i + 1
+            end
+          when Shutdown then
+            running := false
+        end
+      end
+    end
+end
+
+-- A free (top-level) function, not a Chat_Server method: `spawn do ... end`
+-- inside a class method fails to lower on the JVM backend when its body
+-- calls a *method* on an object (even `this`, even with an explicit
+-- `this.` prefix) — confirmed with a minimal repro (see the book's
+-- top-level issues report). Calling a free function from inside `spawn`
+-- works cleanly, so handle_client lives at the top level instead.
+function handle_client(sock: Tcp_Socket, name: String, events: Channel[Hub_Event]) do
+  events.send(create Client_Joined.make(sock))
+  let protocol: Chat_Protocol := create Chat_Protocol.make()
+  let running: Boolean := true
+  from
+    running := true
+  until
+    not running
+  do
+    let line: ?String := sock.read_line()
+    if line = nil then
+      running := false
+    else
+      events.send(create Broadcast.make(sock, protocol.format_message(name, line)))
+    end
+  end
+  events.send(create Client_Left.make(sock))
+  sock.close()
+end
+
+class Chat_Server
+  create
+    make() do end
+  feature
+    -- Accepts exactly `max_clients` connections, then stops accepting (the
+    -- hub keeps running until told to stop separately). Each connecting
+    -- client is expected to send its display name as the very first line.
+    accept_clients(server: Server_Socket, max_clients: Integer, events: Channel[Hub_Event]): Array[Task] do
+      let handlers: Array[Task] := []
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i = max_clients
+      do
+        let maybe_client: ?Tcp_Socket := server.accept(30000)
+        if maybe_client /= nil then
+          let client: Tcp_Socket := maybe_client
+          let name_line: ?String := client.read_line()
+          let name: String := "anon"
+          if name_line /= nil then
+            name := name_line
+          end
+          let h: Task := spawn do
+            handle_client(client, name, events)
+          end
+          handlers.add(h)
+        end
+        i := i + 1
+      end
+      result := handlers
+    end
+end

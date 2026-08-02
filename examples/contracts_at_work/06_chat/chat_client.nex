@@ -1,0 +1,75 @@
+-- chat_client: an interactive client for chat_server.nex. Connects, sends a
+-- display name as the first line, then runs two things concurrently: a
+-- background task printing whatever arrives on the socket, and the main
+-- loop reading console input and sending it. Two independent blocking reads
+-- (the socket, the console) is exactly the shape that needs a second task —
+-- one thread can't block on both at once.
+--
+-- Usage: reads the server host/port from stdin at startup (argv is not an
+-- option — see Project 1's README for why: Process.command_line() does not
+-- return the program's real arguments on either backend today).
+
+intern net/Tcp_Socket
+
+function main() do
+  let console: Console := create Console
+  let host: String := console.read_line("server host [localhost]: ").trim()
+  if host = "" then
+    host := "localhost"
+  end
+  let port_text: String := console.read_line("server port: ").trim()
+  let port: Integer := port_text.to_integer()
+  let name: String := console.read_line("your name: ").trim()
+
+  let sock: Tcp_Socket := create Tcp_Socket.make(host, port)
+  sock.connect()
+  sock.send_line(name)
+  print("connected as " + name + " — type a message, or 'quit' to leave")
+
+  -- Quitting closes `sock` from the main loop while this task may be
+  -- blocked inside read_line() on the same socket; that unblocks it with a
+  -- "stream closed" failure rather than a clean nil, so it's treated the
+  -- same as a normal disconnect instead of surfacing as an error.
+  let reader: Task := spawn do
+    let running: Boolean := true
+    from
+      running := true
+    until
+      not running
+    do
+      let line: ?String := nil
+      do
+        line := sock.read_line()
+      rescue
+        running := false
+      end
+      if not running then
+        -- closed out from under us; nothing more to do
+      elseif line = nil then
+        running := false
+        print("(disconnected)")
+      else
+        print(line)
+      end
+    end
+  end
+
+  let sending: Boolean := true
+  from
+    sending := true
+  until
+    not sending
+  do
+    let text: String := console.read_line("").trim()
+    if text = "quit" then
+      sending := false
+    elseif text /= "" then
+      sock.send_line(text)
+    end
+  end
+
+  sock.close()
+  reader.await(2000)
+end
+
+main()

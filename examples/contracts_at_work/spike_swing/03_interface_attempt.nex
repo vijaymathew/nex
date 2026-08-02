@@ -1,0 +1,24 @@
+-- Spike: can a Nex value satisfy a Java interface (ActionListener, Runnable,
+-- etc.)? Try the two plausible mechanisms in order:
+--   (a) passing a Nex anonymous function (`fn`) where Java expects a
+--       functional/SAM interface (Runnable has a single abstract method,
+--       run(), so this is the best-case scenario for implicit conversion).
+--   (b) declaring a Nex class that `inherit`s a Java interface type.
+-- If both fail, there is no interface-implementation path in Nex today.
+
+import java.lang.Runnable
+import java.lang.Thread
+
+function attempt_a() do
+  with "java" do
+    let action := fn() do
+      print("fn body ran")
+    end
+    -- Best case: Nex's fn value is implicitly usable as a Runnable.
+    let t: Thread := Thread.new(action)
+    t.start()
+    t.join()
+  end
+end
+
+attempt_a()

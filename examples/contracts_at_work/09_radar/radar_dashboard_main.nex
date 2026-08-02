@@ -1,0 +1,100 @@
+-- radar_dashboard_main: a Swing client for radar_service, running as a
+-- SEPARATE process on the JVM backend — this is the capstone's real
+-- finding, not a stylistic choice. radar_service needs data/Json, which is
+-- only usable under --interpret; the dashboard's ActionListeners need the
+-- JVM backend, or mutations through them silently don't persist (Project
+-- 8). No single Nex program can satisfy both requirements at once, so
+-- "Nex Radar" is two programs talking over HTTP rather than one — see the
+-- top-level issues report and this project's README for the full story.
+--
+-- Buttons only ever set flags on Radar_Dashboard_State (Project 8's
+-- pattern); the poll loop is the only code that performs the HTTP call
+-- (via Http_Client + a fixed-lookbehind Regex, not data/Json — see Project
+-- 7's README for why data/Json and net/Http_Client can't be interned
+-- together) or touches a widget.
+
+import javax.swing.JFrame
+import javax.swing.JButton
+import javax.swing.JLabel
+import java.lang.Thread
+
+intern Radar_Dashboard_State
+intern Radar_Dashboard_Listeners
+intern net/Http_Client
+intern text/Regex
+
+function fetch_status(client: Http_Client, base: String, ticks_rx: Regex,
+                       groups_rx: Regex, scans_rx: Regex): String do
+  do
+    let response: Http_Response := client.get(base + "/status")
+    result := "ticks=" + ticks_rx.find(response.body()) +
+               "  duplicate_groups=" + groups_rx.find(response.body()) +
+               "  scans=" + scans_rx.find(response.body())
+  rescue
+    result := "(fetch failed: " + exception + ")"
+  end
+end
+
+function fetch_rescan(client: Http_Client, base: String, ticks_rx: Regex,
+                       groups_rx: Regex, scans_rx: Regex): String do
+  do
+    let response: Http_Response := client.post(base + "/rescan", "")
+    result := "ticks=" + ticks_rx.find(response.body()) +
+               "  duplicate_groups=" + groups_rx.find(response.body()) +
+               "  scans=" + scans_rx.find(response.body())
+  rescue
+    result := "(rescan failed: " + exception + ")"
+  end
+end
+
+function main() do
+  let console: Console := create Console
+  let base: String := console.read_line("radar_service [http://localhost:4323]: ").trim()
+  if base = "" then
+    base := "http://localhost:4323"
+  end
+
+  let state: Radar_Dashboard_State := create Radar_Dashboard_State.make()
+  let client: Http_Client := create Http_Client.make()
+  let ticks_rx: Regex := create Regex.compile('(?<="ticks":)[^,}]+')
+  let groups_rx: Regex := create Regex.compile('(?<="duplicate_groups":)[^,}]+')
+  let scans_rx: Regex := create Regex.compile('(?<="scan_count":)[^,}]+')
+
+  with "java" do
+    let frame: JFrame := JFrame.new("Nex Radar")
+    let label: JLabel := JLabel.new("(not fetched yet)")
+    let refresh_button: JButton := JButton.new("refresh")
+    let rescan_button: JButton := JButton.new("rescan")
+    let quit_button: JButton := JButton.new("quit")
+
+    refresh_button.addActionListener(create Refresh_Listener.make(state))
+    rescan_button.addActionListener(create Rescan_Listener.make(state))
+    quit_button.addActionListener(create Dashboard_Quit_Listener.make(state))
+
+    frame.getContentPane().add(label)
+    frame.getContentPane().add(refresh_button)
+    frame.getContentPane().add(rescan_button)
+    frame.getContentPane().add(quit_button)
+    frame.setSize(420, 160)
+    frame.setVisible(true)
+
+    from
+    until
+      state.should_quit
+    do
+      Thread.sleep(150)
+      if state.should_rescan then
+        state.set_status(fetch_rescan(client, base, ticks_rx, groups_rx, scans_rx))
+        state.clear_rescan()
+      elseif state.should_refresh then
+        state.set_status(fetch_status(client, base, ticks_rx, groups_rx, scans_rx))
+        state.clear_refresh()
+      end
+      label.setText(state.status_text)
+    end
+
+    frame.dispose()
+  end
+end
+
+main()

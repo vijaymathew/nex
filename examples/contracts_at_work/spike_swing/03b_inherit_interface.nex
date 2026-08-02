@@ -1,0 +1,24 @@
+-- Attempt (b): can a Nex class `inherit` a Java interface directly?
+
+import java.lang.Runnable
+import java.lang.Thread
+
+class My_Task
+  inherit
+    Runnable
+  feature
+    run() do
+      print("My_Task.run() executed")
+    end
+end
+
+function attempt_b() do
+  with "java" do
+    let task: My_Task := create My_Task
+    let t: Thread := Thread.new(task)
+    t.start()
+    t.join()
+  end
+end
+
+attempt_b()

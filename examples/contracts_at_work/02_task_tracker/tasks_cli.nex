@@ -1,0 +1,136 @@
+-- tasks_cli: an interactive task tracker over Task_Store, persisted to
+-- tasks.jsonl next to this file.
+--
+-- This reads commands from stdin (Console.read_line) rather than from argv.
+-- That's a deliberate substitution, not the original design: Process's own
+-- command_line() does not return the program's actual arguments on either
+-- backend today (confirmed with a minimal repro — see the book's top-level
+-- issues report), so no Nex CLI can read argv right now. An interactive
+-- loop still exercises the same boundary-parsing practice this project is
+-- about — turning one line of untrusted text into a validated command —
+-- just at a different boundary.
+--
+-- Commands:
+--   add <priority 1-5> <text>
+--   list
+--   done <id>
+--   remove <id>
+--   quit
+
+intern Task
+intern Task_Store
+intern io/Path
+
+function print_task(t: Task) do
+  print(t.to_string())
+end
+
+function list_tasks(store: Task_Store) do
+  if store.tasks.is_empty() then
+    print("(no tasks)")
+  else
+    let i: Integer := 0
+    from
+      i := 0
+    until
+      i = store.tasks.length
+    do
+      print_task(store.tasks.get(i))
+      i := i + 1
+    end
+  end
+end
+
+function handle_add(store: Task_Store, rest: String) do
+  let sp: Integer := rest.index_of(" ")
+  if sp < 0 then
+    print("usage: add <priority 1-5> <text>")
+  else
+    let priority_text: String := rest.substring(0, sp)
+    let text: String := rest.substring(sp + 1, rest.length()).trim()
+    if text = "" then
+      print("usage: add <priority 1-5> <text>")
+    else
+      let priority: Integer := priority_text.to_integer()
+      if priority < 1 or priority > 5 then
+        print("error: priority must be 1-5, got " + priority_text)
+      else
+        let id: Integer := store.add(text, priority)
+        print("added #" + id)
+      end
+    end
+  end
+end
+
+function handle_done(store: Task_Store, rest: String) do
+  let id: Integer := rest.trim().to_integer()
+  if store.mark_done(id) then
+    print("marked #" + id + " done")
+  else
+    print("no such task: #" + id)
+  end
+end
+
+function handle_remove(store: Task_Store, rest: String) do
+  let id: Integer := rest.trim().to_integer()
+  if store.remove(id) then
+    print("removed #" + id)
+  else
+    print("no such task: #" + id)
+  end
+end
+
+function main() do
+  let console: Console := create Console
+  -- A bare relative path ("tasks.jsonl") resolves against the `nex` CLI's
+  -- own installation directory, not the directory this program was run
+  -- from: the `nex` launcher script `cd`s into NEX_HOME before starting
+  -- the JVM, and io/Path's relative-path resolution uses the process's
+  -- real working directory rather than NEX_USER_DIR (which the launcher
+  -- sets, but only `intern` module resolution consults it) — confirmed
+  -- directly (see the book's top-level issues report). NEX_USER_DIR is
+  -- still available as a plain environment variable, so building the path
+  -- from it explicitly is the workaround.
+  let proc: Process := create Process
+  let store_path: Path := create Path.make(proc.getenv("NEX_USER_DIR") + "/tasks.jsonl")
+  let store: Task_Store := create Task_Store.make()
+  store.load_from(store_path)
+
+  print("tasks_cli — commands: add <priority> <text>, list, done <id>, remove <id>, quit")
+  let running: Boolean := true
+  from
+    running := true
+  until
+    not running
+  do
+    let line: String := console.read_line("> ").trim()
+    let sp: Integer := line.index_of(" ")
+    let cmd: String := line
+    let rest: String := ""
+    if sp >= 0 then
+      cmd := line.substring(0, sp)
+      rest := line.substring(sp + 1, line.length())
+    end
+
+    if cmd = "add" then
+      handle_add(store, rest)
+      store.save_to(store_path)
+    elseif cmd = "list" then
+      list_tasks(store)
+    elseif cmd = "done" then
+      handle_done(store, rest)
+      store.save_to(store_path)
+    elseif cmd = "remove" then
+      handle_remove(store, rest)
+      store.save_to(store_path)
+    elseif cmd = "quit" then
+      running := false
+    elseif cmd = "" then
+      -- blank line, ignore
+    else
+      print("unknown command: " + cmd)
+    end
+  end
+end
+
+main()

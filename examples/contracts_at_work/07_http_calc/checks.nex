@@ -1,0 +1,64 @@
+-- Executable checks for calc_service. Starts a real HTTP server on an
+-- ephemeral port and drives it with a real Http_Client. Run:
+-- nex checks.nex --interpret
+
+intern Calc_Service
+intern net/Http_Client
+intern data/Json
+
+class Checker
+  create
+    make() do
+      passed := 0
+      failed := 0
+    end
+  feature
+    passed: Integer
+    failed: Integer
+
+    check(label: String, expected: String, actual: String) do
+      if expected = actual then
+        passed := passed + 1
+        print("PASS " + label)
+      else
+        failed := failed + 1
+        print("FAIL " + label + " expected=" + expected + " actual=" + actual)
+      end
+    end
+
+    summary() do
+      print("---")
+      print("" + passed + " passed, " + failed + " failed")
+    end
+end
+
+let c: Checker := create Checker.make()
+
+let service: Calc_Service := create Calc_Service.make(0)
+service.start()
+print("calc_service on port " + service.port())
+
+let client: Http_Client := create Http_Client.make()
+let json: Json := create Json.make()
+let base: String := "http://localhost:" + service.port()
+
+let r1: Http_Response := client.post(base + "/evaluate", "{\"expr\":\"1 + 2 * 3\"}")
+c.check("status ok", "200", "" + r1.status())
+let body1: Map[String, Any] := json.parse(r1.body())
+c.check("simple result", "7.0", "" + body1.get("result"))
+
+let r2: Http_Response := client.post(base + "/evaluate",
+  "{\"expr\":\"x * x + y\",\"vars\":{\"x\":3,\"y\":1}}")
+let body2: Map[String, Any] := json.parse(r2.body())
+c.check("vars result", "10.0", "" + body2.get("result"))
+
+let r3: Http_Response := client.post(base + "/evaluate", "{\"expr\":\"1 / 0\"}")
+c.check("division by zero status", "400", "" + r3.status())
+let body3: Map[String, Any] := json.parse(r3.body())
+c.check("division by zero has error", "true", "" + body3.contains_key("error"))
+
+let r4: Http_Response := client.post(base + "/evaluate", "{\"expr\":\"undefined_name\"}")
+c.check("undefined var status", "400", "" + r4.status())
+
+service.stop()
+c.summary()
