@@ -249,6 +249,30 @@
    :nex-type nex-type
    :jvm-type jvm-type})
 
+(defn call-super-java-node
+  "super.<method>() reaching a real Java superclass's own implementation
+   (docs/proposals/java-interop.md Phase 2) — e.g. `super.paintComponent(g)`
+   from within an overriding method. Unlike call-virtual (always the internal
+   uniform (NexReplState, Object[])->Object descriptor, for calling another
+   already-lowered Nex method), this carries a real Java method descriptor
+   and is emitted as INVOKESPECIAL, not INVOKEVIRTUAL — bypassing virtual
+   dispatch is the whole point: the target class's own vtable slot for
+   `method` may itself be this Nex override (a bridge, see
+   java-superclass-override-bridge-methods), and an ordinary virtual call
+   would recurse into it instead of reaching the real superclass body.
+   java-return-class is the reflected java.lang.reflect.Method's return Class
+   (compile-time only, not serialized), used to box a primitive result back
+   into Nex's internal representation."
+  [owner method descriptor target java-return-class nex-type jvm-type]
+  {:op :call-super-java
+   :owner owner
+   :method method
+   :descriptor descriptor
+   :target target
+   :java-return-class java-return-class
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
 (defn box-node [from to expr nex-type]
   {:op :box
    :from from

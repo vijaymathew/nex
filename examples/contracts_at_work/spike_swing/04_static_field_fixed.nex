@@ -1,0 +1,15 @@
+-- Re-test of finding 2 from NOTES.md: SwingConstants.CENTER (static field,
+-- no-parens) on the JVM backend, now that Part A's lowering fix has landed.
+
+import javax.swing.JFrame
+import javax.swing.JLabel
+import javax.swing.SwingConstants
+
+function run() do
+  with "java" do
+    let label: JLabel := JLabel.new("centered", SwingConstants.CENTER)
+    print("static field access ok: align=" + label.getHorizontalAlignment())
+  end
+end
+
+run()

@@ -1,0 +1,19 @@
+-- Spike: can Nex import javax.swing classes, construct them, and call
+-- plain (non-listener) methods? No display shown, no listeners attempted.
+
+import javax.swing.JFrame
+import javax.swing.JLabel
+import javax.swing.SwingConstants
+
+function run() do
+  with "java" do
+    let frame: JFrame := JFrame.new("Contracts at Work — Spike")
+    frame.setSize(300, 120)
+    let label: JLabel := JLabel.new("hello from Nex", SwingConstants.CENTER)
+    frame.getContentPane().add(label)
+    print("constructed ok: title=" + frame.getTitle())
+    print("label text=" + label.getText())
+  end
+end
+
+run()

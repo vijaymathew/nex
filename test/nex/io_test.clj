@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [nex.parser :as p]
             [nex.interpreter :as interp]
+            [nex.types.runtime :as rt]
             [nex.typechecker :as tc]))
 
 ;; ============================================================================
@@ -178,6 +179,16 @@ end"
     (let [proc {:nex-builtin-type :Process}
           args (interp/call-builtin-method "p" proc "command_line" [])]
       (is (interp/nex-array? args)))))
+
+(deftest process-command-line-returns-program-argv-test
+  (testing "Process.command_line returns the program's own argv, not the JVM's launch flags (nex.types.runtime/set-program-args!)"
+    (let [proc {:nex-builtin-type :Process}]
+      (try
+        (rt/set-program-args! ["--format" "csv" "report.txt"])
+        (let [args (interp/call-builtin-method "p" proc "command_line" [])]
+          (is (= ["--format" "csv" "report.txt"] (vec args))))
+        (finally
+          (rt/set-program-args! []))))))
 
 ;; ============================================================================
 ;; PROCESS TYPECHECKER TESTS

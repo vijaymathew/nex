@@ -1,0 +1,38 @@
+-- lru_demo: a tiny scripted walkthrough of Lru_Cache, printing what
+-- evicts and why. Not interactive — a fixed sequence, run and read.
+
+intern Lru_Cache
+
+function show(cache: Lru_Cache [String, Integer], key: String) do
+  let v: ?Integer := cache.get(key)
+  if v /= nil then
+    print("  get(" + key + ") = " + v)
+  else
+    print("  get(" + key + ") = (miss)")
+  end
+end
+
+function main() do
+  print("cache capacity 3")
+  let cache: Lru_Cache [String, Integer] := create Lru_Cache.make(3)
+
+  print("put a=1, b=2, c=3")
+  cache.put("a", 1)
+  cache.put("b", 2)
+  cache.put("c", 3)
+  show(cache, "a")
+  show(cache, "b")
+  show(cache, "c")
+
+  print("get(a) — a is now most-recently-used, b is least")
+  show(cache, "a")
+
+  print("put d=4 — capacity exceeded, evicts least-recently-used (b)")
+  cache.put("d", 4)
+  show(cache, "a")
+  show(cache, "b")
+  show(cache, "c")
+  show(cache, "d")
+end
+
+main()

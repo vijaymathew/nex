@@ -6,7 +6,11 @@
 
    The handful of network programs (servers/clients that bind ports or make live
    connections) are excluded — they are meant to run against a live peer, not in
-   a non-interactive test."
+   a non-interactive test. examples/contracts_at_work/ is excluded wholesale: a
+   work-in-progress sample-app series (deliberately out of scope for this
+   session — see project memory), with real CLI tools that call System.exit on
+   a missing-argument error path (fatal to an in-process smoke test that gives
+   every example zero args), live servers/GUIs, and known-incomplete spikes."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -18,6 +22,10 @@
     "http_server.nex"
     "http_client_to_server.nex"})
 
+(defn- contracts-at-work-path?
+  [^java.io.File f]
+  (str/includes? (.getPath f) (str java.io.File/separator "contracts_at_work" java.io.File/separator)))
+
 ;; Relative directories the file-I/O examples create; they normally clean up
 ;; after themselves (delete_tree), but we remove these defensively in case an
 ;; example fails part-way through.
@@ -28,6 +36,7 @@
        (filter #(.isFile ^java.io.File %))
        (filter #(str/ends-with? (.getName ^java.io.File %) ".nex"))
        (remove #(contains? excluded-network-examples (.getName ^java.io.File %)))
+       (remove contracts-at-work-path?)
        (sort-by #(.getPath ^java.io.File %))))
 
 (defn- root-cause [^Throwable t]

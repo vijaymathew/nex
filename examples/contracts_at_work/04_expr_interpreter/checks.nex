@@ -1,0 +1,66 @@
+-- Executable checks for the expression interpreter. Run: nex checks.nex
+
+intern Expr
+
+class Checker
+  create
+    make() do
+      passed := 0
+      failed := 0
+    end
+  feature
+    passed: Integer
+    failed: Integer
+
+    check(label: String, expected: String, actual: String) do
+      if expected = actual then
+        passed := passed + 1
+        print("PASS " + label)
+      else
+        failed := failed + 1
+        print("FAIL " + label + " expected=" + expected + " actual=" + actual)
+      end
+    end
+
+    summary() do
+      print("---")
+      print("" + passed + " passed, " + failed + " failed")
+    end
+end
+
+let c: Checker := create Checker.make()
+let empty_env: Map[String, Real] := {}
+
+c.check("simple add", "3.0", "" + evaluate("1 + 2", empty_env))
+c.check("precedence", "7.0", "" + evaluate("1 + 2 * 3", empty_env))
+c.check("parens", "9.0", "" + evaluate("(1 + 2) * 3", empty_env))
+c.check("unary minus", "-5.0", "" + evaluate("-5", empty_env))
+c.check("unary in expr", "3.0", "" + evaluate("8 + -5", empty_env))
+c.check("division", "2.5", "" + evaluate("5 / 2", empty_env))
+c.check("nested parens", "2.0", "" + evaluate("((1 + 3)) / 2", empty_env))
+
+let env: Map[String, Real] := {}
+env.set("x", 10.0)
+env.set("y", 4.0)
+c.check("variables", "14.0", "" + evaluate("x + y", env))
+c.check("variable in expr", "6.0", "" + evaluate("x - y", env))
+
+-- division by zero is a contract violation, not a host crash
+let div_zero_failed: Boolean := false
+do
+  evaluate("1 / 0", empty_env)
+rescue
+  div_zero_failed := true
+end
+c.check("division by zero caught", "true", "" + div_zero_failed)
+
+-- an undefined variable is a contract violation too
+let undefined_var_failed: Boolean := false
+do
+  evaluate("z + 1", empty_env)
+rescue
+  undefined_var_failed := true
+end
+c.check("undefined variable caught", "true", "" + undefined_var_failed)
+
+c.summary()

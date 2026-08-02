@@ -1,0 +1,18 @@
+-- calc_server_main: runs calc_service on a fixed port until interrupted.
+-- Must run under --interpret — see README.
+
+intern Calc_Service
+
+function main() do
+  let service: Calc_Service := create Calc_Service.make(4322)
+  service.start()
+  print("calc_service listening on port " + service.port())
+  print("POST /evaluate  {\"expr\":\"1 + 2\"}")
+  print("press ctrl-c to stop")
+
+  -- Block forever; Http_Server runs its own listener thread.
+  let console: Console := create Console
+  console.read_line("")
+end
+
+main()

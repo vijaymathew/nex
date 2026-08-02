@@ -1,0 +1,43 @@
+-- Plain Nex state for the dashboard client — same discipline as Project 8:
+-- no Java-typed field anywhere, so the listener classes that hold this stay
+-- safe from the "Java-typed field on a class compiled with an interface"
+-- bug by construction.
+
+class Radar_Dashboard_State
+  create
+    make() do
+      status_text := "(not fetched yet)"
+      should_refresh := true
+      should_rescan := false
+      should_quit := false
+    end
+  feature
+    status_text: String
+    should_refresh: Boolean
+    should_rescan: Boolean
+    should_quit: Boolean
+
+    request_refresh() do
+      should_refresh := true
+    end
+
+    request_rescan() do
+      should_rescan := true
+    end
+
+    request_quit() do
+      should_quit := true
+    end
+
+    set_status(text: String) do
+      status_text := text
+    end
+
+    clear_refresh() do
+      should_refresh := false
+    end
+
+    clear_rescan() do
+      should_rescan := false
+    end
+end

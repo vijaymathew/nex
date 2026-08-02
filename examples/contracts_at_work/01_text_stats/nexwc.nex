@@ -1,0 +1,96 @@
+-- nexwc: a small word-frequency CLI, built on Word_Stats.
+--
+-- Usage:
+--   nex nexwc.nex <file>              -- line/word counts and top 5 words
+--   nex nexwc.nex <file> --top <n>    -- top n words instead of top 5
+--
+-- Nex's own Process class does not expose a way to set the process exit
+-- code, so error paths reach across the host boundary for it explicitly
+-- (System.exit) rather than pretending the language has one.
+--
+-- A bare relative path resolves against the `nex` CLI's own installation
+-- directory, not wherever this program was actually run from — the
+-- launcher `cd`s into NEX_HOME before starting the JVM (documented, not a
+-- bug to fix — see the book's top-level issues report). NEX_USER_DIR is
+-- set beforehand and read here via Process.getenv to resolve a relative
+-- file argument against the caller's real working directory instead.
+
+intern Word_Stats
+intern io/Path
+import java.lang.System
+
+function fail(message: String, code: Integer) do
+  print("error: " + message)
+  with "java" do
+    System.exit(code)
+  end
+end
+
+function resolve_path(proc: Process, raw: String): String do
+  if raw.starts_with("/") then
+    result := raw
+  else
+    result := proc.getenv("NEX_USER_DIR") + "/" + raw
+  end
+end
+
+function parse_top_count(args: Array[String]): Integer
+  do
+    result := 5
+    let i: Integer := 0
+    from
+      i := 0
+    until
+      i = args.length
+    do
+      if args.get(i) = "--top" then
+        if i + 1 >= args.length then
+          fail("--top requires a number", 2)
+        end
+        let n: Integer := args.get(i + 1).to_integer()
+        if n <= 0 then
+          fail("--top must be a positive integer, got " + args.get(i + 1), 2)
+        end
+        result := n
+      end
+      i := i + 1
+    end
+  ensure
+    positive: result > 0
+  end
+
+function main() do
+  let proc: Process := create Process
+  let args: Array[String] := proc.command_line()
+  if args.length = 0 then
+    fail("usage: nexwc <file> [--top n]", 2)
+  end
+
+  let path: Path := create Path.make(resolve_path(proc, args.get(0)))
+  if not path.exists() then
+    fail("no such file: " + args.get(0), 1)
+  end
+  if not path.is_file() then
+    fail("not a file: " + args.get(0), 1)
+  end
+
+  let top_n: Integer := parse_top_count(args)
+  let text: String := path.read_text()
+  let stats: Word_Stats := create Word_Stats.make(text)
+
+  print(args.get(0) + ": " + stats.line_count() + " lines, " +
+        stats.word_count() + " words")
+  print("top " + top_n + " words:")
+  let top: Array[Count_Entry] := stats.top_words(top_n)
+  let i: Integer := 0
+  from
+    i := 0
+  until
+    i = top.length
+  do
+    print("  " + top.get(i).to_string())
+    i := i + 1
+  end
+end
+
+main()

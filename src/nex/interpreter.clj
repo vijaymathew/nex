@@ -81,6 +81,32 @@
 (def nex-map-remove rt/nex-map-remove)
 (defn nex-map-str [m] (rt/nex-map-str nex-format-value m))
 
+(defn- snapshot-old-field-value
+  "A field's stored VALUE, as `old` should see it. An Array (a real
+   java.util.ArrayList) or Map (an atom-backed nex-map, see
+   nex.types.runtime/nex-map) is a genuinely mutable container — capturing
+   the field map's entry for it just copies the *reference*, not a value, so
+   an in-place `.add`/`.put` later in the same method body (matching Nex's
+   own reference semantics for these types, see [[env-replace-object-aliases!]])
+   was visible through the \"old\" snapshot too: `old items.length = items.length
+   - 1` failed because both sides read the SAME, already-mutated ArrayList.
+   Shallow-copying the container here is what actually freezes it at snapshot
+   time; elements themselves are not deep-copied (matching `old` on a plain
+   object field, which likewise reflects a later mutation of that object's
+   own fields — only the container's own membership is what a `.length`/
+   `.get`/`.contains_key` query needs frozen). Sets need no such copy: nex-set
+   is an immutable value replaced wholesale on every op, so the field's
+   existing entry is already a stable, past snapshot."
+  [v]
+  (cond
+    (nex-array? v) (nex-array-from v)
+    (nex-map? v) (nex-map-from (nex-map-entries v))
+    :else v))
+
+(defn- snapshot-old-field-values
+  [fields]
+  (into {} (map (fn [[k v]] [k (snapshot-old-field-value v)])) fields))
+
 (def nex-set rt/nex-set)
 (def nex-set-from rt/nex-set-from)
 (def nex-set? rt/nex-set?)
@@ -262,16 +288,109 @@
       (throw (ex-info (str "Cannot assign to undefined variable: " var-name)
                       {:var-name var-name})))))
 
+(declare walk-and-replace-object-alias!)
+
+(defn- replace-object-alias-in-collection!
+  "Mutate `coll` in place, replacing any element/value `identical?` to
+   old-obj with new-obj — or, failing that, recursing into it (via
+   walk-and-replace-object-alias!), since the element/value may itself be an
+   object whose OWN field holds a nested array/map containing old-obj several
+   levels down (`h.items.get(0).children`, say). Arrays (a real
+   java.util.ArrayList) and Maps (an atom-backed nex-map, see
+   nex.types.runtime/nex-map) are genuinely mutable containers already —
+   unlike a plain env binding, which env-replace-object-aliases! rebinds
+   wholesale, an object living inside one of these needs its *slot* updated
+   directly, or a later read through the same array/map (`arr.get(i)`, a Map
+   value) still sees the stale pre-mutation object. Sets are skipped: nex-set
+   (nex.types.runtime) is an immutable value replaced wholesale on every op,
+   not a stable container object-identity could apply to the same way."
+  [coll old-obj new-obj visited]
+  (cond
+    (nex-array? coll)
+    (dotimes [i (nex-array-size coll)]
+      (let [item (nex-array-get coll i)]
+        (if (identical? item old-obj)
+          (nex-array-set coll i new-obj)
+          (walk-and-replace-object-alias! item old-obj new-obj visited))))
+
+    (nex-map? coll)
+    (doseq [[k v] (nex-map-entries coll)]
+      (if (identical? v old-obj)
+        (nex-map-put coll k new-obj)
+        (walk-and-replace-object-alias! v old-obj new-obj visited)))))
+
+(defn- walk-and-replace-object-alias!
+  "Search `v` for a nested Array/Map (at any depth, through any number of
+   intervening objects' fields) that holds old-obj, and update it in place —
+   this is what lets a mutation reached through one alias (a returned method
+   result, say) become visible through a completely different one (the same
+   object still sitting in an unrelated object's collection-typed field, e.g.
+   `h.items` after `let c := h.first(); c.bump()`). Objects themselves are
+   never rewritten here — write-back-target! already handles an object's OWN
+   rebind on its own mutation — only the mutable containers reachable through
+   them. `visited` (a java.util.IdentityHashMap used as a set) guards against
+   an infinite loop on a cyclic object graph; identity, not `=`, is what
+   matters for a guard whose only job is not revisiting the same physical
+   container twice, and structural equality would wrongly conflate two
+   distinct-but-equal objects."
+  [v old-obj new-obj ^java.util.IdentityHashMap visited]
+  (when (and v (not (.containsKey visited v)))
+    (.put visited v true)
+    (cond
+      (or (nex-array? v) (nex-map? v))
+      (replace-object-alias-in-collection! v old-obj new-obj visited)
+
+      (nex-object? v)
+      (doseq [[_ field-val] (:fields v)]
+        (walk-and-replace-object-alias! field-val old-obj new-obj visited))
+
+      :else nil)))
+
+;; Guards the recursive descent below against reentrancy: a Map keyed by
+;; objects with a user-defined Hashable/`hash` override calls back into the
+;; interpreter (rt/*value-hash*, bound in eval-node's :call dispatch) to
+;; compute each key's hash while replace-object-alias-in-collection! iterates
+;; it — and that nested interpreted call can itself trigger a mutation whose
+;; OWN write-back-target! reaches this same function again, on the very map
+;; already mid-iteration, an unbounded recursion that StackOverflowErrors
+;; (surfaced how far away the actual stack blew depends on where the JVM
+;; happens to run out first — a Var thread-binding lookup deep inside
+;; rt/value-hash in the case that first exposed this). None of that nested
+;; work has anything to do with the mutation already in progress here, so
+;; skipping the recursive descent entirely on reentry is safe — it only ever
+;; discards a walk that would have re-triggered itself anyway.
+(def ^:dynamic *replacing-object-aliases?* false)
+
 (defn- env-replace-object-aliases!
-  "Replace all bindings in the environment chain that still point at old-obj."
+  "Replace all bindings in the environment chain that still point at old-obj,
+   and — since a Nex Array/Map is a genuinely mutable container even in the
+   interpreter (unlike an object, which write-back-target!'s whole rebind
+   model exists to work around) — update any matching element found inside
+   one, so `arr.get(i)` or a Map read sees a just-mutated object too, not only
+   a plain variable holding the object directly. Also descends into an
+   object-typed binding's own fields (walk-and-replace-object-alias!), so a
+   mutation reached through, say, a method's return value still shows up
+   through an unrelated object's collection field holding the same instance."
   [env old-obj new-obj]
   (when (and env (some? old-obj) (not (identical? old-obj new-obj)))
-    (swap! (:bindings env)
-           (fn [bindings]
-             (reduce-kv (fn [m k v]
-                          (assoc m k (if (identical? v old-obj) new-obj v)))
-                        {}
-                        bindings)))
+    (let [visited (java.util.IdentityHashMap.)
+          recursive-descent? (not *replacing-object-aliases?*)]
+      (binding [*replacing-object-aliases?* true]
+        (swap! (:bindings env)
+               (fn [bindings]
+                 (reduce-kv (fn [m k v]
+                              (cond
+                                (identical? v old-obj)
+                                (assoc m k new-obj)
+
+                                (and recursive-descent?
+                                     (or (nex-array? v) (nex-map? v) (nex-object? v)))
+                                (do (walk-and-replace-object-alias! v old-obj new-obj visited)
+                                    (assoc m k v))
+
+                                :else (assoc m k v)))
+                            {}
+                            bindings)))))
     (when-let [parent (:parent env)]
       (env-replace-object-aliases! parent old-obj new-obj))))
 
@@ -402,7 +521,24 @@
                   (throw (ex-info (str "Cyclic inheritance detected: "
                                        (str/join " -> " path))
                                   {:class-name class-name
-                                   :cycle path}))))))]
+                                   :cycle path})))
+                ;; Extending a concrete Java class (Phase 2,
+                ;; docs/proposals/java-interop.md) real-subclasses at the JVM
+                ;; bytecode level (real `extends`, a real super-constructor
+                ;; call) — there is no cheap interpreter equivalent to the
+                ;; java.lang.reflect.Proxy trick Phase 1 uses for interfaces
+                ;; (Proxy only supports interfaces, not concrete classes), so
+                ;; this is compiled-backend-only. Checked here, not just at
+                ;; typecheck time, since the interpreter runs on its own AST
+                ;; path independent of nex.typechecker.
+                (when-not (lookup-class-if-exists ctx parent)
+                  (when-let [^Class klass (bi/resolve-imported-java-class ctx parent)]
+                    (when-not (.isInterface klass)
+                      (throw (ex-info (str "Class " class-name " extends Java class " parent
+                                           " — the interpreter does not support extending a Java "
+                                           "class (only implementing a Java interface). Run this "
+                                           "with the compiled backend (drop --interpret).")
+                                      {:class-name class-name :parent parent}))))))))]
     (let [class-name (:name class-def)
           previous (get @(:classes ctx) class-name)]
       (swap! (:classes ctx) assoc class-name class-def)
@@ -474,6 +610,12 @@
      [value field-name]
      (when-let [[owner ^Field field] (deep-reflected-field value field-name)]
        [true (.get field owner)]))
+
+(defn- compiled-object-field-set!
+     [value field-name new-value]
+     (when-let [[owner ^Field field] (deep-reflected-field value field-name)]
+       (.set field owner new-value)
+       true))
 
 (defn- compiled-runtime-class-name
      [ctx value]
@@ -784,13 +926,17 @@
 ;;
 
 (defn get-parent-classes
-  "Get the list of parent class definitions for a class."
+  "Get the list of parent class definitions for a class. A parent naming an
+   imported Java type (an interface implemented via `inherit`, per
+   docs/proposals/java-interop.md) has no Nex-side class-def and is omitted:
+   callers walking this list for fields/methods/constants/invariants
+   correctly see only the Nex side of the inheritance chain."
   [ctx class-def]
   (when-let [parents (:parents class-def)]
-    (mapv (fn [parent-info]
-            (let [parent-class (lookup-class ctx (:parent parent-info))]
-              (assoc parent-info :class-def parent-class)))
-          parents)))
+    (vec (keep (fn [parent-info]
+                 (when-let [parent-class (lookup-class-if-exists ctx (:parent parent-info))]
+                   (assoc parent-info :class-def parent-class)))
+               parents))))
 
 (defn feature-members
   "Return feature members with section visibility copied onto each member."
@@ -1275,7 +1421,7 @@
                          first
                          :name)
                     (some (fn [{:keys [parent]}]
-                            (search (lookup-class ctx parent)
+                            (search (lookup-class-if-exists ctx parent)
                                     (conj seen (:name class-def))))
                           (:parents class-def)))))]
       (search (lookup-class ctx (:class-name v)) #{}))))
@@ -1475,22 +1621,30 @@
        intern-name))
 
 (defn- resolve-interned*
-     "Traverse intern declarations recursively and collect both the class
-      definitions and the import declarations they bring into scope for static
-      analysis. Returns {:classes [...] :imports [...] :seen #{...}}. Aliased
-      interns add an extra class entry under the alias name. Imports are carried
-      through so that an interned module's host-class imports (e.g.
-      `import java.net.ServerSocket`) are visible to the typechecker that
-      elaborates the merged program."
+     "Traverse intern declarations recursively and collect the class
+      definitions, import declarations, free functions, and `declare type`
+      aliases they bring into scope for static analysis. Returns
+      {:classes [...] :imports [...] :functions [...] :type-aliases [...]
+      :seen #{...}}. Aliased interns add an extra class entry under the alias
+      name. Imports are carried through so that an interned module's
+      host-class imports (e.g. `import java.net.ServerSocket`) are visible to
+      the typechecker that elaborates the merged program — a `declare type`
+      refinement alias needs exactly the same treatment: check-program only
+      ever reads :type-aliases off the *root* program's own parse, so without
+      collecting it here too, a refinement type declared in an interned file
+      (rather than the root script) type-checked as an outright \"Undefined
+      type\" everywhere it was used, even inside that same interned file's own
+      classes."
      [source-id program seen-files]
      (letfn [(resolve* [current-source current-program seen]
                (let [ctx (assoc (make-context) :debug-source current-source)]
                  (reduce
-                  (fn [{:keys [classes imports functions seen]} {:keys [path class-name alias]}]
+                  (fn [{:keys [classes imports functions type-aliases seen]} {:keys [path class-name alias]}]
                     (let [file-path (find-intern-file ctx path class-name)
                           canonical (.getCanonicalPath (clojure.java.io/file file-path))]
                       (if (contains? seen canonical)
-                        {:classes classes :imports imports :functions functions :seen seen}
+                        {:classes classes :imports imports :functions functions
+                         :type-aliases type-aliases :seen seen}
                         (let [file-ast (parser/ast (slurp file-path))
                               nested (resolve* canonical file-ast (conj seen canonical))
                               direct-classes (:classes file-ast)
@@ -1500,14 +1654,16 @@
                               ;; brought into scope too, so a library can export
                               ;; helper/combinator functions, not just classes.
                               all-file-functions (concat (:functions file-ast) (:functions nested))
+                              all-file-type-aliases (concat (:type-aliases file-ast) (:type-aliases nested))
                               aliased-class (when alias
                                               (when-let [class-def (some #(when (= (:name %) class-name) %) all-file-classes)]
                                                 [(assoc class-def :name alias)]))]
                           {:classes (into classes (concat all-file-classes aliased-class))
                            :imports (into imports all-file-imports)
                            :functions (into functions all-file-functions)
+                           :type-aliases (into type-aliases all-file-type-aliases)
                            :seen (:seen nested)}))))
-                  {:classes [] :imports [] :functions [] :seen seen}
+                  {:classes [] :imports [] :functions [] :type-aliases [] :seen seen}
                   (:interns current-program))))]
        (resolve* source-id program seen-files)))
 
@@ -1539,6 +1695,21 @@
       (resolve-interned-functions source-id program #{}))
      ([source-id program seen-files]
       (:functions (resolve-interned* source-id program seen-files))))
+
+(defn resolve-interned-type-aliases
+     "Resolve intern declarations to the `declare type` aliases (including
+      refinement types) they bring into scope for static analysis
+      (recursively). check-program only ever reads :type-aliases off the root
+      program's own parse, so a refinement type declared in an interned file
+      needs to be merged in here the same way resolve-interned-classes/
+      -imports/-functions already are. The runtime interpreter registers the
+      alias itself when it evaluates the interned module (an ordinary
+      top-level statement), so this is only needed for static analysis and
+      compilation, exactly like resolve-interned-functions."
+     ([source-id program]
+      (resolve-interned-type-aliases source-id program #{}))
+     ([source-id program seen-files]
+      (:type-aliases (resolve-interned* source-id program seen-files))))
 
 (defmethod eval-node :program
   [ctx {:keys [imports interns classes functions statements calls duplicate-functions
@@ -1655,7 +1826,25 @@
 
                          :else false))
 
-                     :else false)]
+                     ;; A target-expr shape none of the branches above
+                     ;; recognise — most notably `{:type :literal ...}`, which
+                     ;; `eval-call` (nex.types.builtins) synthesizes for
+                     ;; dispatch that did not originate from any Nex-level
+                     ;; expression at all (a Java interface's real vtable
+                     ;; calling back into a Nex method through the
+                     ;; java.lang.reflect.Proxy of docs/proposals/java-interop.md,
+                     ;; via `call-object-method`). There is no single slot to
+                     ;; write the mutated object back into, but
+                     ;; env-replace-object-aliases! below needs none: it finds
+                     ;; every binding in the current env chain that is
+                     ;; `identical?` to the object's pre-call identity and
+                     ;; replaces it, which is exactly what makes a later,
+                     ;; ordinary read of the same Nex-level variable (e.g.
+                     ;; `counter.count`) see the mutation. Reporting `true`
+                     ;; here only enables that propagation; it is a safe no-op
+                     ;; when old-value is not a Nex object or is not aliased
+                     ;; anywhere in scope.
+                     :else (nex-object? old-value))]
       (when updated?
         (env-replace-object-aliases! (:current-env ctx) old-value value))
       updated?)))
@@ -1816,7 +2005,11 @@
                                   (try (Class/forName (str "java.lang." target-name)) (catch Exception _ nil))
                                   (throw (ex-info (str "Undefined Java class: " target-name) {:class-name target-name})))]
                     (if has-parens
-                      (clojure.lang.Reflector/invokeStaticMethod klass method (to-array arg-values))
+                      ;; `method` here also covers ClassName.new(args) — Clojure's
+                      ;; Reflector special-cases the literal name "new" as
+                      ;; constructor invocation — so arguments need the same
+                      ;; Java-interface Proxy-wrapping java-create-object applies.
+                      (clojure.lang.Reflector/invokeStaticMethod klass method (to-array (bi/java-args ctx arg-values)))
                       (let [^java.lang.reflect.Field field (.getField klass method)]
                         (.get field nil))))
 
@@ -1848,7 +2041,7 @@
                     effective-require (:effective-require method-lookup)
                     effective-ensure (:effective-ensure method-lookup)
                     has-postconditions? (seq effective-ensure)
-                    old-values (when has-postconditions? (:fields obj))
+                    old-values (when has-postconditions? (snapshot-old-field-values (:fields obj)))
                     source-obj (or (-> obj meta write-back-source-key) obj)]
                 (let [method-env (make-env (or (:closure-env obj) (:current-env ctx)))
                       param-names (set (map :name params))
@@ -1974,7 +2167,7 @@
                                              :class-name compiled-class-name}))
                             (runtime-resolve-call-user-method ctx obj method arg-values)))
                         (runtime-resolve-call-user-method ctx obj method arg-values))
-                      (java-call-method obj method arg-values)))))
+                      (java-call-method ctx obj method arg-values)))))
 
       (let [fn-obj (try
                      (env-lookup (:current-env ctx) method)
@@ -2105,44 +2298,70 @@
         caller-class-name (if super-target? super-parent-name (:current-class-name ctx))
         class-def (when class-name (lookup-class-if-exists ctx class-name))
         field-def (when class-def
-                    (lookup-field-with-inheritance ctx class-def field caller-class-name))]
-    (when-not (nex-object? target-obj)
-      (throw (ex-info "Field assignment target must be an object"
-                      {:target target-expr :value target-obj})))
-    (when (and class-def (lookup-class-constant ctx class-def field))
-      (throw (ex-info (str "Cannot assign to constant: " field)
-                      {:field field :constant? true})))
-    (when (and field-def (:once? field-def) (not (:in-constructor? ctx)))
-      (throw (ex-info (str "Cannot assign to once field outside constructor: " field)
-                      {:field field :once? true})))
-    (when-not field-def
-      (throw (ex-info (str "Undefined field: " field)
-                      {:field field :class-name class-name})))
-    (when-not (= caller-class-name (:declaring-class field-def))
-      (throw (ex-info (field-write-error-message field (:declaring-class field-def))
-                      {:field field
-                       :class-name class-name
-                       :declaring-class (:declaring-class field-def)})))
-    (let [val (eval-node ctx value)]
-      (if (and (or super-target? (= (:type target-expr) :this)) (:current-object ctx))
-        (do
-          ;; Track that this field was explicitly modified via this.field :=
-          (when-let [mf (:modified-fields ctx)]
-            (swap! mf conj field))
-          ;; this.field/super.field sets the env variable
-          ;; (fields are tracked as env vars, extracted back to object after body)
-          (env-set! (:current-env ctx) field val)
-          val)
-        (let [updated-obj (make-object (:class-name target-obj)
-                                       (assoc (:fields target-obj) (keyword field) val)
-                                       (:closure-env target-obj))
-              write-back-target (if (= :identifier (:type target-expr))
-                                  (:name target-expr)
-                                  target-expr)]
-          (when-not (write-back-target! ctx write-back-target updated-obj target-obj)
-            (throw (ex-info "Field assignment target is not writable"
-                            {:target target-expr :field field})))
-          val)))))
+                    (lookup-field-with-inheritance ctx class-def field caller-class-name))
+        ;; `target-obj` is a *compiled*-backend object (a real reflected Java
+        ;; instance, not this interpreter's own tagged map) when this method
+        ;; body is itself running interpreted but was captured from — or is
+        ;; itself — compiled code: a spawn/anonymous-function body referencing
+        ;; `this` (rewritten by nex.lower into a captured `__closure_this__`
+        ;; identifier — see rewrite-expression-for-closures) or any other
+        ;; object captured from a compiled caller. `class-name` above already
+        ;; falls back to :current-class-name for such an object (it has no
+        ;; :class-name of its own), which names the *wrong* class for field
+        ;; lookup — compiled-runtime-class-name resolves the object's own real
+        ;; class instead.
+        compiled-class-name (when-not (nex-object? target-obj)
+                              (compiled-runtime-class-name ctx target-obj))
+        compiled-class-def (when compiled-class-name
+                            (lookup-class-if-exists ctx compiled-class-name))]
+    (if compiled-class-def
+      (let [compiled-field-def (lookup-field-with-inheritance ctx compiled-class-def field caller-class-name)]
+        (when-not compiled-field-def
+          (throw (ex-info (str "Undefined field: " field)
+                          {:field field :class-name compiled-class-name})))
+        (let [val (eval-node ctx value)]
+          (when-not (compiled-object-field-set! target-obj field val)
+            (throw (ex-info (str "Undefined field: " field)
+                            {:field field :class-name compiled-class-name})))
+          val))
+      (do
+        (when-not (nex-object? target-obj)
+          (throw (ex-info "Field assignment target must be an object"
+                          {:target target-expr :value target-obj})))
+        (when (and class-def (lookup-class-constant ctx class-def field))
+          (throw (ex-info (str "Cannot assign to constant: " field)
+                          {:field field :constant? true})))
+        (when (and field-def (:once? field-def) (not (:in-constructor? ctx)))
+          (throw (ex-info (str "Cannot assign to once field outside constructor: " field)
+                          {:field field :once? true})))
+        (when-not field-def
+          (throw (ex-info (str "Undefined field: " field)
+                          {:field field :class-name class-name})))
+        (when-not (= caller-class-name (:declaring-class field-def))
+          (throw (ex-info (field-write-error-message field (:declaring-class field-def))
+                          {:field field
+                           :class-name class-name
+                           :declaring-class (:declaring-class field-def)})))
+        (let [val (eval-node ctx value)]
+          (if (and (or super-target? (= (:type target-expr) :this)) (:current-object ctx))
+            (do
+              ;; Track that this field was explicitly modified via this.field :=
+              (when-let [mf (:modified-fields ctx)]
+                (swap! mf conj field))
+              ;; this.field/super.field sets the env variable
+              ;; (fields are tracked as env vars, extracted back to object after body)
+              (env-set! (:current-env ctx) field val)
+              val)
+            (let [updated-obj (make-object (:class-name target-obj)
+                                           (assoc (:fields target-obj) (keyword field) val)
+                                           (:closure-env target-obj))
+                  write-back-target (if (= :identifier (:type target-expr))
+                                      (:name target-expr)
+                                      target-expr)]
+              (when-not (write-back-target! ctx write-back-target updated-obj target-obj)
+                (throw (ex-info "Field assignment target is not writable"
+                                {:target target-expr :field field})))
+              val)))))))
 
 (defmethod eval-node :assign
   [ctx {:keys [target value]}]

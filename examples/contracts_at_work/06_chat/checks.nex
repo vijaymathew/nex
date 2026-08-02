@@ -1,0 +1,96 @@
+-- Executable checks for the chat server/hub. Spins up a real server on an
+-- ephemeral port, connects two in-process Tcp_Socket clients, exchanges
+-- messages, and checks what each side actually received. Run: nex checks.nex
+
+intern net/Server_Socket
+intern net/Tcp_Socket
+intern Chat_Server
+
+class Checker
+  create
+    make() do
+      passed := 0
+      failed := 0
+    end
+  feature
+    passed: Integer
+    failed: Integer
+
+    check(label: String, expected: String, actual: String) do
+      if expected = actual then
+        passed := passed + 1
+        print("PASS " + label)
+      else
+        failed := failed + 1
+        print("FAIL " + label + " expected=" + expected + " actual=" + actual)
+      end
+    end
+
+    summary() do
+      print("---")
+      print("" + passed + " passed, " + failed + " failed")
+    end
+end
+
+let c: Checker := create Checker.make()
+
+let server: Server_Socket := create Server_Socket.make(0)
+server.open()
+print("test server on port " + server.port)
+
+let events: Channel[Hub_Event] := create Channel[Hub_Event].with_capacity(16)
+let hub: Chat_Hub := create Chat_Hub.make()
+let hub_task: Task := spawn do
+  hub.run(events)
+end
+
+let chat_server: Chat_Server := create Chat_Server.make()
+let accept_task: Task[Array[Task]] := spawn do
+  result := chat_server.accept_clients(server, 2, events)
+end
+
+let alice: Tcp_Socket := create Tcp_Socket.make("localhost", server.port)
+alice.connect()
+alice.send_line("alice")
+
+let bob: Tcp_Socket := create Tcp_Socket.make("localhost", server.port)
+bob.connect()
+bob.send_line("bob")
+
+let handlers: Array[Task] := accept_task.await()
+c.check("two handlers spawned", "2", "" + handlers.length)
+
+alice.send_line("hello from alice")
+let bob_received: ?String := bob.read_line()
+if bob_received /= nil then
+  c.check("bob receives alice's message", "alice: hello from alice", bob_received)
+else
+  c.check("bob receives a message", "true", "false")
+end
+
+bob.send_line("hi alice")
+let alice_received: ?String := alice.read_line()
+if alice_received /= nil then
+  c.check("alice receives bob's message", "bob: hi alice", alice_received)
+else
+  c.check("alice receives a message", "true", "false")
+end
+
+alice.close()
+bob.close()
+
+let i: Integer := 0
+from
+  i := 0
+until
+  i = handlers.length
+do
+  handlers.get(i).await(3000)
+  i := i + 1
+end
+
+events.send(create Shutdown.make())
+hub_task.await(3000)
+server.close()
+
+c.summary()

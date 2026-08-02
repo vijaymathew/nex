@@ -124,6 +124,44 @@ end")
           (.delete main-file)
           (.delete tmp-dir))))))
 
+(deftest load-file-resolves-refinement-type-declared-in-interned-file
+  (testing "A `declare type ... where` refinement declared in an interned file is resolvable, both inside that file's own classes and from the loading script — not just when declared directly in the root script"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-intern-refinement-" (System/nanoTime)))
+          qty-file (io/file tmp-dir "Qty_Mod.nex")
+          main-file (io/file tmp-dir "main.nex")
+          ctx (repl/init-repl-context)]
+      (.mkdirs tmp-dir)
+      (spit qty-file "declare type Quantity = Integer where n: n > 0
+
+class Qty_Mod
+create
+  make()
+  do
+  end
+feature
+  check(x: Integer): Quantity
+  do
+    result := x
+  end
+end")
+      (spit main-file "intern Qty_Mod
+
+let m := create Qty_Mod.make()
+let q: Quantity := 5
+print(q)
+print(m.check(7))")
+      (try
+        (let [output (with-out-str
+                       (repl/eval-code ctx (slurp main-file) (.getPath main-file)))]
+          (is (not (.contains output "Undefined type: Quantity")))
+          (is (not (.contains output "Error: Type checking failed")))
+          (is (.contains output "5"))
+          (is (.contains output "7")))
+        (finally
+          (.delete qty-file)
+          (.delete main-file)
+          (.delete tmp-dir))))))
+
 (deftest repl-intern-loads-bare-class-from-home-deps
   (testing "REPL resolves bare intern names from ~/.nex/deps"
     (let [fake-home (io/file (System/getProperty "java.io.tmpdir") (str "nex-home-" (System/nanoTime)))

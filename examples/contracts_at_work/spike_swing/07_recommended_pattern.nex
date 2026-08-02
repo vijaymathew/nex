@@ -1,0 +1,66 @@
+-- The pattern this spike recommends for Part V, combining everything
+-- validated so far: a real ActionListener captures clicks into a Nex-only
+-- Integer field (no Java-typed fields on the listener, avoiding bug A from
+-- NOTES.md), and the separately-proven poll loop (spike 02) — not the
+-- listener itself — is the only code that touches the JLabel. Must run on
+-- the JVM backend (not --interpret) to avoid bug B.
+
+import java.awt.event.ActionListener
+import java.awt.event.ActionEvent
+import java.lang.Thread
+import javax.swing.JFrame
+import javax.swing.JButton
+import javax.swing.JLabel
+
+class Click_Counter
+  inherit
+    ActionListener
+  create
+    make() do
+      this.count := 0
+    end
+  feature
+    count: Integer
+
+    actionPerformed(e: ActionEvent) do
+      count := count + 1
+    end
+end
+
+function run() do
+  with "java" do
+    let frame: JFrame := JFrame.new("Contracts at Work — Spike")
+    let label: JLabel := JLabel.new("clicks: 0")
+    let button: JButton := JButton.new("Click me")
+    let counter: Click_Counter := create Click_Counter.make()
+    button.addActionListener(counter)
+    frame.getContentPane().add(label)
+    frame.getContentPane().add(button)
+    frame.setSize(300, 150)
+    frame.setVisible(true)
+
+    -- Simulate a user clicking between poll ticks.
+    button.doClick()
+    let i: Integer := 0
+    from
+      i := 0
+    until
+      i = 3
+    do
+      Thread.sleep(200)
+      i := i + 1
+      if i = 2 then
+        button.doClick()
+        button.doClick()
+      end
+      label.setText("clicks: " + counter.count)
+      print("tick " + i + ": counter.count=" + counter.count +
+            " label=" + label.getText())
+    end
+
+    frame.dispose()
+    print("final counter.count=" + counter.count)
+  end
+end
+
+run()

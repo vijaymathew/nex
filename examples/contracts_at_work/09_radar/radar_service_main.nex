@@ -1,0 +1,19 @@
+-- radar_service_main: runs radar_service on a fixed port, scanning this
+-- project's own directory. Must run under --interpret — see README.
+
+intern Radar_Service
+
+function main() do
+  let proc: Process := create Process
+  let root: String := proc.getenv("NEX_USER_DIR")
+  let service: Radar_Service := create Radar_Service.make(4323, root)
+  service.start()
+  print("radar_service listening on port " + service.port() + ", scanning " + root)
+  print("GET /status, POST /rescan")
+  print("press ctrl-c to stop")
+
+  let console: Console := create Console
+  console.read_line("")
+end
+
+main()

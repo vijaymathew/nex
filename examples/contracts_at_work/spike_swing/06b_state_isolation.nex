@@ -1,0 +1,58 @@
+-- Isolating an odd result from 06: `count` printed inside actionPerformed
+-- stayed "1" on every doClick, and the counter's own field read "0" from
+-- the outside afterward, even though the label text did update. This
+-- checks whether mutable instance state survives repeated calls through
+-- the interface-dispatch path at all, and whether direct Nex-side calls
+-- (no Java callback involved) behave differently.
+
+import java.awt.event.ActionListener
+import java.awt.event.ActionEvent
+import javax.swing.JButton
+
+class Click_Counter
+  inherit
+    ActionListener
+  create
+    make() do
+      this.count := 0
+    end
+  feature
+    count: Integer
+
+    actionPerformed(e: ActionEvent) do
+      count := count + 1
+      print("  inside actionPerformed: count is now " + count)
+    end
+
+    bump() do
+      count := count + 1
+      print("  inside bump (ordinary Nex call): count is now " + count)
+    end
+end
+
+function run() do
+  -- Baseline: ordinary Nex method calls, no Java interface involved at all.
+  let plain: Click_Counter := create Click_Counter.make()
+  plain.bump()
+  plain.bump()
+  plain.bump()
+  print("plain.count after 3 ordinary calls = " + plain.count)
+
+  print("---")
+
+  -- Same class, invoked through the real Java interface-dispatch path.
+  with "java" do
+    let button: JButton := JButton.new("Click me")
+    let counter: Click_Counter := create Click_Counter.make()
+    button.addActionListener(counter)
+
+    button.doClick()
+    print("counter.count read from Nex after doClick #1 = " + counter.count)
+    button.doClick()
+    print("counter.count read from Nex after doClick #2 = " + counter.count)
+    button.doClick()
+    print("counter.count read from Nex after doClick #3 = " + counter.count)
+  end
+end
+
+run()

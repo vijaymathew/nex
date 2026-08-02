@@ -1,0 +1,69 @@
+-- Executable checks for Dashboard_State and the listeners, driven through
+-- real javax.swing.JButton clicks (button.doClick()), not just direct
+-- method calls — the same style of check the Swing spike used. No visible
+-- window is required for this. Run: nex checks.nex
+
+intern Dashboard_State
+intern Dashboard_Listeners
+import javax.swing.JButton
+
+class Checker
+  create
+    make() do
+      passed := 0
+      failed := 0
+    end
+  feature
+    passed: Integer
+    failed: Integer
+
+    check(label: String, expected: String, actual: String) do
+      if expected = actual then
+        passed := passed + 1
+        print("PASS " + label)
+      else
+        failed := failed + 1
+        print("FAIL " + label + " expected=" + expected + " actual=" + actual)
+      end
+    end
+
+    summary() do
+      print("---")
+      print("" + passed + " passed, " + failed + " failed")
+    end
+end
+
+let c: Checker := create Checker.make()
+
+let state: Dashboard_State := create Dashboard_State.make()
+
+with "java" do
+  let inc_button: JButton := JButton.new("+")
+  inc_button.addActionListener(create Increment_Listener.make(state))
+  let dec_button: JButton := JButton.new("-")
+  dec_button.addActionListener(create Decrement_Listener.make(state))
+  let reset_button: JButton := JButton.new("reset")
+  reset_button.addActionListener(create Reset_Listener.make(state))
+  let quit_button: JButton := JButton.new("quit")
+  quit_button.addActionListener(create Quit_Listener.make(state))
+
+  inc_button.doClick()
+  inc_button.doClick()
+  inc_button.doClick()
+  c.check("three increments", "3", "" + state.count)
+
+  dec_button.doClick()
+  c.check("one decrement", "2", "" + state.count)
+
+  reset_button.doClick()
+  c.check("reset to zero", "0", "" + state.count)
+
+  dec_button.doClick()
+  c.check("decrement below zero allowed", "-1", "" + state.count)
+
+  c.check("not quit yet", "false", "" + state.should_quit)
+  quit_button.doClick()
+  c.check("quit after click", "true", "" + state.should_quit)
+end
+
+c.summary()

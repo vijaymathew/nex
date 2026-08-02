@@ -1,0 +1,43 @@
+-- Further isolation: 06c (label+button+listener, no frame) linked cleanly.
+-- Add JFrame + getContentPane().add(...) + setVisible back in, matching 06,
+-- to see if the frame/container plumbing is what triggers the fallback.
+
+import java.awt.event.ActionListener
+import java.awt.event.ActionEvent
+import javax.swing.JFrame
+import javax.swing.JButton
+import javax.swing.JLabel
+
+class Click_Counter
+  inherit
+    ActionListener
+  create
+    make() do
+      this.count := 0
+    end
+  feature
+    count: Integer
+
+    actionPerformed(e: ActionEvent) do
+      count := count + 1
+    end
+end
+
+function run() do
+  with "java" do
+    let frame: JFrame := JFrame.new("Spike")
+    let label: JLabel := JLabel.new("hello")
+    let button: JButton := JButton.new("Click me")
+    let counter: Click_Counter := create Click_Counter.make()
+    button.addActionListener(counter)
+    frame.getContentPane().add(label)
+    frame.getContentPane().add(button)
+    frame.setSize(300, 150)
+    frame.setVisible(true)
+    button.doClick()
+    print("label text=" + label.getText() + " count=" + counter.count)
+    frame.dispose()
+  end
+end
+
+run()

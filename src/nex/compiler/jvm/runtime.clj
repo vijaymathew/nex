@@ -281,7 +281,7 @@
 
 (defn java-call-method
   [state method-name target args]
-  (bi/java-call-method target method-name args))
+  (bi/java-call-method state target method-name args))
 
 (defn java-get-static-field
   [state class-name field-name]
@@ -661,6 +661,50 @@
   (some-> (.get ^HashMap @(:classes state) class-name)
           :binary-name))
 
+(defn portable-value->compiled
+  "Convert a value built through nex.types.runtime's portable (tagged)
+   representation into the compiled backend's own native one, recursively —
+   needed wherever a value crosses from a backend-agnostic helper
+   (java-http-request and kin, which build a Map/Set with rt/nex-map,
+   rt/nex-set) into a real compiled object's field via reflection: the
+   compiled backend's own Map/Set fields are always a real
+   java.util.HashMap/LinkedHashSet (see emit-map-literal! and the comment
+   above map-contains-key), never the portable tagged form, and Field/set
+   rejects the mismatch outright rather than converting it. Arrays need no
+   container conversion (already java.util.ArrayList on both sides, per
+   nex.types.runtime/nex-array-from) — only their elements, in case one holds
+   a portable map/set in turn.
+
+   Also called directly from emitted bytecode (see emit-unbox-or-cast! in
+   emit.clj) ahead of a CHECKCAST to HashMap/LinkedHashSet: the same portable
+   representation reaches a declared Map/Set-typed local, field, or param
+   whenever its value originates from a backend-agnostic helper — most
+   commonly a builtin free function like json_parse — whose static Nex type
+   is Any, so the compiled backend cannot special-case it the way it does its
+   own Map/Set literals. Public (not `defn-`) so that reflective lookup by
+   name from bytecode resolves it."
+  [v]
+  (cond
+    (rt/nex-map? v)
+    (let [^java.util.Map m (java.util.HashMap.)]
+      (doseq [[k val] (rt/nex-map-entries v)]
+        (.put m (portable-value->compiled k) (portable-value->compiled val)))
+      m)
+
+    (rt/nex-set? v)
+    (let [^java.util.Set s (java.util.LinkedHashSet.)]
+      (doseq [item (rt/nex-set-seq v)]
+        (.add s (portable-value->compiled item)))
+      s)
+
+    (instance? java.util.ArrayList v)
+    (let [^java.util.ArrayList al v]
+      (dotimes [i (.size al)]
+        (.set al i (portable-value->compiled (.get al i))))
+      al)
+
+    :else v))
+
 (defn- instantiate-compiled-object
   [state class-name field-values]
   (let [binary-name (compiled-class-binary-name state class-name)]
@@ -675,7 +719,7 @@
           (.set state-field instance state))
         (doseq [[field-name field-value] field-values]
           (when-let [^Field field (reflected-field cls (name field-name))]
-            (.set field instance field-value)))
+            (.set field instance (portable-value->compiled field-value))))
         instance))))
 
 (defn- make-runtime-object
@@ -727,6 +771,13 @@
          (fn [^HashMap m]
            (doto m (.put "__immediate_output__" (boolean enabled)))))
   nil)
+
+(defn set-program-args!
+  "Thin wrapper so the compiled launcher's `main` (emit-launcher-main!) can
+   reach nex.types.runtime/set-program-args! by name through emit-runtime-
+   call!, which resolves runtime helper names against this namespace only."
+  [args]
+  (rt/set-program-args! args))
 
 (defn- immediate-output?
   [state]
@@ -945,7 +996,14 @@
         ok? (and (some? value)
                  (string? target-type-name)
                  (runtime-compatible-with? state runtime-name target-type-name))]
-    (object-array [(boolean ok?) (if ok? value nil)])))
+    ;; A converted value may originate from a backend-agnostic helper (e.g.
+    ;; nex.types.json/json-value->nex) that builds Maps/Sets via
+    ;; nex.types.runtime's portable tagged representation. The compiled
+    ;; backend's own Map/Set-typed locals/fields are always real
+    ;; java.util.HashMap/LinkedHashSet (see emit-map-literal!), so the value
+    ;; must be converted to that native shape before it flows into one — same
+    ;; conversion instantiate-compiled-object applies for reflective field sets.
+    (object-array [(boolean ok?) (if ok? (portable-value->compiled value) nil)])))
 
 (defn make-contract-violation
   ([kind label]
@@ -1898,6 +1956,32 @@
   [value]
   (value/nex-clone-value interp/nex-object? interp/make-object value))
 
+(defn shallow-copy-collection
+  "A new, independent Array/Map container holding the SAME elements/entries —
+   unlike clone-value, does not recurse into them. Used only for `old`
+   postcondition snapshots (see add-old-field-snapshots in nex.lower): an
+   Array (a real java.util.ArrayList) or Map (a real java.util.HashMap on
+   this backend) is a genuinely mutable container, so a snapshot IR node that
+   just re-reads the field's current reference into a new local slot copies
+   the *reference*, not a value — an in-place `.add`/`.put` later in the same
+   method body was then visible through the \"old\" snapshot too (`old
+   items.length = items.length - 1` failed because both sides read the SAME,
+   already-mutated ArrayList). `old`, semantically, should freeze the
+   container's own membership at snapshot time, not deep-copy every element
+   the way clone-value's Nex-level `.clone()` does — that would silently
+   change identity for any object-valued element (`old items.get(0) = obj`
+   would start comparing a freshly-cloned copy against the original,
+   unrelated to the actual bug)."
+  [value]
+  (cond
+    (instance? java.util.Map value)
+    (java.util.HashMap. ^java.util.Map value)
+
+    (instance? java.util.Collection value)
+    (java.util.ArrayList. ^java.util.Collection value)
+
+    :else value))
+
 (defn array-contains
   [values needle]
   (boolean (some #(deep-equals % needle) values)))
@@ -2072,6 +2156,9 @@
   (cond
     (= name "validate-object-state")
     (validate-object-state state (first args) (second args))
+
+    (= name "shallow-copy-collection")
+    (shallow-copy-collection (first args))
 
     (= name "make-captured-function-object")
     (make-captured-function-object state (first args) (vec (rest args)))

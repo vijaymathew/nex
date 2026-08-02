@@ -1,0 +1,32 @@
+-- Baseline for 06f: same JLabel-typed field, but the class does NOT
+-- implement a Java interface. Confirms the failure needs *both* — a
+-- Java-typed field AND `inherit`ing a Java interface on the same class —
+-- not either alone.
+
+import javax.swing.JLabel
+
+class Label_Holder
+  create
+    make(label: JLabel) do
+      this.label := label
+    end
+  feature
+    label: JLabel
+    count: Integer
+
+    bump() do
+      count := count + 1
+    end
+end
+
+function run() do
+  with "java" do
+    let label: JLabel := JLabel.new("hello")
+    let holder: Label_Holder := create Label_Holder.make(label)
+    holder.bump()
+    holder.bump()
+    print("count=" + holder.count)
+  end
+end
+
+run()

@@ -1,0 +1,110 @@
+-- radar_service: composes Project 5's Dup_Finder behind an HTTP status API
+-- (Project 7's pattern) with a background tick counter (Project 3/6's
+-- Task style), all under one process. GET /status reports current
+-- metrics; POST /rescan re-runs the duplicate scan and returns the update.
+--
+-- Runs on the default JVM backend. Route handlers and the background tick
+-- loop are ordinary Radar_Service methods, called directly from `fn`/
+-- `spawn` closures via `this.` — this used to be impossible (neither kind
+-- of closure could call a method on the enclosing object), forcing
+-- everything out to free functions with captured locals instead. Fixed
+-- upstream; see the book's top-level issues report.
+
+intern net/Http_Server
+intern data/Json
+intern Dup_Finder
+
+class Radar_Metrics
+  create
+    make() do
+      ticks := 0
+      duplicate_groups := 0
+      scan_count := 0
+    end
+  feature
+    ticks: Integer
+    duplicate_groups: Integer
+    scan_count: Integer
+
+    tick() do
+      ticks := ticks + 1
+    end
+
+    record_scan(groups: Integer) do
+      duplicate_groups := groups
+      scan_count := scan_count + 1
+    end
+end
+
+class Radar_Service
+  create
+    make(port: Integer, scan_root: String) do
+      this.server := create Http_Server.make(port)
+      this.metrics := create Radar_Metrics.make()
+      this.finder := create Dup_Finder.make()
+      this.json := create Json.make()
+      this.scan_root := scan_root
+
+      run_scan()
+
+      server.get("/status", fn(req: Http_Request): Http_Server_Response do
+        result := this.status_payload()
+      end)
+      server.post("/rescan", fn(req: Http_Request): Http_Server_Response do
+        this.run_scan()
+        result := this.status_payload()
+      end)
+    end
+  feature
+    server: Http_Server
+    metrics: Radar_Metrics
+    finder: Dup_Finder
+    json: Json
+    scan_root: String
+
+    json_response(status_code: Integer, payload: Map[String, Any]): Http_Server_Response do
+      let headers: Map[String, String] := {}
+      headers.set("Content-Type", "application/json")
+      result := create Http_Server_Response.make(status_code, json.stringify(payload), headers)
+    end
+
+    status_payload(): Http_Server_Response do
+      let payload: Map[String, Any] := {}
+      payload.set("ticks", metrics.ticks)
+      payload.set("duplicate_groups", metrics.duplicate_groups)
+      payload.set("scan_count", metrics.scan_count)
+      result := json_response(200, payload)
+    end
+
+    run_scan() do
+      let dups: Map[String, Array[String]] := finder.find_duplicates(scan_root)
+      metrics.record_scan(dups.size())
+    end
+
+    tick_loop() do
+      let running: Boolean := true
+      from
+        running := true
+      until
+        not running
+      do
+        sleep(1000)
+        metrics.tick()
+      end
+    end
+
+    start() do
+      server.start()
+      let ticker: Task := spawn do
+        this.tick_loop()
+      end
+    end
+
+    stop() do
+      server.stop()
+    end
+
+    port(): Integer do
+      result := server.port
+    end
+end

@@ -23,12 +23,14 @@
           (str *out*))))))
 
 (defn- run-jar!
-  [jar-path]
-  (let [proc (.exec (Runtime/getRuntime) (into-array String ["java" "-jar" jar-path]))]
-    (.waitFor proc)
-    {:exit (.exitValue proc)
-     :out (slurp (.getInputStream proc))
-     :err (slurp (.getErrorStream proc))}))
+  ([jar-path] (run-jar! jar-path []))
+  ([jar-path program-args]
+   (let [proc (.exec (Runtime/getRuntime)
+                     (into-array String (concat ["java" "-jar" jar-path] program-args)))]
+     (.waitFor proc)
+     {:exit (.exitValue proc)
+      :out (slurp (.getInputStream proc))
+      :err (slurp (.getErrorStream proc))})))
 
 (defn- free-port []
   (with-open [socket (java.net.ServerSocket. 0)]
@@ -520,6 +522,230 @@ print(sb.length())")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-imported-java-class-static-field-access-smoke-test
+  (testing "compile-jar reads a static field on an imported Java class (no-parens class-target access)"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-static-field")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.lang.Math
+import javax.swing.SwingConstants
+
+with \"java\" do
+  print(Math.PI)
+  print(SwingConstants.CENTER)
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= [(str Math/PI) "0"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-implements-runnable-and-is-callable-from-java-test
+  (testing "a compiled Nex class inheriting Runnable really `implements` it and a real Java Thread calls back into it"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-runnable")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.lang.Runnable
+import java.lang.Thread
+
+class My_Task
+  inherit
+    Runnable
+  feature
+    run() do
+      print(\"ran\")
+    end
+end
+
+with \"java\" do
+  let task: My_Task := create My_Task
+  let t: Thread := Thread.new(task)
+  t.start()
+  t.join()
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["\"ran\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-implements-comparator-multi-call-round-trip-test
+  (testing "java.util.Collections.sort repeatedly calls back into a compiled Nex Comparator, with correct int-return unboxing/narrowing"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-comparator")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.util.Comparator
+import java.util.ArrayList
+import java.util.Collections
+
+class Reverse_Order
+  inherit
+    Comparator
+  feature
+    compare(a: Integer, b: Integer): Integer do
+      result := b - a
+    end
+end
+
+with \"java\" do
+  let list: ArrayList := create ArrayList
+  list.add(3)
+  list.add(1)
+  list.add(2)
+  let cmp: Reverse_Order := create Reverse_Order
+  Collections.sort(list, cmp)
+  print(list.get(0))
+  print(list.get(1))
+  print(list.get(2))
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["3" "2" "1"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-imported-java-typed-field-smoke-test
+  (testing "a field typed as an imported Java class (not java.lang.*) compiles with a correctly qualified descriptor, on a plain class and on one that also implements a Java interface"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-java-typed-field")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.lang.StringBuilder
+import java.awt.event.ActionListener
+import java.awt.event.ActionEvent
+
+class Builder_Holder
+  create
+    make() do
+      with \"java\" do
+        this.sb := StringBuilder.new()
+      end
+    end
+  feature
+    sb: StringBuilder
+
+    append(s: String) do
+      with \"java\" do
+        sb.append(s)
+      end
+    end
+end
+
+class Click_Counter
+  inherit
+    ActionListener
+  create
+    make(sb: StringBuilder) do
+      this.sb := sb
+      this.count := 0
+    end
+  feature
+    sb: StringBuilder
+    count: Integer
+
+    actionPerformed(e: ActionEvent) do
+      count := count + 1
+    end
+end
+
+with \"java\" do
+  let holder: Builder_Holder := create Builder_Holder.make()
+  holder.append(\"a\")
+  holder.append(\"b\")
+  print(\"result=\" + holder.sb.toString())
+
+  let counter: Click_Counter := create Click_Counter.make(holder.sb)
+  print(\"count=\" + counter.count)
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["\"result=ab\"" "\"count=0\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-extends-thread-override-and-inherited-call-smoke-test
+  (testing "a compiled Nex class extending Thread is a real subclass: overriding run() is what a real Thread.start() calls, and inherited (non-overridden) methods like start()/join() are callable from Nex"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-extend-thread")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.lang.Thread
+
+class My_Thread
+  inherit
+    Thread
+  feature
+    run() do
+      super.run()
+      print(\"ran\")
+    end
+end
+
+with \"java\" do
+  let t: My_Thread := create My_Thread
+  t.setName(\"worker\")
+  t.start()
+  t.join()
+  print(t.getName())
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["\"ran\"" "\"worker\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-extends-java-class-with-args-super-new-fails-with-clear-error-test
+  (testing "super.new(args) with real arguments is a named, honest gap on the compiled backend, not silent wrong behavior"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-extend-args-gap")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.lang.Thread
+
+class My_Thread
+  inherit
+    Thread
+create
+  make(name: String)
+  do
+    super.new(name)
+  end
+feature
+  run() do
+    print(\"ran\")
+  end
+end")
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"not supported yet"
+                              (file/compile-jar (.getPath main-file) (.getPath out-dir) {})))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-cursor-subclass-across-smoke-test
   (testing "compile-jar runs across over a value typed as Cursor when the runtime instance is a Cursor subclass"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-cursor")
@@ -832,6 +1058,114 @@ print(f.peek())")
               {:keys [exit out err]} (run-jar! (:jar result))]
           (is (= 0 exit) err)
           (is (= ["\"draft\"" "\"draft\""] (str/split-lines (str/trim out)))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-process-command-line-returns-real-argv-test
+  (testing "Process.command_line() on a standalone jar returns the program's own argv, not the JVM's launch flags"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-argv")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "let proc := create Process
+let args := proc.command_line()
+print(args.length())
+let i := 0
+from let j := 0 until j >= args.length() do
+  print(args.get(j))
+  j := j + 1
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result) ["hello" "world" "42"])
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["3" "\"hello\"" "\"world\"" "\"42\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-http-client-get-returns-real-response-test
+  (testing "net/Http_Client.get() on the compiled backend returns the server's real status/body/headers, not a silently-defaulted 0/empty object"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-http-client")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")
+          port (free-port)
+          server (com.sun.net.httpserver.HttpServer/create
+                  (java.net.InetSocketAddress. "127.0.0.1" port) 0)]
+      (try
+        (.mkdirs tmp-dir)
+        (.createContext server "/hello"
+                        (reify com.sun.net.httpserver.HttpHandler
+                          (handle [_ exchange]
+                            (let [body (.getBytes "hello from server" java.nio.charset.StandardCharsets/UTF_8)]
+                              (.add (.getResponseHeaders exchange) "Content-Type" "text/plain")
+                              (.sendResponseHeaders exchange 200 (alength body))
+                              (with-open [os (.getResponseBody exchange)]
+                                (.write os body))))))
+        (.start server)
+        (spit main-file (str "intern net/Http_Client
+
+let client := create Http_Client.make()
+let response := client.get(\"http://127.0.0.1:" port "/hello\")
+print(response.status())
+print(response.body())
+print(response.headers().get(\"content-type\"))"))
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["200" "\"hello from server\"" "\"text/plain\""] output-lines)))
+        (finally
+          (.stop server 0)
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-json-parse-convert-map-get-test
+  (testing "method calls on a `convert ... to Map[...]` result from data/Json.parse(...) work on the compiled backend"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-json")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "intern data/Json
+
+let j := create Json.make()
+let raw := j.parse(\"{\\\"a\\\": 1}\")
+if convert raw to obj:Map[String, Any] then
+  print(obj.get(\"a\"))
+else
+  print(\"convert failed\")
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["1"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-json-parse-declared-map-let-test
+  (testing "a `let root: Map[...] := json.parse(...)` binding (no explicit convert) works on the compiled backend, including a nested Map[...]-typed field read"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-json-let")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "intern data/Json
+
+let json: Json := create Json.make()
+let root: Map[String, Any] := json.parse(\"{\\\"name\\\":\\\"nex\\\",\\\"meta\\\":{\\\"ok\\\":true}}\")
+let meta: Map[String, Any] := root.get(\"meta\")
+print(root.get(\"name\"))
+print(meta.get(\"ok\"))")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["\"nex\"" "true"] output-lines)))
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))

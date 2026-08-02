@@ -168,6 +168,50 @@ class Demo
 end"]
       (is (= ["42" "42"] (execute-method code "Demo" "run"))))))
 
+(deftest optional-typed-binding-from-array-get-updates-stored-object
+  (testing "Mutating through a `let t: ?T := arr.get(i)` binding updates the array element (not just the local)"
+    (let [code (str item-class
+                    "\n\nclass Demo\n"
+                    "  feature\n"
+                    "    run() do\n"
+                    "      let items := []\n"
+                    "      items.add(create Todo_Item.make(\"one\"))\n"
+                    "      let t: ?Todo_Item := items.get(0)\n"
+                    "      if t /= nil then\n"
+                    "        t.mark_done()\n"
+                    "      end\n"
+                    "      print(items.get(0).is_done())\n"
+                    "    end\n"
+                    "end")]
+      (is (= ["true"] (execute-method code "Demo" "run"))))))
+
+(deftest local-bound-from-query-result-then-mutated-updates-stored-object
+  (testing "An object both returned from a method and stored in a collection keeps shared identity across a later mutation, even when the returned value is first bound to a local variable rather than mutated immediately on the call chain"
+    (let [code (str item-class
+                    "\n\nclass Holder\n"
+                    "  create\n"
+                    "    make() do\n"
+                    "      items := []\n"
+                    "      items.add(create Todo_Item.make(\"one\"))\n"
+                    "    end\n"
+                    "  feature\n"
+                    "    items: Array[Todo_Item]\n"
+                    "    first(): Todo_Item do\n"
+                    "      result := items.get(0)\n"
+                    "    end\n"
+                    "end\n"
+                    "\nclass Demo\n"
+                    "  feature\n"
+                    "    run() do\n"
+                    "      let h := create Holder.make()\n"
+                    "      let t := h.first()\n"
+                    "      t.mark_done()\n"
+                    "      print(t.is_done())\n"
+                    "      print(h.first().is_done())\n"
+                    "    end\n"
+                    "end")]
+      (is (= ["true" "true"] (execute-method code "Demo" "run"))))))
+
 (deftest query-returning-array-element-writes-back-to-stored-object
   (testing "Commands on objects returned by user-defined queries over array fields update the stored element"
     (let [code (str item-class

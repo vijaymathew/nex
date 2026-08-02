@@ -663,6 +663,36 @@ end")
       (is (= 5 (:result define-result)))
       (is (= 5 (:result y-result))))))
 
+(def ^:private old-array-field-program
+  "class Basket
+create
+  make() do
+    items := []
+  end
+feature
+  items: Array[Integer]
+
+  add_item(x: Integer)
+  do
+    items.add(x)
+  ensure
+    grew: items.length = old items.length + 1
+  end
+end")
+
+(deftest compiled-old-array-field-length-snapshots-value-not-reference-test
+  (testing "`old items.length` snapshots the Array field's membership at method entry, not a live reference to the same mutable ArrayList the method body then mutates in place"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str old-array-field-program
+                                                                     "\n\n"
+                                                                     "let b: Basket := create Basket.make()\n"
+                                                                     "b.add_item(1)\n"
+                                                                     "b.add_item(2)\n"
+                                                                     "b.items.length")))]
+      (is (:compiled? define-result))
+      (is (= 2 (:result define-result))))))
+
 (deftest compiled-class-invariants-smoke-test
   (testing "compiled helper enforces class invariants on creation and method exit"
     (let [session (compiled-repl/make-session)

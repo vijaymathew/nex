@@ -1,0 +1,74 @@
+-- Executable checks for the duplicate-file finder. Builds a small directory
+-- tree under a temp folder, runs find_duplicates against it, cleans up.
+-- Run: nex checks.nex
+--
+-- Uses NEX_USER_DIR rather than a bare relative path for the same reason
+-- documented in Project 2: the `nex` CLI launcher's own working directory
+-- is not the caller's — see the book's top-level issues report.
+
+intern Dup_Finder
+intern io/Path
+intern io/Directory
+
+class Checker
+  create
+    make() do
+      passed := 0
+      failed := 0
+    end
+  feature
+    passed: Integer
+    failed: Integer
+
+    check(label: String, expected: String, actual: String) do
+      if expected = actual then
+        passed := passed + 1
+        print("PASS " + label)
+      else
+        failed := failed + 1
+        print("FAIL " + label + " expected=" + expected + " actual=" + actual)
+      end
+    end
+
+    summary() do
+      print("---")
+      print("" + passed + " passed, " + failed + " failed")
+    end
+end
+
+let c: Checker := create Checker.make()
+
+let proc: Process := create Process
+let base: String := proc.getenv("NEX_USER_DIR") + "/tmp_dupcheck"
+let root: Directory := create Directory.make(base)
+if root.exists() then
+  root.delete_tree()
+end
+root.create_tree()
+
+let sub: Directory := root.child_dir("sub")
+sub.create_tree()
+
+root.child_path("a.txt").write_text("hello world")
+root.child_path("b.txt").write_text("hello world")
+sub.child_path("c.txt").write_text("hello world")
+root.child_path("unique.txt").write_text("nothing else looks like this")
+sub.child_path("d.txt").write_text("also unique")
+
+let finder: Dup_Finder := create Dup_Finder.make()
+let dups: Map[String, Array[String]] := finder.find_duplicates(base)
+c.check("one duplicate group", "1", "" + dups.size())
+
+let keys: Array[String] := dups.keys()
+if keys.length = 1 then
+  let members: Array[String] := dups.get(keys.get(0))
+  c.check("group has 3 members", "3", "" + members.length)
+  c.check("group content", "hello world", keys.get(0))
+else
+  c.check("group found", "true", "false")
+end
+
+root.delete_tree()
+c.check("cleanup", "false", "" + root.exists())
+
+c.summary()

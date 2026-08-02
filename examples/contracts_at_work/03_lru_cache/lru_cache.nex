@@ -1,0 +1,73 @@
+-- Lru_Cache [K, V]: a fixed-capacity cache that evicts the least-recently-used
+-- entry when a new key would exceed capacity. `order` tracks recency,
+-- oldest-first; `map` holds the values. The invariant is the whole spec:
+-- never grow past capacity, and the two structures always agree on size.
+
+class Lru_Cache [K, V]
+  create
+    make(capacity: Integer)
+      require
+        positive_capacity: capacity > 0
+      do
+        this.capacity := capacity
+        this.map := {}
+        this.order := []
+      end
+  feature
+    capacity: Integer
+    map: Map[K, V]
+    order: Array[K]
+
+    size(): Integer do
+      result := map.size()
+    end
+
+    contains(key: K): Boolean do
+      result := map.contains_key(key)
+    end
+
+    get(key: K): ?V do
+      if map.contains_key(key) then
+        touch(key)
+        result := map.get(key)
+      else
+        result := nil
+      end
+    end
+
+    put(key: K, value: V) do
+      if map.contains_key(key) then
+        map.set(key, value)
+        touch(key)
+      else
+        if map.size() >= capacity then
+          evict_oldest()
+        end
+        map.set(key, value)
+        order.add(key)
+      end
+    ensure
+      present: map.contains_key(key)
+    end
+
+    -- Move `key` to the most-recently-used end of `order`.
+    touch(key: K) do
+      let idx: Integer := order.index_of(key)
+      if idx >= 0 then
+        order.remove(idx)
+      end
+      order.add(key)
+    end
+
+    evict_oldest() do
+      if order.length > 0 then
+        let oldest: K := order.get(0)
+        order.remove(0)
+        map.remove(oldest)
+      end
+    end
+
+  invariant
+    within_capacity: map.size() <= capacity
+    order_matches_map: order.length = map.size()
+end

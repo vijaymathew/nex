@@ -1,0 +1,50 @@
+-- Task: a single tracked item. Status is a closed union so "what states
+-- can a task be in" is answered by the type, not by a String someone has to
+-- remember the spelling of. Priority is a refinement type, checked at the
+-- constructor's parameter boundary — this used to need a `require` clause
+-- instead, because refinement types declared in a file weren't resolved
+-- when that file was loaded via `intern` from another module. Fixed
+-- upstream; see the book's top-level issues report.
+
+declare type Priority = Integer where p: p >= 1 and p <= 5
+
+union Task_Status
+  Open
+  Done
+end
+
+class Task
+  create
+    make(id: Integer, text: String, priority: Priority) do
+      this.id := id
+      this.text := text
+      this.priority := priority
+      this.status := create Open.make()
+    end
+  feature
+    id: Integer
+    text: String
+    priority: Integer
+    status: Task_Status
+
+    mark_done() do
+      status := create Done.make()
+    end
+
+    is_done(): Boolean do
+      match status of
+        when Done then result := true
+        when Open then result := false
+      end
+    end
+
+    to_string(): String do
+      let mark: String := ""
+      if is_done() then
+        mark := "x"
+      else
+        mark := " "
+      end
+      result := "[" + mark + "] #" + id + " (p" + priority + ") " + text
+    end
+end

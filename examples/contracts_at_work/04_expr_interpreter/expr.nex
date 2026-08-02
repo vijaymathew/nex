@@ -1,0 +1,162 @@
+-- A small expression language: numbers, variables, +  -  *  /, unary minus,
+-- and parentheses. Grammar to AST to evaluator, in the classic shape:
+--
+--   expr   := term (('+' | '-') term)*
+--   term   := factor (('*' | '/') factor)*
+--   factor := NUMBER | IDENT | '(' expr ')' | '-' factor
+--
+-- Division by zero and an undefined variable are both contract violations
+-- (require), not host exceptions — a caller gets a clear, labeled failure
+-- at the point of the mistake, not an ArithmeticException three frames
+-- away from where the bad input came from.
+
+intern text/Regex
+
+union Expr
+  Num(value: Real)
+  Var(name: String)
+  Bin_Op(op: String, left: Expr, right: Expr)
+  Neg(operand: Expr)
+end
+
+function tokenize(text: String): Array[String] do
+  let rx: Regex := create Regex.compile('\d+\.\d+|\d+|[A-Za-z_][A-Za-z0-9_]*|[+\-*/()]')
+  result := rx.find_all(text)
+end
+
+class Parser
+  create
+    make(tokens: Array[String]) do
+      this.tokens := tokens
+      this.pos := 0
+    end
+  feature
+    tokens: Array[String]
+    pos: Integer
+
+    at_end(): Boolean do
+      result := pos >= tokens.length
+    end
+
+    peek(): String do
+      if at_end() then
+        result := ""
+      else
+        result := tokens.get(pos)
+      end
+    end
+
+    advance(): String do
+      result := peek()
+      pos := pos + 1
+    end
+
+    parse(): Expr
+      do
+        result := parse_expr()
+      ensure
+        consumed_everything: at_end()
+      end
+
+    parse_expr(): Expr do
+      result := parse_term()
+      from
+      until
+        peek() /= "+" and peek() /= "-"
+      do
+        let op: String := advance()
+        let rhs: Expr := parse_term()
+        result := create Bin_Op.make(op, result, rhs)
+      end
+    end
+
+    parse_term(): Expr do
+      result := parse_factor()
+      from
+      until
+        peek() /= "*" and peek() /= "/"
+      do
+        let op: String := advance()
+        let rhs: Expr := parse_factor()
+        result := create Bin_Op.make(op, result, rhs)
+      end
+    end
+
+    parse_factor(): Expr do
+      if peek() = "-" then
+        advance()
+        result := create Neg.make(parse_factor())
+      elseif peek() = "(" then
+        advance()
+        result := parse_expr()
+        if peek() /= ")" then
+          raise "expected ')', got '" + peek() + "'"
+        end
+        advance()
+      elseif at_end() then
+        raise "unexpected end of input"
+      else
+        let tok: String := advance()
+        if is_number(tok) then
+          result := create Num.make(tok.to_real())
+        else
+          result := create Var.make(tok)
+        end
+      end
+    end
+
+    -- Not `tok.char_at(0) >= #0 and ... <= #9`: `#<digit>` char literals
+    -- parse as the ASCII control code with that numeric value, not the
+    -- digit glyph (`#9` is a tab character, not '9') — confirmed with a
+    -- minimal repro, see the book's top-level issues report. A string
+    -- membership check sidesteps char literals entirely.
+    is_number(tok: String): Boolean do
+      result := tok.length() > 0 and "0123456789".contains(tok.substring(0, 1))
+    end
+end
+
+function parse_expr_text(text: String): Expr do
+  let p: Parser := create Parser.make(tokenize(text))
+  result := p.parse()
+end
+
+function divide(a: Real, b: Real): Real
+  require
+    non_zero: b /= 0.0
+  do
+    result := a / b
+  end
+
+function lookup(env: Map[String, Real], name: String): Real
+  require
+    known: env.contains_key(name)
+  do
+    result := env.get(name)
+  end
+
+function eval_expr(e: Expr, env: Map[String, Real]): Real do
+  match e of
+    when Num(value) then
+      result := value
+    when Var(name) then
+      result := lookup(env, name)
+    when Neg(operand) then
+      result := 0.0 - eval_expr(operand, env)
+    when Bin_Op(op, left, right) then
+      let l: Real := eval_expr(left, env)
+      let r: Real := eval_expr(right, env)
+      if op = "+" then
+        result := l + r
+      elseif op = "-" then
+        result := l - r
+      elseif op = "*" then
+        result := l * r
+      else
+        result := divide(l, r)
+      end
+  end
+end
+
+function evaluate(text: String, env: Map[String, Real]): Real do
+  result := eval_expr(parse_expr_text(text), env)
+end

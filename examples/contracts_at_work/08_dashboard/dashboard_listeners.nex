@@ -1,0 +1,82 @@
+-- Real ActionListener implementations — event capture only. Each listener
+-- mutates Dashboard_State and touches nothing Swing-shaped; the poll loop
+-- in dashboard_main.nex is the only code that ever renders that state into
+-- a widget. Confirmed as the working, bug-free pattern in the Swing spike
+-- (examples/contracts_at_work/spike_swing/07_recommended_pattern.nex):
+-- capturing an event into plain Nex state and rendering separately, rather
+-- than mutating a widget from inside actionPerformed directly.
+
+import java.awt.event.ActionListener
+import java.awt.event.ActionEvent
+
+intern Dashboard_State
+
+-- Anchor class: `intern <Name>` requires a top-level declaration literally
+-- named <Name> in the snake_case-matched file (confirmed in Project 5 —
+-- see the book's top-level issues report). This file's real content is the
+-- four listener classes below it; nothing else needs Dashboard_Listeners
+-- to exist as a usable type.
+class Dashboard_Listeners
+  create
+    make() do end
+end
+
+class Increment_Listener
+  inherit
+    ActionListener
+  create
+    make(state: Dashboard_State) do
+      this.state := state
+    end
+  feature
+    state: Dashboard_State
+
+    actionPerformed(e: ActionEvent) do
+      state.increment()
+    end
+end
+
+class Decrement_Listener
+  inherit
+    ActionListener
+  create
+    make(state: Dashboard_State) do
+      this.state := state
+    end
+  feature
+    state: Dashboard_State
+
+    actionPerformed(e: ActionEvent) do
+      state.decrement()
+    end
+end
+
+class Reset_Listener
+  inherit
+    ActionListener
+  create
+    make(state: Dashboard_State) do
+      this.state := state
+    end
+  feature
+    state: Dashboard_State
+
+    actionPerformed(e: ActionEvent) do
+      state.reset()
+    end
+end
+
+class Quit_Listener
+  inherit
+    ActionListener
+  create
+    make(state: Dashboard_State) do
+      this.state := state
+    end
+  feature
+    state: Dashboard_State
+
+    actionPerformed(e: ActionEvent) do
+      state.quit()
+    end
+end

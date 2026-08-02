@@ -26,6 +26,32 @@
         (is (.contains output "true"))
         (is (.contains output "\"hello\""))))))
 
+(deftest tcp-and-server-socket-accept-compiled-backend-runtime
+  (testing "Server_Socket.accept()/Tcp_Socket.from_socket() work on the compiled backend (getInetAddress().getHostAddress() chain)"
+    (binding [repl/*repl-backend* (atom :compiled)]
+      (let [ctx (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx "intern net/Server_Socket")
+                     (repl/eval-code ctx "intern net/Tcp_Socket")
+                     (repl/eval-code ctx "let server: Server_Socket := create Server_Socket.make(0)")
+                     (repl/eval-code ctx "server.open()")
+                     (repl/eval-code ctx "let port: Integer := server.port")
+                     (repl/eval-code ctx "let accept_task: Task[?Tcp_Socket] := spawn do result := server.accept(1000) end")
+                     (repl/eval-code ctx "sleep(50)")
+                     (repl/eval-code ctx "let client: Tcp_Socket := create Tcp_Socket.make(\"127.0.0.1\", port)")
+                     (repl/eval-code ctx "print(client.connect(500))")
+                     (repl/eval-code ctx "let server_client: ?Tcp_Socket := accept_task.await(1500)")
+                     (repl/eval-code ctx "print(server_client /= nil)")
+                     (repl/eval-code ctx "if server_client /= nil then server_client.send_line(\"hello\") end")
+                     (repl/eval-code ctx "print(client.read_line())")
+                     (repl/eval-code ctx "if server_client /= nil then print(server_client.to_string()) end")
+                     (repl/eval-code ctx "if server_client /= nil then server_client.close() end")
+                     (repl/eval-code ctx "client.close()")
+                     (repl/eval-code ctx "server.close()"))]
+        (is (.contains output "true"))
+        (is (.contains output "\"hello\""))
+        (is (.contains output "Tcp_Socket("))))))
+
 (deftest tcp-and-server-socket-timeout-runtime
   (testing "accept(timeout) and connect(timeout) fail promptly on timeout or unavailable endpoint"
     (binding [repl/*repl-backend* (atom :interpreter)]

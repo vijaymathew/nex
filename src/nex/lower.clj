@@ -16,7 +16,8 @@
             [nex.types.builtins :as bi]
             [nex.types.bootstrap :as bootstrap]
             [nex.ir :as ir]
-            [nex.typechecker :as tc]))
+            [nex.typechecker :as tc])
+  (:import [org.objectweb.asm Type]))
 
 (declare lower-expression)
 (declare lower-statement)
@@ -57,6 +58,9 @@
 (declare function-object-call?)
 (declare function-object-binding-type)
 (declare lower-select)
+(declare java-superclass-parent)
+(declare java-super-constructor-call?)
+(declare resolve-imported-java-type)
 
 (defn- invalid-bare-create-call-ex
   [class-name]
@@ -530,6 +534,36 @@
           :anonymous-function
           "Function"
 
+          ;; Falling through to the generic tc/infer-expression-type fallback
+          ;; below (as this used to) builds a fresh env with no current-class
+          ;; context (same gap :when's own case above works around) — a
+          ;; `this`/bare field or method reference inside the body fails to
+          ;; resolve there. It also has no notion of the spawn body's *own*
+          ;; top-level `let` bindings, so a `result := total` closing over an
+          ;; earlier `let total := ...` in the same body fails to resolve
+          ;; either way. Track those bindings here instead, against *this*
+          ;; env (so :this-type/:fields context carries through), and infer
+          ;; result's type directly from its `result := ...` assignment — the
+          ;; same "Any" when there is none matches make-synthetic-anonymous-
+          ;; function-expr's declared return type for a spawn with no result.
+          :spawn
+          (let [local-var-types
+                (reduce (fn [acc stmt]
+                          (if (= :let (:type stmt))
+                            (assoc acc (:name stmt)
+                                   (or (:var-type stmt)
+                                       (infer-type (update env :var-types merge acc) (:value stmt))))
+                            acc))
+                        {}
+                        (:body expr))
+                result-env (update env :var-types merge local-var-types)]
+            (if-let [result-assign (some #(when (and (= :assign (:type %))
+                                                      (= "result" (:target %)))
+                                            %)
+                                          (:body expr))]
+              {:base-type "Task" :type-params [(infer-type result-env (:value result-assign))]}
+              "Task"))
+
           :binary
           (let [op (:operator expr)]
             (cond
@@ -648,8 +682,27 @@
                                         ;; infers as nil here and lowering fails
                                         ;; with "Unable to infer expression type".
                                         :type-aliases *type-aliases*})
-        (throw (ex-info "Unable to infer expression type during lowering"
-                        {:expr expr})))))
+        ;; A bare identifier that names an imported Java class resolves fine
+        ;; as a call target inside `with "java"` (java-host-class-root-name
+        ;; requires :with-java?, by design — see docs/proposals/java-interop.md
+        ;; and the java-interop chapter of the language Definition), but
+        ;; outside one it is just an unresolved identifier, and reaches this
+        ;; generic fallback. The typechecker accepts such a program regardless
+        ;; (its own fallback for an unresolved call is looser than lowering's,
+        ;; which must pick a concrete emission strategy, not just a type), so
+        ;; this is not a compiler defect in the sense the rest of this
+        ;; function's callers are — it is a real, nameable gap with a real
+        ;; workaround, and is reported as one rather than as "please report
+        ;; this bug".
+        (if (and (= (:type expr) :identifier)
+                 (imported-java-qualified-name env (:name expr)))
+          (throw (unsupported
+                  (str "`" (:name expr) "` is an imported Java class; used here, "
+                       "outside a `with \"java\"` block, it cannot be resolved as "
+                       "a call target. Wrap this code in `with \"java\" do ... end`.")
+                  {:expr expr}))
+          (throw (ex-info "Unable to infer expression type during lowering"
+                          {:expr expr}))))))
 
 (defn- infer-target-call-type
   [env expr class-target-name across-item-type target-expr]
@@ -1152,8 +1205,30 @@
                 (let [field-info (get (:fields env') field-name)
                       snapshot-name (str "__old_" field-name)
                       [env'' local] (env-add-local env' snapshot-name (:nex-type field-info))
+                      field-read-ir (snapshot-source-ir env' field-info)
+                      ;; An Array (a real java.util.ArrayList) or Map (a real
+                      ;; java.util.HashMap on this backend) is a genuinely
+                      ;; mutable container: storing the field's current
+                      ;; reference straight into the new snapshot local just
+                      ;; copies the *reference*, and a later in-place
+                      ;; `.add`/`.put` in the same method body is then visible
+                      ;; through the "old" snapshot too, the same reference-
+                      ;; vs-value bug env-replace-object-aliases! exists to
+                      ;; work around on the interpreter side (`old
+                      ;; items.length = items.length - 1` failed because both
+                      ;; sides read the SAME, already-mutated ArrayList).
+                      ;; shallow-copy-collection freezes the container's own
+                      ;; membership at snapshot time without deep-copying
+                      ;; elements (unlike Nex-level `.clone()`), so an
+                      ;; object-valued element's identity is unaffected.
+                      snapshot-ir (if (#{"Array" "Map"} (base-type-name (:nex-type field-info)))
+                                    (ir/call-runtime-node "shallow-copy-collection"
+                                                          [field-read-ir]
+                                                          (:nex-type local)
+                                                          (:jvm-type local))
+                                    field-read-ir)
                       stmt (ir/set-local-node (:slot local)
-                                              (snapshot-source-ir env' field-info)
+                                              snapshot-ir
                                               (:nex-type local)
                                               (:jvm-type local))]
                   [env''
@@ -2258,6 +2333,7 @@
 (declare rewrite-statement-for-closures)
 (declare rewrite-statements-for-closures)
 (declare rewrite-statements-for-closures*)
+(declare sync-callable-into-class-def)
 
 (defn- capture-reference!
   [captures local-types outer-var-types name]
@@ -2265,50 +2341,170 @@
              (contains? outer-var-types name))
     (swap! captures assoc name (get outer-var-types name))))
 
+;; Synthetic capture name for the enclosing instance method's `this`, used by
+;; a spawn/anonymous-function body that references `this` (bare field/method
+;; access or an explicit `this.` prefix). Reserved: no Nex identifier can
+;; start with a double underscore, so this can never collide with a real
+;; capture. A spawn/anonymous-function body with any capture (this one
+;; included) is dispatched to the tree-walking interpreter at runtime rather
+;; than running as compiled bytecode (nex.compiler.jvm.runtime/make-captured-
+;; function-object) — so every reference to `this` inside such a body is
+;; rewritten here into an ordinary field/method access on this captured
+;; identifier, the same shape an outer captured *other* object's field/method
+;; access already uses, rather than left as `this` (which the interpreter
+;; would resolve against the closure's own synthesized class, not the
+;; enclosing one).
+(def ^:private closure-this-capture-name "__closure_this__")
+
+(defn- ctx-class-def
+  [ctx class-name]
+  (some #(when (= (:name %) class-name) %) (:classes ctx)))
+
+;; All of this-type-field?/this-type-method?/capture-closure-this! require
+;; :inside-closure? in addition to :this-type: :this-type is set once, on
+;; ctx, for every method of a class — including the plain (non-closure) body
+;; of the method itself — while :inside-closure? is only set on the
+;; nested-ctx built for a spawn/anonymous-function's *own* body (see the
+;; :anonymous-function and :spawn cases below). Gating on :this-type alone
+;; rewrote an ordinary `this.field := v`/bare `field := v` in the method's own
+;; (non-closure) statements too, pointing it at a capture
+;; (closure-this-capture-name) that only the nested closure's env would ever
+;; define — an ordinary method body needs no such rewriting; `this` already
+;; resolves correctly there.
+(defn- capture-closure-this!
+  [captures ctx]
+  (when (and (:this-type ctx) (:inside-closure? ctx))
+    (swap! captures assoc closure-this-capture-name (:this-type ctx))))
+
+(defn- this-type-field?
+  [ctx name]
+  (boolean (and (:this-type ctx)
+                (:inside-closure? ctx)
+                (accessible-field-def ctx (ctx-class-def ctx (:this-type ctx)) name))))
+
+(defn- this-type-method?
+  [ctx name arity]
+  (boolean (and (:this-type ctx)
+                (:inside-closure? ctx)
+                (accessible-method-def ctx (ctx-class-def ctx (:this-type ctx)) name arity))))
+
 (defn- rewrite-expression-for-closures
   [ctx local-types captures expr]
   (cond
     (not (map? expr)) expr
 
-    (= :identifier (:type expr))
-    (do
-      (capture-reference! captures local-types (:var-types ctx) (:name expr))
+    (= :this (:type expr))
+    (if (and (:this-type ctx) (:inside-closure? ctx))
+      (do (capture-closure-this! captures ctx)
+          {:type :identifier :name closure-this-capture-name})
       expr)
+
+    ;; A bare field read of one of the enclosing method's own fields (`count`,
+    ;; meaning `this.count`): a spawn/anonymous-function body is dispatched to
+    ;; the tree-walking interpreter at runtime (nex.compiler.jvm.runtime/make-
+    ;; captured-function-object), with `this` captured like any other outer
+    ;; variable under closure-this-capture-name. Rewriting the bare read into
+    ;; an explicit field-get on that captured identifier — the same shape an
+    ;; ordinary captured *other* object's field read already uses — means the
+    ;; interpreter needs no special "this" handling for it at all.
+    (= :identifier (:type expr))
+    (if (and (not (contains? local-types (:name expr)))
+             (not (contains? (:var-types ctx) (:name expr)))
+             (this-type-field? ctx (:name expr)))
+      (do (capture-closure-this! captures ctx)
+          {:type :call
+           :target {:type :identifier :name closure-this-capture-name}
+           :method (:name expr)
+           :args []
+           :has-parens false})
+      (do
+        (capture-reference! captures local-types (:var-types ctx) (:name expr))
+        expr))
 
     (= :anonymous-function (:type expr))
     (let [params (or (:params expr) [])
           fn-locals (into {"result" (or (:return-type expr) "Any")}
                           (map (fn [{:keys [name type]}] [name type]))
                           params)
-          nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types))
+          nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types) :inside-closure? true)
           [rewritten-body _ nested-captures]
           (rewrite-statements-for-closures nested-ctx fn-locals (:body expr))
           capture-vec (->> nested-captures
                            (map (fn [[name type]] {:name name :type type}))
                            (sort-by :name)
                            vec)
-          runtime-object? (seq capture-vec)]
+          runtime-object? (seq capture-vec)
+          ;; (:class-def expr) still holds the call<N> method's *original*
+          ;; body — attach-capture-fields only adds capture fields, it never
+          ;; touches method bodies. Ordinarily that staleness is harmless (a
+          ;; plain captured-variable reference rewrites to itself, unchanged),
+          ;; but a `this` reference above rewrites into a genuinely different
+          ;; node shape. interp/make-object (nex.compiler.jvm.runtime/make-
+          ;; captured-function-object) runs *this* class-def's method body at
+          ;; call time — so without this sync, the interpreter would still see
+          ;; the pre-rewrite `this`/bare field or method reference and try to
+          ;; resolve it against the closure's own (fieldless, methodless)
+          ;; class instead of the captured original.
+          call-method-name (str "call" (count params))
+          original-call-method (some #(when (and (= call-method-name (:name %))
+                                                 (= (count params) (count (or (:params %) []))))
+                                       %)
+                                     (class-methods (:class-def expr)))]
       (assoc expr
              :body rewritten-body
              :captures capture-vec
-             :class-def (attach-capture-fields (:class-def expr) capture-vec runtime-object?)))
+             :class-def (attach-capture-fields
+                         (sync-callable-into-class-def
+                          (:class-def expr)
+                          (assoc original-call-method :body rewritten-body))
+                         capture-vec runtime-object?)))
 
+    ;; A method call or explicit field access reaching `this` — bare
+    ;; (`bump()`/`count` as a no-parens access), or via an explicit `this.`
+    ;; prefix — is rewritten the same way: route it through the captured
+    ;; `this` identifier, exactly like calling/reading through any other
+    ;; captured object reference (`other.bump()`), which already works.
     (= :call (:type expr))
     (let [target (:target expr)
+          method (:method expr)
+          bare-target? (nil? target)
+          ;; Explicit `this.foo` is only ever rewritten to the captured-`this`
+          ;; identifier *inside* a closure — outside one, `this` resolves
+          ;; correctly on its own (this is the ordinary, non-nested case: an
+          ;; instance method's own body referencing its own `this`), and
+          ;; substituting it unconditionally broke exactly that: `this.value`
+          ;; in a plain method (no spawn/anonymous-function involved at all)
+          ;; was rewritten into a call on a capture that is only ever bound
+          ;; inside a synthesized closure class.
+          this-target? (and (map? target) (= :this (:type target))
+                            (:inside-closure? ctx))
+          is-field? (false? (:has-parens expr))
+          implicit-this-member?
+          (and bare-target?
+               (not (contains? local-types method))
+               (not (contains? (:var-types ctx) method))
+               (or (this-type-method? ctx method (count (:args expr)))
+                   (and is-field? (this-type-field? ctx method))))
           _ (when (string? target)
               (capture-reference! captures local-types (:var-types ctx) target))
-          method (:method expr)
+          _ (when (or implicit-this-member? this-target?)
+              (capture-closure-this! captures ctx))
           args (mapv #(rewrite-expression-for-closures ctx local-types captures %)
                      (:args expr))
-          expr' (assoc expr
-                       :target (when target
-                                 (rewrite-expression-for-closures ctx local-types captures target))
-                       :args args)]
-      (when (and (nil? target)
+          new-target (cond
+                       (or implicit-this-member? this-target?)
+                       {:type :identifier :name closure-this-capture-name}
+
+                       target
+                       (rewrite-expression-for-closures ctx local-types captures target)
+
+                       :else nil)]
+      (when (and bare-target?
+                 (not implicit-this-member?)
                  (contains? (:var-types ctx) method)
                  (not (contains? local-types method)))
         (swap! captures assoc method (get (:var-types ctx) method)))
-      expr')
+      (assoc expr :target new-target :args args))
 
     (= :binary (:type expr))
     (assoc expr
@@ -2359,7 +2555,7 @@
     (assoc expr :args (mapv #(rewrite-expression-for-closures ctx local-types captures %) (:args expr)))
 
     (= :spawn (:type expr))
-    (let [nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types))
+    (let [nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types) :inside-closure? true)
           fn-expr (make-synthetic-anonymous-function-expr
                    []
                    "Any"
@@ -2379,16 +2575,40 @@
                        (infer-prepass-type ctx local-types value'))]
       [stmt' (assoc local-types (:name stmt) var-type)])
 
+    ;; A bare `count := v` inside a spawn/anonymous-function body means
+    ;; `this.count := v`. Since the closure body runs on the interpreter (see
+    ;; the :identifier case above), rewrite it into an explicit member-assign
+    ;; through the captured `this` identifier — the same shape an ordinary
+    ;; captured *other* object's field write already uses (`other.count := v`,
+    ;; unlike the untouched form, does not depend on `this` being resolvable
+    ;; inside a class the interpreter never sees as the original enclosing
+    ;; class).
     :assign
-    [(assoc stmt :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
-     local-types]
+    (if (and (not (contains? local-types (:target stmt)))
+             (not (contains? (:var-types ctx) (:target stmt)))
+             (this-type-field? ctx (:target stmt)))
+      (do (capture-closure-this! captures ctx)
+          [{:type :member-assign
+            :object {:type :identifier :name closure-this-capture-name}
+            :field (:target stmt)
+            :value (rewrite-expression-for-closures ctx local-types captures (:value stmt))}
+           local-types])
+      [(assoc stmt :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
+       local-types])
 
     :member-assign
-    [(assoc stmt
-            :object (when (:object stmt)
-                      (rewrite-expression-for-closures ctx local-types captures (:object stmt)))
-            :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
-     local-types]
+    (let [this-object? (or (nil? (:object stmt))
+                           (= :this (:type (:object stmt))))
+          rewrite-to-capture? (and this-object? (:this-type ctx) (:inside-closure? ctx))]
+      (when rewrite-to-capture?
+        (capture-closure-this! captures ctx))
+      [(assoc stmt
+              :object (cond
+                        rewrite-to-capture? {:type :identifier :name closure-this-capture-name}
+                        (:object stmt) (rewrite-expression-for-closures ctx local-types captures (:object stmt))
+                        :else nil)
+              :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
+       local-types])
 
     :call
     [(rewrite-expression-for-closures ctx local-types captures stmt)
@@ -2536,7 +2756,17 @@
 
 (defn- rewrite-class-for-closures
   [ctx class-def]
-  (let [field-types (field-type-map class-def)]
+  ;; :this-type (not field-type-map merged into var-types, as a prior version
+  ;; of this function did) is what lets a nested spawn/anonymous-function body
+  ;; tell "this is one of the enclosing instance's own fields/methods" apart
+  ;; from an ordinary outer local capture — see this-type-field?/this-type-
+  ;; method?. Fields are deliberately left out of var-types now: folding them
+  ;; in there made a bare `count` inside a closure look like any other
+  ;; captured local, so the closure got its own private copy of the *value*
+  ;; instead of a live reference to the enclosing object, silently dropping
+  ;; mutations the moment the closure ran (spawn/anonymous-function bodies
+  ;; could read a field but never durably write one).
+  (let [ctx (assoc ctx :this-type (:name class-def))]
     (update class-def :body
             (fn [sections]
               (mapv (fn [section]
@@ -2546,14 +2776,14 @@
                                 (fn [members]
                                   (mapv (fn [member]
                                           (if (= :method (:type member))
-                                            (rewrite-callable-for-closures ctx member field-types)
+                                            (rewrite-callable-for-closures ctx member {})
                                             member))
                                         members)))
 
                         :constructors
                         (update section :constructors
                                 (fn [ctors]
-                                  (mapv #(rewrite-callable-for-closures ctx % field-types) ctors)))
+                                  (mapv #(rewrite-callable-for-closures ctx % {}) ctors)))
 
                         section))
                     sections)))))
@@ -2742,6 +2972,24 @@
             jvm-type (resolve-jvm-type env nex-type)]
         (ir/call-runtime-node (str "any:" method)
                               (into [target-ir] (mapv #(lower-expression env %) args))
+                              nex-type
+                              jvm-type))
+
+      ;; A method not declared/inherited anywhere in the Nex chain, on a
+      ;; receiver whose class extends a Java class (Phase 2, docs/proposals/
+      ;; java-interop.md) — e.g. `t.start()` where My_Thread inherits Thread.
+      ;; The receiver is already a real instance of that Java type at the
+      ;; bytecode level (real `extends`), so the same reflective dispatch the
+      ;; "bare imported Java object" branch above uses (java-call-method)
+      ;; reaches it correctly, without hand-emitting a real-descriptor
+      ;; INVOKEVIRTUAL.
+      (and class-def has-parens (java-superclass-parent env class-def))
+      (let [nex-type "Any"
+            jvm-type (resolve-jvm-type env nex-type)]
+        (ir/call-runtime-node "java-call-method"
+                              (into [(ir/const-node method "String" (ir/object-jvm-type "java/lang/String"))
+                                     target-ir]
+                                    (mapv #(lower-expression env %) args))
                               nex-type
                               jvm-type))
 
@@ -3000,8 +3248,14 @@
                                               [(ir/const-node name
                                                               "String"
                                                               (ir/object-jvm-type "java/lang/String"))
-                                               (lower-expression env {:type :identifier
-                                                                      :name name})])
+                                               ;; The closure-this capture has no
+                                               ;; identifier of its own at the
+                                               ;; instantiation site — it names
+                                               ;; the enclosing method's `this`.
+                                               (lower-expression env (if (= name closure-this-capture-name)
+                                                                      {:type :this}
+                                                                      {:type :identifier
+                                                                       :name name}))])
                                             captures))
                               nex-type
                               (ir/object-jvm-type "java/lang/Object"))
@@ -3298,6 +3552,49 @@
                                                        (resolve-jvm-type env created-type))
                                           created-type)))))))))
 
+(defn- java-object-valued?
+  "True when `expr`, used as a call target, is known at lowering time to hold
+   a raw (reflection-backed) Java object at runtime rather than a Nex value —
+   either because it names something declared with an imported Java type, or
+   because it is itself a call chained off of one (`socket.getInetAddress()`
+   is Any-typed since lower.clj never reflects into a Java method's return
+   type, but its receiver `.getHostAddress()` still needs reflective dispatch
+   rather than the fixed Any-protocol runtime table). Recurses through call
+   chains of arbitrary depth so `a.b().c().d()` resolves correctly as long as
+   `a` roots in a Java import — outside a `with \"java\"` block, where the
+   same need is already handled by the with-java? branch below."
+  [env expr]
+  (let [expr (normalize-call-target expr)
+        ;; An identifier naming a known Nex class (e.g. `Palette` in
+        ;; `Palette.RED`) is a static-member access target, not a variable —
+        ;; infer-type has no binding for it and throws. Recognized and
+        ;; excluded up front, the same way infer-target-call-type's own
+        ;; class-target-name check does, rather than reached via infer-type.
+        names-known-class? (fn [e]
+                             (and (map? e)
+                                  (= :identifier (:type e))
+                                  (some #(= (:name %) (:name e)) (:classes env))))]
+    (cond
+      (nil? expr) false
+
+      (names-known-class? expr) false
+
+      (= :call (:type expr))
+      (let [target-expr (normalize-call-target (:target expr))]
+        (boolean
+         (or (java-host-class-root-name env target-expr)
+             (when-not (names-known-class? target-expr)
+               (let [target-type (resolve-type-alias (infer-type env target-expr))
+                     base-type (base-type-name target-type)]
+                 (or (imported-java-qualified-name env base-type)
+                     (:import (get (visible-class-map env) base-type)))))
+             (java-object-valued? env target-expr))))
+
+      :else
+      (let [target-type (resolve-type-alias (infer-type env expr))
+            base-type (base-type-name target-type)]
+        (boolean (:import (get (visible-class-map env) base-type)))))))
+
 (defn- lower-call-expr [env expr]
   (if (and (nil? (:target expr))
            (empty? (:args expr))
@@ -3384,7 +3681,39 @@
           (= :super (:type target-expr))
           (let [parent-name (single-super-parent-name env)
                 parent-def (get (visible-class-map env) parent-name)
-                parent-meta (class-jvm-meta env parent-name)
+                java-super-klass (when (:import parent-def)
+                                  (let [^Class klass (resolve-imported-java-type env parent-name)]
+                                    (when (and klass (not (.isInterface klass))) klass)))]
+            (if java-super-klass
+              ;; Phase 2 (docs/proposals/java-interop.md): super.<method>(...)
+              ;; reaching the real Java superclass implementation, bypassing
+              ;; this class's own override of it if any (see
+              ;; ir/call-super-java-node). `new` never reaches here — it's
+              ;; stripped from the constructor body earlier, in
+              ;; lower-constructor.
+              (if (seq (:args expr))
+                (throw (unsupported (str "super." (:method expr)
+                                         "(args) with arguments is not supported yet in compiled "
+                                         "lowering for a Java superclass — only zero-argument calls are")
+                                {:expr expr :parent parent-name}))
+                (let [^java.lang.reflect.Method m (some (fn [^java.lang.reflect.Method cand]
+                                                          (and (= (.getName cand) (:method expr))
+                                                               (zero? (alength (.getParameterTypes cand)))
+                                                               cand))
+                                                        (.getMethods java-super-klass))]
+                  (when-not m
+                    (throw (ex-info "Undefined super method call during lowering"
+                                    {:expr expr :parent parent-name})))
+                  (let [nex-type "Any"
+                        jvm-type (resolve-jvm-type env nex-type)]
+                    (ir/call-super-java-node (desc/internal-class-name (.getName java-super-klass))
+                                             (:method expr)
+                                             (Type/getMethodDescriptor m)
+                                             (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
+                                             (.getReturnType m)
+                                             nex-type
+                                             jvm-type))))
+          (let [parent-meta (class-jvm-meta env parent-name)
                 target-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
                                              (str "_parent_" parent-name)
                                              (ir/this-node (:this-type env)
@@ -3431,7 +3760,7 @@
                                         target-ir
                                         arg-irs
                                         nex-type
-                                        jvm-type)))))
+                                        jvm-type)))))))
 
           (and class-target-name
                (:this-type env)
@@ -3468,9 +3797,27 @@
                                         (:name constant)
                                         nex-type
                                         jvm-type))
-            (throw (unsupported "Unsupported class-target access during lowering"
-                            {:expr expr
-                             :target-class class-target-name})))
+            ;; class-target-name matches any entry in `(:classes env)`,
+            ;; including imported-Java-class placeholders (empty :body, so
+            ;; lookup-class-constant above always misses them). Fall through to
+            ;; the same java-get-static-field runtime call the :else branch
+            ;; below already uses for the has-parens (static method) case,
+            ;; rather than treating an imported class as an unsupported target.
+            (if-let [java-owner (:import (get (visible-class-map env) class-target-name))]
+              (let [nex-type (or (infer-call-type env expr) "Any")
+                    jvm-type (resolve-jvm-type env nex-type)]
+                (ir/call-runtime-node "java-get-static-field"
+                                      [(ir/const-node java-owner
+                                                      "String"
+                                                      (ir/object-jvm-type "java/lang/String"))
+                                       (ir/const-node (:method expr)
+                                                      "String"
+                                                      (ir/object-jvm-type "java/lang/String"))]
+                                      nex-type
+                                      jvm-type))
+              (throw (unsupported "Unsupported class-target access during lowering"
+                              {:expr expr
+                               :target-class class-target-name}))))
 
           :else
           (let [java-static-owner (java-host-class-root-name env target-expr)
@@ -3582,8 +3929,12 @@
               ;; `any-protocol-method-names` and crashes on anything else with
               ;; an unbound-Var error at runtime. Inside a with-"java" block,
               ;; always treat any other method name on an `Any` receiver as
-              ;; host interop, regardless of those other tests.
-              (and (:with-java? env)
+              ;; host interop, regardless of those other tests. Outside such a
+              ;; block, the same call shape can still arise from a call chain
+              ;; rooted in an imported Java type (`socket.getInetAddress()
+              ;; .getHostAddress()`) — java-object-valued? recognizes that case
+              ;; from the target expression's own shape, no with-java? needed.
+              (and (or (:with-java? env) (java-object-valued? env target-expr))
                    (or (and (= "Any" (base-type-name target-type))
                             (not (contains? any-protocol-method-names (:method expr))))
                        (and (not (builtin-runtime-receiver-type? env target-type))
@@ -3932,7 +4283,18 @@
                          :target target-expr})))
 
       field-def
-      (if (= (:current-class env) (:declaring-class field-def))
+      (if (or (= (:current-class env) (:declaring-class field-def))
+              ;; A spawn/anonymous-function body with captures never actually
+              ;; runs as this lowered bytecode — it is re-dispatched to the
+              ;; tree-walking interpreter via make-captured-function-object
+              ;; (nex.compiler.jvm.runtime), and this class's IR is discarded
+              ;; before emission (see emitted-anonymous-classes). The
+              ;; encapsulation check below exists to keep *real* compiled
+              ;; classes honest; applying it to a body that will never run as
+              ;; this bytecode only turns an ordinary captured-object field
+              ;; write (`other.count := v`, `this.count := v` once `this` is
+              ;; rewritten to a capture) into a hard compile failure.
+              (:closure-runtime-object? (current-class-def env)))
         [env (ir/call-runtime-node (str "user-field-set:" field-name)
                                    [(lower-expression env target-expr) value-ir]
                                    "Void"
@@ -4204,6 +4566,7 @@
                                                           (:generic-params (:class-def fn-def)))
                                  :fields (field-info-map {:compiled-classes (:compiled-classes fn-def)
                                                           :classes visible-classes
+                                                          :imports visible-imports
                                                           :generic-param-names generic-param-names}
                                                          (:class-def fn-def))
                                  :this-type current-class
@@ -4337,7 +4700,32 @@
 
 (defn- lower-constructor
   [unit-name visible-functions visible-imports visible-classes class-def ctor-def compiled-classes]
-  (let [class-name (:name class-def)
+  (let [ctor-def (if-let [{:keys [nex-name]} (java-superclass-parent {:classes visible-classes} class-def)]
+                   (let [first-stmt (first (:body ctor-def))]
+                     (if (java-super-constructor-call? nex-name first-stmt)
+                       (if (seq (:args first-stmt))
+                         ;; The typechecker validates arity against the Java
+                         ;; class's real constructors, but the compiled
+                         ;; backend does not yet forward arguments into the
+                         ;; real super constructor — only the implicit/no-arg
+                         ;; case is wired (real `<init>` always calls the
+                         ;; Java superclass's no-arg constructor; see
+                         ;; emit-user-default-constructor!). --interpret
+                         ;; doesn't help here either (Phase 2 is compiled-
+                         ;; backend-only), so this is a genuine, currently
+                         ;; unsupported construct.
+                         (throw (unsupported
+                                 "super.new(args)/<JavaClass>.new(args) with arguments is not supported yet in compiled lowering — only the implicit/no-arg Java superclass constructor is"
+                                 {:class-name (:name class-def) :constructor (:name ctor-def)}))
+                         ;; A zero-arg explicit call is exactly the implicit
+                         ;; case — drop the now-redundant statement so the
+                         ;; ordinary body-lowering below never sees a call to
+                         ;; the "new" selector, which is not an ordinary Nex
+                         ;; method.
+                         (update ctor-def :body rest))
+                       ctor-def))
+                   ctor-def)
+        class-name (:name class-def)
         generic-param-names (set (map :name (:generic-params class-def)))
         generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
         env0 (make-lowering-env {:classes visible-classes
@@ -4354,6 +4742,7 @@
                                                           (:generic-params class-def))
                                  :fields (field-info-map {:compiled-classes compiled-classes
                                                           :classes visible-classes
+                                                          :imports visible-imports
                                                           :generic-param-names generic-param-names}
                                                          class-def)
                                  :this-type class-name
@@ -4464,6 +4853,7 @@
                                                           (:generic-params class-def))
                                  :fields (field-info-map {:compiled-classes compiled-classes
                                                           :classes visible-classes
+                                                          :imports visible-imports
                                                           :generic-param-names generic-param-names}
                                                          class-def)
                                  :this-type class-name
@@ -4613,6 +5003,7 @@
                                                          (:generic-params class-def))
                                 :fields (field-info-map {:compiled-classes compiled-classes
                                                          :classes visible-classes
+                                                         :imports visible-imports
                                                          :generic-param-names generic-param-names}
                                                         class-def)
                                 :this-type class-name
@@ -4657,6 +5048,176 @@
                  :return-jvm-type (ir/object-jvm-type "java/lang/Object")
                  :locals (vec (vals (:locals env)))
                  :body body})))
+
+(def ^:private java-interop-object-method-arities
+  "[name arity] of Java-interface members that redeclare one of Object's own
+   methods (Comparator's equals(Object) is the standard example — see the
+   typechecker's identically-named exclusion, object-instance-methods).
+   These never need a bridge: every compiled class already emits a real
+   equals/hashCode (see user-class-spec) and inherits a real toString from
+   Object, either of which already satisfies the interface."
+  #{["equals" 1] ["hashCode" 0] ["toString" 0]})
+
+(defn- resolve-imported-java-type
+  "The reflected Class for parent-name, when the `inherit` entry resolves to
+   any imported Java type — an interface (Phase 1) or a concrete/abstract
+   class (Phase 2, docs/proposals/java-interop.md). Nil for a Nex class or an
+   unresolvable name."
+  [env parent-name]
+  (let [parent-def (get (visible-class-map env) parent-name)]
+    (when (:import parent-def)
+      (try
+        (Class/forName (:import parent-def))
+        (catch Exception _ nil)))))
+
+(defn- resolve-imported-java-interface
+  "resolve-imported-java-type, narrowed to an interface — nil for a
+   concrete/abstract Java class."
+  [env parent-name]
+  (when-let [^Class klass (resolve-imported-java-type env parent-name)]
+    (when (.isInterface klass) klass)))
+
+(defn- java-interface-parents
+  "Reflected Class objects for this class-def's Java-*interface* `inherit`
+   entries. Nex parents, and a Java-*class* parent (java-superclass-parent),
+   are excluded."
+  [env class-def]
+  (->> (:parents class-def)
+       (keep (fn [{:keys [parent]}] (resolve-imported-java-interface env parent)))
+       distinct))
+
+(defn- java-superclass-parent
+  "{:klass ... :nex-name ...} for the concrete Java class this class-def's
+   `inherit` chain extends (Phase 2), walking through Nex ancestors — mirrors
+   nex.typechecker/class-java-superclass-name. nex-name is the literal name
+   written in `inherit` (the parent-qualified super-constructor-call form,
+   <JavaClassName>.new(args), matches against it). At most one exists
+   anywhere in the chain; check-inheritance enforces the JVM's
+   single-inheritance rule. Nil when class-def has no Java-class parent."
+  [env class-def]
+  (letfn [(walk [cn visited]
+            (when-let [cd (and (not (contains? visited cn)) (get (visible-class-map env) cn))]
+              (let [visited' (conj visited cn)]
+                (some (fn [{:keys [parent]}]
+                        (let [parent-cd (get (visible-class-map env) parent)]
+                          (if (and parent-cd (not (:import parent-cd)))
+                            (walk parent visited')
+                            (when-let [^Class klass (resolve-imported-java-type env parent)]
+                              (when-not (.isInterface klass) {:klass klass :nex-name parent})))))
+                      (:parents cd)))))]
+    (walk (:name class-def) #{})))
+
+(defn- bridge-jvm-kind
+  "Collapse a resolved Nex jvm-type to the keyword emit-interface-bridge-
+   method! needs: one of Nex's four primitive-shaped types, or :object for
+   everything reference-shaped (Nex has no other primitives — nex-type->jvm-
+   type never produces :int/:float/:byte/:short, only :long/:double for
+   Integer/Real)."
+  [jvm-type]
+  (if (#{:long :double :boolean :char} jvm-type) jvm-type :object))
+
+(defn- java-super-constructor-call?
+  "True when STMT is `super.new(args)` or `<JavaSuperclassName>.new(args)` —
+   the reserved selector (docs/proposals/java-interop.md) for forwarding to a
+   Java superclass's real constructor. Mirrors
+   nex.typechecker/java-super-constructor-call?, which already validated this
+   shape and position by the time lowering runs."
+  [super-nex-name stmt]
+  (and (map? stmt)
+       (= :call (:type stmt))
+       (= "new" (:method stmt))
+       (or (and (map? (:target stmt)) (= :super (:type (:target stmt))))
+           (= super-nex-name (:target stmt)))))
+
+(defn- java-interface-bridge-methods
+  "One entry per abstract method (across all implemented interfaces) that a
+   compiled class needs a real-Java-descriptor bridge for, so the JVM's own
+   dispatch (a Java caller invoking the interface method) reaches the already-
+   emitted internal Nex method. Deduped by (name, descriptor): two interfaces
+   sharing a method signature (rare, but legal) need only one bridge. See
+   emit-interface-bridge-method! in emit.clj for the codegen this feeds."
+  [env class-def java-interfaces]
+  (->> java-interfaces
+       (mapcat (fn [^Class klass]
+                 (->> (.getMethods klass)
+                      (remove (fn [^java.lang.reflect.Method m]
+                                (or (.isDefault m)
+                                    (java.lang.reflect.Modifier/isStatic (.getModifiers m))
+                                    (contains? java-interop-object-method-arities
+                                               [(.getName m) (alength (.getParameterTypes m))])))))))
+       (map (fn [^java.lang.reflect.Method m] [[(.getName m) (Type/getMethodDescriptor m)] m]))
+       (into {})
+       vals
+       (mapv (fn [^java.lang.reflect.Method m]
+               (let [arity (alength (.getParameterTypes m))
+                     method-def (accessible-method-def env class-def (.getName m) arity)]
+                 (when-not method-def
+                   (throw (ex-info (str "Class " (:name class-def)
+                                        " has no method matching Java interface member "
+                                        (.getName m) "/" arity " during lowering")
+                                   {:class-name (:name class-def)
+                                    :java-method (.getName m)
+                                    :arity arity})))
+                 {:java-name (.getName m)
+                  :descriptor (Type/getMethodDescriptor m)
+                  :target-method-name (lowered-instance-method-name method-def)
+                  :param-classes (vec (.getParameterTypes m))
+                  :return-class (.getReturnType m)
+                  ;; The Nex method's own declared param/return types, in the
+                  ;; representation its already-emitted body actually uses
+                  ;; (Nex Integer is a boxed Long regardless of what the Java
+                  ;; interface's primitive return/param type is) — the bridge
+                  ;; must box/unbox against *this*, not against whatever
+                  ;; wrapper the Java descriptor's own primitive would
+                  ;; naturally suggest, then separately widen/narrow to the
+                  ;; Java primitive if the two differ (e.g. Integer's long
+                  ;; vs. Comparator.compare's int).
+                  :param-nex-kinds (mapv (fn [{:keys [type]}]
+                                           (bridge-jvm-kind (resolve-jvm-type env type)))
+                                         (:params method-def))
+                  :return-nex-kind (bridge-jvm-kind
+                                    (resolve-jvm-type env (function-return-type method-def)))})))))
+
+(defn- java-superclass-override-bridge-methods
+  "One bridge entry per (name, arity) the Nex class's own declared methods
+   share with an inherited Java superclass method — the real vtable slot a
+   Java caller dispatches through polymorphically (Thread.start() calling
+   this.run(), say; docs/proposals/java-interop.md Phase 2). Unlike
+   java-interface-bridge-methods (bridges every abstract interface method),
+   this only bridges methods the class actually redefines: the superclass's
+   other, untouched methods already work correctly through ordinary JVM
+   inheritance and need no bridge. Excludes static and final superclass
+   methods (a final method can't be overridden; a matching Nex method name
+   is coincidental, not an override)."
+  [env class-def super-klass]
+  (if-not super-klass
+    []
+    (->> (class-methods class-def)
+         (mapcat (fn [method-def]
+                   (let [arity (count (or (:params method-def) []))]
+                     (->> (.getMethods ^Class super-klass)
+                          (filter (fn [^java.lang.reflect.Method m]
+                                    (let [mods (.getModifiers m)]
+                                      (and (= (.getName m) (:name method-def))
+                                           (= (alength (.getParameterTypes m)) arity)
+                                           (not (java.lang.reflect.Modifier/isStatic mods))
+                                           (not (java.lang.reflect.Modifier/isFinal mods))))))
+                          (map (fn [^java.lang.reflect.Method m]
+                                 {:key [(.getName m) (Type/getMethodDescriptor m)]
+                                  :java-name (.getName m)
+                                  :descriptor (Type/getMethodDescriptor m)
+                                  :target-method-name (lowered-instance-method-name method-def)
+                                  :param-classes (vec (.getParameterTypes m))
+                                  :return-class (.getReturnType m)
+                                  :param-nex-kinds (mapv (fn [{:keys [type]}]
+                                                           (bridge-jvm-kind (resolve-jvm-type env type)))
+                                                         (:params method-def))
+                                  :return-nex-kind (bridge-jvm-kind
+                                                    (resolve-jvm-type env (function-return-type method-def)))}))))))
+         (map (fn [b] [(:key b) b]))
+         (into {})
+         vals
+         (mapv #(dissoc % :key)))))
 
 (defn- assert-distinct-lowered-methods!
   "Nex mangles routine and constructor names by name+arity, so two of them that
@@ -4755,9 +5316,15 @@
         fields (mapv (fn [field]
                        {:name (:name field)
                         :nex-type (:field-type field)
-                        :jvm-type (resolve-jvm-type {:compiled-classes compiled-classes
-                                                     :generic-param-names (set (map :name (:generic-params class-def)))}
-                                                    (:field-type field))})
+                        ;; Must resolve through `env` (not a minimal ad-hoc map),
+                        ;; since an imported-Java-typed field (e.g. `label:
+                        ;; JLabel`) needs :imports to qualify to its real
+                        ;; internal name (javax/swing/JLabel) — without it,
+                        ;; resolve-jvm-type falls through to treating the bare
+                        ;; Nex-source name as an unqualified internal class
+                        ;; name, emitting a field descriptor the JVM can never
+                        ;; resolve (NoClassDefFoundError: JLabel at link time).
+                        :jvm-type (resolve-jvm-type env (:field-type field))})
                      (remove :constant? (class-fields class-def)))
         runtime-type-fields (mapv (fn [{:keys [name]}]
                                     {:name (generic-runtime-field-name name)
@@ -4779,9 +5346,10 @@
                                              (infer-type constant-env (:value field)))]
                             {:name (:name field)
                              :nex-type nex-type
-                             :jvm-type (resolve-jvm-type {:compiled-classes compiled-classes
-                                                         :generic-param-names (set (map :name (:generic-params class-def)))}
-                                                        nex-type)
+                             ;; Same fix as `fields` above: resolve through
+                             ;; constant-env (which has :imports), not a
+                             ;; minimal map missing it.
+                             :jvm-type (resolve-jvm-type constant-env nex-type)
                              :value (lower-expression constant-env (:value field))}))
                         (filter :constant? (class-fields class-def)))]
     {:name class-name
@@ -4796,6 +5364,15 @@
                                   :deferred? deferred?
                                   :jvm-type (exact-class-jvm-type {:compiled-classes compiled-classes} nex-name)})
                                (resolve-parent-metas env class-def))
+     :interfaces (mapv (fn [^Class klass] (desc/internal-class-name (.getName klass)))
+                       (java-interface-parents env class-def))
+     :java-super-class (when-let [{:keys [^Class klass]} (java-superclass-parent env class-def)]
+                         (desc/internal-class-name (.getName klass)))
+     :java-bridge-methods (into (java-interface-bridge-methods env class-def
+                                                                (java-interface-parents env class-def))
+                                (java-superclass-override-bridge-methods
+                                 env class-def
+                                 (:klass (java-superclass-parent env class-def))))
      :fields fields
      :runtime-type-fields runtime-type-fields
      :constants constants

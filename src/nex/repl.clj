@@ -1444,9 +1444,16 @@
             ;; aliases; the current cell's are recorded further below.
             ast (inject-session-refinements ast @*repl-type-aliases*)]
         (sync-compiled-session-into-interpreter! exec-ctx)
-        ;; Persist any type aliases declared in this input so later REPL lines
-        ;; (and the type checker) can resolve them by name.
-        (doseq [alias (:type-aliases ast)]
+        ;; Persist any type aliases declared in this input — directly, or via
+        ;; an `intern` this input brings into scope — so later REPL lines (and
+        ;; the type checker) can resolve them by name. Without the interned
+        ;; half, a refinement type declared in an interned file (rather than
+        ;; typed directly at the REPL) type-checked as an outright "Undefined
+        ;; type" everywhere it was used, since *repl-type-aliases* — the only
+        ;; thing augmented-ast's own :type-aliases is built from, further
+        ;; below — was never populated from it.
+        (doseq [alias (concat (interp/resolve-interned-type-aliases source-id ast)
+                              (:type-aliases ast))]
           (swap! *repl-type-aliases* assoc (:name alias) alias))
         ;; Type check if enabled
         (when (and @*type-checking-enabled*

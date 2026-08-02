@@ -1,0 +1,29 @@
+-- Is 06g's link failure Swing-specific, or does ANY imported-Java-typed
+-- field on a Nex class fail to link on the JVM backend? Using
+-- java.lang.StringBuilder instead of JLabel to check.
+
+import java.lang.StringBuilder
+
+class Builder_Holder
+  create
+    make() do
+      this.sb := StringBuilder.new()
+    end
+  feature
+    sb: StringBuilder
+
+    append(s: String) do
+      sb.append(s)
+    end
+end
+
+function run() do
+  with "java" do
+    let holder: Builder_Holder := create Builder_Holder.make()
+    holder.append("a")
+    holder.append("b")
+    print("result=" + holder.sb.toString())
+  end
+end
+
+run()

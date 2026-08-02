@@ -71,6 +71,16 @@ Notes:
 - `list()` returns immediate children
 - text I/O uses UTF-8
 
+**A bare relative path resolves against the `nex` CLI's own install directory, not the directory you ran it from.** `nex script.nex` (`bin/nex`) `cd`s into `$NEX_HOME` before starting the JVM, so `create Path.make("data.txt")` inside `script.nex` resolves `"data.txt"` relative to `$NEX_HOME`, not your shell's current directory — a program that works when you happen to run it from inside the Nex install, and silently reads/writes the wrong file (or reports "does not exist") everywhere else. The launcher does export `NEX_USER_DIR` — your original directory — as an environment variable before the `cd`, but `Path` itself does not currently consult it automatically. Workaround: read it yourself and build an absolute path from it:
+
+```nex
+intern io/Path
+
+let p := create Process
+let base: String := p.getenv("NEX_USER_DIR")
+let file: Path := create Path.make(base + "/data.txt")
+```
+
 Example:
 
 ```nex

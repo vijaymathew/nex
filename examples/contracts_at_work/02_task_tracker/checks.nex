@@ -1,0 +1,91 @@
+-- Executable checks for Task and Task_Store. Run: nex checks.nex
+
+intern Task
+intern Task_Store
+
+class Checker
+  create
+    make() do
+      passed := 0
+      failed := 0
+    end
+  feature
+    passed: Integer
+    failed: Integer
+
+    check(label: String, expected: String, actual: String) do
+      if expected = actual then
+        passed := passed + 1
+        print("PASS " + label)
+      else
+        failed := failed + 1
+        print("FAIL " + label + " expected=" + expected + " actual=" + actual)
+      end
+    end
+
+    summary() do
+      print("---")
+      print("" + passed + " passed, " + failed + " failed")
+    end
+end
+
+let c: Checker := create Checker.make()
+
+let store: Task_Store := create Task_Store.make()
+let id1: Integer := store.add("buy milk", 3)
+let id2: Integer := store.add("write chapter", 1)
+c.check("two tasks added", "2", "" + store.tasks.length)
+c.check("ids assigned", "1,2", id1 + "," + id2)
+
+c.check("mark_done ok", "true", "" + store.mark_done(2))
+c.check("mark_done missing", "false", "" + store.mark_done(99))
+
+let looked_up: ?Task := store.find(2)
+if looked_up /= nil then
+  c.check("t2 is done", "true", "" + looked_up.is_done())
+else
+  c.check("t2 found", "true", "false")
+end
+let looked_up1: ?Task := store.find(1)
+if looked_up1 /= nil then
+  c.check("t1 not done", "false", "" + looked_up1.is_done())
+else
+  c.check("t1 found", "true", "false")
+end
+
+c.check("remove ok", "true", "" + store.remove(1))
+c.check("remove missing", "false", "" + store.remove(1))
+c.check("one task left", "1", "" + store.tasks.length)
+
+-- Round trip: serialize the current store, load it into a fresh one.
+let json_text: String := store.to_json()
+let reloaded: Task_Store := create Task_Store.make()
+reloaded.parse_json(json_text)
+c.check("round trip count", "1", "" + reloaded.tasks.length)
+c.check("round trip task text", "write chapter", reloaded.tasks.get(0).text)
+c.check("round trip status survives", "true", "" + reloaded.tasks.get(0).is_done())
+c.check("round trip priority survives", "1", "" + reloaded.tasks.get(0).priority)
+
+-- Schema migration: a version-1 file (bare array, boolean `done`, no priority).
+let legacy_json: String := "[{\"id\":5,\"text\":\"legacy task\",\"done\":true}," +
+                            "{\"id\":7,\"text\":\"legacy open task\",\"done\":false}]"
+let migrated: Task_Store := create Task_Store.make()
+migrated.parse_json(legacy_json)
+c.check("migrated count", "2", "" + migrated.tasks.length)
+
+let m5: ?Task := migrated.find(5)
+let m7: ?Task := migrated.find(7)
+if m5 /= nil then
+  c.check("migrated done task", "true", "" + m5.is_done())
+  c.check("migrated default priority", "3", "" + m5.priority)
+else
+  c.check("migrated task 5 found", "true", "false")
+end
+if m7 /= nil then
+  c.check("migrated open task", "false", "" + m7.is_done())
+else
+  c.check("migrated task 7 found", "true", "false")
+end
+c.check("migrated next_id", "8", "" + migrated.next_id)
+
+c.summary()

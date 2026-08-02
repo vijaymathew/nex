@@ -1,0 +1,96 @@
+-- calc_service: an HTTP JSON API embedding Project 4's expression
+-- interpreter. POST /evaluate with {"expr": "1 + x", "vars": {"x": 2}}
+-- returns {"result": 3.0}, or {"error": "..."} with a 400 status when the
+-- expression is malformed or violates one of evaluate's own contracts
+-- (division by zero, an undefined variable). The interpreter (expr.nex)
+-- doesn't know it's being called over HTTP at all — request parsing and
+-- the wire format live entirely in this file.
+--
+-- Runs on the default JVM backend. Request handling lives on Calc_Service
+-- itself as ordinary methods, and the route closure calls `this.handle_
+-- evaluate(req)` directly — this used to be impossible (a closure passed
+-- as a callback, `fn` or `spawn do...end` alike, couldn't call a method on
+-- the enclosing object, forcing everything through free functions and
+-- captured locals instead), fixed upstream. See the book's top-level
+-- issues report.
+
+intern net/Http_Server
+intern data/Json
+intern Expr
+
+class Calc_Service
+  create
+    make(port: Integer) do
+      this.server := create Http_Server.make(port)
+      this.json := create Json.make()
+      server.post("/evaluate", fn(req: Http_Request): Http_Server_Response do
+        result := this.handle_evaluate(req)
+      end)
+    end
+  feature
+    server: Http_Server
+    json: Json
+
+    json_response(status_code: Integer, payload: Map[String, Any]): Http_Server_Response do
+      let headers: Map[String, String] := {}
+      headers.set("Content-Type", "application/json")
+      result := create Http_Server_Response.make(status_code, json.stringify(payload), headers)
+    end
+
+    -- JSON integers parse as Integer, JSON decimals as Real; evaluate wants
+    -- Real either way.
+    to_real_any(v: Any): Real do
+      if type_is("Integer", v) then
+        let n: Integer := v
+        result := n.to_real()
+      else
+        result := v
+      end
+    end
+
+    parse_vars(body: Map[String, Any]): Map[String, Real] do
+      result := {}
+      if body.contains_key("vars") then
+        let raw_vars: Map[String, Any] := body.get("vars")
+        let names: Array[String] := raw_vars.keys()
+        let i: Integer := 0
+        from
+          i := 0
+        until
+          i = names.length
+        do
+          let name: String := names.get(i)
+          result.set(name, to_real_any(raw_vars.get(name)))
+          i := i + 1
+        end
+      end
+    end
+
+    handle_evaluate(req: Http_Request): Http_Server_Response do
+      do
+        let body: Map[String, Any] := json.parse(req.body())
+        let expr_text: String := body.get("expr")
+        let vars: Map[String, Real] := parse_vars(body)
+        let value: Real := evaluate(expr_text, vars)
+        let payload: Map[String, Any] := {}
+        payload.set("result", value)
+        result := json_response(200, payload)
+      rescue
+        let payload: Map[String, Any] := {}
+        payload.set("error", "" + exception)
+        result := json_response(400, payload)
+      end
+    end
+
+    start() do
+      server.start()
+    end
+
+    stop() do
+      server.stop()
+    end
+
+    port(): Integer do
+      result := server.port
+    end
+end

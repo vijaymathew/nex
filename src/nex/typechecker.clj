@@ -937,6 +937,7 @@
 (declare check-expression)
 (declare collect-class-info)
 (declare check-class)
+(declare check-method)
 (declare convert-guard-binding)
 (declare convert-guard-bindings)
 (declare resolve-generic-type)
@@ -1115,6 +1116,101 @@
                                (:params signature)))
               signature))
           (reflected-java-method-signatures env class-name method-name (count arg-types) static?))))
+
+(defn- class-java-superclass-name
+  "The name of the concrete Java class CLASS-NAME (or one of its Nex
+   ancestors) extends via `inherit` (Phase 2, docs/proposals/java-interop.md),
+   or nil. At most one exists anywhere in the chain — check-inheritance
+   enforces that the JVM's single-inheritance rule holds."
+  [env class-name]
+  (letfn [(walk [cn visited]
+            (when (and cn (not (contains? visited cn)))
+              (when-let [class-def (env-lookup-class env cn)]
+                (let [visited' (conj visited cn)]
+                  (some (fn [{:keys [parent]}]
+                          (let [parent-def (env-lookup-class env parent)
+                                real-nex-class? (and parent-def (not (:import parent-def)))]
+                            (if real-nex-class?
+                              (walk parent visited')
+                              (when-let [^Class klass (resolve-imported-java-class env parent)]
+                                (when-not (.isInterface klass) parent)))))
+                        (:parents class-def))))))]
+    (walk class-name #{})))
+
+(defn- reflected-java-constructor-arities
+  "The arities of KLASS's public constructors — used by
+   check-java-super-constructor-call, at the same name+arity precision as the
+   rest of Phase 1/2's Java-interop checks (no full per-argument type
+   verification, matching the settled simplification for interface method
+   coverage)."
+  [^Class klass]
+  (->> (.getConstructors klass)
+       (filter #(java.lang.reflect.Modifier/isPublic (.getModifiers ^java.lang.reflect.Constructor %)))
+       (map #(alength (.getParameterTypes ^java.lang.reflect.Constructor %)))
+       set))
+
+(defn- java-super-constructor-call?
+  "True when STMT is `super.new(args)` or `<JavaSuperclassName>.new(args)` —
+   the reserved selector (docs/proposals/java-interop.md) for forwarding to a
+   Java superclass's real constructor."
+  [super-name stmt]
+  (and (map? stmt)
+       (= :call (:type stmt))
+       (= "new" (:method stmt))
+       (or (and (map? (:target stmt)) (= :super (:type (:target stmt))))
+           (= super-name (:target stmt)))))
+
+(defn- check-java-super-constructor-call
+  "For a class extending a concrete Java class, each constructor must open
+   with exactly one super.new(args)/<JavaClassName>.new(args) call, matching
+   one of the Java class's public constructors by arity — or, if omitted, the
+   Java class must have a public no-arg constructor (mirroring javac's own
+   implicit super()). The JVM requires the superclass constructor to run
+   before `this` is touched at all, hence the first-statement requirement."
+  [env class-name constructors]
+  (when-let [super-name (class-java-superclass-name env class-name)]
+    (let [^Class klass (resolve-imported-java-class env super-name)
+          valid-arities (reflected-java-constructor-arities klass)
+          ;; A class with no explicit `create` block still needs a Java
+          ;; super-constructor call to exist somewhere (implicitly, if the
+          ;; Java class has a no-arg constructor) — checked as if there were
+          ;; one constructor with an empty body.
+          ctors (if (seq constructors) constructors [{:name "make" :body [] :params []}])]
+      (doseq [{ctor-name :name ctor-body :body ctor-params :params} ctors]
+        (let [first-stmt (first ctor-body)
+              ;; A fresh per-constructor env with its own params bound, mirroring
+              ;; check-constructor's own ctor-env — super.new(...)'s arguments may
+              ;; reference the constructor's parameters (the common case: forwarding
+              ;; a Nex constructor arg straight into the Java super-constructor).
+              ctor-env (make-type-env env)]
+          (doseq [param ctor-params]
+            (env-add-var ctor-env (:name param) (or (:type param) "Any")))
+          (cond
+            (java-super-constructor-call? super-name first-stmt)
+            (let [arg-types (mapv #(check-expression ctor-env %) (:args first-stmt))]
+              (when-not (contains? valid-arities (count arg-types))
+                (throw (ex-info (str "No matching constructor for " super-name)
+                                {:error (type-error
+                                         (str class-name "'s super.new(...) call in " ctor-name
+                                              " passes " (count arg-types) " argument(s); " super-name
+                                              " has no public constructor of that arity."))}))))
+
+            (some #(java-super-constructor-call? super-name %) ctor-body)
+            (throw (ex-info (str "super.new(...) must be the first statement in " ctor-name)
+                            {:error (type-error
+                                     (str "In " class-name "." ctor-name ": the call to " super-name
+                                          "'s constructor (super.new(...) or " super-name ".new(...)) "
+                                          "must be the first statement — the JVM requires the "
+                                          "superclass constructor to run before `this` is touched "
+                                          "at all."))}))
+
+            :else
+            (when-not (contains? valid-arities 0)
+              (throw (ex-info (str class-name "." ctor-name " must call " super-name "'s constructor")
+                              {:error (type-error
+                                       (str class-name "." ctor-name " must open with super.new(...) "
+                                            "or " super-name ".new(...): " super-name " has no public "
+                                            "no-arg constructor to call implicitly."))})))))))))
 
 (defn lookup-class-field
   "Look up a field on a class and its parent chain."
@@ -2101,12 +2197,27 @@
           (if-let [field-member (and (false? has-parens)
                                      (lookup-class-field-member env base-type method current-class))]
             (resolve-generic-type (:field-type field-member) {})
-            (do
-              (doseq [arg args] (check-expression env arg))
-              (let [msg (str "Method not found: " method " on " base-type
-                             ". `super` only reaches " base-type
-                             "'s own features and constructor.")]
-                (throw (ex-info msg {:error (type-error msg)})))))))
+            ;; base-type names no Nex-declared member here — it may instead be
+            ;; a Java interface/class parent (docs/proposals/java-interop.md,
+            ;; Phase 2). `new` is the super-constructor selector
+            ;; (super.new(args), validated separately against the Java
+            ;; class's reflected constructors by
+            ;; check-java-super-constructor-call); any other name may be a
+            ;; real inherited Java method this override calls through to
+            ;; (e.g. `super.paintComponent(g)`).
+            (let [arg-types (mapv #(check-expression env %) args)]
+              (cond
+                (= method "new")
+                "Any"
+
+                (reflected-java-method-signature env base-type method arg-types false)
+                (:return-type (reflected-java-method-signature env base-type method arg-types false))
+
+                :else
+                (let [msg (str "Method not found: " method " on " base-type
+                               ". `super` only reaches " base-type
+                               "'s own features and constructor.")]
+                  (throw (ex-info msg {:error (type-error msg)}))))))))
 
       across-item-type
       (case method
@@ -2189,7 +2300,15 @@
           (check-call-signature env method args method-sig
                                 (member-type-map env target-type type-map method-sig))
           (let [arg-types (mapv #(check-expression env %) args)]
-            (if-let [java-method-sig (reflected-java-method-signature env base-type method arg-types class-target)]
+            ;; A method not declared/inherited anywhere in the Nex chain may
+            ;; still be a real, inherited (non-overridden) member of a Java
+            ;; class this class `extends` (Phase 2, docs/proposals/
+            ;; java-interop.md) — e.g. `t.start()` on a class inheriting
+            ;; Thread. Tried after base-type's own reflection (the ordinary
+            ;; "bare imported Java object" case) so neither shadows the other.
+            (if-let [java-method-sig (or (reflected-java-method-signature env base-type method arg-types class-target)
+                                         (when-let [super-name (class-java-superclass-name env base-type)]
+                                           (reflected-java-method-signature env super-name method arg-types false)))]
               (check-call-signature env method args java-method-sig {} :arg-types arg-types)
               (if (false? has-parens)
                 (if-let [field-member (lookup-class-field-member env base-type method current-class)]
@@ -3062,11 +3181,33 @@
           :array-literal (check-array-literal env expr)
           :set-literal (check-set-literal env expr)
           :map-literal (check-map-literal env expr)
-          :anonymous-function (let [class-def (:class-def expr)]
+          :anonymous-function (let [class-def (:class-def expr)
+                                    ;; Written inside an instance method, this
+                                    ;; literal's `this`/bare field or method
+                                    ;; access means the *enclosing* class's, not
+                                    ;; the synthetic AnonymousFunction_N's own
+                                    ;; (which has none of those members) — a
+                                    ;; plain independent check-class scopes
+                                    ;; __current_class__ to the synthetic class
+                                    ;; and rejects it as "Method not found".
+                                    ;; check-method already takes class-name as
+                                    ;; a parameter distinct from the env it
+                                    ;; extends, so checking the callN body
+                                    ;; directly under the enclosing class's name
+                                    ;; (exactly as check-spawn already does for
+                                    ;; a spawn body, by simply not overriding
+                                    ;; __current_class__ at all) resolves this
+                                    ;; with no new machinery.
+                                    enclosing-class (env-lookup-var env "__current_class__")]
                                 ;; Register the dynamic class definition in the type environment
                                 (collect-class-info env class-def)
-                                ;; Check the class (this will check the callN method body)
-                                (check-class env class-def)
+                                (if enclosing-class
+                                  (check-method env enclosing-class
+                                                (some #(when (= :method (:type %)) %)
+                                                      (feature-members class-def)))
+                                  ;; No enclosing class (a top-level anonymous
+                                  ;; function): check the class as before.
+                                  (check-class env class-def))
                                 ;; Anonymous functions have distinct generated runtime classes,
                                 ;; but their stable static type is Function.
                                 "Function")
@@ -4081,6 +4222,91 @@
                        {:params (:params ctor)
                         :return-type name})))))
 
+(defn- java-type-parent
+  "The reflected Class for parent-name, when it names an imported Java type
+   (interface or class) rather than a Nex class. Nil for a Nex class or an
+   unresolvable name. resolve-imported-java-class already returns nil for a
+   real Nex class (its class-def has no :import and its bare name has no
+   dot), so no extra guard is needed here."
+  [env parent-name]
+  (resolve-imported-java-class env parent-name))
+
+(def ^:private object-instance-methods
+  "[name arity] of java.lang.Object's own public instance methods. Some
+   interfaces (Comparator is the standard example) redeclare equals(Object)
+   purely for documentation; reflection reports it as abstract on the
+   interface, but javac never requires an implementor to write it, since
+   every class already inherits a concrete equals from Object regardless of
+   what the interface says. Excluded here for the same reason."
+  #{["equals" 1] ["hashCode" 0] ["toString" 0]})
+
+(defn- java-interface-abstract-methods
+  "[name arity] pairs for KLASS's abstract instance methods — the members a
+   Nex class inheriting this interface/class must provide. Every non-default,
+   non-static interface method is necessarily abstract, which is why Phase
+   1 (interfaces only) worked without an explicit Modifier/isAbstract check —
+   but Phase 2 also reflects concrete Java classes, whose non-static methods
+   are mostly *not* abstract (Thread has none), so the check is required here
+   to avoid demanding an override of every inherited concrete method. Also
+   excludes Object's own methods (always already provided, see
+   object-instance-methods)."
+  [^Class klass]
+  (->> (.getMethods klass)
+       (remove (fn [^java.lang.reflect.Method m]
+                 (let [mods (.getModifiers m)]
+                   (or (.isDefault m)
+                       (java.lang.reflect.Modifier/isStatic mods)
+                       (not (java.lang.reflect.Modifier/isAbstract mods))))))
+       (map (fn [^java.lang.reflect.Method m]
+              [(.getName m) (alength (.getParameterTypes m))]))
+       (remove object-instance-methods)
+       distinct))
+
+(defn- class-provides-method?
+  "True when CLASS-NAME declares, or inherits through its Nex parent chain, a
+   method member named METHOD-NAME with exactly ARITY params. Java-interface/
+   -class parents contribute nothing here (they have no Nex feature members);
+   only the Nex side of the inheritance chain is walked."
+  [env class-name method-name arity]
+  (letfn [(walk [cn visited]
+            (when (and cn (not (contains? visited cn)))
+              (when-let [class-def (env-lookup-class env cn)]
+                (or (some (fn [m]
+                            (and (= (:type m) :method)
+                                 (= (:name m) method-name)
+                                 (= (count (or (:params m) [])) arity)))
+                          (feature-members class-def))
+                    (some (fn [{:keys [parent]}] (walk parent (conj visited cn)))
+                          (:parents class-def))))))]
+    (boolean (walk class-name #{}))))
+
+(defn- check-java-interface-conformance
+  "For each `inherit` entry that resolves to an imported Java type — an
+   interface (Phase 1) or a concrete/abstract class (Phase 2) — require the
+   class to provide every abstract method the Java type declares, matched by
+   exact Java name and arity (see the java-interop proposal's settled naming
+   convention — no snake_case/camelCase bridging). A no-op for a concrete
+   class with no abstract methods (Thread, JFrame, ...) — the vast majority
+   of Phase 2's use cases."
+  [env class-name parents]
+  (doseq [{:keys [parent]} parents]
+    (when-let [^Class klass (java-type-parent env parent)]
+      (let [missing (->> (java-interface-abstract-methods klass)
+                         (remove (fn [[m-name arity]]
+                                   (class-provides-method? env class-name m-name arity))))]
+        (when (seq missing)
+          (throw (ex-info (str "Class " class-name " does not implement " parent)
+                          {:error (type-error
+                                   (str "Class " class-name " inherits " parent
+                                        " but does not implement its abstract member(s): "
+                                        (str/join ", "
+                                                  (map (fn [[m-name arity]]
+                                                         (str m-name "(" arity
+                                                              (if (= arity 1) " arg)" " args)")))
+                                                       missing))
+                                        ". Declare a method with the exact Java name and arity"
+                                        " for each."))})))))))
+
 (defn check-inheritance
   "Check that inheritance declarations are valid"
   [env class-name parents]
@@ -4101,11 +4327,17 @@
                                   (:parents class-def))))))]
               (visit start-parent [class-name] #{class-name})))]
   (doseq [{:keys [parent]} parents]
-    ;; Check that parent class exists
-    (when-not (or (env-lookup-class env parent) (builtin-type? parent))
-      (throw (ex-info (str "Parent class " parent " not found for class " class-name)
-                      {:error (type-error
-                               (str "Undefined parent class: " parent))})))
+    ;; Check that parent class exists: a Nex class, a builtin, or an imported
+    ;; Java interface or class (docs/proposals/java-interop.md). The
+    ;; at-most-one-concrete-Java-class constraint (JVM single inheritance) is
+    ;; checked once below, across the whole parents list, not per entry here.
+    (let [parent-def (env-lookup-class env parent)
+          real-nex-class? (and parent-def (not (:import parent-def)))
+          java-class (when-not real-nex-class? (resolve-imported-java-class env parent))]
+      (when-not (or real-nex-class? (builtin-type? parent) java-class)
+        (throw (ex-info (str "Parent class " parent " not found for class " class-name)
+                        {:error (type-error
+                                 (str "Undefined parent class: " parent))}))))
     (when (= parent class-name)
       (throw (ex-info (str "Class " class-name " cannot inherit from itself")
                       {:error (type-error
@@ -4114,7 +4346,22 @@
       (throw (ex-info (str "Cyclic inheritance detected: " (str/join " -> " path))
                       {:error (type-error
                                (str "Cyclic inheritance detected: "
-                                    (str/join " -> " path)))}))))))
+                                    (str/join " -> " path)))}))))
+  (let [concrete-java-parents (->> parents
+                                   (map :parent)
+                                   (filter (fn [parent]
+                                             (let [parent-def (env-lookup-class env parent)
+                                                   real-nex-class? (and parent-def (not (:import parent-def)))]
+                                               (when-let [^Class klass (and (not real-nex-class?)
+                                                                            (resolve-imported-java-class env parent))]
+                                                 (not (.isInterface klass)))))))]
+    (when (< 1 (count concrete-java-parents))
+      (throw (ex-info (str "Class " class-name " cannot extend more than one Java class")
+                      {:error (type-error
+                               (str "Class " class-name " inherits more than one concrete Java class ("
+                                    (str/join ", " concrete-java-parents)
+                                    ") — the JVM allows extending only one."))}))))
+  (check-java-interface-conformance env class-name parents)))
 
 (defn- substitute-method-types
   "Apply a generic substitution map to a method member's parameter and return
@@ -4323,7 +4570,11 @@
                                   "match over its subclasses would not cover a bare " name " value."))})))
   ;; Check inheritance
   (when parents
-    (check-inheritance env name parents))
+    (check-inheritance env name parents)
+    (check-java-super-constructor-call env name
+                                       (->> body
+                                            (filter #(= :constructors (:type %)))
+                                            (mapcat :constructors))))
 
   ;; Check invariants
   (doseq [assertion invariant]

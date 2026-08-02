@@ -1,0 +1,61 @@
+-- Real ActionListener implementations for the dashboard client — event
+-- capture only, same split as Project 8: these never touch a widget or an
+-- HTTP client, only Radar_Dashboard_State. The poll loop in
+-- radar_dashboard_main.nex is the only code that performs I/O or renders.
+
+import java.awt.event.ActionListener
+import java.awt.event.ActionEvent
+
+intern Radar_Dashboard_State
+
+-- Anchor class — see Project 5/8's READMEs: `intern <Name>` needs a
+-- top-level declaration literally named <Name> in the matching file.
+class Radar_Dashboard_Listeners
+  create
+    make() do end
+end
+
+class Refresh_Listener
+  inherit
+    ActionListener
+  create
+    make(state: Radar_Dashboard_State) do
+      this.state := state
+    end
+  feature
+    state: Radar_Dashboard_State
+
+    actionPerformed(e: ActionEvent) do
+      state.request_refresh()
+    end
+end
+
+class Rescan_Listener
+  inherit
+    ActionListener
+  create
+    make(state: Radar_Dashboard_State) do
+      this.state := state
+    end
+  feature
+    state: Radar_Dashboard_State
+
+    actionPerformed(e: ActionEvent) do
+      state.request_rescan()
+    end
+end
+
+class Dashboard_Quit_Listener
+  inherit
+    ActionListener
+  create
+    make(state: Radar_Dashboard_State) do
+      this.state := state
+    end
+  feature
+    state: Radar_Dashboard_State
+
+    actionPerformed(e: ActionEvent) do
+      state.request_quit()
+    end
+end

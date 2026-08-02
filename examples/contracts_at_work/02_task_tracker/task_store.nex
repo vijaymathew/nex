@@ -1,0 +1,226 @@
+-- Task_Store: an in-memory collection of tasks, with JSON (de)serialization
+-- kept separate from file I/O. `to_json`/`parse_json` are pure — testable
+-- without touching a filesystem — and `save_to`/`load_from` are the only
+-- methods that know a `Path` exists. Current schema is version 2:
+--
+--   {"schema_version": 2, "tasks": [{"id":1,"text":"...","priority":3,"status":"open"}, ...]}
+--
+-- Schema version 1 (no wrapper object, no priority, boolean instead of a
+-- status string) is still readable and migrated on load:
+--
+--   [{"id":1,"text":"...","done":false}, ...]
+
+intern Task
+intern data/Json
+intern io/Path
+
+class Task_Store
+  create
+    make() do
+      tasks := []
+      next_id := 1
+    end
+  feature
+    tasks: Array[Task]
+    next_id: Integer
+
+    -- Returns the new task's id, not the `Task` object itself. This used
+    -- to be a workaround (an interpreter bug meant an object both stored
+    -- in an array and returned from a method could stop sharing identity
+    -- with the stored copy once mutated — since fixed upstream), but it's
+    -- kept on its own merits: the store stays the single source of truth
+    -- instead of handing out a reference a caller could let go stale.
+    add(text: String, priority: Priority): Integer
+      require
+        non_empty: text /= ""
+      do
+        let t: Task := create Task.make(next_id, text, priority)
+        tasks.add(t)
+        result := next_id
+        next_id := next_id + 1
+      ensure
+        grew: tasks.length = old tasks.length + 1
+      end
+
+    find(id: Integer): ?Task do
+      let i: Integer := 0
+      result := nil
+      from
+        i := 0
+      until
+        i = tasks.length
+      do
+        if tasks.get(i).id = id then
+          result := tasks.get(i)
+        end
+        i := i + 1
+      end
+    end
+
+    mark_done(id: Integer): Boolean do
+      let t: ?Task := find(id)
+      if t = nil then
+        result := false
+      else
+        t.mark_done()
+        result := true
+      end
+    end
+
+    remove(id: Integer): Boolean do
+      let i: Integer := 0
+      result := false
+      from
+        i := 0
+      until
+        i = tasks.length
+      do
+        if tasks.get(i).id = id then
+          tasks.remove(i)
+          result := true
+          i := tasks.length
+        else
+          i := i + 1
+        end
+      end
+    end
+
+    -- Pure serialization: no file I/O, so it's testable on its own.
+    --
+    -- Schema version 2 is one JSON object per line: a header line, then one
+    -- task per line, rather than a single `{"schema_version":2,"tasks":[...]}`
+    -- document. This started as a workaround for a JVM-backend bug where an
+    -- array nested inside a parsed JSON object broke on extraction — since
+    -- fixed upstream (see the book's top-level issues report) — but is kept
+    -- on its own merits: a flat, one-record-per-line format is easy to
+    -- append to and easy to diff, which a save-on-every-change task store
+    -- benefits from regardless of which bugs are or aren't present.
+    to_json(): String do
+      let json: Json := create Json.make()
+      let header: Map[String, Any] := {}
+      header.set("schema_version", 2)
+      let lines: Array[String] := [json.stringify(header)]
+
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i = tasks.length
+      do
+        let t: Task := tasks.get(i)
+        let status_text: String := "open"
+        if t.is_done() then
+          status_text := "done"
+        end
+        let m: Map[String, Any] := {}
+        m.set("id", t.id)
+        m.set("text", t.text)
+        m.set("priority", t.priority)
+        m.set("status", status_text)
+        lines.add(json.stringify(m))
+        i := i + 1
+      end
+
+      result := lines.get(0)
+      i := 1
+      from
+        i := 1
+      until
+        i = lines.length
+      do
+        result := result + "\n" + lines.get(i)
+        i := i + 1
+      end
+    end
+
+    -- Pure deserialization, migrating schema version 1 on the way in.
+    -- Schema version 1 was a single bare JSON array for the whole file
+    -- (`[{"id":1,...}, ...]`) — a *top-level* array, which parses fine on
+    -- both backends.
+    --
+    -- `rows` is `Array[Any]`, not the more precise `Array[Map[String,
+    -- Any]]`: on the JVM backend, storing a json.parse-produced Map into a
+    -- specifically Map[String, Any]-typed array still breaks a method call
+    -- on retrieval, even though the same Map works fine as a plain local or
+    -- in an Array[Any] — a narrower survival of the data/Json compiled-
+    -- backend bug (see the book's top-level issues report). Each element is
+    -- cast back to Map[String, Any] via an ordinary `let` the moment it's
+    -- read out, which works fine.
+    parse_json(text: String) do
+      let json: Json := create Json.make()
+      let trimmed: String := text.trim()
+
+      let rows: Array[Any] := []
+      if trimmed.starts_with("[") then
+        -- schema version 1: one JSON document, a bare top-level array.
+        let items: Array[Any] := json.parse(trimmed)
+        let i: Integer := 0
+        from
+          i := 0
+        until
+          i = items.length
+        do
+          rows.add(items.get(i))
+          i := i + 1
+        end
+      else
+        -- schema version 2: one JSON object per line; skip the header line.
+        let lines: Array[String] := trimmed.split("\n")
+        let i: Integer := 0
+        from
+          i := 0
+        until
+          i = lines.length
+        do
+          let line: String := lines.get(i).trim()
+          if line /= "" then
+            let m: Map[String, Any] := json.parse(line)
+            if not m.contains_key("schema_version") then
+              rows.add(m)
+            end
+          end
+          i := i + 1
+        end
+      end
+
+      tasks := []
+      next_id := 1
+      let i: Integer := 0
+      from
+        i := 0
+      until
+        i = rows.length
+      do
+        let m: Map[String, Any] := rows.get(i)
+        let id: Integer := m.get("id")
+        let item_text: String := m.get("text")
+        let priority: Integer := m.try_get("priority", 3)
+        let done: Boolean := false
+        if m.contains_key("status") then
+          done := (m.get("status") = "done")
+        elseif m.contains_key("done") then
+          done := m.get("done")
+        end
+
+        let t: Task := create Task.make(id, item_text, priority)
+        if done then
+          t.mark_done()
+        end
+        tasks.add(t)
+        if id >= next_id then
+          next_id := id + 1
+        end
+        i := i + 1
+      end
+    end
+
+    save_to(path: Path) do
+      path.write_text(to_json())
+    end
+
+    load_from(path: Path) do
+      if path.exists() then
+        parse_json(path.read_text())
+      end
+    end
+end

@@ -155,6 +155,8 @@ by contrast, raises.)
 
 ## `Char`
 
+A `Char` literal is `#` followed by either a letter/symbol (`#a`, `#Z`, `#!`), one of the named controls `#nul`, `#space`, `#newline`, `#tab`, `#return`, or a run of digits — but that digit form is a **Unicode code point**, not the digit character itself: `#65` is `#A` (ASCII 65), and `#c` is the letter `c`. This means `#0` through `#9` name the ASCII *control* codes 0–9 (`#9` is a tab, `#0` is NUL), not the glyphs `'0'`–`'9'` — there is no bare literal for a digit glyph; write its code point instead (`#48` for `'0'` through `#57` for `'9'`), or index into a string (`"0123456789".char_at(9)`).
+
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
 | `to_string` | none | `String` | Convert to one-character string. |

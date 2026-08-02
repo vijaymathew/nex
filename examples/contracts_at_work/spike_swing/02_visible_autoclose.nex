@@ -1,0 +1,35 @@
+-- Spike: does a real, visible JFrame come up, and can we drive it purely
+-- by polling (a loop that sleeps and mutates a label) with no listeners
+-- attached at all? The window disposes itself after a fixed number of
+-- ticks so this can run unattended with a timeout.
+
+import javax.swing.JFrame
+import javax.swing.JLabel
+import java.lang.Thread
+
+function run() do
+  with "java" do
+    let frame: JFrame := JFrame.new("Contracts at Work — Spike")
+    frame.setSize(320, 140)
+    let label: JLabel := JLabel.new("tick 0")
+    frame.getContentPane().add(label)
+    frame.setVisible(true)
+
+    let i: Integer := 0
+    from
+      i := 0
+    until
+      i = 5
+    do
+      Thread.sleep(300)
+      i := i + 1
+      label.setText("tick " + i)
+      print("tick " + i + " label now=" + label.getText())
+    end
+
+    frame.dispose()
+    print("disposed ok")
+  end
+end
+
+run()

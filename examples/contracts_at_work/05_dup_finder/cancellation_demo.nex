@@ -1,0 +1,38 @@
+-- cancellation_demo: illustrates Task.cancel and await(ms) timeout,
+-- standing in for "what happens to in-flight work when the user gives up
+-- waiting" — the same question a real duplicate-file scan over a huge tree
+-- would raise. Small and self-contained on purpose, separate from
+-- dup_finder.nex itself: neither read_text() nor await_all() in this
+-- project's actual code path takes a timeout or a cancel token, so this is
+-- a worked illustration of the mechanism the chapter discusses, not a
+-- feature exercised by find_duplicates.
+
+function main() do
+  -- A task that takes longer than we're willing to wait.
+  let slow: Task[Integer] := spawn do
+    sleep(2000)
+    result := 42
+  end
+
+  let v: ?Integer := slow.await(200)
+  if v = nil then
+    print("timed out waiting; cancelling")
+    let cancelled: Boolean := slow.cancel()
+    print("cancel requested: " + cancelled)
+  else
+    print("got: " + v)
+  end
+
+  -- A task that finishes well within the timeout.
+  let fast: Task[Integer] := spawn do
+    result := 7
+  end
+  let v2: ?Integer := fast.await(500)
+  if v2 /= nil then
+    print("fast task result: " + v2)
+  else
+    print("fast task unexpectedly timed out")
+  end
+end
+
+main()

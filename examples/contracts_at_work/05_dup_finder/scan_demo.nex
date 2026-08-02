@@ -1,0 +1,41 @@
+-- scan_demo: run Dup_Finder against this project's own directory (always
+-- present, so this has something real to scan without setup) and print
+-- what it finds.
+
+intern Dup_Finder
+
+function main() do
+  let proc: Process := create Process
+  let root: String := proc.getenv("NEX_USER_DIR")
+  print("scanning " + root)
+
+  let finder: Dup_Finder := create Dup_Finder.make()
+  let dups: Map[String, Array[String]] := finder.find_duplicates(root)
+
+  if dups.is_empty() then
+    print("no duplicate files found")
+  else
+    let keys: Array[String] := dups.keys()
+    let i: Integer := 0
+    from
+      i := 0
+    until
+      i = keys.length
+    do
+      let paths: Array[String] := dups.get(keys.get(i))
+      print("duplicate group (" + paths.length + " files):")
+      let j: Integer := 0
+      from
+        j := 0
+      until
+        j = paths.length
+      do
+        print("  " + paths.get(j))
+        j := j + 1
+      end
+      i := i + 1
+    end
+  end
+end
+
+main()

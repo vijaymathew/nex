@@ -557,6 +557,14 @@
 
    :Integer
    {"to_string"         (fn [n & _] (str n))
+    ;; The typechecker has always accepted these three (they're registered
+    ;; alongside every other Integer method), but the runtime table never
+    ;; defined them — n.to_real() and kin failed with "Method not found",
+    ;; not a type error. to_integer/to_integer64 are identity: an Integer is
+    ;; already the language's one 64-bit integer type.
+    "to_integer"        (fn [n & _] n)
+    "to_integer64"      (fn [n & _] n)
+    "to_real"           (fn [n & _] (->nex-real n))
     "abs"               (fn [n & _] (if (neg? n) (nex-int-neg n) n))
     "min"               (fn [n other & _] (if (pos? (nex-numeric-compare n other)) other n))
     "max"               (fn [n other & _] (if (neg? (nex-numeric-compare n other)) other n))
@@ -1010,6 +1018,119 @@
          (Class/forName qualified)
          (catch Exception _ nil))))
 
+(defn- class-def-if-exists
+  "Nex class-def lookup mirroring nex.interpreter/lookup-class-if-exists,
+   duplicated here (rather than required) so this namespace stays free of a
+   dependency on nex.interpreter (see the Stage D extraction note above)."
+  [ctx class-name]
+  (or (get @(:classes ctx) class-name)
+      (get @(:specialized-classes ctx) class-name)))
+
+(defn- class-java-interfaces
+  "Reflected Class objects for the Java interfaces CLASS-NAME's `inherit`
+   chain declares, walking through Nex parents (a Java interface parent is a
+   leaf — see docs/proposals/java-interop.md)."
+  [ctx class-name]
+  (letfn [(walk [cn visited]
+            (when-let [class-def (and (not (contains? visited cn))
+                                      (class-def-if-exists ctx cn))]
+              (let [visited' (conj visited cn)]
+                (mapcat (fn [{:keys [parent]}]
+                          (if (class-def-if-exists ctx parent)
+                            (walk parent visited')
+                            (when-let [^Class klass (resolve-imported-java-class ctx parent)]
+                              (when (.isInterface klass) [klass]))))
+                        (:parents class-def)))))]
+    (distinct (walk class-name #{}))))
+
+(defn- coerce-java-return
+  "Narrow a Nex return value to the primitive type a Java interface method
+   declares, so java.lang.reflect.Proxy's return-value check (which requires
+   an exact wrapper match, e.g. Integer for `int`, not any boxed number)
+   accepts it."
+  [^Class return-type value]
+  (cond
+    (= return-type Void/TYPE) nil
+    (= return-type Integer/TYPE) (int value)
+    (= return-type Long/TYPE) (long value)
+    (= return-type Double/TYPE) (double value)
+    (= return-type Float/TYPE) (float value)
+    (= return-type Boolean/TYPE) (boolean value)
+    (= return-type Short/TYPE) (short value)
+    (= return-type Byte/TYPE) (byte value)
+    (= return-type Character/TYPE) (char value)
+    :else value))
+
+(defn- java-proxy-for-object
+  "Wrap a Nex OBJ that implements one or more Java interfaces (via `inherit`)
+   in a java.lang.reflect.Proxy, so it can be handed to a real Java API that
+   expects one of them (Runnable, ActionListener, ...). InvocationHandler
+   dispatch reuses the ordinary Nex method-call path (eval-call), so calling
+   an interface method on the proxy runs exactly like a Nex-side call to the
+   same method on the object. equals/hashCode/toString inherited from Object
+   (declaring class Object, not the Nex-declared interface) get identity-based
+   defaults instead of an eval-call, since the wrapped class is not required
+   to define them.
+
+   State mutated by a proxied call must be visible both (a) to the *next*
+   proxied call, and (b) to an ordinary Nex read of the same object
+   afterwards (`counter.count`) — and NexObject fields are an immutable map,
+   propagated by write-back-by-convention (nex.interpreter/write-back-target!)
+   rather than a mutable cell. eval-call's dispatch target,
+   `{:type :literal :value obj}`, names no slot that convention can write
+   back to; write-back-target! now treats that shape as a request to
+   propagate the mutation to every *other* alias of the same identity in the
+   current env chain instead (env-replace-object-aliases!), which is exactly
+   what makes (b) work. (a) still needs a slot of its own to re-read from on
+   the next call — a bare Clojure closure over `obj` would keep re-dispatching
+   against the pre-call identity forever, since nothing ever tells the
+   closure a new one exists. So OBJ is registered here under a private,
+   unique binding in the *current* env (the one live when this object
+   crossed into a Java call — e.g. inside the `with \"java\"` block that
+   called `addActionListener`), and each dispatch re-reads that binding first:
+   env-replace-object-aliases! keeps it current the same way it keeps
+   `counter` current, since both are just bindings in the same map."
+  [ctx obj]
+  (let [interfaces (class-java-interfaces ctx (:class-name obj))]
+    (if (empty? interfaces)
+      obj
+      (let [env (:current-env ctx)
+            slot (str "__java_proxy_target_" (gensym) "__")
+            _ (swap! (:bindings env) assoc slot obj)]
+        (java.lang.reflect.Proxy/newProxyInstance
+         (.getContextClassLoader (Thread/currentThread))
+         (into-array Class interfaces)
+         (reify java.lang.reflect.InvocationHandler
+           (invoke [_ proxy method args]
+             (let [^java.lang.reflect.Method method method
+                   method-name (.getName method)
+                   arg-values (vec (or args []))
+                   current-obj (get @(:bindings env) slot obj)]
+               (if (= (.getDeclaringClass method) Object)
+                 (case method-name
+                   "hashCode" (System/identityHashCode current-obj)
+                   "equals" (identical? current-obj (first arg-values))
+                   "toString" (str "NexProxy<" (:class-name current-obj) ">")
+                   nil)
+                 (coerce-java-return (.getReturnType method)
+                                     (eval-call ctx current-obj method-name arg-values)))))))))))
+
+(defn java-arg
+  "Convert one argument for a reflective Java call: a Nex object implementing
+   a Java interface crosses the boundary as a real Proxy for it; everything
+   else passes through unchanged."
+  [ctx v]
+  (if (nex-object? v)
+    (java-proxy-for-object ctx v)
+    v))
+
+(defn java-args
+  "java-arg over a whole argument list — for every interpreter call site that
+   marshals arguments into a reflective Java call (static methods, `new`,
+   constructors, instance methods alike)."
+  [ctx arg-values]
+  (mapv #(java-arg ctx %) arg-values))
+
 (defn java-create-object
      "Create a Java object via reflection."
      [ctx class-name arg-values]
@@ -1017,12 +1138,12 @@
        (when-not klass
          (throw (ex-info (str "Undefined class: " class-name)
                          {:class-name class-name})))
-       (clojure.lang.Reflector/invokeConstructor klass (to-array arg-values))))
+       (clojure.lang.Reflector/invokeConstructor klass (to-array (java-args ctx arg-values)))))
 
 (defn java-call-method
      "Call a Java method via reflection."
-     [target method-name arg-values]
-     (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array arg-values)))
+     [ctx target method-name arg-values]
+     (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array (java-args ctx arg-values))))
 
 (def builtins
   {"print"
