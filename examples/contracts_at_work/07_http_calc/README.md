@@ -10,50 +10,47 @@ contract violations (division by zero, an undefined variable) turned into a
 | File | Role |
 |---|---|
 | `expr.nex` | Copy of Project 4's interpreter — the service embeds it unmodified, exactly the "library another project can `intern`" the outline calls for. |
-| `calc_service.nex` | `Calc_Service` — registers the route; request handling is free functions, not methods (see below). |
-| `calc_server_main.nex` | Runs the service on port 4322. **Must run under `--interpret`**. |
+| `calc_service.nex` | `Calc_Service` — registers the route and handles requests as ordinary methods. |
+| `calc_server_main.nex` | Runs the service on port 4322. |
 | `calc_client.nex` | Interactive CLI over `net/Http_Client`. |
 | `checks.nex` | Starts the service on an ephemeral port, drives it with a real `Http_Client`, checks status codes and bodies. |
 
 ## Running
 
 ```bash
-nex checks.nex --interpret        # 6/6 checks
+nex checks.nex                    # 6/6 checks
 
-nex calc_server_main.nex --interpret   # terminal 1
-nex calc_client.nex --interpret        # terminal 2 — type an expression, or 'quit'
+nex calc_server_main.nex   # terminal 1
+nex calc_client.nex        # terminal 2 — type an expression, or 'quit'
 ```
 
-## Status: works under `--interpret`; three real issues found along the way
+Everything here runs on the default JVM backend.
 
-1. **A closure passed as a callback can't call a method on the enclosing
-   object — same bug family as Project 6, different callback shape.**
-   `server.post("/evaluate", fn(req) do result := this.handle_evaluate(req)
-   end)` fails typechecking (`Method not found: handle_evaluate`) whether
-   `this.` is explicit or omitted. Project 6 hit this with `spawn`; here it's
-   an anonymous `fn` passed as a route handler. Fixed the same way: request
-   handling (`handle_evaluate`, `parse_vars`, `json_response`) are free
-   top-level functions, and the route closure captures a local `json`
-   binding instead of reading `this.json` — capturing a plain local in a
-   closure works fine, it's specifically method access on `this` inside one
-   that doesn't.
-2. **`Integer` has no `to_real()` method.** JSON integers parse as
-   `Integer`; the interpreter's `evaluate` wants `Real`. Checked against the
-   language reference — `Integer`'s method table has no real-conversion
-   entry (`String.to_real()` exists; `Integer.to_real()` doesn't). Fixed
-   with arithmetic promotion (`n + 0.0`) instead.
-3. **Interning both `net/Http_Client` and `data/Json` in the same program
-   breaks any method call on a `Map` returned by `json.parse(...)`** — not
-   file-scoped, confirmed across a module boundary; not about actually
-   *using* `Http_Client`, confirmed with `Http_Client.make()` never called
-   at all. Minimal repro (4 lines): `intern net/Http_Client`, `intern
-   data/Json`, `json.parse(...)`, `.get(...)` on the result — fails with
-   `Method 'call0' uses Result but does not declare a return type`, an
-   error that names neither library. `net/Http_Server` + `data/Json`
-   together (`calc_service.nex`, checked 6/6) has no such problem — this is
-   specific to the *client* library. `json.stringify(...)` to build the
-   request body is unaffected; only reading a parsed Map's fields is. Since
-   `calc_client.nex` unavoidably needs both libraries, the workaround is
-   `text/Regex` with a fixed-lookbehind pattern to read the one field this
-   project's own fixed response shape (`{"result":N}` / `{"error":"..."}`)
-   ever needs, rather than touching `data/Json`'s parse result at all.
+## Status: works cleanly on the default JVM backend; one issue still shapes the client
+
+Two of the three issues originally hit here are fixed upstream (see the
+book's top-level issues report), and the code was updated to match rather
+than keeping the old workaround around:
+
+1. **A closure passed as a callback couldn't call a method on the
+   enclosing object.** Fixed. `handle_evaluate`, `parse_vars`, and
+   `json_response` are back to being ordinary `Calc_Service` methods,
+   called as `this.handle_evaluate(req)` from the route closure, instead
+   of free top-level functions threading a captured `json` local through.
+2. **`Integer` had no `to_real()` method.** Also fixed — `to_real_any` now
+   calls `n.to_real()` directly instead of promoting with `n + 0.0`.
+
+The third is still real, and still shapes `calc_client.nex`: **interning
+both `net/Http_Client` and `data/Json`, then calling `.get()` on a Map
+`json.parse(...)` produced, still fails inside a `function ... do ... end`
+body** — `Method 'call0' uses Result but does not declare a return type`,
+an error naming neither library. This turned out to be narrower than first
+understood: identical code as bare top-level script statements does *not*
+fail (confirmed directly by moving it out of a function), which is why
+`checks.nex` — written as top-level statements — has always called
+`.get()` on parsed responses without issue, while `calc_client.nex`, whose
+logic lives inside `main()`, still can't. `calc_client.nex` reads the
+service's response with a fixed-lookbehind `text/Regex` instead, on the
+one field its own fixed response shape (`{"result":N}` / `{"error":"..."}`)
+ever needs, rather than touching `data/Json`'s parse result inside a
+function at all.

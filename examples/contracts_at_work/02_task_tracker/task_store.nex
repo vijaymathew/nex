@@ -24,35 +24,22 @@ class Task_Store
     tasks: Array[Task]
     next_id: Integer
 
-    -- Returns the new task's id, not the `Task` object itself. On the
-    -- interpreter, an object reference that is both stored in an array and
-    -- returned from a method stops sharing identity with the stored copy
-    -- once either is mutated — confirmed with a minimal repro (see the
-    -- book's top-level issues report; the JVM backend does not have this
-    -- problem, but is separately blocked for this project by the JSON bug
-    -- above, so the interpreter is the backend this project actually runs
-    -- on). Handing back only the id, and requiring every later lookup to
-    -- go through the store (`find`/`mark_done`/`remove`, all of which
-    -- mutate through the array directly), sidesteps it — and is arguably
-    -- the better API regardless: the store stays the single source of
-    -- truth instead of handing out a reference callers can let go stale.
-    add(text: String, priority: Integer): Integer
+    -- Returns the new task's id, not the `Task` object itself. This used
+    -- to be a workaround (an interpreter bug meant an object both stored
+    -- in an array and returned from a method could stop sharing identity
+    -- with the stored copy once mutated — since fixed upstream), but it's
+    -- kept on its own merits: the store stays the single source of truth
+    -- instead of handing out a reference a caller could let go stale.
+    add(text: String, priority: Priority): Integer
       require
         non_empty: text /= ""
-        valid_priority: priority >= 1 and priority <= 5
       do
-        -- `old tasks.length` is deliberately not used here either: `old`
-        -- on a mutable Array field snapshots the reference, not the value,
-        -- so a postfix call like `.length` on it still sees the
-        -- post-mutation state. Capturing the count in a local first works
-        -- around it.
-        let count_before: Integer := tasks.length
         let t: Task := create Task.make(next_id, text, priority)
         tasks.add(t)
         result := next_id
         next_id := next_id + 1
       ensure
-        grew: tasks.length = count_before + 1
+        grew: tasks.length = old tasks.length + 1
       end
 
     find(id: Integer): ?Task do
@@ -70,27 +57,13 @@ class Task_Store
       end
     end
 
-    -- Deliberately does not go through `find`: binding an object reference
-    -- to a `?T`-typed local and mutating it through that binding does not
-    -- persist the mutation back to the original object (confirmed with a
-    -- minimal repro — see the book's top-level issues report), even though
-    -- reads through such a binding work fine. Mutating `tasks.get(i)`
-    -- directly, with no `?Task` intermediate, avoids it.
     mark_done(id: Integer): Boolean do
-      let i: Integer := 0
-      result := false
-      from
-        i := 0
-      until
-        i = tasks.length
-      do
-        if tasks.get(i).id = id then
-          tasks.get(i).mark_done()
-          result := true
-          i := tasks.length
-        else
-          i := i + 1
-        end
+      let t: ?Task := find(id)
+      if t = nil then
+        result := false
+      else
+        t.mark_done()
+        result := true
       end
     end
 
@@ -116,14 +89,12 @@ class Task_Store
     --
     -- Schema version 2 is one JSON object per line: a header line, then one
     -- task per line, rather than a single `{"schema_version":2,"tasks":[...]}`
-    -- document. That's a workaround, not a style choice: on the JVM backend,
-    -- an array *nested inside* a parsed JSON object fails a runtime type
-    -- check when extracted and assigned to `Array[Any]` — confirmed with a
-    -- minimal repro (a top-level array, or a natively-built Nex map/array,
-    -- both parse fine; only an array reached via `Map.get` on a
-    -- `Json.parse`-produced Map breaks) — see the book's top-level issues
-    -- report. Keeping every JSON document flat (no nested arrays) avoids it
-    -- entirely.
+    -- document. This started as a workaround for a JVM-backend bug where an
+    -- array nested inside a parsed JSON object broke on extraction — since
+    -- fixed upstream (see the book's top-level issues report) — but is kept
+    -- on its own merits: a flat, one-record-per-line format is easy to
+    -- append to and easy to diff, which a save-on-every-change task store
+    -- benefits from regardless of which bugs are or aren't present.
     to_json(): String do
       let json: Json := create Json.make()
       let header: Map[String, Any] := {}
@@ -165,13 +136,21 @@ class Task_Store
     -- Pure deserialization, migrating schema version 1 on the way in.
     -- Schema version 1 was a single bare JSON array for the whole file
     -- (`[{"id":1,...}, ...]`) — a *top-level* array, which parses fine on
-    -- both backends; it's only arrays nested inside an object that hit the
-    -- bug above, so the legacy format needs no rewrite to stay readable.
+    -- both backends.
+    --
+    -- `rows` is `Array[Any]`, not the more precise `Array[Map[String,
+    -- Any]]`: on the JVM backend, storing a json.parse-produced Map into a
+    -- specifically Map[String, Any]-typed array still breaks a method call
+    -- on retrieval, even though the same Map works fine as a plain local or
+    -- in an Array[Any] — a narrower survival of the data/Json compiled-
+    -- backend bug (see the book's top-level issues report). Each element is
+    -- cast back to Map[String, Any] via an ordinary `let` the moment it's
+    -- read out, which works fine.
     parse_json(text: String) do
       let json: Json := create Json.make()
       let trimmed: String := text.trim()
 
-      let rows: Array[Map[String, Any]] := []
+      let rows: Array[Any] := []
       if trimmed.starts_with("[") then
         -- schema version 1: one JSON document, a bare top-level array.
         let items: Array[Any] := json.parse(trimmed)

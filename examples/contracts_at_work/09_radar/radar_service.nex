@@ -3,18 +3,16 @@
 -- Task style), all under one process. GET /status reports current
 -- metrics; POST /rescan re-runs the duplicate scan and returns the update.
 --
--- Must run under --interpret: this project needs data/Json (see Project 2
--- and Project 7's READMEs for why data/Json + JVM backend don't mix for
--- anything beyond parse() itself).
---
--- Route handlers and the background loop are free functions, not methods —
--- same reason as Project 6/7: a closure passed to spawn or as a route
--- handler can't call a method on the enclosing object.
+-- Runs on the default JVM backend. Route handlers and the background tick
+-- loop are ordinary Radar_Service methods, called directly from `fn`/
+-- `spawn` closures via `this.` — this used to be impossible (neither kind
+-- of closure could call a method on the enclosing object), forcing
+-- everything out to free functions with captured locals instead. Fixed
+-- upstream; see the book's top-level issues report.
 
 intern net/Http_Server
 intern data/Json
 intern Dup_Finder
-import java.lang.Thread
 
 class Radar_Metrics
   create
@@ -38,67 +36,67 @@ class Radar_Metrics
     end
 end
 
-function json_response(json: Json, status_code: Integer, payload: Map[String, Any]): Http_Server_Response do
-  let headers: Map[String, String] := {}
-  headers.set("Content-Type", "application/json")
-  result := create Http_Server_Response.make(status_code, json.stringify(payload), headers)
-end
-
-function status_payload(json: Json, metrics: Radar_Metrics): Http_Server_Response do
-  let payload: Map[String, Any] := {}
-  payload.set("ticks", metrics.ticks)
-  payload.set("duplicate_groups", metrics.duplicate_groups)
-  payload.set("scan_count", metrics.scan_count)
-  result := json_response(json, 200, payload)
-end
-
-function run_scan(finder: Dup_Finder, metrics: Radar_Metrics, root_dir: String) do
-  let dups: Map[String, Array[String]] := finder.find_duplicates(root_dir)
-  metrics.record_scan(dups.size())
-end
-
-function tick_loop(metrics: Radar_Metrics) do
-  let running: Boolean := true
-  from
-    running := true
-  until
-    not running
-  do
-    Thread.sleep(1000)
-    metrics.tick()
-  end
-end
-
 class Radar_Service
   create
     make(port: Integer, scan_root: String) do
       this.server := create Http_Server.make(port)
       this.metrics := create Radar_Metrics.make()
+      this.finder := create Dup_Finder.make()
+      this.json := create Json.make()
+      this.scan_root := scan_root
 
-      let json: Json := create Json.make()
-      let finder: Dup_Finder := create Dup_Finder.make()
-      let m: Radar_Metrics := metrics
-      let root: String := scan_root
-
-      run_scan(finder, m, root)
+      run_scan()
 
       server.get("/status", fn(req: Http_Request): Http_Server_Response do
-        result := status_payload(json, m)
+        result := this.status_payload()
       end)
       server.post("/rescan", fn(req: Http_Request): Http_Server_Response do
-        run_scan(finder, m, root)
-        result := status_payload(json, m)
+        this.run_scan()
+        result := this.status_payload()
       end)
     end
   feature
     server: Http_Server
     metrics: Radar_Metrics
+    finder: Dup_Finder
+    json: Json
+    scan_root: String
+
+    json_response(status_code: Integer, payload: Map[String, Any]): Http_Server_Response do
+      let headers: Map[String, String] := {}
+      headers.set("Content-Type", "application/json")
+      result := create Http_Server_Response.make(status_code, json.stringify(payload), headers)
+    end
+
+    status_payload(): Http_Server_Response do
+      let payload: Map[String, Any] := {}
+      payload.set("ticks", metrics.ticks)
+      payload.set("duplicate_groups", metrics.duplicate_groups)
+      payload.set("scan_count", metrics.scan_count)
+      result := json_response(200, payload)
+    end
+
+    run_scan() do
+      let dups: Map[String, Array[String]] := finder.find_duplicates(scan_root)
+      metrics.record_scan(dups.size())
+    end
+
+    tick_loop() do
+      let running: Boolean := true
+      from
+        running := true
+      until
+        not running
+      do
+        sleep(1000)
+        metrics.tick()
+      end
+    end
 
     start() do
       server.start()
-      let m: Radar_Metrics := metrics
       let ticker: Task := spawn do
-        tick_loop(m)
+        this.tick_loop()
       end
     end
 

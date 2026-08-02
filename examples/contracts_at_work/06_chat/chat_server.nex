@@ -5,6 +5,12 @@
 -- channel and lets the hub serialize access. Graceful disconnect: a client
 -- handler notices read_line() returning nil (end of stream) and tells the
 -- hub to drop it, rather than leaving a dead socket in the broadcast list.
+--
+-- Runs on the default JVM backend. handle_client lives as an ordinary
+-- Chat_Server method, called directly from inside `spawn do ... end` — this
+-- used to fail to lower on the JVM backend (a spawned closure couldn't call
+-- a method on an object, even `this`), forcing it out to a free function
+-- instead. Fixed upstream; see the book's top-level issues report.
 
 intern net/Server_Socket
 intern net/Tcp_Socket
@@ -59,36 +65,30 @@ class Chat_Hub
     end
 end
 
--- A free (top-level) function, not a Chat_Server method: `spawn do ... end`
--- inside a class method fails to lower on the JVM backend when its body
--- calls a *method* on an object (even `this`, even with an explicit
--- `this.` prefix) — confirmed with a minimal repro (see the book's
--- top-level issues report). Calling a free function from inside `spawn`
--- works cleanly, so handle_client lives at the top level instead.
-function handle_client(sock: Tcp_Socket, name: String, events: Channel[Hub_Event]) do
-  events.send(create Client_Joined.make(sock))
-  let protocol: Chat_Protocol := create Chat_Protocol.make()
-  let running: Boolean := true
-  from
-    running := true
-  until
-    not running
-  do
-    let line: ?String := sock.read_line()
-    if line = nil then
-      running := false
-    else
-      events.send(create Broadcast.make(sock, protocol.format_message(name, line)))
-    end
-  end
-  events.send(create Client_Left.make(sock))
-  sock.close()
-end
-
 class Chat_Server
   create
     make() do end
   feature
+    handle_client(sock: Tcp_Socket, name: String, events: Channel[Hub_Event]) do
+      events.send(create Client_Joined.make(sock))
+      let protocol: Chat_Protocol := create Chat_Protocol.make()
+      let running: Boolean := true
+      from
+        running := true
+      until
+        not running
+      do
+        let line: ?String := sock.read_line()
+        if line = nil then
+          running := false
+        else
+          events.send(create Broadcast.make(sock, protocol.format_message(name, line)))
+        end
+      end
+      events.send(create Client_Left.make(sock))
+      sock.close()
+    end
+
     -- Accepts exactly `max_clients` connections, then stops accepting (the
     -- hub keeps running until told to stop separately). Each connecting
     -- client is expected to send its display name as the very first line.
@@ -109,7 +109,7 @@ class Chat_Server
             name := name_line
           end
           let h: Task := spawn do
-            handle_client(client, name, events)
+            this.handle_client(client, name, events)
           end
           handlers.add(h)
         end

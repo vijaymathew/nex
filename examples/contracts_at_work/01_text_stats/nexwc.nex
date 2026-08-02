@@ -7,6 +7,13 @@
 -- Nex's own Process class does not expose a way to set the process exit
 -- code, so error paths reach across the host boundary for it explicitly
 -- (System.exit) rather than pretending the language has one.
+--
+-- A bare relative path resolves against the `nex` CLI's own installation
+-- directory, not wherever this program was actually run from — the
+-- launcher `cd`s into NEX_HOME before starting the JVM (documented, not a
+-- bug to fix — see the book's top-level issues report). NEX_USER_DIR is
+-- set beforehand and read here via Process.getenv to resolve a relative
+-- file argument against the caller's real working directory instead.
 
 intern Word_Stats
 intern io/Path
@@ -16,6 +23,14 @@ function fail(message: String, code: Integer) do
   print("error: " + message)
   with "java" do
     System.exit(code)
+  end
+end
+
+function resolve_path(proc: Process, raw: String): String do
+  if raw.starts_with("/") then
+    result := raw
+  else
+    result := proc.getenv("NEX_USER_DIR") + "/" + raw
   end
 end
 
@@ -51,7 +66,7 @@ function main() do
     fail("usage: nexwc <file> [--top n]", 2)
   end
 
-  let path: Path := create Path.make(args.get(0))
+  let path: Path := create Path.make(resolve_path(proc, args.get(0)))
   if not path.exists() then
     fail("no such file: " + args.get(0), 1)
   end
