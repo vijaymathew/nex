@@ -16,7 +16,8 @@
             [nex.types.builtins :as bi]
             [nex.types.bootstrap :as bootstrap]
             [nex.ir :as ir]
-            [nex.typechecker :as tc]))
+            [nex.typechecker :as tc])
+  (:import [org.objectweb.asm Type]))
 
 (declare lower-expression)
 (declare lower-statement)
@@ -4676,6 +4677,96 @@
                  :locals (vec (vals (:locals env)))
                  :body body})))
 
+(def ^:private java-interop-object-method-arities
+  "[name arity] of Java-interface members that redeclare one of Object's own
+   methods (Comparator's equals(Object) is the standard example — see the
+   typechecker's identically-named exclusion, object-instance-methods).
+   These never need a bridge: every compiled class already emits a real
+   equals/hashCode (see user-class-spec) and inherits a real toString from
+   Object, either of which already satisfies the interface."
+  #{["equals" 1] ["hashCode" 0] ["toString" 0]})
+
+(defn- resolve-imported-java-interface
+  "The reflected Class for parent-name, when the `inherit` entry resolves to
+   an imported Java *interface* (docs/proposals/java-interop.md).
+   check-inheritance already rejects a concrete Java class parent at
+   typecheck time, so this only needs to tell a Nex class apart from a Java
+   interface, never classify further."
+  [env parent-name]
+  (let [parent-def (get (visible-class-map env) parent-name)]
+    (when (:import parent-def)
+      (try
+        (let [^Class klass (Class/forName (:import parent-def))]
+          (when (.isInterface klass) klass))
+        (catch Exception _ nil)))))
+
+(defn- java-interface-parents
+  "Reflected Class objects for this class-def's Java-interface `inherit`
+   entries. Nex parents are excluded — those go through resolve-parent-metas
+   instead, on the composition path this doesn't touch."
+  [env class-def]
+  (->> (:parents class-def)
+       (keep (fn [{:keys [parent]}] (resolve-imported-java-interface env parent)))
+       distinct))
+
+(defn- bridge-jvm-kind
+  "Collapse a resolved Nex jvm-type to the keyword emit-interface-bridge-
+   method! needs: one of Nex's four primitive-shaped types, or :object for
+   everything reference-shaped (Nex has no other primitives — nex-type->jvm-
+   type never produces :int/:float/:byte/:short, only :long/:double for
+   Integer/Real)."
+  [jvm-type]
+  (if (#{:long :double :boolean :char} jvm-type) jvm-type :object))
+
+(defn- java-interface-bridge-methods
+  "One entry per abstract method (across all implemented interfaces) that a
+   compiled class needs a real-Java-descriptor bridge for, so the JVM's own
+   dispatch (a Java caller invoking the interface method) reaches the already-
+   emitted internal Nex method. Deduped by (name, descriptor): two interfaces
+   sharing a method signature (rare, but legal) need only one bridge. See
+   emit-interface-bridge-method! in emit.clj for the codegen this feeds."
+  [env class-def java-interfaces]
+  (->> java-interfaces
+       (mapcat (fn [^Class klass]
+                 (->> (.getMethods klass)
+                      (remove (fn [^java.lang.reflect.Method m]
+                                (or (.isDefault m)
+                                    (java.lang.reflect.Modifier/isStatic (.getModifiers m))
+                                    (contains? java-interop-object-method-arities
+                                               [(.getName m) (alength (.getParameterTypes m))])))))))
+       (map (fn [^java.lang.reflect.Method m] [[(.getName m) (Type/getMethodDescriptor m)] m]))
+       (into {})
+       vals
+       (mapv (fn [^java.lang.reflect.Method m]
+               (let [arity (alength (.getParameterTypes m))
+                     method-def (accessible-method-def env class-def (.getName m) arity)]
+                 (when-not method-def
+                   (throw (ex-info (str "Class " (:name class-def)
+                                        " has no method matching Java interface member "
+                                        (.getName m) "/" arity " during lowering")
+                                   {:class-name (:name class-def)
+                                    :java-method (.getName m)
+                                    :arity arity})))
+                 {:java-name (.getName m)
+                  :descriptor (Type/getMethodDescriptor m)
+                  :target-method-name (lowered-instance-method-name method-def)
+                  :param-classes (vec (.getParameterTypes m))
+                  :return-class (.getReturnType m)
+                  ;; The Nex method's own declared param/return types, in the
+                  ;; representation its already-emitted body actually uses
+                  ;; (Nex Integer is a boxed Long regardless of what the Java
+                  ;; interface's primitive return/param type is) — the bridge
+                  ;; must box/unbox against *this*, not against whatever
+                  ;; wrapper the Java descriptor's own primitive would
+                  ;; naturally suggest, then separately widen/narrow to the
+                  ;; Java primitive if the two differ (e.g. Integer's long
+                  ;; vs. Comparator.compare's int).
+                  :param-nex-kinds (mapv (fn [{:keys [type]}]
+                                           (bridge-jvm-kind (resolve-jvm-type env type)))
+                                         (:params method-def))
+                  :return-nex-kind (bridge-jvm-kind
+                                    (resolve-jvm-type env (function-return-type method-def)))})))))
+
 (defn- assert-distinct-lowered-methods!
   "Nex mangles routine and constructor names by name+arity, so two of them that
    share both would emit duplicate JVM methods and fail at `defineClass`. Reject
@@ -4814,6 +4905,10 @@
                                   :deferred? deferred?
                                   :jvm-type (exact-class-jvm-type {:compiled-classes compiled-classes} nex-name)})
                                (resolve-parent-metas env class-def))
+     :interfaces (mapv (fn [^Class klass] (desc/internal-class-name (.getName klass)))
+                       (java-interface-parents env class-def))
+     :java-bridge-methods (java-interface-bridge-methods env class-def
+                                                          (java-interface-parents env class-def))
      :fields fields
      :runtime-type-fields runtime-type-fields
      :constants constants

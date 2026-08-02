@@ -4081,6 +4081,83 @@
                        {:params (:params ctor)
                         :return-type name})))))
 
+(defn- java-interface-class
+  "The reflected Class for parent-name, when it names an imported Java
+   *interface* rather than a Nex class. Nil for a Nex class, a concrete Java
+   class, or an unresolvable name. resolve-imported-java-class already
+   returns nil for a real Nex class (its class-def has no :import and its
+   bare name has no dot), so no extra guard is needed here."
+  [env parent-name]
+  (when-let [^Class klass (resolve-imported-java-class env parent-name)]
+    (when (.isInterface klass)
+      klass)))
+
+(def ^:private object-instance-methods
+  "[name arity] of java.lang.Object's own public instance methods. Some
+   interfaces (Comparator is the standard example) redeclare equals(Object)
+   purely for documentation; reflection reports it as abstract on the
+   interface, but javac never requires an implementor to write it, since
+   every class already inherits a concrete equals from Object regardless of
+   what the interface says. Excluded here for the same reason."
+  #{["equals" 1] ["hashCode" 0] ["toString" 0]})
+
+(defn- java-interface-abstract-methods
+  "[name arity] pairs for KLASS's abstract instance methods — the members a
+   Nex class inheriting this interface must provide. Excludes default and
+   static methods (already have a body, or aren't part of the contract) and
+   Object's own methods (always already provided, see object-instance-methods)."
+  [^Class klass]
+  (->> (.getMethods klass)
+       (remove (fn [^java.lang.reflect.Method m]
+                 (or (.isDefault m)
+                     (java.lang.reflect.Modifier/isStatic (.getModifiers m)))))
+       (map (fn [^java.lang.reflect.Method m]
+              [(.getName m) (alength (.getParameterTypes m))]))
+       (remove object-instance-methods)
+       distinct))
+
+(defn- class-provides-method?
+  "True when CLASS-NAME declares, or inherits through its Nex parent chain, a
+   method member named METHOD-NAME with exactly ARITY params. Java-interface/
+   -class parents contribute nothing here (they have no Nex feature members);
+   only the Nex side of the inheritance chain is walked."
+  [env class-name method-name arity]
+  (letfn [(walk [cn visited]
+            (when (and cn (not (contains? visited cn)))
+              (when-let [class-def (env-lookup-class env cn)]
+                (or (some (fn [m]
+                            (and (= (:type m) :method)
+                                 (= (:name m) method-name)
+                                 (= (count (or (:params m) [])) arity)))
+                          (feature-members class-def))
+                    (some (fn [{:keys [parent]}] (walk parent (conj visited cn)))
+                          (:parents class-def))))))]
+    (boolean (walk class-name #{}))))
+
+(defn- check-java-interface-conformance
+  "For each `inherit` entry that resolves to a Java interface, require the
+   class to provide every abstract method the interface declares, matched by
+   exact Java name and arity (see the java-interop proposal's settled naming
+   convention — no snake_case/camelCase bridging)."
+  [env class-name parents]
+  (doseq [{:keys [parent]} parents]
+    (when-let [^Class klass (java-interface-class env parent)]
+      (let [missing (->> (java-interface-abstract-methods klass)
+                         (remove (fn [[m-name arity]]
+                                   (class-provides-method? env class-name m-name arity))))]
+        (when (seq missing)
+          (throw (ex-info (str "Class " class-name " does not implement " parent)
+                          {:error (type-error
+                                   (str "Class " class-name " inherits Java interface " parent
+                                        " but does not implement: "
+                                        (str/join ", "
+                                                  (map (fn [[m-name arity]]
+                                                         (str m-name "(" arity
+                                                              (if (= arity 1) " arg)" " args)")))
+                                                       missing))
+                                        ". Declare a method with the exact Java name and arity"
+                                        " for each."))})))))))
+
 (defn check-inheritance
   "Check that inheritance declarations are valid"
   [env class-name parents]
@@ -4101,11 +4178,25 @@
                                   (:parents class-def))))))]
               (visit start-parent [class-name] #{class-name})))]
   (doseq [{:keys [parent]} parents]
-    ;; Check that parent class exists
-    (when-not (or (env-lookup-class env parent) (builtin-type? parent))
-      (throw (ex-info (str "Parent class " parent " not found for class " class-name)
-                      {:error (type-error
-                               (str "Undefined parent class: " parent))})))
+    ;; Check that parent class exists: a Nex class, a builtin, or an imported
+    ;; Java *interface* (java.util.function.Runnable etc. — see the
+    ;; java-interop proposal). Extending a concrete Java class isn't
+    ;; implemented yet, so a resolvable-but-concrete Java class gets its own,
+    ;; more specific error rather than silently typechecking into behavior
+    ;; nothing later actually implements.
+    (let [parent-def (env-lookup-class env parent)
+          real-nex-class? (and parent-def (not (:import parent-def)))
+          java-class (when-not real-nex-class? (resolve-imported-java-class env parent))]
+      (when (and java-class (not (.isInterface ^Class java-class)))
+        (throw (ex-info (str "Class " class-name " cannot extend Java class " parent)
+                        {:error (type-error
+                                 (str "Class " class-name " inherits " parent
+                                      ", a concrete Java class. Extending a Java class is not "
+                                      "supported yet — only implementing a Java interface is."))})))
+      (when-not (or real-nex-class? (builtin-type? parent) java-class)
+        (throw (ex-info (str "Parent class " parent " not found for class " class-name)
+                        {:error (type-error
+                                 (str "Undefined parent class: " parent))}))))
     (when (= parent class-name)
       (throw (ex-info (str "Class " class-name " cannot inherit from itself")
                       {:error (type-error
@@ -4114,7 +4205,8 @@
       (throw (ex-info (str "Cyclic inheritance detected: " (str/join " -> " path))
                       {:error (type-error
                                (str "Cyclic inheritance detected: "
-                                    (str/join " -> " path)))}))))))
+                                    (str/join " -> " path)))}))))
+  (check-java-interface-conformance env class-name parents)))
 
 (defn- substitute-method-types
   "Apply a generic substitution map to a method member's parameter and return

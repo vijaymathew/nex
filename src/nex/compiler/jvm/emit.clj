@@ -124,7 +124,7 @@
    :binary-name (desc/binary-class-name (:jvm-name class-spec))
    :source-file (:source-file class-spec)
    :super-name "java/lang/Object"
-   :interfaces []
+   :interfaces (vec (:interfaces class-spec))
    :flags Opcodes/ACC_PUBLIC
    :fields (vec
             (concat
@@ -217,7 +217,15 @@
                          :flags Opcodes/ACC_PUBLIC
                          :kind :instance-fn
                          :fn-node fn-node}))
-                    (:methods class-spec))))}))
+                    (:methods class-spec))
+              (map (fn [bridge]
+                     {:name (:java-name bridge)
+                      :descriptor (:descriptor bridge)
+                      :flags Opcodes/ACC_PUBLIC
+                      :kind :interface-bridge
+                      :owner (:internal-name class-spec)
+                      :bridge bridge})
+                   (:java-bridge-methods class-spec))))}))
 
 (defn launcher-class-spec
   [{:keys [internal-name binary-name source-file program-internal-name classes-edn imports-edn]}]
@@ -2527,6 +2535,138 @@
     (.visitMaxs mv 0 0)
     (.visitEnd mv)))
 
+(def ^:private primitive-class->jvm-type
+  {Integer/TYPE :int, Long/TYPE :long, Double/TYPE :double, Boolean/TYPE :boolean
+   Character/TYPE :char, Float/TYPE :float, Byte/TYPE :byte, Short/TYPE :short
+   Void/TYPE :void})
+
+(def ^:private primitive-box-info
+  "Per-primitive boxing/unboxing/load/return info for interface-bridge codegen.
+   Broader than descriptor.clj's boxing-owner/unboxing-method (int/long/double/
+   boolean/char only, the five Nex's own type system needs): a reflected Java
+   interface method's descriptor can use any of the eight JVM primitives, so
+   this table covers all of them."
+  {:int     {:box-owner "java/lang/Integer"   :box-desc "(I)Ljava/lang/Integer;"   :unbox-name "intValue"     :unbox-desc "()I" :load Opcodes/ILOAD :return Opcodes/IRETURN}
+   :long    {:box-owner "java/lang/Long"      :box-desc "(J)Ljava/lang/Long;"      :unbox-name "longValue"    :unbox-desc "()J" :load Opcodes/LLOAD :return Opcodes/LRETURN}
+   :double  {:box-owner "java/lang/Double"    :box-desc "(D)Ljava/lang/Double;"    :unbox-name "doubleValue"  :unbox-desc "()D" :load Opcodes/DLOAD :return Opcodes/DRETURN}
+   :float   {:box-owner "java/lang/Float"     :box-desc "(F)Ljava/lang/Float;"     :unbox-name "floatValue"   :unbox-desc "()F" :load Opcodes/FLOAD :return Opcodes/FRETURN}
+   :boolean {:box-owner "java/lang/Boolean"   :box-desc "(Z)Ljava/lang/Boolean;"   :unbox-name "booleanValue" :unbox-desc "()Z" :load Opcodes/ILOAD :return Opcodes/IRETURN}
+   :char    {:box-owner "java/lang/Character" :box-desc "(C)Ljava/lang/Character;" :unbox-name "charValue"    :unbox-desc "()C" :load Opcodes/ILOAD :return Opcodes/IRETURN}
+   :byte    {:box-owner "java/lang/Byte"      :box-desc "(B)Ljava/lang/Byte;"      :unbox-name "byteValue"    :unbox-desc "()B" :load Opcodes/ILOAD :return Opcodes/IRETURN}
+   :short   {:box-owner "java/lang/Short"     :box-desc "(S)Ljava/lang/Short;"     :unbox-name "shortValue"   :unbox-desc "()S" :load Opcodes/ILOAD :return Opcodes/IRETURN}})
+
+(defn- reference-type-internal-name
+  [^Class klass]
+  (.getInternalName (Type/getType klass)))
+
+(defn- param-slot-offsets
+  "Local-variable slot for each of an instance method's real params, starting
+   at slot 1 (slot 0 is `this`); long/double each occupy two slots."
+  [param-classes]
+  (loop [cs (seq param-classes) slot 1 acc []]
+    (if (empty? cs)
+      acc
+      (let [width (if (#{Long/TYPE Double/TYPE} (first cs)) 2 1)]
+        (recur (next cs) (+ slot width) (conj acc slot))))))
+
+(defn- numeric-conversion-kind
+  "byte/short share int's JVM computational category (no separate load/return
+   opcodes exist for them), so a conversion opcode lookup treats them as int."
+  [k]
+  (case k (:byte :short) :int k))
+
+(defn- numeric-widen-narrow-opcode
+  "The JVM primitive-conversion opcode from FROM to TO (both one of :int
+   :long :float :double, after normalizing byte/short to :int), or nil when
+   no conversion is needed — same kind, or a non-numeric primitive
+   (:boolean/:char) where the only sensible case is identity."
+  [from to]
+  (let [from (numeric-conversion-kind from)
+        to (numeric-conversion-kind to)]
+    (when (and (not= from to)
+               (#{:int :long :float :double} from)
+               (#{:int :long :float :double} to))
+      (get {[:int :long] Opcodes/I2L, [:int :float] Opcodes/I2F, [:int :double] Opcodes/I2D
+            [:long :int] Opcodes/L2I, [:long :float] Opcodes/L2F, [:long :double] Opcodes/L2D
+            [:float :int] Opcodes/F2I, [:float :long] Opcodes/F2L, [:float :double] Opcodes/F2D
+            [:double :int] Opcodes/D2I, [:double :long] Opcodes/D2L, [:double :float] Opcodes/D2F}
+           [from to]))))
+
+(defn- emit-interface-bridge-method!
+  "Bridges a Java interface method's real descriptor to the compiled class's
+   own internal Nex method, which always uses the uniform
+   (NexReplState, Object[])->Object descriptor (repl-fn-method-descriptor) —
+   so a real Java caller (a JVM collection sort, a Thread, a Swing listener
+   list) reaches the Nex method exactly as if it had been called from Nex.
+
+   The internal method needs a NexReplState, which a real Java caller has no
+   way to supply. Solved the same way emit-object-equals!/emit-object-
+   hash-code! already solve it for equals/hashCode — another pair of methods
+   Java calls with no state in scope — by reading `this.__state__`, the
+   object's own field set at construction (emit-object-state-arg!), rather
+   than threading a param through."
+  [^ClassWriter cw {:keys [name descriptor flags owner bridge]}]
+  (let [{:keys [target-method-name param-classes return-class param-nex-kinds return-nex-kind]} bridge
+        ^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)
+        slots (param-slot-offsets param-classes)]
+    (.visitCode mv)
+    ;; `this`, kept on the stack under `state` and `args` as the receiver for
+    ;; the INVOKEVIRTUAL below.
+    (.visitVarInsn mv Opcodes/ALOAD 0)
+    (emit-object-state-arg! mv owner)
+    (.visitIntInsn mv Opcodes/BIPUSH (count param-classes))
+    (.visitTypeInsn mv Opcodes/ANEWARRAY "java/lang/Object")
+    (doseq [[idx ^Class param-class slot nex-kind] (map vector (range) param-classes slots param-nex-kinds)]
+      (.visitInsn mv Opcodes/DUP)
+      (.visitIntInsn mv Opcodes/BIPUSH idx)
+      (if-let [java-kind (get primitive-class->jvm-type param-class)]
+        ;; A primitive Java param: load it, convert to the Nex-side primitive
+        ;; kind when it differs (a genuinely `int`-typed Java param landing in
+        ;; a Nex `Integer` (long) parameter, say), then box with whichever
+        ;; wrapper the already-emitted Nex method body actually expects to
+        ;; read back out of the args array — falling back to Java's own
+        ;; wrapper only when the Nex side isn't itself primitive-shaped (a
+        ;; loosely typed `Any` parameter).
+        (let [box-kind (if (contains? primitive-box-info nex-kind) nex-kind java-kind)
+              {:keys [load]} (get primitive-box-info java-kind)
+              {:keys [box-owner box-desc]} (get primitive-box-info box-kind)]
+          (.visitVarInsn mv load slot)
+          (when-let [conv (numeric-widen-narrow-opcode java-kind box-kind)]
+            (.visitInsn mv conv))
+          (.visitMethodInsn mv Opcodes/INVOKESTATIC box-owner "valueOf" box-desc false))
+        (.visitVarInsn mv Opcodes/ALOAD slot))
+      (.visitInsn mv Opcodes/AASTORE))
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL owner target-method-name (repl-fn-method-descriptor) false)
+    (let [java-kind (get primitive-class->jvm-type return-class)]
+      (cond
+        (= java-kind :void)
+        (do (.visitInsn mv Opcodes/POP)
+            (.visitInsn mv Opcodes/RETURN))
+
+        ;; A primitive Java return: unbox using whichever wrapper the Nex
+        ;; method body actually returned (Nex Integer is a boxed Long
+        ;; regardless of the Java interface's own primitive return type),
+        ;; then convert to the Java-expected primitive kind if they differ.
+        java-kind
+        (let [unbox-kind (if (contains? primitive-box-info return-nex-kind) return-nex-kind java-kind)
+              {:keys [box-owner unbox-name unbox-desc]} (get primitive-box-info unbox-kind)
+              {:keys [return]} (get primitive-box-info java-kind)]
+          (.visitTypeInsn mv Opcodes/CHECKCAST box-owner)
+          (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL box-owner unbox-name unbox-desc false)
+          (when-let [conv (numeric-widen-narrow-opcode unbox-kind java-kind)]
+            (.visitInsn mv conv))
+          (.visitInsn mv return))
+
+        (.isArray ^Class return-class)
+        (.visitInsn mv Opcodes/ARETURN)
+
+        :else
+        (do
+          (.visitTypeInsn mv Opcodes/CHECKCAST (reference-type-internal-name return-class))
+          (.visitInsn mv Opcodes/ARETURN))))
+    (.visitMaxs mv 0 0)
+    (.visitEnd mv)))
+
 (defn emit-method!
   [^ClassWriter cw method-spec]
   (case (:kind method-spec)
@@ -2541,6 +2681,7 @@
     :instance-ctor-fn (emit-instance-fn-method! cw method-spec)
     :abstract-instance-fn (emit-abstract-instance-fn-method! cw method-spec)
     :instance-fn (emit-instance-fn-method! cw method-spec)
+    :interface-bridge (emit-interface-bridge-method! cw method-spec)
     (throw (ex-info "Unsupported method emission kind"
                     {:method-spec method-spec}))))
 

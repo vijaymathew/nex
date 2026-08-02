@@ -281,7 +281,7 @@
 
 (defn java-call-method
   [state method-name target args]
-  (bi/java-call-method target method-name args))
+  (bi/java-call-method state target method-name args))
 
 (defn java-get-static-field
   [state class-name field-name]

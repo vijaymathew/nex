@@ -1010,6 +1010,101 @@
          (Class/forName qualified)
          (catch Exception _ nil))))
 
+(defn- class-def-if-exists
+  "Nex class-def lookup mirroring nex.interpreter/lookup-class-if-exists,
+   duplicated here (rather than required) so this namespace stays free of a
+   dependency on nex.interpreter (see the Stage D extraction note above)."
+  [ctx class-name]
+  (or (get @(:classes ctx) class-name)
+      (get @(:specialized-classes ctx) class-name)))
+
+(defn- class-java-interfaces
+  "Reflected Class objects for the Java interfaces CLASS-NAME's `inherit`
+   chain declares, walking through Nex parents (a Java interface parent is a
+   leaf — see docs/proposals/java-interop.md)."
+  [ctx class-name]
+  (letfn [(walk [cn visited]
+            (when-let [class-def (and (not (contains? visited cn))
+                                      (class-def-if-exists ctx cn))]
+              (let [visited' (conj visited cn)]
+                (mapcat (fn [{:keys [parent]}]
+                          (if (class-def-if-exists ctx parent)
+                            (walk parent visited')
+                            (when-let [^Class klass (resolve-imported-java-class ctx parent)]
+                              (when (.isInterface klass) [klass]))))
+                        (:parents class-def)))))]
+    (distinct (walk class-name #{}))))
+
+(defn- coerce-java-return
+  "Narrow a Nex return value to the primitive type a Java interface method
+   declares, so java.lang.reflect.Proxy's return-value check (which requires
+   an exact wrapper match, e.g. Integer for `int`, not any boxed number)
+   accepts it."
+  [^Class return-type value]
+  (cond
+    (= return-type Void/TYPE) nil
+    (= return-type Integer/TYPE) (int value)
+    (= return-type Long/TYPE) (long value)
+    (= return-type Double/TYPE) (double value)
+    (= return-type Float/TYPE) (float value)
+    (= return-type Boolean/TYPE) (boolean value)
+    (= return-type Short/TYPE) (short value)
+    (= return-type Byte/TYPE) (byte value)
+    (= return-type Character/TYPE) (char value)
+    :else value))
+
+(defn- java-proxy-for-object
+  "Wrap a Nex OBJ that implements one or more Java interfaces (via `inherit`)
+   in a java.lang.reflect.Proxy, so it can be handed to a real Java API that
+   expects one of them (Runnable, ActionListener, ...). InvocationHandler
+   dispatch reuses the ordinary Nex method-call path (eval-call), so calling
+   an interface method on the proxy runs exactly like a Nex-side call to the
+   same method on the object. equals/hashCode/toString inherited from Object
+   (declaring class Object, not the Nex-declared interface) get identity-based
+   defaults instead of an eval-call, since the wrapped class is not required
+   to define them.
+
+   A fresh Proxy is built per call rather than cached per object identity:
+   NexObject identity is not stable across the interpreter's existing object
+   value-semantics gap (see memory: nex-compiled-vs-interpreter-gotchas), so
+   caching on it would be caching on the wrong key."
+  [ctx obj]
+  (let [interfaces (class-java-interfaces ctx (:class-name obj))]
+    (if (empty? interfaces)
+      obj
+      (java.lang.reflect.Proxy/newProxyInstance
+       (.getContextClassLoader (Thread/currentThread))
+       (into-array Class interfaces)
+       (reify java.lang.reflect.InvocationHandler
+         (invoke [_ proxy method args]
+           (let [^java.lang.reflect.Method method method
+                 method-name (.getName method)
+                 arg-values (vec (or args []))]
+             (if (= (.getDeclaringClass method) Object)
+               (case method-name
+                 "hashCode" (System/identityHashCode obj)
+                 "equals" (identical? obj (first arg-values))
+                 "toString" (str "NexProxy<" (:class-name obj) ">")
+                 nil)
+               (coerce-java-return (.getReturnType method)
+                                   (eval-call ctx obj method-name arg-values))))))))))
+
+(defn java-arg
+  "Convert one argument for a reflective Java call: a Nex object implementing
+   a Java interface crosses the boundary as a real Proxy for it; everything
+   else passes through unchanged."
+  [ctx v]
+  (if (nex-object? v)
+    (java-proxy-for-object ctx v)
+    v))
+
+(defn java-args
+  "java-arg over a whole argument list — for every interpreter call site that
+   marshals arguments into a reflective Java call (static methods, `new`,
+   constructors, instance methods alike)."
+  [ctx arg-values]
+  (mapv #(java-arg ctx %) arg-values))
+
 (defn java-create-object
      "Create a Java object via reflection."
      [ctx class-name arg-values]
@@ -1017,12 +1112,12 @@
        (when-not klass
          (throw (ex-info (str "Undefined class: " class-name)
                          {:class-name class-name})))
-       (clojure.lang.Reflector/invokeConstructor klass (to-array arg-values))))
+       (clojure.lang.Reflector/invokeConstructor klass (to-array (java-args ctx arg-values)))))
 
 (defn java-call-method
      "Call a Java method via reflection."
-     [target method-name arg-values]
-     (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array arg-values)))
+     [ctx target method-name arg-values]
+     (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array (java-args ctx arg-values))))
 
 (def builtins
   {"print"

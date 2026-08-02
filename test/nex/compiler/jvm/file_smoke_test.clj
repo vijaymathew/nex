@@ -543,6 +543,80 @@ end")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-implements-runnable-and-is-callable-from-java-test
+  (testing "a compiled Nex class inheriting Runnable really `implements` it and a real Java Thread calls back into it"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-runnable")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.lang.Runnable
+import java.lang.Thread
+
+class My_Task
+  inherit
+    Runnable
+  feature
+    run() do
+      print(\"ran\")
+    end
+end
+
+with \"java\" do
+  let task: My_Task := create My_Task
+  let t: Thread := Thread.new(task)
+  t.start()
+  t.join()
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["\"ran\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-implements-comparator-multi-call-round-trip-test
+  (testing "java.util.Collections.sort repeatedly calls back into a compiled Nex Comparator, with correct int-return unboxing/narrowing"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-comparator")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.util.Comparator
+import java.util.ArrayList
+import java.util.Collections
+
+class Reverse_Order
+  inherit
+    Comparator
+  feature
+    compare(a: Integer, b: Integer): Integer do
+      result := b - a
+    end
+end
+
+with \"java\" do
+  let list: ArrayList := create ArrayList
+  list.add(3)
+  list.add(1)
+  list.add(2)
+  let cmp: Reverse_Order := create Reverse_Order
+  Collections.sort(list, cmp)
+  print(list.get(0))
+  print(list.get(1))
+  print(list.get(2))
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["3" "2" "1"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-cursor-subclass-across-smoke-test
   (testing "compile-jar runs across over a value typed as Cursor when the runtime instance is a Cursor subclass"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-cursor")

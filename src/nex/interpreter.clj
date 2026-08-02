@@ -784,13 +784,17 @@
 ;;
 
 (defn get-parent-classes
-  "Get the list of parent class definitions for a class."
+  "Get the list of parent class definitions for a class. A parent naming an
+   imported Java type (an interface implemented via `inherit`, per
+   docs/proposals/java-interop.md) has no Nex-side class-def and is omitted:
+   callers walking this list for fields/methods/constants/invariants
+   correctly see only the Nex side of the inheritance chain."
   [ctx class-def]
   (when-let [parents (:parents class-def)]
-    (mapv (fn [parent-info]
-            (let [parent-class (lookup-class ctx (:parent parent-info))]
-              (assoc parent-info :class-def parent-class)))
-          parents)))
+    (vec (keep (fn [parent-info]
+                 (when-let [parent-class (lookup-class-if-exists ctx (:parent parent-info))]
+                   (assoc parent-info :class-def parent-class)))
+               parents))))
 
 (defn feature-members
   "Return feature members with section visibility copied onto each member."
@@ -1275,7 +1279,7 @@
                          first
                          :name)
                     (some (fn [{:keys [parent]}]
-                            (search (lookup-class ctx parent)
+                            (search (lookup-class-if-exists ctx parent)
                                     (conj seen (:name class-def))))
                           (:parents class-def)))))]
       (search (lookup-class ctx (:class-name v)) #{}))))
@@ -1816,7 +1820,11 @@
                                   (try (Class/forName (str "java.lang." target-name)) (catch Exception _ nil))
                                   (throw (ex-info (str "Undefined Java class: " target-name) {:class-name target-name})))]
                     (if has-parens
-                      (clojure.lang.Reflector/invokeStaticMethod klass method (to-array arg-values))
+                      ;; `method` here also covers ClassName.new(args) — Clojure's
+                      ;; Reflector special-cases the literal name "new" as
+                      ;; constructor invocation — so arguments need the same
+                      ;; Java-interface Proxy-wrapping java-create-object applies.
+                      (clojure.lang.Reflector/invokeStaticMethod klass method (to-array (bi/java-args ctx arg-values)))
                       (let [^java.lang.reflect.Field field (.getField klass method)]
                         (.get field nil))))
 
@@ -1974,7 +1982,7 @@
                                              :class-name compiled-class-name}))
                             (runtime-resolve-call-user-method ctx obj method arg-values)))
                         (runtime-resolve-call-user-method ctx obj method arg-values))
-                      (java-call-method obj method arg-values)))))
+                      (java-call-method ctx obj method arg-values)))))
 
       (let [fn-obj (try
                      (env-lookup (:current-env ctx) method)
