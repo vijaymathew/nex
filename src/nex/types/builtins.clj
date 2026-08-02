@@ -1064,30 +1064,48 @@
    defaults instead of an eval-call, since the wrapped class is not required
    to define them.
 
-   A fresh Proxy is built per call rather than cached per object identity:
-   NexObject identity is not stable across the interpreter's existing object
-   value-semantics gap (see memory: nex-compiled-vs-interpreter-gotchas), so
-   caching on it would be caching on the wrong key."
+   State mutated by a proxied call must be visible both (a) to the *next*
+   proxied call, and (b) to an ordinary Nex read of the same object
+   afterwards (`counter.count`) — and NexObject fields are an immutable map,
+   propagated by write-back-by-convention (nex.interpreter/write-back-target!)
+   rather than a mutable cell. eval-call's dispatch target,
+   `{:type :literal :value obj}`, names no slot that convention can write
+   back to; write-back-target! now treats that shape as a request to
+   propagate the mutation to every *other* alias of the same identity in the
+   current env chain instead (env-replace-object-aliases!), which is exactly
+   what makes (b) work. (a) still needs a slot of its own to re-read from on
+   the next call — a bare Clojure closure over `obj` would keep re-dispatching
+   against the pre-call identity forever, since nothing ever tells the
+   closure a new one exists. So OBJ is registered here under a private,
+   unique binding in the *current* env (the one live when this object
+   crossed into a Java call — e.g. inside the `with \"java\"` block that
+   called `addActionListener`), and each dispatch re-reads that binding first:
+   env-replace-object-aliases! keeps it current the same way it keeps
+   `counter` current, since both are just bindings in the same map."
   [ctx obj]
   (let [interfaces (class-java-interfaces ctx (:class-name obj))]
     (if (empty? interfaces)
       obj
-      (java.lang.reflect.Proxy/newProxyInstance
-       (.getContextClassLoader (Thread/currentThread))
-       (into-array Class interfaces)
-       (reify java.lang.reflect.InvocationHandler
-         (invoke [_ proxy method args]
-           (let [^java.lang.reflect.Method method method
-                 method-name (.getName method)
-                 arg-values (vec (or args []))]
-             (if (= (.getDeclaringClass method) Object)
-               (case method-name
-                 "hashCode" (System/identityHashCode obj)
-                 "equals" (identical? obj (first arg-values))
-                 "toString" (str "NexProxy<" (:class-name obj) ">")
-                 nil)
-               (coerce-java-return (.getReturnType method)
-                                   (eval-call ctx obj method-name arg-values))))))))))
+      (let [env (:current-env ctx)
+            slot (str "__java_proxy_target_" (gensym) "__")
+            _ (swap! (:bindings env) assoc slot obj)]
+        (java.lang.reflect.Proxy/newProxyInstance
+         (.getContextClassLoader (Thread/currentThread))
+         (into-array Class interfaces)
+         (reify java.lang.reflect.InvocationHandler
+           (invoke [_ proxy method args]
+             (let [^java.lang.reflect.Method method method
+                   method-name (.getName method)
+                   arg-values (vec (or args []))
+                   current-obj (get @(:bindings env) slot obj)]
+               (if (= (.getDeclaringClass method) Object)
+                 (case method-name
+                   "hashCode" (System/identityHashCode current-obj)
+                   "equals" (identical? current-obj (first arg-values))
+                   "toString" (str "NexProxy<" (:class-name current-obj) ">")
+                   nil)
+                 (coerce-java-return (.getReturnType method)
+                                     (eval-call ctx current-obj method-name arg-values)))))))))))
 
 (defn java-arg
   "Convert one argument for a reflective Java call: a Nex object implementing

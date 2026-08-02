@@ -98,5 +98,40 @@ end")
       (is (not (:success result)))
       (is (some #(re-find #"does not implement" (:message %)) (:errors result))))))
 
+(deftest mutable-state-survives-repeated-proxy-dispatch-test
+  (testing "field mutations from repeated calls through the Proxy are visible both across calls and to an ordinary Nex-side read afterward"
+    (let [output (run "import java.awt.event.ActionListener
+import java.awt.event.ActionEvent
+import javax.swing.JButton
+
+class Click_Counter
+  inherit
+    ActionListener
+  create
+    make() do
+      this.count := 0
+    end
+  feature
+    count: Integer
+
+    actionPerformed(e: ActionEvent) do
+      count := count + 1
+    end
+end
+
+with \"java\" do
+  let button: JButton := JButton.new(\"Click me\")
+  let counter: Click_Counter := create Click_Counter.make()
+  button.addActionListener(counter)
+
+  button.doClick()
+  print(counter.count)
+  button.doClick()
+  print(counter.count)
+  button.doClick()
+  print(counter.count)
+end")]
+      (is (= ["1" "2" "3"] output)))))
+
 ;; Extending a concrete Java class (Phase 2 of docs/proposals/java-interop.md)
 ;; has its own test file, test/nex/java_interop_extend_class_test.clj.

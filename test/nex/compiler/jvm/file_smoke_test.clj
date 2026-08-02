@@ -617,6 +617,69 @@ end")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-imported-java-typed-field-smoke-test
+  (testing "a field typed as an imported Java class (not java.lang.*) compiles with a correctly qualified descriptor, on a plain class and on one that also implements a Java interface"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-java-typed-field")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.lang.StringBuilder
+import java.awt.event.ActionListener
+import java.awt.event.ActionEvent
+
+class Builder_Holder
+  create
+    make() do
+      with \"java\" do
+        this.sb := StringBuilder.new()
+      end
+    end
+  feature
+    sb: StringBuilder
+
+    append(s: String) do
+      with \"java\" do
+        sb.append(s)
+      end
+    end
+end
+
+class Click_Counter
+  inherit
+    ActionListener
+  create
+    make(sb: StringBuilder) do
+      this.sb := sb
+      this.count := 0
+    end
+  feature
+    sb: StringBuilder
+    count: Integer
+
+    actionPerformed(e: ActionEvent) do
+      count := count + 1
+    end
+end
+
+with \"java\" do
+  let holder: Builder_Holder := create Builder_Holder.make()
+  holder.append(\"a\")
+  holder.append(\"b\")
+  print(\"result=\" + holder.sb.toString())
+
+  let counter: Click_Counter := create Click_Counter.make(holder.sb)
+  print(\"count=\" + counter.count)
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["\"result=ab\"" "\"count=0\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-extends-thread-override-and-inherited-call-smoke-test
   (testing "a compiled Nex class extending Thread is a real subclass: overriding run() is what a real Thread.start() calls, and inherited (non-overridden) methods like start()/join() are callable from Nex"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-extend-thread")

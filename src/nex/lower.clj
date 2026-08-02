@@ -652,8 +652,27 @@
                                         ;; infers as nil here and lowering fails
                                         ;; with "Unable to infer expression type".
                                         :type-aliases *type-aliases*})
-        (throw (ex-info "Unable to infer expression type during lowering"
-                        {:expr expr})))))
+        ;; A bare identifier that names an imported Java class resolves fine
+        ;; as a call target inside `with "java"` (java-host-class-root-name
+        ;; requires :with-java?, by design — see docs/proposals/java-interop.md
+        ;; and the java-interop chapter of the language Definition), but
+        ;; outside one it is just an unresolved identifier, and reaches this
+        ;; generic fallback. The typechecker accepts such a program regardless
+        ;; (its own fallback for an unresolved call is looser than lowering's,
+        ;; which must pick a concrete emission strategy, not just a type), so
+        ;; this is not a compiler defect in the sense the rest of this
+        ;; function's callers are — it is a real, nameable gap with a real
+        ;; workaround, and is reported as one rather than as "please report
+        ;; this bug".
+        (if (and (= (:type expr) :identifier)
+                 (imported-java-qualified-name env (:name expr)))
+          (throw (unsupported
+                  (str "`" (:name expr) "` is an imported Java class; used here, "
+                       "outside a `with \"java\"` block, it cannot be resolved as "
+                       "a call target. Wrap this code in `with \"java\" do ... end`.")
+                  {:expr expr}))
+          (throw (ex-info "Unable to infer expression type during lowering"
+                          {:expr expr}))))))
 
 (defn- infer-target-call-type
   [env expr class-target-name across-item-type target-expr]
@@ -4276,6 +4295,7 @@
                                                           (:generic-params (:class-def fn-def)))
                                  :fields (field-info-map {:compiled-classes (:compiled-classes fn-def)
                                                           :classes visible-classes
+                                                          :imports visible-imports
                                                           :generic-param-names generic-param-names}
                                                          (:class-def fn-def))
                                  :this-type current-class
@@ -4451,6 +4471,7 @@
                                                           (:generic-params class-def))
                                  :fields (field-info-map {:compiled-classes compiled-classes
                                                           :classes visible-classes
+                                                          :imports visible-imports
                                                           :generic-param-names generic-param-names}
                                                          class-def)
                                  :this-type class-name
@@ -4561,6 +4582,7 @@
                                                           (:generic-params class-def))
                                  :fields (field-info-map {:compiled-classes compiled-classes
                                                           :classes visible-classes
+                                                          :imports visible-imports
                                                           :generic-param-names generic-param-names}
                                                          class-def)
                                  :this-type class-name
@@ -4710,6 +4732,7 @@
                                                          (:generic-params class-def))
                                 :fields (field-info-map {:compiled-classes compiled-classes
                                                          :classes visible-classes
+                                                         :imports visible-imports
                                                          :generic-param-names generic-param-names}
                                                         class-def)
                                 :this-type class-name
@@ -5022,9 +5045,15 @@
         fields (mapv (fn [field]
                        {:name (:name field)
                         :nex-type (:field-type field)
-                        :jvm-type (resolve-jvm-type {:compiled-classes compiled-classes
-                                                     :generic-param-names (set (map :name (:generic-params class-def)))}
-                                                    (:field-type field))})
+                        ;; Must resolve through `env` (not a minimal ad-hoc map),
+                        ;; since an imported-Java-typed field (e.g. `label:
+                        ;; JLabel`) needs :imports to qualify to its real
+                        ;; internal name (javax/swing/JLabel) — without it,
+                        ;; resolve-jvm-type falls through to treating the bare
+                        ;; Nex-source name as an unqualified internal class
+                        ;; name, emitting a field descriptor the JVM can never
+                        ;; resolve (NoClassDefFoundError: JLabel at link time).
+                        :jvm-type (resolve-jvm-type env (:field-type field))})
                      (remove :constant? (class-fields class-def)))
         runtime-type-fields (mapv (fn [{:keys [name]}]
                                     {:name (generic-runtime-field-name name)
@@ -5046,9 +5075,10 @@
                                              (infer-type constant-env (:value field)))]
                             {:name (:name field)
                              :nex-type nex-type
-                             :jvm-type (resolve-jvm-type {:compiled-classes compiled-classes
-                                                         :generic-param-names (set (map :name (:generic-params class-def)))}
-                                                        nex-type)
+                             ;; Same fix as `fields` above: resolve through
+                             ;; constant-env (which has :imports), not a
+                             ;; minimal map missing it.
+                             :jvm-type (resolve-jvm-type constant-env nex-type)
                              :value (lower-expression constant-env (:value field))}))
                         (filter :constant? (class-fields class-def)))]
     {:name class-name

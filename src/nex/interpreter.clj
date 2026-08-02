@@ -1676,7 +1676,25 @@
 
                          :else false))
 
-                     :else false)]
+                     ;; A target-expr shape none of the branches above
+                     ;; recognise — most notably `{:type :literal ...}`, which
+                     ;; `eval-call` (nex.types.builtins) synthesizes for
+                     ;; dispatch that did not originate from any Nex-level
+                     ;; expression at all (a Java interface's real vtable
+                     ;; calling back into a Nex method through the
+                     ;; java.lang.reflect.Proxy of docs/proposals/java-interop.md,
+                     ;; via `call-object-method`). There is no single slot to
+                     ;; write the mutated object back into, but
+                     ;; env-replace-object-aliases! below needs none: it finds
+                     ;; every binding in the current env chain that is
+                     ;; `identical?` to the object's pre-call identity and
+                     ;; replaces it, which is exactly what makes a later,
+                     ;; ordinary read of the same Nex-level variable (e.g.
+                     ;; `counter.count`) see the mutation. Reporting `true`
+                     ;; here only enables that propagation; it is a safe no-op
+                     ;; when old-value is not a Nex object or is not aliased
+                     ;; anywhere in scope.
+                     :else (nex-object? old-value))]
       (when updated?
         (env-replace-object-aliases! (:current-env ctx) old-value value))
       updated?)))
