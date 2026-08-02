@@ -5,6 +5,7 @@
             [nex.parser :as parser]
             [nex.interpreter :as interp]
             [nex.typechecker :as tc]
+            [nex.types.runtime :as rt]
             [nex.compiler.jvm.file :as jvm-file]
             [nex.compiler.jvm.classloader :as loader])
   (:import [clj_antlr ParseError]))
@@ -34,7 +35,10 @@
                       {:errors (map tc/format-type-error (:errors result))})))))
 
 (defn- run-interpreted
-  [source-id ast]
+  [source-id ast program-args]
+  ;; Process.command_line() is process-wide state (see nex.types.runtime),
+  ;; not threaded through ctx — set once, here, before the program runs.
+  (rt/set-program-args! program-args)
   (let [ctx (assoc (interp/make-context) :debug-source source-id)]
     ;; The program writes its own output as it runs, interleaved with `Console`
     ;; in the order the program produced it; nothing is echoed afterwards.
@@ -118,7 +122,7 @@
    returned as {:backend-defect e} for the caller to fall back on; any other
    throwable is rethrown (unwrapped from the reflective call) after the partial
    output is flushed."
-  [{:keys [main-class classes]}]
+  [{:keys [main-class classes]} program-args]
   (let [ldr (loader/make-loader)]
     (doseq [[binary-name ^bytes bytecode] classes]
       (loader/define-class! ldr binary-name bytecode))
@@ -129,7 +133,12 @@
           flush-buf! (fn [] (print (.toString buf "UTF-8")) (flush))]
       (try
         (System/setOut (java.io.PrintStream. buf true "UTF-8"))
-        (.invoke m nil (object-array [(into-array String [])]))
+        ;; The class's own `main` (emit-launcher-main!) records these as
+        ;; Process.command_line() before running the program — this is not
+        ;; just plumbing for this in-process call; it is what makes a jar
+        ;; built from `classes` behave identically whether run through
+        ;; nex.eval or directly (`java -jar foo.jar arg1 arg2`).
+        (.invoke m nil (object-array [(into-array String program-args)]))
         (System/setOut real-out)
         (flush-buf!)
         nil
@@ -163,24 +172,28 @@
    never re-executed. The one automatic fallback left is a LinkageError — a
    backend defect, not the program's behaviour — which runs interpreted with a
    warning rather than failing a valid program."
-  [source-id ast {:keys [interpret?]}]
-  (if interpret?
-    (run-interpreted source-id ast)
-    (let [{:keys [compiled compile-error]} (try-compile source-id ast)]
-      (if compile-error
-        (throw (ex-info (compile-error-message compile-error)
-                        {:type :not-compilable}
-                        compile-error))
-        (if-let [{:keys [backend-defect]} (run-compiled compiled)]
-          (do (warn-fallback! (str "compiled program failed to link ("
-                                   (or (ex-message backend-defect) (str backend-defect))
-                                   ")"))
-              (run-interpreted source-id ast))
-          nil)))))
+  [source-id ast {:keys [interpret? program-args]}]
+  (let [program-args (or program-args [])]
+    (if interpret?
+      (run-interpreted source-id ast program-args)
+      (let [{:keys [compiled compile-error]} (try-compile source-id ast)]
+        (if compile-error
+          (throw (ex-info (compile-error-message compile-error)
+                          {:type :not-compilable}
+                          compile-error))
+          (if-let [{:keys [backend-defect]} (run-compiled compiled program-args)]
+            (do (warn-fallback! (str "compiled program failed to link ("
+                                     (or (ex-message backend-defect) (str backend-defect))
+                                     ")"))
+                (run-interpreted source-id ast program-args))
+            nil))))))
 
 (defn eval-file
   "Parse and evaluate a Nex file. opts: {:interpret? bool} to force the
-   tree-walking interpreter instead of the compiled JVM backend."
+   tree-walking interpreter instead of the compiled JVM backend; {:program-args
+   [...]} the program's own argv, returned by Process.command_line() —
+   everything after the file name on the command line, not to be confused
+   with the `nex` launcher's own flags like --interpret."
   ([file-path] (eval-file file-path {}))
   ([file-path opts]
    (let [source-id (.getCanonicalPath (io/file file-path))
@@ -191,17 +204,18 @@
 
 (defn -main
   "Main entry point for nex eval command.
-   Usage: nex.eval [--interpret] <file.nex>"
+   Usage: nex.eval [--interpret] <file.nex> [program-args...]"
   [& args]
   (let [interpret? (boolean (some #{"--interpret"} args))
-        files (remove #{"--interpret"} args)
-        file (first files)]
+        files (vec (remove #{"--interpret"} args))
+        file (first files)
+        program-args (vec (rest files))]
     (when (nil? file)
       (println "Error: No file provided")
-      (println "Usage: nex <file.nex> [--interpret]")
+      (println "Usage: nex <file.nex> [--interpret] [program-args...]")
       (System/exit 1))
     (try
-      (eval-file file {:interpret? interpret?})
+      (eval-file file {:interpret? interpret? :program-args program-args})
       (System/exit 0)
       (catch ParseError e
         (println "Syntax error:")

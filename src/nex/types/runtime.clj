@@ -723,8 +723,32 @@
   (System/getenv name))
 (defn nex-process-setenv [name value]
   (throw (ex-info "Setting env vars not supported on JVM" {})))
+
+;; The program's own argv — the args a user passed after the script/jar name,
+;; e.g. `nex report.nex --format csv` or `java -jar report.jar --format csv`.
+;; Neither backend's entry point threads these through the normal call chain
+;; (the compiled `main(String[] args)` never even reads its own parameter, and
+;; the interpreter's builtin-method dispatch for a Process value discards the
+;; ctx it's actually given), so command_line() is set process-wide, once, by
+;; whichever entry point starts the program (nex.eval/eval-file for both
+;; backends via nex.eval, and the compiled launcher's own `main` so a jar run
+;; directly — `java -jar foo.jar arg1 arg2` — also works without nex.eval in
+;; the picture at all). This used to read the *JVM's* input arguments
+;; (ManagementFactory RuntimeMXBean) — launch flags like -Xmx, never the
+;; program's own args, which RuntimeMXBean.getInputArguments() explicitly
+;; excludes.
+(defonce ^:private program-args-atom (atom []))
+
+(defn set-program-args!
+  "Record the program's own argv, once, at process start. ARGS may be a raw
+   Java String[] (the compiled launcher's `main` parameter) or any seqable
+   collection of strings (the interpreter's CLI entry point)."
+  [args]
+  (reset! program-args-atom (vec args))
+  nil)
+
 (defn nex-process-command-line []
-  (nex-array-from (into [] (.getInputArguments (java.lang.management.ManagementFactory/getRuntimeMXBean)))))
+  (nex-array-from @program-args-atom))
 
 (defn nex-console? [v] (and (map? v) (= (:nex-builtin-type v) :Console)))
 (defn nex-process? [v] (and (map? v) (= (:nex-builtin-type v) :Process)))

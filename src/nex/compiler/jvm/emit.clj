@@ -318,6 +318,15 @@
                         false)
       (.visitInsn mv Opcodes/POP)
 
+      ;; Record the program's own argv before anything else runs, so
+      ;; Process.command_line() sees it — the reflective in-process caller
+      ;; (nex.eval/run-compiled) sets the same value again redundantly, but
+      ;; a jar run directly (`java -jar foo.jar arg1 arg2`, no nex.eval in
+      ;; the picture) depends on this call to see its args at all.
+      (emit-runtime-call! mv "set-program-args!"
+                          [(fn [] (.visitVarInsn mv Opcodes/ALOAD 0))])
+      (.visitInsn mv Opcodes/POP)
+
       (emit-runtime-call! mv "make-repl-state" [])
       (.visitTypeInsn mv Opcodes/CHECKCAST repl-state-internal-name)
       (.visitVarInsn mv Opcodes/ASTORE 1)

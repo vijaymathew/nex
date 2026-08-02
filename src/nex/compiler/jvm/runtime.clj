@@ -661,6 +661,41 @@
   (some-> (.get ^HashMap @(:classes state) class-name)
           :binary-name))
 
+(defn- portable-value->compiled
+  "Convert a value built through nex.types.runtime's portable (tagged)
+   representation into the compiled backend's own native one, recursively —
+   needed wherever a value crosses from a backend-agnostic helper
+   (java-http-request and kin, which build a Map/Set with rt/nex-map,
+   rt/nex-set) into a real compiled object's field via reflection: the
+   compiled backend's own Map/Set fields are always a real
+   java.util.HashMap/LinkedHashSet (see emit-map-literal! and the comment
+   above map-contains-key), never the portable tagged form, and Field/set
+   rejects the mismatch outright rather than converting it. Arrays need no
+   container conversion (already java.util.ArrayList on both sides, per
+   nex.types.runtime/nex-array-from) — only their elements, in case one holds
+   a portable map/set in turn."
+  [v]
+  (cond
+    (rt/nex-map? v)
+    (let [^java.util.Map m (java.util.HashMap.)]
+      (doseq [[k val] (rt/nex-map-entries v)]
+        (.put m (portable-value->compiled k) (portable-value->compiled val)))
+      m)
+
+    (rt/nex-set? v)
+    (let [^java.util.Set s (java.util.LinkedHashSet.)]
+      (doseq [item (rt/nex-set-seq v)]
+        (.add s (portable-value->compiled item)))
+      s)
+
+    (instance? java.util.ArrayList v)
+    (let [^java.util.ArrayList al v]
+      (dotimes [i (.size al)]
+        (.set al i (portable-value->compiled (.get al i))))
+      al)
+
+    :else v))
+
 (defn- instantiate-compiled-object
   [state class-name field-values]
   (let [binary-name (compiled-class-binary-name state class-name)]
@@ -675,7 +710,7 @@
           (.set state-field instance state))
         (doseq [[field-name field-value] field-values]
           (when-let [^Field field (reflected-field cls (name field-name))]
-            (.set field instance field-value)))
+            (.set field instance (portable-value->compiled field-value))))
         instance))))
 
 (defn- make-runtime-object
@@ -727,6 +762,13 @@
          (fn [^HashMap m]
            (doto m (.put "__immediate_output__" (boolean enabled)))))
   nil)
+
+(defn set-program-args!
+  "Thin wrapper so the compiled launcher's `main` (emit-launcher-main!) can
+   reach nex.types.runtime/set-program-args! by name through emit-runtime-
+   call!, which resolves runtime helper names against this namespace only."
+  [args]
+  (rt/set-program-args! args))
 
 (defn- immediate-output?
   [state]

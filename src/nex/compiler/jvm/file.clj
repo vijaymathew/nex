@@ -221,6 +221,27 @@
                                                   :var-types {}})
            class-asts (vec (concat (user-class-defs prepared-ast)
                                    (lower/collect-anonymous-class-defs prepared-ast)))
+           ;; A raw parsed class-def carries no :binary-name — that's computed
+           ;; separately, above, into compiled-classes, and was never merged
+           ;; back in here. Runtime helpers that build a Nex object at
+           ;; runtime (java-http-request and kin, via make-runtime-object)
+           ;; look a class up by name in exactly this table
+           ;; (bootstrap-compiled-state! populates it verbatim) to construct
+           ;; a real instance of the compiled class; without :binary-name
+           ;; that lookup always failed, silently downgrading every such
+           ;; object to an interpreter-only NexObject with no method bodies
+           ;; to run (see interpreter-reachable? below — it never knew this
+           ;; fallback path existed, so it trimmed bodies a program with no
+           ;; closures at all could still end up needing).
+           class-asts (mapv (fn [c]
+                              (if-let [{:keys [internal-name jvm-name binary-name]}
+                                       (get compiled-classes (:name c))]
+                                (assoc c
+                                       :internal-name internal-name
+                                       :jvm-name jvm-name
+                                       :binary-name binary-name)
+                                c))
+                            class-asts)
            ;; Shrink the embedded table to structural metadata when the program
            ;; cannot reach the interpreter, then let the chunker (emit-string-
            ;; constant!) split whatever is still over the 65535-byte LDC cap.

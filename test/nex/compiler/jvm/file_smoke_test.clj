@@ -23,12 +23,14 @@
           (str *out*))))))
 
 (defn- run-jar!
-  [jar-path]
-  (let [proc (.exec (Runtime/getRuntime) (into-array String ["java" "-jar" jar-path]))]
-    (.waitFor proc)
-    {:exit (.exitValue proc)
-     :out (slurp (.getInputStream proc))
-     :err (slurp (.getErrorStream proc))}))
+  ([jar-path] (run-jar! jar-path []))
+  ([jar-path program-args]
+   (let [proc (.exec (Runtime/getRuntime)
+                     (into-array String (concat ["java" "-jar" jar-path] program-args)))]
+     (.waitFor proc)
+     {:exit (.exitValue proc)
+      :out (slurp (.getInputStream proc))
+      :err (slurp (.getErrorStream proc))})))
 
 (defn- free-port []
   (with-open [socket (java.net.ServerSocket. 0)]
@@ -1057,5 +1059,65 @@ print(f.peek())")
           (is (= 0 exit) err)
           (is (= ["\"draft\"" "\"draft\""] (str/split-lines (str/trim out)))))
         (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-process-command-line-returns-real-argv-test
+  (testing "Process.command_line() on a standalone jar returns the program's own argv, not the JVM's launch flags"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-argv")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "let proc := create Process
+let args := proc.command_line()
+print(args.length())
+let i := 0
+from let j := 0 until j >= args.length() do
+  print(args.get(j))
+  j := j + 1
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result) ["hello" "world" "42"])
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["3" "\"hello\"" "\"world\"" "\"42\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-http-client-get-returns-real-response-test
+  (testing "net/Http_Client.get() on the compiled backend returns the server's real status/body/headers, not a silently-defaulted 0/empty object"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-http-client")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")
+          port (free-port)
+          server (com.sun.net.httpserver.HttpServer/create
+                  (java.net.InetSocketAddress. "127.0.0.1" port) 0)]
+      (try
+        (.mkdirs tmp-dir)
+        (.createContext server "/hello"
+                        (reify com.sun.net.httpserver.HttpHandler
+                          (handle [_ exchange]
+                            (let [body (.getBytes "hello from server" java.nio.charset.StandardCharsets/UTF_8)]
+                              (.add (.getResponseHeaders exchange) "Content-Type" "text/plain")
+                              (.sendResponseHeaders exchange 200 (alength body))
+                              (with-open [os (.getResponseBody exchange)]
+                                (.write os body))))))
+        (.start server)
+        (spit main-file (str "intern net/Http_Client
+
+let client := create Http_Client.make()
+let response := client.get(\"http://127.0.0.1:" port "/hello\")
+print(response.status())
+print(response.body())
+print(response.headers().get(\"content-type\"))"))
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["200" "\"hello from server\"" "\"text/plain\""] output-lines)))
+        (finally
+          (.stop server 0)
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
