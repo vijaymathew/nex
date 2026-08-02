@@ -661,7 +661,7 @@
   (some-> (.get ^HashMap @(:classes state) class-name)
           :binary-name))
 
-(defn- portable-value->compiled
+(defn portable-value->compiled
   "Convert a value built through nex.types.runtime's portable (tagged)
    representation into the compiled backend's own native one, recursively —
    needed wherever a value crosses from a backend-agnostic helper
@@ -673,7 +673,16 @@
    rejects the mismatch outright rather than converting it. Arrays need no
    container conversion (already java.util.ArrayList on both sides, per
    nex.types.runtime/nex-array-from) — only their elements, in case one holds
-   a portable map/set in turn."
+   a portable map/set in turn.
+
+   Also called directly from emitted bytecode (see emit-unbox-or-cast! in
+   emit.clj) ahead of a CHECKCAST to HashMap/LinkedHashSet: the same portable
+   representation reaches a declared Map/Set-typed local, field, or param
+   whenever its value originates from a backend-agnostic helper — most
+   commonly a builtin free function like json_parse — whose static Nex type
+   is Any, so the compiled backend cannot special-case it the way it does its
+   own Map/Set literals. Public (not `defn-`) so that reflective lookup by
+   name from bytecode resolves it."
   [v]
   (cond
     (rt/nex-map? v)
@@ -1947,6 +1956,32 @@
   [value]
   (value/nex-clone-value interp/nex-object? interp/make-object value))
 
+(defn shallow-copy-collection
+  "A new, independent Array/Map container holding the SAME elements/entries —
+   unlike clone-value, does not recurse into them. Used only for `old`
+   postcondition snapshots (see add-old-field-snapshots in nex.lower): an
+   Array (a real java.util.ArrayList) or Map (a real java.util.HashMap on
+   this backend) is a genuinely mutable container, so a snapshot IR node that
+   just re-reads the field's current reference into a new local slot copies
+   the *reference*, not a value — an in-place `.add`/`.put` later in the same
+   method body was then visible through the \"old\" snapshot too (`old
+   items.length = items.length - 1` failed because both sides read the SAME,
+   already-mutated ArrayList). `old`, semantically, should freeze the
+   container's own membership at snapshot time, not deep-copy every element
+   the way clone-value's Nex-level `.clone()` does — that would silently
+   change identity for any object-valued element (`old items.get(0) = obj`
+   would start comparing a freshly-cloned copy against the original,
+   unrelated to the actual bug)."
+  [value]
+  (cond
+    (instance? java.util.Map value)
+    (java.util.HashMap. ^java.util.Map value)
+
+    (instance? java.util.Collection value)
+    (java.util.ArrayList. ^java.util.Collection value)
+
+    :else value))
+
 (defn array-contains
   [values needle]
   (boolean (some #(deep-equals % needle) values)))
@@ -2121,6 +2156,9 @@
   (cond
     (= name "validate-object-state")
     (validate-object-state state (first args) (second args))
+
+    (= name "shallow-copy-collection")
+    (shallow-copy-collection (first args))
 
     (= name "make-captured-function-object")
     (make-captured-function-object state (first args) (vec (rest args)))

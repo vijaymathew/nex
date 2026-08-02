@@ -18,7 +18,9 @@
          :functions (vec (concat (interp/resolve-interned-functions source-id ast)
                                  (:functions ast)))
          :imports (vec (concat (interp/resolve-interned-imports source-id ast)
-                               (:imports ast)))))
+                               (:imports ast)))
+         :type-aliases (vec (concat (interp/resolve-interned-type-aliases source-id ast)
+                                    (:type-aliases ast)))))
 
 (defn- type-check-ast!
   [source-id ast]

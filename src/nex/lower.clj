@@ -1205,8 +1205,30 @@
                 (let [field-info (get (:fields env') field-name)
                       snapshot-name (str "__old_" field-name)
                       [env'' local] (env-add-local env' snapshot-name (:nex-type field-info))
+                      field-read-ir (snapshot-source-ir env' field-info)
+                      ;; An Array (a real java.util.ArrayList) or Map (a real
+                      ;; java.util.HashMap on this backend) is a genuinely
+                      ;; mutable container: storing the field's current
+                      ;; reference straight into the new snapshot local just
+                      ;; copies the *reference*, and a later in-place
+                      ;; `.add`/`.put` in the same method body is then visible
+                      ;; through the "old" snapshot too, the same reference-
+                      ;; vs-value bug env-replace-object-aliases! exists to
+                      ;; work around on the interpreter side (`old
+                      ;; items.length = items.length - 1` failed because both
+                      ;; sides read the SAME, already-mutated ArrayList).
+                      ;; shallow-copy-collection freezes the container's own
+                      ;; membership at snapshot time without deep-copying
+                      ;; elements (unlike Nex-level `.clone()`), so an
+                      ;; object-valued element's identity is unaffected.
+                      snapshot-ir (if (#{"Array" "Map"} (base-type-name (:nex-type field-info)))
+                                    (ir/call-runtime-node "shallow-copy-collection"
+                                                          [field-read-ir]
+                                                          (:nex-type local)
+                                                          (:jvm-type local))
+                                    field-read-ir)
                       stmt (ir/set-local-node (:slot local)
-                                              (snapshot-source-ir env' field-info)
+                                              snapshot-ir
                                               (:nex-type local)
                                               (:jvm-type local))]
                   [env''

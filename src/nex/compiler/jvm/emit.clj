@@ -27,6 +27,7 @@
 
 (declare emit-const!)
 (declare emit-runtime-call!)
+(declare emit-runtime-invoke-1!)
 (declare emit-expression!)
 (declare primitive-class->jvm-type)
 (declare primitive-box-info)
@@ -475,6 +476,31 @@
     :else
     nil))
 
+(defn- emit-unbox-or-cast-to-collection!
+  "Like emit-unbox-or-cast!, but for a HashMap/LinkedHashSet target type,
+   converts a portable (tagged) value to the compiled backend's native shape
+   before the cast — needed wherever a value crosses from a backend-agnostic
+   helper (most commonly a builtin free function like json_parse, whose
+   static Nex type is Any) into a declared Map/Set-typed local/field/param;
+   nothing upstream of that boundary could have known to convert it already.
+
+   NOT the same as unconditionally patching emit-unbox-or-cast! itself: that
+   function also runs on every ordinary re-read of an *already*-Map/Set-typed
+   value (a plain local/field load, a method-call target) — re-converting
+   those replaces the live HashMap/LinkedHashSet reference with a fresh copy
+   on every read, silently breaking a subsequent `.put`/`.add` (it mutates the
+   throwaway copy, never the value actually stored in the local/field/global).
+   This wrapper is only reached from emit-stack-coerce!'s from/to-type-differ
+   branch, which by construction never fires when the value is already the
+   declared type (an equal-type coercion short-circuits before it)."
+  [^MethodVisitor mv jvm-type]
+  (if (and (ir/object-jvm-type? jvm-type)
+           (#{hashmap-internal-name linkedhashset-internal-name} (second jvm-type)))
+    (do
+      (emit-runtime-invoke-1! mv "portable-value->compiled")
+      (.visitTypeInsn mv Opcodes/CHECKCAST (second jvm-type)))
+    (emit-unbox-or-cast! mv jvm-type)))
+
 (defn- emit-const!
   [^MethodVisitor mv {:keys [value jvm-type]}]
   (cond
@@ -541,9 +567,14 @@
          (contains? ir/primitive-jvm-types to-jvm-type))
     (emit-unbox-or-cast! mv to-jvm-type)
 
+    ;; Reached only when from/to differ (the equal-type clause above already
+    ;; excludes a value re-read at its own already-known type), so this is
+    ;; always a genuine type-changing coercion — the boundary
+    ;; emit-unbox-or-cast-to-collection! guards against a portable-vs-native
+    ;; Map/Set mismatch for.
     (and (ir/object-jvm-type? from-jvm-type)
          (ir/object-jvm-type? to-jvm-type))
-    (emit-unbox-or-cast! mv to-jvm-type)
+    (emit-unbox-or-cast-to-collection! mv to-jvm-type)
 
     :else
     (throw (ex-info "Unsupported JVM stack coercion"
@@ -2320,8 +2351,34 @@
       (emit-load-values-map! mv state-slot)
       (.visitLdcInsn mv ^String (:name stmt))
       (let [expr-jvm-type (emit-expr! mv (:expr stmt) state-slot)]
-        (when (contains? ir/primitive-jvm-types expr-jvm-type)
-          (emit-box! mv expr-jvm-type)))
+        (cond
+          (contains? ir/primitive-jvm-types expr-jvm-type)
+          (emit-box! mv expr-jvm-type)
+
+          ;; An object-typed value stored into a *Map/Set-declared* global may
+          ;; need the same portable-vs-native conversion emit-stack-coerce!
+          ;; applies at every other write site (:set-local, :field-set) — a
+          ;; top-level `let root: Map[...] := json.parse(...)` reaches only
+          ;; this path, and previously stored the raw (possibly portable)
+          ;; value with no conversion at all, so every later read (:top-get,
+          ;; itself an ordinary CHECKCAST with no conversion of its own)
+          ;; failed. Gated on the *declared* type actually being Map/Set (not
+          ;; just "object, and differs from expr's own type" the way
+          ;; emit-stack-coerce! decides it for a local): a top-level
+          ;; Integer/Real global stores its value as a boxed Object
+          ;; regardless of the Nex-level declared type (unlike :set-local's
+          ;; real primitive JVM local slot), so unconditionally coercing
+          ;; expr-jvm-type=Object down to to-jvm-type=:long here — as
+          ;; emit-stack-coerce! would for a *local* — left a raw unboxed long
+          ;; on the stack where HashMap.put expects a boxed Object (hit by a
+          ;; `with "java"` global sourced from a raw Java call whose static
+          ;; Nex type is Any/Object, e.g. `let n: Integer :=
+          ;; System.getProperty(...).length()`).
+          (and (ir/object-jvm-type? (:jvm-type stmt))
+               (#{hashmap-internal-name linkedhashset-internal-name} (second (:jvm-type stmt))))
+          (emit-unbox-or-cast-to-collection! mv (:jvm-type stmt))
+
+          :else nil))
       (.visitMethodInsn mv
                         Opcodes/INVOKEVIRTUAL
                         hashmap-internal-name

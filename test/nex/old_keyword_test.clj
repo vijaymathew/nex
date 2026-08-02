@@ -116,6 +116,27 @@
       (is (= 0 (get (:fields obj) :y)))
       (is (= 0 (get (:fields updated-obj) :y))))))
 
+(deftest old-keyword-array-field-length-snapshots-value-not-reference-test
+  (testing "'old' on a query over a mutable Array field (items.length) snapshots membership at method entry, not a live reference to the same ArrayList the method body then mutates in place"
+    (let [code "class Basket
+  feature
+    items: Array[Integer]
+    add_item(x: Integer) do
+      items.add(x)
+      ensure
+        grew: items.length = old items.length + 1
+      end
+  end"
+          ctx (-> code p/ast interp/interpret)
+          create-node {:type :create :class-name "Basket" :constructor nil :args []}
+          obj (eval-node ctx create-node)
+          _ (interp/env-define (:current-env ctx) "b" obj)
+          call-node {:type :call :target "b" :method "add_item" :args [{:type :integer :value 1}]}
+          _ (eval-node ctx call-node)
+          _ (eval-node ctx (assoc call-node :args [{:type :integer :value 2}]))
+          updated-obj (interp/env-lookup (:current-env ctx) "b")]
+      (is (= 2 (interp/nex-array-size (get (:fields updated-obj) :items)))))))
+
 (deftest old-keyword-outside-postcondition-error-test
   (testing "'old' throws error when used outside postcondition"
     (let [code "class A

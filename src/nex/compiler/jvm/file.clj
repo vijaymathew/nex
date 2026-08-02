@@ -107,11 +107,13 @@
   (let [intern-classes (interp/resolve-interned-classes source-id ast)
         intern-functions (interp/resolve-interned-functions source-id ast)
         intern-imports (interp/resolve-interned-imports source-id ast)
+        intern-type-aliases (interp/resolve-interned-type-aliases source-id ast)
         merged-imports (merge-import-like-nodes intern-imports (:imports ast))]
     (assoc ast
            :imports merged-imports
            :classes (vec (concat intern-classes (:classes ast)))
-           :functions (vec (concat intern-functions (:functions ast))))))
+           :functions (vec (concat intern-functions (:functions ast)))
+           :type-aliases (vec (concat intern-type-aliases (:type-aliases ast))))))
 
 (defn- debug-location
   [x]

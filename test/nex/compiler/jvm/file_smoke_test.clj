@@ -1146,3 +1146,26 @@ end")
         (finally
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-json-parse-declared-map-let-test
+  (testing "a `let root: Map[...] := json.parse(...)` binding (no explicit convert) works on the compiled backend, including a nested Map[...]-typed field read"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-json-let")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "intern data/Json
+
+let json: Json := create Json.make()
+let root: Map[String, Any] := json.parse(\"{\\\"name\\\":\\\"nex\\\",\\\"meta\\\":{\\\"ok\\\":true}}\")
+let meta: Map[String, Any] := root.get(\"meta\")
+print(root.get(\"name\"))
+print(meta.get(\"ok\"))")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["\"nex\"" "true"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
