@@ -534,6 +534,36 @@
           :anonymous-function
           "Function"
 
+          ;; Falling through to the generic tc/infer-expression-type fallback
+          ;; below (as this used to) builds a fresh env with no current-class
+          ;; context (same gap :when's own case above works around) — a
+          ;; `this`/bare field or method reference inside the body fails to
+          ;; resolve there. It also has no notion of the spawn body's *own*
+          ;; top-level `let` bindings, so a `result := total` closing over an
+          ;; earlier `let total := ...` in the same body fails to resolve
+          ;; either way. Track those bindings here instead, against *this*
+          ;; env (so :this-type/:fields context carries through), and infer
+          ;; result's type directly from its `result := ...` assignment — the
+          ;; same "Any" when there is none matches make-synthetic-anonymous-
+          ;; function-expr's declared return type for a spawn with no result.
+          :spawn
+          (let [local-var-types
+                (reduce (fn [acc stmt]
+                          (if (= :let (:type stmt))
+                            (assoc acc (:name stmt)
+                                   (or (:var-type stmt)
+                                       (infer-type (update env :var-types merge acc) (:value stmt))))
+                            acc))
+                        {}
+                        (:body expr))
+                result-env (update env :var-types merge local-var-types)]
+            (if-let [result-assign (some #(when (and (= :assign (:type %))
+                                                      (= "result" (:target %)))
+                                            %)
+                                          (:body expr))]
+              {:base-type "Task" :type-params [(infer-type result-env (:value result-assign))]}
+              "Task"))
+
           :binary
           (let [op (:operator expr)]
             (cond
@@ -2281,6 +2311,7 @@
 (declare rewrite-statement-for-closures)
 (declare rewrite-statements-for-closures)
 (declare rewrite-statements-for-closures*)
+(declare sync-callable-into-class-def)
 
 (defn- capture-reference!
   [captures local-types outer-var-types name]
@@ -2288,50 +2319,170 @@
              (contains? outer-var-types name))
     (swap! captures assoc name (get outer-var-types name))))
 
+;; Synthetic capture name for the enclosing instance method's `this`, used by
+;; a spawn/anonymous-function body that references `this` (bare field/method
+;; access or an explicit `this.` prefix). Reserved: no Nex identifier can
+;; start with a double underscore, so this can never collide with a real
+;; capture. A spawn/anonymous-function body with any capture (this one
+;; included) is dispatched to the tree-walking interpreter at runtime rather
+;; than running as compiled bytecode (nex.compiler.jvm.runtime/make-captured-
+;; function-object) — so every reference to `this` inside such a body is
+;; rewritten here into an ordinary field/method access on this captured
+;; identifier, the same shape an outer captured *other* object's field/method
+;; access already uses, rather than left as `this` (which the interpreter
+;; would resolve against the closure's own synthesized class, not the
+;; enclosing one).
+(def ^:private closure-this-capture-name "__closure_this__")
+
+(defn- ctx-class-def
+  [ctx class-name]
+  (some #(when (= (:name %) class-name) %) (:classes ctx)))
+
+;; All of this-type-field?/this-type-method?/capture-closure-this! require
+;; :inside-closure? in addition to :this-type: :this-type is set once, on
+;; ctx, for every method of a class — including the plain (non-closure) body
+;; of the method itself — while :inside-closure? is only set on the
+;; nested-ctx built for a spawn/anonymous-function's *own* body (see the
+;; :anonymous-function and :spawn cases below). Gating on :this-type alone
+;; rewrote an ordinary `this.field := v`/bare `field := v` in the method's own
+;; (non-closure) statements too, pointing it at a capture
+;; (closure-this-capture-name) that only the nested closure's env would ever
+;; define — an ordinary method body needs no such rewriting; `this` already
+;; resolves correctly there.
+(defn- capture-closure-this!
+  [captures ctx]
+  (when (and (:this-type ctx) (:inside-closure? ctx))
+    (swap! captures assoc closure-this-capture-name (:this-type ctx))))
+
+(defn- this-type-field?
+  [ctx name]
+  (boolean (and (:this-type ctx)
+                (:inside-closure? ctx)
+                (accessible-field-def ctx (ctx-class-def ctx (:this-type ctx)) name))))
+
+(defn- this-type-method?
+  [ctx name arity]
+  (boolean (and (:this-type ctx)
+                (:inside-closure? ctx)
+                (accessible-method-def ctx (ctx-class-def ctx (:this-type ctx)) name arity))))
+
 (defn- rewrite-expression-for-closures
   [ctx local-types captures expr]
   (cond
     (not (map? expr)) expr
 
-    (= :identifier (:type expr))
-    (do
-      (capture-reference! captures local-types (:var-types ctx) (:name expr))
+    (= :this (:type expr))
+    (if (and (:this-type ctx) (:inside-closure? ctx))
+      (do (capture-closure-this! captures ctx)
+          {:type :identifier :name closure-this-capture-name})
       expr)
+
+    ;; A bare field read of one of the enclosing method's own fields (`count`,
+    ;; meaning `this.count`): a spawn/anonymous-function body is dispatched to
+    ;; the tree-walking interpreter at runtime (nex.compiler.jvm.runtime/make-
+    ;; captured-function-object), with `this` captured like any other outer
+    ;; variable under closure-this-capture-name. Rewriting the bare read into
+    ;; an explicit field-get on that captured identifier — the same shape an
+    ;; ordinary captured *other* object's field read already uses — means the
+    ;; interpreter needs no special "this" handling for it at all.
+    (= :identifier (:type expr))
+    (if (and (not (contains? local-types (:name expr)))
+             (not (contains? (:var-types ctx) (:name expr)))
+             (this-type-field? ctx (:name expr)))
+      (do (capture-closure-this! captures ctx)
+          {:type :call
+           :target {:type :identifier :name closure-this-capture-name}
+           :method (:name expr)
+           :args []
+           :has-parens false})
+      (do
+        (capture-reference! captures local-types (:var-types ctx) (:name expr))
+        expr))
 
     (= :anonymous-function (:type expr))
     (let [params (or (:params expr) [])
           fn-locals (into {"result" (or (:return-type expr) "Any")}
                           (map (fn [{:keys [name type]}] [name type]))
                           params)
-          nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types))
+          nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types) :inside-closure? true)
           [rewritten-body _ nested-captures]
           (rewrite-statements-for-closures nested-ctx fn-locals (:body expr))
           capture-vec (->> nested-captures
                            (map (fn [[name type]] {:name name :type type}))
                            (sort-by :name)
                            vec)
-          runtime-object? (seq capture-vec)]
+          runtime-object? (seq capture-vec)
+          ;; (:class-def expr) still holds the call<N> method's *original*
+          ;; body — attach-capture-fields only adds capture fields, it never
+          ;; touches method bodies. Ordinarily that staleness is harmless (a
+          ;; plain captured-variable reference rewrites to itself, unchanged),
+          ;; but a `this` reference above rewrites into a genuinely different
+          ;; node shape. interp/make-object (nex.compiler.jvm.runtime/make-
+          ;; captured-function-object) runs *this* class-def's method body at
+          ;; call time — so without this sync, the interpreter would still see
+          ;; the pre-rewrite `this`/bare field or method reference and try to
+          ;; resolve it against the closure's own (fieldless, methodless)
+          ;; class instead of the captured original.
+          call-method-name (str "call" (count params))
+          original-call-method (some #(when (and (= call-method-name (:name %))
+                                                 (= (count params) (count (or (:params %) []))))
+                                       %)
+                                     (class-methods (:class-def expr)))]
       (assoc expr
              :body rewritten-body
              :captures capture-vec
-             :class-def (attach-capture-fields (:class-def expr) capture-vec runtime-object?)))
+             :class-def (attach-capture-fields
+                         (sync-callable-into-class-def
+                          (:class-def expr)
+                          (assoc original-call-method :body rewritten-body))
+                         capture-vec runtime-object?)))
 
+    ;; A method call or explicit field access reaching `this` — bare
+    ;; (`bump()`/`count` as a no-parens access), or via an explicit `this.`
+    ;; prefix — is rewritten the same way: route it through the captured
+    ;; `this` identifier, exactly like calling/reading through any other
+    ;; captured object reference (`other.bump()`), which already works.
     (= :call (:type expr))
     (let [target (:target expr)
+          method (:method expr)
+          bare-target? (nil? target)
+          ;; Explicit `this.foo` is only ever rewritten to the captured-`this`
+          ;; identifier *inside* a closure — outside one, `this` resolves
+          ;; correctly on its own (this is the ordinary, non-nested case: an
+          ;; instance method's own body referencing its own `this`), and
+          ;; substituting it unconditionally broke exactly that: `this.value`
+          ;; in a plain method (no spawn/anonymous-function involved at all)
+          ;; was rewritten into a call on a capture that is only ever bound
+          ;; inside a synthesized closure class.
+          this-target? (and (map? target) (= :this (:type target))
+                            (:inside-closure? ctx))
+          is-field? (false? (:has-parens expr))
+          implicit-this-member?
+          (and bare-target?
+               (not (contains? local-types method))
+               (not (contains? (:var-types ctx) method))
+               (or (this-type-method? ctx method (count (:args expr)))
+                   (and is-field? (this-type-field? ctx method))))
           _ (when (string? target)
               (capture-reference! captures local-types (:var-types ctx) target))
-          method (:method expr)
+          _ (when (or implicit-this-member? this-target?)
+              (capture-closure-this! captures ctx))
           args (mapv #(rewrite-expression-for-closures ctx local-types captures %)
                      (:args expr))
-          expr' (assoc expr
-                       :target (when target
-                                 (rewrite-expression-for-closures ctx local-types captures target))
-                       :args args)]
-      (when (and (nil? target)
+          new-target (cond
+                       (or implicit-this-member? this-target?)
+                       {:type :identifier :name closure-this-capture-name}
+
+                       target
+                       (rewrite-expression-for-closures ctx local-types captures target)
+
+                       :else nil)]
+      (when (and bare-target?
+                 (not implicit-this-member?)
                  (contains? (:var-types ctx) method)
                  (not (contains? local-types method)))
         (swap! captures assoc method (get (:var-types ctx) method)))
-      expr')
+      (assoc expr :target new-target :args args))
 
     (= :binary (:type expr))
     (assoc expr
@@ -2382,7 +2533,7 @@
     (assoc expr :args (mapv #(rewrite-expression-for-closures ctx local-types captures %) (:args expr)))
 
     (= :spawn (:type expr))
-    (let [nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types))
+    (let [nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types) :inside-closure? true)
           fn-expr (make-synthetic-anonymous-function-expr
                    []
                    "Any"
@@ -2402,16 +2553,40 @@
                        (infer-prepass-type ctx local-types value'))]
       [stmt' (assoc local-types (:name stmt) var-type)])
 
+    ;; A bare `count := v` inside a spawn/anonymous-function body means
+    ;; `this.count := v`. Since the closure body runs on the interpreter (see
+    ;; the :identifier case above), rewrite it into an explicit member-assign
+    ;; through the captured `this` identifier — the same shape an ordinary
+    ;; captured *other* object's field write already uses (`other.count := v`,
+    ;; unlike the untouched form, does not depend on `this` being resolvable
+    ;; inside a class the interpreter never sees as the original enclosing
+    ;; class).
     :assign
-    [(assoc stmt :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
-     local-types]
+    (if (and (not (contains? local-types (:target stmt)))
+             (not (contains? (:var-types ctx) (:target stmt)))
+             (this-type-field? ctx (:target stmt)))
+      (do (capture-closure-this! captures ctx)
+          [{:type :member-assign
+            :object {:type :identifier :name closure-this-capture-name}
+            :field (:target stmt)
+            :value (rewrite-expression-for-closures ctx local-types captures (:value stmt))}
+           local-types])
+      [(assoc stmt :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
+       local-types])
 
     :member-assign
-    [(assoc stmt
-            :object (when (:object stmt)
-                      (rewrite-expression-for-closures ctx local-types captures (:object stmt)))
-            :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
-     local-types]
+    (let [this-object? (or (nil? (:object stmt))
+                           (= :this (:type (:object stmt))))
+          rewrite-to-capture? (and this-object? (:this-type ctx) (:inside-closure? ctx))]
+      (when rewrite-to-capture?
+        (capture-closure-this! captures ctx))
+      [(assoc stmt
+              :object (cond
+                        rewrite-to-capture? {:type :identifier :name closure-this-capture-name}
+                        (:object stmt) (rewrite-expression-for-closures ctx local-types captures (:object stmt))
+                        :else nil)
+              :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
+       local-types])
 
     :call
     [(rewrite-expression-for-closures ctx local-types captures stmt)
@@ -2559,7 +2734,17 @@
 
 (defn- rewrite-class-for-closures
   [ctx class-def]
-  (let [field-types (field-type-map class-def)]
+  ;; :this-type (not field-type-map merged into var-types, as a prior version
+  ;; of this function did) is what lets a nested spawn/anonymous-function body
+  ;; tell "this is one of the enclosing instance's own fields/methods" apart
+  ;; from an ordinary outer local capture — see this-type-field?/this-type-
+  ;; method?. Fields are deliberately left out of var-types now: folding them
+  ;; in there made a bare `count` inside a closure look like any other
+  ;; captured local, so the closure got its own private copy of the *value*
+  ;; instead of a live reference to the enclosing object, silently dropping
+  ;; mutations the moment the closure ran (spawn/anonymous-function bodies
+  ;; could read a field but never durably write one).
+  (let [ctx (assoc ctx :this-type (:name class-def))]
     (update class-def :body
             (fn [sections]
               (mapv (fn [section]
@@ -2569,14 +2754,14 @@
                                 (fn [members]
                                   (mapv (fn [member]
                                           (if (= :method (:type member))
-                                            (rewrite-callable-for-closures ctx member field-types)
+                                            (rewrite-callable-for-closures ctx member {})
                                             member))
                                         members)))
 
                         :constructors
                         (update section :constructors
                                 (fn [ctors]
-                                  (mapv #(rewrite-callable-for-closures ctx % field-types) ctors)))
+                                  (mapv #(rewrite-callable-for-closures ctx % {}) ctors)))
 
                         section))
                     sections)))))
@@ -3041,8 +3226,14 @@
                                               [(ir/const-node name
                                                               "String"
                                                               (ir/object-jvm-type "java/lang/String"))
-                                               (lower-expression env {:type :identifier
-                                                                      :name name})])
+                                               ;; The closure-this capture has no
+                                               ;; identifier of its own at the
+                                               ;; instantiation site — it names
+                                               ;; the enclosing method's `this`.
+                                               (lower-expression env (if (= name closure-this-capture-name)
+                                                                      {:type :this}
+                                                                      {:type :identifier
+                                                                       :name name}))])
                                             captures))
                               nex-type
                               (ir/object-jvm-type "java/lang/Object"))
@@ -3338,6 +3529,49 @@
                                                        created-type
                                                        (resolve-jvm-type env created-type))
                                           created-type)))))))))
+
+(defn- java-object-valued?
+  "True when `expr`, used as a call target, is known at lowering time to hold
+   a raw (reflection-backed) Java object at runtime rather than a Nex value —
+   either because it names something declared with an imported Java type, or
+   because it is itself a call chained off of one (`socket.getInetAddress()`
+   is Any-typed since lower.clj never reflects into a Java method's return
+   type, but its receiver `.getHostAddress()` still needs reflective dispatch
+   rather than the fixed Any-protocol runtime table). Recurses through call
+   chains of arbitrary depth so `a.b().c().d()` resolves correctly as long as
+   `a` roots in a Java import — outside a `with \"java\"` block, where the
+   same need is already handled by the with-java? branch below."
+  [env expr]
+  (let [expr (normalize-call-target expr)
+        ;; An identifier naming a known Nex class (e.g. `Palette` in
+        ;; `Palette.RED`) is a static-member access target, not a variable —
+        ;; infer-type has no binding for it and throws. Recognized and
+        ;; excluded up front, the same way infer-target-call-type's own
+        ;; class-target-name check does, rather than reached via infer-type.
+        names-known-class? (fn [e]
+                             (and (map? e)
+                                  (= :identifier (:type e))
+                                  (some #(= (:name %) (:name e)) (:classes env))))]
+    (cond
+      (nil? expr) false
+
+      (names-known-class? expr) false
+
+      (= :call (:type expr))
+      (let [target-expr (normalize-call-target (:target expr))]
+        (boolean
+         (or (java-host-class-root-name env target-expr)
+             (when-not (names-known-class? target-expr)
+               (let [target-type (resolve-type-alias (infer-type env target-expr))
+                     base-type (base-type-name target-type)]
+                 (or (imported-java-qualified-name env base-type)
+                     (:import (get (visible-class-map env) base-type)))))
+             (java-object-valued? env target-expr))))
+
+      :else
+      (let [target-type (resolve-type-alias (infer-type env expr))
+            base-type (base-type-name target-type)]
+        (boolean (:import (get (visible-class-map env) base-type)))))))
 
 (defn- lower-call-expr [env expr]
   (if (and (nil? (:target expr))
@@ -3673,8 +3907,12 @@
               ;; `any-protocol-method-names` and crashes on anything else with
               ;; an unbound-Var error at runtime. Inside a with-"java" block,
               ;; always treat any other method name on an `Any` receiver as
-              ;; host interop, regardless of those other tests.
-              (and (:with-java? env)
+              ;; host interop, regardless of those other tests. Outside such a
+              ;; block, the same call shape can still arise from a call chain
+              ;; rooted in an imported Java type (`socket.getInetAddress()
+              ;; .getHostAddress()`) — java-object-valued? recognizes that case
+              ;; from the target expression's own shape, no with-java? needed.
+              (and (or (:with-java? env) (java-object-valued? env target-expr))
                    (or (and (= "Any" (base-type-name target-type))
                             (not (contains? any-protocol-method-names (:method expr))))
                        (and (not (builtin-runtime-receiver-type? env target-type))
@@ -4023,7 +4261,18 @@
                          :target target-expr})))
 
       field-def
-      (if (= (:current-class env) (:declaring-class field-def))
+      (if (or (= (:current-class env) (:declaring-class field-def))
+              ;; A spawn/anonymous-function body with captures never actually
+              ;; runs as this lowered bytecode — it is re-dispatched to the
+              ;; tree-walking interpreter via make-captured-function-object
+              ;; (nex.compiler.jvm.runtime), and this class's IR is discarded
+              ;; before emission (see emitted-anonymous-classes). The
+              ;; encapsulation check below exists to keep *real* compiled
+              ;; classes honest; applying it to a body that will never run as
+              ;; this bytecode only turns an ordinary captured-object field
+              ;; write (`other.count := v`, `this.count := v` once `this` is
+              ;; rewritten to a capture) into a hard compile failure.
+              (:closure-runtime-object? (current-class-def env)))
         [env (ir/call-runtime-node (str "user-field-set:" field-name)
                                    [(lower-expression env target-expr) value-ir]
                                    "Void"

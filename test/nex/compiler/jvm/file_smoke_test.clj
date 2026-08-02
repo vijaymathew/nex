@@ -1121,3 +1121,28 @@ print(response.headers().get(\"content-type\"))"))
           (.stop server 0)
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-json-parse-convert-map-get-test
+  (testing "method calls on a `convert ... to Map[...]` result from data/Json.parse(...) work on the compiled backend"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-json")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "intern data/Json
+
+let j := create Json.make()
+let raw := j.parse(\"{\\\"a\\\": 1}\")
+if convert raw to obj:Map[String, Any] then
+  print(obj.get(\"a\"))
+else
+  print(\"convert failed\")
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["1"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))

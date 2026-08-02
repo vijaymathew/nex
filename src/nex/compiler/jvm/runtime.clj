@@ -987,7 +987,14 @@
         ok? (and (some? value)
                  (string? target-type-name)
                  (runtime-compatible-with? state runtime-name target-type-name))]
-    (object-array [(boolean ok?) (if ok? value nil)])))
+    ;; A converted value may originate from a backend-agnostic helper (e.g.
+    ;; nex.types.json/json-value->nex) that builds Maps/Sets via
+    ;; nex.types.runtime's portable tagged representation. The compiled
+    ;; backend's own Map/Set-typed locals/fields are always real
+    ;; java.util.HashMap/LinkedHashSet (see emit-map-literal!), so the value
+    ;; must be converted to that native shape before it flows into one — same
+    ;; conversion instantiate-compiled-object applies for reflective field sets.
+    (object-array [(boolean ok?) (if ok? (portable-value->compiled value) nil)])))
 
 (defn make-contract-violation
   ([kind label]

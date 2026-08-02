@@ -937,6 +937,7 @@
 (declare check-expression)
 (declare collect-class-info)
 (declare check-class)
+(declare check-method)
 (declare convert-guard-binding)
 (declare convert-guard-bindings)
 (declare resolve-generic-type)
@@ -3180,11 +3181,33 @@
           :array-literal (check-array-literal env expr)
           :set-literal (check-set-literal env expr)
           :map-literal (check-map-literal env expr)
-          :anonymous-function (let [class-def (:class-def expr)]
+          :anonymous-function (let [class-def (:class-def expr)
+                                    ;; Written inside an instance method, this
+                                    ;; literal's `this`/bare field or method
+                                    ;; access means the *enclosing* class's, not
+                                    ;; the synthetic AnonymousFunction_N's own
+                                    ;; (which has none of those members) — a
+                                    ;; plain independent check-class scopes
+                                    ;; __current_class__ to the synthetic class
+                                    ;; and rejects it as "Method not found".
+                                    ;; check-method already takes class-name as
+                                    ;; a parameter distinct from the env it
+                                    ;; extends, so checking the callN body
+                                    ;; directly under the enclosing class's name
+                                    ;; (exactly as check-spawn already does for
+                                    ;; a spawn body, by simply not overriding
+                                    ;; __current_class__ at all) resolves this
+                                    ;; with no new machinery.
+                                    enclosing-class (env-lookup-var env "__current_class__")]
                                 ;; Register the dynamic class definition in the type environment
                                 (collect-class-info env class-def)
-                                ;; Check the class (this will check the callN method body)
-                                (check-class env class-def)
+                                (if enclosing-class
+                                  (check-method env enclosing-class
+                                                (some #(when (= :method (:type %)) %)
+                                                      (feature-members class-def)))
+                                  ;; No enclosing class (a top-level anonymous
+                                  ;; function): check the class as before.
+                                  (check-class env class-def))
                                 ;; Anonymous functions have distinct generated runtime classes,
                                 ;; but their stable static type is Function.
                                 "Function")

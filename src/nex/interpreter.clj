@@ -492,6 +492,12 @@
      (when-let [[owner ^Field field] (deep-reflected-field value field-name)]
        [true (.get field owner)]))
 
+(defn- compiled-object-field-set!
+     [value field-name new-value]
+     (when-let [[owner ^Field field] (deep-reflected-field value field-name)]
+       (.set field owner new-value)
+       true))
+
 (defn- compiled-runtime-class-name
      [ctx value]
      (when value
@@ -2148,44 +2154,70 @@
         caller-class-name (if super-target? super-parent-name (:current-class-name ctx))
         class-def (when class-name (lookup-class-if-exists ctx class-name))
         field-def (when class-def
-                    (lookup-field-with-inheritance ctx class-def field caller-class-name))]
-    (when-not (nex-object? target-obj)
-      (throw (ex-info "Field assignment target must be an object"
-                      {:target target-expr :value target-obj})))
-    (when (and class-def (lookup-class-constant ctx class-def field))
-      (throw (ex-info (str "Cannot assign to constant: " field)
-                      {:field field :constant? true})))
-    (when (and field-def (:once? field-def) (not (:in-constructor? ctx)))
-      (throw (ex-info (str "Cannot assign to once field outside constructor: " field)
-                      {:field field :once? true})))
-    (when-not field-def
-      (throw (ex-info (str "Undefined field: " field)
-                      {:field field :class-name class-name})))
-    (when-not (= caller-class-name (:declaring-class field-def))
-      (throw (ex-info (field-write-error-message field (:declaring-class field-def))
-                      {:field field
-                       :class-name class-name
-                       :declaring-class (:declaring-class field-def)})))
-    (let [val (eval-node ctx value)]
-      (if (and (or super-target? (= (:type target-expr) :this)) (:current-object ctx))
-        (do
-          ;; Track that this field was explicitly modified via this.field :=
-          (when-let [mf (:modified-fields ctx)]
-            (swap! mf conj field))
-          ;; this.field/super.field sets the env variable
-          ;; (fields are tracked as env vars, extracted back to object after body)
-          (env-set! (:current-env ctx) field val)
-          val)
-        (let [updated-obj (make-object (:class-name target-obj)
-                                       (assoc (:fields target-obj) (keyword field) val)
-                                       (:closure-env target-obj))
-              write-back-target (if (= :identifier (:type target-expr))
-                                  (:name target-expr)
-                                  target-expr)]
-          (when-not (write-back-target! ctx write-back-target updated-obj target-obj)
-            (throw (ex-info "Field assignment target is not writable"
-                            {:target target-expr :field field})))
-          val)))))
+                    (lookup-field-with-inheritance ctx class-def field caller-class-name))
+        ;; `target-obj` is a *compiled*-backend object (a real reflected Java
+        ;; instance, not this interpreter's own tagged map) when this method
+        ;; body is itself running interpreted but was captured from — or is
+        ;; itself — compiled code: a spawn/anonymous-function body referencing
+        ;; `this` (rewritten by nex.lower into a captured `__closure_this__`
+        ;; identifier — see rewrite-expression-for-closures) or any other
+        ;; object captured from a compiled caller. `class-name` above already
+        ;; falls back to :current-class-name for such an object (it has no
+        ;; :class-name of its own), which names the *wrong* class for field
+        ;; lookup — compiled-runtime-class-name resolves the object's own real
+        ;; class instead.
+        compiled-class-name (when-not (nex-object? target-obj)
+                              (compiled-runtime-class-name ctx target-obj))
+        compiled-class-def (when compiled-class-name
+                            (lookup-class-if-exists ctx compiled-class-name))]
+    (if compiled-class-def
+      (let [compiled-field-def (lookup-field-with-inheritance ctx compiled-class-def field caller-class-name)]
+        (when-not compiled-field-def
+          (throw (ex-info (str "Undefined field: " field)
+                          {:field field :class-name compiled-class-name})))
+        (let [val (eval-node ctx value)]
+          (when-not (compiled-object-field-set! target-obj field val)
+            (throw (ex-info (str "Undefined field: " field)
+                            {:field field :class-name compiled-class-name})))
+          val))
+      (do
+        (when-not (nex-object? target-obj)
+          (throw (ex-info "Field assignment target must be an object"
+                          {:target target-expr :value target-obj})))
+        (when (and class-def (lookup-class-constant ctx class-def field))
+          (throw (ex-info (str "Cannot assign to constant: " field)
+                          {:field field :constant? true})))
+        (when (and field-def (:once? field-def) (not (:in-constructor? ctx)))
+          (throw (ex-info (str "Cannot assign to once field outside constructor: " field)
+                          {:field field :once? true})))
+        (when-not field-def
+          (throw (ex-info (str "Undefined field: " field)
+                          {:field field :class-name class-name})))
+        (when-not (= caller-class-name (:declaring-class field-def))
+          (throw (ex-info (field-write-error-message field (:declaring-class field-def))
+                          {:field field
+                           :class-name class-name
+                           :declaring-class (:declaring-class field-def)})))
+        (let [val (eval-node ctx value)]
+          (if (and (or super-target? (= (:type target-expr) :this)) (:current-object ctx))
+            (do
+              ;; Track that this field was explicitly modified via this.field :=
+              (when-let [mf (:modified-fields ctx)]
+                (swap! mf conj field))
+              ;; this.field/super.field sets the env variable
+              ;; (fields are tracked as env vars, extracted back to object after body)
+              (env-set! (:current-env ctx) field val)
+              val)
+            (let [updated-obj (make-object (:class-name target-obj)
+                                           (assoc (:fields target-obj) (keyword field) val)
+                                           (:closure-env target-obj))
+                  write-back-target (if (= :identifier (:type target-expr))
+                                      (:name target-expr)
+                                      target-expr)]
+              (when-not (write-back-target! ctx write-back-target updated-obj target-obj)
+                (throw (ex-info "Field assignment target is not writable"
+                                {:target target-expr :field field})))
+              val)))))))
 
 (defmethod eval-node :assign
   [ctx {:keys [target value]}]

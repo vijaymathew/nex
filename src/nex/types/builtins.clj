@@ -557,6 +557,14 @@
 
    :Integer
    {"to_string"         (fn [n & _] (str n))
+    ;; The typechecker has always accepted these three (they're registered
+    ;; alongside every other Integer method), but the runtime table never
+    ;; defined them — n.to_real() and kin failed with "Method not found",
+    ;; not a type error. to_integer/to_integer64 are identity: an Integer is
+    ;; already the language's one 64-bit integer type.
+    "to_integer"        (fn [n & _] n)
+    "to_integer64"      (fn [n & _] n)
+    "to_real"           (fn [n & _] (->nex-real n))
     "abs"               (fn [n & _] (if (neg? n) (nex-int-neg n) n))
     "min"               (fn [n other & _] (if (pos? (nex-numeric-compare n other)) other n))
     "max"               (fn [n other & _] (if (neg? (nex-numeric-compare n other)) other n))
