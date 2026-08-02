@@ -3468,9 +3468,27 @@
                                         (:name constant)
                                         nex-type
                                         jvm-type))
-            (throw (unsupported "Unsupported class-target access during lowering"
-                            {:expr expr
-                             :target-class class-target-name})))
+            ;; class-target-name matches any entry in `(:classes env)`,
+            ;; including imported-Java-class placeholders (empty :body, so
+            ;; lookup-class-constant above always misses them). Fall through to
+            ;; the same java-get-static-field runtime call the :else branch
+            ;; below already uses for the has-parens (static method) case,
+            ;; rather than treating an imported class as an unsupported target.
+            (if-let [java-owner (:import (get (visible-class-map env) class-target-name))]
+              (let [nex-type (or (infer-call-type env expr) "Any")
+                    jvm-type (resolve-jvm-type env nex-type)]
+                (ir/call-runtime-node "java-get-static-field"
+                                      [(ir/const-node java-owner
+                                                      "String"
+                                                      (ir/object-jvm-type "java/lang/String"))
+                                       (ir/const-node (:method expr)
+                                                      "String"
+                                                      (ir/object-jvm-type "java/lang/String"))]
+                                      nex-type
+                                      jvm-type))
+              (throw (unsupported "Unsupported class-target access during lowering"
+                              {:expr expr
+                               :target-class class-target-name}))))
 
           :else
           (let [java-static-owner (java-host-class-root-name env target-expr)

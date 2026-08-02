@@ -520,6 +520,29 @@ print(sb.length())")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-imported-java-class-static-field-access-smoke-test
+  (testing "compile-jar reads a static field on an imported Java class (no-parens class-target access)"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-static-field")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.lang.Math
+import javax.swing.SwingConstants
+
+with \"java\" do
+  print(Math.PI)
+  print(SwingConstants.CENTER)
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= [(str Math/PI) "0"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-cursor-subclass-across-smoke-test
   (testing "compile-jar runs across over a value typed as Cursor when the runtime instance is a Cursor subclass"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-cursor")
