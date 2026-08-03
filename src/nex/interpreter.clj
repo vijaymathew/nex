@@ -891,12 +891,17 @@
 (def report-contract-violation bi/report-contract-violation)
 
 (defn check-assertions
-  "Check a list of assertions. Throws exception if any fail."
+  "Check a list of assertions. Throws exception if any fail.
+   No-op when `:skip-contracts?` is set on ctx — require/ensure/invariant are
+   the only contract kinds routed through here; bare `assert` has its own
+   eval-node case and always runs (per spec: \"there is no mode that strips
+   them\")."
   [ctx assertions contract-type]
-  (doseq [{:keys [label condition]} assertions]
-    (let [result (eval-node ctx condition)]
-      (when-not result
-        (report-contract-violation contract-type label condition)))))
+  (when-not (:skip-contracts? ctx)
+    (doseq [{:keys [label condition]} assertions]
+      (let [result (eval-node ctx condition)]
+        (when-not result
+          (report-contract-violation contract-type label condition))))))
 
 (defn check-class-invariant
   "Check the class invariant for an object or class context."

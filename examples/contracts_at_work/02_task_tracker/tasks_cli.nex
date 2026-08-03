@@ -1,14 +1,12 @@
 -- tasks_cli: an interactive task tracker over Task_Store, persisted to
 -- tasks.jsonl next to this file.
 --
--- This reads commands from stdin (Console.read_line) rather than from argv.
--- That's a deliberate substitution, not the original design: Process's own
--- command_line() does not return the program's actual arguments on either
--- backend today (confirmed with a minimal repro — see the book's top-level
--- issues report), so no Nex CLI can read argv right now. An interactive
--- loop still exercises the same boundary-parsing practice this project is
--- about — turning one line of untrusted text into a validated command —
--- just at a different boundary.
+-- This reads commands from stdin (Console.read_line) rather than from argv,
+-- because a tracker meant to add/list/complete/remove across a whole
+-- session is a natural fit for an interactive loop, unlike Project 1's
+-- one-shot nexwc. It still exercises the same boundary-parsing practice —
+-- turning one line of untrusted text into a validated command — just at a
+-- different boundary: a line of stdin instead of an argv entry.
 --
 -- Commands:
 --   add <priority 1-5> <text>

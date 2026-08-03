@@ -37,11 +37,13 @@
                       {:errors (map tc/format-type-error (:errors result))})))))
 
 (defn- run-interpreted
-  [source-id ast program-args]
+  [source-id ast program-args skip-contracts?]
   ;; Process.command_line() is process-wide state (see nex.types.runtime),
   ;; not threaded through ctx — set once, here, before the program runs.
   (rt/set-program-args! program-args)
-  (let [ctx (assoc (interp/make-context) :debug-source source-id)]
+  (let [ctx (assoc (interp/make-context)
+                    :debug-source source-id
+                    :skip-contracts? skip-contracts?)]
     ;; The program writes its own output as it runs, interleaved with `Console`
     ;; in the order the program produced it; nothing is echoed afterwards.
     (interp/eval-node ctx ast)
@@ -107,9 +109,10 @@
    errors are caught earlier by `type-check-ast!`, so a failure here means an
    unsupported construct (or a compiler defect) — `compile-error-message` tells
    the two apart."
-  [source-id ast]
+  [source-id ast skip-contracts?]
   (try
-    {:compiled (jvm-file/compile-ast source-id ast {:skip-type-check true})}
+    {:compiled (jvm-file/compile-ast source-id ast {:skip-type-check true
+                                                     :skip-contracts? skip-contracts?})}
     (catch Throwable e {:compile-error e})))
 
 (defn- run-compiled
@@ -174,11 +177,11 @@
    never re-executed. The one automatic fallback left is a LinkageError — a
    backend defect, not the program's behaviour — which runs interpreted with a
    warning rather than failing a valid program."
-  [source-id ast {:keys [interpret? program-args]}]
+  [source-id ast {:keys [interpret? program-args skip-contracts?]}]
   (let [program-args (or program-args [])]
     (if interpret?
-      (run-interpreted source-id ast program-args)
-      (let [{:keys [compiled compile-error]} (try-compile source-id ast)]
+      (run-interpreted source-id ast program-args skip-contracts?)
+      (let [{:keys [compiled compile-error]} (try-compile source-id ast skip-contracts?)]
         (if compile-error
           (throw (ex-info (compile-error-message compile-error)
                           {:type :not-compilable}
@@ -187,15 +190,17 @@
             (do (warn-fallback! (str "compiled program failed to link ("
                                      (or (ex-message backend-defect) (str backend-defect))
                                      ")"))
-                (run-interpreted source-id ast program-args))
+                (run-interpreted source-id ast program-args skip-contracts?))
             nil))))))
 
 (defn eval-file
   "Parse and evaluate a Nex file. opts: {:interpret? bool} to force the
-   tree-walking interpreter instead of the compiled JVM backend; {:program-args
-   [...]} the program's own argv, returned by Process.command_line() —
-   everything after the file name on the command line, not to be confused
-   with the `nex` launcher's own flags like --interpret."
+   tree-walking interpreter instead of the compiled JVM backend; {:skip-contracts?
+   bool} to lower require/ensure/invariant checks to no-ops (bare `assert`
+   always runs regardless); {:program-args [...]} the program's own argv,
+   returned by Process.command_line() — everything after the file name on the
+   command line, not to be confused with the `nex` launcher's own flags like
+   --interpret."
   ([file-path] (eval-file file-path {}))
   ([file-path opts]
    (let [source-id (.getCanonicalPath (io/file file-path))
@@ -206,18 +211,21 @@
 
 (defn -main
   "Main entry point for nex eval command.
-   Usage: nex.eval [--interpret] <file.nex> [program-args...]"
+   Usage: nex.eval [--interpret] [--skip-contracts] <file.nex> [program-args...]"
   [& args]
   (let [interpret? (boolean (some #{"--interpret"} args))
-        files (vec (remove #{"--interpret"} args))
+        skip-contracts? (boolean (some #{"--skip-contracts"} args))
+        files (vec (remove #{"--interpret" "--skip-contracts"} args))
         file (first files)
         program-args (vec (rest files))]
     (when (nil? file)
       (println "Error: No file provided")
-      (println "Usage: nex <file.nex> [--interpret] [program-args...]")
+      (println "Usage: nex <file.nex> [--interpret] [--skip-contracts] [program-args...]")
       (System/exit 1))
     (try
-      (eval-file file {:interpret? interpret? :program-args program-args})
+      (eval-file file {:interpret? interpret?
+                       :skip-contracts? skip-contracts?
+                       :program-args program-args})
       (System/exit 0)
       (catch ParseError e
         (println "Syntax error:")

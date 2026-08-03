@@ -23,7 +23,7 @@ USAGE:
 
 COMMANDS:
     (no command)              Start the Nex REPL
-    compile jvm <file> [output-dir] [--classpath entries]
+    compile jvm <file> [output-dir] [--classpath entries] [--skip-contracts]
                               Compile a Nex file to a standalone JVM JAR
     format <file|dir>         Format Nex source files
     doc <file|dir> [output]   Generate documentation from Nex files
@@ -37,16 +37,27 @@ OPTIONS:
                               (nex <file>.nex) and compiling
                               (nex compile jvm). On compile, the entries are
                               also shaded into the output jar.
+    --skip-contracts          Lower require/ensure/invariant checks to no-ops
+                              (both class and loop invariants). Bare `assert`
+                              always runs regardless — there is no mode that
+                              strips it. Meant for a trusted, perf-critical
+                              release build; risky wherever untrusted input
+                              or latent bugs remain. Available on both
+                              running (nex <file>.nex) and compiling
+                              (nex compile jvm).
 
 EXAMPLES:
     nex                                      # Start REPL
     nex app.nex                              # Run app.nex (compiled JVM backend)
     nex app.nex --interpret                  # Run on the tree-walking interpreter
     nex app.nex --classpath a.jar:b.jar      # Run with extra jars on the classpath
+    nex app.nex --skip-contracts             # Run with require/ensure/invariant checks off
     nex compile jvm app.nex                  # Compile to a standalone app.jar in current dir
     nex compile jvm app.nex build/           # Compile to a standalone app.jar in build/
     nex compile jvm app.nex --classpath a.jar:b.jar
                                               # Compile, bundling extra jars into the output jar
+    nex compile jvm app.nex --skip-contracts
+                                              # Compile a release build with contracts off
     nex format src/                          # Format all files in directory
     nex format MyClass.nex                   # Format single file
     nex doc MyClass.nex MyClass.md           # Generate documentation
@@ -93,6 +104,7 @@ cmd_repl() {
 
 cmd_compile() {
     local classpath=""
+    local skip_contracts=""
     local -a positional=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -103,6 +115,10 @@ cmd_compile() {
                 fi
                 classpath="$2"
                 shift 2
+                ;;
+            --skip-contracts)
+                skip_contracts="1"
+                shift
                 ;;
             *)
                 positional+=("$1")
@@ -118,7 +134,7 @@ cmd_compile() {
 
     if [[ -z "$target" || -z "$file" ]]; then
         echo "Error: compile requires target and file arguments"
-        echo "Usage: nex compile jvm <file> [output-dir] [--classpath entries]"
+        echo "Usage: nex compile jvm <file> [output-dir] [--classpath entries] [--skip-contracts]"
         exit 1
     fi
 
@@ -144,10 +160,15 @@ cmd_compile() {
     mkdir -p "$output"
     output="$(cd "$output" && pwd)"
 
+    local -a extra_flags=()
+    if [[ -n "$skip_contracts" ]]; then
+        extra_flags+=(--skip-contracts)
+    fi
+
     if [[ -n "$classpath" ]]; then
-        run_with_extra_classpath "$classpath" nex.compiler.jvm.file "$file" "$output"
+        run_with_extra_classpath "$classpath" nex.compiler.jvm.file "$file" "$output" "${extra_flags[@]}"
     else
-        cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.compiler.jvm.file "$file" "$output"
+        cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.compiler.jvm.file "$file" "$output" "${extra_flags[@]}"
     fi
 }
 

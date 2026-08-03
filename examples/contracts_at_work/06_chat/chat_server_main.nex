@@ -1,7 +1,6 @@
 -- chat_server_main: runs a real chat server on a fixed port, accepting up
--- to 8 clients, until Shutdown is sent to the hub. Must run under
--- --interpret — see README: Server_Socket.accept() is unusable on the JVM
--- backend today (a stdlib bug, not this project's code).
+-- to 8 clients, until Shutdown is sent to the hub. Runs on the default
+-- JVM backend.
 
 intern net/Server_Socket
 intern Chat_Server

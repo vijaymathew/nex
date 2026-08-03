@@ -1,11 +1,10 @@
 -- radar_dashboard_main: a Swing client for radar_service, running as a
--- SEPARATE process on the JVM backend — this is the capstone's real
--- finding, not a stylistic choice. radar_service needs data/Json, which is
--- only usable under --interpret; the dashboard's ActionListeners need the
--- JVM backend, or mutations through them silently don't persist (Project
--- 8). No single Nex program can satisfy both requirements at once, so
--- "Nex Radar" is two programs talking over HTTP rather than one — see the
--- top-level issues report and this project's README for the full story.
+-- SEPARATE process on the JVM backend. The split was originally forced by
+-- two now-fixed backend incompatibilities (see this project's README for
+-- the full three-attempt retrospective); it's kept now because watching a
+-- service from a separate process over a real network boundary is closer
+-- to how monitoring actually works than a monitor sharing a process with
+-- the thing it watches.
 --
 -- Buttons only ever set flags on Radar_Dashboard_State (Project 8's
 -- pattern); the poll loop is the only code that performs the HTTP call
