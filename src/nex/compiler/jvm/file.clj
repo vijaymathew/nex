@@ -220,7 +220,8 @@
                                                   :classes []
                                                   :functions []
                                                   :imports (:imports prepared-ast)
-                                                  :var-types {}})
+                                                  :var-types {}
+                                                  :skip-contracts? (:skip-contracts? opts)})
            class-asts (vec (concat (user-class-defs prepared-ast)
                                    (lower/collect-anonymous-class-defs prepared-ast)))
            ;; A raw parsed class-def carries no :binary-name — that's computed
@@ -423,12 +424,14 @@
 (defn -main
   [& args]
   (when (empty? args)
-    (println "Usage: nex compile jvm <input.nex> [output-dir]")
+    (println "Usage: nex compile jvm <input.nex> [output-dir] [--skip-contracts]")
     (System/exit 1))
-  (let [input-file (first args)
+  (let [skip-contracts? (boolean (some #{"--skip-contracts"} args))
+        args (vec (remove #{"--skip-contracts"} args))
+        input-file (first args)
         output-dir (or (second args) ".")]
     (try
-      (let [result (compile-jar input-file output-dir {})]
+      (let [result (compile-jar input-file output-dir {:skip-contracts? skip-contracts?})]
         (println (str "Compiled " input-file " -> " (:jar result)))
         (println (str "Main class: " (:main-class result))))
       (System/exit 0)

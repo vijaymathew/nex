@@ -1,5 +1,5 @@
 -- calc_server_main: runs calc_service on a fixed port until interrupted.
--- Must run under --interpret — see README.
+-- Runs on the default JVM backend.
 
 intern Calc_Service
 

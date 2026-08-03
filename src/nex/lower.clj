@@ -185,6 +185,12 @@
 ;; site passing it through.
 (def ^:dynamic *top-level-globals* {})
 
+;; Program-wide `--skip-contracts` default, bound once at the lowering entry
+;; point (nex.compiler.jvm.file/compile-ast, via lower-repl-cell's opts).
+;; Threaded the same way as *top-level-globals* so nested function/method/
+;; constructor/invariant-method lowering all pick it up automatically.
+(def ^:dynamic *skip-contracts?* false)
+
 (defn- unsupported
   "An ex-info marking a construct the compiled backend does not implement yet.
 
@@ -326,12 +332,13 @@
   - `:generic-param-names` visible generic parameter identifiers lowered as JVM Object
   - `:generic-runtime-values` map of generic parameter name -> IR expression that yields
     the runtime type token string for that parameter
-  - `:with-java?` whether unresolved target calls should lower as JVM host interop"
+  - `:with-java?` whether unresolved target calls should lower as JVM host interop
+  - `:skip-contracts?` whether require/ensure/invariant checks lower to no-ops"
   ([] (make-lowering-env {}))
   ([{:keys [locals top-level? repl? state-slot next-slot classes functions imports var-types
             compiled-classes current-class fields this-type old-field-locals
             generic-param-names generic-param-constraints generic-runtime-values
-            with-java? across-cursors globals] :as opts}]
+            with-java? across-cursors globals skip-contracts?] :as opts}]
    {:locals (or locals {})
     :top-level? (if (contains? opts :top-level?) top-level? true)
     :repl? (if (contains? opts :repl?) repl? true)
@@ -362,7 +369,8 @@
     ;; (§7). In a non-top-level body an otherwise-unknown identifier that names a
     ;; global lowers to a `top-get` against the live session state. Defaults to the
     ;; program-wide dynamic var so nested body envs pick globals up automatically.
-    :globals (or globals *top-level-globals*)}))
+    :globals (or globals *top-level-globals*)
+    :skip-contracts? (boolean (or skip-contracts? *skip-contracts?*))}))
 
 (defn- string-jvm-type
   []
@@ -1160,8 +1168,15 @@
                        jvm-type)))
 
 (defn- assertion-ir
+  "Lower a require/ensure/invariant/class-invariant clause to an assert IR
+   node, or to a no-op when :skip-contracts? is set. Bare `assert` (kind
+   :assert) is never elided here — per spec, \"there is no mode that strips
+   them\" — callers for it pass a distinct kind precisely so this guard
+   leaves it alone."
   [env kind {:keys [label condition]}]
-  (ir/assert-node kind label (lower-expression env condition)))
+  (if (and (:skip-contracts? env) (not= kind :assert))
+    (ir/block-node [])
+    (ir/assert-node kind label (lower-expression env condition))))
 
 (defn- function-root-class?
   [env class-name]
@@ -5404,7 +5419,8 @@
   [program opts]
   (binding [*type-aliases* (merge *type-aliases*
                                   (into {} (map (juxt :name :type-expr)
-                                                (:type-aliases program))))]
+                                                (:type-aliases program))))
+            *skip-contracts?* (boolean (:skip-contracts? opts))]
   (let [unit-name (or (:name opts) "nex/repl/Cell_0001")
         actual-classes (vec (user-class-defs program))
         anonymous-classes (vec (collect-anonymous-class-defs program))

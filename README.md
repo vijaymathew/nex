@@ -350,8 +350,21 @@ end")
 ```
 
 The JVM compiler shades the current compiler classpath into the output jar. To
-include extra Java/Maven dependencies, launch the compiler with those deps on
-the classpath first. Run `nex help` for the full list of CLI commands and examples.
+include extra Java/Maven dependencies when calling `jvm/compile-jar` directly,
+launch the compiler with those deps already on the classpath.
+
+The `nex` CLI has a `--classpath` flag for this instead of requiring a custom
+launch: `nex compile jvm app.nex --classpath a.jar:b.jar` puts the given
+jars/dirs on the classpath before compiling (so they're shaded into the
+output jar too), and `nex app.nex --classpath a.jar:b.jar` does the same for
+running a script directly — entries are separated by the platform path
+separator, matching `java -cp`.
+
+The CLI also has a `--skip-contracts` flag: `nex compile jvm app.nex
+--skip-contracts` and `nex app.nex --skip-contracts` lower `require`/`ensure`/
+`invariant` checks to no-ops, for a trusted, perf-critical release build. Bare
+`assert` always runs regardless — there is no mode that strips it. Run
+`nex help` for the full list of CLI commands and examples.
 
 ### Running Tests
 

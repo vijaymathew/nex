@@ -1,6 +1,5 @@
 -- Executable checks for calc_service. Starts a real HTTP server on an
--- ephemeral port and drives it with a real Http_Client. Run:
--- nex checks.nex --interpret
+-- ephemeral port and drives it with a real Http_Client. Run: nex checks.nex
 
 intern Calc_Service
 intern net/Http_Client

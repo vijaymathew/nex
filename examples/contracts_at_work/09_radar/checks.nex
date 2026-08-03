@@ -1,6 +1,6 @@
 -- Executable checks for radar_service. Builds a small directory with
 -- duplicate files, starts the service against it on an ephemeral port,
--- and drives it with a real Http_Client. Run: nex checks.nex --interpret
+-- and drives it with a real Http_Client. Run: nex checks.nex
 
 intern Radar_Service
 intern net/Http_Client

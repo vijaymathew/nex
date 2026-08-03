@@ -1,5 +1,5 @@
 -- radar_service_main: runs radar_service on a fixed port, scanning this
--- project's own directory. Must run under --interpret — see README.
+-- project's own directory. Runs on the default JVM backend.
 
 intern Radar_Service
 
