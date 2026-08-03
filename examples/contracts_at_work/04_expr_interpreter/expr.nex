@@ -107,9 +107,9 @@ class Parser
 
     -- Not `tok.char_at(0) >= #0 and ... <= #9`: `#<digit>` char literals
     -- parse as the ASCII control code with that numeric value, not the
-    -- digit glyph (`#9` is a tab character, not '9') — confirmed with a
-    -- minimal repro, see the book's top-level issues report. A string
-    -- membership check sidesteps char literals entirely.
+    -- digit glyph (`#9` is a tab character, not '9') — this is intentional,
+    -- not a bug in the language. A string membership check sidesteps char
+    -- literals entirely.
     is_number(tok: String): Boolean do
       result := tok.length() > 0 and "0123456789".contains(tok.substring(0, 1))
     end

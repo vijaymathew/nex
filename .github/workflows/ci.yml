@@ -29,9 +29,4 @@ jobs:
           cli: latest
 
       - name: Run Clojure test suite
-        env:
-          # Mirrors what `bin/nex` exports before running a script (see cmd_run_script) —
-          # the examples smoke test runs contracts_at_work/*/checks.nex in-process via
-          # nex.eval, which need NEX_USER_DIR to resolve their scratch directories.
-          NEX_USER_DIR: ${{ github.workspace }}
         run: clojure -M:test test/scripts/run_tests.clj

@@ -369,12 +369,8 @@ The CLI also has a `--skip-contracts` flag: `nex compile jvm app.nex
 ### Running Tests
 
 ```bash
-NEX_USER_DIR="$(pwd)" clojure -M:test test/scripts/run_tests.clj
+clojure -M:test test/scripts/run_tests.clj
 ```
-
-`NEX_USER_DIR` is what `bin/nex` normally exports before running a script; the
-examples smoke test runs a few examples that need it set directly since it
-invokes them in-process rather than through the `nex` CLI.
 
 ### Running Examples
 
