@@ -23,19 +23,30 @@ USAGE:
 
 COMMANDS:
     (no command)              Start the Nex REPL
-    compile jvm <file> [output-dir]
+    compile jvm <file> [output-dir] [--classpath entries]
                               Compile a Nex file to a standalone JVM JAR
     format <file|dir>         Format Nex source files
     doc <file|dir> [output]   Generate documentation from Nex files
     eval <code>               Evaluate a Nex code snippet
     help                      Show this help message
 
+OPTIONS:
+    --classpath entries       Extra jar/dir paths for Java interop, colon-
+                              separated (same convention as `java -cp` on
+                              this platform). Available on both running
+                              (nex <file>.nex) and compiling
+                              (nex compile jvm). On compile, the entries are
+                              also shaded into the output jar.
+
 EXAMPLES:
     nex                                      # Start REPL
     nex app.nex                              # Run app.nex (compiled JVM backend)
     nex app.nex --interpret                  # Run on the tree-walking interpreter
+    nex app.nex --classpath a.jar:b.jar      # Run with extra jars on the classpath
     nex compile jvm app.nex                  # Compile to a standalone app.jar in current dir
     nex compile jvm app.nex build/           # Compile to a standalone app.jar in build/
+    nex compile jvm app.nex --classpath a.jar:b.jar
+                                              # Compile, bundling extra jars into the output jar
     nex format src/                          # Format all files in directory
     nex format MyClass.nex                   # Format single file
     nex doc MyClass.nex MyClass.md           # Generate documentation
@@ -56,19 +67,58 @@ show_version() {
 J_OPTIONS="${J_OPTIONS:--J--enable-native-access=ALL-UNNAMED}"
 USER_DIR="$(pwd)"
 
+# Run `clojure.main -m "$@"` with extra jar/dir paths (colon-separated, same
+# convention as `java -cp`) prepended onto the project's own computed
+# classpath. Bypassing the `clojure` launcher for this case (going straight to
+# `java`) makes the extra entries visible on the real JVM classpath from
+# process start, so both compile-time interop resolution (Class/forName) and
+# runtime class linkage see them — no dynamic classloader trickery, and no
+# reliance on `URLClassLoader`, which the JDK 9+ app classloader isn't.
+run_with_extra_classpath() {
+    local extra_cp="$1"
+    shift
+    local base_cp
+    base_cp="$(cd "$NEX_HOME" && clojure -Spath)" || exit 1
+    local -a java_opts=()
+    for tok in $J_OPTIONS; do
+        java_opts+=("${tok#-J}")
+    done
+    cd "$NEX_HOME" && java "${java_opts[@]}" -cp "${base_cp}:${extra_cp}" clojure.main -m "$@"
+}
+
 # Command implementations
 cmd_repl() {
     cd "$NEX_HOME" && clojure ${J_OPTIONS} -J-Dnex.user.dir="$USER_DIR" -M:repl
 }
 
 cmd_compile() {
+    local classpath=""
+    local -a positional=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --classpath)
+                if [[ -z "$2" ]]; then
+                    echo "Error: --classpath requires an argument"
+                    exit 1
+                fi
+                classpath="$2"
+                shift 2
+                ;;
+            *)
+                positional+=("$1")
+                shift
+                ;;
+        esac
+    done
+    set -- "${positional[@]}"
+
     local target="$1"
     local file="$2"
     local output="$3"
 
     if [[ -z "$target" || -z "$file" ]]; then
         echo "Error: compile requires target and file arguments"
-        echo "Usage: nex compile jvm <file> [output-dir]"
+        echo "Usage: nex compile jvm <file> [output-dir] [--classpath entries]"
         exit 1
     fi
 
@@ -93,7 +143,12 @@ cmd_compile() {
     # Make output path absolute
     mkdir -p "$output"
     output="$(cd "$output" && pwd)"
-    cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.compiler.jvm.file "$file" "$output"
+
+    if [[ -n "$classpath" ]]; then
+        run_with_extra_classpath "$classpath" nex.compiler.jvm.file "$file" "$output"
+    else
+        cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.compiler.jvm.file "$file" "$output"
+    fi
 }
 
 cmd_format() {
@@ -189,7 +244,31 @@ cmd_run_script() {
     export NEX_USER_DIR=`pwd`
     fullpath=$(readlink -f "$1")
     shift
-    cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.eval "$fullpath" "$@"
+
+    local classpath=""
+    local -a rest=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --classpath)
+                if [[ -z "$2" ]]; then
+                    echo "Error: --classpath requires an argument"
+                    exit 1
+                fi
+                classpath="$2"
+                shift 2
+                ;;
+            *)
+                rest+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -n "$classpath" ]]; then
+        run_with_extra_classpath "$classpath" nex.eval "$fullpath" "${rest[@]}"
+    else
+        cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.eval "$fullpath" "${rest[@]}"
+    fi
 }
 
 # Main command dispatcher
