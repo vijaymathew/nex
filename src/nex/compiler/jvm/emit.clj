@@ -880,6 +880,7 @@
    "type_is"                                 ["builtin-type-is" [:state :b0 :b1]]
    "sleep"                                   ["builtin-sleep!" [:b0]]
    "hint_spin"                               ["builtin-hint-spin!" []]
+   "exit"                                    ["builtin-exit!" [:b0]]
    "http_get"                                ["builtin-http-get" [:state :bvar]]
    "http_post"                               ["builtin-http-post" [:state :bvar]]
    "json_parse"                              ["builtin-json-parse" [:state :b0]]

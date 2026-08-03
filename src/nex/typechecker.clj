@@ -2612,6 +2612,7 @@
    "println" check-builtin-print
    "sleep"   check-builtin-sleep
    "hint_spin"    (builtin-nullary "hint_spin" "Void")
+   "exit"    (builtin-single-arg "exit" "Integer" "Void")
    "random_real"  (builtin-nullary "random_real" "Real")
    "datetime_now" (builtin-nullary "datetime_now" "Integer")
    "type_of"  (builtin-checked-args "type_of" 1 "String")

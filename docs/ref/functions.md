@@ -44,6 +44,15 @@ Blocks the current task for approximately `ms` milliseconds. Returns `nil`.
 
 `ms` must be a non-negative integer.
 
+## `exit`
+
+```nex
+exit(status: Integer)
+```
+
+Terminates the process immediately with the given exit status, equivalent to
+Java's `System.exit(status)`. Does not return.
+
 ## `random_real`
 
 ```nex

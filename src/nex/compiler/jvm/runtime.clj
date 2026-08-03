@@ -1286,6 +1286,10 @@
   (Thread/onSpinWait)
   nil)
 
+(defn builtin-exit!
+  [status]
+  (System/exit (int status)))
+
 (defn builtin-http-get
   ([state url]
    (builtin-http-get state url nil))

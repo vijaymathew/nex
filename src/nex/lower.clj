@@ -816,6 +816,7 @@
    "println" "Void"
    "sleep" "Void"
    "hint_spin" "Void"
+   "exit" "Void"
    "random_real" "Real"
    "type_of" "String"
    "type_is" "Boolean"

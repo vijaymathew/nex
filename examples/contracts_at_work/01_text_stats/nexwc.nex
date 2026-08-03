@@ -4,9 +4,9 @@
 --   nex nexwc.nex <file>              -- line/word counts and top 5 words
 --   nex nexwc.nex <file> --top <n>    -- top n words instead of top 5
 --
--- Nex's own Process class does not expose a way to set the process exit
--- code, so error paths reach across the host boundary for it explicitly
--- (System.exit) rather than pretending the language has one.
+-- Every error path in this program funnels through fail, which prints a
+-- message and calls the language's own global exit(status) to set the
+-- process exit code.
 --
 -- A bare relative path resolves against the `nex` CLI's own installation
 -- directory, not wherever this program was actually run from — the
@@ -17,13 +17,10 @@
 
 intern Word_Stats
 intern io/Path
-import java.lang.System
 
 function fail(message: String, code: Integer) do
   print("error: " + message)
-  with "java" do
-    System.exit(code)
-  end
+  exit(code)
 end
 
 function resolve_path(proc: Process, raw: String): String do

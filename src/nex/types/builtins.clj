@@ -1220,6 +1220,13 @@
      (Thread/onSpinWait)
      nil)
 
+   "exit"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "exit expects exactly 1 argument"
+                       {:function "exit" :expected 1 :actual (count args)})))
+     (System/exit (int (first args))))
+
    "random_real"
    (fn [_ctx & args]
      (when (not= (count args) 0)
