@@ -11,16 +11,6 @@ import java.awt.event.ActionEvent
 
 intern Dashboard_State
 
--- Anchor class: `intern <Name>` requires a top-level declaration literally
--- named <Name> in the snake_case-matched file (confirmed in Project 5 —
--- see the book's top-level issues report). This file's real content is the
--- four listener classes below it; nothing else needs Dashboard_Listeners
--- to exist as a usable type.
-class Dashboard_Listeners
-  create
-    make() do end
-end
-
 class Increment_Listener
   inherit
     ActionListener

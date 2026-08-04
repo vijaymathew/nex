@@ -4,7 +4,7 @@
 -- constructor's parameter boundary — this used to need a `require` clause
 -- instead, because refinement types declared in a file weren't resolved
 -- when that file was loaded via `intern` from another module. Fixed
--- upstream; see the book's top-level issues report.
+-- upstream.
 
 declare type Priority = Integer where p: p >= 1 and p <= 5
 

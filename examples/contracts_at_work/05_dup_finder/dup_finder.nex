@@ -12,10 +12,11 @@
 -- is out of scope for this small a tool.
 --
 -- Everything lives as methods on Dup_Finder rather than loose top-level
--- functions: `intern <Name>` requires a top-level declaration literally
--- named <Name> in the snake_case-matched file (confirmed directly — see the
--- book's top-level issues report), so a functions-only module can't be
--- interned by a name that doesn't also label something in the file.
+-- functions: `intern <Name>` merges every top-level declaration in the
+-- loaded file into the interning program's namespace unconditionally, so a
+-- functions-only module would hand its bare names straight to the caller's
+-- global scope, free to collide with anything else defined there. Grouping
+-- them under Dup_Finder keeps the names reachable only via an instance.
 
 intern io/Path
 intern io/Directory

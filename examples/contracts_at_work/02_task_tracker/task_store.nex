@@ -91,10 +91,10 @@ class Task_Store
     -- task per line, rather than a single `{"schema_version":2,"tasks":[...]}`
     -- document. This started as a workaround for a JVM-backend bug where an
     -- array nested inside a parsed JSON object broke on extraction — since
-    -- fixed upstream (see the book's top-level issues report) — but is kept
-    -- on its own merits: a flat, one-record-per-line format is easy to
-    -- append to and easy to diff, which a save-on-every-change task store
-    -- benefits from regardless of which bugs are or aren't present.
+    -- fixed upstream — but is kept on its own merits: a flat,
+    -- one-record-per-line format is easy to append to and easy to diff,
+    -- which a save-on-every-change task store benefits from regardless of
+    -- which bugs are or aren't present.
     to_json(): String do
       let json: Json := create Json.make()
       let header: Map[String, Any] := {}
@@ -143,7 +143,7 @@ class Task_Store
     -- specifically Map[String, Any]-typed array still breaks a method call
     -- on retrieval, even though the same Map works fine as a plain local or
     -- in an Array[Any] — a narrower survival of the data/Json compiled-
-    -- backend bug (see the book's top-level issues report). Each element is
+    -- backend bug. Each element is
     -- cast back to Map[String, Any] via an ordinary `let` the moment it's
     -- read out, which works fine.
     parse_json(text: String) do

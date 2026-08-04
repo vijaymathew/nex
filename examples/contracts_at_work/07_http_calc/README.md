@@ -28,9 +28,8 @@ Everything here runs on the default JVM backend.
 
 ## Status: works cleanly on the default JVM backend; one issue still shapes the client
 
-Two of the three issues originally hit here are fixed upstream (see the
-book's top-level issues report), and the code was updated to match rather
-than keeping the old workaround around:
+Two of the three issues originally hit here are fixed upstream, and the
+code was updated to match rather than keeping the old workaround around:
 
 1. **A closure passed as a callback couldn't call a method on the
    enclosing object.** Fixed. `handle_evaluate`, `parse_vars`, and

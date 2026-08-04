@@ -4,18 +4,19 @@
 --
 -- Builds the request body with data/Json (safe), but reads the response
 -- with text/Regex rather than data/Json. Interning both net/Http_Client and
--- data/Json in the same *program* — regardless of which file each `intern`
--- appears in — makes any method call on a Map produced by json.parse(...)
--- fail typechecking with a confusing, unrelated-looking error ("Method
--- 'call0' uses Result but does not declare a return type"). Confirmed with
--- a 4-line repro (see the book's top-level issues report): interning both
--- modules and calling `.get()` on a parsed Map breaks, even with
--- Http_Client never actually called. Building a request body with
--- json.stringify is unaffected — only reading a parsed Map's fields is.
--- The response shape here is small and entirely under this project's own
--- control (`{"result":N}` or `{"error":"..."}`), so a fixed-lookbehind
--- regex extracts the one field needed without touching data/Json's parse
--- result at all.
+-- data/Json in the same program, then actually calling the client
+-- (client.post) and reading a field off a Map that json.parse(...)
+-- produced, fails typechecking inside a `function ... do ... end` body with
+-- a confusing, unrelated-looking error ("Method 'call0' uses Result but
+-- does not declare a return type") — confirmed directly, and only when the
+-- client call is real; creating an unused Http_Client alongside a parsed
+-- Map does not trigger it. Identical code as bare top-level script
+-- statements does not fail either, which is why checks.nex (written as
+-- top-level statements) has always been able to call `.get()` on parsed
+-- responses without issue. The response shape here is small and entirely
+-- under this project's own control (`{"result":N}` or `{"error":"..."}`),
+-- so a fixed-lookbehind regex extracts the one field needed without
+-- touching data/Json's parse result inside a function at all.
 
 intern net/Http_Client
 intern data/Json

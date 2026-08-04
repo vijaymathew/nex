@@ -10,7 +10,7 @@
 -- Chat_Server method, called directly from inside `spawn do ... end` — this
 -- used to fail to lower on the JVM backend (a spawned closure couldn't call
 -- a method on an object, even `this`), forcing it out to a free function
--- instead. Fixed upstream; see the book's top-level issues report.
+-- instead. Fixed upstream.
 
 intern net/Server_Socket
 intern net/Tcp_Socket

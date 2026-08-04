@@ -11,7 +11,7 @@
 -- A bare relative path resolves against the `nex` CLI's own installation
 -- directory, not wherever this program was actually run from — the
 -- launcher `cd`s into NEX_HOME before starting the JVM (documented, not a
--- bug to fix — see the book's top-level issues report). NEX_USER_DIR is
+-- bug to fix). NEX_USER_DIR is
 -- set beforehand and read here via Process.getenv to resolve a relative
 -- file argument against the caller's real working directory instead.
 

@@ -55,9 +55,8 @@ backend, for a *different* reason than attempt 1's.
 
 **What actually fixed it:** both root causes — `data/Json`'s method calls
 on the JVM backend, and `Http_Client`'s response handling on the JVM
-backend — were fixed upstream in the language itself, along with several
-other issues this book surfaced (see the top-level issues report). Once
-both were fixed, **attempt 1's original one-process design became
+backend — were fixed upstream in the language itself. Once both were
+fixed, **attempt 1's original one-process design became
 possible again**, but by then the two-process, HTTP-boundary design was
 already built, tested, and arguably the better architecture regardless —
 watching a service from a separate process over a real network boundary is

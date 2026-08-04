@@ -86,7 +86,7 @@ function main() do
   -- the JVM, and io/Path's relative-path resolution uses the process's
   -- real working directory rather than NEX_USER_DIR (which the launcher
   -- sets, but only `intern` module resolution consults it) — confirmed
-  -- directly (see the book's top-level issues report). NEX_USER_DIR is
+  -- directly. NEX_USER_DIR is
   -- still available as a plain environment variable, so building the path
   -- from it explicitly is the workaround.
   let proc: Process := create Process
