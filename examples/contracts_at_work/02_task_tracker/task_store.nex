@@ -137,20 +137,11 @@ class Task_Store
     -- Schema version 1 was a single bare JSON array for the whole file
     -- (`[{"id":1,...}, ...]`) — a *top-level* array, which parses fine on
     -- both backends.
-    --
-    -- `rows` is `Array[Any]`, not the more precise `Array[Map[String,
-    -- Any]]`: on the JVM backend, storing a json.parse-produced Map into a
-    -- specifically Map[String, Any]-typed array still breaks a method call
-    -- on retrieval, even though the same Map works fine as a plain local or
-    -- in an Array[Any] — a narrower survival of the data/Json compiled-
-    -- backend bug. Each element is
-    -- cast back to Map[String, Any] via an ordinary `let` the moment it's
-    -- read out, which works fine.
     parse_json(text: String) do
       let json: Json := create Json.make()
       let trimmed: String := text.trim()
 
-      let rows: Array[Any] := []
+      let rows: Array[Map[String, Any]] := []
       if trimmed.starts_with("[") then
         -- schema version 1: one JSON document, a bare top-level array.
         let items: Array[Any] := json.parse(trimmed)
