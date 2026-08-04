@@ -8,7 +8,7 @@
 -- `spawn` closures via `this.` — this used to be impossible (neither kind
 -- of closure could call a method on the enclosing object), forcing
 -- everything out to free functions with captured locals instead. Fixed
--- upstream; see the book's top-level issues report.
+-- upstream.
 
 intern net/Http_Server
 intern data/Json

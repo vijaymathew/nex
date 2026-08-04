@@ -34,9 +34,8 @@ Everything here runs on the default JVM backend.
 This project originally needed `--interpret`, for a real, severe bug:
 `Server_Socket.accept()` was unusable on the JVM backend for any accepted
 connection at all, traced to `Tcp_Socket.from_socket` hitting a missing
-runtime binding. Fixed upstream (see the book's top-level issues report);
-confirmed directly against this project's own `checks.nex`, which now
-passes on the default backend with no `--interpret` flag.
+runtime binding. Fixed upstream; confirmed directly against this project's own `checks.nex`,
+which now passes on the default backend with no `--interpret` flag.
 
 One design choice changed along with the fix. `handle_client` was
 originally a free (top-level) function, not a `Chat_Server` method — a

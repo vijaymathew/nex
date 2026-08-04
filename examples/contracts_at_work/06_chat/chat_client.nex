@@ -5,9 +5,9 @@
 -- (the socket, the console) is exactly the shape that needs a second task —
 -- one thread can't block on both at once.
 --
--- Usage: reads the server host/port from stdin at startup (argv is not an
--- option — see Project 1's README for why: Process.command_line() does not
--- return the program's real arguments on either backend today).
+-- Usage: reads the server host/port from stdin at startup rather than argv,
+-- just to keep this client interactive and self-prompting; Process.command_line()
+-- itself works fine on both backends (see Project 1).
 
 intern net/Tcp_Socket
 

@@ -1071,6 +1071,24 @@
       (emit-box! mv jvm-type))
     (ir/object-jvm-type "java/lang/Object")))
 
+(defn- emit-boxed-expr-for-storage!
+  "Like emit-boxed-expr!, but also runs the boxed value through the compiled
+   backend's portable-value->compiled conversion before it is stored as an
+   ArrayList element or a HashMap/LinkedHashSet key/value — i.e. everywhere a
+   value is written into a compiled-native collection outside the
+   emit-stack-coerce!/emit-unbox-or-cast-to-collection! path (array/map/set
+   literals, and the Array/Map add/add_at/put/set methods).
+
+   Needed because a value can reach this boundary with a static Nex type of
+   Any (e.g. an element read out of an Array[Any], or the result of a
+   backend-agnostic helper like json_parse) while still being a portable
+   NexMap/NexSet at runtime; nothing upstream had a declared Map/Set type to
+   convert against. portable-value->compiled is a no-op for every other kind
+   of value, so calling it here unconditionally is safe."
+  [^MethodVisitor mv expr state-slot]
+  (emit-boxed-expr! mv expr state-slot)
+  (emit-runtime-invoke-1! mv "portable-value->compiled"))
+
 (defn- emit-array-literal!
   [^MethodVisitor mv expr state-slot]
   (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
@@ -1078,7 +1096,7 @@
   (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "()V" false)
   (doseq [element (:elements expr)]
     (.visitInsn mv Opcodes/DUP)
-    (emit-boxed-expr! mv element state-slot)
+    (emit-boxed-expr-for-storage! mv element state-slot)
     (.visitMethodInsn mv
                       Opcodes/INVOKEVIRTUAL
                       arraylist-internal-name
@@ -1095,8 +1113,8 @@
   (.visitMethodInsn mv Opcodes/INVOKESPECIAL hashmap-internal-name "<init>" "()V" false)
   (doseq [{:keys [key value]} (:entries expr)]
     (.visitInsn mv Opcodes/DUP)
-    (emit-boxed-expr! mv key state-slot)
-    (emit-boxed-expr! mv value state-slot)
+    (emit-boxed-expr-for-storage! mv key state-slot)
+    (emit-boxed-expr-for-storage! mv value state-slot)
     (.visitMethodInsn mv
                       Opcodes/INVOKEVIRTUAL
                       hashmap-internal-name
@@ -1113,7 +1131,7 @@
   (.visitMethodInsn mv Opcodes/INVOKESPECIAL linkedhashset-internal-name "<init>" "()V" false)
   (doseq [element (:elements expr)]
     (.visitInsn mv Opcodes/DUP)
-    (emit-boxed-expr! mv element state-slot)
+    (emit-boxed-expr-for-storage! mv element state-slot)
     (.visitMethodInsn mv
                       Opcodes/INVOKEVIRTUAL
                       linkedhashset-internal-name
@@ -1233,7 +1251,7 @@
       (do
         (emit-expr! mv target state-slot)
         (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (emit-boxed-expr! mv (first args) state-slot)
+        (emit-boxed-expr-for-storage! mv (first args) state-slot)
         (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "add" "(Ljava/lang/Object;)Z" false)
         (.visitInsn mv Opcodes/POP)
         :void)
@@ -1246,7 +1264,7 @@
         (emit-expr! mv target state-slot)
         (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
         (emit-as-int! mv (first args) state-slot)
-        (emit-boxed-expr! mv (second args) state-slot)
+        (emit-boxed-expr-for-storage! mv (second args) state-slot)
         (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "add" "(ILjava/lang/Object;)V" false)
         :void)
 
@@ -1258,7 +1276,7 @@
         (emit-expr! mv target state-slot)
         (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
         (emit-as-int! mv (first args) state-slot)
-        (emit-boxed-expr! mv (second args) state-slot)
+        (emit-boxed-expr-for-storage! mv (second args) state-slot)
         (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "set" "(ILjava/lang/Object;)Ljava/lang/Object;" false)
         (.visitInsn mv Opcodes/POP)
         :void)
@@ -1464,8 +1482,8 @@
       (do
         (emit-expr! mv target state-slot)
         (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
-        (emit-boxed-expr! mv (first args) state-slot)
-        (emit-boxed-expr! mv (second args) state-slot)
+        (emit-boxed-expr-for-storage! mv (first args) state-slot)
+        (emit-boxed-expr-for-storage! mv (second args) state-slot)
         (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "put" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;" false)
         (.visitInsn mv Opcodes/POP)
         :void)

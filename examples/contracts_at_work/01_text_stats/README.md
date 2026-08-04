@@ -36,7 +36,7 @@ language as documented and simply started working once the bug was fixed.
 One thing it *did* need: a bare relative path (`nexwc.nex sample.txt`)
 resolves against the `nex` CLI's own installation directory, not wherever
 the program was actually run from (the launcher `cd`s into `NEX_HOME`
-before starting the JVM). This is by design, not a bug — see the book's
-top-level issues report. `resolve_path` in `nexwc.nex` reads `NEX_USER_DIR`
+before starting the JVM). This is by design, not a bug.
+`resolve_path` in `nexwc.nex` reads `NEX_USER_DIR`
 via `Process.getenv` and resolves any non-absolute path against it, the
 same workaround used in Projects 2, 5, and 9.

@@ -4,7 +4,7 @@
 --
 -- Uses NEX_USER_DIR rather than a bare relative path for the same reason
 -- documented in Project 2: the `nex` CLI launcher's own working directory
--- is not the caller's — see the book's top-level issues report.
+-- is not the caller's.
 
 intern Dup_Finder
 intern io/Path

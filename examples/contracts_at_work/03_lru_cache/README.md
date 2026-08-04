@@ -29,5 +29,5 @@ project in this book so far where that was true. Worth noting precisely
 scalar/collection manipulation on `Map`/`Array` with no file I/O, no JSON,
 no `?T`-typed mutation, and no `old` on a mutable field in a postcondition —
 exactly the combination of things that turned out to be where this pass of
-Nex's bugs cluster (see the book's top-level issues report). A library kept
-to core language + `Map`/`Array` is, for now, the safest ground to build on.
+Nex's bugs cluster. A library kept to core language + `Map`/`Array` is, for
+now, the safest ground to build on.

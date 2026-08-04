@@ -23,9 +23,9 @@ nex tasks_cli.nex    # interactive; type `add 3 buy milk`, `list`, `done 1`, `re
 ## Status: works cleanly on the default JVM backend
 
 This project originally needed `--interpret` for several reasons, all since
-fixed upstream (see the book's top-level issues report) — `Task_Store` was
-rewritten to use the idiomatic form once each fix was confirmed, rather
-than leaving defensive workarounds for bugs that no longer exist:
+fixed upstream — `Task_Store` was rewritten to use the idiomatic form once
+each fix was confirmed, rather than leaving defensive workarounds for bugs
+that no longer exist:
 
 - **`data/Json`-parsed `Map` method calls on the JVM backend** — fixed;
   this project no longer needs `--interpret` at all.

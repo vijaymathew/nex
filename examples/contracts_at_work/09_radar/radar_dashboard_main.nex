@@ -9,8 +9,9 @@
 -- Buttons only ever set flags on Radar_Dashboard_State (Project 8's
 -- pattern); the poll loop is the only code that performs the HTTP call
 -- (via Http_Client + a fixed-lookbehind Regex, not data/Json — see Project
--- 7's README for why data/Json and net/Http_Client can't be interned
--- together) or touches a widget.
+-- 7's README: reading a data/Json-parsed Map's fields after an actual
+-- Http_Client call, inside a function body, still fails typechecking) or
+-- touches a widget.
 
 import javax.swing.JFrame
 import javax.swing.JButton
