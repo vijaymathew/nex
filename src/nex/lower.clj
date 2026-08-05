@@ -2293,7 +2293,19 @@
 
 (defn- next-synthetic-closure-class-name
   []
-  (str "AnonymousFunction_" (swap! next-synthetic-closure-id inc)))
+  ;; Distinct prefix from walker.clj's generate-unique-fn-name (also
+  ;; "AnonymousFunction_N", used for source-level `fn(...) do ... end`
+  ;; closures at parse time): that counter and this one are separate atoms,
+  ;; so sharing a format let a `spawn` block's synthesized wrapper closure
+  ;; land on the same name as an unrelated user-written closure whenever both
+  ;; counters happened to reach the same N. Two closures with the same class
+  ;; name silently collapse to one entry wherever the compiler collects
+  ;; anonymous class-defs into a name-keyed table (e.g.
+  ;; nex.compiler.jvm.file/collect-anonymous-class-defs' dedup-by-name), so
+  ;; the loser's method body vanishes and calling it fails at runtime with an
+  ;; opaque "Method not found: callN" — see this project's radar_service
+  ;; postmortem for the reproduction.
+  (str "AnonymousSpawn_" (swap! next-synthetic-closure-id inc)))
 
 (defn- make-synthetic-anonymous-function-expr
   [params return-type body]

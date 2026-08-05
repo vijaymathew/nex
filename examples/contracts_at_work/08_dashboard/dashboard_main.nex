@@ -11,6 +11,7 @@
 import javax.swing.JFrame
 import javax.swing.JButton
 import javax.swing.JLabel
+import java.awt.FlowLayout
 import java.lang.Thread
 
 intern Dashboard_State
@@ -32,6 +33,7 @@ function main() do
     reset_button.addActionListener(create Reset_Listener.make(state))
     quit_button.addActionListener(create Quit_Listener.make(state))
 
+    frame.getContentPane().setLayout(FlowLayout.new())
     frame.getContentPane().add(label)
     frame.getContentPane().add(inc_button)
     frame.getContentPane().add(dec_button)

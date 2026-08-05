@@ -19,6 +19,16 @@
            [clj_antlr ParseError])
   (:gen-class))
 
+;; Two independent compiler-side counters synthesize hidden closure-wrapper
+;; class names: walker.clj's for source-level `fn(...) do ... end` closures
+;; ("AnonymousFunction_N") and lower.clj's for `spawn do ... end` blocks
+;; ("AnonymousSpawn_N"). Both must stay invisible to REPL completion/type-
+;; check bookkeeping below, so match either prefix rather than hardcoding one.
+(defn- synthetic-anonymous-class-name?
+  [^String name]
+  (or (.startsWith name "AnonymousFunction_")
+      (.startsWith name "AnonymousSpawn_")))
+
 ;;
 ;; REPL State
 ;;
@@ -88,7 +98,7 @@
                 cls-names  (when ctx
                              (->> (keys @(:classes ctx))
                                   (remove #(or (= % "__ReplTemp__")
-                                               (.startsWith ^String % "AnonymousFunction_")
+                                               (synthetic-anonymous-class-name? %)
                                                (= % "Function")))
                                   (map name)))
                 all-words  (concat nex-keywords nex-types nex-builtins
@@ -1466,11 +1476,11 @@
               synthetic-function-class-names (set (map :class-name prev-functions))
               referenced-anonymous-class-names (->> (vals @*repl-var-types*)
                                                     (filter string?)
-                                                    (filter #(str/starts-with? % "AnonymousFunction_"))
+                                                    (filter synthetic-anonymous-class-name?)
                                                     set)
               prev-classes (remove #(or (= "__ReplTemp__" (:name %))
                                         (contains? synthetic-function-class-names (:name %))
-                                        (and (str/starts-with? (str (:name %)) "AnonymousFunction_")
+                                        (and (synthetic-anonymous-class-name? (str (:name %)))
                                              (not (contains? referenced-anonymous-class-names (:name %)))))
                                    (vals @(:classes ctx)))
               intern-classes (interp/resolve-interned-classes source-id ast)
