@@ -16,6 +16,7 @@
 import javax.swing.JFrame
 import javax.swing.JButton
 import javax.swing.JLabel
+import java.awt.FlowLayout
 import java.lang.Thread
 
 intern Radar_Dashboard_State
@@ -71,6 +72,7 @@ function main() do
     rescan_button.addActionListener(create Rescan_Listener.make(state))
     quit_button.addActionListener(create Dashboard_Quit_Listener.make(state))
 
+    frame.getContentPane().setLayout(FlowLayout.new())
     frame.getContentPane().add(label)
     frame.getContentPane().add(refresh_button)
     frame.getContentPane().add(rescan_button)
