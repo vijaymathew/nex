@@ -1,0 +1,77 @@
+-- The constrained core (Appendix B.2, Chapters 3-5). A Quantity cannot be
+-- non-positive; a Line_Item pairs a SKU with a quantity and a unit price;
+-- an Order is exactly one of three shapes: Draft (being priced), Placed
+-- (priced and admitted), or Shipped (handed to a carrier). Placed's
+-- invariant is the membrane form -- a non-negative total in a well-formed
+-- order -- not a pre-pricing "total = sum" simplification.
+
+intern Leaf_Types
+
+declare type Quantity = Integer where n: n > 0
+
+class Line_Item
+  create make(s: Sku, q: Quantity, unit: Money) do sku := s  quantity := q  unit_price := unit end
+  feature
+    sku: Sku
+    quantity: Quantity
+    unit_price: Money
+    subtotal(): Money do result := unit_price.times(quantity) end
+end
+
+function sum_of(items: Array[Line_Item]): Money
+  require
+    not_empty: items.length > 0
+  do
+    result := create Money.zero(items.get(0).unit_price.currency)
+    across items as it do
+      result := result + it.subtotal
+    end
+  end
+
+sealed deferred class Order
+  create init(xs: Array[Line_Item]) do items := xs end
+  feature
+    items: Array[Line_Item]     -- the one field every state shares
+end
+
+class Draft
+  inherit Order
+  create make(xs: Array[Line_Item], ccy: String, floor: Money,
+              email: Email_Address, dest: String)
+    do Order.init(xs)  currency := ccy  floor_price := floor
+       customer_email := email  zone := dest end
+  feature
+    currency: String
+    floor_price: Money
+    customer_email: Email_Address
+    zone: String
+end
+
+class Placed
+  inherit Order
+  create make(xs: Array[Line_Item], t: Money, email: Email_Address, dest: String)
+    require not_empty: xs.length > 0
+    do Order.init(xs)  total := t  customer_email := email  zone := dest end
+  feature
+    total: Money
+    customer_email: Email_Address
+    zone: String
+  invariant
+    not_empty:     items.length > 0
+    non_negative:  not total.is_negative()
+end
+
+class Shipped
+  inherit Order
+  create make(xs: Array[Line_Item], t: Tracking_Id) do Order.init(xs)  tracking := t end
+  feature
+    tracking: Tracking_Id
+end
+
+-- The one total transition into shipment: you cannot ship what was never placed.
+function ship(p: Placed, t: Tracking_Id): Shipped
+  do
+    result := create Shipped.make(p.items, t)
+  ensure
+    items_preserved: result.items = p.items
+  end

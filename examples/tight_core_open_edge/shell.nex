@@ -1,0 +1,64 @@
+-- The imperative shell (Appendix B.9, Chapters 6 & 8): the only region that
+-- touches the world. It calls the pure core, then performs the returned
+-- effects. Payment_Gateway, Mailer, Order_Store, and Warehouse_Api are left
+-- unspecified interfaces in the book; here they are small in-memory fakes
+-- that record what they were asked to do, so a check script can assert on
+-- them without a real payment processor, mail server, database, or carrier
+-- API.
+
+intern Orchestration
+
+class Payment_Gateway
+  create make() do charged := [] end
+  feature
+    charged: Array[Money]
+    charge(amount: Money) do charged.add(amount) end
+end
+
+class Mailer
+  create make() do sent := [] end
+  feature
+    sent: Array[Email_Address]
+    send(recipient: Email_Address) do sent.add(recipient) end
+end
+
+class Order_Store
+  create make() do saved := [] end
+  feature
+    saved: Array[Placed]
+    save(order: Placed) do saved.add(order) end
+end
+
+class Warehouse_Api
+  create make() do reservations := [] end
+  feature
+    reservations: Array[String]
+    reserve(warehouse: String, items: Array[Line_Item]) do reservations.add(warehouse) end
+end
+
+function perform(e: Effect, gateway: Payment_Gateway, mailer: Mailer,
+        store: Order_Store, warehouse: Warehouse_Api)
+  do
+    match e of
+      when Charge_Payment as c then gateway.charge(c.amount)
+      when Reserve_Stock as r then warehouse.reserve(r.warehouse, r.items)
+      when Send_Confirmation as s then mailer.send(s.recipient)
+      when Record_Order as rec then store.save(rec.order)
+    end
+  end
+
+-- Drive one request: decide purely, then perform.
+function handle_request(request: Order_Request, rule: Price_Expr, routes: Array[Term],
+                        now: Instant, gateway: Payment_Gateway, mailer: Mailer,
+                        store: Order_Store, warehouse: Warehouse_Api): Result[Placed, String]
+  do
+    match place_order(request, rule, routes, now) of
+      when Err as e then
+        result := create Err[Placed, String].make(e.error)
+      when Ok as placement then
+        across placement.value.effects as fx do
+          perform(fx, gateway, mailer, store, warehouse)
+        end
+        result := create Ok[Placed, String].make(placement.value.order)
+    end
+  end

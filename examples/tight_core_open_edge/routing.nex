@@ -1,0 +1,142 @@
+-- Fulfillment by unification and search (Appendix B.7, Chapter 13). Terms
+-- are a closed structure with open unknowns; unification finds the
+-- substitution that makes two terms agree; the search tries each ground
+-- route fact against the order's query and keeps the first that satisfies
+-- the domain.
+
+intern Order_Core
+intern data/Result
+
+union Term
+  Var(name: String)
+  Atom(value: String)
+  Compound(functor: String, args: Array[Term])
+end
+
+class Substitution
+  create make() do bindings := {} end
+  feature
+    bindings: Map[String, Term]
+
+    bind(vname: String, t: Term): Substitution
+      do bindings.put(vname, t)  result := this end
+
+    resolve(t: Term): Term
+      do
+        match t of
+          when Var(name) then
+            if bindings.contains_key(name) then result := resolve(bindings.get(name))
+            else result := t end
+          else
+            result := t
+        end
+      end
+end
+
+function unify(a: Term, b: Term, s: Substitution): Result[Substitution, String]
+  do
+    let x: Term := s.resolve(a)
+    let y: Term := s.resolve(b)
+    match x of
+      when Var(name) then result := create Ok[Substitution, String].make(s.bind(name, y))
+      when Atom as ax then result := unify_atom(ax, y, s)
+      when Compound as cx then result := unify_compound(cx, y, s)
+    end
+  end
+
+function unify_atom(ax: Atom, y: Term, s: Substitution): Result[Substitution, String]
+  do
+    match y of
+      when Var(name) then result := create Ok[Substitution, String].make(s.bind(name, ax))
+      when Atom(value as v) if v = ax.value then result := create Ok[Substitution, String].make(s)
+      when Atom(value as v) then result := create Err[Substitution, String].make("clash: " + ax.value + " vs " + v)
+      when Compound then result := create Err[Substitution, String].make("atom vs structure")
+    end
+  end
+
+function unify_compound(cx: Compound, y: Term, s: Substitution): Result[Substitution, String]
+  do
+    match y of
+      when Var(name) then result := create Ok[Substitution, String].make(s.bind(name, cx))
+      when Atom then result := create Err[Substitution, String].make("structure vs atom")
+      when Compound as cy then
+        if cx.functor = cy.functor and cx.args.length = cy.args.length then
+          result := unify_args(cx.args, cy.args, s, 0)
+        else
+          result := create Err[Substitution, String].make("functor / arity mismatch")
+        end
+    end
+  end
+
+function unify_args(xs: Array[Term], ys: Array[Term], s: Substitution, i: Integer): Result[Substitution, String]
+  do
+    if i >= xs.length then
+      result := create Ok[Substitution, String].make(s)
+    else
+      match unify(xs.get(i), ys.get(i), s) of
+        when Ok as ok then result := unify_args(xs, ys, ok.value, i + 1)
+        when Err as e then result := create Err[Substitution, String].make(e.error)
+      end
+    end
+  end
+
+-- The order's routing query: known zone, unknown warehouse/carrier/cost.
+function routing_query(o: Placed): Term
+  do
+    let args: Array[Term] := []
+    args.add(create Atom.make(o.zone))
+    args.add(create Var.make("Warehouse"))
+    args.add(create Var.make("Carrier"))
+    args.add(create Var.make("Cost"))
+    result := create Compound.make("route", args)
+  end
+
+-- A domain guardrail on a committed solution (a real one checks stock and deadline).
+function satisfies_constraints(s: Substitution): Boolean
+  do result := s.bindings.contains_key("Warehouse") end
+
+function warehouse_of(s: Substitution): String
+  do
+    match s.resolve(create Var.make("Warehouse")) of
+      when Atom as a then result := a.value
+      else result := "unknown"
+    end
+  end
+
+-- Route facts, as data: (zone, warehouse, carrier, cost).
+function route_fact(zone: String, wh: String, carrier: String, cost: String): Term
+  do
+    let args: Array[Term] := []
+    args.add(create Atom.make(zone))
+    args.add(create Atom.make(wh))
+    args.add(create Atom.make(carrier))
+    args.add(create Atom.make(cost))
+    result := create Compound.make("route", args)
+  end
+
+-- Try each route fact; the first whose bindings satisfy every constraint wins.
+function route(query: Term, routes: Array[Term]): Result[Substitution, String]
+  do
+    from
+      let i: Integer := 0
+      let found: Boolean := false
+      result := create Err[Substitution, String].make("no eligible route")
+    invariant
+      in_range: 0 <= i and i <= routes.length
+    variant
+      routes.length - i
+    until
+      i >= routes.length or found
+    do
+      match unify(query, routes.get(i), create Substitution.make()) of
+        when Ok as s then
+          if satisfies_constraints(s.value) then
+            result := create Ok[Substitution, String].make(s.value)
+            found := true
+          end
+        when Err then
+          -- structural mismatch: backtrack, try the next route
+      end
+      i := i + 1
+    end
+  end

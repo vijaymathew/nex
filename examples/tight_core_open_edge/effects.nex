@@ -1,0 +1,19 @@
+-- Effects as data (Appendix B.6, Chapter 6). The pure core decides *what*
+-- should happen to the world without doing any of it -- an Effect is a
+-- description, performed later by the imperative shell.
+
+intern Order_Core
+
+union Effect
+  Charge_Payment(amount: Money)
+  Reserve_Stock(warehouse: String, items: Array[Line_Item])
+  Send_Confirmation(recipient: Email_Address)
+  Record_Order(order: Placed)
+end
+
+class Placement
+  feature
+    order: Placed
+    effects: Array[Effect]
+  create make(o: Placed, fx: Array[Effect]) do order := o  effects := fx end
+end

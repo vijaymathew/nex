@@ -1,0 +1,320 @@
+-- Executable checks for the whole capstone (Appendix B). Every region gets
+-- its own block of checks, bottom-up in the same order the appendix builds
+-- them: leaf types, core, pricing edge, membrane, effects, routing,
+-- orchestration, shell. Run: nex check.nex
+-- Exits 0 if every check passed, 1 otherwise (so this composes with CI).
+
+intern Shell
+
+class Checker
+  create
+    make() do
+      passed := 0
+      failed := 0
+    end
+  feature
+    passed: Integer
+    failed: Integer
+
+    check(label: String, expected: String, actual: String) do
+      if expected = actual then
+        passed := passed + 1
+        print("PASS " + label)
+      else
+        failed := failed + 1
+        print("FAIL " + label + " expected=" + expected + " actual=" + actual)
+      end
+    end
+
+    summary() do
+      print("---")
+      print("" + passed + " passed, " + failed + " failed")
+      if failed > 0 then
+        raise "" + failed + " check(s) failed"
+      end
+    end
+end
+
+function raw(sku: String, qty: Integer, unit_amt: Integer, ccy: String): Raw_Line_Item
+  do result := create Raw_Line_Item.make(sku, qty, unit_amt, ccy) end
+
+let chk: Checker := create Checker.make()
+
+-- ===========================================================================
+-- B.1 -- Assumed leaf types: Money arithmetic, comparisons, and the boundary
+-- parser built from field parsers like parse_quantity / parse_order.
+-- ===========================================================================
+
+let m500: Money := create Money.make(500, "USD")
+let m200: Money := create Money.make(200, "USD")
+chk.check("money plus", "700 USD", "" + (m500 + m200))
+chk.check("money minus", "300 USD", "" + (m500 - m200))
+chk.check("money less_percent", "450 USD", "" + m500.less_percent(10))
+chk.check("money times", "1500 USD", "" + m500.times(3))
+chk.check("money compare >", "true", "" + (m500 > m200))
+chk.check("money compare <", "false", "" + (m500 < m200))
+chk.check("money equals", "true", "" + (m500 = create Money.make(500, "USD")))
+chk.check("money zero is neither", "false", "" + create Money.zero("USD").is_negative())
+
+let currency_mismatch_caught: Boolean := false
+do
+  let bad_sum: Money := m500 + create Money.make(1, "EUR")
+rescue
+  currency_mismatch_caught := true
+end
+chk.check("money +: currency precondition", "true", "" + currency_mismatch_caught)
+
+chk.check("parse_quantity ok", "true", "" + parse_quantity(3).is_ok())
+chk.check("parse_quantity rejects zero", "true", "" + parse_quantity(0).is_err())
+chk.check("parse_quantity rejects negative", "true", "" + parse_quantity(-5).is_err())
+
+let good_req: Order_Request := create Order_Request.make(
+  [raw("SKU-1", 2, 1000, "USD"), raw("SKU-2", 1, 500, "USD")],
+  "USD", 100, "buyer@example.com", "zone-a")
+match parse_order(good_req) of
+  when Ok as ok then
+    chk.check("parse_order: item count", "2", "" + ok.value.items.length)
+    chk.check("parse_order: currency", "USD", ok.value.currency)
+  when Err as e then
+    chk.check("parse_order should have succeeded", "Ok", "Err: " + e.error)
+end
+
+let empty_req: Order_Request := create Order_Request.make([], "USD", 100, "buyer@example.com", "zone-a")
+chk.check("parse_order rejects empty order", "true", "" + parse_order(empty_req).is_err())
+
+let bad_qty_req: Order_Request := create Order_Request.make(
+  [raw("SKU-1", -1, 1000, "USD")], "USD", 100, "buyer@example.com", "zone-a")
+chk.check("parse_order rejects bad quantity", "true", "" + parse_order(bad_qty_req).is_err())
+
+let bad_floor_req: Order_Request := create Order_Request.make(
+  [raw("SKU-1", 1, 1000, "USD")], "USD", -1, "buyer@example.com", "zone-a")
+chk.check("parse_order rejects negative floor", "true", "" + parse_order(bad_floor_req).is_err())
+
+-- ===========================================================================
+-- B.2 -- The constrained core: sum_of, the Order state machine, invariants.
+-- ===========================================================================
+
+let unit: Money := create Money.make(1000, "USD")
+let two_items: Array[Line_Item] := [
+  create Line_Item.make("SKU-1", 2, unit),
+  create Line_Item.make("SKU-2", 3, create Money.make(500, "USD"))
+]
+chk.check("sum_of multiple lines", "3500 USD", "" + sum_of(two_items))
+
+let sum_of_empty_caught: Boolean := false
+do
+  let s: Money := sum_of([])
+rescue
+  sum_of_empty_caught := true
+end
+chk.check("sum_of require not_empty", "true", "" + sum_of_empty_caught)
+
+let placed_ok: Placed := create Placed.make(two_items, sum_of(two_items), "a@b.com", "zone-a")
+chk.check("Placed total", "3500 USD", "" + placed_ok.total)
+
+let placed_negative_total_caught: Boolean := false
+do
+  let bad: Placed := create Placed.make(two_items, create Money.make(-1, "USD"), "a@b.com", "zone-a")
+rescue
+  placed_negative_total_caught := true
+end
+chk.check("Placed invariant: non_negative total", "true", "" + placed_negative_total_caught)
+
+let placed_empty_items_caught: Boolean := false
+do
+  let bad: Placed := create Placed.make([], create Money.zero("USD"), "a@b.com", "zone-a")
+rescue
+  placed_empty_items_caught := true
+end
+chk.check("Placed require: not_empty items", "true", "" + placed_empty_items_caught)
+
+let shipped: Shipped := ship(placed_ok, "TRACK-1")
+chk.check("ship: tracking id", "TRACK-1", shipped.tracking)
+chk.check("ship: items preserved", "true", "" + (shipped.items = placed_ok.items))
+
+-- ===========================================================================
+-- B.4 -- The open pricing edge: Base, Percent_Off, When, Floored, Over_Amount.
+-- ===========================================================================
+
+let big_draft: Draft := create Draft.make(
+  [create Line_Item.make("SKU-1", 5, create Money.make(1000, "USD"))],
+  "USD", create Money.zero("USD"), "a@b.com", "zone-a")
+let small_draft: Draft := create Draft.make(
+  [create Line_Item.make("SKU-1", 1, create Money.make(1000, "USD"))],
+  "USD", create Money.zero("USD"), "a@b.com", "zone-a")
+
+let threshold: Spec [Draft] := create Over_Amount.make(create Money.make(4000, "USD"))
+chk.check("Over_Amount holds on big order", "true", "" + threshold.holds(big_draft))
+chk.check("Over_Amount does not hold on small order", "false", "" + threshold.holds(small_draft))
+
+let discount_rule: Price_Expr := create Floored.make(
+  create When.make(threshold, create Percent_Off.make(10, create Base), create Base))
+chk.check("rule: big order gets 10% off", "4500 USD", "" + discount_rule.eval(big_draft))
+chk.check("rule: small order stays at base", "1000 USD", "" + discount_rule.eval(small_draft))
+
+let invalid_percent_caught: Boolean := false
+do
+  let bad_rule: Price_Expr := create Percent_Off.make(150, create Base)
+  bad_rule.eval(big_draft)
+rescue
+  invalid_percent_caught := true
+end
+chk.check("Percent_Off require: valid_percent", "true", "" + invalid_percent_caught)
+
+-- A steep discount that would fall below the floor: Floored clamps it back up.
+let steep_draft: Draft := create Draft.make(
+  [create Line_Item.make("SKU-1", 1, create Money.make(1000, "USD"))],
+  "USD", create Money.make(950, "USD"), "a@b.com", "zone-a")
+let steep_rule: Price_Expr := create Floored.make(create Percent_Off.make(50, create Base))
+chk.check("Floored clamps below-floor discount", "950 USD", "" + steep_rule.eval(steep_draft))
+
+-- ===========================================================================
+-- B.5 -- The membrane: admit_quote is the only door into Placed.
+-- ===========================================================================
+
+let membrane_draft: Draft := create Draft.make(
+  two_items, "USD", create Money.make(500, "USD"), "buyer@example.com", "zone-a")
+
+match admit_quote(membrane_draft, create Money.make(3000, "USD")) of
+  when Ok as ok then chk.check("admit_quote: within terms", "3000 USD", "" + ok.value.total)
+  when Err as e then chk.check("admit_quote should have admitted", "Ok", "Err: " + e.error)
+end
+
+chk.check("admit_quote: below floor rejected", "true",
+  "" + admit_quote(membrane_draft, create Money.make(100, "USD")).is_err())
+chk.check("admit_quote: negative rejected", "true",
+  "" + admit_quote(membrane_draft, create Money.make(-1, "USD")).is_err())
+
+let admit_currency_mismatch_caught: Boolean := false
+do
+  admit_quote(membrane_draft, create Money.make(3000, "EUR"))
+rescue
+  admit_currency_mismatch_caught := true
+end
+chk.check("admit_quote require: same_currency", "true", "" + admit_currency_mismatch_caught)
+
+-- ===========================================================================
+-- B.7 -- Fulfillment by unification and search.
+-- ===========================================================================
+
+let s0: Substitution := create Substitution.make()
+match unify(create Atom.make("zone-a"), create Atom.make("zone-a"), s0) of
+  when Ok then chk.check("unify: matching atoms", "true", "true")
+  when Err then chk.check("unify: matching atoms", "true", "false")
+end
+match unify(create Atom.make("zone-a"), create Atom.make("zone-b"), s0) of
+  when Ok then chk.check("unify: clashing atoms", "false", "true")
+  when Err then chk.check("unify: clashing atoms", "false", "false")
+end
+match unify(create Var.make("X"), create Atom.make("zone-a"), create Substitution.make()) of
+  when Ok as ok then
+    match ok.value.resolve(create Var.make("X")) of
+      when Atom as a then chk.check("unify: var binds", "zone-a", a.value)
+      else chk.check("unify: var binds", "zone-a", "not-atom")
+    end
+  when Err then chk.check("unify: var binds", "zone-a", "unbound")
+end
+
+let route_table: Array[Term] := []
+route_table.add(route_fact("zone-a", "wh-1", "ups", "500"))
+route_table.add(route_fact("zone-b", "wh-2", "fedex", "650"))
+
+let placed_a: Placed := create Placed.make(two_items, sum_of(two_items), "a@b.com", "zone-a")
+match route(routing_query(placed_a), route_table) of
+  when Ok as sol then chk.check("route: zone-a resolves", "wh-1", warehouse_of(sol.value))
+  when Err as e then chk.check("route: zone-a resolves", "wh-1", "Err: " + e.error)
+end
+
+let placed_c: Placed := create Placed.make(two_items, sum_of(two_items), "a@b.com", "zone-c")
+chk.check("route: unknown zone fails", "true", "" + route(routing_query(placed_c), route_table).is_err())
+
+-- ===========================================================================
+-- B.8 / B.9 / B.10 -- Orchestration and the imperative shell, end to end.
+-- ===========================================================================
+
+let rule: Price_Expr := create Floored.make(
+  create When.make(
+    create Over_Amount.make(create Money.make(4000, "USD")),
+    create Percent_Off.make(10, create Base),
+    create Base))
+
+-- Scenario 1: a big order gets the discount, routes, and every effect fires.
+do
+  let gateway: Payment_Gateway := create Payment_Gateway.make()
+  let mailer: Mailer := create Mailer.make()
+  let store: Order_Store := create Order_Store.make()
+  let warehouse: Warehouse_Api := create Warehouse_Api.make()
+  let req: Order_Request := create Order_Request.make(
+    [raw("SKU-1", 5, 1000, "USD")], "USD", 100, "buyer@example.com", "zone-a")
+  match handle_request(req, rule, route_table, 0, gateway, mailer, store, warehouse) of
+    when Ok as ok then chk.check("scenario 1: total after discount", "4500 USD", "" + ok.value.total)
+    when Err as e then chk.check("scenario 1: total after discount", "4500 USD", "Err: " + e.error)
+  end
+  chk.check("scenario 1: payment charged", "1", "" + gateway.charged.length)
+  chk.check("scenario 1: payment amount", "4500 USD", "" + gateway.charged.get(0))
+  chk.check("scenario 1: confirmation sent to", "buyer@example.com", mailer.sent.get(0))
+  chk.check("scenario 1: order recorded", "4500 USD", "" + store.saved.get(0).total)
+  chk.check("scenario 1: reserved at", "wh-1", warehouse.reservations.get(0))
+end
+
+-- Scenario 2: a small order stays at base price -- no discount.
+do
+  let gateway: Payment_Gateway := create Payment_Gateway.make()
+  let mailer: Mailer := create Mailer.make()
+  let store: Order_Store := create Order_Store.make()
+  let warehouse: Warehouse_Api := create Warehouse_Api.make()
+  let req: Order_Request := create Order_Request.make(
+    [raw("SKU-1", 1, 1000, "USD")], "USD", 100, "buyer@example.com", "zone-a")
+  match handle_request(req, rule, route_table, 0, gateway, mailer, store, warehouse) of
+    when Ok as ok then chk.check("scenario 2: no discount below threshold", "1000 USD", "" + ok.value.total)
+    when Err as e then chk.check("scenario 2: no discount below threshold", "1000 USD", "Err: " + e.error)
+  end
+end
+
+-- Scenario 3: a malformed request never reaches pricing -- boundary rejects it,
+-- and no effect is performed (no charge, no email, no reservation).
+do
+  let gateway: Payment_Gateway := create Payment_Gateway.make()
+  let mailer: Mailer := create Mailer.make()
+  let store: Order_Store := create Order_Store.make()
+  let warehouse: Warehouse_Api := create Warehouse_Api.make()
+  let req: Order_Request := create Order_Request.make(
+    [raw("SKU-1", -3, 1000, "USD")], "USD", 100, "buyer@example.com", "zone-a")
+  let outcome: Result[Placed, String] := handle_request(req, rule, route_table, 0, gateway, mailer, store, warehouse)
+  chk.check("scenario 3: rejected at the boundary", "true", "" + outcome.is_err())
+  chk.check("scenario 3: no payment charged", "0", "" + gateway.charged.length)
+  chk.check("scenario 3: no confirmation sent", "0", "" + mailer.sent.length)
+  chk.check("scenario 3: no stock reserved", "0", "" + warehouse.reservations.length)
+end
+
+-- Scenario 4: a well-formed, well-priced order for a zone with no route --
+-- the membrane admits it, but fulfillment can't place it anywhere.
+do
+  let gateway: Payment_Gateway := create Payment_Gateway.make()
+  let mailer: Mailer := create Mailer.make()
+  let store: Order_Store := create Order_Store.make()
+  let warehouse: Warehouse_Api := create Warehouse_Api.make()
+  let req: Order_Request := create Order_Request.make(
+    [raw("SKU-1", 1, 1000, "USD")], "USD", 100, "buyer@example.com", "zone-nowhere")
+  let outcome: Result[Placed, String] := handle_request(req, rule, route_table, 0, gateway, mailer, store, warehouse)
+  chk.check("scenario 4: unfulfillable order rejected", "true", "" + outcome.is_err())
+  chk.check("scenario 4: no payment charged when unfulfillable", "0", "" + gateway.charged.length)
+end
+
+-- Scenario 5: a price below the floor never gets admitted, even though
+-- parsing and routing would both have succeeded.
+do
+  let gateway: Payment_Gateway := create Payment_Gateway.make()
+  let mailer: Mailer := create Mailer.make()
+  let store: Order_Store := create Order_Store.make()
+  let warehouse: Warehouse_Api := create Warehouse_Api.make()
+  let steep_discount_rule: Price_Expr := create Percent_Off.make(90, create Base)
+  let req: Order_Request := create Order_Request.make(
+    [raw("SKU-1", 1, 1000, "USD")], "USD", 500, "buyer@example.com", "zone-a")
+  let outcome: Result[Placed, String] :=
+    handle_request(req, steep_discount_rule, route_table, 0, gateway, mailer, store, warehouse)
+  chk.check("scenario 5: below-floor quote rejected", "true", "" + outcome.is_err())
+  chk.check("scenario 5: no reservation when quote rejected", "0", "" + warehouse.reservations.length)
+end
+
+chk.summary()
