@@ -29,6 +29,9 @@ class Checker
     summary() do
       print("---")
       print("" + passed + " passed, " + failed + " failed")
+      if failed > 0 then
+        raise "" + failed + " check(s) failed"
+      end
     end
 end
 

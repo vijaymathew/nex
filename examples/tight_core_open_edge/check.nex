@@ -30,7 +30,7 @@ class Checker
       print("---")
       print("" + passed + " passed, " + failed + " failed")
       if failed > 0 then
-        exit(1)
+        raise "" + failed + " check(s) failed"
       end
     end
 end
