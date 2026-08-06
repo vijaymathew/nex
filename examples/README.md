@@ -55,6 +55,10 @@ read one is to run it alongside the source.
 - **programming_in_nex/** — worked solutions to the end-of-chapter exercises in
   *Programming with Nex*, one directory per chapter
 - **beyond_code/** — larger programs that go past single-feature demos
+- **tight_core_open_edge/** — the Appendix B capstone from *Tight Core, Open
+  Edge*: a constrained order core, an open pricing edge, a contract
+  membrane, fulfillment routing by unification and search, and a thin
+  imperative shell, with `check.nex` exercising every region
 
 ## Running
 

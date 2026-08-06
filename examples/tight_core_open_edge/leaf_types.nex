@@ -1,0 +1,71 @@
+-- Assumed leaf types (Appendix B.1): a small supporting library of value
+-- types the rest of the capstone treats as given. Money is an amount with
+-- a currency; its arithmetic is written with ordinary operators because a
+-- Nex class earns an operator by binding a routine to it with `alias` --
+-- `a - b` is then exactly `a.minus(b)`, precondition and all. That is why
+-- `same_currency` can be a *contract* on the operator rather than a check
+-- every caller must remember. Comparisons come from Comparable's `compare`;
+-- value equality from `equals`.
+--
+-- Sku, Email_Address, Tracking_Id, and Instant are opaque identifiers and
+-- timestamps in the book; here they are structural aliases over String /
+-- Integer so the capstone has something concrete to construct and compare.
+
+class Money
+  inherit Comparable
+  create
+    make(amount: Integer, currency: String) do
+      this.amount := amount
+      this.currency := currency
+    end
+    zero(currency: String) do
+      this.amount := 0
+      this.currency := currency
+    end
+  feature
+    amount: Integer
+    currency: String
+
+    plus(m: Money): Money alias "+"
+      require same_currency: currency = m.currency
+      do result := create Money.make(amount + m.amount, currency)
+      end
+
+    minus(m: Money): Money alias "-"
+      require same_currency: currency = m.currency
+      do result := create Money.make(amount - m.amount, currency)
+      end
+
+    is_negative(): Boolean do result := amount < 0 end
+    is_positive(): Boolean do result := amount > 0 end
+
+    less_percent(pct: Integer): Money
+      require valid_percent: pct >= 0 and pct <= 100
+      do result := create Money.make(amount - (amount * pct / 100), currency)
+      end
+
+    times(n: Integer): Money do
+      result := create Money.make(amount * n, currency)
+    end
+
+    compare(other: Any): Integer do
+      let m: Money := other
+      if amount < m.amount then result := -1
+      elseif amount > m.amount then result := 1
+      else result := 0 end
+    end
+
+    equals(other: Any): Boolean do
+      let m: Money := other
+      result := amount = m.amount and currency = m.currency
+    end
+
+    hash(): Integer do result := amount end
+
+    to_string(): String do result := "" + amount + " " + currency end
+end
+
+declare type Sku = String
+declare type Email_Address = String
+declare type Tracking_Id = String
+declare type Instant = Integer

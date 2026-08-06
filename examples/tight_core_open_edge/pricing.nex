@@ -1,0 +1,66 @@
+-- The open pricing edge (Appendix B.4, Chapters 7 & 10). Pricing is a small
+-- open language of expressions evaluated against a Draft, with conditions
+-- drawn from a specification algebra. Both interfaces are `deferred` and
+-- unsealed, so new terms and new conditions are added without editing
+-- anything here or in the core.
+
+intern Order_Core
+
+-- Specifications: an open algebra of conditions on a draft (Chapter 7).
+deferred class Spec [T]
+  feature holds(item: T): Boolean deferred
+end
+
+class Over_Amount inherit Spec [Draft]
+  create make(m: Money) do threshold := m end
+  feature
+    threshold: Money
+    holds(d: Draft): Boolean do result := sum_of(d.items) >= threshold end
+end
+
+-- Pricing expressions: an open language, evaluated to a Money (Chapter 10).
+deferred class Price_Expr
+  feature eval(d: Draft): Money deferred
+end
+
+class Base inherit Price_Expr
+  feature eval(d: Draft): Money do result := sum_of(d.items) end
+end
+
+class Percent_Off inherit Price_Expr
+  create make(pct: Integer, inner: Price_Expr) do percent := pct  base := inner end
+  feature
+    percent: Integer
+    base: Price_Expr
+    eval(d: Draft): Money
+      require valid_percent: percent >= 0 and percent <= 100
+      do result := base.eval(d).less_percent(percent)
+      ensure no_increase: result <= base.eval(d)
+      end
+end
+
+class When inherit Price_Expr
+  create make(s: Spec [Draft], t: Price_Expr, e: Price_Expr)
+    do condition := s  yes := t  no := e end
+  feature
+    condition: Spec [Draft]
+    yes: Price_Expr
+    no: Price_Expr
+    eval(d: Draft): Money
+      do
+        if condition.holds(d) then result := yes.eval(d)
+        else result := no.eval(d) end
+      end
+end
+
+class Floored inherit Price_Expr
+  create make(inner: Price_Expr) do base := inner end
+  feature
+    base: Price_Expr
+    eval(d: Draft): Money
+      do
+        let p: Money := base.eval(d)
+        if p < d.floor_price then result := d.floor_price else result := p end
+      ensure respects_floor: result >= d.floor_price
+      end
+end

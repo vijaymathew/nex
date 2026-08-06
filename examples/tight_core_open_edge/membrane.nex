@@ -1,0 +1,22 @@
+-- The membrane (Appendix B.5, Chapters 2, 9, 15): the one gate through which
+-- every price, from any pricing rule that will ever exist, must pass to
+-- become part of an order. Written from the core's side; it states the
+-- terms and admits only what meets them.
+
+intern Order_Core
+intern data/Result
+
+function admit_quote(draft: Draft, quote: Money): Result[Placed, String]
+  require
+    same_currency: quote.currency = draft.currency
+  do
+    if quote.is_negative() then
+      result := create Err[Placed, String].make("quote is negative")
+    elseif quote < draft.floor_price then
+      result := create Err[Placed, String].make("quote below floor")
+    else
+      -- on success, Placed's own invariant guarantees a consistent order
+      result := create Ok[Placed, String].make(
+        create Placed.make(draft.items, quote, draft.customer_email, draft.zone))
+    end
+  end

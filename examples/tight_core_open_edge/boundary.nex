@@ -1,0 +1,101 @@
+-- The boundary parser (Appendix B.1, Chapter 4): turns an untrusted request
+-- into a validated Draft, or an Err with a reason. Built from small field
+-- parsers -- parse_quantity, parse_line_item -- each validating exactly one
+-- thing, composed by parse_order.
+--
+-- NOTE: `Quantity`'s `where n: n > 0` predicate is only auto-checked by the
+-- runtime when the `declare type` lives in the *same file* doing the
+-- narrowing -- it is not (yet) re-checked when the type alias is reached
+-- through `intern` (a backend gap, not a language rule). parse_quantity
+-- therefore validates explicitly rather than leaning on that check.
+
+intern Order_Core
+intern data/Result
+
+class Raw_Line_Item
+  create make(s: String, q: Integer, unit_amt: Integer, ccy: String)
+    do sku := s  quantity := q  unit_amount := unit_amt  currency := ccy end
+  feature
+    sku: String
+    quantity: Integer
+    unit_amount: Integer
+    currency: String
+end
+
+class Order_Request
+  create make(xs: Array[Raw_Line_Item], ccy: String, floor_amt: Integer,
+              email: String, dest: String)
+    do items := xs  currency := ccy  floor_amount := floor_amt
+       customer_email := email  zone := dest end
+  feature
+    items: Array[Raw_Line_Item]
+    currency: String
+    floor_amount: Integer
+    customer_email: String
+    zone: String
+end
+
+function parse_quantity(n: Integer): Result[Quantity, String]
+  do
+    if n > 0 then
+      let q: Quantity := n
+      result := create Ok[Quantity, String].make(q)
+    else
+      result := create Err[Quantity, String].make("quantity must be positive, got " + n)
+    end
+  end
+
+function parse_line_item(raw: Raw_Line_Item): Result[Line_Item, String]
+  do
+    match parse_quantity(raw.quantity) of
+      when Err as e then
+        result := create Err[Line_Item, String].make("bad quantity for " + raw.sku + ": " + e.error)
+      when Ok as ok then
+        let unit: Money := create Money.make(raw.unit_amount, raw.currency)
+        result := create Ok[Line_Item, String].make(create Line_Item.make(raw.sku, ok.value, unit))
+    end
+  end
+
+function parse_line_items(raws: Array[Raw_Line_Item]): Result[Array[Line_Item], String]
+  do
+    let items: Array[Line_Item] := []
+    let failure: ?String := nil
+    let i: Integer := 0
+    from
+      i := 0
+    invariant
+      in_range: 0 <= i and i <= raws.length
+    until
+      i >= raws.length or failure /= nil
+    do
+      match parse_line_item(raws.get(i)) of
+        when Ok as ok then items.add(ok.value)
+        when Err as e then failure := e.error
+      end
+      i := i + 1
+    end
+    if failure /= nil then
+      result := create Err[Array[Line_Item], String].make(failure)
+    else
+      result := create Ok[Array[Line_Item], String].make(items)
+    end
+  end
+
+function parse_order(request: Order_Request): Result[Draft, String]
+  do
+    if request.items.length = 0 then
+      result := create Err[Draft, String].make("order has no line items")
+    elseif request.floor_amount < 0 then
+      result := create Err[Draft, String].make("floor price cannot be negative")
+    else
+      match parse_line_items(request.items) of
+        when Err as e then
+          result := create Err[Draft, String].make(e.error)
+        when Ok as ok then
+          let floor: Money := create Money.make(request.floor_amount, request.currency)
+          result := create Ok[Draft, String].make(
+            create Draft.make(ok.value, request.currency, floor,
+                               request.customer_email, request.zone))
+      end
+    end
+  end
