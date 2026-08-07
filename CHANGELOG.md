@@ -2,6 +2,106 @@
 
 ## Unreleased
 
+## 0.3.3 - 2026-08-07
+
+- **New: a Nex class can `inherit` a Java interface or a concrete Java
+  class, not just another Nex class.** Inheriting an imported interface
+  (`Runnable`, `Comparator`, `ActionListener`, ...) makes the class a real
+  instance of it — a Java API that calls back through the interface (a
+  `Thread`, `Collections.sort`, a Swing listener) reaches the Nex method
+  directly. Inheriting a concrete Java class (`Thread`, `Exception`, ...)
+  is compiled-backend only: the first statement of each constructor must be
+  `super.new(args)` (or may be omitted if the Java class has a public
+  no-arg constructor), matching one of the Java class's public constructors
+  by arity, and every abstract method the Java type declares must be
+  provided, checked by name and arity — the same precision Phase 1 already
+  used for interfaces. Extending two Java classes at once, or a Java class
+  together with a Nex one, is rejected at typecheck time (the JVM allows
+  only one concrete superclass). Static members of an imported Java class
+  (`Math.PI`, `Collections.sort(...)`) also now resolve correctly on the
+  compiled backend, including when reached off a class that is only an
+  interop placeholder.
+
+  Along the way: a field typed with an imported Java type failed to compile
+  on the JVM backend, and the interpreter's `java.lang.reflect.Proxy`
+  bridge for interface dispatch lost mutable state across calls — both
+  fixed.
+
+- **New: `nex`'s `--classpath` and `--skip-contracts` flags.**
+  `--classpath a.jar:b.jar` (colon-separated, matching `java -cp`) puts
+  extra jars/dirs on the classpath for `nex app.nex` and
+  `nex compile jvm app.nex` alike — compiling also shades them into the
+  output jar. `--skip-contracts` lowers `require`/`ensure`/`invariant`
+  checks (class and loop invariants) to no-ops for a trusted,
+  perf-critical release build; bare `assert` always runs regardless, since
+  there is no mode that strips it.
+
+- **New: the `exit(status)` builtin.** Terminates the process immediately
+  with the given exit status, equivalent to Java's `System.exit(status)`.
+  Does not return. Available on both backends.
+
+- **Fixed: a value stored into a compiled-native `Array`/`Map`/`Set` while
+  statically typed `Any` could keep its interpreter-only representation
+  instead of being converted to the compiled backend's own collection
+  type.** An element read out of an `Array[Any]`, or a `Map` produced by
+  `data/Json`'s `parse`, could be written into a literal, or passed to
+  `add`/`add_at`/`set`/`put`, without running through the conversion every
+  other storage path already applied — so a later method call on it
+  (`.get()`, etc.) crashed on the compiled backend even though the same
+  value worked fine as a plain local. Conversion now runs unconditionally
+  at every point a boxed value is written into a compiled collection.
+
+- **Fixed: `Server_Socket.accept()` was unusable on the compiled backend
+  for any accepted connection**, traced to a missing runtime binding in
+  `Tcp_Socket.from_socket`. It now works end-to-end.
+
+- **Fixed: a `spawn` block or anonymous-function body inside an instance
+  method couldn't call `this.method(...)`, a bare inherited method or
+  field, or mutate object state through a captured `this` or other
+  captured object, on the compiled backend.** All of these now work,
+  removing the need to hoist such code out to free functions with
+  manually captured locals.
+
+- **Fixed: `Process.command_line()` didn't return the program's real
+  command-line arguments on either backend.** A program's own `argv` —
+  everything after the file name on the `nex` command line, distinct from
+  `nex`'s own flags like `--interpret` — is now threaded through to both
+  the interpreter and the compiled backend (including a jar run directly
+  with `java -jar`), on both the in-process eval path and a standalone
+  jar's own `main`.
+
+- **Fixed: a `spawn` block's synthesized wrapper closure could collide,
+  by class name, with an unrelated source-level `fn(...) do ... end`
+  closure.** Both were generated as `AnonymousFunction_N` from two
+  independent counters; whenever the counters reached the same `N`, the
+  compiler's name-keyed table of anonymous class defs silently kept only
+  one of the two, and calling the other crashed at runtime with an opaque
+  "Method not found" error. `spawn`-generated wrappers now use a distinct
+  `AnonymousSpawn_N` prefix.
+
+- **Fixed: `super.method(...)`, `super.field`, and a `super` constructor
+  call could type-check against the wrong target.** The generic call-
+  resolution path walked the whole ancestor chain looking for any
+  matching-arity member — constructors included — so an invalid `super`
+  call (wrong arity, or naming a constructor only some ancestor happens to
+  have) could pass type-checking and then crash lowering with an opaque
+  internal error instead of a real type error. `super` now resolves
+  through a dedicated path that mirrors lowering's actual semantics: the
+  immediate parent's own feature methods and constructor only, never an
+  ancestor further up, and never a fallback to the `Any` protocol.
+
+- **Fixed: a `when ... then ... else ... end` expression's type inference
+  couldn't see a bare field reference (`total_seconds` meaning
+  `this.total_seconds`) in its condition or either branch.** It fell
+  through to a generic fallback with no current-class context, so
+  inference silently failed wherever a `when` expression relied on it.
+  `when` now has its own inference path, mirroring how `if` already
+  resolves its own branch environments.
+
+- **Fixed: `==` and `!=` weren't recognized as relational operators by the
+  compiled REPL's fast-path evaluator**, alongside the `=`/`/=` spellings
+  it already handled.
+
 ## 0.3.2 - 2026-07-31
 
 - **New: the `assert` statement.** `require`, `ensure`, and `invariant` state
