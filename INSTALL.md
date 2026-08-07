@@ -110,7 +110,7 @@ If Java is not installed:
 ```bash
 $ ./install.sh jvm
 
-Nex Language Installer v0.3.2
+Nex Language Installer v0.3.3
 
 Installation target: jvm
 Install prefix: /usr/local
@@ -137,7 +137,7 @@ Nex Language Installed Successfully!
 ```bash
 $ ./install.sh jvm --install-deps
 
-Nex Language Installer v0.3.2
+Nex Language Installer v0.3.3
 
 Installation target: jvm
 Install prefix: /usr/local
