@@ -9,9 +9,11 @@
 
   The emitter handles control flow, runtime helper calls, object-model support,
   and debug metadata such as source files, line tables, and local variables."
-  (:require [clojure.string :as str]
+  (:require [clojure.set :as set]
+            [clojure.string :as str]
             [nex.compiler.jvm.descriptor :as desc]
-            [nex.ir :as ir])
+            [nex.ir :as ir]
+            [nex.types.builtins :as bi])
   (:import [org.objectweb.asm ClassWriter Label MethodVisitor Opcodes Type]))
 
 (def ^:private class-version Opcodes/V17)
@@ -1380,17 +1382,6 @@
   (.visitInsn mv Opcodes/POP)
   jvm-type)
 
-(defn- emit-array-method-last!
-  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
-  (emit-expr! mv target state-slot)
-  (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-  (.visitInsn mv Opcodes/DUP)
-  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "size" "()I" false)
-  (.visitInsn mv Opcodes/ICONST_1)
-  (.visitInsn mv Opcodes/ISUB)
-  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "get" "(I)Ljava/lang/Object;" false)
-  (emit-unbox-or-cast! mv jvm-type)
-  jvm-type)
 
 (defn- emit-array-method-sort!
   [^MethodVisitor mv {:keys [target jvm-type] :as expr} state-slot]
@@ -1434,21 +1425,36 @@
   (emit-unbox-or-cast! mv jvm-type)
   jvm-type)
 
+(defn- assert-direct-methods-in-sync!
+  "Fails fast at namespace load if `dispatch-methods` — the method names a
+   \"direct\" JVM bytecode-emission dispatch table implements — drifts from
+   the canonical method set for `builtin-type` in nex.types.builtins, the
+   authoritative source of what the type actually supports. Array/Map/Set/
+   Task/Channel have no generic runtime-dispatch fallback (unlike scalar and
+   cursor types), so any drift here is a guaranteed crash the first time a
+   user calls the missing method on the compiled backend, not just a stray
+   inconsistency — this is exactly the shape of bug that motivated the
+   check (push/at/size/first/last used to exist here without a matching
+   nex.types.builtins entry, and were unreachable dead aliases as a result)."
+  [table-name builtin-type dispatch-methods]
+  (let [canonical (set (keys (get bi/builtin-type-methods builtin-type)))
+        emitted (set dispatch-methods)]
+    (assert (= canonical emitted)
+            (str table-name " is out of sync with nex.types.builtins " builtin-type
+                 (when-let [extra (seq (set/difference emitted canonical))]
+                   (str " — entries with no canonical method: " (sort extra)))
+                 (when-let [missing (seq (set/difference canonical emitted))]
+                   (str " — canonical methods with no direct emitter: " (sort missing)))))))
+
 (def ^:private emit-array-method-dispatch
   "Array method name -> `(fn [mv expr state-slot] -> jvm-type)`: the primary
-   dispatch table for `emit-array-method!`. \"push\"/\"at\"/\"set\"/\"size\"/
-   \"first\" are pure aliases (bytecode-identical to another entry once the
-   method name — and, for \"first\", the args — is rewritten), so they're
-   inline lambdas rather than named functions of their own."
+   dispatch table for `emit-array-method!`."
   {"get"       emit-array-method-get!
    "add"       emit-array-method-add!
-   "push"      (fn [mv expr state-slot] (emit-collection-method! mv (assoc expr :method "add") state-slot))
    "add_at"    emit-array-method-add-at!
-   "at"        (fn [mv expr state-slot] (emit-collection-method! mv (assoc expr :method "add_at") state-slot))
    "put"       emit-array-method-put!
    "set"       (fn [mv expr state-slot] (emit-collection-method! mv (assoc expr :method "put") state-slot))
    "length"    emit-array-method-length!
-   "size"      (fn [mv expr state-slot] (emit-collection-method! mv (assoc expr :method "length") state-slot))
    "is_empty"  emit-array-method-is-empty!
    "contains"  emit-array-method-contains!
    "index_of"  emit-array-method-index-of!
@@ -1460,14 +1466,14 @@
    "take_last" emit-array-method-take-last!
    "drop_last" emit-array-method-drop-last!
    "concat"    emit-array-method-concat!
-   "first"     (fn [mv expr state-slot]
-                 (emit-collection-method! mv (assoc expr :method "get" :args [(ir/const-node 0 "Integer" :int)]) state-slot))
-   "last"      emit-array-method-last!
    "sort"      emit-array-method-sort!
    "to_string" emit-array-method-to-string!
    "equals"    emit-array-method-equals!
    "clone"     emit-array-method-clone!
    "cursor"    emit-array-method-cursor!})
+
+(assert-direct-methods-in-sync!
+ "emit-array-method-dispatch" :Array (keys emit-array-method-dispatch))
 
 (defn- emit-array-method!
   [^MethodVisitor mv expr state-slot]
@@ -1592,13 +1598,12 @@
   jvm-type)
 
 (def ^:private emit-map-method-dispatch
-  "Map method name -> `(fn [mv expr state-slot] -> jvm-type)`. \"at\"/\"set\"
-   are pure aliases for \"put\", so they're inline lambdas rather than named
-   functions of their own — same convention as `emit-array-method-dispatch`."
+  "Map method name -> `(fn [mv expr state-slot] -> jvm-type)`. \"set\" is a
+   pure alias for \"put\", so it's an inline lambda rather than a named
+   function of its own — same convention as `emit-array-method-dispatch`."
   {"get"          emit-map-method-get!
    "try_get"      emit-map-method-try-get!
    "put"          emit-map-method-put!
-   "at"           (fn [mv expr state-slot] (emit-collection-method! mv (assoc expr :method "put") state-slot))
    "set"          (fn [mv expr state-slot] (emit-collection-method! mv (assoc expr :method "put") state-slot))
    "size"         emit-map-method-size!
    "is_empty"     emit-map-method-is-empty!
@@ -1610,6 +1615,9 @@
    "equals"       emit-map-method-equals!
    "clone"        emit-map-method-clone!
    "cursor"       emit-map-method-cursor!})
+
+(assert-direct-methods-in-sync!
+ "emit-map-method-dispatch" :Map (keys emit-map-method-dispatch))
 
 (defn- emit-map-method!
   [^MethodVisitor mv expr state-slot]
@@ -1709,6 +1717,9 @@
    "clone"                emit-set-method-clone!
    "cursor"               emit-set-method-cursor!})
 
+(assert-direct-methods-in-sync!
+ "emit-set-method-dispatch" :Set (keys emit-set-method-dispatch))
+
 (defn- emit-set-method!
   [^MethodVisitor mv expr state-slot]
   (if-let [handler (get emit-set-method-dispatch (:method expr))]
@@ -1790,6 +1801,13 @@
    [:channel "is_closed"]   (emit-concurrency-target-only-op! "channel-is-closed-method")
    [:channel "capacity"]    (emit-concurrency-target-only-op! "channel-capacity-method")
    [:channel "size"]        (emit-concurrency-target-only-op! "channel-size-method")})
+
+(assert-direct-methods-in-sync!
+ "emit-concurrency-method-dispatch [:task ...]" :Task
+ (->> emit-concurrency-method-dispatch keys (filter #(= :task (first %))) (map second)))
+(assert-direct-methods-in-sync!
+ "emit-concurrency-method-dispatch [:channel ...]" :Channel
+ (->> emit-concurrency-method-dispatch keys (filter #(= :channel (first %))) (map second)))
 
 (defn- emit-concurrency-method!
   [^MethodVisitor mv expr state-slot]

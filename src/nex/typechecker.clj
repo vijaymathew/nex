@@ -1,7 +1,8 @@
 (ns nex.typechecker
   "Static type checker for Nex language"
   (:require [clojure.string :as str]
-            [clojure.set :as set]))
+            [clojure.set :as set]
+            [nex.types.builtins :as bi]))
 
 ;;
 ;; Type Environment
@@ -4794,6 +4795,19 @@
 ;; Program Type Checking
 ;;
 
+;; A builtin method's static signature (params + return type) lives as
+;; `:signatures` metadata on its implementation in nex.types.builtins'
+;; `builtin-type-methods` — the same place the runtime behaviour and (for
+;; Array/Map/Set/Task/Channel) the JVM bytecode-emission gate live, so the
+;; three no longer drift the way push/at/size/first/last once did. A method
+;; can have more than one signature (Array.sort, Task.await, Channel.send
+;; are each overloaded on arity), hence a vector.
+(defn- register-builtin-type-signatures!
+  [env type-name]
+  (doseq [[method-name fn-val] (get bi/builtin-type-methods (keyword type-name))
+          sig (:signatures (meta fn-val))]
+    (env-add-method env type-name method-name sig)))
+
 (defn- register-any-protocol!
   [env]
   (env-add-class env "Any" {:name "Any"
@@ -4801,12 +4815,7 @@
                             :generic-params nil
                             :parents nil
                             :body []})
-  (doseq [[method-name sig]
-          {"to_string" {:params [] :return-type "String"}
-           "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "hash" {:params [] :return-type "Integer"}
-           "clone" {:params [] :return-type "Any"}}]
-    (env-add-method env "Any" method-name sig)))
+  (register-builtin-type-signatures! env "Any"))
 
 (defn- register-comparable-protocol!
   [env]
@@ -4848,182 +4857,37 @@
 
 (defn- register-integer-methods!
   [env]
-  (doseq [[method-name sig]
-          {"to_string" {:params [] :return-type "String"}
-           "to_integer" {:params [] :return-type "Integer"}
-           "to_integer64" {:params [] :return-type "Integer"}
-           "to_real" {:params [] :return-type "Real"}
-           "abs" {:params [] :return-type "Integer"}
-           "min" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
-           "max" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
-           "pick" {:params [] :return-type "Integer"}
-           "plus" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
-           "minus" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
-           "times" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
-           "divided_by" {:params [{:name "other" :type "Integer"}] :return-type "Real"}
-           "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "not_equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "less_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "less_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "greater_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "greater_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}}]
-    (env-add-method env "Integer" method-name sig))
-  (env-add-method env "Integer" "to_char" {:params [] :return-type "Char"})
-  (doseq [[method-name sig]
-          {"bitwise_left_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_right_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_logical_right_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_rotate_left" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_rotate_right" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_is_set" {:params [{:name "n" :type "Integer"}] :return-type "Boolean"}
-           "bitwise_set" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_unset" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_and" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
-           "bitwise_or" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
-           "bitwise_xor" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
-           "bitwise_not" {:params [] :return-type "Integer"}}]
-    (env-add-method env "Integer" method-name sig)))
+  (register-builtin-type-signatures! env "Integer"))
 
 (defn- register-real-methods!
   [env]
-  (doseq [[method-name sig]
-          {"to_string" {:params [] :return-type "String"}
-           "to_integer" {:params [] :return-type "Integer"}
-           "to_integer64" {:params [] :return-type "Integer"}
-           "to_real" {:params [] :return-type "Real"}
-           "abs" {:params [] :return-type "Real"}
-           "min" {:params [{:name "other" :type "Real"}] :return-type "Real"}
-           "max" {:params [{:name "other" :type "Real"}] :return-type "Real"}
-           "round"    {:params [] :return-type "Integer"}
-           "to_fixed" {:params [{:name "places" :type "Integer"}] :return-type "Real"}
-           "is_nan" {:params [] :return-type "Boolean"}
-           "is_infinite" {:params [] :return-type "Boolean"}
-           "is_finite" {:params [] :return-type "Boolean"}
-           "plus" {:params [{:name "other" :type "Real"}] :return-type "Real"}
-           "minus" {:params [{:name "other" :type "Real"}] :return-type "Real"}
-           "times" {:params [{:name "other" :type "Real"}] :return-type "Real"}
-           "divided_by" {:params [{:name "other" :type "Real"}] :return-type "Real"}
-           "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "not_equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "less_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "less_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "greater_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "greater_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}}]
-    (env-add-method env "Real" method-name sig)))
+  (register-builtin-type-signatures! env "Real"))
 
 (defn- register-char-methods!
   [env]
-  (doseq [[method-name sig]
-          {"to_string"   {:params [] :return-type "String"}
-           "to_upper"    {:params [] :return-type "String"}
-           "to_lower"    {:params [] :return-type "String"}
-           "to_integer"  {:params [] :return-type "Integer"}}]
-    (env-add-method env "Char" method-name sig)))
+  (register-builtin-type-signatures! env "Char"))
 
 (defn- register-string-methods!
   [env]
-  (doseq [[method-name sig]
-          {"length"      {:params [] :return-type "Integer"}
-           "index_of"    {:params [{:name "substr" :type "String"}] :return-type "Integer"}
-           "substring"   {:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}] :return-type "String"}
-           "to_upper"    {:params [] :return-type "String"}
-           "to_lower"    {:params [] :return-type "String"}
-           "to_integer"  {:params [] :return-type "Integer"}
-           "to_integer64" {:params [] :return-type "Integer"}
-           "to_real"     {:params [] :return-type "Real"}
-           "contains"    {:params [{:name "substr" :type "String"}] :return-type "Boolean"}
-           "starts_with" {:params [{:name "prefix" :type "String"}] :return-type "Boolean"}
-           "ends_with"   {:params [{:name "suffix" :type "String"}] :return-type "Boolean"}
-           "trim"        {:params [] :return-type "String"}
-           "replace"     {:params [{:name "old" :type "String"} {:name "new" :type "String"}] :return-type "String"}
-           "pad_end"     {:params [{:name "pad" :type "String"} {:name "count" :type "Integer"}] :return-type "String"}
-           "pad_start"   {:params [{:name "pad" :type "String"} {:name "count" :type "Integer"}] :return-type "String"}
-           "replicate"   {:params [{:name "n" :type "Integer"}] :return-type "String"}
-           "char_at"     {:params [{:name "index" :type "Integer"}] :return-type "Char"}
-           "chars"       {:params [] :return-type {:base-type "Array" :type-params ["Char"]}}
-           "to_bytes"    {:params [] :return-type {:base-type "Array" :type-params ["Integer"]}}
-           "compare"     {:params [{:name "a" :type "Any"}] :return-type "Integer"}
-           "hash"        {:params [] :return-type "Integer"}
-           "split"       {:params [{:name "delimiter" :type "String"}]
-                          :return-type {:base-type "Array" :type-params ["String"]}}
-           "join"        {:params [{:name "parts" :type {:base-type "Array" :type-params ["String"]}}]
-                          :return-type "String"}
-           ;; A String iterates over its Chars, exactly as Array/Map/Set iterate
-           ;; over their elements. It reached this through the universal "Any"
-           ;; fallback until that stopped promising the cursor protocol on every
-           ;; value; the capability is real, so it is declared where the other
-           ;; cursor-bearing builtins declare theirs.
-           "cursor"      {:params [] :return-type "Cursor"}}]
-    (env-add-method env "String" method-name sig)))
+  (register-builtin-type-signatures! env "String"))
 
 (defn- register-console-methods!
   [env]
-  (doseq [[method-name sig]
-          {"print" {:params [{:name "msg" :type "String"}] :return-type "Void"}
-           "print_line" {:params [{:name "msg" :type "String"}] :return-type "Void"}
-           "error" {:params [{:name "msg" :type "String"}] :return-type "Void"}
-           "new_line" {:params [] :return-type "Void"}
-           "flush" {:params [] :return-type "Void"}
-           "read_integer" {:params [] :return-type "Integer"}
-           "read_real" {:params [] :return-type "Real"}}]
-    (env-add-class env "Console" {:name "Console"
-                                  :generic-params nil})
-    (env-add-method env "Console" method-name sig))
-  (env-add-method env "Console" "read_line"
-                  {:params [] :return-type "String"})
-  (env-add-method env "Console" "read_line"
-                  {:params [{:name "prompt" :type "String"}] :return-type "String"}))
+  (env-add-class env "Console" {:name "Console"
+                                :generic-params nil})
+  (register-builtin-type-signatures! env "Console"))
 
 (defn- register-task-methods!
   [env]
   (env-add-class env "Task" {:name "Task"
                              :generic-params [{:name "T"}]})
-  (doseq [[method-name sig]
-          {"await"   {:params [] :return-type "T"}
-           "cancel"  {:params [] :return-type "Boolean"}
-           "is_done" {:params [] :return-type "Boolean"}
-           "is_cancelled" {:params [] :return-type "Boolean"}}]
-    (env-add-method env "Task" method-name sig)))
+  (register-builtin-type-signatures! env "Task"))
 
 (defn- register-process-methods!
   [env]
   (env-add-class env "Process" {:name "Process"
                                 :generic-params nil})
-  (doseq [[method-name sig]
-          {"getenv" {:params [{:name "name" :type "String"}] :return-type "String"}
-           "setenv" {:params [{:name "name" :type "String"} {:name "value" :type "String"}] :return-type "Void"}
-           "command_line" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}
-
-           "is_self" {:params [] :return-type "Boolean"}
-           "is_child" {:params [] :return-type "Boolean"}
-
-           "set_working_directory" {:params [{:name "dir" :type "String"}] :return-type "Void"}
-           "set_redirect_error_to_output" {:params [{:name "flag" :type "Boolean"}] :return-type "Void"}
-
-           "start" {:params [] :return-type "Void"}
-           "is_started" {:params [] :return-type "Boolean"}
-           "is_alive" {:params [] :return-type "Boolean"}
-           "pid" {:params [] :return-type "Integer"}
-
-           "exit_code" {:params [] :return-type {:base-type "Integer" :detachable true}}
-
-           "terminate" {:params [] :return-type "Void"}
-           "kill" {:params [] :return-type "Void"}
-
-           "write" {:params [{:name "text" :type "String"}] :return-type "Void"}
-           "write_line" {:params [{:name "text" :type "String"}] :return-type "Void"}
-           "close_stdin" {:params [] :return-type "Void"}
-           "read_line" {:params [] :return-type {:base-type "String" :detachable true}}
-           "read_all" {:params [] :return-type "String"}
-           "read_error_line" {:params [] :return-type {:base-type "String" :detachable true}}
-           "read_error_all" {:params [] :return-type "String"}
-
-           "to_string" {:params [] :return-type "String"}}]
-    (env-add-method env "Process" method-name sig))
-  (env-add-method env "Process" "wait" {:params [] :return-type "Integer"})
-  (env-add-method env "Process" "wait"
-                  {:params [{:name "timeout_ms" :type "Integer"}]
-                   :return-type {:base-type "Integer" :detachable true}}))
+  (register-builtin-type-signatures! env "Process"))
 
 (defn- register-array-methods!
   [env]
@@ -5033,64 +4897,13 @@
                   {:params [{:name "size" :type "Integer"}
                             {:name "value" :type "T"}]
                    :return-type {:base-type "Array" :type-params ["T"]}})
-  (doseq [[method-name sig]
-          {"get"         {:params [{:name "index" :type "Integer"}] :return-type "T"}
-           "add"         {:params [{:name "value" :type "T"}] :return-type "Void"}
-           "push"        {:params [{:name "value" :type "T"}] :return-type "Void"}
-           "add_at"      {:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}
-           "at"          {:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}
-           "set"         {:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}
-           "length"      {:params [] :return-type "Integer"}
-           "size"        {:params [] :return-type "Integer"}
-           "is_empty"    {:params [] :return-type "Boolean"}
-           "contains"    {:params [{:name "elem" :type "T"}] :return-type "Boolean"}
-           "index_of"    {:params [{:name "elem" :type "T"}] :return-type "Integer"}
-           "remove"      {:params [{:name "index" :type "Integer"}] :return-type "Void"}
-           "reverse"     {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
-           "sort"        {0 {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
-                          1 {:params [{:name "compareFn" :type "Function"}]
-                             :return-type {:base-type "Array" :type-params ["T"]}}}
-           "slice"       {:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}]
-                          :return-type {:base-type "Array" :type-params ["T"]}}
-           "take"        {:params [{:name "n" :type "Integer"}]
-                          :return-type {:base-type "Array" :type-params ["T"]}}
-           "drop"        {:params [{:name "n" :type "Integer"}]
-                          :return-type {:base-type "Array" :type-params ["T"]}}
-           "take_last"   {:params [{:name "n" :type "Integer"}]
-                          :return-type {:base-type "Array" :type-params ["T"]}}
-           "drop_last"   {:params [{:name "n" :type "Integer"}]
-                          :return-type {:base-type "Array" :type-params ["T"]}}
-           "concat"      {:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}]
-                          :return-type {:base-type "Array" :type-params ["T"]}}
-           "first"       {:params [] :return-type "T"}
-           "last"        {:params [] :return-type "T"}
-           "to_string"   {:params [] :return-type "String"}
-           "equals"      {:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}] :return-type "Boolean"}
-           "clone"       {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
-           "cursor"      {:params [] :return-type "Cursor"}}]
-    (env-add-method env "Array" method-name sig)))
+  (register-builtin-type-signatures! env "Array"))
 
 (defn- register-map-methods!
   [env]
   (env-add-class env "Map" {:name "Map"
                              :generic-params [{:name "K"} {:name "V"}]})
-  (doseq [[method-name sig]
-          {"get"          {:params [{:name "key" :type "K"}] :return-type "V"}
-           "try_get"      {:params [{:name "key" :type "K"} {:name "default" :type "V"}] :return-type "V"}
-           "put"          {:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}
-           "at"           {:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}
-           "set"          {:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}
-           "size"         {:params [] :return-type "Integer"}
-           "is_empty"     {:params [] :return-type "Boolean"}
-           "contains_key" {:params [{:name "key" :type "K"}] :return-type "Boolean"}
-           "keys"         {:params [] :return-type {:base-type "Array" :type-params ["K"]}}
-           "values"       {:params [] :return-type {:base-type "Array" :type-params ["V"]}}
-           "remove"       {:params [{:name "key" :type "K"}] :return-type "Void"}
-           "to_string"    {:params [] :return-type "String"}
-           "equals"       {:params [{:name "other" :type {:base-type "Map" :type-params ["K" "V"]}}] :return-type "Boolean"}
-           "clone"        {:params [] :return-type {:base-type "Map" :type-params ["K" "V"]}}
-           "cursor"       {:params [] :return-type "Cursor"}}]
-    (env-add-method env "Map" method-name sig)))
+  (register-builtin-type-signatures! env "Map"))
 
 (defn- register-set-methods!
   [env]
@@ -5100,24 +4913,7 @@
                   {:params [{:name "values"
                              :type {:base-type "Array" :type-params ["T"]}}]
                    :return-type {:base-type "Set" :type-params ["T"]}})
-  (doseq [[method-name sig]
-          {"contains"             {:params [{:name "value" :type "T"}] :return-type "Boolean"}
-           "union"                {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
-                                   :return-type {:base-type "Set" :type-params ["T"]}}
-           "difference"           {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
-                                   :return-type {:base-type "Set" :type-params ["T"]}}
-           "intersection"         {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
-                                   :return-type {:base-type "Set" :type-params ["T"]}}
-           "symmetric_difference" {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
-                                   :return-type {:base-type "Set" :type-params ["T"]}}
-           "size"                 {:params [] :return-type "Integer"}
-           "is_empty"             {:params [] :return-type "Boolean"}
-           "to_array"             {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
-           "to_string"            {:params [] :return-type "String"}
-           "equals"               {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}] :return-type "Boolean"}
-           "clone"                {:params [] :return-type {:base-type "Set" :type-params ["T"]}}
-           "cursor"               {:params [] :return-type "Cursor"}}]
-    (env-add-method env "Set" method-name sig)))
+  (register-builtin-type-signatures! env "Set"))
 
 (defn- register-min-heap-methods!
   [env]
@@ -5129,15 +4925,7 @@
   (env-add-method env "Min_Heap" "from_comparator"
                   {:params [{:name "compare" :type "Function"}]
                    :return-type {:base-type "Min_Heap" :type-params ["T"]}})
-  (doseq [[method-name sig]
-          {"insert"          {:params [{:name "value" :type "T"}] :return-type "Void"}
-           "extract_min"     {:params [] :return-type "T"}
-           "try_extract_min" {:params [] :return-type {:base-type "T" :detachable true}}
-           "peek"            {:params [] :return-type "T"}
-           "try_peek"        {:params [] :return-type {:base-type "T" :detachable true}}
-           "size"            {:params [] :return-type "Integer"}
-           "is_empty"        {:params [] :return-type "Boolean"}}]
-    (env-add-method env "Min_Heap" method-name sig)))
+  (register-builtin-type-signatures! env "Min_Heap"))
 
 ;; Atomic_Integer and Atomic_Integer64 are both 64-bit atomics on the JVM
 ;; (see nex.types.builtins) and share this exact method set — differing
@@ -5148,17 +4936,7 @@
   (env-add-method env class-name "make"
                   {:params [{:name "initial" :type "Integer"}]
                    :return-type class-name})
-  (doseq [[method-name sig]
-          {"load" {:params [] :return-type "Integer"}
-           "store" {:params [{:name "value" :type "Integer"}] :return-type "Void"}
-           "compare_and_set" {:params [{:name "expected" :type "Integer"}
-                                       {:name "update" :type "Integer"}]
-                              :return-type "Boolean"}
-           "get_and_add" {:params [{:name "delta" :type "Integer"}] :return-type "Integer"}
-           "add_and_get" {:params [{:name "delta" :type "Integer"}] :return-type "Integer"}
-           "increment" {:params [] :return-type "Integer"}
-           "decrement" {:params [] :return-type "Integer"}}]
-    (env-add-method env class-name method-name sig)))
+  (register-builtin-type-signatures! env class-name))
 
 (defn- register-atomic-boolean-methods!
   [env]
@@ -5166,13 +4944,7 @@
   (env-add-method env "Atomic_Boolean" "make"
                   {:params [{:name "initial" :type "Boolean"}]
                    :return-type "Atomic_Boolean"})
-  (doseq [[method-name sig]
-          {"load" {:params [] :return-type "Boolean"}
-           "store" {:params [{:name "value" :type "Boolean"}] :return-type "Void"}
-           "compare_and_set" {:params [{:name "expected" :type "Boolean"}
-                                       {:name "update" :type "Boolean"}]
-                              :return-type "Boolean"}}]
-    (env-add-method env "Atomic_Boolean" method-name sig)))
+  (register-builtin-type-signatures! env "Atomic_Boolean"))
 
 (defn- register-atomic-reference-methods!
   [env]
@@ -5181,28 +4953,13 @@
   (env-add-method env "Atomic_Reference" "make"
                   {:params [{:name "initial" :type {:base-type "T" :detachable true}}]
                    :return-type {:base-type "Atomic_Reference" :type-params ["T"]}})
-  (doseq [[method-name sig]
-          {"load" {:params [] :return-type {:base-type "T" :detachable true}}
-           "store" {:params [{:name "value" :type {:base-type "T" :detachable true}}] :return-type "Void"}
-           "compare_and_set" {:params [{:name "expected" :type {:base-type "T" :detachable true}}
-                                       {:name "update" :type {:base-type "T" :detachable true}}]
-                              :return-type "Boolean"}}]
-    (env-add-method env "Atomic_Reference" method-name sig)))
+  (register-builtin-type-signatures! env "Atomic_Reference"))
 
 (defn- register-channel-methods!
   [env]
   (env-add-class env "Channel" {:name "Channel"
                                 :generic-params [{:name "T"}]})
-  (doseq [[method-name sig]
-          {"send"        {:params [{:name "value" :type "T"}] :return-type "Void"}
-           "try_send"    {:params [{:name "value" :type "T"}] :return-type "Boolean"}
-           "receive"     {:params [] :return-type "T"}
-           "try_receive" {:params [] :return-type {:base-type "T" :detachable true}}
-           "close"       {:params [] :return-type "Void"}
-           "is_closed"   {:params [] :return-type "Boolean"}
-           "capacity"    {:params [] :return-type "Integer"}
-           "size"        {:params [] :return-type "Integer"}}]
-    (env-add-method env "Channel" method-name sig)))
+  (register-builtin-type-signatures! env "Channel"))
 
 ;; Built-in Function methods: call0..call32
 (defn- register-function-call-methods!
