@@ -32,7 +32,7 @@
 (declare current-class-def)
 (declare class-method-def)
 (declare class-field-def)
- (declare elseif->else-expr)
+(declare elseif->else-expr)
 (declare visible-class-map)
 (declare generic-type-map)
 (declare normalize-call-target)
