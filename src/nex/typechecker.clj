@@ -154,6 +154,7 @@
       (not (contains? acc generic-name)) (assoc acc generic-name constraint)
       (and (nil? (get acc generic-name)) constraint) (assoc acc generic-name constraint)
       :else acc)))
+
 (defn- infer-generic-constraints-from-type
   [class-lookup type-expr]
   (let [t (normalize-type type-expr)]
@@ -2116,8 +2117,13 @@
          (str " Narrow it first, for example: if convert <expr> to"
               " items: Array[Integer] then across items as x do ... end end"))))
 
-(defn- check-target-call
-  [env {:keys [target method args has-parens from-pattern from-across]}]
+(defn- resolve-call-target-info
+  "Resolve everything the branches below need about `target` itself, once,
+   up front: what class/type it names, whether it's detachable and
+   nil-guarded, and the generic type-param bindings visible through it.
+   Returned as a map so each branch can destructure just the handful of
+   keys it actually needs."
+  [env {:keys [target]}]
   (let [target-name (when (string? target) target)
         across-item-type (and target-name
                               (env-lookup-across-cursor env target-name))
@@ -2149,198 +2155,244 @@
                     (:base-type target-type)
                     target-type)
         type-map (build-generic-type-map env target-type)]
-    ;; A bare-identifier target that resolves to nothing — not a local, field,
-    ;; class, across cursor, a parameterless routine of the current class, nor a
-    ;; Java name inside `with java` — is an undefined variable. Without this the
-    ;; member access slips through type-checking with a nil/Any target type and
-    ;; fails later (cryptically in the JVM lowering, or only at runtime).
-    (when (and *strict-undefined-targets*
-               (string? target)
-               (nil? target-type)
-               (not across-item-type)
-               (not with-java?)
-               ;; `this`/`Current` are special call targets, not variables (both
-               ;; reach here as their own node type, never as this bare-string
-               ;; `target`, so the `string? target` guard above already excludes
-               ;; them — kept only for `Current`, a vestigial alias with no
-               ;; grammar token or handling of its own anywhere in the codebase.
-               ;; `super` used to need the same treatment before it got its own
-               ;; node type too; now `(string? target)` alone excludes it.
-               (not (#{"this" "Current"} target))
-               (not (and current-class
-                         (lookup-class-method env current-class target 0 current-class))))
-      (throw (ex-info (str "Undefined variable: " target)
-                      {:error (type-error (str "Undefined variable: " target))})))
-    (when (and (not class-target) target-detachable? (not guarded?))
-      (throw (ex-info (str "Feature access on detachable target requires nil-check: " method)
+    {:target-name target-name
+     :across-item-type across-item-type
+     :with-java? with-java?
+     :class-target class-target
+     :current-class current-class
+     :target-type target-type
+     :normalized-target normalized-target
+     :target-detachable? target-detachable?
+     :guarded? guarded?
+     :base-type base-type
+     :type-map type-map}))
+
+;; A bare-identifier target that resolves to nothing — not a local, field,
+;; class, across cursor, a parameterless routine of the current class, nor a
+;; Java name inside `with java` — is an undefined variable. Without this the
+;; member access slips through type-checking with a nil/Any target type and
+;; fails later (cryptically in the JVM lowering, or only at runtime).
+(defn- reject-undefined-target!
+  [env {:keys [target]} {:keys [across-item-type with-java? current-class target-type]}]
+  (when (and *strict-undefined-targets*
+             (string? target)
+             (nil? target-type)
+             (not across-item-type)
+             (not with-java?)
+             ;; `this`/`Current` are special call targets, not variables (both
+             ;; reach here as their own node type, never as this bare-string
+             ;; `target`, so the `string? target` guard above already excludes
+             ;; them — kept only for `Current`, a vestigial alias with no
+             ;; grammar token or handling of its own anywhere in the codebase.
+             ;; `super` used to need the same treatment before it got its own
+             ;; node type too; now `(string? target)` alone excludes it.
+             (not (#{"this" "Current"} target))
+             (not (and current-class
+                       (lookup-class-method env current-class target 0 current-class))))
+    (throw (ex-info (str "Undefined variable: " target)
+                    {:error (type-error (str "Undefined variable: " target))}))))
+
+(defn- reject-unguarded-detachable-target!
+  [_env {:keys [method]} {:keys [class-target target-detachable? guarded? normalized-target]}]
+  (when (and (not class-target) target-detachable? (not guarded?))
+    (throw (ex-info (str "Feature access on detachable target requires nil-check: " method)
+                    {:error (type-error
+                             (str "Cannot call feature '" method "' on detachable "
+                                  (display-type normalized-target)
+                                  ". Wrap with: if <obj> /= nil then <obj>." method "(...) end"))}))))
+
+;; `super.method(...)` / `super.method` resolve against the immediate super
+;; parent only — never further up the chain for a constructor, and never
+;; falling back to a universal `Any` protocol signature — because that is
+;; exactly what `nex.lower` is able to call. `check-general-target-call`
+;; (via `lookup-class-method`) walks the whole ancestor chain looking for
+;; *any* matching-arity entry, constructors included; that lets an invalid
+;; super call (wrong arity, or naming a constructor that only some ancestor
+;; happens to have) pass type-checking, only to crash lowering with an
+;; opaque "internal error" instead of a real type error.
+(defn- check-super-call
+  [env {:keys [method args has-parens]} {:keys [base-type current-class]}]
+  (if-let [ctor-def (class-own-constructor env base-type method (count args))]
+    (check-call-signature env method args
+                          {:params (:params ctor-def) :return-type base-type}
+                          {})
+    (if-let [method-sig (lookup-super-feature-method env base-type method (count args))]
+      (check-call-signature env method args method-sig {})
+      (if-let [field-member (and (false? has-parens)
+                                 (lookup-class-field-member env base-type method current-class))]
+        (resolve-generic-type (:field-type field-member) {})
+        ;; base-type names no Nex-declared member here — it may instead be
+        ;; a Java interface/class parent (docs/proposals/java-interop.md,
+        ;; Phase 2). `new` is the super-constructor selector
+        ;; (super.new(args), validated separately against the Java
+        ;; class's reflected constructors by
+        ;; check-java-super-constructor-call); any other name may be a
+        ;; real inherited Java method this override calls through to
+        ;; (e.g. `super.paintComponent(g)`).
+        (let [arg-types (mapv #(check-expression env %) args)]
+          (cond
+            (= method "new")
+            "Any"
+
+            (reflected-java-method-signature env base-type method arg-types false)
+            (:return-type (reflected-java-method-signature env base-type method arg-types false))
+
+            :else
+            (let [msg (str "Method not found: " method " on " base-type
+                           ". `super` only reaches " base-type
+                           "'s own features and constructor.")]
+              (throw (ex-info msg {:error (type-error msg)})))))))))
+
+(defn- check-across-item-call
+  [_env {:keys [method]} {:keys [across-item-type]}]
+  (case method
+    "item" across-item-type
+    "start" "Void"
+    "next" "Void"
+    "at_end" "Boolean"
+    "cursor" "Cursor"
+    nil))
+
+(defn- check-class-constant-access
+  [env {:keys [method]} {:keys [base-type type-map current-class target-type]}]
+  (if-let [constant (lookup-class-constant env base-type method)]
+    (resolve-generic-type (:field-type constant) type-map)
+    (if-let [method-sig (and current-class
+                             (not= current-class base-type)
+                             (class-subtype? env current-class base-type)
+                             (lookup-class-method env base-type method 0 current-class))]
+      (check-call-signature env method [] method-sig
+                            (member-type-map env target-type type-map method-sig)
+                            :arg-types [])
+      "Any")))
+
+(defn- check-array-sort-call
+  [env {:keys [args]} {:keys [target-type type-map]}]
+  (let [elem-type (if (map? target-type)
+                    (or (first (or (:type-params target-type) (:type-args target-type)))
+                        "Any")
+                    "Any")]
+    (case (count args)
+      0
+      (do
+        (when-not (sortable-array-element-type? env elem-type)
+          (throw (ex-info "Array.sort requires Comparable element type"
+                          {:error (type-error
+                                   (str "Array.sort requires elements of a built-in sortable type or Comparable, got "
+                                        (display-type elem-type)))})))
+        (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map))
+
+      1
+      (let [compare-type (check-expression env (first args))]
+        (when-not (types-compatible? env compare-type "Function")
+          (throw (ex-info "Array.sort(compareFn) expects a Function argument"
+                          {:error (type-error
+                                   (str "Expected Function, got " (display-type compare-type)))})))
+        (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map))
+
+      (throw (ex-info "Method sort expects 0 or 1 arguments"
                       {:error (type-error
-                               (str "Cannot call feature '" method "' on detachable "
-                                    (display-type normalized-target)
-                                    ". Wrap with: if <obj> /= nil then <obj>." method "(...) end"))})))
-    (cond
-      ;; `super.method(...)` / `super.method` resolve against the immediate
-      ;; super parent only — never further up the chain for a constructor, and
-      ;; never falling back to a universal `Any` protocol signature — because
-      ;; that is exactly what `nex.lower` is able to call. The generic path
-      ;; below (via `lookup-class-method`) walks the whole ancestor chain
-      ;; looking for *any* matching-arity entry, constructors included; that
-      ;; lets an invalid super call (wrong arity, or naming a constructor that
-      ;; only some ancestor happens to have) pass type-checking, only to crash
-      ;; lowering with an opaque "internal error" instead of a real type error.
-      (and (map? target) (= :super (:type target)))
-      (if-let [ctor-def (class-own-constructor env base-type method (count args))]
-        (check-call-signature env method args
-                              {:params (:params ctor-def) :return-type base-type}
-                              {})
-        (if-let [method-sig (lookup-super-feature-method env base-type method (count args))]
-          (check-call-signature env method args method-sig {})
-          (if-let [field-member (and (false? has-parens)
-                                     (lookup-class-field-member env base-type method current-class))]
-            (resolve-generic-type (:field-type field-member) {})
-            ;; base-type names no Nex-declared member here — it may instead be
-            ;; a Java interface/class parent (docs/proposals/java-interop.md,
-            ;; Phase 2). `new` is the super-constructor selector
-            ;; (super.new(args), validated separately against the Java
-            ;; class's reflected constructors by
-            ;; check-java-super-constructor-call); any other name may be a
-            ;; real inherited Java method this override calls through to
-            ;; (e.g. `super.paintComponent(g)`).
-            (let [arg-types (mapv #(check-expression env %) args)]
-              (cond
-                (= method "new")
+                               (str "Method sort expects 0 or 1 arguments, got " (count args)))})))))
+
+;; Invoking a Function value that carries an explicit signature (e.g.
+;; `f.call1(x)` where `f: Function(n: Integer): Integer`): the declared
+;; return type is more precise than the generic callN result (Any).
+(defn- check-typed-function-call
+  [env {:keys [args]} {:keys [target-type]}]
+  (doseq [arg args]
+    (check-expression env arg))
+  (:return-type target-type))
+
+(defn- check-general-target-call
+  [env {:keys [method args has-parens from-pattern from-across]}
+   {:keys [base-type type-map current-class class-target target-type with-java?]}]
+  (let [class-def (env-lookup-class env base-type)]
+    ;; Resolution order is what makes an override an override. The receiver's
+    ;; own declaration must beat the universal "Any" protocol, or a class
+    ;; redefining a protocol member is checked against the *protocol's*
+    ;; signature instead of its own: `clone: M` was typed by Any's
+    ;; `clone: Any`, so `m.clone.v` — the whole point of overriding it —
+    ;; failed with "Undefined field: v" while the override itself ran
+    ;; correctly at runtime. `to_string`/`equals` hid the bug because the
+    ;; signature you would override them with matches Any's already.
+    ;;
+    ;; The receiver's *builtin* signature still comes first: for Task,
+    ;; Channel, Cursor and friends that table is the authority, and it is
+    ;; keyed on the real base type rather than a fallback.
+    (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
+                            (lookup-class-method env base-type method (count args) current-class)
+                            (builtin-method-signature "Any" method (count args) type-map))]
+      (check-call-signature env method args method-sig
+                            (member-type-map env target-type type-map method-sig))
+      (let [arg-types (mapv #(check-expression env %) args)]
+        ;; A method not declared/inherited anywhere in the Nex chain may
+        ;; still be a real, inherited (non-overridden) member of a Java
+        ;; class this class `extends` (Phase 2, docs/proposals/
+        ;; java-interop.md) — e.g. `t.start()` on a class inheriting
+        ;; Thread. Tried after base-type's own reflection (the ordinary
+        ;; "bare imported Java object" case) so neither shadows the other.
+        (if-let [java-method-sig (or (reflected-java-method-signature env base-type method arg-types class-target)
+                                     (when-let [super-name (class-java-superclass-name env base-type)]
+                                       (reflected-java-method-signature env super-name method arg-types false)))]
+          (check-call-signature env method args java-method-sig {} :arg-types arg-types)
+          (if (false? has-parens)
+            (if-let [field-member (lookup-class-field-member env base-type method current-class)]
+              (resolve-generic-type (:field-type field-member)
+                                    (member-type-map env target-type type-map field-member))
+              (if with-java?
                 "Any"
+                (if (and class-def (not (:import class-def)))
+                  (if-let [method-sig (lookup-class-method-any-arity env base-type method current-class)]
+                    (throw (ex-info (str "Method " method " on " base-type
+                                         " requires " (count (:params method-sig))
+                                         " argument(s); zero-argument access is invalid")
+                                    {:error (type-error
+                                             (str "Method " method " on " base-type
+                                                  " requires " (count (:params method-sig))
+                                                  " argument(s); zero-argument access is invalid"))}))
+                    (throw (ex-info (str "Undefined field: " method)
+                                    {:error (type-error
+                                             (undefined-field-message
+                                              env base-type method current-class
+                                              from-pattern))})))
+                  "Any")))
+            (if with-java?
+              "Any"
+              (let [msg (if (and from-across (= "cursor" method))
+                          (across-target-message base-type)
+                          (str "Method not found: " method))]
+                (if (and class-def (not (:import class-def)))
+                  (throw (ex-info msg {:error (type-error msg)}))
+                  (if (and from-across (= "cursor" method))
+                    (throw (ex-info msg {:error (type-error msg)}))
+                    "Any"))))))))))
 
-                (reflected-java-method-signature env base-type method arg-types false)
-                (:return-type (reflected-java-method-signature env base-type method arg-types false))
+(defn- check-target-call
+  [env {:keys [target method has-parens] :as expr}]
+  (let [call-info (resolve-call-target-info env expr)]
+    (reject-undefined-target! env expr call-info)
+    (reject-unguarded-detachable-target! env expr call-info)
+    (cond
+      (and (map? target) (= :super (:type target)))
+      (check-super-call env expr call-info)
 
-                :else
-                (let [msg (str "Method not found: " method " on " base-type
-                               ". `super` only reaches " base-type
-                               "'s own features and constructor.")]
-                  (throw (ex-info msg {:error (type-error msg)}))))))))
+      (:across-item-type call-info)
+      (check-across-item-call env expr call-info)
 
-      across-item-type
-      (case method
-        "item" across-item-type
-        "start" "Void"
-        "next" "Void"
-        "at_end" "Boolean"
-        "cursor" "Cursor"
-        nil)
+      (and (:class-target call-info) (false? has-parens))
+      (check-class-constant-access env expr call-info)
 
-      (and class-target (false? has-parens))
-      (if-let [constant (lookup-class-constant env base-type method)]
-        (resolve-generic-type (:field-type constant) type-map)
-        (if-let [method-sig (and current-class
-                                 (not= current-class base-type)
-                                 (class-subtype? env current-class base-type)
-                                 (lookup-class-method env base-type method 0 current-class))]
-          (check-call-signature env method [] method-sig
-                                (member-type-map env target-type type-map method-sig)
-                                :arg-types [])
-          "Any"))
+      (and (= (:base-type call-info) "Array") (= method "sort"))
+      (check-array-sort-call env expr call-info)
 
-      (and (= base-type "Array") (= method "sort"))
-      (do
-        (let [elem-type (if (map? target-type)
-                          (or (first (or (:type-params target-type) (:type-args target-type)))
-                              "Any")
-                          "Any")]
-          (case (count args)
-            0
-            (do
-              (when-not (sortable-array-element-type? env elem-type)
-                (throw (ex-info "Array.sort requires Comparable element type"
-                                {:error (type-error
-                                         (str "Array.sort requires elements of a built-in sortable type or Comparable, got "
-                                              (display-type elem-type)))})))
-              (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map))
-
-            1
-            (let [compare-type (check-expression env (first args))]
-              (when-not (types-compatible? env compare-type "Function")
-                (throw (ex-info "Array.sort(compareFn) expects a Function argument"
-                                {:error (type-error
-                                         (str "Expected Function, got " (display-type compare-type)))})))
-              (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map))
-
-            (throw (ex-info "Method sort expects 0 or 1 arguments"
-                            {:error (type-error
-                                     (str "Method sort expects 0 or 1 arguments, got " (count args)))})))))
-
-      ;; Invoking a Function value that carries an explicit signature (e.g.
-      ;; `f.call1(x)` where `f: Function(n: Integer): Integer`): the declared
-      ;; return type is more precise than the generic callN result (Any).
-      (and (= base-type "Function")
-           (map? target-type)
-           (:return-type target-type)
+      (and (= (:base-type call-info) "Function")
+           (map? (:target-type call-info))
+           (:return-type (:target-type call-info))
            (re-matches #"call\d+" (str method)))
-      (do
-        (doseq [arg args]
-          (check-expression env arg))
-        (:return-type target-type))
+      (check-typed-function-call env expr call-info)
 
       :else
-      (let [class-def (env-lookup-class env base-type)]
-        ;; Resolution order is what makes an override an override. The receiver's
-        ;; own declaration must beat the universal "Any" protocol, or a class
-        ;; redefining a protocol member is checked against the *protocol's*
-        ;; signature instead of its own: `clone: M` was typed by Any's
-        ;; `clone: Any`, so `m.clone.v` — the whole point of overriding it —
-        ;; failed with "Undefined field: v" while the override itself ran
-        ;; correctly at runtime. `to_string`/`equals` hid the bug because the
-        ;; signature you would override them with matches Any's already.
-        ;;
-        ;; The receiver's *builtin* signature still comes first: for Task,
-        ;; Channel, Cursor and friends that table is the authority, and it is
-        ;; keyed on the real base type rather than a fallback.
-        (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
-                                (lookup-class-method env base-type method (count args) current-class)
-                                (builtin-method-signature "Any" method (count args) type-map))]
-          (check-call-signature env method args method-sig
-                                (member-type-map env target-type type-map method-sig))
-          (let [arg-types (mapv #(check-expression env %) args)]
-            ;; A method not declared/inherited anywhere in the Nex chain may
-            ;; still be a real, inherited (non-overridden) member of a Java
-            ;; class this class `extends` (Phase 2, docs/proposals/
-            ;; java-interop.md) — e.g. `t.start()` on a class inheriting
-            ;; Thread. Tried after base-type's own reflection (the ordinary
-            ;; "bare imported Java object" case) so neither shadows the other.
-            (if-let [java-method-sig (or (reflected-java-method-signature env base-type method arg-types class-target)
-                                         (when-let [super-name (class-java-superclass-name env base-type)]
-                                           (reflected-java-method-signature env super-name method arg-types false)))]
-              (check-call-signature env method args java-method-sig {} :arg-types arg-types)
-              (if (false? has-parens)
-                (if-let [field-member (lookup-class-field-member env base-type method current-class)]
-                  (resolve-generic-type (:field-type field-member)
-                                        (member-type-map env target-type type-map field-member))
-                  (if with-java?
-                    "Any"
-                    (if (and class-def (not (:import class-def)))
-                      (if-let [method-sig (lookup-class-method-any-arity env base-type method current-class)]
-                        (throw (ex-info (str "Method " method " on " base-type
-                                             " requires " (count (:params method-sig))
-                                             " argument(s); zero-argument access is invalid")
-                                        {:error (type-error
-                                                 (str "Method " method " on " base-type
-                                                      " requires " (count (:params method-sig))
-                                                      " argument(s); zero-argument access is invalid"))}))
-                        (throw (ex-info (str "Undefined field: " method)
-                                        {:error (type-error
-                                                 (undefined-field-message
-                                                  env base-type method current-class
-                                                  from-pattern))})))
-                      "Any")))
-                (if with-java?
-                  "Any"
-                  (let [msg (if (and from-across (= "cursor" method))
-                              (across-target-message base-type)
-                              (str "Method not found: " method))]
-                    (if (and class-def (not (:import class-def)))
-                      (throw (ex-info msg {:error (type-error msg)}))
-                      (if (and from-across (= "cursor" method))
-                        (throw (ex-info msg {:error (type-error msg)}))
-                        "Any"))))))))))))
+      (check-general-target-call env expr call-info))))
 
 ;; ---------------------------------------------------------------------------
 ;; Built-in free-function call checking.
