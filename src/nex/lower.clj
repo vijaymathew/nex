@@ -3345,288 +3345,286 @@
     (throw (unsupported "Unsupported expression node for lowering"
                     {:expr expr :node-type (:type expr)}))))
 
-(defn- lower-create-expr [env expr]
-  (let [class-name (:class-name expr)
-        compiled (get (:compiled-classes env) class-name)
-        class-def (get (visible-class-map env) class-name)]
-    (cond
-      (= class-name "Console")
-      (let [nex-type (infer-type env expr)]
-        (when (or (:constructor expr) (seq (:args expr)))
-          (throw (ex-info "create Console takes no constructor or arguments in compiled lowering"
+(defn- lower-create-console
+  [env expr]
+  (let [nex-type (infer-type env expr)]
+    (when (or (:constructor expr) (seq (:args expr)))
+      (throw (ex-info "create Console takes no constructor or arguments in compiled lowering"
+                      {:expr expr})))
+    (ir/call-runtime-node "create-console"
+                          []
+                          nex-type
+                          (resolve-jvm-type env nex-type))))
+
+(defn- lower-create-process
+  [env expr]
+  (let [nex-type (infer-type env expr)
+        jvm-type (resolve-jvm-type env nex-type)]
+    (case (:constructor expr)
+      (nil "self")
+      (do
+        (when (seq (:args expr))
+          (throw (ex-info "create Process takes no arguments in compiled lowering"
                           {:expr expr})))
-        (ir/call-runtime-node "create-console"
+        (ir/call-runtime-node "create-process" [] nex-type jvm-type))
+
+      "command"
+      (do
+        (when-not (<= 1 (count (:args expr)) 2)
+          (throw (ex-info "Process.command expects 1 or 2 arguments in compiled lowering"
+                          {:expr expr})))
+        (ir/call-runtime-node "create-process-command"
+                              (mapv #(lower-expression env %) (:args expr))
+                              nex-type
+                              jvm-type))
+
+      (throw (unsupported "Unsupported Process constructor in compiled lowering"
+                      {:expr expr
+                       :constructor (:constructor expr)})))))
+
+(defn- lower-create-channel
+  [env expr]
+  (let [nex-type (infer-type env expr)]
+    (case (:constructor expr)
+      nil
+      (do
+        (when (seq (:args expr))
+          (throw (ex-info "create Channel takes no arguments in compiled lowering"
+                          {:expr expr})))
+        (ir/call-runtime-node "create-channel"
                               []
                               nex-type
                               (resolve-jvm-type env nex-type)))
 
-      (= class-name "Process")
-      (let [nex-type (infer-type env expr)
-            jvm-type (resolve-jvm-type env nex-type)]
-        (case (:constructor expr)
-          (nil "self")
-          (do
-            (when (seq (:args expr))
-              (throw (ex-info "create Process takes no arguments in compiled lowering"
-                              {:expr expr})))
-            (ir/call-runtime-node "create-process" [] nex-type jvm-type))
-
-          "command"
-          (do
-            (when-not (<= 1 (count (:args expr)) 2)
-              (throw (ex-info "Process.command expects 1 or 2 arguments in compiled lowering"
-                              {:expr expr})))
-            (ir/call-runtime-node "create-process-command"
-                                  (mapv #(lower-expression env %) (:args expr))
-                                  nex-type
-                                  jvm-type))
-
-          (throw (unsupported "Unsupported Process constructor in compiled lowering"
-                          {:expr expr
-                           :constructor (:constructor expr)}))))
-
-      (= class-name "Channel")
-      (let [nex-type (infer-type env expr)]
-        (case (:constructor expr)
-          nil
-          (do
-            (when (seq (:args expr))
-              (throw (ex-info "create Channel takes no arguments in compiled lowering"
-                              {:expr expr})))
-            (ir/call-runtime-node "create-channel"
-                                  []
-                                  nex-type
-                                  (resolve-jvm-type env nex-type)))
-
-          "with_capacity"
-          (do
-            (when-not (= 1 (count (:args expr)))
-              (throw (ex-info "Channel.with_capacity expects exactly 1 argument in compiled lowering"
-                              {:expr expr})))
-            (ir/call-runtime-node "create-channel"
-                                  [(lower-expression env (first (:args expr)))]
-                                  nex-type
-                                  (resolve-jvm-type env nex-type)))
-
-          (throw (unsupported "Unsupported Channel constructor in compiled lowering"
-                          {:expr expr
-                           :constructor (:constructor expr)}))))
-
-      (= class-name "Array")
-      (let [nex-type (infer-type env expr)]
-        (case (:constructor expr)
-          nil
-          (do
-            (when (seq (:args expr))
-              (throw (ex-info "create Array takes no arguments in compiled lowering"
-                              {:expr expr})))
-            (ir/call-runtime-node "create-array"
-                                  []
-                                  nex-type
-                                  (resolve-jvm-type env nex-type)))
-
-          "filled"
-          (do
-            (when-not (= 2 (count (:args expr)))
-              (throw (ex-info "Array.filled expects exactly 2 arguments in compiled lowering"
-                              {:expr expr})))
-            (ir/call-runtime-node "create-array-filled"
-                                  [(lower-expression env (first (:args expr)))
-                                   (lower-expression env (second (:args expr)))]
-                                  nex-type
-                                  (resolve-jvm-type env nex-type)))
-
-          (throw (unsupported "Unsupported Array constructor in compiled lowering"
-                          {:expr expr
-                           :constructor (:constructor expr)}))))
-
-      (= class-name "Min_Heap")
-      (let [nex-type (infer-type env expr)]
-        (case (:constructor expr)
-          nil
-          (do
-            (when (seq (:args expr))
-              (throw (ex-info "create Min_Heap takes no arguments in compiled lowering"
-                              {:expr expr})))
-            (ir/call-runtime-node "create-min-heap-empty"
-                                  []
-                                  nex-type
-                                  (resolve-jvm-type env nex-type)))
-
-          "empty"
-          (do
-            (when (seq (:args expr))
-              (throw (ex-info "Min_Heap.empty takes no arguments in compiled lowering"
-                              {:expr expr})))
-            (ir/call-runtime-node "create-min-heap-empty"
-                                  []
-                                  nex-type
-                                  (resolve-jvm-type env nex-type)))
-
-          "from_comparator"
-          (do
-            (when-not (= 1 (count (:args expr)))
-              (throw (ex-info "Min_Heap.from_comparator expects exactly 1 argument in compiled lowering"
-                              {:expr expr})))
-            (ir/call-runtime-node "create-min-heap-from-comparator"
-                                  [(lower-expression env (first (:args expr)))]
-                                  nex-type
-                                  (resolve-jvm-type env nex-type)))
-
-          (throw (unsupported "Unsupported Min_Heap constructor in compiled lowering"
-                          {:expr expr
-                           :constructor (:constructor expr)}))))
-
-      (= class-name "Atomic_Integer")
-      (let [nex-type (infer-type env expr)]
-        (when-not (= "make" (:constructor expr))
-          (throw (unsupported "Unsupported Atomic_Integer constructor in compiled lowering"
-                          {:expr expr :constructor (:constructor expr)})))
-        (when-not (= 1 (count (:args expr)))
-          (throw (ex-info "Atomic_Integer.make expects exactly 1 argument in compiled lowering"
-                          {:expr expr})))
-        (ir/call-runtime-node "create-atomic-integer"
-                              [(lower-expression env (first (:args expr)))]
-                              nex-type
-                              (resolve-jvm-type env nex-type)))
-
-      (= class-name "Atomic_Integer64")
-      (let [nex-type (infer-type env expr)]
-        (when-not (= "make" (:constructor expr))
-          (throw (unsupported "Unsupported Atomic_Integer64 constructor in compiled lowering"
-                          {:expr expr :constructor (:constructor expr)})))
-        (when-not (= 1 (count (:args expr)))
-          (throw (ex-info "Atomic_Integer64.make expects exactly 1 argument in compiled lowering"
-                          {:expr expr})))
-        (ir/call-runtime-node "create-atomic-integer64"
-                              [(lower-expression env (first (:args expr)))]
-                              nex-type
-                              (resolve-jvm-type env nex-type)))
-
-      (= class-name "Atomic_Boolean")
-      (let [nex-type (infer-type env expr)]
-        (when-not (= "make" (:constructor expr))
-          (throw (unsupported "Unsupported Atomic_Boolean constructor in compiled lowering"
-                          {:expr expr :constructor (:constructor expr)})))
-        (when-not (= 1 (count (:args expr)))
-          (throw (ex-info "Atomic_Boolean.make expects exactly 1 argument in compiled lowering"
-                          {:expr expr})))
-        (ir/call-runtime-node "create-atomic-boolean"
-                              [(lower-expression env (first (:args expr)))]
-                              nex-type
-                              (resolve-jvm-type env nex-type)))
-
-      (= class-name "Atomic_Reference")
-      (let [nex-type (infer-type env expr)]
-        (when-not (= "make" (:constructor expr))
-          (throw (unsupported "Unsupported Atomic_Reference constructor in compiled lowering"
-                          {:expr expr :constructor (:constructor expr)})))
-        (when-not (= 1 (count (:args expr)))
-          (throw (ex-info "Atomic_Reference.make expects exactly 1 argument in compiled lowering"
-                          {:expr expr})))
-        (ir/call-runtime-node "create-atomic-reference"
-                              [(lower-expression env (first (:args expr)))]
-                              nex-type
-                              (resolve-jvm-type env nex-type)))
-
-      (and class-def (:import class-def))
-      ;; A constructor name on an imported Java class is decorative: the
-      ;; interpreter's java-create-object ignores it and reflectively invokes
-      ;; the host constructor with the arguments, so lowering does the same.
-      (let [nex-type (infer-type env expr)]
-        (ir/call-runtime-node "java-create-object"
-                              (into [(ir/const-node class-name
-                                                    "String"
-                                                    (ir/object-jvm-type "java/lang/String"))]
-                                    (mapv #(lower-expression env %) (:args expr)))
-                              nex-type
-                              (resolve-jvm-type env nex-type)))
-
-      (= class-name "Map")
-      (let [nex-type (infer-type env expr)]
-        (if (nil? (:constructor expr))
-          (do
-            (when (seq (:args expr))
-              (throw (ex-info "create Map takes no arguments in compiled lowering"
-                              {:expr expr})))
-            (ir/map-literal-node [] nex-type (resolve-jvm-type env nex-type)))
-          (throw (unsupported "Unsupported Map constructor in compiled lowering"
-                          {:expr expr :constructor (:constructor expr)}))))
-
-      (= class-name "Set")
-      (let [nex-type (infer-type env expr)]
-        (case (:constructor expr)
-          nil
-          (do
-            (when (seq (:args expr))
-              (throw (ex-info "create Set takes no arguments in compiled lowering"
-                              {:expr expr})))
-            (ir/set-literal-node [] nex-type (resolve-jvm-type env nex-type)))
-
-          "from_array"
-          (do
-            (when-not (= 1 (count (:args expr)))
-              (throw (ex-info "Set.from_array expects exactly 1 argument in compiled lowering"
-                              {:expr expr})))
-            (ir/call-runtime-node "create-set-from-array"
-                                  [(lower-expression env (first (:args expr)))]
-                                  nex-type
-                                  (resolve-jvm-type env nex-type)))
-
-          (throw (unsupported "Unsupported Set constructor in compiled lowering"
-                          {:expr expr :constructor (:constructor expr)}))))
-
-      :else
+      "with_capacity"
       (do
-        (when-not compiled
-          (throw (unsupported "Create of non-compiled class is not supported in lowering"
-                          {:expr expr :class-name class-name})))
-        (when (:deferred? class-def)
-          (throw (ex-info "Unsupported create of deferred class in compiled lowering"
-                          {:expr expr :class-name class-name})))
-        (let [created-type (infer-type env expr)
-              runtime-generic-args (class-generic-runtime-args env class-def created-type)]
-          (if-let [constructor-name (:constructor expr)]
-            (let [ctor-def (own-or-inherited-constructor-def env class-def constructor-name (count (:args expr)))]
-              (when-not ctor-def
-                (throw (ex-info "Constructor not found during lowering"
-                                {:expr expr
-                                 :class-name class-name
-                                 :constructor constructor-name
-                                 :arity (count (:args expr))})))
-              (ir/call-virtual-node (:internal-name compiled)
-                                    (lowered-constructor-method-name ctor-def)
-                                    (desc/repl-instance-method-descriptor)
+        (when-not (= 1 (count (:args expr)))
+          (throw (ex-info "Channel.with_capacity expects exactly 1 argument in compiled lowering"
+                          {:expr expr})))
+        (ir/call-runtime-node "create-channel"
+                              [(lower-expression env (first (:args expr)))]
+                              nex-type
+                              (resolve-jvm-type env nex-type)))
+
+      (throw (unsupported "Unsupported Channel constructor in compiled lowering"
+                      {:expr expr
+                       :constructor (:constructor expr)})))))
+
+(defn- lower-create-array
+  [env expr]
+  (let [nex-type (infer-type env expr)]
+    (case (:constructor expr)
+      nil
+      (do
+        (when (seq (:args expr))
+          (throw (ex-info "create Array takes no arguments in compiled lowering"
+                          {:expr expr})))
+        (ir/call-runtime-node "create-array"
+                              []
+                              nex-type
+                              (resolve-jvm-type env nex-type)))
+
+      "filled"
+      (do
+        (when-not (= 2 (count (:args expr)))
+          (throw (ex-info "Array.filled expects exactly 2 arguments in compiled lowering"
+                          {:expr expr})))
+        (ir/call-runtime-node "create-array-filled"
+                              [(lower-expression env (first (:args expr)))
+                               (lower-expression env (second (:args expr)))]
+                              nex-type
+                              (resolve-jvm-type env nex-type)))
+
+      (throw (unsupported "Unsupported Array constructor in compiled lowering"
+                      {:expr expr
+                       :constructor (:constructor expr)})))))
+
+(defn- lower-create-min-heap
+  [env expr]
+  (let [nex-type (infer-type env expr)]
+    (case (:constructor expr)
+      nil
+      (do
+        (when (seq (:args expr))
+          (throw (ex-info "create Min_Heap takes no arguments in compiled lowering"
+                          {:expr expr})))
+        (ir/call-runtime-node "create-min-heap-empty"
+                              []
+                              nex-type
+                              (resolve-jvm-type env nex-type)))
+
+      "empty"
+      (do
+        (when (seq (:args expr))
+          (throw (ex-info "Min_Heap.empty takes no arguments in compiled lowering"
+                          {:expr expr})))
+        (ir/call-runtime-node "create-min-heap-empty"
+                              []
+                              nex-type
+                              (resolve-jvm-type env nex-type)))
+
+      "from_comparator"
+      (do
+        (when-not (= 1 (count (:args expr)))
+          (throw (ex-info "Min_Heap.from_comparator expects exactly 1 argument in compiled lowering"
+                          {:expr expr})))
+        (ir/call-runtime-node "create-min-heap-from-comparator"
+                              [(lower-expression env (first (:args expr)))]
+                              nex-type
+                              (resolve-jvm-type env nex-type)))
+
+      (throw (unsupported "Unsupported Min_Heap constructor in compiled lowering"
+                      {:expr expr
+                       :constructor (:constructor expr)})))))
+
+(defn- lower-create-single-arg-atomic
+  "Builds a `create <Class>.make(value)` lowering handler for the atomic
+   builtins: all four (Atomic_Integer, Atomic_Integer64, Atomic_Boolean,
+   Atomic_Reference) share this one-arg-named-'make' shape, differing only
+   in the class name (for error messages) and the runtime-call node name."
+  [class-name runtime-fn-name]
+  (fn [env expr]
+    (let [nex-type (infer-type env expr)]
+      (when-not (= "make" (:constructor expr))
+        (throw (unsupported (str "Unsupported " class-name " constructor in compiled lowering")
+                        {:expr expr :constructor (:constructor expr)})))
+      (when-not (= 1 (count (:args expr)))
+        (throw (ex-info (str class-name ".make expects exactly 1 argument in compiled lowering")
+                        {:expr expr})))
+      (ir/call-runtime-node runtime-fn-name
+                            [(lower-expression env (first (:args expr)))]
+                            nex-type
+                            (resolve-jvm-type env nex-type)))))
+
+(defn- lower-create-map
+  [env expr]
+  (let [nex-type (infer-type env expr)]
+    (if (nil? (:constructor expr))
+      (do
+        (when (seq (:args expr))
+          (throw (ex-info "create Map takes no arguments in compiled lowering"
+                          {:expr expr})))
+        (ir/map-literal-node [] nex-type (resolve-jvm-type env nex-type)))
+      (throw (unsupported "Unsupported Map constructor in compiled lowering"
+                      {:expr expr :constructor (:constructor expr)})))))
+
+(defn- lower-create-set
+  [env expr]
+  (let [nex-type (infer-type env expr)]
+    (case (:constructor expr)
+      nil
+      (do
+        (when (seq (:args expr))
+          (throw (ex-info "create Set takes no arguments in compiled lowering"
+                          {:expr expr})))
+        (ir/set-literal-node [] nex-type (resolve-jvm-type env nex-type)))
+
+      "from_array"
+      (do
+        (when-not (= 1 (count (:args expr)))
+          (throw (ex-info "Set.from_array expects exactly 1 argument in compiled lowering"
+                          {:expr expr})))
+        (ir/call-runtime-node "create-set-from-array"
+                              [(lower-expression env (first (:args expr)))]
+                              nex-type
+                              (resolve-jvm-type env nex-type)))
+
+      (throw (unsupported "Unsupported Set constructor in compiled lowering"
+                      {:expr expr :constructor (:constructor expr)})))))
+
+(def ^:private lower-create-builtin-dispatch
+  "class-name -> (fn [env expr] ...): the built-in-type half of
+   `lower-create-expr`. A class name with no entry here falls through to
+   the Java-import check, then to `lower-user-create` for an ordinary Nex
+   class."
+  {"Console"          lower-create-console
+   "Process"          lower-create-process
+   "Channel"          lower-create-channel
+   "Array"            lower-create-array
+   "Min_Heap"         lower-create-min-heap
+   "Atomic_Integer"   (lower-create-single-arg-atomic "Atomic_Integer" "create-atomic-integer")
+   "Atomic_Integer64" (lower-create-single-arg-atomic "Atomic_Integer64" "create-atomic-integer64")
+   "Atomic_Boolean"   (lower-create-single-arg-atomic "Atomic_Boolean" "create-atomic-boolean")
+   "Atomic_Reference" (lower-create-single-arg-atomic "Atomic_Reference" "create-atomic-reference")
+   "Map"              lower-create-map
+   "Set"              lower-create-set})
+
+;; A constructor name on an imported Java class is decorative: the
+;; interpreter's java-create-object ignores it and reflectively invokes
+;; the host constructor with the arguments, so lowering does the same.
+(defn- lower-java-create
+  [env expr class-name]
+  (let [nex-type (infer-type env expr)]
+    (ir/call-runtime-node "java-create-object"
+                          (into [(ir/const-node class-name
+                                                "String"
+                                                (ir/object-jvm-type "java/lang/String"))]
+                                (mapv #(lower-expression env %) (:args expr)))
+                          nex-type
+                          (resolve-jvm-type env nex-type))))
+
+(defn- lower-user-create
+  [env expr class-name class-def compiled]
+  (when-not compiled
+    (throw (unsupported "Create of non-compiled class is not supported in lowering"
+                    {:expr expr :class-name class-name})))
+  (when (:deferred? class-def)
+    (throw (ex-info "Unsupported create of deferred class in compiled lowering"
+                    {:expr expr :class-name class-name})))
+  (let [created-type (infer-type env expr)
+        runtime-generic-args (class-generic-runtime-args env class-def created-type)]
+    (if-let [constructor-name (:constructor expr)]
+      (let [ctor-def (own-or-inherited-constructor-def env class-def constructor-name (count (:args expr)))]
+        (when-not ctor-def
+          (throw (ex-info "Constructor not found during lowering"
+                          {:expr expr
+                           :class-name class-name
+                           :constructor constructor-name
+                           :arity (count (:args expr))})))
+        (ir/call-virtual-node (:internal-name compiled)
+                              (lowered-constructor-method-name ctor-def)
+                              (desc/repl-instance-method-descriptor)
+                              (ir/new-node (:internal-name compiled)
+                                           class-name
+                                           created-type
+                                           (exact-class-jvm-type env class-name))
+                              (into (mapv #(lower-expression env %) (:args expr))
+                                    runtime-generic-args)
+                              created-type
+                              (resolve-jvm-type env created-type)))
+      (do
+        (when (seq (:args expr))
+          (throw (unsupported "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
+                          {:expr expr})))
+        (if (seq (:generic-params class-def))
+          (ir/call-virtual-node (:internal-name compiled)
+                                (generic-init-method-name)
+                                (desc/repl-instance-method-descriptor)
+                                (ir/new-node (:internal-name compiled)
+                                             class-name
+                                             created-type
+                                             (resolve-jvm-type env created-type))
+                                runtime-generic-args
+                                created-type
+                                (resolve-jvm-type env created-type))
+          (validate-object-state-ir env
+                                    class-name
                                     (ir/new-node (:internal-name compiled)
                                                  class-name
                                                  created-type
-                                                 (exact-class-jvm-type env class-name))
-                                    (into (mapv #(lower-expression env %) (:args expr))
-                                          runtime-generic-args)
-                                    created-type
-                                    (resolve-jvm-type env created-type)))
-            (do
-              (when (seq (:args expr))
-                (throw (unsupported "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
-                                {:expr expr})))
-              (if (seq (:generic-params class-def))
-                (ir/call-virtual-node (:internal-name compiled)
-                                      (generic-init-method-name)
-                                      (desc/repl-instance-method-descriptor)
-                                      (ir/new-node (:internal-name compiled)
-                                                   class-name
-                                                   created-type
-                                                   (resolve-jvm-type env created-type))
-                                      runtime-generic-args
-                                      created-type
-                                      (resolve-jvm-type env created-type))
-                (validate-object-state-ir env
-                                          class-name
-                                          (ir/new-node (:internal-name compiled)
-                                                       class-name
-                                                       created-type
-                                                       (resolve-jvm-type env created-type))
-                                          created-type)))))))))
+                                                 (resolve-jvm-type env created-type))
+                                    created-type))))))
+
+(defn- lower-create-expr [env expr]
+  (let [class-name (:class-name expr)
+        compiled (get (:compiled-classes env) class-name)
+        class-def (get (visible-class-map env) class-name)]
+    (if-let [handler (get lower-create-builtin-dispatch class-name)]
+      (handler env expr)
+      (if (and class-def (:import class-def))
+        (lower-java-create env expr class-name)
+        (lower-user-create env expr class-name class-def compiled)))))
+
 
 (defn- java-object-valued?
   "True when `expr`, used as a call target, is known at lowering time to hold

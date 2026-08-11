@@ -2874,319 +2874,316 @@
                             {:error (type-error
                                      (str "Undefined function: " method))})))))))))
 
-(defn check-create
-  "Check the type of a create expression"
-  [env {:keys [class-name generic-args constructor args] :as expr}]
-  (cond
-    ;; Handle built-in Array type
-    (= class-name "Array")
-    (let [target-type (if (seq generic-args)
-                        (do
-                          (validate-generic-args env class-name generic-args)
-                          {:base-type "Array" :type-args generic-args})
-                        "Array")]
-      (cond
-        (nil? constructor)
-        (do
-          (when (seq args)
-            (throw (ex-info "create Array expects no arguments"
-                            {:error (type-error "create Array expects no arguments")})))
-          target-type)
+(defn- check-create-array
+  [env {:keys [generic-args constructor args]}]
+  (let [target-type (if (seq generic-args)
+                      (do
+                        (validate-generic-args env "Array" generic-args)
+                        {:base-type "Array" :type-args generic-args})
+                      "Array")]
+    (cond
+      (nil? constructor)
+      (do
+        (when (seq args)
+          (throw (ex-info "create Array expects no arguments"
+                          {:error (type-error "create Array expects no arguments")})))
+        target-type)
 
-        (= constructor "filled")
-        (do
-          (when-not (= 2 (count args))
-            (throw (ex-info "Array.filled expects 2 arguments"
-                            {:error (type-error "Array.filled expects exactly 2 arguments")})))
-          (let [size-type (check-expression env (first args))
-                value-type (check-expression env (second args))
-                elem-type (or (first generic-args) value-type)]
-            (when-not (types-compatible? env size-type "Integer")
-              (throw (ex-info "Array.filled requires Integer size"
+      (= constructor "filled")
+      (do
+        (when-not (= 2 (count args))
+          (throw (ex-info "Array.filled expects 2 arguments"
+                          {:error (type-error "Array.filled expects exactly 2 arguments")})))
+        (let [size-type (check-expression env (first args))
+              value-type (check-expression env (second args))
+              elem-type (or (first generic-args) value-type)]
+          (when-not (types-compatible? env size-type "Integer")
+            (throw (ex-info "Array.filled requires Integer size"
+                            {:error (type-error
+                                     (str "Array.filled expects Integer size, got "
+                                          (display-type size-type)))})))
+          (when-not (types-compatible? env value-type elem-type)
+            (throw (ex-info "Array.filled value type mismatch"
+                            {:error (type-error
+                                     (str "Array.filled expects "
+                                          (display-type elem-type)
+                                          " value, got "
+                                          (display-type value-type)))})))
+          {:base-type "Array" :type-args [elem-type]}))
+
+      :else
+      (throw (ex-info (str "Constructor not found: Array." constructor)
+                      {:error (type-error (str "Constructor not found: Array." constructor))})))))
+
+(defn- check-create-console
+  [_env _expr]
+  "Console")
+
+(defn- check-create-process
+  [env {:keys [constructor args]}]
+  (case constructor
+    nil
+    (do
+      (when (seq args)
+        (throw (ex-info "create Process expects no arguments"
+                        {:error (type-error "create Process expects no arguments")})))
+      "Process")
+
+    "self"
+    (do
+      (when (seq args)
+        (throw (ex-info "Process.self expects no arguments"
+                        {:error (type-error "Process.self expects no arguments")})))
+      "Process")
+
+    "command"
+    (do
+      (when-not (<= 1 (count args) 2)
+        (throw (ex-info "Process.command expects 1 or 2 arguments"
+                        {:error (type-error "Process.command expects (String) or (String, Array[String])")})))
+      (let [command-type (check-expression env (first args))]
+        (when-not (types-compatible? env command-type "String")
+          (throw (ex-info "Process.command requires a String command"
+                          {:error (type-error
+                                   (str "Process.command expects String, got "
+                                        (display-type command-type)))})))
+        (when (= 2 (count args))
+          (let [args-type (check-expression env (second args))
+                expected {:base-type "Array" :type-params ["String"]}]
+            (when-not (types-compatible? env args-type expected)
+              (throw (ex-info "Process.command requires Array[String] arguments"
                               {:error (type-error
-                                       (str "Array.filled expects Integer size, got "
-                                            (display-type size-type)))})))
-            (when-not (types-compatible? env value-type elem-type)
-              (throw (ex-info "Array.filled value type mismatch"
-                              {:error (type-error
-                                       (str "Array.filled expects "
-                                            (display-type elem-type)
-                                            " value, got "
-                                            (display-type value-type)))})))
-            {:base-type "Array" :type-args [elem-type]}))
+                                       (str "Process.command expects Array[String], got "
+                                            (display-type args-type)))}))))))
+      "Process")
 
-        :else
-        (throw (ex-info (str "Constructor not found: Array." constructor)
-                        {:error (type-error (str "Constructor not found: Array." constructor))}))))
+    (throw (ex-info (str "Constructor not found: Process." constructor)
+                    {:error (type-error (str "Constructor not found: Process." constructor))}))))
 
-    ;; Handle built-in Console type
-    (= class-name "Console") "Console"
-    ;; Handle built-in Process type
-    (= class-name "Process")
+(defn- check-create-min-heap
+  [env {:keys [generic-args constructor args]}]
+  (let [target-type (if (seq generic-args)
+                      (do
+                        (validate-generic-args env "Min_Heap" generic-args)
+                        {:base-type "Min_Heap" :type-args generic-args})
+                      "Min_Heap")]
     (case constructor
       nil
       (do
         (when (seq args)
-          (throw (ex-info "create Process expects no arguments"
-                          {:error (type-error "create Process expects no arguments")})))
-        "Process")
+          (throw (ex-info "create Min_Heap expects no arguments"
+                          {:error (type-error "create Min_Heap expects no arguments")})))
+        (when-let [elem-type (first generic-args)]
+          (when-not (sortable-array-element-type? env elem-type)
+            (throw (ex-info "Min_Heap.empty requires Comparable element type"
+                            {:error (type-error
+                                     (str "Min_Heap.empty requires a built-in sortable type or Comparable element type, got "
+                                          (display-type elem-type)
+                                          ". Use Min_Heap.from_comparator(...) instead."))}))))
+        target-type)
 
-      "self"
+      "empty"
       (do
         (when (seq args)
-          (throw (ex-info "Process.self expects no arguments"
-                          {:error (type-error "Process.self expects no arguments")})))
-        "Process")
-
-      "command"
-      (do
-        (when-not (<= 1 (count args) 2)
-          (throw (ex-info "Process.command expects 1 or 2 arguments"
-                          {:error (type-error "Process.command expects (String) or (String, Array[String])")})))
-        (let [command-type (check-expression env (first args))]
-          (when-not (types-compatible? env command-type "String")
-            (throw (ex-info "Process.command requires a String command"
+          (throw (ex-info "Min_Heap.empty expects no arguments"
+                          {:error (type-error "Min_Heap.empty expects no arguments")})))
+        (when-let [elem-type (first generic-args)]
+          (when-not (sortable-array-element-type? env elem-type)
+            (throw (ex-info "Min_Heap.empty requires Comparable element type"
                             {:error (type-error
-                                     (str "Process.command expects String, got "
-                                          (display-type command-type)))})))
-          (when (= 2 (count args))
-            (let [args-type (check-expression env (second args))
-                  expected {:base-type "Array" :type-params ["String"]}]
-              (when-not (types-compatible? env args-type expected)
-                (throw (ex-info "Process.command requires Array[String] arguments"
-                                {:error (type-error
-                                         (str "Process.command expects Array[String], got "
-                                              (display-type args-type)))}))))))
-        "Process")
+                                     (str "Min_Heap.empty requires a built-in sortable type or Comparable element type, got "
+                                          (display-type elem-type)
+                                          ". Use Min_Heap.from_comparator(...) instead."))}))))
+        target-type)
 
-      (throw (ex-info (str "Constructor not found: Process." constructor)
-                      {:error (type-error (str "Constructor not found: Process." constructor))})))
-    ;; Handle built-in Min_Heap type
-    (= class-name "Min_Heap")
-    (let [target-type (if (seq generic-args)
-                        (do
-                          (validate-generic-args env class-name generic-args)
-                          {:base-type "Min_Heap" :type-args generic-args})
-                        "Min_Heap")]
-      (case constructor
-        nil
-        (do
-          (when (seq args)
-            (throw (ex-info "create Min_Heap expects no arguments"
-                            {:error (type-error "create Min_Heap expects no arguments")})))
-          (when-let [elem-type (first generic-args)]
-            (when-not (sortable-array-element-type? env elem-type)
-              (throw (ex-info "Min_Heap.empty requires Comparable element type"
-                              {:error (type-error
-                                       (str "Min_Heap.empty requires a built-in sortable type or Comparable element type, got "
-                                            (display-type elem-type)
-                                            ". Use Min_Heap.from_comparator(...) instead."))}))))
-          target-type)
+      "from_comparator"
+      (do
+        (when-not (= 1 (count args))
+          (throw (ex-info "Min_Heap.from_comparator expects 1 argument"
+                          {:error (type-error "Min_Heap.from_comparator expects exactly 1 Function argument")})))
+        (let [compare-type (check-expression env (first args))]
+          (when-not (types-compatible? env compare-type "Function")
+            (throw (ex-info "Min_Heap.from_comparator requires a Function"
+                            {:error (type-error
+                                     (str "Min_Heap.from_comparator expects Function, got "
+                                          (display-type compare-type)))}))))
+        target-type)
 
-        "empty"
-        (do
-          (when (seq args)
-            (throw (ex-info "Min_Heap.empty expects no arguments"
-                            {:error (type-error "Min_Heap.empty expects no arguments")})))
-          (when-let [elem-type (first generic-args)]
-            (when-not (sortable-array-element-type? env elem-type)
-              (throw (ex-info "Min_Heap.empty requires Comparable element type"
-                              {:error (type-error
-                                       (str "Min_Heap.empty requires a built-in sortable type or Comparable element type, got "
-                                            (display-type elem-type)
-                                            ". Use Min_Heap.from_comparator(...) instead."))}))))
-          target-type)
+      (throw (ex-info (str "Constructor not found: Min_Heap." constructor)
+                      {:error (type-error (str "Constructor not found: Min_Heap." constructor))})))))
 
-        "from_comparator"
-        (do
-          (when-not (= 1 (count args))
-            (throw (ex-info "Min_Heap.from_comparator expects 1 argument"
-                            {:error (type-error "Min_Heap.from_comparator expects exactly 1 Function argument")})))
-          (let [compare-type (check-expression env (first args))]
-            (when-not (types-compatible? env compare-type "Function")
-              (throw (ex-info "Min_Heap.from_comparator requires a Function"
-                              {:error (type-error
-                                       (str "Min_Heap.from_comparator expects Function, got "
-                                            (display-type compare-type)))}))))
-          target-type)
+(defn- check-create-single-arg-atomic
+  "Builds a `create <Class>.make(value)` checker for the non-generic atomic
+   builtins (Atomic_Integer, Atomic_Integer64, Atomic_Boolean): all three
+   share this one-arg-named-'make' shape, differing only in the class name
+   (for error messages) and the expected argument type. Atomic_Reference is
+   the odd one out (generic, detachable) and keeps its own checker below."
+  [class-name expected-type]
+  (fn [env {:keys [constructor args]}]
+    (when-not (= constructor "make")
+      (throw (ex-info (str "Constructor not found: " class-name "." constructor)
+                      {:error (type-error (str "Constructor not found: " class-name "." constructor))})))
+    (when-not (= 1 (count args))
+      (throw (ex-info (str class-name ".make expects 1 argument")
+                      {:error (type-error (str class-name ".make expects exactly 1 " expected-type " argument"))})))
+    (let [arg-type (check-expression env (first args))]
+      (when-not (types-compatible? env arg-type expected-type)
+        (throw (ex-info (str class-name ".make requires " expected-type " initial value")
+                        {:error (type-error
+                                 (str class-name ".make expects " expected-type ", got "
+                                      (display-type arg-type)))}))))
+    class-name))
 
-        (throw (ex-info (str "Constructor not found: Min_Heap." constructor)
-                        {:error (type-error (str "Constructor not found: Min_Heap." constructor))}))))
+(defn- check-create-atomic-reference
+  [env {:keys [generic-args constructor args]}]
+  (let [target-type (if (seq generic-args)
+                      (do
+                        (validate-generic-args env "Atomic_Reference" generic-args)
+                        {:base-type "Atomic_Reference" :type-args generic-args})
+                      nil)]
+    (when-not (= constructor "make")
+      (throw (ex-info (str "Constructor not found: Atomic_Reference." constructor)
+                      {:error (type-error (str "Constructor not found: Atomic_Reference." constructor))})))
+    (when-not (= 1 (count args))
+      (throw (ex-info "Atomic_Reference.make expects 1 argument"
+                      {:error (type-error "Atomic_Reference.make expects exactly 1 argument")})))
+    (let [arg-type (check-expression env (first args))
+          elem-type (or (first generic-args)
+                        (if (= (attachable-type arg-type) "Nil")
+                          "Any"
+                          (attachable-type arg-type)))
+          maybe-elem (detachable-version elem-type)]
+      (when-not (types-compatible? env arg-type maybe-elem)
+        (throw (ex-info "Atomic_Reference.make initial value type mismatch"
+                        {:error (type-error
+                                 (str "Atomic_Reference.make expects "
+                                      (display-type maybe-elem)
+                                      ", got "
+                                      (display-type arg-type)))})))
+      (or target-type
+          {:base-type "Atomic_Reference" :type-args [elem-type]}))))
 
-    (= class-name "Atomic_Integer")
+(defn- check-create-channel
+  [env {:keys [generic-args constructor args]}]
+  (cond
+    (nil? constructor)
+    nil
+
+    (= constructor "with_capacity")
     (do
-      (when-not (= constructor "make")
-        (throw (ex-info (str "Constructor not found: Atomic_Integer." constructor)
-                        {:error (type-error (str "Constructor not found: Atomic_Integer." constructor))})))
       (when-not (= 1 (count args))
-        (throw (ex-info "Atomic_Integer.make expects 1 argument"
-                        {:error (type-error "Atomic_Integer.make expects exactly 1 Integer argument")})))
+        (throw (ex-info "Channel.with_capacity expects 1 argument"
+                        {:error (type-error "Channel.with_capacity expects exactly 1 Integer argument")})))
       (let [arg-type (check-expression env (first args))]
         (when-not (types-compatible? env arg-type "Integer")
-          (throw (ex-info "Atomic_Integer.make requires Integer initial value"
+          (throw (ex-info "Channel.with_capacity requires Integer capacity"
                           {:error (type-error
-                                   (str "Atomic_Integer.make expects Integer, got "
-                                        (display-type arg-type)))}))))
-      "Atomic_Integer")
+                                   (str "Channel.with_capacity expects Integer, got "
+                                        (display-type arg-type)))})))))
 
-    (= class-name "Atomic_Integer64")
-    (do
-      (when-not (= constructor "make")
-        (throw (ex-info (str "Constructor not found: Atomic_Integer64." constructor)
-                        {:error (type-error (str "Constructor not found: Atomic_Integer64." constructor))})))
-      (when-not (= 1 (count args))
-        (throw (ex-info "Atomic_Integer64.make expects 1 argument"
-                        {:error (type-error "Atomic_Integer64.make expects exactly 1 Integer argument")})))
-      (let [arg-type (check-expression env (first args))]
-        (when-not (types-compatible? env arg-type "Integer")
-          (throw (ex-info "Atomic_Integer64.make requires Integer initial value"
-                          {:error (type-error
-                                   (str "Atomic_Integer64.make expects Integer, got "
-                                        (display-type arg-type)))}))))
-      "Atomic_Integer64")
-
-    (= class-name "Atomic_Boolean")
-    (do
-      (when-not (= constructor "make")
-        (throw (ex-info (str "Constructor not found: Atomic_Boolean." constructor)
-                        {:error (type-error (str "Constructor not found: Atomic_Boolean." constructor))})))
-      (when-not (= 1 (count args))
-        (throw (ex-info "Atomic_Boolean.make expects 1 argument"
-                        {:error (type-error "Atomic_Boolean.make expects exactly 1 Boolean argument")})))
-      (let [arg-type (check-expression env (first args))]
-        (when-not (types-compatible? env arg-type "Boolean")
-          (throw (ex-info "Atomic_Boolean.make requires Boolean initial value"
-                          {:error (type-error
-                                   (str "Atomic_Boolean.make expects Boolean, got "
-                                        (display-type arg-type)))}))))
-      "Atomic_Boolean")
-
-    (= class-name "Atomic_Reference")
-    (let [target-type (if (seq generic-args)
-                        (do
-                          (validate-generic-args env class-name generic-args)
-                          {:base-type "Atomic_Reference" :type-args generic-args})
-                        nil)]
-      (when-not (= constructor "make")
-        (throw (ex-info (str "Constructor not found: Atomic_Reference." constructor)
-                        {:error (type-error (str "Constructor not found: Atomic_Reference." constructor))})))
-      (when-not (= 1 (count args))
-        (throw (ex-info "Atomic_Reference.make expects 1 argument"
-                        {:error (type-error "Atomic_Reference.make expects exactly 1 argument")})))
-      (let [arg-type (check-expression env (first args))
-            elem-type (or (first generic-args)
-                          (if (= (attachable-type arg-type) "Nil")
-                            "Any"
-                            (attachable-type arg-type)))
-            maybe-elem (detachable-version elem-type)]
-        (when-not (types-compatible? env arg-type maybe-elem)
-          (throw (ex-info "Atomic_Reference.make initial value type mismatch"
-                          {:error (type-error
-                                   (str "Atomic_Reference.make expects "
-                                        (display-type maybe-elem)
-                                        ", got "
-                                        (display-type arg-type)))})))
-        (or target-type
-            {:base-type "Atomic_Reference" :type-args [elem-type]})))
-
-    ;; Handle built-in Channel type
-    (= class-name "Channel")
-    (do
-      (cond
-        (nil? constructor)
-        nil
-
-        (= constructor "with_capacity")
-        (do
-          (when-not (= 1 (count args))
-            (throw (ex-info "Channel.with_capacity expects 1 argument"
-                            {:error (type-error "Channel.with_capacity expects exactly 1 Integer argument")})))
-          (let [arg-type (check-expression env (first args))]
-            (when-not (types-compatible? env arg-type "Integer")
-              (throw (ex-info "Channel.with_capacity requires Integer capacity"
-                              {:error (type-error
-                                       (str "Channel.with_capacity expects Integer, got "
-                                            (display-type arg-type)))})))))
-
-        :else
-        (throw (ex-info (str "Constructor not found: Channel." constructor)
-                        {:error (type-error (str "Constructor not found: Channel." constructor))})))
-      (if (seq generic-args)
-        {:base-type "Channel" :type-args generic-args}
-        "Channel"))
     :else
-    (do
-      ;; Check if class exists
-      (when-not (or (env-lookup-class env class-name) (builtin-type? class-name))
-        (throw (ex-info (str "Undefined class: " class-name)
-                        {:error (type-error (str "Undefined class: " class-name))})))
-      (let [class-def (env-lookup-class env class-name)]
-        (when (:deferred? class-def)
-          (throw (ex-info (str "Cannot instantiate deferred class: " class-name)
+    (throw (ex-info (str "Constructor not found: Channel." constructor)
+                    {:error (type-error (str "Constructor not found: Channel." constructor))})))
+  (if (seq generic-args)
+    {:base-type "Channel" :type-args generic-args}
+    "Channel"))
+
+(def ^:private check-create-builtin-dispatch
+  "class-name -> (fn [env expr] ...): the built-in-type half of
+   `check-create`. A class name with no entry here falls through to
+   `check-create-user-class`, which also handles Map/Set — registered as
+   ordinary generic classes rather than special-cased here."
+  {"Array"            check-create-array
+   "Console"          check-create-console
+   "Process"          check-create-process
+   "Min_Heap"         check-create-min-heap
+   "Atomic_Integer"   (check-create-single-arg-atomic "Atomic_Integer" "Integer")
+   "Atomic_Integer64" (check-create-single-arg-atomic "Atomic_Integer64" "Integer")
+   "Atomic_Boolean"   (check-create-single-arg-atomic "Atomic_Boolean" "Boolean")
+   "Atomic_Reference" check-create-atomic-reference
+   "Channel"          check-create-channel})
+
+(defn- check-create-user-class
+  [env {:keys [class-name generic-args constructor args]}]
+  ;; Check if class exists
+  (when-not (or (env-lookup-class env class-name) (builtin-type? class-name))
+    (throw (ex-info (str "Undefined class: " class-name)
+                    {:error (type-error (str "Undefined class: " class-name))})))
+  (let [class-def (env-lookup-class env class-name)]
+    (when (:deferred? class-def)
+      (throw (ex-info (str "Cannot instantiate deferred class: " class-name)
+                      {:error (type-error
+                               (str "Cannot instantiate deferred class " class-name
+                                    "; instantiate a concrete child class instead"))})))
+    ;; Imported Java classes have no Nex constructor signatures; skip validation.
+    (if (and class-def (:import class-def))
+      (if (seq generic-args)
+        (do (validate-generic-args env class-name generic-args)
+            {:base-type class-name :type-args generic-args})
+        class-name)
+      (let [constructors (lookup-class-constructors env class-name)
+            has-constructors? (seq constructors)
+            ctor-name (or constructor "make")
+            ctor-sig (lookup-class-method env class-name ctor-name)
+            gparams (:generic-params class-def)
+            arg-types (when (and (or constructor (seq args)) ctor-sig)
+                        (mapv #(check-expression env %) args))
+            ;; When type arguments are not written explicitly, infer them from
+            ;; the constructor's argument types (`create Ok.make(5)` ->
+            ;; Ok[Integer, Any]); parameters not mentioned by the constructor
+            ;; stay `Any`. Explicit `[…]` remains authoritative.
+            inferred-map (when (and (empty? generic-args) (seq gparams) ctor-sig (seq args))
+                           (reduce (fn [acc [arg-type param]]
+                                     (merge-inferred-generic-bindings
+                                      env acc
+                                      (infer-generic-type-map-from-arg
+                                       env (set (map :name gparams)) (:type param) arg-type)))
+                                   {}
+                                   (map vector arg-types (:params ctor-sig))))
+            target-type (cond
+                          (seq generic-args)
+                          (do (validate-generic-args env class-name generic-args)
+                              {:base-type class-name :type-args generic-args})
+                          (and (seq gparams) inferred-map)
+                          {:base-type class-name
+                           :type-args (mapv #(get inferred-map (:name %) "Any") gparams)}
+                          :else class-name)
+            type-map (build-generic-type-map env target-type)]
+        ;; If class defines constructors, disallow implicit default create.
+        (when (and has-constructors?
+                   (nil? constructor)
+                   (empty? args))
+          (throw (ex-info (str "Constructor required for class " class-name)
                           {:error (type-error
-                                   (str "Cannot instantiate deferred class " class-name
-                                        "; instantiate a concrete child class instead"))})))
-        ;; Imported Java classes have no Nex constructor signatures; skip validation.
-        (if (and class-def (:import class-def))
-          (if (seq generic-args)
-            (do (validate-generic-args env class-name generic-args)
-                {:base-type class-name :type-args generic-args})
-            class-name)
-          (let [constructors (lookup-class-constructors env class-name)
-                has-constructors? (seq constructors)
-                ctor-name (or constructor "make")
-                ctor-sig (lookup-class-method env class-name ctor-name)
-                gparams (:generic-params class-def)
-                arg-types (when (and (or constructor (seq args)) ctor-sig)
-                            (mapv #(check-expression env %) args))
-                ;; When type arguments are not written explicitly, infer them from
-                ;; the constructor's argument types (`create Ok.make(5)` ->
-                ;; Ok[Integer, Any]); parameters not mentioned by the constructor
-                ;; stay `Any`. Explicit `[…]` remains authoritative.
-                inferred-map (when (and (empty? generic-args) (seq gparams) ctor-sig (seq args))
-                               (reduce (fn [acc [arg-type param]]
-                                         (merge-inferred-generic-bindings
-                                          env acc
-                                          (infer-generic-type-map-from-arg
-                                           env (set (map :name gparams)) (:type param) arg-type)))
-                                       {}
-                                       (map vector arg-types (:params ctor-sig))))
-                target-type (cond
-                              (seq generic-args)
-                              (do (validate-generic-args env class-name generic-args)
-                                  {:base-type class-name :type-args generic-args})
-                              (and (seq gparams) inferred-map)
-                              {:base-type class-name
-                               :type-args (mapv #(get inferred-map (:name %) "Any") gparams)}
-                              :else class-name)
-                type-map (build-generic-type-map env target-type)]
-            ;; If class defines constructors, disallow implicit default create.
-            (when (and has-constructors?
-                       (nil? constructor)
-                       (empty? args))
-              (throw (ex-info (str "Constructor required for class " class-name)
+                                   (str "Class " class-name
+                                        " defines constructors; use an explicit constructor call, e.g. create "
+                                        class-name ".<ctor>(...)"))})))
+        (when (or constructor (seq args))
+          (when-not ctor-sig
+            (throw (ex-info (str "Constructor not found: " class-name "." ctor-name)
+                            {:error (type-error
+                                     (str "Constructor not found: " class-name "." ctor-name))})))
+          (let [params (:params ctor-sig)]
+            (when (not= (count params) (count args))
+              (throw (ex-info (str "Constructor argument count mismatch for " class-name "." ctor-name)
                               {:error (type-error
-                                       (str "Class " class-name
-                                            " defines constructors; use an explicit constructor call, e.g. create "
-                                            class-name ".<ctor>(...)"))})))
-            (when (or constructor (seq args))
-              (when-not ctor-sig
-                (throw (ex-info (str "Constructor not found: " class-name "." ctor-name)
-                                {:error (type-error
-                                         (str "Constructor not found: " class-name "." ctor-name))})))
-              (let [params (:params ctor-sig)]
-                (when (not= (count params) (count args))
-                  (throw (ex-info (str "Constructor argument count mismatch for " class-name "." ctor-name)
+                                       (str "Expected " (count params) " args, got "
+                                            (count args)))})))
+            (doseq [[arg-type param] (map vector arg-types params)]
+              (let [param-type (resolve-generic-type (:type param) type-map)]
+                (when-not (types-compatible? env arg-type param-type)
+                  (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
                                   {:error (type-error
-                                           (str "Expected " (count params) " args, got "
-                                                (count args)))})))
-                (doseq [[arg-type param] (map vector arg-types params)]
-                  (let [param-type (resolve-generic-type (:type param) type-map)]
-                    (when-not (types-compatible? env arg-type param-type)
-                      (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
-                                      {:error (type-error
-                                               (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))))
-            target-type))))))
+                                           (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))))
+        target-type))))
+
+(defn check-create
+  "Check the type of a create expression"
+  [env {:keys [class-name] :as expr}]
+  (if-let [handler (get check-create-builtin-dispatch class-name)]
+    (handler env expr)
+    (check-create-user-class env expr)))
+
 
 (defn check-array-literal
   "Check the type of an array literal"
