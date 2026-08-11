@@ -139,6 +139,27 @@
 (def nex-process-getenv rt/nex-process-getenv)
 (def nex-process-setenv rt/nex-process-setenv)
 (def nex-process-command-line rt/nex-process-command-line)
+(def nex-process-is-self rt/nex-process-is-self)
+(def nex-process-is-child rt/nex-process-is-child)
+(def nex-process-set-working-directory rt/nex-process-set-working-directory)
+(def nex-process-set-redirect-error-to-output rt/nex-process-set-redirect-error-to-output)
+(def nex-process-start rt/nex-process-start)
+(def nex-process-is-started rt/nex-process-is-started)
+(def nex-process-is-alive rt/nex-process-is-alive)
+(def nex-process-pid rt/nex-process-pid)
+(def nex-process-wait rt/nex-process-wait)
+(def nex-process-wait-timeout rt/nex-process-wait-timeout)
+(def nex-process-exit-code rt/nex-process-exit-code)
+(def nex-process-terminate rt/nex-process-terminate)
+(def nex-process-kill rt/nex-process-kill)
+(def nex-process-write rt/nex-process-write)
+(def nex-process-write-line rt/nex-process-write-line)
+(def nex-process-close-stdin rt/nex-process-close-stdin)
+(def nex-process-read-line rt/nex-process-read-line)
+(def nex-process-read-all rt/nex-process-read-all)
+(def nex-process-read-error-line rt/nex-process-read-error-line)
+(def nex-process-read-error-all rt/nex-process-read-error-all)
+(def nex-process-to-string rt/nex-process-to-string)
 
 ;; ---------------------------------------------------------------------------
 ;; Engine hooks. The builtin library is engine-neutral; the pieces that need
@@ -837,9 +858,45 @@
     "read_real"    ^{:returns "Real"} (fn [_ & _] (nex-parse-real (nex-console-read-line)))}
 
    :Process
-   {"getenv"       ^{:returns "String"} (fn [_ name & _] (or (nex-process-getenv (str name)) ""))
-    "setenv"       ^{:returns "Void"} (fn [_ name value & _] (nex-process-setenv (str name) (str value)) nil)
-    "command_line" ^{:returns {:base-type "Array" :type-params ["String"]}} (fn [_ & _] (nex-process-command-line))}
+   {"getenv"       ^{:returns "String"} (fn [proc name & _] (or (nex-process-getenv proc (str name)) ""))
+    "setenv"       ^{:returns "Void"} (fn [proc name value & _] (nex-process-setenv proc (str name) (str value)) nil)
+    "command_line" ^{:returns {:base-type "Array" :type-params ["String"]}} (fn [proc & _] (nex-process-command-line proc))
+
+    "is_self"      ^{:returns "Boolean"} (fn [proc & _] (nex-process-is-self proc))
+    "is_child"     ^{:returns "Boolean"} (fn [proc & _] (nex-process-is-child proc))
+
+    "set_working_directory"        ^{:returns "Void"} (fn [proc dir & _] (nex-process-set-working-directory proc (str dir)))
+    "set_redirect_error_to_output" ^{:returns "Void"} (fn [proc flag & _] (nex-process-set-redirect-error-to-output proc (boolean flag)))
+
+    "start"        ^{:returns "Void"} (fn [proc & _] (nex-process-start proc))
+    "is_started"   ^{:returns "Boolean"} (fn [proc & _] (nex-process-is-started proc))
+    "is_alive"     ^{:returns "Boolean"} (fn [proc & _] (nex-process-is-alive proc))
+    "pid"          ^{:returns "Integer"} (fn [proc & _] (nex-process-pid proc))
+
+    ;; wait() never actually returns nil (it blocks until exit), but the JVM
+    ;; lowering's static return type is keyed by method name only, not arity
+    ;; — see builtin-type-method-return-type — so both arities share the
+    ;; nullable declaration here. The typechecker itself (typechecker.clj)
+    ;; still gives wait() and wait(ms) their precise per-arity types.
+    "wait"         ^{:returns {:base-type "Integer" :detachable true}}
+                   (fn [proc & [timeout]]
+                     (if (some? timeout)
+                       (nex-process-wait-timeout proc timeout)
+                       (nex-process-wait proc)))
+    "exit_code"    ^{:returns {:base-type "Integer" :detachable true}} (fn [proc & _] (nex-process-exit-code proc))
+
+    "terminate"    ^{:returns "Void"} (fn [proc & _] (nex-process-terminate proc))
+    "kill"         ^{:returns "Void"} (fn [proc & _] (nex-process-kill proc))
+
+    "write"            ^{:returns "Void"} (fn [proc text & _] (nex-process-write proc (str text)))
+    "write_line"       ^{:returns "Void"} (fn [proc text & _] (nex-process-write-line proc (str text)))
+    "close_stdin"      ^{:returns "Void"} (fn [proc & _] (nex-process-close-stdin proc))
+    "read_line"        ^{:returns {:base-type "String" :detachable true}} (fn [proc & _] (nex-process-read-line proc))
+    "read_all"         ^{:returns "String"} (fn [proc & _] (nex-process-read-all proc))
+    "read_error_line"  ^{:returns {:base-type "String" :detachable true}} (fn [proc & _] (nex-process-read-error-line proc))
+    "read_error_all"   ^{:returns "String"} (fn [proc & _] (nex-process-read-error-all proc))
+
+    "to_string"    ^{:returns "String"} (fn [proc & _] (nex-process-to-string proc))}
 
    :ArrayCursor
    {"start"   (fn [c & _] (reset! (:index c) 0) nil)

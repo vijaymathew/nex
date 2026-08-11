@@ -220,6 +220,162 @@ end"
       (is (:success result)))))
 
 ;; ============================================================================
+;; PROCESS SPAWN INTERPRETER TESTS
+;; ============================================================================
+
+(deftest process-self-vs-child-test
+  (testing "bare create Process and Process.self are self; Process.command is a child"
+    (let [self1 (rt/nex-process-self)
+          self2 {:nex-builtin-type :Process}]
+      (is (interp/call-builtin-method "p" self1 "is_self" []))
+      (is (not (interp/call-builtin-method "p" self1 "is_child" [])))
+      ;; An untagged map (no :self? key) — the shape produced by an
+      ;; uninitialized `feature x: Process` field and older code — must still
+      ;; behave as self, not silently misclassify as a child with no state.
+      (is (interp/call-builtin-method "p" self2 "is_self" [])))
+    (let [child (rt/nex-process-command "echo" ["hi"])]
+      (is (not (interp/call-builtin-method "p" child "is_self" [])))
+      (is (interp/call-builtin-method "p" child "is_child" [])))))
+
+(deftest process-command-single-string-splits-on-whitespace-test
+  (testing "command(str) splits into argv the same as command(str, args)"
+    (let [child (rt/nex-process-command "echo hello world")]
+      (is (= "echo" (:command child)))
+      (is (= ["hello" "world"] (:arguments child))))))
+
+(deftest process-spawn-echo-test
+  (testing "a spawned child can be started and its stdout read"
+    (let [child (rt/nex-process-command "echo" ["hello"])]
+      (is (not (interp/call-builtin-method "p" child "is_started" [])))
+      (interp/call-builtin-method "p" child "start" [])
+      (is (interp/call-builtin-method "p" child "is_started" []))
+      (is (= "hello" (interp/call-builtin-method "p" child "read_line" [])))
+      (is (= 0 (interp/call-builtin-method "p" child "wait" [])))
+      (is (= 0 (interp/call-builtin-method "p" child "exit_code" []))))))
+
+(deftest process-spawn-stdin-roundtrip-test
+  (testing "writing to a child's stdin and reading its echoed stdout"
+    (let [child (rt/nex-process-command "cat" [])]
+      (interp/call-builtin-method "p" child "start" [])
+      (interp/call-builtin-method "p" child "write_line" ["ping"])
+      (interp/call-builtin-method "p" child "close_stdin" [])
+      (is (= "ping" (interp/call-builtin-method "p" child "read_line" [])))
+      (is (= 0 (interp/call-builtin-method "p" child "wait" []))))))
+
+(deftest process-start-on-self-is-noop-test
+  (testing "start() on the self process does nothing and never raises"
+    (let [self (rt/nex-process-self)]
+      (interp/call-builtin-method "p" self "start" [])
+      (is (interp/call-builtin-method "p" self "is_started" [])))))
+
+(deftest process-child-only-methods-raise-on-self-test
+  (testing "wait/kill/terminate/stdio raise when called on the self process"
+    (let [self (rt/nex-process-self)]
+      (is (thrown? Exception (interp/call-builtin-method "p" self "wait" [])))
+      (is (thrown? Exception (interp/call-builtin-method "p" self "kill" [])))
+      (is (thrown? Exception (interp/call-builtin-method "p" self "read_line" []))))))
+
+(deftest process-methods-raise-before-start-test
+  (testing "child-only lifecycle methods raise before start()"
+    (let [child (rt/nex-process-command "echo" ["hi"])]
+      (is (thrown? Exception (interp/call-builtin-method "p" child "wait" [])))
+      (is (thrown? Exception (interp/call-builtin-method "p" child "read_line" []))))))
+
+(deftest process-double-start-raises-test
+  (testing "start() a second time raises"
+    (let [child (rt/nex-process-command "echo" ["hi"])]
+      (interp/call-builtin-method "p" child "start" [])
+      (is (thrown? Exception (interp/call-builtin-method "p" child "start" [])))
+      (interp/call-builtin-method "p" child "wait" []))))
+
+(deftest process-child-setenv-getenv-test
+  (testing "setenv/getenv on a child configure its own environment before start"
+    (let [child (rt/nex-process-command "echo" ["hi"])]
+      (interp/call-builtin-method "p" child "setenv" ["NEX_TEST_VAR" "abc"])
+      (is (= "abc" (interp/call-builtin-method "p" child "getenv" ["NEX_TEST_VAR"])))
+      (interp/call-builtin-method "p" child "start" [])
+      (interp/call-builtin-method "p" child "wait" [])
+      (is (thrown? Exception
+                   (interp/call-builtin-method "p" child "setenv" ["NEX_TEST_VAR" "xyz"]))))))
+
+(deftest process-child-command-line-test
+  (testing "command_line on a child returns its own launch argv"
+    (let [child (rt/nex-process-command "echo" ["a" "b"])]
+      (is (= ["echo" "a" "b"]
+             (vec (interp/call-builtin-method "p" child "command_line" [])))))))
+
+(deftest process-redirect-error-to-output-test
+  (testing "set_redirect_error_to_output merges stderr into stdout"
+    (let [child (rt/nex-process-command "sh" ["-c" "echo err 1>&2"])]
+      (interp/call-builtin-method "p" child "set_redirect_error_to_output" [true])
+      (interp/call-builtin-method "p" child "start" [])
+      (is (= "err" (interp/call-builtin-method "p" child "read_line" [])))
+      (interp/call-builtin-method "p" child "wait" []))))
+
+(deftest process-kill-test
+  (testing "kill() forcibly terminates a running child"
+    (let [child (rt/nex-process-command "sleep" ["30"])]
+      (interp/call-builtin-method "p" child "start" [])
+      (is (interp/call-builtin-method "p" child "is_alive" []))
+      (interp/call-builtin-method "p" child "kill" [])
+      (interp/call-builtin-method "p" child "wait" [])
+      (is (not (interp/call-builtin-method "p" child "is_alive" []))))))
+
+;; ============================================================================
+;; PROCESS SPAWN TYPECHECKER TESTS
+;; ============================================================================
+
+(deftest typechecker-process-command-constructor-test
+  (testing "Typechecker accepts Process.command in both arities"
+    (let [code "class Main
+  feature
+    demo() do
+      let p1: Process := create Process.command(\"ls -lat\")
+      let p2: Process := create Process.command(\"ls\", [\"-lat\"])
+      let p3: Process := create Process.self
+    end
+end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result)))))
+
+(deftest typechecker-process-spawn-methods-test
+  (testing "Typechecker accepts the child lifecycle/IO methods"
+    (let [code "class Main
+  feature
+    demo() do
+      let p: Process := create Process.command(\"echo\", [\"hi\"])
+      p.set_working_directory(\"/tmp\")
+      p.set_redirect_error_to_output(true)
+      p.start()
+      let started: Boolean := p.is_started()
+      let alive: Boolean := p.is_alive()
+      let id: Integer := p.pid()
+      let line: ?String := p.read_line()
+      let all: String := p.read_all()
+      p.write_line(\"x\")
+      p.close_stdin()
+      let code1: Integer := p.wait()
+      let code2: ?Integer := p.wait(1000)
+      let ec: ?Integer := p.exit_code()
+      p.terminate()
+      p.kill()
+    end
+end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result)))))
+
+(deftest typechecker-process-command-requires-string-test
+  (testing "Process.command rejects a non-String command"
+    (let [code "class Main
+  feature
+    demo() do
+      let p: Process := create Process.command(42)
+    end
+end"
+          result (tc/type-check (p/ast code))]
+      (is (not (:success result))))))
+
+;; ============================================================================
 ;; OUTPUT ORDERING
 ;; ============================================================================
 

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **New: `Process` can spawn and control child OS processes.**
+  `create Process.command("ls -lat")` (shell-word split) or
+  `create Process.command("ls", ["-lat"])` (explicit argv) build a child
+  process that isn't started until `start()` is called, so
+  `set_working_directory`/`set_redirect_error_to_output`/`setenv` can
+  configure it first. Once started, a child exposes `is_alive`/`pid`,
+  `wait`/`wait(timeout_ms)`/`exit_code`, `terminate`/`kill`, and
+  line-oriented reads/writes on its stdin/stdout/stderr
+  (`read_line`/`read_all`/`write`/`write_line`/`close_stdin`, plus
+  `read_error_line`/`read_error_all`). `create Process`/`create
+  Process.self` keep referring to the running Nex program itself, as
+  before — `getenv`/`setenv`/`command_line` now also work meaningfully on
+  a child (its own configured environment and launch argv). Every
+  child-only method raises if called on the self process or before/after
+  the wrong point in the child's lifecycle. See `docs/ref/system-classes.md`.
+
 ## 0.3.3 - 2026-08-07
 
 - **New: a Nex class can `inherit` a Java interface or a concrete Java

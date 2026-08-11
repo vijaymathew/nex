@@ -719,10 +719,232 @@
             (.close raf))
   nil)
 
-(defn nex-process-getenv [name]
-  (System/getenv name))
-(defn nex-process-setenv [name value]
-  (throw (ex-info "Setting env vars not supported on JVM" {})))
+;; ---------------------------------------------------------------------------
+;; Process: either the "self" process (the running Nex program) or a spawned
+;; child. A self instance is {:nex-builtin-type :Process :self? true}. A
+;; child instance additionally carries :command/:arguments (its launch argv),
+;; a :process-builder (java.lang.ProcessBuilder, mutable up to start()), and
+;; :state — an atom holding everything that changes once start() runs (the
+;; live java.lang.Process plus its stdin/stdout/stderr streams). Keeping all
+;; of that inside one atom, the same trick Channel/Atomic_Integer use, lets
+;; the outer map stay an ordinary immutable Clojure map while every method
+;; call still mutates the one true instance.
+
+(defn nex-process-self []
+  {:nex-builtin-type :Process :self? true})
+
+(defn- process-self?
+  "True for a self instance. :self? is missing (not just true) on the plain
+   {:nex-builtin-type :Process} map that default-initialized `feature x:
+   Process` fields and older code still produce, so treat 'missing' as self
+   too — only an explicit `:self? false` (a spawned child) says otherwise."
+  [proc]
+  (not (false? (:self? proc))))
+
+(defn- process-split-command-line
+  "Minimal shell-word split: whitespace-separated, honoring '...' and \"...\"
+   grouping (no escape-character support). This is what the single-string
+   `command(str)` constructor uses; callers who need exact argv control
+   (spaces inside an argument, etc.) should use `command(str, args)` instead."
+  [command]
+  (let [len (count command)]
+    (loop [i 0 words [] current nil quote-char nil]
+      (if (>= i len)
+        (cond-> words (some? current) (conj current))
+        (let [c (.charAt ^String command i)]
+          (cond
+            (some? quote-char)
+            (if (= c quote-char)
+              (recur (inc i) words (or current "") nil)
+              (recur (inc i) words (str (or current "") c) quote-char))
+
+            (or (= c \") (= c \'))
+            (recur (inc i) words (or current "") c)
+
+            (Character/isWhitespace c)
+            (if (some? current)
+              (recur (inc i) (conj words current) nil nil)
+              (recur (inc i) words nil nil))
+
+            :else
+            (recur (inc i) words (str (or current "") c) nil)))))))
+
+(defn nex-process-command
+  ([full-command]
+   (let [words (process-split-command-line (str full-command))]
+     (nex-process-command (first words) (vec (rest words)))))
+  ([command arguments]
+   (let [command (str command)
+         arguments (mapv str arguments)
+         argv (java.util.ArrayList. ^java.util.Collection (into [command] arguments))
+         pb (java.lang.ProcessBuilder. ^java.util.List argv)]
+     {:nex-builtin-type :Process
+      :self? false
+      :command command
+      :arguments arguments
+      :process-builder pb
+      :state (atom {:started? false :process nil
+                    :stdin nil :stdout nil :stderr nil})})))
+
+(defn- process-require-child!
+  [proc]
+  (when (process-self? proc)
+    (throw (ex-info "Process: this operation is not supported on the current process" {}))))
+
+(defn- process-require-not-started!
+  [proc]
+  (process-require-child! proc)
+  (when (:started? @(:state proc))
+    (throw (ex-info "Process: the process has already been started" {}))))
+
+(defn- process-require-started!
+  [proc]
+  (process-require-child! proc)
+  (when-not (:started? @(:state proc))
+    (throw (ex-info "Process: the process has not been started" {}))))
+
+(defn nex-process-is-self [proc] (boolean (process-self? proc)))
+(defn nex-process-is-child [proc] (not (process-self? proc)))
+
+(defn nex-process-set-working-directory [proc dir]
+  (process-require-not-started! proc)
+  (.directory ^java.lang.ProcessBuilder (:process-builder proc) (java.io.File. (str dir)))
+  nil)
+
+(defn nex-process-set-redirect-error-to-output [proc flag]
+  (process-require-not-started! proc)
+  (.redirectErrorStream ^java.lang.ProcessBuilder (:process-builder proc) (boolean flag))
+  nil)
+
+(defn nex-process-start [proc]
+  (if (process-self? proc)
+    nil
+    (do
+      (process-require-not-started! proc)
+      (let [^java.lang.ProcessBuilder pb (:process-builder proc)
+            merged-error? (.redirectErrorStream pb)
+            ^java.lang.Process p (try
+                                    (.start pb)
+                                    (catch java.io.IOException e
+                                      (throw (ex-info (str "Process: failed to start '" (:command proc)
+                                                            "': " (.getMessage e))
+                                                      {}))))
+            stdin (java.io.BufferedWriter. (java.io.OutputStreamWriter. (.getOutputStream p)))
+            stdout (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream p)))
+            stderr (when-not merged-error?
+                     (java.io.BufferedReader. (java.io.InputStreamReader. (.getErrorStream p))))]
+        (reset! (:state proc) {:started? true :process p
+                               :stdin stdin :stdout stdout :stderr stderr})
+        nil))))
+
+(defn nex-process-is-started [proc]
+  (if (process-self? proc) true (:started? @(:state proc))))
+
+(defn nex-process-is-alive [proc]
+  (if (process-self? proc)
+    true
+    (let [{:keys [started? ^java.lang.Process process]} @(:state proc)]
+      (boolean (and started? (.isAlive process))))))
+
+(defn nex-process-pid [proc]
+  (if (process-self? proc)
+    (.pid (java.lang.ProcessHandle/current))
+    (do
+      (process-require-started! proc)
+      (.pid ^java.lang.Process (:process @(:state proc))))))
+
+(defn nex-process-wait [proc]
+  (process-require-started! proc)
+  (try
+    (.waitFor ^java.lang.Process (:process @(:state proc)))
+    (catch InterruptedException _
+      (throw (ex-info "Process: interrupted while waiting" {})))))
+
+(defn nex-process-wait-timeout [proc timeout-ms]
+  (process-require-started! proc)
+  (let [^java.lang.Process p (:process @(:state proc))]
+    (try
+      (if (.waitFor p (long timeout-ms) java.util.concurrent.TimeUnit/MILLISECONDS)
+        (.exitValue p)
+        nil)
+      (catch InterruptedException _
+        (throw (ex-info "Process: interrupted while waiting" {}))))))
+
+(defn nex-process-exit-code [proc]
+  (when-not (process-self? proc)
+    (let [{:keys [started? ^java.lang.Process process]} @(:state proc)]
+      (when (and started? (not (.isAlive process)))
+        (.exitValue process)))))
+
+(defn nex-process-terminate [proc]
+  (process-require-started! proc)
+  (.destroy ^java.lang.Process (:process @(:state proc)))
+  nil)
+
+(defn nex-process-kill [proc]
+  (process-require-started! proc)
+  (.destroyForcibly ^java.lang.Process (:process @(:state proc)))
+  nil)
+
+(defn nex-process-write [proc text]
+  (process-require-started! proc)
+  (let [^java.io.BufferedWriter w (:stdin @(:state proc))]
+    (.write w (str text))
+    (.flush w))
+  nil)
+
+(defn nex-process-write-line [proc text]
+  (process-require-started! proc)
+  (let [^java.io.BufferedWriter w (:stdin @(:state proc))]
+    (.write w (str text))
+    (.newLine w)
+    (.flush w))
+  nil)
+
+(defn nex-process-close-stdin [proc]
+  (process-require-started! proc)
+  (.close ^java.io.BufferedWriter (:stdin @(:state proc)))
+  nil)
+
+(defn nex-process-read-line [proc]
+  (process-require-started! proc)
+  (.readLine ^java.io.BufferedReader (:stdout @(:state proc))))
+
+(defn nex-process-read-all [proc]
+  (process-require-started! proc)
+  (or (slurp ^java.io.BufferedReader (:stdout @(:state proc))) ""))
+
+(defn nex-process-read-error-line [proc]
+  (process-require-started! proc)
+  (when-let [^java.io.BufferedReader r (:stderr @(:state proc))]
+    (.readLine r)))
+
+(defn nex-process-read-error-all [proc]
+  (process-require-started! proc)
+  (if-let [^java.io.BufferedReader r (:stderr @(:state proc))]
+    (or (slurp r) "")
+    ""))
+
+(defn nex-process-to-string [proc]
+  (if (process-self? proc)
+    "Process(self)"
+    (str "Process(" (:command proc)
+        (when (seq (:arguments proc)) (str " " (str/join " " (:arguments proc))))
+        ")")))
+
+(defn nex-process-getenv [proc name]
+  (if (process-self? proc)
+    (System/getenv name)
+    (get (.environment ^java.lang.ProcessBuilder (:process-builder proc)) name)))
+
+(defn nex-process-setenv [proc name value]
+  (if (process-self? proc)
+    (throw (ex-info "Setting env vars not supported on JVM" {}))
+    (do
+      (when (:started? @(:state proc))
+        (throw (ex-info "Process: cannot set an environment variable after start()" {})))
+      (.put (.environment ^java.lang.ProcessBuilder (:process-builder proc)) name value)
+      nil)))
 
 ;; The program's own argv — the args a user passed after the script/jar name,
 ;; e.g. `nex report.nex --format csv` or `java -jar report.jar --format csv`.
@@ -747,8 +969,10 @@
   (reset! program-args-atom (vec args))
   nil)
 
-(defn nex-process-command-line []
-  (nex-array-from @program-args-atom))
+(defn nex-process-command-line [proc]
+  (if (process-self? proc)
+    (nex-array-from @program-args-atom)
+    (nex-array-from (into [(:command proc)] (:arguments proc)))))
 
 (defn nex-console? [v] (and (map? v) (= (:nex-builtin-type v) :Console)))
 (defn nex-process? [v] (and (map? v) (= (:nex-builtin-type v) :Process)))
