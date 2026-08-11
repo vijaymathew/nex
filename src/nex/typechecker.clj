@@ -4753,10 +4753,8 @@
 ;; Program Type Checking
 ;;
 
-(defn register-builtin-methods
-  "Register method signatures for built-in types."
+(defn- register-any-protocol!
   [env]
-  ;; Built-in deferred protocol classes
   (env-add-class env "Any" {:name "Any"
                             :deferred? false
                             :generic-params nil
@@ -4767,8 +4765,10 @@
            "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
            "hash" {:params [] :return-type "Integer"}
            "clone" {:params [] :return-type "Any"}}]
-    (env-add-method env "Any" method-name sig))
+    (env-add-method env "Any" method-name sig)))
 
+(defn- register-comparable-protocol!
+  [env]
   (env-add-class env "Comparable" {:name "Comparable"
                                    :deferred? true
                                    :generic-params nil
@@ -4776,8 +4776,10 @@
                                    :body []})
   (env-add-method env "Comparable" "compare"
                   {:params [{:name "a" :type "Any"}]
-                   :return-type "Integer"})
+                   :return-type "Integer"}))
 
+(defn- register-hashable-protocol!
+  [env]
   (env-add-class env "Hashable" {:name "Hashable"
                                  :deferred? true
                                  :generic-params nil
@@ -4785,9 +4787,11 @@
                                  :body []})
   (env-add-method env "Hashable" "hash"
                   {:params []
-                   :return-type "Integer"})
+                   :return-type "Integer"}))
 
-  ;; Built-in scalar classes implement Comparable + Hashable
+;; Built-in scalar classes implement Comparable + Hashable
+(defn- register-scalar-classes!
+  [env]
   (doseq [scalar ["String" "Integer" "Real" "Boolean" "Char"]]
     (env-add-class env scalar {:name scalar
                                :deferred? false
@@ -4799,8 +4803,10 @@
                      :return-type "Integer"})
     (env-add-method env scalar "hash"
                     {:params []
-                     :return-type "Integer"}))
+                     :return-type "Integer"})))
 
+(defn- register-integer-methods!
+  [env]
   (doseq [[method-name sig]
           {"to_string" {:params [] :return-type "String"}
            "to_integer" {:params [] :return-type "Integer"}
@@ -4821,7 +4827,24 @@
            "greater_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
            "greater_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}}]
     (env-add-method env "Integer" method-name sig))
+  (env-add-method env "Integer" "to_char" {:params [] :return-type "Char"})
+  (doseq [[method-name sig]
+          {"bitwise_left_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_right_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_logical_right_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_rotate_left" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_rotate_right" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_is_set" {:params [{:name "n" :type "Integer"}] :return-type "Boolean"}
+           "bitwise_set" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_unset" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
+           "bitwise_and" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
+           "bitwise_or" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
+           "bitwise_xor" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
+           "bitwise_not" {:params [] :return-type "Integer"}}]
+    (env-add-method env "Integer" method-name sig)))
 
+(defn- register-real-methods!
+  [env]
   (doseq [[method-name sig]
           {"to_string" {:params [] :return-type "String"}
            "to_integer" {:params [] :return-type "Integer"}
@@ -4845,32 +4868,19 @@
            "less_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
            "greater_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
            "greater_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}}]
-    (env-add-method env "Real" method-name sig))
+    (env-add-method env "Real" method-name sig)))
 
-  (env-add-method env "Integer" "to_char" {:params [] :return-type "Char"})
-
+(defn- register-char-methods!
+  [env]
   (doseq [[method-name sig]
           {"to_string"   {:params [] :return-type "String"}
            "to_upper"    {:params [] :return-type "String"}
            "to_lower"    {:params [] :return-type "String"}
            "to_integer"  {:params [] :return-type "Integer"}}]
-    (env-add-method env "Char" method-name sig))
+    (env-add-method env "Char" method-name sig)))
 
-  (doseq [[method-name sig]
-          {"bitwise_left_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_right_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_logical_right_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_rotate_left" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_rotate_right" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_is_set" {:params [{:name "n" :type "Integer"}] :return-type "Boolean"}
-           "bitwise_set" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_unset" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_and" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
-           "bitwise_or" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
-           "bitwise_xor" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
-           "bitwise_not" {:params [] :return-type "Integer"}}]
-    (env-add-method env "Integer" method-name sig))
-
+(defn- register-string-methods!
+  [env]
   (doseq [[method-name sig]
           {"length"      {:params [] :return-type "Integer"}
            "index_of"    {:params [{:name "substr" :type "String"}] :return-type "Integer"}
@@ -4903,7 +4913,10 @@
            ;; value; the capability is real, so it is declared where the other
            ;; cursor-bearing builtins declare theirs.
            "cursor"      {:params [] :return-type "Cursor"}}]
-    (env-add-method env "String" method-name sig))
+    (env-add-method env "String" method-name sig)))
+
+(defn- register-console-methods!
+  [env]
   (doseq [[method-name sig]
           {"print" {:params [{:name "msg" :type "String"}] :return-type "Void"}
            "print_line" {:params [{:name "msg" :type "String"}] :return-type "Void"}
@@ -4918,7 +4931,10 @@
   (env-add-method env "Console" "read_line"
                   {:params [] :return-type "String"})
   (env-add-method env "Console" "read_line"
-                  {:params [{:name "prompt" :type "String"}] :return-type "String"})
+                  {:params [{:name "prompt" :type "String"}] :return-type "String"}))
+
+(defn- register-task-methods!
+  [env]
   (env-add-class env "Task" {:name "Task"
                              :generic-params [{:name "T"}]})
   (doseq [[method-name sig]
@@ -4926,7 +4942,10 @@
            "cancel"  {:params [] :return-type "Boolean"}
            "is_done" {:params [] :return-type "Boolean"}
            "is_cancelled" {:params [] :return-type "Boolean"}}]
-    (env-add-method env "Task" method-name sig))
+    (env-add-method env "Task" method-name sig)))
+
+(defn- register-process-methods!
+  [env]
   (env-add-class env "Process" {:name "Process"
                                 :generic-params nil})
   (doseq [[method-name sig]
@@ -4963,8 +4982,10 @@
   (env-add-method env "Process" "wait" {:params [] :return-type "Integer"})
   (env-add-method env "Process" "wait"
                   {:params [{:name "timeout_ms" :type "Integer"}]
-                   :return-type {:base-type "Integer" :detachable true}})
-  ;; Register Array[T] class and methods
+                   :return-type {:base-type "Integer" :detachable true}}))
+
+(defn- register-array-methods!
+  [env]
   (env-add-class env "Array" {:name "Array"
                                :generic-params [{:name "T"}]})
   (env-add-method env "Array" "filled"
@@ -5006,9 +5027,10 @@
            "equals"      {:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}] :return-type "Boolean"}
            "clone"       {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
            "cursor"      {:params [] :return-type "Cursor"}}]
-    (env-add-method env "Array" method-name sig))
+    (env-add-method env "Array" method-name sig)))
 
-  ;; Register Map[K, V] class and methods
+(defn- register-map-methods!
+  [env]
   (env-add-class env "Map" {:name "Map"
                              :generic-params [{:name "K"} {:name "V"}]})
   (doseq [[method-name sig]
@@ -5027,9 +5049,10 @@
            "equals"       {:params [{:name "other" :type {:base-type "Map" :type-params ["K" "V"]}}] :return-type "Boolean"}
            "clone"        {:params [] :return-type {:base-type "Map" :type-params ["K" "V"]}}
            "cursor"       {:params [] :return-type "Cursor"}}]
-    (env-add-method env "Map" method-name sig))
+    (env-add-method env "Map" method-name sig)))
 
-  ;; Register Set[T] class and methods
+(defn- register-set-methods!
+  [env]
   (env-add-class env "Set" {:name "Set"
                             :generic-params [{:name "T"}]})
   (env-add-method env "Set" "from_array"
@@ -5053,9 +5076,10 @@
            "equals"               {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}] :return-type "Boolean"}
            "clone"                {:params [] :return-type {:base-type "Set" :type-params ["T"]}}
            "cursor"               {:params [] :return-type "Cursor"}}]
-    (env-add-method env "Set" method-name sig))
+    (env-add-method env "Set" method-name sig)))
 
-  ;; Register Min_Heap[T] class and methods
+(defn- register-min-heap-methods!
+  [env]
   (env-add-class env "Min_Heap" {:name "Min_Heap"
                                  :generic-params [{:name "T"}]})
   (env-add-method env "Min_Heap" "empty"
@@ -5072,13 +5096,17 @@
            "try_peek"        {:params [] :return-type {:base-type "T" :detachable true}}
            "size"            {:params [] :return-type "Integer"}
            "is_empty"        {:params [] :return-type "Boolean"}}]
-    (env-add-method env "Min_Heap" method-name sig))
+    (env-add-method env "Min_Heap" method-name sig)))
 
-  ;; Register atomic built-ins
-  (env-add-class env "Atomic_Integer" {:name "Atomic_Integer"})
-  (env-add-method env "Atomic_Integer" "make"
+;; Atomic_Integer and Atomic_Integer64 are both 64-bit atomics on the JVM
+;; (see nex.types.builtins) and share this exact method set — differing
+;; only in the class name.
+(defn- register-atomic-integer-like-methods!
+  [env class-name]
+  (env-add-class env class-name {:name class-name})
+  (env-add-method env class-name "make"
                   {:params [{:name "initial" :type "Integer"}]
-                   :return-type "Atomic_Integer"})
+                   :return-type class-name})
   (doseq [[method-name sig]
           {"load" {:params [] :return-type "Integer"}
            "store" {:params [{:name "value" :type "Integer"}] :return-type "Void"}
@@ -5089,24 +5117,10 @@
            "add_and_get" {:params [{:name "delta" :type "Integer"}] :return-type "Integer"}
            "increment" {:params [] :return-type "Integer"}
            "decrement" {:params [] :return-type "Integer"}}]
-    (env-add-method env "Atomic_Integer" method-name sig))
+    (env-add-method env class-name method-name sig)))
 
-  (env-add-class env "Atomic_Integer64" {:name "Atomic_Integer64"})
-  (env-add-method env "Atomic_Integer64" "make"
-                  {:params [{:name "initial" :type "Integer"}]
-                   :return-type "Atomic_Integer64"})
-  (doseq [[method-name sig]
-          {"load" {:params [] :return-type "Integer"}
-           "store" {:params [{:name "value" :type "Integer"}] :return-type "Void"}
-           "compare_and_set" {:params [{:name "expected" :type "Integer"}
-                                       {:name "update" :type "Integer"}]
-                              :return-type "Boolean"}
-           "get_and_add" {:params [{:name "delta" :type "Integer"}] :return-type "Integer"}
-           "add_and_get" {:params [{:name "delta" :type "Integer"}] :return-type "Integer"}
-           "increment" {:params [] :return-type "Integer"}
-           "decrement" {:params [] :return-type "Integer"}}]
-    (env-add-method env "Atomic_Integer64" method-name sig))
-
+(defn- register-atomic-boolean-methods!
+  [env]
   (env-add-class env "Atomic_Boolean" {:name "Atomic_Boolean"})
   (env-add-method env "Atomic_Boolean" "make"
                   {:params [{:name "initial" :type "Boolean"}]
@@ -5117,8 +5131,10 @@
            "compare_and_set" {:params [{:name "expected" :type "Boolean"}
                                        {:name "update" :type "Boolean"}]
                               :return-type "Boolean"}}]
-    (env-add-method env "Atomic_Boolean" method-name sig))
+    (env-add-method env "Atomic_Boolean" method-name sig)))
 
+(defn- register-atomic-reference-methods!
+  [env]
   (env-add-class env "Atomic_Reference" {:name "Atomic_Reference"
                                          :generic-params [{:name "T"}]})
   (env-add-method env "Atomic_Reference" "make"
@@ -5130,9 +5146,10 @@
            "compare_and_set" {:params [{:name "expected" :type {:base-type "T" :detachable true}}
                                        {:name "update" :type {:base-type "T" :detachable true}}]
                               :return-type "Boolean"}}]
-    (env-add-method env "Atomic_Reference" method-name sig))
+    (env-add-method env "Atomic_Reference" method-name sig)))
 
-  ;; Register Channel[T] class and methods
+(defn- register-channel-methods!
+  [env]
   (env-add-class env "Channel" {:name "Channel"
                                 :generic-params [{:name "T"}]})
   (doseq [[method-name sig]
@@ -5144,15 +5161,43 @@
            "is_closed"   {:params [] :return-type "Boolean"}
            "capacity"    {:params [] :return-type "Integer"}
            "size"        {:params [] :return-type "Integer"}}]
-    (env-add-method env "Channel" method-name sig))
+    (env-add-method env "Channel" method-name sig)))
 
-  ;; Built-in Function methods: call0..call32
+;; Built-in Function methods: call0..call32
+(defn- register-function-call-methods!
+  [env]
   (doseq [n (range 0 33)]
     (env-add-method env "Function"
                     (str "call" n)
                     {:params (mapv (fn [i] {:name (str "arg" i) :type "Any"})
                                    (range 1 (inc n)))
                      :return-type "Any"})))
+
+(defn register-builtin-methods
+  "Register method signatures for built-in types."
+  [env]
+  (register-any-protocol! env)
+  (register-comparable-protocol! env)
+  (register-hashable-protocol! env)
+  (register-scalar-classes! env)
+  (register-integer-methods! env)
+  (register-real-methods! env)
+  (register-char-methods! env)
+  (register-string-methods! env)
+  (register-console-methods! env)
+  (register-task-methods! env)
+  (register-process-methods! env)
+  (register-array-methods! env)
+  (register-map-methods! env)
+  (register-set-methods! env)
+  (register-min-heap-methods! env)
+  (register-atomic-integer-like-methods! env "Atomic_Integer")
+  (register-atomic-integer-like-methods! env "Atomic_Integer64")
+  (register-atomic-boolean-methods! env)
+  (register-atomic-reference-methods! env)
+  (register-channel-methods! env)
+  (register-function-call-methods! env))
+
 
 ;;
 ;; Undefined-type validation
