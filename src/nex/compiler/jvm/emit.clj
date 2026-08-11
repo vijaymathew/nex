@@ -1477,234 +1477,245 @@
                     {:expr expr}))))
 
 
+(defn- emit-map-method-get!
+  [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+  (emit-runtime-call! mv "map-get"
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (emit-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
+(defn- emit-map-method-try-get!
+  [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+  (emit-runtime-call! mv "map-try-get"
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (emit-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))
+                       (fn [] (emit-boxed-expr! mv (second args) state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
+(defn- emit-map-method-put!
+  [^MethodVisitor mv {:keys [target args]} state-slot]
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
+  (emit-boxed-expr-for-storage! mv (first args) state-slot)
+  (emit-boxed-expr-for-storage! mv (second args) state-slot)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "put" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;" false)
+  (.visitInsn mv Opcodes/POP)
+  :void)
+
+(defn- emit-map-method-size!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "size" "()I" false)
+  (emit-stack-coerce! mv :int jvm-type)
+  jvm-type)
+
+(defn- emit-map-method-is-empty!
+  [^MethodVisitor mv {:keys [target]} state-slot]
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "isEmpty" "()Z" false)
+  :boolean)
+
+(defn- emit-map-method-contains-key!
+  [^MethodVisitor mv {:keys [target args]} state-slot]
+  (emit-runtime-call! mv "map-contains-key"
+                      [(fn [] (emit-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+  (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
+  :boolean)
+
+(defn- emit-map-method-keys!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
+  (.visitInsn mv Opcodes/DUP)
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "keySet" "()Ljava/util/Set;" false)
+  (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
+  jvm-type)
+
+(defn- emit-map-method-values!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
+  (.visitInsn mv Opcodes/DUP)
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "values" "()Ljava/util/Collection;" false)
+  (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
+  jvm-type)
+
+(defn- emit-map-method-remove!
+  [^MethodVisitor mv {:keys [target args]} state-slot]
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
+  (emit-boxed-expr! mv (first args) state-slot)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "remove" "(Ljava/lang/Object;)Ljava/lang/Object;" false)
+  (.visitInsn mv Opcodes/POP)
+  :void)
+
+(defn- emit-map-method-to-string!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-runtime-call! mv "map-to-string"
+                      [(fn [] (emit-expr! mv target state-slot))])
+  (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
+  jvm-type)
+
+(defn- emit-map-method-equals!
+  [^MethodVisitor mv {:keys [target args]} state-slot]
+  (emit-runtime-call! mv "deep-equals"
+                      [(fn [] (emit-boxed-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+  (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
+  :boolean)
+
+(defn- emit-map-method-clone!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-runtime-call! mv "clone-value"
+                      [(fn [] (emit-boxed-expr! mv target state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
+(defn- emit-map-method-cursor!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-runtime-call! mv "collection-cursor"
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (.visitLdcInsn mv "Map"))
+                       (fn [] (emit-boxed-expr! mv target state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
+(def ^:private emit-map-method-dispatch
+  "Map method name -> `(fn [mv expr state-slot] -> jvm-type)`. \"at\"/\"set\"
+   are pure aliases for \"put\", so they're inline lambdas rather than named
+   functions of their own — same convention as `emit-array-method-dispatch`."
+  {"get"          emit-map-method-get!
+   "try_get"      emit-map-method-try-get!
+   "put"          emit-map-method-put!
+   "at"           (fn [mv expr state-slot] (emit-collection-method! mv (assoc expr :method "put") state-slot))
+   "set"          (fn [mv expr state-slot] (emit-collection-method! mv (assoc expr :method "put") state-slot))
+   "size"         emit-map-method-size!
+   "is_empty"     emit-map-method-is-empty!
+   "contains_key" emit-map-method-contains-key!
+   "keys"         emit-map-method-keys!
+   "values"       emit-map-method-values!
+   "remove"       emit-map-method-remove!
+   "to_string"    emit-map-method-to-string!
+   "equals"       emit-map-method-equals!
+   "clone"        emit-map-method-clone!
+   "cursor"       emit-map-method-cursor!})
+
 (defn- emit-map-method!
   [^MethodVisitor mv expr state-slot]
-  (let [{:keys [collection-kind method target args jvm-type]} expr]
-    (case method
-      "get"
-      (do
-        (emit-runtime-call! mv "map-get"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
+  (if-let [handler (get emit-map-method-dispatch (:method expr))]
+    (handler mv expr state-slot)
+    (throw (ex-info "Unsupported collection method emission"
+                    {:expr expr}))))
 
-      "try_get"
-      (do
-        (emit-runtime-call! mv "map-try-get"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
 
-      "put"
-      (do
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
-        (emit-boxed-expr-for-storage! mv (first args) state-slot)
-        (emit-boxed-expr-for-storage! mv (second args) state-slot)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "put" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;" false)
-        (.visitInsn mv Opcodes/POP)
-        :void)
+(defn- emit-set-method-contains!
+  [^MethodVisitor mv {:keys [target args]} state-slot]
+  (emit-runtime-call! mv "set-contains"
+                      [(fn [] (emit-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+  (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
+  :boolean)
 
-      "at"
-      (emit-collection-method! mv (assoc expr :method "put") state-slot)
+;; union/difference/intersection/symmetric_difference are the same shape —
+;; a two-arg runtime helper call, then unbox — differing only in which
+;; helper they call.
+(defn- emit-set-binary-op!
+  [runtime-helper-name]
+  (fn [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+    (emit-runtime-call! mv runtime-helper-name
+                        [(fn [] (emit-expr! mv target state-slot))
+                         (fn [] (emit-expr! mv (first args) state-slot))])
+    (emit-unbox-or-cast! mv jvm-type)
+    jvm-type))
 
-      "set"
-      (emit-collection-method! mv (assoc expr :method "put") state-slot)
+(defn- emit-set-method-size!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST linkedhashset-internal-name)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL linkedhashset-internal-name "size" "()I" false)
+  (emit-stack-coerce! mv :int jvm-type)
+  jvm-type)
 
-      "size"
-      (do
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "size" "()I" false)
-        (emit-stack-coerce! mv :int jvm-type)
-        jvm-type)
+(defn- emit-set-method-is-empty!
+  [^MethodVisitor mv {:keys [target]} state-slot]
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST linkedhashset-internal-name)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL linkedhashset-internal-name "isEmpty" "()Z" false)
+  :boolean)
 
-      "is_empty"
-      (do
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "isEmpty" "()Z" false)
-        :boolean)
+(defn- emit-set-method-to-array!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-runtime-call! mv "set-to-array"
+                      [(fn [] (emit-expr! mv target state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
 
-      "contains_key"
-      (do
-        (emit-runtime-call! mv "map-contains-key"
-                            [(fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
-        :boolean)
+(defn- emit-set-method-to-string!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-runtime-call! mv "set-to-string"
+                      [(fn [] (emit-expr! mv target state-slot))])
+  (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
+  jvm-type)
 
-      "keys"
-      (do
-        (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
-        (.visitInsn mv Opcodes/DUP)
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "keySet" "()Ljava/util/Set;" false)
-        (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
-        jvm-type)
+(defn- emit-set-method-equals!
+  [^MethodVisitor mv {:keys [target args]} state-slot]
+  (emit-runtime-call! mv "deep-equals"
+                      [(fn [] (emit-boxed-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+  (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
+  :boolean)
 
-      "values"
-      (do
-        (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
-        (.visitInsn mv Opcodes/DUP)
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "values" "()Ljava/util/Collection;" false)
-        (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
-        jvm-type)
+(defn- emit-set-method-clone!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-runtime-call! mv "clone-value"
+                      [(fn [] (emit-boxed-expr! mv target state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
 
-      "remove"
-      (do
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
-        (emit-boxed-expr! mv (first args) state-slot)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "remove" "(Ljava/lang/Object;)Ljava/lang/Object;" false)
-        (.visitInsn mv Opcodes/POP)
-        :void)
+(defn- emit-set-method-cursor!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-runtime-call! mv "collection-cursor"
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (.visitLdcInsn mv "Set"))
+                       (fn [] (emit-boxed-expr! mv target state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
 
-      "to_string"
-      (do
-        (emit-runtime-call! mv "map-to-string"
-                            [(fn [] (emit-expr! mv target state-slot))])
-        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
-        jvm-type)
-
-      "equals"
-      (do
-        (emit-runtime-call! mv "deep-equals"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
-        :boolean)
-
-      "clone"
-      (do
-        (emit-runtime-call! mv "clone-value"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "cursor"
-      (do
-        (emit-runtime-call! mv "collection-cursor"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (.visitLdcInsn mv "Map"))
-                             (fn [] (emit-boxed-expr! mv target state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      (throw (ex-info "Unsupported collection method emission"
-                      {:expr expr})))))
+(def ^:private emit-set-method-dispatch
+  "Set method name -> `(fn [mv expr state-slot] -> jvm-type)`."
+  {"contains"             emit-set-method-contains!
+   "union"                (emit-set-binary-op! "set-union")
+   "difference"           (emit-set-binary-op! "set-difference")
+   "intersection"         (emit-set-binary-op! "set-intersection")
+   "symmetric_difference" (emit-set-binary-op! "set-symmetric-difference")
+   "size"                 emit-set-method-size!
+   "is_empty"             emit-set-method-is-empty!
+   "to_array"             emit-set-method-to-array!
+   "to_string"            emit-set-method-to-string!
+   "equals"               emit-set-method-equals!
+   "clone"                emit-set-method-clone!
+   "cursor"               emit-set-method-cursor!})
 
 (defn- emit-set-method!
   [^MethodVisitor mv expr state-slot]
-  (let [{:keys [collection-kind method target args jvm-type]} expr]
-    (case method
-      "contains"
-      (do
-        (emit-runtime-call! mv "set-contains"
-                            [(fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
-        :boolean)
+  (if-let [handler (get emit-set-method-dispatch (:method expr))]
+    (handler mv expr state-slot)
+    (throw (ex-info "Unsupported collection method emission"
+                    {:expr expr}))))
 
-      "union"
-      (do
-        (emit-runtime-call! mv "set-union"
-                            [(fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-expr! mv (first args) state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "difference"
-      (do
-        (emit-runtime-call! mv "set-difference"
-                            [(fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-expr! mv (first args) state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "intersection"
-      (do
-        (emit-runtime-call! mv "set-intersection"
-                            [(fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-expr! mv (first args) state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "symmetric_difference"
-      (do
-        (emit-runtime-call! mv "set-symmetric-difference"
-                            [(fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-expr! mv (first args) state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "size"
-      (do
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST linkedhashset-internal-name)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL linkedhashset-internal-name "size" "()I" false)
-        (emit-stack-coerce! mv :int jvm-type)
-        jvm-type)
-
-      "is_empty"
-      (do
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST linkedhashset-internal-name)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL linkedhashset-internal-name "isEmpty" "()Z" false)
-        :boolean)
-
-      "to_array"
-      (do
-        (emit-runtime-call! mv "set-to-array"
-                            [(fn [] (emit-expr! mv target state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "to_string"
-      (do
-        (emit-runtime-call! mv "set-to-string"
-                            [(fn [] (emit-expr! mv target state-slot))])
-        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
-        jvm-type)
-
-      "equals"
-      (do
-        (emit-runtime-call! mv "deep-equals"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
-        :boolean)
-
-      "clone"
-      (do
-        (emit-runtime-call! mv "clone-value"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "cursor"
-      (do
-        (emit-runtime-call! mv "collection-cursor"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (.visitLdcInsn mv "Set"))
-                             (fn [] (emit-boxed-expr! mv target state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      (throw (ex-info "Unsupported collection method emission"
-                      {:expr expr})))))
 
 (defn- emit-collection-method!
   [^MethodVisitor mv expr state-slot]
@@ -1715,94 +1726,78 @@
     (throw (ex-info "Unsupported collection method emission"
                     {:expr expr}))))
 
+(defn- emit-concurrency-return!
+  [^MethodVisitor mv jvm-type]
+  (if (= :void jvm-type)
+    (do (.visitInsn mv Opcodes/POP) :void)
+    (do (emit-unbox-or-cast! mv jvm-type)
+        jvm-type)))
+
+;; Most Task/Channel methods take the receiver only (no user args) and
+;; forward straight to a same-named runtime helper — differing only in
+;; which helper.
+(defn- emit-concurrency-target-only-op!
+  [runtime-helper-name]
+  (fn [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+    (emit-runtime-call! mv runtime-helper-name
+                        [(fn [] (emit-boxed-expr! mv target state-slot))])
+    (emit-concurrency-return! mv jvm-type)))
+
+(defn- emit-concurrency-task-await!
+  [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+  (emit-runtime-call! mv "task-await-method"
+                      (cond-> [(fn [] (emit-boxed-expr! mv target state-slot))]
+                        (seq args) (conj (fn [] (emit-boxed-expr! mv (first args) state-slot)))))
+  (emit-concurrency-return! mv jvm-type))
+
+(defn- emit-concurrency-channel-send!
+  [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+  (emit-runtime-call! mv "channel-send-method"
+                      (cond-> [(fn [] (emit-boxed-expr! mv target state-slot))
+                               (fn [] (emit-boxed-expr! mv (first args) state-slot))]
+                        (= 2 (count args)) (conj (fn [] (emit-boxed-expr! mv (second args) state-slot)))))
+  (emit-concurrency-return! mv jvm-type))
+
+(defn- emit-concurrency-channel-try-send!
+  [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+  (emit-runtime-call! mv "channel-try-send-method"
+                      [(fn [] (emit-boxed-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+  (emit-concurrency-return! mv jvm-type))
+
+(defn- emit-concurrency-channel-receive!
+  [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+  (emit-runtime-call! mv "channel-receive-method"
+                      (cond-> [(fn [] (emit-boxed-expr! mv target state-slot))]
+                        (seq args) (conj (fn [] (emit-boxed-expr! mv (first args) state-slot)))))
+  (emit-concurrency-return! mv jvm-type))
+
+(def ^:private emit-concurrency-method-dispatch
+  "[concurrency-kind method] -> `(fn [mv expr state-slot] -> jvm-type)`.
+   Most entries take the receiver only and forward to a same-named runtime
+   helper, so `emit-concurrency-target-only-op!` builds those handlers from
+   just the helper name; the four with their own argument shapes (task
+   await, channel send/try_send/receive) get their own function."
+  {[:task "await"]          emit-concurrency-task-await!
+   [:task "cancel"]         (emit-concurrency-target-only-op! "task-cancel-method")
+   [:task "is_done"]        (emit-concurrency-target-only-op! "task-is-done-method")
+   [:task "is_cancelled"]   (emit-concurrency-target-only-op! "task-is-cancelled-method")
+   [:channel "send"]        emit-concurrency-channel-send!
+   [:channel "try_send"]    emit-concurrency-channel-try-send!
+   [:channel "receive"]     emit-concurrency-channel-receive!
+   [:channel "try_receive"] (emit-concurrency-target-only-op! "channel-try-receive-method")
+   [:channel "close"]       (emit-concurrency-target-only-op! "channel-close-method")
+   [:channel "is_closed"]   (emit-concurrency-target-only-op! "channel-is-closed-method")
+   [:channel "capacity"]    (emit-concurrency-target-only-op! "channel-capacity-method")
+   [:channel "size"]        (emit-concurrency-target-only-op! "channel-size-method")})
+
 (defn- emit-concurrency-method!
   [^MethodVisitor mv expr state-slot]
-  (let [{:keys [concurrency-kind method target args jvm-type]} expr
-        emit-return (fn [jvm-type]
-                      (if (= :void jvm-type)
-                        (do (.visitInsn mv Opcodes/POP) :void)
-                        (do (emit-unbox-or-cast! mv jvm-type)
-                            jvm-type)))]
-    (case [concurrency-kind method]
-      [:task "await"]
-      (do
-        (emit-runtime-call! mv "task-await-method"
-                            (cond-> [(fn [] (emit-boxed-expr! mv target state-slot))]
-                              (seq args) (conj (fn [] (emit-boxed-expr! mv (first args) state-slot)))))
-        (emit-return jvm-type))
+  (if-let [handler (get emit-concurrency-method-dispatch [(:concurrency-kind expr) (:method expr)])]
+    (handler mv expr state-slot)
+    (throw (ex-info "Unsupported concurrency method emission"
+                    {:expr expr}))))
 
-      [:task "cancel"]
-      (do
-        (emit-runtime-call! mv "task-cancel-method"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))])
-        (emit-return jvm-type))
-
-      [:task "is_done"]
-      (do
-        (emit-runtime-call! mv "task-is-done-method"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))])
-        (emit-return jvm-type))
-
-      [:task "is_cancelled"]
-      (do
-        (emit-runtime-call! mv "task-is-cancelled-method"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))])
-        (emit-return jvm-type))
-
-      [:channel "send"]
-      (do
-        (emit-runtime-call! mv "channel-send-method"
-                            (cond-> [(fn [] (emit-boxed-expr! mv target state-slot))
-                                     (fn [] (emit-boxed-expr! mv (first args) state-slot))]
-                              (= 2 (count args)) (conj (fn [] (emit-boxed-expr! mv (second args) state-slot)))))
-        (emit-return jvm-type))
-
-      [:channel "try_send"]
-      (do
-        (emit-runtime-call! mv "channel-try-send-method"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-return jvm-type))
-
-      [:channel "receive"]
-      (do
-        (emit-runtime-call! mv "channel-receive-method"
-                            (cond-> [(fn [] (emit-boxed-expr! mv target state-slot))]
-                              (seq args) (conj (fn [] (emit-boxed-expr! mv (first args) state-slot)))))
-        (emit-return jvm-type))
-
-      [:channel "try_receive"]
-      (do
-        (emit-runtime-call! mv "channel-try-receive-method"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))])
-        (emit-return jvm-type))
-
-      [:channel "close"]
-      (do
-        (emit-runtime-call! mv "channel-close-method"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))])
-        (emit-return jvm-type))
-
-      [:channel "is_closed"]
-      (do
-        (emit-runtime-call! mv "channel-is-closed-method"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))])
-        (emit-return jvm-type))
-
-      [:channel "capacity"]
-      (do
-        (emit-runtime-call! mv "channel-capacity-method"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))])
-        (emit-return jvm-type))
-
-      [:channel "size"]
-      (do
-        (emit-runtime-call! mv "channel-size-method"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))])
-        (emit-return jvm-type))
-
-      (throw (ex-info "Unsupported concurrency method emission"
-                      {:expr expr})))))
 
 (defn- emit-expr-const!
   [^MethodVisitor mv expr _state-slot]
@@ -2380,126 +2375,130 @@
       (.visitLabel mv label)
       (.visitLineNumber mv (int line) label))))
 
+(defn- emit-stmt-set-local!
+  [^MethodVisitor mv stmt state-slot]
+  (let [expr-jvm-type (emit-expr! mv (:expr stmt) state-slot)]
+    (emit-stack-coerce! mv expr-jvm-type (:jvm-type stmt))
+    (mark-local-debug-before! mv (:slot stmt))
+    (.visitVarInsn mv (local-store-op (:jvm-type stmt)) (:slot stmt))
+    (mark-local-debug-after! mv (:slot stmt))
+    expr-jvm-type))
+
+(defn- emit-stmt-top-set!
+  [^MethodVisitor mv stmt state-slot]
+  (emit-load-values-map! mv state-slot)
+  (.visitLdcInsn mv ^String (:name stmt))
+  (let [expr-jvm-type (emit-expr! mv (:expr stmt) state-slot)]
+    (cond
+      (contains? ir/primitive-jvm-types expr-jvm-type)
+      (emit-box! mv expr-jvm-type)
+
+      ;; An object-typed value stored into a *Map/Set-declared* global may
+      ;; need the same portable-vs-native conversion emit-stack-coerce!
+      ;; applies at every other write site (:set-local, :field-set) — a
+      ;; top-level `let root: Map[...] := json.parse(...)` reaches only this
+      ;; path, and previously stored the raw (possibly portable) value with
+      ;; no conversion at all, so every later read (:top-get, itself an
+      ;; ordinary CHECKCAST with no conversion of its own) failed. Gated on
+      ;; the *declared* type actually being Map/Set (not just "object, and
+      ;; differs from expr's own type" the way emit-stack-coerce! decides it
+      ;; for a local): a top-level Integer/Real global stores its value as a
+      ;; boxed Object regardless of the Nex-level declared type (unlike
+      ;; :set-local's real primitive JVM local slot), so unconditionally
+      ;; coercing expr-jvm-type=Object down to to-jvm-type=:long here — as
+      ;; emit-stack-coerce! would for a *local* — left a raw unboxed long on
+      ;; the stack where HashMap.put expects a boxed Object (hit by a `with
+      ;; "java"` global sourced from a raw Java call whose static Nex type
+      ;; is Any/Object, e.g. `let n: Integer :=
+      ;; System.getProperty(...).length()`).
+      (and (ir/object-jvm-type? (:jvm-type stmt))
+           (#{hashmap-internal-name linkedhashset-internal-name} (second (:jvm-type stmt))))
+      (emit-unbox-or-cast-to-collection! mv (:jvm-type stmt))
+
+      :else nil))
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    hashmap-internal-name
+                    "put"
+                    "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                    false)
+  (.visitInsn mv Opcodes/POP))
+
+(defn- emit-stmt-field-set!
+  [^MethodVisitor mv stmt state-slot]
+  (emit-expr! mv (:target stmt) state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST (:owner stmt))
+  (emit-stack-coerce! mv (emit-expr! mv (:expr stmt) state-slot) (:jvm-type stmt))
+  (.visitFieldInsn mv
+                   Opcodes/PUTFIELD
+                   (:owner stmt)
+                   (:field stmt)
+                   (desc/jvm-type->descriptor (:jvm-type stmt))))
+
+(defn- emit-stmt-block!
+  [^MethodVisitor mv stmt state-slot]
+  (doseq [nested (:body stmt)]
+    (emit-stmt! mv nested state-slot)))
+
+(defn- emit-stmt-if!
+  [^MethodVisitor mv stmt state-slot]
+  (let [else-label (Label.)
+        end-label (Label.)
+        test-type (emit-expr! mv (:test stmt) state-slot)]
+    (when-not (= :boolean test-type)
+      (throw (ex-info "If statement test did not lower to boolean"
+                      {:stmt stmt :test-jvm-type test-type})))
+    (.visitJumpInsn mv Opcodes/IFEQ else-label)
+    (doseq [then-stmt (:then stmt)]
+      (emit-stmt! mv then-stmt state-slot))
+    (.visitJumpInsn mv Opcodes/GOTO end-label)
+    (.visitLabel mv else-label)
+    (doseq [else-stmt (:else stmt)]
+      (emit-stmt! mv else-stmt state-slot))
+    (.visitLabel mv end-label)))
+
+(defn- emit-stmt-loop!
+  [^MethodVisitor mv stmt state-slot]
+  (let [loop-label (Label.)
+        end-label (Label.)]
+    (doseq [init-stmt (:init stmt)]
+      (emit-stmt! mv init-stmt state-slot))
+    (.visitLabel mv loop-label)
+    (let [test-type (emit-expr! mv (:test stmt) state-slot)]
+      (.visitJumpInsn mv Opcodes/IFNE end-label))
+    (doseq [body-stmt (:body stmt)]
+      (emit-stmt! mv body-stmt state-slot))
+    (.visitJumpInsn mv Opcodes/GOTO loop-label)
+    (.visitLabel mv end-label)))
+
+(def ^:private emit-stmt-dispatch
+  "IR statement `:op` -> `(fn [mv stmt state-slot] -> ...)`: the primary
+   dispatch table for `emit-stmt!`, consulted after it has already emitted
+   the line number — that applies unconditionally, regardless of which
+   branch runs, so it stays in `emit-stmt!` itself rather than in each
+   handler."
+  {:return       (fn [mv stmt state-slot] (emit-return! mv (:expr stmt) state-slot))
+   :pop          (fn [mv stmt state-slot] (emit-pop! mv (emit-expr! mv (:expr stmt) state-slot)))
+   :set-local    emit-stmt-set-local!
+   :top-set      emit-stmt-top-set!
+   :field-set    emit-stmt-field-set!
+   :call-runtime (fn [mv stmt state-slot] (emit-pop! mv (emit-expr! mv stmt state-slot)))
+   :raise        (fn [mv stmt state-slot] (emit-raise! mv (:expr stmt) state-slot))
+   :retry        (fn [mv _stmt _state-slot] (emit-retry! mv))
+   :assert       (fn [mv stmt state-slot] (emit-assert! mv stmt state-slot))
+   :try          (fn [mv stmt state-slot] (emit-try! mv stmt state-slot))
+   :block        emit-stmt-block!
+   :if-stmt      emit-stmt-if!
+   :loop         emit-stmt-loop!})
+
 (defn- emit-stmt!
   [^MethodVisitor mv stmt state-slot]
   (emit-line-number! mv stmt)
-  (case (:op stmt)
-    :return
-    (emit-return! mv (:expr stmt) state-slot)
-
-    :pop
-    (emit-pop! mv (emit-expr! mv (:expr stmt) state-slot))
-
-    :set-local
-    (let [expr-jvm-type (emit-expr! mv (:expr stmt) state-slot)]
-      (emit-stack-coerce! mv expr-jvm-type (:jvm-type stmt))
-      (mark-local-debug-before! mv (:slot stmt))
-      (.visitVarInsn mv (local-store-op (:jvm-type stmt)) (:slot stmt))
-      (mark-local-debug-after! mv (:slot stmt))
-      expr-jvm-type)
-
-    :top-set
-    (do
-      (emit-load-values-map! mv state-slot)
-      (.visitLdcInsn mv ^String (:name stmt))
-      (let [expr-jvm-type (emit-expr! mv (:expr stmt) state-slot)]
-        (cond
-          (contains? ir/primitive-jvm-types expr-jvm-type)
-          (emit-box! mv expr-jvm-type)
-
-          ;; An object-typed value stored into a *Map/Set-declared* global may
-          ;; need the same portable-vs-native conversion emit-stack-coerce!
-          ;; applies at every other write site (:set-local, :field-set) — a
-          ;; top-level `let root: Map[...] := json.parse(...)` reaches only
-          ;; this path, and previously stored the raw (possibly portable)
-          ;; value with no conversion at all, so every later read (:top-get,
-          ;; itself an ordinary CHECKCAST with no conversion of its own)
-          ;; failed. Gated on the *declared* type actually being Map/Set (not
-          ;; just "object, and differs from expr's own type" the way
-          ;; emit-stack-coerce! decides it for a local): a top-level
-          ;; Integer/Real global stores its value as a boxed Object
-          ;; regardless of the Nex-level declared type (unlike :set-local's
-          ;; real primitive JVM local slot), so unconditionally coercing
-          ;; expr-jvm-type=Object down to to-jvm-type=:long here — as
-          ;; emit-stack-coerce! would for a *local* — left a raw unboxed long
-          ;; on the stack where HashMap.put expects a boxed Object (hit by a
-          ;; `with "java"` global sourced from a raw Java call whose static
-          ;; Nex type is Any/Object, e.g. `let n: Integer :=
-          ;; System.getProperty(...).length()`).
-          (and (ir/object-jvm-type? (:jvm-type stmt))
-               (#{hashmap-internal-name linkedhashset-internal-name} (second (:jvm-type stmt))))
-          (emit-unbox-or-cast-to-collection! mv (:jvm-type stmt))
-
-          :else nil))
-      (.visitMethodInsn mv
-                        Opcodes/INVOKEVIRTUAL
-                        hashmap-internal-name
-                        "put"
-                        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
-                        false)
-      (.visitInsn mv Opcodes/POP))
-
-    :field-set
-    (do
-      (emit-expr! mv (:target stmt) state-slot)
-      (.visitTypeInsn mv Opcodes/CHECKCAST (:owner stmt))
-      (emit-stack-coerce! mv (emit-expr! mv (:expr stmt) state-slot) (:jvm-type stmt))
-      (.visitFieldInsn mv
-                       Opcodes/PUTFIELD
-                       (:owner stmt)
-                       (:field stmt)
-                       (desc/jvm-type->descriptor (:jvm-type stmt))))
-
-    :call-runtime
-    (emit-pop! mv (emit-expr! mv stmt state-slot))
-
-    :raise
-    (emit-raise! mv (:expr stmt) state-slot)
-
-    :retry
-    (emit-retry! mv)
-
-    :assert
-    (emit-assert! mv stmt state-slot)
-
-    :try
-    (emit-try! mv stmt state-slot)
-
-    :block
-    (doseq [nested (:body stmt)]
-      (emit-stmt! mv nested state-slot))
-
-    :if-stmt
-    (let [else-label (Label.)
-          end-label (Label.)
-          test-type (emit-expr! mv (:test stmt) state-slot)]
-      (when-not (= :boolean test-type)
-        (throw (ex-info "If statement test did not lower to boolean"
-                        {:stmt stmt :test-jvm-type test-type})))
-      (.visitJumpInsn mv Opcodes/IFEQ else-label)
-      (doseq [then-stmt (:then stmt)]
-        (emit-stmt! mv then-stmt state-slot))
-      (.visitJumpInsn mv Opcodes/GOTO end-label)
-      (.visitLabel mv else-label)
-      (doseq [else-stmt (:else stmt)]
-        (emit-stmt! mv else-stmt state-slot))
-      (.visitLabel mv end-label))
-
-    :loop
-    (let [loop-label (Label.)
-          end-label (Label.)]
-      (doseq [init-stmt (:init stmt)]
-        (emit-stmt! mv init-stmt state-slot))
-      (.visitLabel mv loop-label)
-      (let [test-type (emit-expr! mv (:test stmt) state-slot)]
-        (.visitJumpInsn mv Opcodes/IFNE end-label))
-      (doseq [body-stmt (:body stmt)]
-        (emit-stmt! mv body-stmt state-slot))
-      (.visitJumpInsn mv Opcodes/GOTO loop-label)
-      (.visitLabel mv end-label))
-
+  (if-let [handler (get emit-stmt-dispatch (:op stmt))]
+    (handler mv stmt state-slot)
     (throw (ex-info "Unsupported IR statement emission"
                     {:stmt stmt :op (:op stmt)}))))
+
 
 (defn- emit-function-arg-prologue!
   [^MethodVisitor mv fn-node arg-array-slot]
