@@ -3669,6 +3669,472 @@
             base-type (base-type-name target-type)]
         (boolean (:import (get (visible-class-map env) base-type)))))))
 
+(defn- lower-implicit-self-call
+  [env expr arg-irs]
+  (let [method-def (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+                       (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr))))
+        nex-type (function-return-type method-def)
+        jvm-type (resolve-jvm-type env nex-type)]
+    (if (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+      (ir/call-virtual-node (:internal-name (class-jvm-meta env (:this-type env)))
+                            (lowered-instance-method-name method-def)
+                            (desc/repl-instance-method-descriptor)
+                            (ir/this-node (:this-type env)
+                                          (exact-class-jvm-type env (:this-type env)))
+                            arg-irs
+                            nex-type
+                            jvm-type)
+      (let [{:keys [owner-internal-name carrier-owner carrier-field carrier-jvm-type]}
+            (get (direct-parent-method-map env (current-class-def env))
+                 [(:method expr) (count (:args expr))])]
+        (ir/call-virtual-node owner-internal-name
+                              (lowered-instance-method-name method-def)
+                              (desc/repl-instance-method-descriptor)
+                              (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
+                                                 carrier-field
+                                                 (ir/this-node (:this-type env)
+                                                               (exact-class-jvm-type env (:this-type env)))
+                                                 (:source-class (get (direct-parent-method-map env (current-class-def env))
+                                                                     [(:method expr) (count (:args expr))]))
+                                                 carrier-jvm-type)
+                              arg-irs
+                              nex-type
+                              jvm-type)))))
+
+(defn- lower-call-without-target
+  "A call with no receiver: an implicit call on `this` inside the currently
+   executing method, a Function-valued local invoked as `f(...)`, the
+   await_all/await_any builtins, another builtin free function, or (falling
+   through) a REPL top-level function."
+  [env expr arg-irs]
+  (cond
+    (and (:this-type env)
+         (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+             (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr)))))
+    (lower-implicit-self-call env expr arg-irs)
+
+    (function-object-call? env (:method expr) (count (:args expr)))
+    (let [nex-type (infer-type env expr)
+          jvm-type (resolve-jvm-type env nex-type)]
+      (ir/call-function-node (lower-expression env {:type :identifier
+                                                    :name (:method expr)})
+                             arg-irs
+                             nex-type
+                             jvm-type))
+
+    (#{"await_all" "await_any"} (:method expr))
+    (let [nex-type (infer-type env expr)
+          jvm-type (resolve-jvm-type env nex-type)]
+      (ir/call-runtime-node (if (= "await_all" (:method expr))
+                              "op:await-all"
+                              "op:await-any")
+                            arg-irs
+                            nex-type
+                            jvm-type))
+
+    (contains? builtin-function-names (:method expr))
+    (let [nex-type (infer-type env expr)
+          jvm-type (resolve-jvm-type env nex-type)]
+      (ir/call-runtime-node (:method expr) arg-irs nex-type jvm-type))
+
+    :else
+    (let [nex-type (infer-type env expr)
+          jvm-type (resolve-jvm-type env nex-type)]
+      (ir/call-repl-fn-node (:method expr) arg-irs nex-type jvm-type))))
+
+;; Phase 2 (docs/proposals/java-interop.md): super.<method>(...) reaching the
+;; real Java superclass implementation, bypassing this class's own override
+;; of it if any (see ir/call-super-java-node). `new` never reaches here —
+;; it's stripped from the constructor body earlier, in lower-constructor.
+(defn- lower-java-super-call
+  [env expr parent-name ^Class java-super-klass]
+  (if (seq (:args expr))
+    (throw (unsupported (str "super." (:method expr)
+                             "(args) with arguments is not supported yet in compiled "
+                             "lowering for a Java superclass — only zero-argument calls are")
+                    {:expr expr :parent parent-name}))
+    (let [^java.lang.reflect.Method m (some (fn [^java.lang.reflect.Method cand]
+                                              (and (= (.getName cand) (:method expr))
+                                                   (zero? (alength (.getParameterTypes cand)))
+                                                   cand))
+                                            (.getMethods java-super-klass))]
+      (when-not m
+        (throw (ex-info "Undefined super method call during lowering"
+                        {:expr expr :parent parent-name})))
+      (let [nex-type "Any"
+            jvm-type (resolve-jvm-type env nex-type)]
+        (ir/call-super-java-node (desc/internal-class-name (.getName java-super-klass))
+                                 (:method expr)
+                                 (Type/getMethodDescriptor m)
+                                 (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
+                                 (.getReturnType m)
+                                 nex-type
+                                 jvm-type)))))
+
+(defn- lower-nex-super-call
+  [env expr parent-name parent-def arg-irs]
+  (let [parent-meta (class-jvm-meta env parent-name)
+        target-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                     (str "_parent_" parent-name)
+                                     (ir/this-node (:this-type env)
+                                                   (exact-class-jvm-type env (:this-type env)))
+                                     parent-name
+                                     (exact-class-jvm-type env parent-name))]
+    (if (false? (:has-parens expr))
+      (if-let [field-def (or (class-field-def parent-def (:method expr))
+                             (when-let [field-info (get (direct-parent-field-map env (current-class-def env))
+                                                        (:method expr))]
+                               {:field-type (:nex-type field-info)}))]
+        (let [nex-type (:field-type field-def)
+              jvm-type (resolve-jvm-type env nex-type)]
+          (ir/call-runtime-node (str "user-field-get:" (:method expr))
+                                [target-ir]
+                                nex-type
+                                jvm-type))
+        (let [method-def (or (class-method-def parent-def (:method expr) 0)
+                             (inherited-method-def env parent-def (:method expr) 0))]
+          (when-not method-def
+            (throw (ex-info "Undefined super feature access during lowering"
+                            {:expr expr
+                             :parent parent-name})))
+          (let [nex-type (function-return-type method-def)
+                jvm-type (resolve-jvm-type env nex-type)]
+            (ir/call-virtual-node (:internal-name parent-meta)
+                                  (lowered-instance-method-name method-def)
+                                  (desc/repl-instance-method-descriptor)
+                                  target-ir
+                                  []
+                                  nex-type
+                                  jvm-type))))
+      (let [method-def (or (class-method-def parent-def (:method expr) (count (:args expr)))
+                           (inherited-method-def env parent-def (:method expr) (count (:args expr))))]
+        (when-not method-def
+          (throw (ex-info "Undefined super method call during lowering"
+                          {:expr expr
+                           :parent parent-name})))
+        (let [nex-type (function-return-type method-def)
+              jvm-type (resolve-jvm-type env nex-type)]
+          (ir/call-virtual-node (:internal-name parent-meta)
+                                (lowered-instance-method-name method-def)
+                                (desc/repl-instance-method-descriptor)
+                                target-ir
+                                arg-irs
+                                nex-type
+                                jvm-type))))))
+
+(defn- lower-super-call
+  [env expr arg-irs]
+  (let [parent-name (single-super-parent-name env)
+        parent-def (get (visible-class-map env) parent-name)
+        java-super-klass (when (:import parent-def)
+                          (let [^Class klass (resolve-imported-java-type env parent-name)]
+                            (when (and klass (not (.isInterface klass))) klass)))]
+    (if java-super-klass
+      (lower-java-super-call env expr parent-name java-super-klass)
+      (lower-nex-super-call env expr parent-name parent-def arg-irs))))
+
+(defn- lower-parent-qualified-call
+  [env expr class-target-name arg-irs]
+  (let [parent-meta (class-jvm-meta env class-target-name)
+        method-def (class-method-def (get (visible-class-map env) class-target-name)
+                                     (:method expr)
+                                     (count (:args expr)))
+        nex-type (function-return-type method-def)
+        jvm-type (resolve-jvm-type env nex-type)]
+    (ir/call-virtual-node (:internal-name parent-meta)
+                          (lowered-instance-method-name method-def)
+                          (desc/repl-instance-method-descriptor)
+                          (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                             (str "_parent_" class-target-name)
+                                             (ir/this-node (:this-type env)
+                                                           (exact-class-jvm-type env (:this-type env)))
+                                             class-target-name
+                                             (exact-class-jvm-type env class-target-name))
+                          arg-irs
+                          nex-type
+                          jvm-type)))
+
+(defn- lower-class-constant-or-static-field
+  [env expr class-target-name]
+  (if-let [constant (lookup-class-constant env class-target-name (:method expr))]
+    (let [owner (:declaring-class constant)
+          nex-type (constant-nex-type env constant)
+          jvm-type (resolve-jvm-type env nex-type)]
+      (ir/static-field-get-node (:internal-name (class-jvm-meta env owner))
+                                (:name constant)
+                                nex-type
+                                jvm-type))
+    ;; class-target-name matches any entry in `(:classes env)`, including
+    ;; imported-Java-class placeholders (empty :body, so lookup-class-constant
+    ;; above always misses them). Fall through to the same java-get-static-field
+    ;; runtime call `lower-java-static-owner-call` already uses for the
+    ;; has-parens (static method) case, rather than treating an imported class
+    ;; as an unsupported target.
+    (if-let [java-owner (:import (get (visible-class-map env) class-target-name))]
+      (let [nex-type (or (infer-call-type env expr) "Any")
+            jvm-type (resolve-jvm-type env nex-type)]
+        (ir/call-runtime-node "java-get-static-field"
+                              [(ir/const-node java-owner
+                                              "String"
+                                              (ir/object-jvm-type "java/lang/String"))
+                               (ir/const-node (:method expr)
+                                              "String"
+                                              (ir/object-jvm-type "java/lang/String"))]
+                              nex-type
+                              jvm-type))
+      (throw (unsupported "Unsupported class-target access during lowering"
+                      {:expr expr
+                       :target-class class-target-name})))))
+
+(defn- lower-java-static-owner-call
+  [env expr java-static-owner arg-irs]
+  (let [nex-type (or (infer-call-type env expr) "Any")
+        jvm-type (resolve-jvm-type env nex-type)]
+    (if (:has-parens expr)
+      (ir/call-runtime-node "java-call-static"
+                            (into [(ir/const-node java-static-owner
+                                                  "String"
+                                                  (ir/object-jvm-type "java/lang/String"))
+                                   (ir/const-node (:method expr)
+                                                  "String"
+                                                  (ir/object-jvm-type "java/lang/String"))]
+                                  arg-irs)
+                            nex-type
+                            jvm-type)
+      (ir/call-runtime-node "java-get-static-field"
+                            [(ir/const-node java-static-owner
+                                            "String"
+                                            (ir/object-jvm-type "java/lang/String"))
+                             (ir/const-node (:method expr)
+                                            "String"
+                                            (ir/object-jvm-type "java/lang/String"))]
+                            nex-type
+                            jvm-type))))
+
+(defn- lower-direct-bitwise-call
+  [env expr target-expr arg-irs]
+  (let [target-ir (lower-expression env target-expr)
+        nex-type (infer-type env expr)
+        jvm-type (resolve-jvm-type env nex-type)
+        direct-op (get direct-integer-bitwise-method->op (:method expr))]
+    (if (= :bit-not direct-op)
+      (ir/unary-node direct-op target-ir nex-type jvm-type)
+      (ir/binary-node direct-op
+                      target-ir
+                      (first arg-irs)
+                      nex-type
+                      jvm-type))))
+
+(defn- lower-direct-collection-call
+  [env expr target-expr target-type arg-irs]
+  (let [target-ir (lower-expression env target-expr)
+        nex-type (or (collection-method-return-type target-type (:method expr))
+                     (infer-type env expr))
+        jvm-type (resolve-jvm-type env nex-type)]
+    (ir/collection-method-node (keyword (.toLowerCase ^String (base-type-name target-type)))
+                               (:method expr)
+                               target-ir
+                               arg-irs
+                               nex-type
+                               jvm-type)))
+
+(defn- lower-direct-concurrency-call
+  [env expr target-expr target-type arg-irs]
+  (let [target-ir (lower-expression env target-expr)
+        nex-type (infer-type env expr)
+        jvm-type (resolve-jvm-type env nex-type)]
+    (ir/concurrency-method-node (keyword (.toLowerCase ^String (base-type-name target-type)))
+                                (:method expr)
+                                target-ir
+                                arg-irs
+                                nex-type
+                                jvm-type)))
+
+;; Shared by both an imported-Java-typed receiver (`imported-java-qualified-
+;; name`) and a receiver only known through host interop (`with "java"` or a
+;; call chain rooted in one) — both dispatch through the same reflective
+;; runtime calls.
+(defn- lower-java-instance-call
+  [env expr target-expr arg-irs]
+  (let [target-ir (lower-expression env target-expr)
+        nex-type (or (infer-call-type env expr) "Any")
+        jvm-type (resolve-jvm-type env nex-type)]
+    (if (:has-parens expr)
+      (ir/call-runtime-node "java-call-method"
+                            (into [(ir/const-node (:method expr)
+                                                  "String"
+                                                  (ir/object-jvm-type "java/lang/String"))
+                                   target-ir]
+                                  arg-irs)
+                            nex-type
+                            jvm-type)
+      (ir/call-runtime-node "java-get-field"
+                            [(ir/const-node (:method expr)
+                                            "String"
+                                            (ir/object-jvm-type "java/lang/String"))
+                             target-ir]
+                            nex-type
+                            jvm-type))))
+
+(defn- lower-builtin-receiver-call
+  [env expr target-expr target-type arg-irs]
+  (let [target-ir (lower-expression env target-expr)
+        base-type (base-type-name target-type)
+        nex-type (infer-type env expr)
+        jvm-type (resolve-jvm-type env nex-type)]
+    (ir/call-runtime-node (str "builtin-method:" base-type ":" (:method expr))
+                          (into [target-ir] arg-irs)
+                          nex-type
+                          jvm-type)))
+
+(defn- lower-generic-builtin-constrained-call
+  [env expr target-expr target-type arg-irs]
+  (let [target-ir (lower-expression env target-expr)
+        constraint (get (:generic-param-constraints env)
+                        (base-type-name target-type))
+        nex-type (or (infer-type env expr) "Any")
+        jvm-type (resolve-jvm-type env nex-type)]
+    (ir/call-runtime-node (str "method:" (:method expr))
+                          (into [target-ir] arg-irs)
+                          nex-type
+                          jvm-type)))
+
+(defn- lower-generic-user-constrained-call
+  [env expr target-expr target-type arg-irs]
+  (let [constraint-def (->> (get (:generic-param-constraints env)
+                                 (base-type-name target-type))
+                            (get (visible-class-map env)))
+        method-def (accessible-method-def env constraint-def (:method expr)
+                                          (count (:args expr)))
+        field-def (when-not method-def
+                    (accessible-field-def env constraint-def (:method expr)))
+        target-ir (lower-expression env target-expr)
+        nex-type (or (if method-def
+                       (function-return-type method-def)
+                       (:field-type field-def))
+                     (infer-call-type env expr)
+                     "Any")
+        jvm-type (resolve-jvm-type env nex-type)]
+    ;; A routine of the bound dispatches as a routine even when written
+    ;; without parentheses (Nex allows `x.describe` for a no-arg call), so
+    ;; resolution — not punctuation — decides method vs field.
+    (if method-def
+      (ir/call-runtime-node (str "user-method:" (:method expr))
+                            (into [target-ir] arg-irs)
+                            nex-type
+                            jvm-type)
+      (ir/call-runtime-node (str "user-field-get:" (:method expr))
+                            [target-ir]
+                            nex-type
+                            jvm-type))))
+
+(defn- lower-general-receiver-call
+  [env expr target-expr arg-irs]
+  (let [java-static-owner (java-host-class-root-name env target-expr)
+        ;; Resolved through aliases for the same reason as in
+        ;; `infer-target-call-type`: the branches below choose a dispatch
+        ;; strategy by receiver type, and an alias/refinement name matches
+        ;; none of them.
+        target-type (when-not java-static-owner
+                      (resolve-type-alias (infer-type env target-expr)))]
+    (cond
+      java-static-owner
+      (lower-java-static-owner-call env expr java-static-owner arg-irs)
+
+      (if-let [direct-op (and (= "Integer" (base-type-name target-type))
+                              (get direct-integer-bitwise-method->op (:method expr)))]
+        direct-op
+        false)
+      (lower-direct-bitwise-call env expr target-expr arg-irs)
+
+      (direct-collection-method? target-type (:method expr))
+      (lower-direct-collection-call env expr target-expr target-type arg-irs)
+
+      (direct-concurrency-method? env target-type (:method expr))
+      (lower-direct-concurrency-call env expr target-expr target-type arg-irs)
+
+      (imported-java-qualified-name env (base-type-name target-type))
+      (lower-java-instance-call env expr target-expr arg-irs)
+
+      ;; Host interop is only for *unresolved* targets (see the env
+      ;; docstring): a with-"java" block still contains ordinary Nex calls
+      ;; (Console, collections, user classes), which must keep their normal
+      ;; dispatch rather than fall into reflection.
+      ;;
+      ;; `Any` is a builtin-runtime-receiver-type too, and even a registered
+      ;; (synthetic) entry in `visible-class-map` — but it is also the
+      ;; static type every Java interop value carries (there is no way for
+      ;; the typechecker to know a real Java type), so the ordinary
+      ;; "unresolved target" tests below would wrongly send every interop
+      ;; call — `builder.append(s)` on a `builder: Any` holding a live
+      ;; `java.lang.StringBuilder`, say — into the fixed Any-protocol
+      ;; dispatch table instead, which only understands the handful of
+      ;; names in `any-protocol-method-names` and crashes on anything else
+      ;; with an unbound-Var error at runtime. Inside a with-"java" block,
+      ;; always treat any other method name on an `Any` receiver as host
+      ;; interop, regardless of those other tests. Outside such a block,
+      ;; the same call shape can still arise from a call chain rooted in an
+      ;; imported Java type (`socket.getInetAddress().getHostAddress()`) —
+      ;; java-object-valued? recognizes that case from the target
+      ;; expression's own shape, no with-java? needed.
+      (and (or (:with-java? env) (java-object-valued? env target-expr))
+           (or (and (= "Any" (base-type-name target-type))
+                    (not (contains? any-protocol-method-names (:method expr))))
+               (and (not (builtin-runtime-receiver-type? env target-type))
+                    (not (get (visible-class-map env) (base-type-name target-type)))
+                    (not (get (:compiled-classes env) (base-type-name target-type))))))
+      (lower-java-instance-call env expr target-expr arg-irs)
+
+      (builtin-runtime-receiver-type? env target-type)
+      (lower-builtin-receiver-call env expr target-expr target-type arg-irs)
+
+      ;; Generic type parameter with a constraint (e.g. T -> Comparable)
+      ;; Dispatch through the constraint type's builtin methods at runtime
+      (when-let [constraint (get (:generic-param-constraints env)
+                                 (base-type-name target-type))]
+        (contains? builtin-runtime-receiver-types constraint))
+      (lower-generic-builtin-constrained-call env expr target-expr target-type arg-irs)
+
+      ;; Generic type parameter constrained by a *user* class (e.g. `[T ->
+      ;; Addable]`). The receiver is an ordinary Nex object at runtime, so
+      ;; dispatch dynamically the way any user-class call does; the
+      ;; constraint supplies the routine's declared signature, which is
+      ;; what the typechecker already checked the call against.
+      (when-let [constraint-def (some->> (get (:generic-param-constraints env)
+                                             (base-type-name target-type))
+                                        (get (visible-class-map env)))]
+        (or (accessible-method-def env constraint-def (:method expr)
+                                   (count (:args expr)))
+            (accessible-field-def env constraint-def (:method expr))))
+      (lower-generic-user-constrained-call env expr target-expr target-type arg-irs)
+
+      :else
+      (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
+          (throw (unsupported "Unsupported target call expression for lowering"
+                          {:expr expr
+                           :target-type target-type}))))))
+
+(defn- lower-call-with-target
+  [env expr target-expr class-target-name arg-irs]
+  (cond
+    (= :super (:type target-expr))
+    (lower-super-call env expr arg-irs)
+
+    (and class-target-name
+         (:this-type env)
+         (some #(= class-target-name (:parent %))
+               (:parents (current-class-def env)))
+         (if-let [parent-def (get (visible-class-map env) class-target-name)]
+           (class-method-def parent-def (:method expr) (count (:args expr)))
+           false))
+    (lower-parent-qualified-call env expr class-target-name arg-irs)
+
+    (and class-target-name (false? (:has-parens expr)))
+    (lower-class-constant-or-static-field env expr class-target-name)
+
+    :else
+    (lower-general-receiver-call env expr target-expr arg-irs)))
+
 (defn- lower-call-expr [env expr]
   (if (and (nil? (:target expr))
            (empty? (:args expr))
@@ -3688,420 +4154,10 @@
         (if (nil? (:constructor target-expr))
           (throw (invalid-bare-create-call-ex (:class-name target-expr)))
           (lower-expression env (assoc target-expr :args (:args expr))))
-      (if (nil? target-expr)
-        (cond
-          (and (:this-type env)
-               (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
-                   (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr)))))
-          (let [method-def (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
-                               (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr))))
-                nex-type (function-return-type method-def)
-                jvm-type (resolve-jvm-type env nex-type)]
-            (if (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
-              (ir/call-virtual-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                    (lowered-instance-method-name method-def)
-                                    (desc/repl-instance-method-descriptor)
-                                    (ir/this-node (:this-type env)
-                                                  (exact-class-jvm-type env (:this-type env)))
-                                    arg-irs
-                                    nex-type
-                                    jvm-type)
-              (let [{:keys [owner-internal-name carrier-owner carrier-field carrier-jvm-type]}
-                    (get (direct-parent-method-map env (current-class-def env))
-                         [(:method expr) (count (:args expr))])]
-                (ir/call-virtual-node owner-internal-name
-                                      (lowered-instance-method-name method-def)
-                                      (desc/repl-instance-method-descriptor)
-                                      (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
-                                                         carrier-field
-                                                         (ir/this-node (:this-type env)
-                                                                       (exact-class-jvm-type env (:this-type env)))
-                                                         (:source-class (get (direct-parent-method-map env (current-class-def env))
-                                                                             [(:method expr) (count (:args expr))]))
-                                                         carrier-jvm-type)
-                                      arg-irs
-                                      nex-type
-                                      jvm-type))))
+        (if (nil? target-expr)
+          (lower-call-without-target env expr arg-irs)
+          (lower-call-with-target env expr target-expr class-target-name arg-irs))))))
 
-          (function-object-call? env (:method expr) (count (:args expr)))
-          (let [nex-type (infer-type env expr)
-                jvm-type (resolve-jvm-type env nex-type)]
-            (ir/call-function-node (lower-expression env {:type :identifier
-                                                          :name (:method expr)})
-                                   arg-irs
-                                   nex-type
-                                   jvm-type))
-
-          (#{"await_all" "await_any"} (:method expr))
-          (let [nex-type (infer-type env expr)
-                jvm-type (resolve-jvm-type env nex-type)]
-            (ir/call-runtime-node (if (= "await_all" (:method expr))
-                                    "op:await-all"
-                                    "op:await-any")
-                                  arg-irs
-                                  nex-type
-                                  jvm-type))
-
-          (contains? builtin-function-names (:method expr))
-          (let [nex-type (infer-type env expr)
-                jvm-type (resolve-jvm-type env nex-type)]
-            (ir/call-runtime-node (:method expr) arg-irs nex-type jvm-type))
-
-          :else
-          (let [nex-type (infer-type env expr)
-                jvm-type (resolve-jvm-type env nex-type)]
-            (ir/call-repl-fn-node (:method expr) arg-irs nex-type jvm-type)))
-        (cond
-          (= :super (:type target-expr))
-          (let [parent-name (single-super-parent-name env)
-                parent-def (get (visible-class-map env) parent-name)
-                java-super-klass (when (:import parent-def)
-                                  (let [^Class klass (resolve-imported-java-type env parent-name)]
-                                    (when (and klass (not (.isInterface klass))) klass)))]
-            (if java-super-klass
-              ;; Phase 2 (docs/proposals/java-interop.md): super.<method>(...)
-              ;; reaching the real Java superclass implementation, bypassing
-              ;; this class's own override of it if any (see
-              ;; ir/call-super-java-node). `new` never reaches here — it's
-              ;; stripped from the constructor body earlier, in
-              ;; lower-constructor.
-              (if (seq (:args expr))
-                (throw (unsupported (str "super." (:method expr)
-                                         "(args) with arguments is not supported yet in compiled "
-                                         "lowering for a Java superclass — only zero-argument calls are")
-                                {:expr expr :parent parent-name}))
-                (let [^java.lang.reflect.Method m (some (fn [^java.lang.reflect.Method cand]
-                                                          (and (= (.getName cand) (:method expr))
-                                                               (zero? (alength (.getParameterTypes cand)))
-                                                               cand))
-                                                        (.getMethods java-super-klass))]
-                  (when-not m
-                    (throw (ex-info "Undefined super method call during lowering"
-                                    {:expr expr :parent parent-name})))
-                  (let [nex-type "Any"
-                        jvm-type (resolve-jvm-type env nex-type)]
-                    (ir/call-super-java-node (desc/internal-class-name (.getName java-super-klass))
-                                             (:method expr)
-                                             (Type/getMethodDescriptor m)
-                                             (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
-                                             (.getReturnType m)
-                                             nex-type
-                                             jvm-type))))
-          (let [parent-meta (class-jvm-meta env parent-name)
-                target-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                             (str "_parent_" parent-name)
-                                             (ir/this-node (:this-type env)
-                                                           (exact-class-jvm-type env (:this-type env)))
-                                             parent-name
-                                             (exact-class-jvm-type env parent-name))]
-            (if (false? (:has-parens expr))
-              (if-let [field-def (or (class-field-def parent-def (:method expr))
-                                     (when-let [field-info (get (direct-parent-field-map env (current-class-def env))
-                                                                (:method expr))]
-                                       {:field-type (:nex-type field-info)}))]
-                (let [nex-type (:field-type field-def)
-                      jvm-type (resolve-jvm-type env nex-type)]
-                  (ir/call-runtime-node (str "user-field-get:" (:method expr))
-                                        [target-ir]
-                                        nex-type
-                                        jvm-type))
-                (let [method-def (or (class-method-def parent-def (:method expr) 0)
-                                     (inherited-method-def env parent-def (:method expr) 0))]
-                  (when-not method-def
-                    (throw (ex-info "Undefined super feature access during lowering"
-                                    {:expr expr
-                                     :parent parent-name})))
-                  (let [nex-type (function-return-type method-def)
-                        jvm-type (resolve-jvm-type env nex-type)]
-                    (ir/call-virtual-node (:internal-name parent-meta)
-                                          (lowered-instance-method-name method-def)
-                                          (desc/repl-instance-method-descriptor)
-                                          target-ir
-                                          []
-                                          nex-type
-                                          jvm-type))))
-              (let [method-def (or (class-method-def parent-def (:method expr) (count (:args expr)))
-                                   (inherited-method-def env parent-def (:method expr) (count (:args expr))))]
-                (when-not method-def
-                  (throw (ex-info "Undefined super method call during lowering"
-                                  {:expr expr
-                                   :parent parent-name})))
-                (let [nex-type (function-return-type method-def)
-                      jvm-type (resolve-jvm-type env nex-type)]
-                  (ir/call-virtual-node (:internal-name parent-meta)
-                                        (lowered-instance-method-name method-def)
-                                        (desc/repl-instance-method-descriptor)
-                                        target-ir
-                                        arg-irs
-                                        nex-type
-                                        jvm-type)))))))
-
-          (and class-target-name
-               (:this-type env)
-               (some #(= class-target-name (:parent %))
-                     (:parents (current-class-def env)))
-               (if-let [parent-def (get (visible-class-map env) class-target-name)]
-                 (class-method-def parent-def (:method expr) (count (:args expr)))
-                 false))
-          (let [parent-meta (class-jvm-meta env class-target-name)
-                method-def (class-method-def (get (visible-class-map env) class-target-name)
-                                             (:method expr)
-                                             (count (:args expr)))
-                nex-type (function-return-type method-def)
-                jvm-type (resolve-jvm-type env nex-type)]
-            (ir/call-virtual-node (:internal-name parent-meta)
-                                  (lowered-instance-method-name method-def)
-                                  (desc/repl-instance-method-descriptor)
-                                  (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                                     (str "_parent_" class-target-name)
-                                                     (ir/this-node (:this-type env)
-                                                                   (exact-class-jvm-type env (:this-type env)))
-                                                     class-target-name
-                                                     (exact-class-jvm-type env class-target-name))
-                                  arg-irs
-                                  nex-type
-                                  jvm-type))
-
-          (and class-target-name (false? (:has-parens expr)))
-          (if-let [constant (lookup-class-constant env class-target-name (:method expr))]
-            (let [owner (:declaring-class constant)
-                  nex-type (constant-nex-type env constant)
-                  jvm-type (resolve-jvm-type env nex-type)]
-              (ir/static-field-get-node (:internal-name (class-jvm-meta env owner))
-                                        (:name constant)
-                                        nex-type
-                                        jvm-type))
-            ;; class-target-name matches any entry in `(:classes env)`,
-            ;; including imported-Java-class placeholders (empty :body, so
-            ;; lookup-class-constant above always misses them). Fall through to
-            ;; the same java-get-static-field runtime call the :else branch
-            ;; below already uses for the has-parens (static method) case,
-            ;; rather than treating an imported class as an unsupported target.
-            (if-let [java-owner (:import (get (visible-class-map env) class-target-name))]
-              (let [nex-type (or (infer-call-type env expr) "Any")
-                    jvm-type (resolve-jvm-type env nex-type)]
-                (ir/call-runtime-node "java-get-static-field"
-                                      [(ir/const-node java-owner
-                                                      "String"
-                                                      (ir/object-jvm-type "java/lang/String"))
-                                       (ir/const-node (:method expr)
-                                                      "String"
-                                                      (ir/object-jvm-type "java/lang/String"))]
-                                      nex-type
-                                      jvm-type))
-              (throw (unsupported "Unsupported class-target access during lowering"
-                              {:expr expr
-                               :target-class class-target-name}))))
-
-          :else
-          (let [java-static-owner (java-host-class-root-name env target-expr)
-                ;; Resolved through aliases for the same reason as in
-                ;; `infer-target-call-type`: the branches below choose a
-                ;; dispatch strategy by receiver type, and an alias/refinement
-                ;; name matches none of them.
-                target-type (when-not java-static-owner
-                              (resolve-type-alias (infer-type env target-expr)))]
-            (cond
-              java-static-owner
-              (let [nex-type (or (infer-call-type env expr) "Any")
-                    jvm-type (resolve-jvm-type env nex-type)]
-                (if (:has-parens expr)
-                  (ir/call-runtime-node "java-call-static"
-                                        (into [(ir/const-node java-static-owner
-                                                              "String"
-                                                              (ir/object-jvm-type "java/lang/String"))
-                                               (ir/const-node (:method expr)
-                                                              "String"
-                                                              (ir/object-jvm-type "java/lang/String"))]
-                                              arg-irs)
-                                        nex-type
-                                        jvm-type)
-                  (ir/call-runtime-node "java-get-static-field"
-                                        [(ir/const-node java-static-owner
-                                                        "String"
-                                                        (ir/object-jvm-type "java/lang/String"))
-                                         (ir/const-node (:method expr)
-                                                        "String"
-                                                        (ir/object-jvm-type "java/lang/String"))]
-                                        nex-type
-                                        jvm-type)))
-
-              (if-let [direct-op (and (= "Integer" (base-type-name target-type))
-                                      (get direct-integer-bitwise-method->op (:method expr)))]
-                direct-op
-                false)
-              (let [target-ir (lower-expression env target-expr)
-                    nex-type (infer-type env expr)
-                    jvm-type (resolve-jvm-type env nex-type)
-                    direct-op (get direct-integer-bitwise-method->op (:method expr))]
-                (if (= :bit-not direct-op)
-                  (ir/unary-node direct-op target-ir nex-type jvm-type)
-                  (ir/binary-node direct-op
-                                  target-ir
-                                  (first arg-irs)
-                                  nex-type
-                                  jvm-type)))
-
-              (direct-collection-method? target-type (:method expr))
-              (let [target-ir (lower-expression env target-expr)
-                    nex-type (or (collection-method-return-type target-type (:method expr))
-                                 (infer-type env expr))
-                    jvm-type (resolve-jvm-type env nex-type)]
-                (ir/collection-method-node (keyword (.toLowerCase ^String (base-type-name target-type)))
-                                           (:method expr)
-                                           target-ir
-                                           arg-irs
-                                           nex-type
-                                           jvm-type))
-
-              (direct-concurrency-method? env target-type (:method expr))
-              (let [target-ir (lower-expression env target-expr)
-                    nex-type (infer-type env expr)
-                    jvm-type (resolve-jvm-type env nex-type)]
-                (ir/concurrency-method-node (keyword (.toLowerCase ^String (base-type-name target-type)))
-                                            (:method expr)
-                                            target-ir
-                                            arg-irs
-                                            nex-type
-                                            jvm-type))
-
-              (imported-java-qualified-name env (base-type-name target-type))
-              (let [target-ir (lower-expression env target-expr)
-                    nex-type (or (infer-call-type env expr) "Any")
-                    jvm-type (resolve-jvm-type env nex-type)]
-                (if (:has-parens expr)
-                  (ir/call-runtime-node "java-call-method"
-                                        (into [(ir/const-node (:method expr)
-                                                              "String"
-                                                              (ir/object-jvm-type "java/lang/String"))
-                                               target-ir]
-                                              arg-irs)
-                                        nex-type
-                                        jvm-type)
-                  (ir/call-runtime-node "java-get-field"
-                                        [(ir/const-node (:method expr)
-                                                        "String"
-                                                        (ir/object-jvm-type "java/lang/String"))
-                                         target-ir]
-                                        nex-type
-                                        jvm-type)))
-
-              ;; Host interop is only for *unresolved* targets (see the env
-              ;; docstring): a with-"java" block still contains ordinary Nex
-              ;; calls (Console, collections, user classes), which must keep
-              ;; their normal dispatch rather than fall into reflection.
-              ;;
-              ;; `Any` is a builtin-runtime-receiver-type too, and even a
-              ;; registered (synthetic) entry in `visible-class-map` — but it
-              ;; is also the static type every Java interop value carries
-              ;; (there is no way for the typechecker to know a real Java
-              ;; type), so the ordinary "unresolved target" tests below would
-              ;; wrongly send every interop call — `builder.append(s)` on a
-              ;; `builder: Any` holding a live `java.lang.StringBuilder`, say
-              ;; — into the fixed Any-protocol dispatch table instead, which
-              ;; only understands the handful of names in
-              ;; `any-protocol-method-names` and crashes on anything else with
-              ;; an unbound-Var error at runtime. Inside a with-"java" block,
-              ;; always treat any other method name on an `Any` receiver as
-              ;; host interop, regardless of those other tests. Outside such a
-              ;; block, the same call shape can still arise from a call chain
-              ;; rooted in an imported Java type (`socket.getInetAddress()
-              ;; .getHostAddress()`) — java-object-valued? recognizes that case
-              ;; from the target expression's own shape, no with-java? needed.
-              (and (or (:with-java? env) (java-object-valued? env target-expr))
-                   (or (and (= "Any" (base-type-name target-type))
-                            (not (contains? any-protocol-method-names (:method expr))))
-                       (and (not (builtin-runtime-receiver-type? env target-type))
-                            (not (get (visible-class-map env) (base-type-name target-type)))
-                            (not (get (:compiled-classes env) (base-type-name target-type))))))
-              (let [target-ir (lower-expression env target-expr)
-                    nex-type (or (infer-call-type env expr) "Any")
-                    jvm-type (resolve-jvm-type env nex-type)]
-                (if (:has-parens expr)
-                  (ir/call-runtime-node "java-call-method"
-                                        (into [(ir/const-node (:method expr)
-                                                              "String"
-                                                              (ir/object-jvm-type "java/lang/String"))
-                                               target-ir]
-                                              arg-irs)
-                                        nex-type
-                                        jvm-type)
-                  (ir/call-runtime-node "java-get-field"
-                                        [(ir/const-node (:method expr)
-                                                        "String"
-                                                        (ir/object-jvm-type "java/lang/String"))
-                                         target-ir]
-                                        nex-type
-                                        jvm-type)))
-
-              (builtin-runtime-receiver-type? env target-type)
-              (let [target-ir (lower-expression env target-expr)
-                    base-type (base-type-name target-type)
-                    nex-type (infer-type env expr)
-                    jvm-type (resolve-jvm-type env nex-type)]
-                (ir/call-runtime-node (str "builtin-method:" base-type ":" (:method expr))
-                                      (into [target-ir] arg-irs)
-                                      nex-type
-                                      jvm-type))
-
-              ;; Generic type parameter with a constraint (e.g. T -> Comparable)
-              ;; Dispatch through the constraint type's builtin methods at runtime
-              (when-let [constraint (get (:generic-param-constraints env)
-                                         (base-type-name target-type))]
-                (contains? builtin-runtime-receiver-types constraint))
-              (let [target-ir (lower-expression env target-expr)
-                    constraint (get (:generic-param-constraints env)
-                                    (base-type-name target-type))
-                    nex-type (or (infer-type env expr) "Any")
-                    jvm-type (resolve-jvm-type env nex-type)]
-                (ir/call-runtime-node (str "method:" (:method expr))
-                                      (into [target-ir] arg-irs)
-                                      nex-type
-                                      jvm-type))
-
-              ;; Generic type parameter constrained by a *user* class
-              ;; (e.g. `[T -> Addable]`). The receiver is an ordinary Nex object
-              ;; at runtime, so dispatch dynamically the way any user-class call
-              ;; does; the constraint supplies the routine's declared signature,
-              ;; which is what the typechecker already checked the call against.
-              (when-let [constraint-def (some->> (get (:generic-param-constraints env)
-                                                     (base-type-name target-type))
-                                                (get (visible-class-map env)))]
-                (or (accessible-method-def env constraint-def (:method expr)
-                                           (count (:args expr)))
-                    (accessible-field-def env constraint-def (:method expr))))
-              (let [constraint-def (->> (get (:generic-param-constraints env)
-                                             (base-type-name target-type))
-                                        (get (visible-class-map env)))
-                    method-def (accessible-method-def env constraint-def (:method expr)
-                                                      (count (:args expr)))
-                    field-def (when-not method-def
-                                (accessible-field-def env constraint-def (:method expr)))
-                    target-ir (lower-expression env target-expr)
-                    nex-type (or (if method-def
-                                   (function-return-type method-def)
-                                   (:field-type field-def))
-                                 (infer-call-type env expr)
-                                 "Any")
-                    jvm-type (resolve-jvm-type env nex-type)]
-                ;; A routine of the bound dispatches as a routine even when written
-                ;; without parentheses (Nex allows `x.describe` for a no-arg call),
-                ;; so resolution — not punctuation — decides method vs field.
-                (if method-def
-                  (ir/call-runtime-node (str "user-method:" (:method expr))
-                                        (into [target-ir] arg-irs)
-                                        nex-type
-                                        jvm-type)
-                  (ir/call-runtime-node (str "user-field-get:" (:method expr))
-                                        [target-ir]
-                                        nex-type
-                                        jvm-type)))
-
-              :else
-              (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
-                  (throw (unsupported "Unsupported target call expression for lowering"
-                                  {:expr expr
-                                   :target-type target-type})))))))))))
 
 (defn lower-statement
   [env stmt]
