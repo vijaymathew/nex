@@ -1960,8 +1960,351 @@
       (throw (ex-info (str "Method not found in parent " parent-class-name ": " method)
                       {:parent parent-class-name :method method})))))
 
+(defn- resolve-interp-call-target
+  "Classify `target` once for `eval-call-with-target`'s dispatch below: what
+   name (if any) it's written as, whether it's `super`/a parent-qualified
+   call, whether it names a Java host class inside a `with \"java\"` block,
+   and the live value it evaluates to otherwise."
+  [ctx target]
+  (let [target-name (when (string? target) target)
+        ;; `super.method(...)`/`super.make(...)`: `super` has its own node
+        ;; type (like `this`), resolved to the current class's one direct
+        ;; parent rather than a literal name written at the call site.
+        super-target? (and (map? target) (= :super (:type target)))
+        super-parent-name (when super-target? (resolve-super-parent-name ctx))
+        class-target (when target-name (lookup-class-if-exists ctx target-name))
+        ;; Check if target is a parent class name (parent-qualified call:
+        ;; A.method()), or `super`, which resolves to the direct parent of
+        ;; the class whose body is currently executing rather than a
+        ;; literal name written at the call site.
+        parent-class (when (or target-name super-target?)
+                       (if super-target?
+                         (lookup-class-if-exists ctx super-parent-name)
+                         (when (:current-object ctx)
+                           (let [cls (lookup-class-if-exists ctx target-name)]
+                             (when (and cls
+                                        (is-parent? ctx (:class-name (:current-object ctx)) target-name))
+                               cls)))))
+        ;; Check if target is a Java host class (only when inside with "java" block)
+        java-class? (and (:with-java? ctx)
+                         target-name
+                         (not class-target)
+                         (not parent-class)
+                         (re-matches #"[A-Z][A-Za-z0-9_]*" target-name)
+                         (not (env-contains? (:current-env ctx) target-name)))
+        obj (when-not (or parent-class java-class?)
+              (if class-target
+                nil
+                (if target-name
+                (env-lookup (:current-env ctx) target-name)
+                (eval-node ctx target))))]
+    {:target-name target-name
+     :super-target? super-target?
+     :super-parent-name super-parent-name
+     :class-target class-target
+     :parent-class parent-class
+     :java-class? java-class?
+     :obj obj}))
+
+(defn- invoke-java-static-call
+  "Java static method or field access inside a `with \"java\"` block."
+  [ctx target-name method has-parens arg-values]
+  (let [klass (or (resolve-imported-java-class ctx target-name)
+                          (try (Class/forName (str "java.lang." target-name)) (catch Exception _ nil))
+                          (throw (ex-info (str "Undefined Java class: " target-name) {:class-name target-name})))]
+            (if has-parens
+              ;; `method` here also covers ClassName.new(args) — Clojure's
+              ;; Reflector special-cases the literal name "new" as
+              ;; constructor invocation — so arguments need the same
+              ;; Java-interface Proxy-wrapping java-create-object applies.
+              (clojure.lang.Reflector/invokeStaticMethod klass method (to-array (bi/java-args ctx arg-values)))
+              (let [^java.lang.reflect.Field field (.getField klass method)]
+                (.get field nil)))))
+
+(defn- invoke-found-nex-method
+  "Invoke a method that resolved via `lookup-method-with-inheritance` on an
+   interpreter object: validate the call shape, run the method body in its
+   own environment with pre/postcondition checks, then write the resulting
+   field mutations back to `target` — restoring the pre-call object first
+   if anything in that final write-back/check step itself throws, so the
+   exception doesn't leave `target` holding a half-written object."
+  [ctx target target-name class-def method method-lookup obj has-parens arg-values]
+  (let [method-def (:method method-lookup)
+      params (:params method-def)]
+    (ensure-callable-defined! method-def)
+    ;; Bug fix: disallow paren-less calls to methods that require arguments
+    (when (and (false? has-parens) (seq params))
+      (throw (ex-info (str method " requires arguments")
+                      {:method method :params (mapv :name params)})))
+    (let [source-class (:source-class method-lookup)
+        all-fields (get-all-fields ctx class-def)
+        effective-require (:effective-require method-lookup)
+        effective-ensure (:effective-ensure method-lookup)
+        has-postconditions? (seq effective-ensure)
+        old-values (when has-postconditions? (snapshot-old-field-values (:fields obj)))
+        source-obj (or (-> obj meta write-back-source-key) obj)]
+      (let [method-env (make-env (or (:closure-env obj) (:current-env ctx)))
+            param-names (set (map :name params))
+            ;; Define fields first, then params — so params shadow fields
+            _ (doseq [[field-name field-val] (:fields obj)]
+                (env-define method-env (name field-name) field-val))
+            _ (bind-class-constants! ctx method-env class-def)
+            _ (when params
+                (doseq [[param arg-val] (map vector params arg-values)]
+                  (env-define method-env (:name param) arg-val)))
+            modified-fields (atom #{})
+            return-type (:return-type method-def)
+            default-result (if return-type
+                            (get-default-field-value return-type)
+                            nil)
+            _ (env-define method-env "result" default-result)
+            _ (env-define method-env "this" obj)
+            new-ctx (-> ctx
+                       (assoc :current-env method-env)
+                       (assoc :current-object obj)
+                       (assoc :current-target target-name)
+                       (assoc :current-class-name (:name source-class))
+                       (assoc :current-method-name method)
+                       (assoc :old-values old-values)
+                       (assoc :modified-fields modified-fields)
+                       (update :debug-stack (fnil conj [])
+                               {:class (:name source-class)
+                                :method method
+                                :env method-env
+                                :arg-names (set (map :name (or params [])))
+                                :field-names (set (map name (keys (:fields obj))))
+                                :source (:debug-source ctx)})
+                       (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
+            _ (when-let [require-assertions effective-require]
+                (check-assertions new-ctx require-assertions Precondition))
+            _ (if-let [rescue (:rescue method-def)]
+                (eval-body-with-rescue new-ctx (:body method-def) rescue)
+                (doseq [stmt (:body method-def)]
+                  (eval-node new-ctx stmt)))
+            updated-fields (reduce (fn [m field]
+                                    (let [field-name (:name field)
+                                          field-key (keyword field-name)]
+                                      ;; Skip fields shadowed by params unless explicitly modified via this.field :=
+                                      (if (and (contains? param-names field-name)
+                                               (not (contains? @modified-fields field-name)))
+                                        m
+                                        (let [val (try
+                                                    (env-lookup method-env field-name)
+                                                    (catch Exception _ ::not-found))]
+                                          (if (not= val ::not-found)
+                                            (assoc m field-key val)
+                                            m)))))
+                                  (:fields obj)
+                                  all-fields)
+            updated-obj (make-object (:class-name obj) updated-fields (:closure-env obj))
+            result-flag (try
+                          (env-lookup method-env "__result_assigned__")
+                          (catch Exception _ ::not-found))
+            result (cond
+                     (= result-flag "result")
+                     (env-lookup method-env "result")
+                     :else
+                     (let [res (try
+                                 (env-lookup method-env "result")
+                                 (catch Exception _ ::not-found))]
+                       (if (not= res ::not-found)
+                         res
+                         nil)))]
+        (try
+          (when-let [ensure-assertions effective-ensure]
+            (check-assertions new-ctx ensure-assertions Postcondition))
+          (check-class-invariant new-ctx class-def)
+          (write-back-target! ctx target updated-obj source-obj)
+          (annotate-reference-result target obj result)
+          (catch Exception e
+            (write-back-target! ctx target source-obj source-obj)
+            (throw e)))))))
+
+(defn- resolve-nex-object-field-or-any-protocol
+  "The method named didn't resolve on the object's class chain (no
+   `method-lookup`): it may still be a field, a Function-valued field
+   invoked with parens (`obj.on_click(...)`, dispatched as `call<N>` on the
+   field's value), or one of the Any protocol's universal names."
+  [ctx target target-name class-def method obj has-parens arg-values]
+  (let [field (lookup-field-with-inheritance ctx class-def method (:current-class-name ctx))]
+    (if field
+      (let [field-val (get (:fields obj) (keyword method))]
+        (if (and has-parens (nex-object? field-val))
+          ;; Function field with parens: invoke callN on it
+          (let [call-method (str "call" (count arg-values))
+                literal-args (mapv (fn [v] {:type :literal :value v}) arg-values)]
+            (eval-node ctx {:type :call
+                            :target {:type :literal :value field-val}
+                            :method call-method
+                            :args literal-args}))
+          ;; No parens or not a Function: return field value (if no args)
+          (if (empty? arg-values)
+            field-val
+            (throw (ex-info (str "Method not found: " method)
+                            {:object obj :method method})))))
+      (if (get-in builtin-type-methods [:Any method])
+        (call-builtin-method ctx (or target-name target) obj method arg-values)
+        (throw (ex-info (str "Method not found: " method)
+                        {:object obj :method method}))))))
+
+(defn- invoke-nex-object-call
+  [ctx target target-name method obj has-parens arg-values]
+  (let [class-def (lookup-class ctx (:class-name obj))
+        method-lookup (lookup-method-with-inheritance ctx class-def method (count arg-values))]
+    (if method-lookup
+      (invoke-found-nex-method ctx target target-name class-def method method-lookup obj has-parens arg-values)
+      (resolve-nex-object-field-or-any-protocol ctx target target-name class-def method obj has-parens arg-values))))
+
+(defn- invoke-compiled-object-call
+  [ctx obj method has-parens arg-values]
+  (let [compiled-class-name (compiled-runtime-class-name ctx obj)
+                compiled-class-def (when compiled-class-name
+                                     (lookup-class-if-exists ctx compiled-class-name))]
+            (if compiled-class-def
+              (if (and (empty? arg-values)
+                       (false? has-parens))
+                (if-let [_ (lookup-field-with-inheritance ctx
+                                                          compiled-class-def
+                                                          method
+                                                          (:current-class-name ctx))]
+                  (if-let [[_ field-value] (compiled-object-field obj method)]
+                    field-value
+                    (throw (ex-info (str "Undefined field: " method)
+                                    {:field method
+                                     :class-name compiled-class-name})))
+                  (if-let [_ (lookup-field-with-inheritance-any-visibility ctx
+                                                                           compiled-class-def
+                                                                           method)]
+                    (throw (ex-info (str "Undefined field: " method)
+                                    {:field method
+                                     :class-name compiled-class-name}))
+                    (runtime-resolve-call-user-method ctx obj method arg-values)))
+                (runtime-resolve-call-user-method ctx obj method arg-values))
+              (java-call-method ctx obj method arg-values))))
+
+(defn- eval-call-with-target
+  [ctx {:keys [target method has-parens]} arg-values]
+  (let [{:keys [target-name super-parent-name class-target parent-class java-class? obj]}
+        (resolve-interp-call-target ctx target)]
+    (cond
+      ;; Java static method or field access inside with "java" block
+      java-class?
+      (invoke-java-static-call ctx target-name method has-parens arg-values)
+
+      ;; Class-qualified constant access: A.CONST
+      (and class-target
+           (false? has-parens)
+           (lookup-class-constant ctx class-target method))
+      (eval-class-constant ctx class-target method)
+
+      ;; Parent-qualified call: A.method() where A is a parent class, or
+      ;; super.method()/super.make(...), where the parent is resolved from
+      ;; the current class rather than named at the call site.
+      parent-class
+      (dispatch-parent-call ctx (:current-object ctx) (or super-parent-name target-name) method arg-values)
+
+      (nex-object? obj)
+      (invoke-nex-object-call ctx target target-name method obj has-parens arg-values)
+
+      (get-type-name obj)
+      (call-builtin-method ctx (or target-name target) obj method arg-values)
+
+      :else
+      (invoke-compiled-object-call ctx obj method has-parens arg-values))))
+
+(defn- eval-call-without-target
+  "A call with no receiver: `method` is either a callable bound in the
+   current env (a local Function, a compiled top-level function, or a host
+   fn), or — failing that — an implicit call on `this` inside the currently
+   executing method, or a global builtin."
+  [ctx method args has-parens arg-values]
+  (let [fn-obj (try
+                 (env-lookup (:current-env ctx) method)
+                 (catch Exception _ ::not-found))]
+    (if (not= fn-obj ::not-found)
+      (let [compiled-callable? (boolean (compiled-runtime-class-name ctx fn-obj))]
+        (cond
+          (or (nex-object? fn-obj) compiled-callable?)
+          (if (not= has-parens false)
+            ;; has-parens is true or nil (default): invoke the Function
+            (let [call-method (str "call" (count args))]
+              (eval-node ctx {:type :call
+                              :target method
+                              :method call-method
+                              :args args}))
+            ;; has-parens is false: return the Function object
+            fn-obj)
+
+          ;; A plain host callable (e.g. a compiled top-level function bridged
+          ;; into the interpreter for a deoptimized closure): apply it.
+          (and (fn? fn-obj) (not= has-parens false))
+          (apply fn-obj arg-values)
+
+          ;; Variable value found (non-callable). In no-parens form, treat as identifier.
+          ;; This keeps expressions like x + 1 working when parser emits :call for bare identifiers.
+          (false? has-parens)
+          fn-obj
+
+          :else
+          (throw (ex-info (str "Undefined function: " method)
+                          {:function method}))))
+      (if-let [current-obj (:current-object ctx)]
+        (let [class-def (lookup-class ctx (:class-name current-obj))
+              method-lookup (lookup-method-with-inheritance ctx
+                                                            class-def
+                                                            method
+                                                            (count args)
+                                                            (:current-class-name ctx))]
+          (if method-lookup
+            (let [all-fields (get-all-fields ctx class-def)
+              current-env (:current-env ctx)
+              updated-fields (reduce (fn [m field]
+                                      (let [field-name (:name field)
+                                            field-key (keyword field-name)
+                                            val (try
+                                                  (env-lookup current-env field-name)
+                                                  (catch Exception _ ::not-found))]
+                                        (if (not= val ::not-found)
+                                          (assoc m field-key val)
+                                          m)))
+                                    (:fields current-obj)
+                                    all-fields)
+              updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
+              target-name (:current-target ctx)]
+            (if (string? target-name)
+              ;; The enclosing method was invoked on a plain variable, so route
+              ;; the self-call back through that variable to propagate any
+              ;; field mutations to the caller.
+              (let [_ (env-set! (-> ctx :current-env :parent) target-name updated-obj)
+                    result (eval-node ctx {:type :call
+                                           :target target-name
+                                           :method method
+                                           :args args})
+                    called-obj (env-lookup (-> ctx :current-env :parent) target-name)
+                    _ (when called-obj
+                        (doseq [[field-name field-val] (:fields called-obj)]
+                          (env-set! current-env (name field-name) field-val)))]
+                result)
+              ;; The enclosing method was invoked on a non-variable target
+              ;; (e.g. `a.b.m()`), so there is no caller variable to route
+              ;; through. Dispatch straight to the current object; rewriting
+              ;; with a nil target would re-enter this branch forever
+              ;; (StackOverflow).
+              (eval-node ctx {:type :call
+                              :target {:type :literal :value updated-obj}
+                              :method method
+                              :args args})))
+            (if-let [builtin (get builtins method)]
+              (apply builtin ctx arg-values)
+              (throw (ex-info (str "Undefined method: " method)
+                              {:function method :object current-obj})))))
+        (if-let [builtin (get builtins method)]
+          (apply builtin ctx arg-values)
+          (throw (ex-info (str "Undefined function: " method)
+                          {:function method})))))))
+
 (defmethod eval-node :call
-  [ctx {:keys [target method args has-parens]}]
+  [ctx {:keys [target method args has-parens] :as expr}]
   (maybe-debug-pause ctx {:type :call :target target :method method :args args :has-parens has-parens})
   (if (and (map? target) (= :create (:type target)) (nil? method))
     (if (nil? (:constructor target))
@@ -1973,293 +2316,9 @@
       (eval-node ctx (assoc target :args args)))
     (let [arg-values (mapv #(eval-node ctx %) args)]
       (if target
-      (let [target-name (when (string? target) target)
-            ;; `super.method(...)`/`super.make(...)`: `super` has its own node
-            ;; type (like `this`), resolved to the current class's one direct
-            ;; parent rather than a literal name written at the call site.
-            super-target? (and (map? target) (= :super (:type target)))
-            super-parent-name (when super-target? (resolve-super-parent-name ctx))
-            class-target (when target-name (lookup-class-if-exists ctx target-name))
-            ;; Check if target is a parent class name (parent-qualified call:
-            ;; A.method()), or `super`, which resolves to the direct parent of
-            ;; the class whose body is currently executing rather than a
-            ;; literal name written at the call site.
-            parent-class (when (or target-name super-target?)
-                           (if super-target?
-                             (lookup-class-if-exists ctx super-parent-name)
-                             (when (:current-object ctx)
-                               (let [cls (lookup-class-if-exists ctx target-name)]
-                                 (when (and cls
-                                            (is-parent? ctx (:class-name (:current-object ctx)) target-name))
-                                   cls)))))
-            ;; Check if target is a Java host class (only when inside with "java" block)
-            java-class? (and (:with-java? ctx)
-                             target-name
-                             (not class-target)
-                             (not parent-class)
-                             (re-matches #"[A-Z][A-Za-z0-9_]*" target-name)
-                             (not (env-contains? (:current-env ctx) target-name)))
-            obj (when-not (or parent-class java-class?)
-                  (if class-target
-                    nil
-                    (if target-name
-                    (env-lookup (:current-env ctx) target-name)
-                    (eval-node ctx target))))]
-        (cond
-          ;; Java static method or field access inside with "java" block
-          java-class?
-          (let [klass (or (resolve-imported-java-class ctx target-name)
-                                  (try (Class/forName (str "java.lang." target-name)) (catch Exception _ nil))
-                                  (throw (ex-info (str "Undefined Java class: " target-name) {:class-name target-name})))]
-                    (if has-parens
-                      ;; `method` here also covers ClassName.new(args) — Clojure's
-                      ;; Reflector special-cases the literal name "new" as
-                      ;; constructor invocation — so arguments need the same
-                      ;; Java-interface Proxy-wrapping java-create-object applies.
-                      (clojure.lang.Reflector/invokeStaticMethod klass method (to-array (bi/java-args ctx arg-values)))
-                      (let [^java.lang.reflect.Field field (.getField klass method)]
-                        (.get field nil))))
+        (eval-call-with-target ctx expr arg-values)
+        (eval-call-without-target ctx method args has-parens arg-values)))))
 
-          ;; Class-qualified constant access: A.CONST
-          (and class-target
-               (false? has-parens)
-               (lookup-class-constant ctx class-target method))
-          (eval-class-constant ctx class-target method)
-
-          ;; Parent-qualified call: A.method() where A is a parent class, or
-          ;; super.method()/super.make(...), where the parent is resolved from
-          ;; the current class rather than named at the call site.
-          parent-class
-          (dispatch-parent-call ctx (:current-object ctx) (or super-parent-name target-name) method arg-values)
-
-          (nex-object? obj)
-          (let [class-def (lookup-class ctx (:class-name obj))
-                method-lookup (lookup-method-with-inheritance ctx class-def method (count arg-values))]
-            (if method-lookup
-                (let [method-def (:method method-lookup)
-                    params (:params method-def)]
-                (ensure-callable-defined! method-def)
-                ;; Bug fix: disallow paren-less calls to methods that require arguments
-                (when (and (false? has-parens) (seq params))
-                  (throw (ex-info (str method " requires arguments")
-                                  {:method method :params (mapv :name params)})))
-                (let [source-class (:source-class method-lookup)
-                    all-fields (get-all-fields ctx class-def)
-                    effective-require (:effective-require method-lookup)
-                    effective-ensure (:effective-ensure method-lookup)
-                    has-postconditions? (seq effective-ensure)
-                    old-values (when has-postconditions? (snapshot-old-field-values (:fields obj)))
-                    source-obj (or (-> obj meta write-back-source-key) obj)]
-                (let [method-env (make-env (or (:closure-env obj) (:current-env ctx)))
-                      param-names (set (map :name params))
-                      ;; Define fields first, then params — so params shadow fields
-                      _ (doseq [[field-name field-val] (:fields obj)]
-                          (env-define method-env (name field-name) field-val))
-                      _ (bind-class-constants! ctx method-env class-def)
-                      _ (when params
-                          (doseq [[param arg-val] (map vector params arg-values)]
-                            (env-define method-env (:name param) arg-val)))
-                      modified-fields (atom #{})
-                      return-type (:return-type method-def)
-                      default-result (if return-type
-                                      (get-default-field-value return-type)
-                                      nil)
-                      _ (env-define method-env "result" default-result)
-                      _ (env-define method-env "this" obj)
-                      new-ctx (-> ctx
-                                 (assoc :current-env method-env)
-                                 (assoc :current-object obj)
-                                 (assoc :current-target target-name)
-                                 (assoc :current-class-name (:name source-class))
-                                 (assoc :current-method-name method)
-                                 (assoc :old-values old-values)
-                                 (assoc :modified-fields modified-fields)
-                                 (update :debug-stack (fnil conj [])
-                                         {:class (:name source-class)
-                                          :method method
-                                          :env method-env
-                                          :arg-names (set (map :name (or params [])))
-                                          :field-names (set (map name (keys (:fields obj))))
-                                          :source (:debug-source ctx)})
-                                 (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
-                      _ (when-let [require-assertions effective-require]
-                          (check-assertions new-ctx require-assertions Precondition))
-                      _ (if-let [rescue (:rescue method-def)]
-                          (eval-body-with-rescue new-ctx (:body method-def) rescue)
-                          (doseq [stmt (:body method-def)]
-                            (eval-node new-ctx stmt)))
-                      updated-fields (reduce (fn [m field]
-                                              (let [field-name (:name field)
-                                                    field-key (keyword field-name)]
-                                                ;; Skip fields shadowed by params unless explicitly modified via this.field :=
-                                                (if (and (contains? param-names field-name)
-                                                         (not (contains? @modified-fields field-name)))
-                                                  m
-                                                  (let [val (try
-                                                              (env-lookup method-env field-name)
-                                                              (catch Exception _ ::not-found))]
-                                                    (if (not= val ::not-found)
-                                                      (assoc m field-key val)
-                                                      m)))))
-                                            (:fields obj)
-                                            all-fields)
-                      updated-obj (make-object (:class-name obj) updated-fields (:closure-env obj))
-                      result-flag (try
-                                    (env-lookup method-env "__result_assigned__")
-                                    (catch Exception _ ::not-found))
-                      result (cond
-                               (= result-flag "result")
-                               (env-lookup method-env "result")
-                               :else
-                               (let [res (try
-                                           (env-lookup method-env "result")
-                                           (catch Exception _ ::not-found))]
-                                 (if (not= res ::not-found)
-                                   res
-                                   nil)))]
-                  (try
-                    (when-let [ensure-assertions effective-ensure]
-                      (check-assertions new-ctx ensure-assertions Postcondition))
-                    (check-class-invariant new-ctx class-def)
-                    (write-back-target! ctx target updated-obj source-obj)
-                    (annotate-reference-result target obj result)
-                    (catch Exception e
-                      (write-back-target! ctx target source-obj source-obj)
-                      (throw e))))))
-              (let [field (lookup-field-with-inheritance ctx class-def method (:current-class-name ctx))]
-                (if field
-                  (let [field-val (get (:fields obj) (keyword method))]
-                    (if (and has-parens (nex-object? field-val))
-                      ;; Function field with parens: invoke callN on it
-                      (let [call-method (str "call" (count arg-values))
-                            literal-args (mapv (fn [v] {:type :literal :value v}) arg-values)]
-                        (eval-node ctx {:type :call
-                                        :target {:type :literal :value field-val}
-                                        :method call-method
-                                        :args literal-args}))
-                      ;; No parens or not a Function: return field value (if no args)
-                      (if (empty? arg-values)
-                        field-val
-                        (throw (ex-info (str "Method not found: " method)
-                                        {:object obj :method method})))))
-                  (if (get-in builtin-type-methods [:Any method])
-                    (call-builtin-method ctx (or target-name target) obj method arg-values)
-                    (throw (ex-info (str "Method not found: " method)
-                                    {:object obj :method method})))))))
-
-          (get-type-name obj)
-          (call-builtin-method ctx (or target-name target) obj method arg-values)
-
-          :else
-          (let [compiled-class-name (compiled-runtime-class-name ctx obj)
-                        compiled-class-def (when compiled-class-name
-                                             (lookup-class-if-exists ctx compiled-class-name))]
-                    (if compiled-class-def
-                      (if (and (empty? arg-values)
-                               (false? has-parens))
-                        (if-let [_ (lookup-field-with-inheritance ctx
-                                                                  compiled-class-def
-                                                                  method
-                                                                  (:current-class-name ctx))]
-                          (if-let [[_ field-value] (compiled-object-field obj method)]
-                            field-value
-                            (throw (ex-info (str "Undefined field: " method)
-                                            {:field method
-                                             :class-name compiled-class-name})))
-                          (if-let [_ (lookup-field-with-inheritance-any-visibility ctx
-                                                                                   compiled-class-def
-                                                                                   method)]
-                            (throw (ex-info (str "Undefined field: " method)
-                                            {:field method
-                                             :class-name compiled-class-name}))
-                            (runtime-resolve-call-user-method ctx obj method arg-values)))
-                        (runtime-resolve-call-user-method ctx obj method arg-values))
-                      (java-call-method ctx obj method arg-values)))))
-
-      (let [fn-obj (try
-                     (env-lookup (:current-env ctx) method)
-                     (catch Exception _ ::not-found))]
-        (if (not= fn-obj ::not-found)
-          (let [compiled-callable? (boolean (compiled-runtime-class-name ctx fn-obj))]
-            (cond
-              (or (nex-object? fn-obj) compiled-callable?)
-              (if (not= has-parens false)
-                ;; has-parens is true or nil (default): invoke the Function
-                (let [call-method (str "call" (count args))]
-                  (eval-node ctx {:type :call
-                                  :target method
-                                  :method call-method
-                                  :args args}))
-                ;; has-parens is false: return the Function object
-                fn-obj)
-
-              ;; A plain host callable (e.g. a compiled top-level function bridged
-              ;; into the interpreter for a deoptimized closure): apply it.
-              (and (fn? fn-obj) (not= has-parens false))
-              (apply fn-obj arg-values)
-
-              ;; Variable value found (non-callable). In no-parens form, treat as identifier.
-              ;; This keeps expressions like x + 1 working when parser emits :call for bare identifiers.
-              (false? has-parens)
-              fn-obj
-
-              :else
-              (throw (ex-info (str "Undefined function: " method)
-                              {:function method}))))
-          (if-let [current-obj (:current-object ctx)]
-            (let [class-def (lookup-class ctx (:class-name current-obj))
-                  method-lookup (lookup-method-with-inheritance ctx
-                                                                class-def
-                                                                method
-                                                                (count args)
-                                                                (:current-class-name ctx))]
-              (if method-lookup
-                (let [all-fields (get-all-fields ctx class-def)
-                  current-env (:current-env ctx)
-                  updated-fields (reduce (fn [m field]
-                                          (let [field-name (:name field)
-                                                field-key (keyword field-name)
-                                                val (try
-                                                      (env-lookup current-env field-name)
-                                                      (catch Exception _ ::not-found))]
-                                            (if (not= val ::not-found)
-                                              (assoc m field-key val)
-                                              m)))
-                                        (:fields current-obj)
-                                        all-fields)
-                  updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
-                  target-name (:current-target ctx)]
-              (if (string? target-name)
-                ;; The enclosing method was invoked on a plain variable, so route
-                ;; the self-call back through that variable to propagate any
-                ;; field mutations to the caller.
-                (let [_ (env-set! (-> ctx :current-env :parent) target-name updated-obj)
-                      result (eval-node ctx {:type :call
-                                             :target target-name
-                                             :method method
-                                             :args args})
-                      called-obj (env-lookup (-> ctx :current-env :parent) target-name)
-                      _ (when called-obj
-                          (doseq [[field-name field-val] (:fields called-obj)]
-                            (env-set! current-env (name field-name) field-val)))]
-                  result)
-                ;; The enclosing method was invoked on a non-variable target
-                ;; (e.g. `a.b.m()`), so there is no caller variable to route
-                ;; through. Dispatch straight to the current object; rewriting
-                ;; with a nil target would re-enter this branch forever
-                ;; (StackOverflow).
-                (eval-node ctx {:type :call
-                                :target {:type :literal :value updated-obj}
-                                :method method
-                                :args args})))
-                (if-let [builtin (get builtins method)]
-                  (apply builtin ctx arg-values)
-                  (throw (ex-info (str "Undefined method: " method)
-                                  {:function method :object current-obj})))))
-            (if-let [builtin (get builtins method)]
-              (apply builtin ctx arg-values)
-              (throw (ex-info (str "Undefined function: " method)
-                              {:function method}))))))))))
 
 (defmethod eval-node :this
   [ctx _]
@@ -2811,125 +2870,145 @@
               (lookup-constructor-with-inheritance ctx class-def constructor-name))
             (get-parent-classes ctx class-def))))
 
-(defmethod eval-node :create
-  [ctx {:keys [class-name generic-args constructor args]}]
-  ;; Handle built-in IO types
-  (case class-name
-    "Console" {:nex-builtin-type :Console}
-    "Process" (let [arg-values (mapv #(eval-node ctx %) args)]
-               (cond
-                 (or (nil? constructor) (= constructor "self"))
-                 (do
-                   (when (seq arg-values)
-                     (throw (ex-info "create Process expects no arguments"
-                                     {:class-name "Process" :constructor constructor})))
-                   (nex-process-self))
+(defn- create-console-builtin
+  [_ctx _constructor _args]
+  {:nex-builtin-type :Console})
 
-                 (= constructor "command")
-                 (do
-                   (when-not (<= 1 (count arg-values) 2)
-                     (throw (ex-info "Process.command expects 1 or 2 arguments"
-                                     {:class-name "Process" :constructor constructor})))
-                   (if (= 2 (count arg-values))
-                     (nex-process-command (first arg-values) (second arg-values))
-                     (nex-process-command (first arg-values))))
+(defn- create-process-builtin
+  [ctx constructor args]
+  (let [arg-values (mapv #(eval-node ctx %) args)]
+    (cond
+      (or (nil? constructor) (= constructor "self"))
+      (do
+        (when (seq arg-values)
+          (throw (ex-info "create Process expects no arguments"
+                          {:class-name "Process" :constructor constructor})))
+        (nex-process-self))
 
-                 :else
-                 (throw (ex-info (str "Constructor not found: Process." constructor)
-                                 {:class-name "Process" :constructor constructor}))))
-    "Array" (let [arg-values (mapv #(eval-node ctx %) args)]
-              (cond
-                (nil? constructor) (nex-array)
-                (= constructor "filled")
-                (let [[size value] arg-values]
-                  (when-not (integer? size)
-                    (throw (ex-info "Array.filled requires an Integer size"
-                                    {:class-name "Array" :constructor constructor})))
-                  (when (neg? size)
-                    (throw (ex-info "Array size must be non-negative"
-                                    {:class-name "Array" :constructor constructor})))
-                  (nex-array-from (vec (repeat size value))))
-                :else
-                (throw (ex-info (str "Constructor not found: Array." constructor)
-                                {:class-name "Array" :constructor constructor}))))
-    "Map" (nex-map)
-    "Min_Heap" (let [arg-values (mapv #(eval-node ctx %) args)]
-                 (cond
-                   (or (nil? constructor) (= constructor "empty"))
-                   (do
-                     (when (seq arg-values)
-                       (throw (ex-info "Min_Heap.empty expects no arguments"
-                                       {:class-name "Min_Heap" :constructor constructor})))
-                     (make-min-heap nil))
+      (= constructor "command")
+      (do
+        (when-not (<= 1 (count arg-values) 2)
+          (throw (ex-info "Process.command expects 1 or 2 arguments"
+                          {:class-name "Process" :constructor constructor})))
+        (if (= 2 (count arg-values))
+          (nex-process-command (first arg-values) (second arg-values))
+          (nex-process-command (first arg-values))))
 
-                   (= constructor "from_comparator")
-                   (do
-                     (when-not (= 1 (count arg-values))
-                       (throw (ex-info "Min_Heap.from_comparator expects 1 argument"
-                                       {:class-name "Min_Heap" :constructor constructor})))
-                     (make-min-heap (first arg-values)))
+      :else
+      (throw (ex-info (str "Constructor not found: Process." constructor)
+                      {:class-name "Process" :constructor constructor})))))
 
-                   :else
-                   (throw (ex-info (str "Constructor not found: Min_Heap." constructor)
-                                   {:class-name "Min_Heap" :constructor constructor}))))
-    "Atomic_Integer" (let [arg-values (mapv #(eval-node ctx %) args)]
-                       (when-not (= constructor "make")
-                         (throw (ex-info (str "Constructor not found: Atomic_Integer." constructor)
-                                         {:class-name "Atomic_Integer" :constructor constructor})))
-                       (when-not (= 1 (count arg-values))
-                         (throw (ex-info "Atomic_Integer.make expects 1 argument"
-                                         {:class-name "Atomic_Integer" :constructor constructor})))
-                       (make-atomic-integer (first arg-values)))
-    "Atomic_Integer64" (let [arg-values (mapv #(eval-node ctx %) args)]
-                         (when-not (= constructor "make")
-                           (throw (ex-info (str "Constructor not found: Atomic_Integer64." constructor)
-                                           {:class-name "Atomic_Integer64" :constructor constructor})))
-                         (when-not (= 1 (count arg-values))
-                           (throw (ex-info "Atomic_Integer64.make expects 1 argument"
-                                           {:class-name "Atomic_Integer64" :constructor constructor})))
-                         (make-atomic-integer64 (first arg-values)))
-    "Atomic_Boolean" (let [arg-values (mapv #(eval-node ctx %) args)]
-                       (when-not (= constructor "make")
-                         (throw (ex-info (str "Constructor not found: Atomic_Boolean." constructor)
-                                         {:class-name "Atomic_Boolean" :constructor constructor})))
-                       (when-not (= 1 (count arg-values))
-                         (throw (ex-info "Atomic_Boolean.make expects 1 argument"
-                                         {:class-name "Atomic_Boolean" :constructor constructor})))
-                       (make-atomic-boolean (first arg-values)))
-    "Atomic_Reference" (let [arg-values (mapv #(eval-node ctx %) args)]
-                         (when-not (= constructor "make")
-                           (throw (ex-info (str "Constructor not found: Atomic_Reference." constructor)
-                                           {:class-name "Atomic_Reference" :constructor constructor})))
-                         (when-not (= 1 (count arg-values))
-                           (throw (ex-info "Atomic_Reference.make expects 1 argument"
-                                           {:class-name "Atomic_Reference" :constructor constructor})))
-                         (make-atomic-reference (first arg-values)))
-    "Channel" (let [arg-values (mapv #(eval-node ctx %) args)]
-                        (cond
-                          (nil? constructor) (make-channel)
-                          (= constructor "with_capacity")
-                          (let [capacity (first arg-values)]
-                            (when-not (integer? capacity)
-                              (throw (ex-info "Channel.with_capacity requires an Integer capacity"
-                                              {:class-name "Channel" :constructor constructor})))
-                            (when (neg? capacity)
-                              (throw (ex-info "Channel capacity must be non-negative"
-                                              {:class-name "Channel" :constructor constructor})))
-                            (make-channel capacity))
-                          :else
-                          (throw (ex-info (str "Constructor not found: Channel." constructor)
-                                          {:class-name "Channel" :constructor constructor}))))
-    "Set" (let [arg-values (mapv #(eval-node ctx %) args)]
-            (cond
-              (nil? constructor) (nex-set)
-              (= constructor "from_array") (let [source (first arg-values)]
-                                             (cond
-                                               (nex-array? source) (nex-set-from source)
-                                               (sequential? source) (nex-set-from source)
-                                               :else (throw (ex-info "Set.from_array requires an array"
-                                                                     {:class-name "Set"}))))
-              :else (throw (ex-info (str "Constructor not found: Set." constructor)
-                                    {:class-name "Set" :constructor constructor}))))
+(defn- create-array-builtin
+  [ctx constructor args]
+  (let [arg-values (mapv #(eval-node ctx %) args)]
+    (cond
+      (nil? constructor) (nex-array)
+      (= constructor "filled")
+      (let [[size value] arg-values]
+        (when-not (integer? size)
+          (throw (ex-info "Array.filled requires an Integer size"
+                          {:class-name "Array" :constructor constructor})))
+        (when (neg? size)
+          (throw (ex-info "Array size must be non-negative"
+                          {:class-name "Array" :constructor constructor})))
+        (nex-array-from (vec (repeat size value))))
+      :else
+      (throw (ex-info (str "Constructor not found: Array." constructor)
+                      {:class-name "Array" :constructor constructor})))))
+
+(defn- create-map-builtin
+  [_ctx _constructor _args]
+  (nex-map))
+
+(defn- create-min-heap-builtin
+  [ctx constructor args]
+  (let [arg-values (mapv #(eval-node ctx %) args)]
+    (cond
+      (or (nil? constructor) (= constructor "empty"))
+      (do
+        (when (seq arg-values)
+          (throw (ex-info "Min_Heap.empty expects no arguments"
+                          {:class-name "Min_Heap" :constructor constructor})))
+        (make-min-heap nil))
+
+      (= constructor "from_comparator")
+      (do
+        (when-not (= 1 (count arg-values))
+          (throw (ex-info "Min_Heap.from_comparator expects 1 argument"
+                          {:class-name "Min_Heap" :constructor constructor})))
+        (make-min-heap (first arg-values)))
+
+      :else
+      (throw (ex-info (str "Constructor not found: Min_Heap." constructor)
+                      {:class-name "Min_Heap" :constructor constructor})))))
+
+(defn- create-single-arg-atomic
+  "Builds a `create <Class>.make(value)` handler for the atomic builtins:
+   all four (Atomic_Integer, Atomic_Integer64, Atomic_Boolean,
+   Atomic_Reference) share this same one-arg-named-'make' shape, differing
+   only in the class name (for error messages) and the underlying atomic
+   constructor to call."
+  [class-name make-fn]
+  (fn [ctx constructor args]
+    (let [arg-values (mapv #(eval-node ctx %) args)]
+      (when-not (= constructor "make")
+        (throw (ex-info (str "Constructor not found: " class-name "." constructor)
+                        {:class-name class-name :constructor constructor})))
+      (when-not (= 1 (count arg-values))
+        (throw (ex-info (str class-name ".make expects 1 argument")
+                        {:class-name class-name :constructor constructor})))
+      (make-fn (first arg-values)))))
+
+(defn- create-channel-builtin
+  [ctx constructor args]
+  (let [arg-values (mapv #(eval-node ctx %) args)]
+    (cond
+      (nil? constructor) (make-channel)
+      (= constructor "with_capacity")
+      (let [capacity (first arg-values)]
+        (when-not (integer? capacity)
+          (throw (ex-info "Channel.with_capacity requires an Integer capacity"
+                          {:class-name "Channel" :constructor constructor})))
+        (when (neg? capacity)
+          (throw (ex-info "Channel capacity must be non-negative"
+                          {:class-name "Channel" :constructor constructor})))
+        (make-channel capacity))
+      :else
+      (throw (ex-info (str "Constructor not found: Channel." constructor)
+                      {:class-name "Channel" :constructor constructor})))))
+
+(defn- create-set-builtin
+  [ctx constructor args]
+  (let [arg-values (mapv #(eval-node ctx %) args)]
+    (cond
+      (nil? constructor) (nex-set)
+      (= constructor "from_array") (let [source (first arg-values)]
+                                     (cond
+                                       (nex-array? source) (nex-set-from source)
+                                       (sequential? source) (nex-set-from source)
+                                       :else (throw (ex-info "Set.from_array requires an array"
+                                                             {:class-name "Set"}))))
+      :else (throw (ex-info (str "Constructor not found: Set." constructor)
+                            {:class-name "Set" :constructor constructor})))))
+
+(def ^:private create-builtin-dispatch
+  "class-name -> (fn [ctx constructor args] ...): the built-in-type half of
+   `eval-node :create`. A class name with no entry here is a user-defined
+   (or Java interop) class, handled by `create-user-object`."
+  {"Console"          create-console-builtin
+   "Process"          create-process-builtin
+   "Array"            create-array-builtin
+   "Map"              create-map-builtin
+   "Min_Heap"         create-min-heap-builtin
+   "Atomic_Integer"   (create-single-arg-atomic "Atomic_Integer" make-atomic-integer)
+   "Atomic_Integer64" (create-single-arg-atomic "Atomic_Integer64" make-atomic-integer64)
+   "Atomic_Boolean"   (create-single-arg-atomic "Atomic_Boolean" make-atomic-boolean)
+   "Atomic_Reference" (create-single-arg-atomic "Atomic_Reference" make-atomic-reference)
+   "Channel"          create-channel-builtin
+   "Set"              create-set-builtin})
+
+(defn- create-user-object
+  [ctx class-name generic-args constructor args]
   ;; Resolve effective class name (handle generic specialization)
   (let [effective-class-name
         (if (seq generic-args)
@@ -3045,7 +3124,14 @@
         ;; Return the object
         obj)
       ;; Java interop fallback (CLJ only)
-      (java-create-object ctx class-name (mapv #(eval-node ctx %) args))))))
+      (java-create-object ctx class-name (mapv #(eval-node ctx %) args)))))
+
+(defmethod eval-node :create
+  [ctx {:keys [class-name generic-args constructor args]}]
+  (if-let [handler (get create-builtin-dispatch class-name)]
+    (handler ctx constructor args)
+    (create-user-object ctx class-name generic-args constructor args)))
+
 
 (defmethod eval-node :spawn
   [ctx {:keys [body]}]
