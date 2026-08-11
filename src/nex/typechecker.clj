@@ -1949,162 +1949,176 @@
         "Task"
         {:base-type "Task" :type-params [result-type]}))))
 
+;; The universal protocol: what *every* value has, whatever its type. This
+;; case is consulted for every receiver (see `check-target-call`), so a name
+;; listed here typechecks against a class that never declares it — which is
+;; a promise only worth making for names that have a default implementation
+;; behind them. It must therefore stay in step with the two things that
+;; provide those defaults: the "Any" protocol class registered in
+;; `register-builtin-methods`, and `builtin-type-methods` :Any in
+;; nex.types.builtins. All three now list the same names.
+;;
+;; The cursor protocol (`cursor`/`start`/`item`/`next`/`at_end`) used to be
+;; here and is deliberately not: there is no universal default for it, so
+;; listing it promised an iteration protocol on every value in the language
+;; and delivered it on none — `p.cursor` on a plain class typechecked and
+;; then failed at runtime ("Method not found") or refused to compile. Each
+;; of those names is now owned by the types that actually implement it: the
+;; "Cursor" case below, the `across` loop's cursor path in
+;; `check-target-call`, Array/Map/Set/String in `register-builtin-methods`,
+;; and any user class that declares its own.
+;;
+;; `hash` is intentionally absent even though the other two tables carry it:
+;; a class opts into hashing by inheriting Hashable. Adding it here would
+;; typecheck `p.hash` on any class, which the compiled backend cannot lower.
+(defn- builtin-method-signature-any
+  [method argc _type-map]
+  (case method
+    "to_string" (when (= argc 0)
+                  {:params [] :return-type "String"})
+    "equals" (when (= argc 1)
+               {:params [{:name "other" :type "Any"}] :return-type "Boolean"})
+    "clone" (when (= argc 0)
+              {:params [] :return-type "Any"})
+    nil))
+
+(defn- builtin-method-signature-task
+  [method argc type-map]
+  (case method
+    "await" (case argc
+              0 {:params [] :return-type (resolve-generic-type "T" type-map)}
+              1 {:params [{:name "timeout_ms" :type "Integer"}]
+                 :return-type (detachable-version (resolve-generic-type "T" type-map))}
+              nil)
+    "cancel" (when (= argc 0)
+               {:params [] :return-type "Boolean"})
+    "is_done" (when (= argc 0)
+                {:params [] :return-type "Boolean"})
+    "is_cancelled" (when (= argc 0)
+                     {:params [] :return-type "Boolean"})
+    nil))
+
+(defn- builtin-method-signature-channel
+  [method argc type-map]
+  (let [elem-type (or (resolve-generic-type "T" type-map) "Any")]
+    (case method
+      "send" (case argc
+               1 {:params [{:name "value" :type elem-type}] :return-type "Void"}
+               2 {:params [{:name "value" :type elem-type}
+                           {:name "timeout_ms" :type "Integer"}]
+                  :return-type "Boolean"}
+               nil)
+      "try_send" (when (= argc 1)
+                   {:params [{:name "value" :type elem-type}] :return-type "Boolean"})
+      "receive" (case argc
+                  0 {:params [] :return-type elem-type}
+                  1 {:params [{:name "timeout_ms" :type "Integer"}]
+                     :return-type (detachable-version elem-type)}
+                  nil)
+      "try_receive" (when (= argc 0)
+                      {:params [] :return-type (detachable-version elem-type)})
+      "close" (when (= argc 0) {:params [] :return-type "Void"})
+      "is_closed" (when (= argc 0) {:params [] :return-type "Boolean"})
+      "capacity" (when (= argc 0) {:params [] :return-type "Integer"})
+      "size" (when (= argc 0) {:params [] :return-type "Integer"})
+      nil)))
+
+(defn- builtin-method-signature-min-heap
+  [method argc type-map]
+  (let [elem-type (or (resolve-generic-type "T" type-map) "Any")]
+    (case method
+      "insert" (when (= argc 1)
+                 {:params [{:name "value" :type elem-type}] :return-type "Void"})
+      "extract_min" (when (= argc 0)
+                      {:params [] :return-type elem-type})
+      "try_extract_min" (when (= argc 0)
+                          {:params [] :return-type (detachable-version elem-type)})
+      "peek" (when (= argc 0)
+               {:params [] :return-type elem-type})
+      "try_peek" (when (= argc 0)
+                   {:params [] :return-type (detachable-version elem-type)})
+      "size" (when (= argc 0) {:params [] :return-type "Integer"})
+      "is_empty" (when (= argc 0) {:params [] :return-type "Boolean"})
+      nil)))
+
+;; Atomic_Integer and Atomic_Integer64 are both 64-bit atomics on the JVM
+;; (see nex.types.builtins) and share this exact signature set — one
+;; handler, used for both keys in the dispatch table below.
+(defn- builtin-method-signature-atomic-numeric
+  [method argc _type-map]
+  (case method
+    "load" (when (= argc 0) {:params [] :return-type "Integer"})
+    "store" (when (= argc 1) {:params [{:name "value" :type "Integer"}] :return-type "Void"})
+    "compare_and_set" (when (= argc 2)
+                        {:params [{:name "expected" :type "Integer"}
+                                  {:name "update" :type "Integer"}]
+                         :return-type "Boolean"})
+    "get_and_add" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
+    "add_and_get" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
+    "increment" (when (= argc 0) {:params [] :return-type "Integer"})
+    "decrement" (when (= argc 0) {:params [] :return-type "Integer"})
+    nil))
+
+(defn- builtin-method-signature-atomic-boolean
+  [method argc _type-map]
+  (case method
+    "load" (when (= argc 0) {:params [] :return-type "Boolean"})
+    "store" (when (= argc 1) {:params [{:name "value" :type "Boolean"}] :return-type "Void"})
+    "compare_and_set" (when (= argc 2)
+                        {:params [{:name "expected" :type "Boolean"}
+                                  {:name "update" :type "Boolean"}]
+                         :return-type "Boolean"})
+    nil))
+
+(defn- builtin-method-signature-atomic-reference
+  [method argc type-map]
+  (let [elem-type (or (resolve-generic-type "T" type-map) "Any")
+        maybe-elem (detachable-version elem-type)]
+    (case method
+      "load" (when (= argc 0) {:params [] :return-type maybe-elem})
+      "store" (when (= argc 1) {:params [{:name "value" :type maybe-elem}] :return-type "Void"})
+      "compare_and_set" (when (= argc 2)
+                          {:params [{:name "expected" :type maybe-elem}
+                                    {:name "update" :type maybe-elem}]
+                           :return-type "Boolean"})
+      nil)))
+
+(defn- builtin-method-signature-cursor
+  [method argc _type-map]
+  (case method
+    "start" (when (= argc 0)
+              {:params [] :return-type "Void"})
+    "cursor" (when (= argc 0)
+               {:params [] :return-type "Cursor"})
+    "item" (when (= argc 0)
+             {:params [] :return-type "Any"})
+    "next" (when (= argc 0)
+             {:params [] :return-type "Void"})
+    "at_end" (when (= argc 0)
+               {:params [] :return-type "Boolean"})
+    nil))
+
+(def ^:private builtin-method-signature-dispatch
+  "base-type -> `(fn [method argc type-map] -> signature-or-nil)`: the
+   primary dispatch table for `builtin-method-signature`. Each handler
+   keeps its own `case method`(+argc) dispatch internally — a method can be
+   genuinely overloaded (Task.await, Channel.send/receive) — the map only
+   replaces the outer `case base-type` that used to pick the handler out."
+  {"Any" builtin-method-signature-any
+   "Task" builtin-method-signature-task
+   "Channel" builtin-method-signature-channel
+   "Min_Heap" builtin-method-signature-min-heap
+   "Atomic_Integer" builtin-method-signature-atomic-numeric
+   "Atomic_Integer64" builtin-method-signature-atomic-numeric
+   "Atomic_Boolean" builtin-method-signature-atomic-boolean
+   "Atomic_Reference" builtin-method-signature-atomic-reference
+   "Cursor" builtin-method-signature-cursor})
+
 (defn- builtin-method-signature
   [base-type method argc type-map]
-  (case base-type
-    ;; The universal protocol: what *every* value has, whatever its type. This
-    ;; case is consulted for every receiver (see `check-target-call`), so a name
-    ;; listed here typechecks against a class that never declares it — which is
-    ;; a promise only worth making for names that have a default implementation
-    ;; behind them. It must therefore stay in step with the two things that
-    ;; provide those defaults: the "Any" protocol class registered in
-    ;; `register-builtin-methods`, and `builtin-type-methods` :Any in
-    ;; nex.types.builtins. All three now list the same names.
-    ;;
-    ;; The cursor protocol (`cursor`/`start`/`item`/`next`/`at_end`) used to be
-    ;; here and is deliberately not: there is no universal default for it, so
-    ;; listing it promised an iteration protocol on every value in the language
-    ;; and delivered it on none — `p.cursor` on a plain class typechecked and
-    ;; then failed at runtime ("Method not found") or refused to compile. Each
-    ;; of those names is now owned by the types that actually implement it: the
-    ;; "Cursor" case below, the `across` loop's cursor path in
-    ;; `check-target-call`, Array/Map/Set/String in `register-builtin-methods`,
-    ;; and any user class that declares its own.
-    ;;
-    ;; `hash` is intentionally absent even though the other two tables carry it:
-    ;; a class opts into hashing by inheriting Hashable. Adding it here would
-    ;; typecheck `p.hash` on any class, which the compiled backend cannot lower.
-    "Any"
-    (case method
-      "to_string" (when (= argc 0)
-                    {:params [] :return-type "String"})
-      "equals" (when (= argc 1)
-                 {:params [{:name "other" :type "Any"}] :return-type "Boolean"})
-      "clone" (when (= argc 0)
-                {:params [] :return-type "Any"})
-      nil)
+  (when-let [handler (get builtin-method-signature-dispatch base-type)]
+    (handler method argc type-map)))
 
-    "Task"
-    (case method
-      "await" (case argc
-                0 {:params [] :return-type (resolve-generic-type "T" type-map)}
-                1 {:params [{:name "timeout_ms" :type "Integer"}]
-                   :return-type (detachable-version (resolve-generic-type "T" type-map))}
-                nil)
-      "cancel" (when (= argc 0)
-                 {:params [] :return-type "Boolean"})
-      "is_done" (when (= argc 0)
-                  {:params [] :return-type "Boolean"})
-      "is_cancelled" (when (= argc 0)
-                       {:params [] :return-type "Boolean"})
-      nil)
-
-    "Channel"
-    (let [elem-type (or (resolve-generic-type "T" type-map) "Any")]
-      (case method
-        "send" (case argc
-                 1 {:params [{:name "value" :type elem-type}] :return-type "Void"}
-                 2 {:params [{:name "value" :type elem-type}
-                             {:name "timeout_ms" :type "Integer"}]
-                    :return-type "Boolean"}
-                 nil)
-        "try_send" (when (= argc 1)
-                     {:params [{:name "value" :type elem-type}] :return-type "Boolean"})
-        "receive" (case argc
-                    0 {:params [] :return-type elem-type}
-                    1 {:params [{:name "timeout_ms" :type "Integer"}]
-                       :return-type (detachable-version elem-type)}
-                    nil)
-        "try_receive" (when (= argc 0)
-                        {:params [] :return-type (detachable-version elem-type)})
-        "close" (when (= argc 0) {:params [] :return-type "Void"})
-        "is_closed" (when (= argc 0) {:params [] :return-type "Boolean"})
-        "capacity" (when (= argc 0) {:params [] :return-type "Integer"})
-        "size" (when (= argc 0) {:params [] :return-type "Integer"})
-        nil))
-
-    "Min_Heap"
-    (let [elem-type (or (resolve-generic-type "T" type-map) "Any")]
-      (case method
-        "insert" (when (= argc 1)
-                   {:params [{:name "value" :type elem-type}] :return-type "Void"})
-        "extract_min" (when (= argc 0)
-                        {:params [] :return-type elem-type})
-        "try_extract_min" (when (= argc 0)
-                            {:params [] :return-type (detachable-version elem-type)})
-        "peek" (when (= argc 0)
-                 {:params [] :return-type elem-type})
-        "try_peek" (when (= argc 0)
-                     {:params [] :return-type (detachable-version elem-type)})
-        "size" (when (= argc 0) {:params [] :return-type "Integer"})
-        "is_empty" (when (= argc 0) {:params [] :return-type "Boolean"})
-        nil))
-
-    "Atomic_Integer"
-    (case method
-      "load" (when (= argc 0) {:params [] :return-type "Integer"})
-      "store" (when (= argc 1) {:params [{:name "value" :type "Integer"}] :return-type "Void"})
-      "compare_and_set" (when (= argc 2)
-                          {:params [{:name "expected" :type "Integer"}
-                                    {:name "update" :type "Integer"}]
-                           :return-type "Boolean"})
-      "get_and_add" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
-      "add_and_get" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
-      "increment" (when (= argc 0) {:params [] :return-type "Integer"})
-      "decrement" (when (= argc 0) {:params [] :return-type "Integer"})
-      nil)
-
-    "Atomic_Integer64"
-    (case method
-      "load" (when (= argc 0) {:params [] :return-type "Integer"})
-      "store" (when (= argc 1) {:params [{:name "value" :type "Integer"}] :return-type "Void"})
-      "compare_and_set" (when (= argc 2)
-                          {:params [{:name "expected" :type "Integer"}
-                                    {:name "update" :type "Integer"}]
-                           :return-type "Boolean"})
-      "get_and_add" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
-      "add_and_get" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
-      "increment" (when (= argc 0) {:params [] :return-type "Integer"})
-      "decrement" (when (= argc 0) {:params [] :return-type "Integer"})
-      nil)
-
-    "Atomic_Boolean"
-    (case method
-      "load" (when (= argc 0) {:params [] :return-type "Boolean"})
-      "store" (when (= argc 1) {:params [{:name "value" :type "Boolean"}] :return-type "Void"})
-      "compare_and_set" (when (= argc 2)
-                          {:params [{:name "expected" :type "Boolean"}
-                                    {:name "update" :type "Boolean"}]
-                           :return-type "Boolean"})
-      nil)
-
-    "Atomic_Reference"
-    (let [elem-type (or (resolve-generic-type "T" type-map) "Any")
-          maybe-elem (detachable-version elem-type)]
-      (case method
-        "load" (when (= argc 0) {:params [] :return-type maybe-elem})
-        "store" (when (= argc 1) {:params [{:name "value" :type maybe-elem}] :return-type "Void"})
-        "compare_and_set" (when (= argc 2)
-                            {:params [{:name "expected" :type maybe-elem}
-                                      {:name "update" :type maybe-elem}]
-                             :return-type "Boolean"})
-        nil))
-
-    "Cursor"
-    (case method
-      "start" (when (= argc 0)
-                {:params [] :return-type "Void"})
-      "cursor" (when (= argc 0)
-                 {:params [] :return-type "Cursor"})
-      "item" (when (= argc 0)
-               {:params [] :return-type "Any"})
-      "next" (when (= argc 0)
-               {:params [] :return-type "Void"})
-      "at_end" (when (= argc 0)
-                 {:params [] :return-type "Boolean"})
-      nil)
-
-    nil))
 
 (defn- across-target-message
   "The diagnostic for an `across` whose target cannot be iterated. `cursor` is

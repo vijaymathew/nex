@@ -156,115 +156,120 @@
       (println "Error reading input:" (.getMessage e))
       nil)))
 
+(defn- sanitize-repl-line
+  "Blank out string/char contents and comments in `line`, preserving its
+   length and every other character's position, so the delimiter-balance
+   and keyword-counting passes below aren't confused by a bracket or
+   keyword that only appears inside a string literal or a comment."
+  [line]
+  (let [n (count line)]
+    (loop [i 0
+           in-string? false
+           escaped? false
+           out (StringBuilder.)]
+      (if (>= i n)
+        (str out)
+        (let [ch (.charAt ^String line i)
+              next-ch (when (< (inc i) n) (.charAt ^String line (inc i)))]
+          (cond
+            in-string?
+            (cond
+              escaped? (do (.append out \space)
+                           (recur (inc i) true false out))
+              (= ch \\) (do (.append out \space)
+                            (recur (inc i) true true out))
+              (= ch \") (do (.append out \space)
+                            (recur (inc i) false false out))
+              :else (do (.append out \space)
+                        (recur (inc i) true false out)))
+
+            (and (= ch \-) (= next-ch \-))
+            ;; Rest of the line is a comment.
+            (str out)
+
+            (= ch \")
+            (do (.append out \space)
+                (recur (inc i) true false out))
+
+            (and (= ch \#) next-ch (not= next-ch \{))
+            ;; Character literals like #), #], or #} should not affect
+            ;; delimiter balancing. Set literals start with #{, so keep
+            ;; those characters visible to the delimiter pass.
+            (let [j (cond
+                      (Character/isLetterOrDigit next-ch)
+                      (loop [j (inc i)]
+                        (if (and (< j n)
+                                 (Character/isLetterOrDigit (.charAt ^String line j)))
+                          (recur (inc j))
+                          j))
+
+                      :else
+                      (+ i 2))]
+              (.append out (apply str (repeat (- j i) \space)))
+              (recur j false false out))
+
+            :else
+            (do (.append out ch)
+                (recur (inc i) false false out))))))))
+
+;; A `when` is either a value-producing when-expression (`when c then x else
+;; y end`, which opens its own `end`-terminated block) or a clause of
+;; `match`/`select` (`when p then block`, which does not). Since both now
+;; share the `then` keyword, they are told apart by context: a `when` is a
+;; clause when its innermost enclosing construct is a `match`/`select`
+;; guard. Only when-expressions count toward the open-block balance.
+(defn- count-when-expressions
+  [text]
+  (let [tokens (re-seq #"\bclass\b|\bdo\b|\bfrom\b|\brepeat\b|\bacross\b|\bif\b|\bcase\b|\bmatch\b|\bselect\b|\bwhen\b|\bthen\b|\belse\b|\bend\b" text)]
+    (loop [tokens tokens
+           stack '()
+           count 0]
+      (if-let [token (first tokens)]
+        (let [top (peek stack)]
+          (case token
+            ("class" "do" "from" "repeat" "across" "if" "case")
+            (recur (rest tokens) (conj stack :block) count)
+
+            ("match" "select")
+            (recur (rest tokens) (conj stack :guard) count)
+
+            "when"
+            ;; A sibling clause closes the previous clause body first.
+            (let [stack (if (= top :clausebody) (pop stack) stack)]
+              (if (= (peek stack) :guard)
+                (recur (rest tokens) (conj stack :clause) count)
+                (recur (rest tokens) (conj stack :when) (inc count))))
+
+            "then"
+            ;; `then` after a clause's pattern opens that clause's body.
+            (recur (rest tokens)
+                   (if (= top :clause) (conj (pop stack) :clausebody) stack)
+                   count)
+
+            "else"
+            ;; A trailing `else` closes the guard's last clause body.
+            (recur (rest tokens)
+                   (if (= top :clausebody) (pop stack) stack)
+                   count)
+
+            "end"
+            (recur (rest tokens)
+                   (cond
+                     (= top :clausebody) (pop (pop stack)) ;; clause body + its guard
+                     (seq stack) (pop stack)
+                     :else stack)
+                   count)
+
+            (recur (rest tokens) stack count)))
+        count))))
+
 (defn continue-reading?
   "Check if we need to continue reading (unclosed block)"
   [lines]
-  (let [sanitize-line
-        (fn [line]
-          (let [n (count line)]
-            (loop [i 0
-                   in-string? false
-                   escaped? false
-                   out (StringBuilder.)]
-              (if (>= i n)
-                (str out)
-                (let [ch (.charAt ^String line i)
-                      next-ch (when (< (inc i) n) (.charAt ^String line (inc i)))]
-                  (cond
-                    in-string?
-                    (cond
-                      escaped? (do (.append out \space)
-                                   (recur (inc i) true false out))
-                      (= ch \\) (do (.append out \space)
-                                    (recur (inc i) true true out))
-                      (= ch \") (do (.append out \space)
-                                    (recur (inc i) false false out))
-                      :else (do (.append out \space)
-                                (recur (inc i) true false out)))
-
-                    (and (= ch \-) (= next-ch \-))
-                    ;; Rest of the line is a comment.
-                    (str out)
-
-                    (= ch \")
-                    (do (.append out \space)
-                        (recur (inc i) true false out))
-
-                    (and (= ch \#) next-ch (not= next-ch \{))
-                    ;; Character literals like #), #], or #} should not affect
-                    ;; delimiter balancing. Set literals start with #{, so keep
-                    ;; those characters visible to the delimiter pass.
-                    (let [j (cond
-                              (Character/isLetterOrDigit next-ch)
-                              (loop [j (inc i)]
-                                (if (and (< j n)
-                                         (Character/isLetterOrDigit (.charAt ^String line j)))
-                                  (recur (inc j))
-                                  j))
-
-                              :else
-                              (+ i 2))]
-                      (.append out (apply str (repeat (- j i) \space)))
-                      (recur j false false out))
-
-                    :else
-                    (do (.append out ch)
-                        (recur (inc i) false false out))))))))
-        raw-text (str/join "\n" lines)
+  (let [raw-text (str/join "\n" lines)
         text (->> lines
-                  (map sanitize-line)
+                  (map sanitize-repl-line)
                   (str/join "\n"))
-        ;; A `when` is either a value-producing when-expression
-        ;; (`when c then x else y end`, which opens its own `end`-terminated
-        ;; block) or a clause of `match`/`select` (`when p then block`, which
-        ;; does not). Since both now share the `then` keyword, they are told
-        ;; apart by context: a `when` is a clause when its innermost enclosing
-        ;; construct is a `match`/`select` guard. Only when-expressions count
-        ;; toward the open-block balance.
-        count-when-expressions
-        (fn [text]
-          (let [tokens (re-seq #"\bclass\b|\bdo\b|\bfrom\b|\brepeat\b|\bacross\b|\bif\b|\bcase\b|\bmatch\b|\bselect\b|\bwhen\b|\bthen\b|\belse\b|\bend\b" text)]
-            (loop [tokens tokens
-                   stack '()
-                   count 0]
-              (if-let [token (first tokens)]
-                (let [top (peek stack)]
-                  (case token
-                    ("class" "do" "from" "repeat" "across" "if" "case")
-                    (recur (rest tokens) (conj stack :block) count)
-
-                    ("match" "select")
-                    (recur (rest tokens) (conj stack :guard) count)
-
-                    "when"
-                    ;; A sibling clause closes the previous clause body first.
-                    (let [stack (if (= top :clausebody) (pop stack) stack)]
-                      (if (= (peek stack) :guard)
-                        (recur (rest tokens) (conj stack :clause) count)
-                        (recur (rest tokens) (conj stack :when) (inc count))))
-
-                    "then"
-                    ;; `then` after a clause's pattern opens that clause's body.
-                    (recur (rest tokens)
-                           (if (= top :clause) (conj (pop stack) :clausebody) stack)
-                           count)
-
-                    "else"
-                    ;; A trailing `else` closes the guard's last clause body.
-                    (recur (rest tokens)
-                           (if (= top :clausebody) (pop stack) stack)
-                           count)
-
-                    "end"
-                    (recur (rest tokens)
-                           (cond
-                             (= top :clausebody) (pop (pop stack)) ;; clause body + its guard
-                             (seq stack) (pop stack)
-                             :else stack)
-                           count)
-
-                    (recur (rest tokens) stack count)))
-                count))))
         delimiter-balance
         (reduce (fn [balance ch]
                   (case ch
@@ -324,6 +329,7 @@
         open-delimiters?
         trailing-operator?
         (> open-blocks end-count))))
+
 
 (defn read-input
   "Read potentially multi-line input from the user"
