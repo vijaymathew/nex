@@ -3328,14 +3328,29 @@
                               (resolve-jvm-type env nex-type)))
 
       (= class-name "Process")
-      (let [nex-type (infer-type env expr)]
-        (when (or (:constructor expr) (seq (:args expr)))
-          (throw (ex-info "create Process takes no constructor or arguments in compiled lowering"
-                          {:expr expr})))
-        (ir/call-runtime-node "create-process"
-                              []
-                              nex-type
-                              (resolve-jvm-type env nex-type)))
+      (let [nex-type (infer-type env expr)
+            jvm-type (resolve-jvm-type env nex-type)]
+        (case (:constructor expr)
+          (nil "self")
+          (do
+            (when (seq (:args expr))
+              (throw (ex-info "create Process takes no arguments in compiled lowering"
+                              {:expr expr})))
+            (ir/call-runtime-node "create-process" [] nex-type jvm-type))
+
+          "command"
+          (do
+            (when-not (<= 1 (count (:args expr)) 2)
+              (throw (ex-info "Process.command expects 1 or 2 arguments in compiled lowering"
+                              {:expr expr})))
+            (ir/call-runtime-node "create-process-command"
+                                  (mapv #(lower-expression env %) (:args expr))
+                                  nex-type
+                                  jvm-type))
+
+          (throw (unsupported "Unsupported Process constructor in compiled lowering"
+                          {:expr expr
+                           :constructor (:constructor expr)}))))
 
       (= class-name "Channel")
       (let [nex-type (infer-type env expr)]

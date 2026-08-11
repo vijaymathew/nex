@@ -23,19 +23,60 @@ create Console
 
 ## `Process`
 
+A `Process` value is either the *self* process (the running Nex program) or a
+spawned *child*.
+
 ### Construction
 
 ```nex
-create Process
+create Process              -- self (the running program)
+create Process.self         -- same, explicit
+create Process.command("ls -lat")                      -- shell-word split
+create Process.command("ls", ["-lat", "/tmp"])          -- explicit argv, no shell
 ```
+
+A child is only configured by its constructor — nothing runs until `start()`
+is called, which allows `set_working_directory`/`set_redirect_error_to_output`/
+`setenv` to be applied first.
 
 ### Methods
 
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
-| `getenv` | `name: String` | `String` | Read environment variable (empty if missing). |
-| `setenv` | `name: String, value: String` | `Void` | Set environment variable (platform dependent). |
-| `command_line` | none | `Array[String]` | Return command-line arguments. |
+| `getenv` | `name: String` | `String` | Self: the OS env var. Child: its configured/inherited value. |
+| `setenv` | `name: String, value: String` | `Void` | Self: sets the current process's env (platform dependent, may raise). Child (pre-start only): records an override applied at `start()`. |
+| `command_line` | none | `Array[String]` | Self: this program's argv. Child: its own launch argv (command + arguments). |
+| `is_self` | none | `Boolean` | True for the self process. |
+| `is_child` | none | `Boolean` | True for a spawned child. |
+| `set_working_directory` | `dir: String` | `Void` | Child, pre-start only. |
+| `set_redirect_error_to_output` | `flag: Boolean` | `Void` | Child, pre-start only. Merges the child's stderr into its stdout stream. |
+| `start` | none | `Void` | Self: no-op. Child: launches the process; raises if the executable can't be found/run. |
+| `is_started` | none | `Boolean` | Self: always `true`. Child: whether `start()` has run. |
+| `is_alive` | none | `Boolean` | Self: always `true`. Child: whether the process is still running. |
+| `pid` | none | `Integer` | Self: the current process id. Child: requires `start()`. |
+| `wait` | none | `Integer` | Child only. Blocks until exit; returns the exit code. |
+| `wait` | `timeout_ms: Integer` | `?Integer` | Child only. Blocks up to `timeout_ms`; `nil` means still running. |
+| `exit_code` | none | `?Integer` | `nil` while running, not started, or self. |
+| `terminate` | none | `Void` | Child only. Graceful shutdown (SIGTERM-equivalent). |
+| `kill` | none | `Void` | Child only. Forced shutdown (SIGKILL-equivalent). |
+| `write` | `text: String` | `Void` | Child only, after `start()`. Writes to the child's stdin. |
+| `write_line` | `text: String` | `Void` | Same, plus a line terminator. |
+| `close_stdin` | none | `Void` | Closes the child's stdin (signals EOF to it). |
+| `read_line` | none | `?String` | Reads one line of the child's stdout; `nil` at EOF. |
+| `read_all` | none | `String` | Reads the rest of the child's stdout up to EOF. |
+| `read_error_line` | none | `?String` | Reads one line of the child's stderr; `nil` at EOF or when merged via `set_redirect_error_to_output`. |
+| `read_error_all` | none | `String` | Reads the rest of the child's stderr up to EOF. |
+
+### Notes
+
+- Every child-only method (`start`, `wait`, `terminate`, `kill`, the stream
+  methods, etc.) raises if called on the self process.
+- `start()`/`wait()`/etc. also raise if called before `start()` where a
+  started process is required, or if `start()` is called twice.
+- `command(str)` splits on whitespace, honoring `'...'`/`"..."` grouping (no
+  escape-character support). Use `command(str, args)` for exact argv control.
+- Suspend/resume isn't exposed: there is no portable pause primitive on the
+  JVM (no SIGSTOP/SIGCONT equivalent).
 
 ## `Task`
 
@@ -196,6 +237,18 @@ print(path.read_text())
 let p := create Process
 print(p.getenv("HOME"))
 print(p.command_line())
+
+let echo := create Process.command("echo", ["hello", "world"])
+echo.start()
+print(echo.read_line())
+print(echo.wait())
+
+let child := create Process.command("cat")
+child.start()
+child.write_line("ping")
+child.close_stdin()
+print(child.read_line())
+print(child.wait())
 
 let t: Task[Integer] := spawn do
   result := 42

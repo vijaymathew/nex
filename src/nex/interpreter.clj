@@ -193,6 +193,8 @@
 (def nex-process-getenv rt/nex-process-getenv)
 (def nex-process-setenv rt/nex-process-setenv)
 (def nex-process-command-line rt/nex-process-command-line)
+(def nex-process-self rt/nex-process-self)
+(def nex-process-command rt/nex-process-command)
 
 (defn- http-response-headers->nex-map
      [headers]
@@ -1517,7 +1519,7 @@
       "String" ""
       "Min_Heap" (make-min-heap nil)
       "Console" {:nex-builtin-type :Console}
-      "Process" {:nex-builtin-type :Process}
+      "Process" (nex-process-self)
       "Task" nil
       "Channel" nil
       nil)
@@ -2814,7 +2816,27 @@
   ;; Handle built-in IO types
   (case class-name
     "Console" {:nex-builtin-type :Console}
-    "Process" {:nex-builtin-type :Process}
+    "Process" (let [arg-values (mapv #(eval-node ctx %) args)]
+               (cond
+                 (or (nil? constructor) (= constructor "self"))
+                 (do
+                   (when (seq arg-values)
+                     (throw (ex-info "create Process expects no arguments"
+                                     {:class-name "Process" :constructor constructor})))
+                   (nex-process-self))
+
+                 (= constructor "command")
+                 (do
+                   (when-not (<= 1 (count arg-values) 2)
+                     (throw (ex-info "Process.command expects 1 or 2 arguments"
+                                     {:class-name "Process" :constructor constructor})))
+                   (if (= 2 (count arg-values))
+                     (nex-process-command (first arg-values) (second arg-values))
+                     (nex-process-command (first arg-values))))
+
+                 :else
+                 (throw (ex-info (str "Constructor not found: Process." constructor)
+                                 {:class-name "Process" :constructor constructor}))))
     "Array" (let [arg-values (mapv #(eval-node ctx %) args)]
               (cond
                 (nil? constructor) (nex-array)

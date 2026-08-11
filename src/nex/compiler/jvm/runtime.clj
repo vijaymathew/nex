@@ -1793,6 +1793,26 @@
 (def-builtin-method-wrapper builtin-method-process-getenv "getenv")
 (def-builtin-method-wrapper builtin-method-process-setenv "setenv")
 (def-builtin-method-wrapper builtin-method-process-command-line "command_line")
+(def-builtin-method-wrapper builtin-method-process-is-self "is_self")
+(def-builtin-method-wrapper builtin-method-process-is-child "is_child")
+(def-builtin-method-wrapper builtin-method-process-set-working-directory "set_working_directory")
+(def-builtin-method-wrapper builtin-method-process-set-redirect-error-to-output "set_redirect_error_to_output")
+(def-builtin-method-wrapper builtin-method-process-start "start")
+(def-builtin-method-wrapper builtin-method-process-is-started "is_started")
+(def-builtin-method-wrapper builtin-method-process-is-alive "is_alive")
+(def-builtin-method-wrapper builtin-method-process-pid "pid")
+(def-builtin-method-wrapper builtin-method-process-wait "wait")
+(def-builtin-method-wrapper builtin-method-process-exit-code "exit_code")
+(def-builtin-method-wrapper builtin-method-process-terminate "terminate")
+(def-builtin-method-wrapper builtin-method-process-kill "kill")
+(def-builtin-method-wrapper builtin-method-process-write "write")
+(def-builtin-method-wrapper builtin-method-process-write-line "write_line")
+(def-builtin-method-wrapper builtin-method-process-close-stdin "close_stdin")
+(def-builtin-method-wrapper builtin-method-process-read-line "read_line")
+(def-builtin-method-wrapper builtin-method-process-read-all "read_all")
+(def-builtin-method-wrapper builtin-method-process-read-error-line "read_error_line")
+(def-builtin-method-wrapper builtin-method-process-read-error-all "read_error_all")
+(def-builtin-method-wrapper builtin-method-process-to-string "to_string")
 
 (defn deep-equals
   [a b]
@@ -2171,7 +2191,12 @@
     {:nex-builtin-type :Console}
 
     (= name "create-process")
-    {:nex-builtin-type :Process}
+    (rt/nex-process-self)
+
+    (= name "create-process-command")
+    (if (= 2 (count args))
+      (rt/nex-process-command (first args) (second args))
+      (rt/nex-process-command (first args)))
 
     (= name "create-channel")
     (if (seq args)

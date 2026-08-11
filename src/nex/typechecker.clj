@@ -2870,7 +2870,45 @@
     ;; Handle built-in Console type
     (= class-name "Console") "Console"
     ;; Handle built-in Process type
-    (= class-name "Process") "Process"
+    (= class-name "Process")
+    (case constructor
+      nil
+      (do
+        (when (seq args)
+          (throw (ex-info "create Process expects no arguments"
+                          {:error (type-error "create Process expects no arguments")})))
+        "Process")
+
+      "self"
+      (do
+        (when (seq args)
+          (throw (ex-info "Process.self expects no arguments"
+                          {:error (type-error "Process.self expects no arguments")})))
+        "Process")
+
+      "command"
+      (do
+        (when-not (<= 1 (count args) 2)
+          (throw (ex-info "Process.command expects 1 or 2 arguments"
+                          {:error (type-error "Process.command expects (String) or (String, Array[String])")})))
+        (let [command-type (check-expression env (first args))]
+          (when-not (types-compatible? env command-type "String")
+            (throw (ex-info "Process.command requires a String command"
+                            {:error (type-error
+                                     (str "Process.command expects String, got "
+                                          (display-type command-type)))})))
+          (when (= 2 (count args))
+            (let [args-type (check-expression env (second args))
+                  expected {:base-type "Array" :type-params ["String"]}]
+              (when-not (types-compatible? env args-type expected)
+                (throw (ex-info "Process.command requires Array[String] arguments"
+                                {:error (type-error
+                                         (str "Process.command expects Array[String], got "
+                                              (display-type args-type)))}))))))
+        "Process")
+
+      (throw (ex-info (str "Constructor not found: Process." constructor)
+                      {:error (type-error (str "Constructor not found: Process." constructor))})))
     ;; Handle built-in Min_Heap type
     (= class-name "Min_Heap")
     (let [target-type (if (seq generic-args)
@@ -4840,13 +4878,43 @@
            "is_done" {:params [] :return-type "Boolean"}
            "is_cancelled" {:params [] :return-type "Boolean"}}]
     (env-add-method env "Task" method-name sig))
+  (env-add-class env "Process" {:name "Process"
+                                :generic-params nil})
   (doseq [[method-name sig]
           {"getenv" {:params [{:name "name" :type "String"}] :return-type "String"}
            "setenv" {:params [{:name "name" :type "String"} {:name "value" :type "String"}] :return-type "Void"}
-           "command_line" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}}]
-    (env-add-class env "Process" {:name "Process"
-                                  :generic-params nil})
+           "command_line" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}
+
+           "is_self" {:params [] :return-type "Boolean"}
+           "is_child" {:params [] :return-type "Boolean"}
+
+           "set_working_directory" {:params [{:name "dir" :type "String"}] :return-type "Void"}
+           "set_redirect_error_to_output" {:params [{:name "flag" :type "Boolean"}] :return-type "Void"}
+
+           "start" {:params [] :return-type "Void"}
+           "is_started" {:params [] :return-type "Boolean"}
+           "is_alive" {:params [] :return-type "Boolean"}
+           "pid" {:params [] :return-type "Integer"}
+
+           "exit_code" {:params [] :return-type {:base-type "Integer" :detachable true}}
+
+           "terminate" {:params [] :return-type "Void"}
+           "kill" {:params [] :return-type "Void"}
+
+           "write" {:params [{:name "text" :type "String"}] :return-type "Void"}
+           "write_line" {:params [{:name "text" :type "String"}] :return-type "Void"}
+           "close_stdin" {:params [] :return-type "Void"}
+           "read_line" {:params [] :return-type {:base-type "String" :detachable true}}
+           "read_all" {:params [] :return-type "String"}
+           "read_error_line" {:params [] :return-type {:base-type "String" :detachable true}}
+           "read_error_all" {:params [] :return-type "String"}
+
+           "to_string" {:params [] :return-type "String"}}]
     (env-add-method env "Process" method-name sig))
+  (env-add-method env "Process" "wait" {:params [] :return-type "Integer"})
+  (env-add-method env "Process" "wait"
+                  {:params [{:name "timeout_ms" :type "Integer"}]
+                   :return-type {:base-type "Integer" :detachable true}})
   ;; Register Array[T] class and methods
   (env-add-class env "Array" {:name "Array"
                                :generic-params [{:name "T"}]})
