@@ -4193,206 +4193,234 @@
           (lower-call-with-target env expr target-expr class-target-name arg-irs))))))
 
 
+(defn- lower-stmt-let
+  [env stmt]
+  (let [across-binding (across-cursor-binding env stmt)
+        [env0 value-ir] (cond
+                          across-binding
+                          [env (lower-expression env (:target-expr across-binding))]
+
+                          (= :convert (:type (:value stmt)))
+                          (let [[env' _] (ensure-convert-binding env (:value stmt))
+                                [env'' convert-ir] (lower-convert-expression env' (:value stmt))]
+                            [env'' convert-ir])
+
+                          :else
+                          [env (lower-expression env (:value stmt))])
+        nex-type (or (:var-type stmt)
+                     (:target-type across-binding)
+                     (infer-type env0 (:value stmt)))
+        env1 (if (and (:synthetic stmt)
+                      (string? (:name stmt))
+                      (str/starts-with? (:name stmt) "__across_c_")
+                      (= :call (get-in stmt [:value :type]))
+                      (= "cursor" (get-in stmt [:value :method]))
+                      (empty? (get-in stmt [:value :args])))
+               (let [target-type (infer-type env0 (get-in stmt [:value :target]))]
+                 (assoc-in env0 [:across-cursors (:name stmt)]
+                           (tc/cursor-item-type target-type)))
+               env0)]
+    (if (and (:top-level? env) (not (:scoped-locals? env)))
+      [(update env1 :var-types assoc (:name stmt) nex-type)
+       (ir/top-set-node (:name stmt) value-ir nex-type (resolve-jvm-type env1 nex-type))]
+      (let [[env' local] (env-add-local env1 (:name stmt) nex-type)]
+        [env' (ir/set-local-node (:slot local) value-ir (:nex-type local) (:jvm-type local))]))))
+
+(defn- lower-stmt-assign
+  [env stmt]
+  (let [value-ir (lower-expression env (:value stmt))
+        target-name (:target stmt)]
+    (if-let [{:keys [slot nex-type jvm-type]} (get (:locals env) target-name)]
+      [env (ir/set-local-node slot value-ir nex-type jvm-type)]
+      (if-let [{:keys [owner field nex-type jvm-type]} (get (:fields env) target-name)]
+        (let [field-info (get (:fields env) target-name)
+              target-ir (if-let [carrier-field (:carrier-field field-info)]
+                          (ir/field-get-node (:internal-name (class-jvm-meta env (:carrier-owner field-info)))
+                                             carrier-field
+                                             (ir/this-node (:this-type env)
+                                                           (exact-class-jvm-type env (:this-type env)))
+                                             owner
+                                             (:carrier-jvm-type field-info))
+                          (ir/this-node (:this-type env)
+                                        (exact-class-jvm-type env (:this-type env))))]
+          [env (ir/field-set-node (:internal-name (class-jvm-meta env owner))
+                                  field
+                                  target-ir
+                                  value-ir
+                                  nex-type
+                                  jvm-type)])
+        (let [nex-type (or (get (:var-types env) target-name)
+                           (infer-type env {:type :identifier :name target-name}))
+              jvm-type (resolve-jvm-type env nex-type)]
+          (if (:top-level? env)
+            [(update env :var-types assoc target-name nex-type)
+             (ir/top-set-node target-name value-ir nex-type jvm-type)]
+            (throw (ex-info "Assignment target is not a known local"
+                            {:target target-name}))))))))
+
+(defn- lower-stmt-convert
+  [env stmt]
+  (let [[env' _] (ensure-convert-binding env stmt)
+        [env'' convert-ir] (lower-convert-expression env' stmt)]
+    [env'' (ir/pop-node convert-ir)]))
+
+(defn- lower-stmt-with
+  [env stmt]
+  (if (= "java" (:target stmt))
+    (let [[env' lowered] (lower-statements (assoc env :with-java? true) (:body stmt))]
+      [(assoc env' :with-java? (:with-java? env))
+       (with-stmt-debug (ir/block-node lowered) stmt)])
+    [env (with-stmt-debug (ir/block-node []) stmt)]))
+
+(defn- lower-stmt-if
+  [env stmt]
+  (let [[cond-env test-ir] (lower-boolean-condition env (:condition stmt))
+        condition-init-stmts (convert-binding-init-stmts cond-env (:condition stmt))
+        [then-env then-body] (lower-scoped-statements (refine-condition-branch-env cond-env (:condition stmt) :then)
+                                                      (:then stmt))
+        [else-env else-body]
+        (if-let [clause (first (:elseif stmt))]
+          (lower-scoped-statements
+           (scoped-env env then-env)
+           [{:type :if
+             :condition (:condition clause)
+             :then (:then clause)
+             :elseif (vec (rest (:elseif stmt)))
+             :else (:else stmt)}])
+          (lower-scoped-statements (refine-condition-branch-env (scoped-env env then-env)
+                                                                (:condition stmt)
+                                                                :else)
+                                   (or (:else stmt) [])))]
+    [(scoped-env env else-env)
+     (if (seq condition-init-stmts)
+       (ir/block-node (conj condition-init-stmts
+                            (ir/if-stmt-node test-ir then-body else-body)))
+       (ir/if-stmt-node test-ir then-body else-body))]))
+
+(defn- lower-stmt-scoped-block
+  [env stmt]
+  (if-let [rescue (:rescue stmt)]
+    (let [[env1 throwable-slot] (alloc-temp-slot env)
+          [env2 rescue-throwable-slot] (alloc-temp-slot env1)
+          [body-env lowered-body] (lower-statements (scoped-child-env env2) (:body stmt))
+          local-init-stmts (init-new-locals-stmts env2 body-env)
+          env-after-body (scoped-env env2 body-env)
+          rescue-env0 (assoc (scoped-child-env env-after-body) :retry-allowed? true)
+          [rescue-env1 exception-local] (env-add-local rescue-env0 "exception" "Any")
+          [rescue-env2 lowered-rescue] (lower-statements rescue-env1 rescue)
+          final-env (scoped-env env-after-body rescue-env2)]
+      [final-env
+       (if (seq local-init-stmts)
+         (ir/block-node (conj local-init-stmts
+                              (ir/try-node lowered-body
+                                           lowered-rescue
+                                           throwable-slot
+                                           rescue-throwable-slot
+                                           (:slot exception-local))))
+         (ir/try-node lowered-body
+                      lowered-rescue
+                      throwable-slot
+                      rescue-throwable-slot
+                      (:slot exception-local)))])
+    (let [[env' lowered] (lower-scoped-statements env (:body stmt))]
+      [env' (ir/block-node lowered)])))
+
+(defn- lower-stmt-case
+  [env stmt]
+  (let [case-env (scoped-child-env env)
+        [env' local] (env-add-local case-env (str "__case_tmp_" (:next-slot env) "__")
+                                    (infer-type env (:expr stmt)))
+        init-local (ir/set-local-node (:slot local)
+                                      (lower-expression env (:expr stmt))
+                                      (:nex-type local)
+                                      (:jvm-type local))
+        [env'' lowered-clauses] (lower-case-clauses env' local (:clauses stmt)
+                                                    (if-let [else-stmt (:else stmt)]
+                                                      [else-stmt]
+                                                      []))]
+    [(scoped-env env env'')
+     (ir/block-node (into [init-local] lowered-clauses))]))
+
+(defn- lower-stmt-match
+  [env stmt]
+  (let [match-env (scoped-child-env env)
+        tmp-name (str "__match_tmp_" (:next-slot env) "__")
+        [env' local] (env-add-local match-env tmp-name
+                                    (infer-type env (:expr stmt)))
+        init-local (ir/set-local-node (:slot local)
+                                      (lower-expression env (:expr stmt))
+                                      (:nex-type local)
+                                      (:jvm-type local))
+        else-stmts (if-let [else-body (:else stmt)]
+                      else-body
+                      [{:type :raise
+                        :value {:type :string :value "No matching clause in match"}}])
+        [env'' lowered-clauses] (lower-match-clauses env' tmp-name (:clauses stmt) else-stmts)]
+    [(scoped-env env env'')
+     (ir/block-node (into [init-local] lowered-clauses))]))
+
+(defn- lower-stmt-raise
+  [env stmt]
+  [env (ir/raise-node (lower-expression env (:value stmt)))])
+
+(defn- lower-stmt-retry
+  [env stmt]
+  (if (:retry-allowed? env)
+    [env (ir/retry-node)]
+    (throw (ex-info "retry is only supported in compiled rescue blocks"
+                    {:stmt stmt}))))
+
+;; Several assertions under one `assert` lower to one check each, in order.
+;; A bare `assert expr` has no label, so carry the statement's line down to
+;; each check for the failure message.
+(defn- lower-stmt-assert
+  [env stmt]
+  [env (ir/block-node
+        (mapv (fn [assertion]
+                (cond-> (assertion-ir env :assert assertion)
+                  (:dbg/line stmt) (assoc :dbg/line (:dbg/line stmt))))
+              (:assertions stmt)))])
+
+(defn- lower-expr-statement
+  [env stmt]
+  [env (ir/pop-node (lower-expression env stmt))])
+
+(def ^:private lower-statement-dispatch
+  "AST node `:type` -> `(fn [env stmt] -> [env' ir-node])`: the primary
+   dispatch table for `lower-statement`. `lower-member-assign-stmt`,
+   `lower-call-stmt`, and `lower-loop-stmt` are only forward-declared this
+   early in the file (their own defns come later) — wrapped for the same
+   reason `infer-type-dispatch`'s `:call` entry is. `lower-select` is
+   already defined above this point, so it's referenced bare. A statement
+   type with no entry here falls through to `expression-node-types` in
+   `lower-statement` — expressions used as bare statements pop their value."
+  {:let           lower-stmt-let
+   :assign        lower-stmt-assign
+   :member-assign (fn [env stmt] (lower-member-assign-stmt env stmt))
+   :call          (fn [env stmt] (lower-call-stmt env stmt))
+   :convert       lower-stmt-convert
+   :with          lower-stmt-with
+   :if            lower-stmt-if
+   :scoped-block  lower-stmt-scoped-block
+   :case          lower-stmt-case
+   :match         lower-stmt-match
+   :loop          (fn [env stmt] (lower-loop-stmt env stmt))
+   :select        lower-select
+   :raise         lower-stmt-raise
+   :retry         lower-stmt-retry
+   :assert        lower-stmt-assert})
+
 (defn lower-statement
   [env stmt]
   (let [[env' lowered]
-        (cond
-          (= :let (:type stmt))
-          (let [across-binding (across-cursor-binding env stmt)
-                [env0 value-ir] (cond
-                                  across-binding
-                                  [env (lower-expression env (:target-expr across-binding))]
-
-                                  (= :convert (:type (:value stmt)))
-                                  (let [[env' _] (ensure-convert-binding env (:value stmt))
-                                        [env'' convert-ir] (lower-convert-expression env' (:value stmt))]
-                                    [env'' convert-ir])
-
-                                  :else
-                                  [env (lower-expression env (:value stmt))])
-                nex-type (or (:var-type stmt)
-                             (:target-type across-binding)
-                             (infer-type env0 (:value stmt)))
-                env1 (if (and (:synthetic stmt)
-                              (string? (:name stmt))
-                              (str/starts-with? (:name stmt) "__across_c_")
-                              (= :call (get-in stmt [:value :type]))
-                              (= "cursor" (get-in stmt [:value :method]))
-                              (empty? (get-in stmt [:value :args])))
-                       (let [target-type (infer-type env0 (get-in stmt [:value :target]))]
-                         (assoc-in env0 [:across-cursors (:name stmt)]
-                                   (tc/cursor-item-type target-type)))
-                       env0)]
-            (if (and (:top-level? env) (not (:scoped-locals? env)))
-              [(update env1 :var-types assoc (:name stmt) nex-type)
-               (ir/top-set-node (:name stmt) value-ir nex-type (resolve-jvm-type env1 nex-type))]
-              (let [[env' local] (env-add-local env1 (:name stmt) nex-type)]
-                [env' (ir/set-local-node (:slot local) value-ir (:nex-type local) (:jvm-type local))])))
-
-          (= :assign (:type stmt))
-          (let [value-ir (lower-expression env (:value stmt))
-                target-name (:target stmt)]
-            (if-let [{:keys [slot nex-type jvm-type]} (get (:locals env) target-name)]
-              [env (ir/set-local-node slot value-ir nex-type jvm-type)]
-              (if-let [{:keys [owner field nex-type jvm-type]} (get (:fields env) target-name)]
-                (let [field-info (get (:fields env) target-name)
-                      target-ir (if-let [carrier-field (:carrier-field field-info)]
-                                  (ir/field-get-node (:internal-name (class-jvm-meta env (:carrier-owner field-info)))
-                                                     carrier-field
-                                                     (ir/this-node (:this-type env)
-                                                                   (exact-class-jvm-type env (:this-type env)))
-                                                     owner
-                                                     (:carrier-jvm-type field-info))
-                                  (ir/this-node (:this-type env)
-                                                (exact-class-jvm-type env (:this-type env))))]
-                  [env (ir/field-set-node (:internal-name (class-jvm-meta env owner))
-                                          field
-                                          target-ir
-                                          value-ir
-                                          nex-type
-                                          jvm-type)])
-                (let [nex-type (or (get (:var-types env) target-name)
-                                   (infer-type env {:type :identifier :name target-name}))
-                      jvm-type (resolve-jvm-type env nex-type)]
-                  (if (:top-level? env)
-                    [(update env :var-types assoc target-name nex-type)
-                     (ir/top-set-node target-name value-ir nex-type jvm-type)]
-                    (throw (ex-info "Assignment target is not a known local"
-                                    {:target target-name})))))))
-
-          (= :member-assign (:type stmt))
-          (lower-member-assign-stmt env stmt)
-
-          (= :call (:type stmt))
-          (lower-call-stmt env stmt)
-
-          (= :convert (:type stmt))
-          (let [[env' _] (ensure-convert-binding env stmt)
-                [env'' convert-ir] (lower-convert-expression env' stmt)]
-            [env'' (ir/pop-node convert-ir)])
-
-          (= :with (:type stmt))
-          (if (= "java" (:target stmt))
-            (let [[env' lowered] (lower-statements (assoc env :with-java? true) (:body stmt))]
-              [(assoc env' :with-java? (:with-java? env))
-               (with-stmt-debug (ir/block-node lowered) stmt)])
-            [env (with-stmt-debug (ir/block-node []) stmt)])
-
-          (= :if (:type stmt))
-          (let [[cond-env test-ir] (lower-boolean-condition env (:condition stmt))
-                condition-init-stmts (convert-binding-init-stmts cond-env (:condition stmt))
-                [then-env then-body] (lower-scoped-statements (refine-condition-branch-env cond-env (:condition stmt) :then)
-                                                              (:then stmt))
-                [else-env else-body]
-                (if-let [clause (first (:elseif stmt))]
-                  (lower-scoped-statements
-                   (scoped-env env then-env)
-                   [{:type :if
-                     :condition (:condition clause)
-                     :then (:then clause)
-                     :elseif (vec (rest (:elseif stmt)))
-                     :else (:else stmt)}])
-                  (lower-scoped-statements (refine-condition-branch-env (scoped-env env then-env)
-                                                                        (:condition stmt)
-                                                                        :else)
-                                           (or (:else stmt) [])))]
-            [(scoped-env env else-env)
-             (if (seq condition-init-stmts)
-               (ir/block-node (conj condition-init-stmts
-                                    (ir/if-stmt-node test-ir then-body else-body)))
-               (ir/if-stmt-node test-ir then-body else-body))])
-
-          (= :scoped-block (:type stmt))
-          (if-let [rescue (:rescue stmt)]
-            (let [[env1 throwable-slot] (alloc-temp-slot env)
-                  [env2 rescue-throwable-slot] (alloc-temp-slot env1)
-                  [body-env lowered-body] (lower-statements (scoped-child-env env2) (:body stmt))
-                  local-init-stmts (init-new-locals-stmts env2 body-env)
-                  env-after-body (scoped-env env2 body-env)
-                  rescue-env0 (assoc (scoped-child-env env-after-body) :retry-allowed? true)
-                  [rescue-env1 exception-local] (env-add-local rescue-env0 "exception" "Any")
-                  [rescue-env2 lowered-rescue] (lower-statements rescue-env1 rescue)
-                  final-env (scoped-env env-after-body rescue-env2)]
-              [final-env
-               (if (seq local-init-stmts)
-                 (ir/block-node (conj local-init-stmts
-                                      (ir/try-node lowered-body
-                                                   lowered-rescue
-                                                   throwable-slot
-                                                   rescue-throwable-slot
-                                                   (:slot exception-local))))
-                 (ir/try-node lowered-body
-                              lowered-rescue
-                              throwable-slot
-                              rescue-throwable-slot
-                              (:slot exception-local)))])
-            (let [[env' lowered] (lower-scoped-statements env (:body stmt))]
-              [env' (ir/block-node lowered)]))
-
-          (= :case (:type stmt))
-          (let [case-env (scoped-child-env env)
-                [env' local] (env-add-local case-env (str "__case_tmp_" (:next-slot env) "__")
-                                            (infer-type env (:expr stmt)))
-                init-local (ir/set-local-node (:slot local)
-                                              (lower-expression env (:expr stmt))
-                                              (:nex-type local)
-                                              (:jvm-type local))
-                [env'' lowered-clauses] (lower-case-clauses env' local (:clauses stmt)
-                                                            (if-let [else-stmt (:else stmt)]
-                                                              [else-stmt]
-                                                              []))]
-            [(scoped-env env env'')
-             (ir/block-node (into [init-local] lowered-clauses))])
-
-          (= :match (:type stmt))
-          (let [match-env (scoped-child-env env)
-                tmp-name (str "__match_tmp_" (:next-slot env) "__")
-                [env' local] (env-add-local match-env tmp-name
-                                            (infer-type env (:expr stmt)))
-                init-local (ir/set-local-node (:slot local)
-                                              (lower-expression env (:expr stmt))
-                                              (:nex-type local)
-                                              (:jvm-type local))
-                else-stmts (if-let [else-body (:else stmt)]
-                              else-body
-                              [{:type :raise
-                                :value {:type :string :value "No matching clause in match"}}])
-                [env'' lowered-clauses] (lower-match-clauses env' tmp-name (:clauses stmt) else-stmts)]
-            [(scoped-env env env'')
-             (ir/block-node (into [init-local] lowered-clauses))])
-
-          (= :loop (:type stmt))
-          (lower-loop-stmt env stmt)
-
-          (= :select (:type stmt))
-          (lower-select env stmt)
-
-          (= :raise (:type stmt))
-          [env (ir/raise-node (lower-expression env (:value stmt)))]
-
-          (= :retry (:type stmt))
-          (if (:retry-allowed? env)
-            [env (ir/retry-node)]
-            (throw (ex-info "retry is only supported in compiled rescue blocks"
-                            {:stmt stmt})))
-
-          (= :assert (:type stmt))
-          ;; Several assertions under one `assert` lower to one check each, in
-          ;; order. A bare `assert expr` has no label, so carry the statement's
-          ;; line down to each check for the failure message.
-          [env (ir/block-node
-                (mapv (fn [assertion]
-                        (cond-> (assertion-ir env :assert assertion)
-                          (:dbg/line stmt) (assoc :dbg/line (:dbg/line stmt))))
-                      (:assertions stmt)))]
-
-          (contains? expression-node-types (:type stmt))
-          [env (ir/pop-node (lower-expression env stmt))]
-
-          :else
-          (throw (unsupported "Unsupported statement node for lowering"
-                          {:stmt stmt :node-type (:type stmt)})))]
+        (if-let [handler (get lower-statement-dispatch (:type stmt))]
+          (handler env stmt)
+          (if (contains? expression-node-types (:type stmt))
+            (lower-expr-statement env stmt)
+            (throw (unsupported "Unsupported statement node for lowering"
+                            {:stmt stmt :node-type (:type stmt)}))))]
     [env' (with-stmt-debug lowered stmt)]))
+
 
 (defn- lower-member-assign-stmt [env stmt]
   (let [field-name (:field stmt)

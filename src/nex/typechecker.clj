@@ -3240,6 +3240,114 @@
                                           (display-type first-type) " and " (display-type elem-type)))})))))
       {:base-type "Set" :type-params [first-type]})))
 
+(defn- check-expr-anonymous-function
+  [env expr]
+  (let [class-def (:class-def expr)
+        ;; Written inside an instance method, this literal's `this`/bare
+        ;; field or method access means the *enclosing* class's, not the
+        ;; synthetic AnonymousFunction_N's own (which has none of those
+        ;; members) — a plain independent check-class scopes
+        ;; __current_class__ to the synthetic class and rejects it as
+        ;; "Method not found". check-method already takes class-name as a
+        ;; parameter distinct from the env it extends, so checking the
+        ;; callN body directly under the enclosing class's name (exactly as
+        ;; check-spawn already does for a spawn body, by simply not
+        ;; overriding __current_class__ at all) resolves this with no new
+        ;; machinery.
+        enclosing-class (env-lookup-var env "__current_class__")]
+    ;; Register the dynamic class definition in the type environment
+    (collect-class-info env class-def)
+    (if enclosing-class
+      (check-method env enclosing-class
+                    (some #(when (= :method (:type %)) %)
+                          (feature-members class-def)))
+      ;; No enclosing class (a top-level anonymous function): check the class
+      ;; as before.
+      (check-class env class-def))
+    ;; Anonymous functions have distinct generated runtime classes, but their
+    ;; stable static type is Function.
+    "Function"))
+
+(defn- check-expr-when
+  [env expr]
+  (let [cond-type (check-expression env (:condition expr))
+        cons-env (doto (make-type-env env)
+                   (apply-condition-branch-refinement! (:condition expr) :then))
+        alt-env (doto (make-type-env env)
+                  (apply-condition-branch-refinement! (:condition expr) :else))
+        cons-type (check-expression cons-env (:consequent expr))
+        alt-type (check-expression alt-env (:alternative expr))
+        cons-nil? (= (normalize-type cons-type) "Nil")
+        alt-nil? (= (normalize-type alt-type) "Nil")
+        result-type (cond
+                      (and cons-nil? alt-nil?) "Nil"
+                      cons-nil? (detachable-version alt-type)
+                      alt-nil? (detachable-version cons-type)
+                      :else cons-type)]
+    (when-not (types-compatible? env cond-type "Boolean")
+      (throw (ex-info "when condition must be Boolean"
+                      {:error (type-error
+                               (str "when condition has type " cond-type ", expected Boolean"))})))
+    (when-not (or cons-nil?
+                  alt-nil?
+                  (types-compatible? env cons-type alt-type)
+                  (types-compatible? env alt-type cons-type))
+      (throw (ex-info "when branches must have compatible types"
+                      {:error (type-error
+                               (str "when branches have incompatible types: "
+                                    (display-type cons-type) " and "
+                                    (display-type alt-type)))})))
+    result-type))
+
+(defn- check-expr-old
+  [env expr]
+  (check-expression env (:expr expr)))
+
+(defn- check-expr-this
+  [env _expr]
+  (or (env-lookup-var env "__current_class__") "Any"))
+
+;; `super`'s type is its resolved parent class, so a call/field access
+;; through it type-checks through the ordinary machinery for a value of a
+;; known class type — the same one `this` uses above. Non-virtual dispatch
+;; to that parent's own implementation (rather than whatever overrides it)
+;; is a lowering/interpreter concern, not a typechecking one; see
+;; `resolve-super-parent-class-name`.
+(defn- check-expr-super
+  [env _expr]
+  (resolve-super-parent-class-name env (env-lookup-var env "__current_class__")))
+
+(def ^:private check-expression-dispatch
+  "AST node `:type` -> `(fn [env expr] -> type)`: the map-shaped half of
+   `check-expression`'s dispatch, consulted once `expr` is known to be a
+   map (see the outer `cond` in `check-expression`, which handles nil/
+   string/number/boolean shapes first). All the delegate functions here are
+   already defined above this point in the file, so — unlike
+   `infer-type-dispatch`'s `:call` entry in lower.clj — none need wrapping
+   to dodge an as-yet-Unbound forward declare. A `:type` with no entry here
+   falls through to \"Any\", matching the case's original trailing default."
+  {:integer            check-literal
+   :real               check-literal
+   :string             check-literal
+   :char               check-literal
+   :boolean            check-literal
+   :nil                check-literal
+   :identifier         check-identifier
+   :binary             check-binary-op
+   :unary              check-unary-op
+   :call               check-call
+   :create             check-create
+   :array-literal      check-array-literal
+   :set-literal        check-set-literal
+   :map-literal        check-map-literal
+   :anonymous-function check-expr-anonymous-function
+   :when               check-expr-when
+   :old                check-expr-old
+   :convert            check-convert
+   :spawn              check-spawn
+   :this               check-expr-this
+   :super              check-expr-super})
+
 (defn check-expression
   "Check the type of an expression"
   [env expr]
@@ -3254,92 +3362,11 @@
         (number? expr) "Integer"
         (boolean? expr) "Boolean"
         (map? expr)
-        (case (:type expr)
-          :integer (check-literal env expr)
-          :real (check-literal env expr)
-          :string (check-literal env expr)
-          :char (check-literal env expr)
-          :boolean (check-literal env expr)
-          :nil (check-literal env expr)
-          :identifier (check-identifier env expr)
-          :binary (check-binary-op env expr)
-          :unary (check-unary-op env expr)
-          :call (check-call env expr)
-          :create (check-create env expr)
-          :array-literal (check-array-literal env expr)
-          :set-literal (check-set-literal env expr)
-          :map-literal (check-map-literal env expr)
-          :anonymous-function (let [class-def (:class-def expr)
-                                    ;; Written inside an instance method, this
-                                    ;; literal's `this`/bare field or method
-                                    ;; access means the *enclosing* class's, not
-                                    ;; the synthetic AnonymousFunction_N's own
-                                    ;; (which has none of those members) — a
-                                    ;; plain independent check-class scopes
-                                    ;; __current_class__ to the synthetic class
-                                    ;; and rejects it as "Method not found".
-                                    ;; check-method already takes class-name as
-                                    ;; a parameter distinct from the env it
-                                    ;; extends, so checking the callN body
-                                    ;; directly under the enclosing class's name
-                                    ;; (exactly as check-spawn already does for
-                                    ;; a spawn body, by simply not overriding
-                                    ;; __current_class__ at all) resolves this
-                                    ;; with no new machinery.
-                                    enclosing-class (env-lookup-var env "__current_class__")]
-                                ;; Register the dynamic class definition in the type environment
-                                (collect-class-info env class-def)
-                                (if enclosing-class
-                                  (check-method env enclosing-class
-                                                (some #(when (= :method (:type %)) %)
-                                                      (feature-members class-def)))
-                                  ;; No enclosing class (a top-level anonymous
-                                  ;; function): check the class as before.
-                                  (check-class env class-def))
-                                ;; Anonymous functions have distinct generated runtime classes,
-                                ;; but their stable static type is Function.
-                                "Function")
-          :when (let [cond-type (check-expression env (:condition expr))
-                       cons-env (doto (make-type-env env)
-                                  (apply-condition-branch-refinement! (:condition expr) :then))
-                       alt-env (doto (make-type-env env)
-                                 (apply-condition-branch-refinement! (:condition expr) :else))
-                       cons-type (check-expression cons-env (:consequent expr))
-                       alt-type (check-expression alt-env (:alternative expr))
-                       cons-nil? (= (normalize-type cons-type) "Nil")
-                       alt-nil? (= (normalize-type alt-type) "Nil")
-                       result-type (cond
-                                     (and cons-nil? alt-nil?) "Nil"
-                                     cons-nil? (detachable-version alt-type)
-                                     alt-nil? (detachable-version cons-type)
-                                     :else cons-type)]
-                   (when-not (types-compatible? env cond-type "Boolean")
-                     (throw (ex-info "when condition must be Boolean"
-                                     {:error (type-error
-                                              (str "when condition has type " cond-type ", expected Boolean"))})))
-                   (when-not (or cons-nil?
-                                 alt-nil?
-                                 (types-compatible? env cons-type alt-type)
-                                 (types-compatible? env alt-type cons-type))
-                     (throw (ex-info "when branches must have compatible types"
-                                     {:error (type-error
-                                              (str "when branches have incompatible types: "
-                                                   (display-type cons-type) " and "
-                                                   (display-type alt-type)))})))
-                   result-type)
-          :old (check-expression env (:expr expr))
-          :convert (check-convert env expr)
-          :spawn (check-spawn env expr)
-          :this (or (env-lookup-var env "__current_class__") "Any")
-          ;; `super`'s type is its resolved parent class, so a call/field
-          ;; access through it type-checks through the ordinary machinery for
-          ;; a value of a known class type — the same one `this` uses above.
-          ;; Non-virtual dispatch to that parent's own implementation (rather
-          ;; than whatever overrides it) is a lowering/interpreter concern,
-          ;; not a typechecking one; see `resolve-super-parent-class-name`.
-          :super (resolve-super-parent-class-name env (env-lookup-var env "__current_class__"))
+        (if-let [handler (get check-expression-dispatch (:type expr))]
+          (handler env expr)
           "Any")
         :else "Any"))))
+
 
 ;;
 ;; Statement Type Checking
