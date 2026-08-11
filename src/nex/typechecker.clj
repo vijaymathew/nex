@@ -1,7 +1,8 @@
 (ns nex.typechecker
   "Static type checker for Nex language"
   (:require [clojure.string :as str]
-            [clojure.set :as set]))
+            [clojure.set :as set]
+            [nex.types.builtins :as bi]))
 
 ;;
 ;; Type Environment
@@ -154,6 +155,7 @@
       (not (contains? acc generic-name)) (assoc acc generic-name constraint)
       (and (nil? (get acc generic-name)) constraint) (assoc acc generic-name constraint)
       :else acc)))
+
 (defn- infer-generic-constraints-from-type
   [class-lookup type-expr]
   (let [t (normalize-type type-expr)]
@@ -1948,162 +1950,176 @@
         "Task"
         {:base-type "Task" :type-params [result-type]}))))
 
+;; The universal protocol: what *every* value has, whatever its type. This
+;; case is consulted for every receiver (see `check-target-call`), so a name
+;; listed here typechecks against a class that never declares it — which is
+;; a promise only worth making for names that have a default implementation
+;; behind them. It must therefore stay in step with the two things that
+;; provide those defaults: the "Any" protocol class registered in
+;; `register-builtin-methods`, and `builtin-type-methods` :Any in
+;; nex.types.builtins. All three now list the same names.
+;;
+;; The cursor protocol (`cursor`/`start`/`item`/`next`/`at_end`) used to be
+;; here and is deliberately not: there is no universal default for it, so
+;; listing it promised an iteration protocol on every value in the language
+;; and delivered it on none — `p.cursor` on a plain class typechecked and
+;; then failed at runtime ("Method not found") or refused to compile. Each
+;; of those names is now owned by the types that actually implement it: the
+;; "Cursor" case below, the `across` loop's cursor path in
+;; `check-target-call`, Array/Map/Set/String in `register-builtin-methods`,
+;; and any user class that declares its own.
+;;
+;; `hash` is intentionally absent even though the other two tables carry it:
+;; a class opts into hashing by inheriting Hashable. Adding it here would
+;; typecheck `p.hash` on any class, which the compiled backend cannot lower.
+(defn- builtin-method-signature-any
+  [method argc _type-map]
+  (case method
+    "to_string" (when (= argc 0)
+                  {:params [] :return-type "String"})
+    "equals" (when (= argc 1)
+               {:params [{:name "other" :type "Any"}] :return-type "Boolean"})
+    "clone" (when (= argc 0)
+              {:params [] :return-type "Any"})
+    nil))
+
+(defn- builtin-method-signature-task
+  [method argc type-map]
+  (case method
+    "await" (case argc
+              0 {:params [] :return-type (resolve-generic-type "T" type-map)}
+              1 {:params [{:name "timeout_ms" :type "Integer"}]
+                 :return-type (detachable-version (resolve-generic-type "T" type-map))}
+              nil)
+    "cancel" (when (= argc 0)
+               {:params [] :return-type "Boolean"})
+    "is_done" (when (= argc 0)
+                {:params [] :return-type "Boolean"})
+    "is_cancelled" (when (= argc 0)
+                     {:params [] :return-type "Boolean"})
+    nil))
+
+(defn- builtin-method-signature-channel
+  [method argc type-map]
+  (let [elem-type (or (resolve-generic-type "T" type-map) "Any")]
+    (case method
+      "send" (case argc
+               1 {:params [{:name "value" :type elem-type}] :return-type "Void"}
+               2 {:params [{:name "value" :type elem-type}
+                           {:name "timeout_ms" :type "Integer"}]
+                  :return-type "Boolean"}
+               nil)
+      "try_send" (when (= argc 1)
+                   {:params [{:name "value" :type elem-type}] :return-type "Boolean"})
+      "receive" (case argc
+                  0 {:params [] :return-type elem-type}
+                  1 {:params [{:name "timeout_ms" :type "Integer"}]
+                     :return-type (detachable-version elem-type)}
+                  nil)
+      "try_receive" (when (= argc 0)
+                      {:params [] :return-type (detachable-version elem-type)})
+      "close" (when (= argc 0) {:params [] :return-type "Void"})
+      "is_closed" (when (= argc 0) {:params [] :return-type "Boolean"})
+      "capacity" (when (= argc 0) {:params [] :return-type "Integer"})
+      "size" (when (= argc 0) {:params [] :return-type "Integer"})
+      nil)))
+
+(defn- builtin-method-signature-min-heap
+  [method argc type-map]
+  (let [elem-type (or (resolve-generic-type "T" type-map) "Any")]
+    (case method
+      "insert" (when (= argc 1)
+                 {:params [{:name "value" :type elem-type}] :return-type "Void"})
+      "extract_min" (when (= argc 0)
+                      {:params [] :return-type elem-type})
+      "try_extract_min" (when (= argc 0)
+                          {:params [] :return-type (detachable-version elem-type)})
+      "peek" (when (= argc 0)
+               {:params [] :return-type elem-type})
+      "try_peek" (when (= argc 0)
+                   {:params [] :return-type (detachable-version elem-type)})
+      "size" (when (= argc 0) {:params [] :return-type "Integer"})
+      "is_empty" (when (= argc 0) {:params [] :return-type "Boolean"})
+      nil)))
+
+;; Atomic_Integer and Atomic_Integer64 are both 64-bit atomics on the JVM
+;; (see nex.types.builtins) and share this exact signature set — one
+;; handler, used for both keys in the dispatch table below.
+(defn- builtin-method-signature-atomic-numeric
+  [method argc _type-map]
+  (case method
+    "load" (when (= argc 0) {:params [] :return-type "Integer"})
+    "store" (when (= argc 1) {:params [{:name "value" :type "Integer"}] :return-type "Void"})
+    "compare_and_set" (when (= argc 2)
+                        {:params [{:name "expected" :type "Integer"}
+                                  {:name "update" :type "Integer"}]
+                         :return-type "Boolean"})
+    "get_and_add" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
+    "add_and_get" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
+    "increment" (when (= argc 0) {:params [] :return-type "Integer"})
+    "decrement" (when (= argc 0) {:params [] :return-type "Integer"})
+    nil))
+
+(defn- builtin-method-signature-atomic-boolean
+  [method argc _type-map]
+  (case method
+    "load" (when (= argc 0) {:params [] :return-type "Boolean"})
+    "store" (when (= argc 1) {:params [{:name "value" :type "Boolean"}] :return-type "Void"})
+    "compare_and_set" (when (= argc 2)
+                        {:params [{:name "expected" :type "Boolean"}
+                                  {:name "update" :type "Boolean"}]
+                         :return-type "Boolean"})
+    nil))
+
+(defn- builtin-method-signature-atomic-reference
+  [method argc type-map]
+  (let [elem-type (or (resolve-generic-type "T" type-map) "Any")
+        maybe-elem (detachable-version elem-type)]
+    (case method
+      "load" (when (= argc 0) {:params [] :return-type maybe-elem})
+      "store" (when (= argc 1) {:params [{:name "value" :type maybe-elem}] :return-type "Void"})
+      "compare_and_set" (when (= argc 2)
+                          {:params [{:name "expected" :type maybe-elem}
+                                    {:name "update" :type maybe-elem}]
+                           :return-type "Boolean"})
+      nil)))
+
+(defn- builtin-method-signature-cursor
+  [method argc _type-map]
+  (case method
+    "start" (when (= argc 0)
+              {:params [] :return-type "Void"})
+    "cursor" (when (= argc 0)
+               {:params [] :return-type "Cursor"})
+    "item" (when (= argc 0)
+             {:params [] :return-type "Any"})
+    "next" (when (= argc 0)
+             {:params [] :return-type "Void"})
+    "at_end" (when (= argc 0)
+               {:params [] :return-type "Boolean"})
+    nil))
+
+(def ^:private builtin-method-signature-dispatch
+  "base-type -> `(fn [method argc type-map] -> signature-or-nil)`: the
+   primary dispatch table for `builtin-method-signature`. Each handler
+   keeps its own `case method`(+argc) dispatch internally — a method can be
+   genuinely overloaded (Task.await, Channel.send/receive) — the map only
+   replaces the outer `case base-type` that used to pick the handler out."
+  {"Any" builtin-method-signature-any
+   "Task" builtin-method-signature-task
+   "Channel" builtin-method-signature-channel
+   "Min_Heap" builtin-method-signature-min-heap
+   "Atomic_Integer" builtin-method-signature-atomic-numeric
+   "Atomic_Integer64" builtin-method-signature-atomic-numeric
+   "Atomic_Boolean" builtin-method-signature-atomic-boolean
+   "Atomic_Reference" builtin-method-signature-atomic-reference
+   "Cursor" builtin-method-signature-cursor})
+
 (defn- builtin-method-signature
   [base-type method argc type-map]
-  (case base-type
-    ;; The universal protocol: what *every* value has, whatever its type. This
-    ;; case is consulted for every receiver (see `check-target-call`), so a name
-    ;; listed here typechecks against a class that never declares it — which is
-    ;; a promise only worth making for names that have a default implementation
-    ;; behind them. It must therefore stay in step with the two things that
-    ;; provide those defaults: the "Any" protocol class registered in
-    ;; `register-builtin-methods`, and `builtin-type-methods` :Any in
-    ;; nex.types.builtins. All three now list the same names.
-    ;;
-    ;; The cursor protocol (`cursor`/`start`/`item`/`next`/`at_end`) used to be
-    ;; here and is deliberately not: there is no universal default for it, so
-    ;; listing it promised an iteration protocol on every value in the language
-    ;; and delivered it on none — `p.cursor` on a plain class typechecked and
-    ;; then failed at runtime ("Method not found") or refused to compile. Each
-    ;; of those names is now owned by the types that actually implement it: the
-    ;; "Cursor" case below, the `across` loop's cursor path in
-    ;; `check-target-call`, Array/Map/Set/String in `register-builtin-methods`,
-    ;; and any user class that declares its own.
-    ;;
-    ;; `hash` is intentionally absent even though the other two tables carry it:
-    ;; a class opts into hashing by inheriting Hashable. Adding it here would
-    ;; typecheck `p.hash` on any class, which the compiled backend cannot lower.
-    "Any"
-    (case method
-      "to_string" (when (= argc 0)
-                    {:params [] :return-type "String"})
-      "equals" (when (= argc 1)
-                 {:params [{:name "other" :type "Any"}] :return-type "Boolean"})
-      "clone" (when (= argc 0)
-                {:params [] :return-type "Any"})
-      nil)
+  (when-let [handler (get builtin-method-signature-dispatch base-type)]
+    (handler method argc type-map)))
 
-    "Task"
-    (case method
-      "await" (case argc
-                0 {:params [] :return-type (resolve-generic-type "T" type-map)}
-                1 {:params [{:name "timeout_ms" :type "Integer"}]
-                   :return-type (detachable-version (resolve-generic-type "T" type-map))}
-                nil)
-      "cancel" (when (= argc 0)
-                 {:params [] :return-type "Boolean"})
-      "is_done" (when (= argc 0)
-                  {:params [] :return-type "Boolean"})
-      "is_cancelled" (when (= argc 0)
-                       {:params [] :return-type "Boolean"})
-      nil)
-
-    "Channel"
-    (let [elem-type (or (resolve-generic-type "T" type-map) "Any")]
-      (case method
-        "send" (case argc
-                 1 {:params [{:name "value" :type elem-type}] :return-type "Void"}
-                 2 {:params [{:name "value" :type elem-type}
-                             {:name "timeout_ms" :type "Integer"}]
-                    :return-type "Boolean"}
-                 nil)
-        "try_send" (when (= argc 1)
-                     {:params [{:name "value" :type elem-type}] :return-type "Boolean"})
-        "receive" (case argc
-                    0 {:params [] :return-type elem-type}
-                    1 {:params [{:name "timeout_ms" :type "Integer"}]
-                       :return-type (detachable-version elem-type)}
-                    nil)
-        "try_receive" (when (= argc 0)
-                        {:params [] :return-type (detachable-version elem-type)})
-        "close" (when (= argc 0) {:params [] :return-type "Void"})
-        "is_closed" (when (= argc 0) {:params [] :return-type "Boolean"})
-        "capacity" (when (= argc 0) {:params [] :return-type "Integer"})
-        "size" (when (= argc 0) {:params [] :return-type "Integer"})
-        nil))
-
-    "Min_Heap"
-    (let [elem-type (or (resolve-generic-type "T" type-map) "Any")]
-      (case method
-        "insert" (when (= argc 1)
-                   {:params [{:name "value" :type elem-type}] :return-type "Void"})
-        "extract_min" (when (= argc 0)
-                        {:params [] :return-type elem-type})
-        "try_extract_min" (when (= argc 0)
-                            {:params [] :return-type (detachable-version elem-type)})
-        "peek" (when (= argc 0)
-                 {:params [] :return-type elem-type})
-        "try_peek" (when (= argc 0)
-                     {:params [] :return-type (detachable-version elem-type)})
-        "size" (when (= argc 0) {:params [] :return-type "Integer"})
-        "is_empty" (when (= argc 0) {:params [] :return-type "Boolean"})
-        nil))
-
-    "Atomic_Integer"
-    (case method
-      "load" (when (= argc 0) {:params [] :return-type "Integer"})
-      "store" (when (= argc 1) {:params [{:name "value" :type "Integer"}] :return-type "Void"})
-      "compare_and_set" (when (= argc 2)
-                          {:params [{:name "expected" :type "Integer"}
-                                    {:name "update" :type "Integer"}]
-                           :return-type "Boolean"})
-      "get_and_add" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
-      "add_and_get" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
-      "increment" (when (= argc 0) {:params [] :return-type "Integer"})
-      "decrement" (when (= argc 0) {:params [] :return-type "Integer"})
-      nil)
-
-    "Atomic_Integer64"
-    (case method
-      "load" (when (= argc 0) {:params [] :return-type "Integer"})
-      "store" (when (= argc 1) {:params [{:name "value" :type "Integer"}] :return-type "Void"})
-      "compare_and_set" (when (= argc 2)
-                          {:params [{:name "expected" :type "Integer"}
-                                    {:name "update" :type "Integer"}]
-                           :return-type "Boolean"})
-      "get_and_add" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
-      "add_and_get" (when (= argc 1) {:params [{:name "delta" :type "Integer"}] :return-type "Integer"})
-      "increment" (when (= argc 0) {:params [] :return-type "Integer"})
-      "decrement" (when (= argc 0) {:params [] :return-type "Integer"})
-      nil)
-
-    "Atomic_Boolean"
-    (case method
-      "load" (when (= argc 0) {:params [] :return-type "Boolean"})
-      "store" (when (= argc 1) {:params [{:name "value" :type "Boolean"}] :return-type "Void"})
-      "compare_and_set" (when (= argc 2)
-                          {:params [{:name "expected" :type "Boolean"}
-                                    {:name "update" :type "Boolean"}]
-                           :return-type "Boolean"})
-      nil)
-
-    "Atomic_Reference"
-    (let [elem-type (or (resolve-generic-type "T" type-map) "Any")
-          maybe-elem (detachable-version elem-type)]
-      (case method
-        "load" (when (= argc 0) {:params [] :return-type maybe-elem})
-        "store" (when (= argc 1) {:params [{:name "value" :type maybe-elem}] :return-type "Void"})
-        "compare_and_set" (when (= argc 2)
-                            {:params [{:name "expected" :type maybe-elem}
-                                      {:name "update" :type maybe-elem}]
-                             :return-type "Boolean"})
-        nil))
-
-    "Cursor"
-    (case method
-      "start" (when (= argc 0)
-                {:params [] :return-type "Void"})
-      "cursor" (when (= argc 0)
-                 {:params [] :return-type "Cursor"})
-      "item" (when (= argc 0)
-               {:params [] :return-type "Any"})
-      "next" (when (= argc 0)
-               {:params [] :return-type "Void"})
-      "at_end" (when (= argc 0)
-                 {:params [] :return-type "Boolean"})
-      nil)
-
-    nil))
 
 (defn- across-target-message
   "The diagnostic for an `across` whose target cannot be iterated. `cursor` is
@@ -2116,8 +2132,13 @@
          (str " Narrow it first, for example: if convert <expr> to"
               " items: Array[Integer] then across items as x do ... end end"))))
 
-(defn- check-target-call
-  [env {:keys [target method args has-parens from-pattern from-across]}]
+(defn- resolve-call-target-info
+  "Resolve everything the branches below need about `target` itself, once,
+   up front: what class/type it names, whether it's detachable and
+   nil-guarded, and the generic type-param bindings visible through it.
+   Returned as a map so each branch can destructure just the handful of
+   keys it actually needs."
+  [env {:keys [target]}]
   (let [target-name (when (string? target) target)
         across-item-type (and target-name
                               (env-lookup-across-cursor env target-name))
@@ -2149,198 +2170,244 @@
                     (:base-type target-type)
                     target-type)
         type-map (build-generic-type-map env target-type)]
-    ;; A bare-identifier target that resolves to nothing — not a local, field,
-    ;; class, across cursor, a parameterless routine of the current class, nor a
-    ;; Java name inside `with java` — is an undefined variable. Without this the
-    ;; member access slips through type-checking with a nil/Any target type and
-    ;; fails later (cryptically in the JVM lowering, or only at runtime).
-    (when (and *strict-undefined-targets*
-               (string? target)
-               (nil? target-type)
-               (not across-item-type)
-               (not with-java?)
-               ;; `this`/`Current` are special call targets, not variables (both
-               ;; reach here as their own node type, never as this bare-string
-               ;; `target`, so the `string? target` guard above already excludes
-               ;; them — kept only for `Current`, a vestigial alias with no
-               ;; grammar token or handling of its own anywhere in the codebase.
-               ;; `super` used to need the same treatment before it got its own
-               ;; node type too; now `(string? target)` alone excludes it.
-               (not (#{"this" "Current"} target))
-               (not (and current-class
-                         (lookup-class-method env current-class target 0 current-class))))
-      (throw (ex-info (str "Undefined variable: " target)
-                      {:error (type-error (str "Undefined variable: " target))})))
-    (when (and (not class-target) target-detachable? (not guarded?))
-      (throw (ex-info (str "Feature access on detachable target requires nil-check: " method)
+    {:target-name target-name
+     :across-item-type across-item-type
+     :with-java? with-java?
+     :class-target class-target
+     :current-class current-class
+     :target-type target-type
+     :normalized-target normalized-target
+     :target-detachable? target-detachable?
+     :guarded? guarded?
+     :base-type base-type
+     :type-map type-map}))
+
+;; A bare-identifier target that resolves to nothing — not a local, field,
+;; class, across cursor, a parameterless routine of the current class, nor a
+;; Java name inside `with java` — is an undefined variable. Without this the
+;; member access slips through type-checking with a nil/Any target type and
+;; fails later (cryptically in the JVM lowering, or only at runtime).
+(defn- reject-undefined-target!
+  [env {:keys [target]} {:keys [across-item-type with-java? current-class target-type]}]
+  (when (and *strict-undefined-targets*
+             (string? target)
+             (nil? target-type)
+             (not across-item-type)
+             (not with-java?)
+             ;; `this`/`Current` are special call targets, not variables (both
+             ;; reach here as their own node type, never as this bare-string
+             ;; `target`, so the `string? target` guard above already excludes
+             ;; them — kept only for `Current`, a vestigial alias with no
+             ;; grammar token or handling of its own anywhere in the codebase.
+             ;; `super` used to need the same treatment before it got its own
+             ;; node type too; now `(string? target)` alone excludes it.
+             (not (#{"this" "Current"} target))
+             (not (and current-class
+                       (lookup-class-method env current-class target 0 current-class))))
+    (throw (ex-info (str "Undefined variable: " target)
+                    {:error (type-error (str "Undefined variable: " target))}))))
+
+(defn- reject-unguarded-detachable-target!
+  [_env {:keys [method]} {:keys [class-target target-detachable? guarded? normalized-target]}]
+  (when (and (not class-target) target-detachable? (not guarded?))
+    (throw (ex-info (str "Feature access on detachable target requires nil-check: " method)
+                    {:error (type-error
+                             (str "Cannot call feature '" method "' on detachable "
+                                  (display-type normalized-target)
+                                  ". Wrap with: if <obj> /= nil then <obj>." method "(...) end"))}))))
+
+;; `super.method(...)` / `super.method` resolve against the immediate super
+;; parent only — never further up the chain for a constructor, and never
+;; falling back to a universal `Any` protocol signature — because that is
+;; exactly what `nex.lower` is able to call. `check-general-target-call`
+;; (via `lookup-class-method`) walks the whole ancestor chain looking for
+;; *any* matching-arity entry, constructors included; that lets an invalid
+;; super call (wrong arity, or naming a constructor that only some ancestor
+;; happens to have) pass type-checking, only to crash lowering with an
+;; opaque "internal error" instead of a real type error.
+(defn- check-super-call
+  [env {:keys [method args has-parens]} {:keys [base-type current-class]}]
+  (if-let [ctor-def (class-own-constructor env base-type method (count args))]
+    (check-call-signature env method args
+                          {:params (:params ctor-def) :return-type base-type}
+                          {})
+    (if-let [method-sig (lookup-super-feature-method env base-type method (count args))]
+      (check-call-signature env method args method-sig {})
+      (if-let [field-member (and (false? has-parens)
+                                 (lookup-class-field-member env base-type method current-class))]
+        (resolve-generic-type (:field-type field-member) {})
+        ;; base-type names no Nex-declared member here — it may instead be
+        ;; a Java interface/class parent (docs/proposals/java-interop.md,
+        ;; Phase 2). `new` is the super-constructor selector
+        ;; (super.new(args), validated separately against the Java
+        ;; class's reflected constructors by
+        ;; check-java-super-constructor-call); any other name may be a
+        ;; real inherited Java method this override calls through to
+        ;; (e.g. `super.paintComponent(g)`).
+        (let [arg-types (mapv #(check-expression env %) args)]
+          (cond
+            (= method "new")
+            "Any"
+
+            (reflected-java-method-signature env base-type method arg-types false)
+            (:return-type (reflected-java-method-signature env base-type method arg-types false))
+
+            :else
+            (let [msg (str "Method not found: " method " on " base-type
+                           ". `super` only reaches " base-type
+                           "'s own features and constructor.")]
+              (throw (ex-info msg {:error (type-error msg)})))))))))
+
+(defn- check-across-item-call
+  [_env {:keys [method]} {:keys [across-item-type]}]
+  (case method
+    "item" across-item-type
+    "start" "Void"
+    "next" "Void"
+    "at_end" "Boolean"
+    "cursor" "Cursor"
+    nil))
+
+(defn- check-class-constant-access
+  [env {:keys [method]} {:keys [base-type type-map current-class target-type]}]
+  (if-let [constant (lookup-class-constant env base-type method)]
+    (resolve-generic-type (:field-type constant) type-map)
+    (if-let [method-sig (and current-class
+                             (not= current-class base-type)
+                             (class-subtype? env current-class base-type)
+                             (lookup-class-method env base-type method 0 current-class))]
+      (check-call-signature env method [] method-sig
+                            (member-type-map env target-type type-map method-sig)
+                            :arg-types [])
+      "Any")))
+
+(defn- check-array-sort-call
+  [env {:keys [args]} {:keys [target-type type-map]}]
+  (let [elem-type (if (map? target-type)
+                    (or (first (or (:type-params target-type) (:type-args target-type)))
+                        "Any")
+                    "Any")]
+    (case (count args)
+      0
+      (do
+        (when-not (sortable-array-element-type? env elem-type)
+          (throw (ex-info "Array.sort requires Comparable element type"
+                          {:error (type-error
+                                   (str "Array.sort requires elements of a built-in sortable type or Comparable, got "
+                                        (display-type elem-type)))})))
+        (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map))
+
+      1
+      (let [compare-type (check-expression env (first args))]
+        (when-not (types-compatible? env compare-type "Function")
+          (throw (ex-info "Array.sort(compareFn) expects a Function argument"
+                          {:error (type-error
+                                   (str "Expected Function, got " (display-type compare-type)))})))
+        (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map))
+
+      (throw (ex-info "Method sort expects 0 or 1 arguments"
                       {:error (type-error
-                               (str "Cannot call feature '" method "' on detachable "
-                                    (display-type normalized-target)
-                                    ". Wrap with: if <obj> /= nil then <obj>." method "(...) end"))})))
-    (cond
-      ;; `super.method(...)` / `super.method` resolve against the immediate
-      ;; super parent only — never further up the chain for a constructor, and
-      ;; never falling back to a universal `Any` protocol signature — because
-      ;; that is exactly what `nex.lower` is able to call. The generic path
-      ;; below (via `lookup-class-method`) walks the whole ancestor chain
-      ;; looking for *any* matching-arity entry, constructors included; that
-      ;; lets an invalid super call (wrong arity, or naming a constructor that
-      ;; only some ancestor happens to have) pass type-checking, only to crash
-      ;; lowering with an opaque "internal error" instead of a real type error.
-      (and (map? target) (= :super (:type target)))
-      (if-let [ctor-def (class-own-constructor env base-type method (count args))]
-        (check-call-signature env method args
-                              {:params (:params ctor-def) :return-type base-type}
-                              {})
-        (if-let [method-sig (lookup-super-feature-method env base-type method (count args))]
-          (check-call-signature env method args method-sig {})
-          (if-let [field-member (and (false? has-parens)
-                                     (lookup-class-field-member env base-type method current-class))]
-            (resolve-generic-type (:field-type field-member) {})
-            ;; base-type names no Nex-declared member here — it may instead be
-            ;; a Java interface/class parent (docs/proposals/java-interop.md,
-            ;; Phase 2). `new` is the super-constructor selector
-            ;; (super.new(args), validated separately against the Java
-            ;; class's reflected constructors by
-            ;; check-java-super-constructor-call); any other name may be a
-            ;; real inherited Java method this override calls through to
-            ;; (e.g. `super.paintComponent(g)`).
-            (let [arg-types (mapv #(check-expression env %) args)]
-              (cond
-                (= method "new")
+                               (str "Method sort expects 0 or 1 arguments, got " (count args)))})))))
+
+;; Invoking a Function value that carries an explicit signature (e.g.
+;; `f.call1(x)` where `f: Function(n: Integer): Integer`): the declared
+;; return type is more precise than the generic callN result (Any).
+(defn- check-typed-function-call
+  [env {:keys [args]} {:keys [target-type]}]
+  (doseq [arg args]
+    (check-expression env arg))
+  (:return-type target-type))
+
+(defn- check-general-target-call
+  [env {:keys [method args has-parens from-pattern from-across]}
+   {:keys [base-type type-map current-class class-target target-type with-java?]}]
+  (let [class-def (env-lookup-class env base-type)]
+    ;; Resolution order is what makes an override an override. The receiver's
+    ;; own declaration must beat the universal "Any" protocol, or a class
+    ;; redefining a protocol member is checked against the *protocol's*
+    ;; signature instead of its own: `clone: M` was typed by Any's
+    ;; `clone: Any`, so `m.clone.v` — the whole point of overriding it —
+    ;; failed with "Undefined field: v" while the override itself ran
+    ;; correctly at runtime. `to_string`/`equals` hid the bug because the
+    ;; signature you would override them with matches Any's already.
+    ;;
+    ;; The receiver's *builtin* signature still comes first: for Task,
+    ;; Channel, Cursor and friends that table is the authority, and it is
+    ;; keyed on the real base type rather than a fallback.
+    (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
+                            (lookup-class-method env base-type method (count args) current-class)
+                            (builtin-method-signature "Any" method (count args) type-map))]
+      (check-call-signature env method args method-sig
+                            (member-type-map env target-type type-map method-sig))
+      (let [arg-types (mapv #(check-expression env %) args)]
+        ;; A method not declared/inherited anywhere in the Nex chain may
+        ;; still be a real, inherited (non-overridden) member of a Java
+        ;; class this class `extends` (Phase 2, docs/proposals/
+        ;; java-interop.md) — e.g. `t.start()` on a class inheriting
+        ;; Thread. Tried after base-type's own reflection (the ordinary
+        ;; "bare imported Java object" case) so neither shadows the other.
+        (if-let [java-method-sig (or (reflected-java-method-signature env base-type method arg-types class-target)
+                                     (when-let [super-name (class-java-superclass-name env base-type)]
+                                       (reflected-java-method-signature env super-name method arg-types false)))]
+          (check-call-signature env method args java-method-sig {} :arg-types arg-types)
+          (if (false? has-parens)
+            (if-let [field-member (lookup-class-field-member env base-type method current-class)]
+              (resolve-generic-type (:field-type field-member)
+                                    (member-type-map env target-type type-map field-member))
+              (if with-java?
                 "Any"
+                (if (and class-def (not (:import class-def)))
+                  (if-let [method-sig (lookup-class-method-any-arity env base-type method current-class)]
+                    (throw (ex-info (str "Method " method " on " base-type
+                                         " requires " (count (:params method-sig))
+                                         " argument(s); zero-argument access is invalid")
+                                    {:error (type-error
+                                             (str "Method " method " on " base-type
+                                                  " requires " (count (:params method-sig))
+                                                  " argument(s); zero-argument access is invalid"))}))
+                    (throw (ex-info (str "Undefined field: " method)
+                                    {:error (type-error
+                                             (undefined-field-message
+                                              env base-type method current-class
+                                              from-pattern))})))
+                  "Any")))
+            (if with-java?
+              "Any"
+              (let [msg (if (and from-across (= "cursor" method))
+                          (across-target-message base-type)
+                          (str "Method not found: " method))]
+                (if (and class-def (not (:import class-def)))
+                  (throw (ex-info msg {:error (type-error msg)}))
+                  (if (and from-across (= "cursor" method))
+                    (throw (ex-info msg {:error (type-error msg)}))
+                    "Any"))))))))))
 
-                (reflected-java-method-signature env base-type method arg-types false)
-                (:return-type (reflected-java-method-signature env base-type method arg-types false))
+(defn- check-target-call
+  [env {:keys [target method has-parens] :as expr}]
+  (let [call-info (resolve-call-target-info env expr)]
+    (reject-undefined-target! env expr call-info)
+    (reject-unguarded-detachable-target! env expr call-info)
+    (cond
+      (and (map? target) (= :super (:type target)))
+      (check-super-call env expr call-info)
 
-                :else
-                (let [msg (str "Method not found: " method " on " base-type
-                               ". `super` only reaches " base-type
-                               "'s own features and constructor.")]
-                  (throw (ex-info msg {:error (type-error msg)}))))))))
+      (:across-item-type call-info)
+      (check-across-item-call env expr call-info)
 
-      across-item-type
-      (case method
-        "item" across-item-type
-        "start" "Void"
-        "next" "Void"
-        "at_end" "Boolean"
-        "cursor" "Cursor"
-        nil)
+      (and (:class-target call-info) (false? has-parens))
+      (check-class-constant-access env expr call-info)
 
-      (and class-target (false? has-parens))
-      (if-let [constant (lookup-class-constant env base-type method)]
-        (resolve-generic-type (:field-type constant) type-map)
-        (if-let [method-sig (and current-class
-                                 (not= current-class base-type)
-                                 (class-subtype? env current-class base-type)
-                                 (lookup-class-method env base-type method 0 current-class))]
-          (check-call-signature env method [] method-sig
-                                (member-type-map env target-type type-map method-sig)
-                                :arg-types [])
-          "Any"))
+      (and (= (:base-type call-info) "Array") (= method "sort"))
+      (check-array-sort-call env expr call-info)
 
-      (and (= base-type "Array") (= method "sort"))
-      (do
-        (let [elem-type (if (map? target-type)
-                          (or (first (or (:type-params target-type) (:type-args target-type)))
-                              "Any")
-                          "Any")]
-          (case (count args)
-            0
-            (do
-              (when-not (sortable-array-element-type? env elem-type)
-                (throw (ex-info "Array.sort requires Comparable element type"
-                                {:error (type-error
-                                         (str "Array.sort requires elements of a built-in sortable type or Comparable, got "
-                                              (display-type elem-type)))})))
-              (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map))
-
-            1
-            (let [compare-type (check-expression env (first args))]
-              (when-not (types-compatible? env compare-type "Function")
-                (throw (ex-info "Array.sort(compareFn) expects a Function argument"
-                                {:error (type-error
-                                         (str "Expected Function, got " (display-type compare-type)))})))
-              (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map))
-
-            (throw (ex-info "Method sort expects 0 or 1 arguments"
-                            {:error (type-error
-                                     (str "Method sort expects 0 or 1 arguments, got " (count args)))})))))
-
-      ;; Invoking a Function value that carries an explicit signature (e.g.
-      ;; `f.call1(x)` where `f: Function(n: Integer): Integer`): the declared
-      ;; return type is more precise than the generic callN result (Any).
-      (and (= base-type "Function")
-           (map? target-type)
-           (:return-type target-type)
+      (and (= (:base-type call-info) "Function")
+           (map? (:target-type call-info))
+           (:return-type (:target-type call-info))
            (re-matches #"call\d+" (str method)))
-      (do
-        (doseq [arg args]
-          (check-expression env arg))
-        (:return-type target-type))
+      (check-typed-function-call env expr call-info)
 
       :else
-      (let [class-def (env-lookup-class env base-type)]
-        ;; Resolution order is what makes an override an override. The receiver's
-        ;; own declaration must beat the universal "Any" protocol, or a class
-        ;; redefining a protocol member is checked against the *protocol's*
-        ;; signature instead of its own: `clone: M` was typed by Any's
-        ;; `clone: Any`, so `m.clone.v` — the whole point of overriding it —
-        ;; failed with "Undefined field: v" while the override itself ran
-        ;; correctly at runtime. `to_string`/`equals` hid the bug because the
-        ;; signature you would override them with matches Any's already.
-        ;;
-        ;; The receiver's *builtin* signature still comes first: for Task,
-        ;; Channel, Cursor and friends that table is the authority, and it is
-        ;; keyed on the real base type rather than a fallback.
-        (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
-                                (lookup-class-method env base-type method (count args) current-class)
-                                (builtin-method-signature "Any" method (count args) type-map))]
-          (check-call-signature env method args method-sig
-                                (member-type-map env target-type type-map method-sig))
-          (let [arg-types (mapv #(check-expression env %) args)]
-            ;; A method not declared/inherited anywhere in the Nex chain may
-            ;; still be a real, inherited (non-overridden) member of a Java
-            ;; class this class `extends` (Phase 2, docs/proposals/
-            ;; java-interop.md) — e.g. `t.start()` on a class inheriting
-            ;; Thread. Tried after base-type's own reflection (the ordinary
-            ;; "bare imported Java object" case) so neither shadows the other.
-            (if-let [java-method-sig (or (reflected-java-method-signature env base-type method arg-types class-target)
-                                         (when-let [super-name (class-java-superclass-name env base-type)]
-                                           (reflected-java-method-signature env super-name method arg-types false)))]
-              (check-call-signature env method args java-method-sig {} :arg-types arg-types)
-              (if (false? has-parens)
-                (if-let [field-member (lookup-class-field-member env base-type method current-class)]
-                  (resolve-generic-type (:field-type field-member)
-                                        (member-type-map env target-type type-map field-member))
-                  (if with-java?
-                    "Any"
-                    (if (and class-def (not (:import class-def)))
-                      (if-let [method-sig (lookup-class-method-any-arity env base-type method current-class)]
-                        (throw (ex-info (str "Method " method " on " base-type
-                                             " requires " (count (:params method-sig))
-                                             " argument(s); zero-argument access is invalid")
-                                        {:error (type-error
-                                                 (str "Method " method " on " base-type
-                                                      " requires " (count (:params method-sig))
-                                                      " argument(s); zero-argument access is invalid"))}))
-                        (throw (ex-info (str "Undefined field: " method)
-                                        {:error (type-error
-                                                 (undefined-field-message
-                                                  env base-type method current-class
-                                                  from-pattern))})))
-                      "Any")))
-                (if with-java?
-                  "Any"
-                  (let [msg (if (and from-across (= "cursor" method))
-                              (across-target-message base-type)
-                              (str "Method not found: " method))]
-                    (if (and class-def (not (:import class-def)))
-                      (throw (ex-info msg {:error (type-error msg)}))
-                      (if (and from-across (= "cursor" method))
-                        (throw (ex-info msg {:error (type-error msg)}))
-                        "Any"))))))))))))
+      (check-general-target-call env expr call-info))))
 
 ;; ---------------------------------------------------------------------------
 ;; Built-in free-function call checking.
@@ -2822,319 +2889,316 @@
                             {:error (type-error
                                      (str "Undefined function: " method))})))))))))
 
-(defn check-create
-  "Check the type of a create expression"
-  [env {:keys [class-name generic-args constructor args] :as expr}]
-  (cond
-    ;; Handle built-in Array type
-    (= class-name "Array")
-    (let [target-type (if (seq generic-args)
-                        (do
-                          (validate-generic-args env class-name generic-args)
-                          {:base-type "Array" :type-args generic-args})
-                        "Array")]
-      (cond
-        (nil? constructor)
-        (do
-          (when (seq args)
-            (throw (ex-info "create Array expects no arguments"
-                            {:error (type-error "create Array expects no arguments")})))
-          target-type)
+(defn- check-create-array
+  [env {:keys [generic-args constructor args]}]
+  (let [target-type (if (seq generic-args)
+                      (do
+                        (validate-generic-args env "Array" generic-args)
+                        {:base-type "Array" :type-args generic-args})
+                      "Array")]
+    (cond
+      (nil? constructor)
+      (do
+        (when (seq args)
+          (throw (ex-info "create Array expects no arguments"
+                          {:error (type-error "create Array expects no arguments")})))
+        target-type)
 
-        (= constructor "filled")
-        (do
-          (when-not (= 2 (count args))
-            (throw (ex-info "Array.filled expects 2 arguments"
-                            {:error (type-error "Array.filled expects exactly 2 arguments")})))
-          (let [size-type (check-expression env (first args))
-                value-type (check-expression env (second args))
-                elem-type (or (first generic-args) value-type)]
-            (when-not (types-compatible? env size-type "Integer")
-              (throw (ex-info "Array.filled requires Integer size"
+      (= constructor "filled")
+      (do
+        (when-not (= 2 (count args))
+          (throw (ex-info "Array.filled expects 2 arguments"
+                          {:error (type-error "Array.filled expects exactly 2 arguments")})))
+        (let [size-type (check-expression env (first args))
+              value-type (check-expression env (second args))
+              elem-type (or (first generic-args) value-type)]
+          (when-not (types-compatible? env size-type "Integer")
+            (throw (ex-info "Array.filled requires Integer size"
+                            {:error (type-error
+                                     (str "Array.filled expects Integer size, got "
+                                          (display-type size-type)))})))
+          (when-not (types-compatible? env value-type elem-type)
+            (throw (ex-info "Array.filled value type mismatch"
+                            {:error (type-error
+                                     (str "Array.filled expects "
+                                          (display-type elem-type)
+                                          " value, got "
+                                          (display-type value-type)))})))
+          {:base-type "Array" :type-args [elem-type]}))
+
+      :else
+      (throw (ex-info (str "Constructor not found: Array." constructor)
+                      {:error (type-error (str "Constructor not found: Array." constructor))})))))
+
+(defn- check-create-console
+  [_env _expr]
+  "Console")
+
+(defn- check-create-process
+  [env {:keys [constructor args]}]
+  (case constructor
+    nil
+    (do
+      (when (seq args)
+        (throw (ex-info "create Process expects no arguments"
+                        {:error (type-error "create Process expects no arguments")})))
+      "Process")
+
+    "self"
+    (do
+      (when (seq args)
+        (throw (ex-info "Process.self expects no arguments"
+                        {:error (type-error "Process.self expects no arguments")})))
+      "Process")
+
+    "command"
+    (do
+      (when-not (<= 1 (count args) 2)
+        (throw (ex-info "Process.command expects 1 or 2 arguments"
+                        {:error (type-error "Process.command expects (String) or (String, Array[String])")})))
+      (let [command-type (check-expression env (first args))]
+        (when-not (types-compatible? env command-type "String")
+          (throw (ex-info "Process.command requires a String command"
+                          {:error (type-error
+                                   (str "Process.command expects String, got "
+                                        (display-type command-type)))})))
+        (when (= 2 (count args))
+          (let [args-type (check-expression env (second args))
+                expected {:base-type "Array" :type-params ["String"]}]
+            (when-not (types-compatible? env args-type expected)
+              (throw (ex-info "Process.command requires Array[String] arguments"
                               {:error (type-error
-                                       (str "Array.filled expects Integer size, got "
-                                            (display-type size-type)))})))
-            (when-not (types-compatible? env value-type elem-type)
-              (throw (ex-info "Array.filled value type mismatch"
-                              {:error (type-error
-                                       (str "Array.filled expects "
-                                            (display-type elem-type)
-                                            " value, got "
-                                            (display-type value-type)))})))
-            {:base-type "Array" :type-args [elem-type]}))
+                                       (str "Process.command expects Array[String], got "
+                                            (display-type args-type)))}))))))
+      "Process")
 
-        :else
-        (throw (ex-info (str "Constructor not found: Array." constructor)
-                        {:error (type-error (str "Constructor not found: Array." constructor))}))))
+    (throw (ex-info (str "Constructor not found: Process." constructor)
+                    {:error (type-error (str "Constructor not found: Process." constructor))}))))
 
-    ;; Handle built-in Console type
-    (= class-name "Console") "Console"
-    ;; Handle built-in Process type
-    (= class-name "Process")
+(defn- check-create-min-heap
+  [env {:keys [generic-args constructor args]}]
+  (let [target-type (if (seq generic-args)
+                      (do
+                        (validate-generic-args env "Min_Heap" generic-args)
+                        {:base-type "Min_Heap" :type-args generic-args})
+                      "Min_Heap")]
     (case constructor
       nil
       (do
         (when (seq args)
-          (throw (ex-info "create Process expects no arguments"
-                          {:error (type-error "create Process expects no arguments")})))
-        "Process")
+          (throw (ex-info "create Min_Heap expects no arguments"
+                          {:error (type-error "create Min_Heap expects no arguments")})))
+        (when-let [elem-type (first generic-args)]
+          (when-not (sortable-array-element-type? env elem-type)
+            (throw (ex-info "Min_Heap.empty requires Comparable element type"
+                            {:error (type-error
+                                     (str "Min_Heap.empty requires a built-in sortable type or Comparable element type, got "
+                                          (display-type elem-type)
+                                          ". Use Min_Heap.from_comparator(...) instead."))}))))
+        target-type)
 
-      "self"
+      "empty"
       (do
         (when (seq args)
-          (throw (ex-info "Process.self expects no arguments"
-                          {:error (type-error "Process.self expects no arguments")})))
-        "Process")
-
-      "command"
-      (do
-        (when-not (<= 1 (count args) 2)
-          (throw (ex-info "Process.command expects 1 or 2 arguments"
-                          {:error (type-error "Process.command expects (String) or (String, Array[String])")})))
-        (let [command-type (check-expression env (first args))]
-          (when-not (types-compatible? env command-type "String")
-            (throw (ex-info "Process.command requires a String command"
+          (throw (ex-info "Min_Heap.empty expects no arguments"
+                          {:error (type-error "Min_Heap.empty expects no arguments")})))
+        (when-let [elem-type (first generic-args)]
+          (when-not (sortable-array-element-type? env elem-type)
+            (throw (ex-info "Min_Heap.empty requires Comparable element type"
                             {:error (type-error
-                                     (str "Process.command expects String, got "
-                                          (display-type command-type)))})))
-          (when (= 2 (count args))
-            (let [args-type (check-expression env (second args))
-                  expected {:base-type "Array" :type-params ["String"]}]
-              (when-not (types-compatible? env args-type expected)
-                (throw (ex-info "Process.command requires Array[String] arguments"
-                                {:error (type-error
-                                         (str "Process.command expects Array[String], got "
-                                              (display-type args-type)))}))))))
-        "Process")
+                                     (str "Min_Heap.empty requires a built-in sortable type or Comparable element type, got "
+                                          (display-type elem-type)
+                                          ". Use Min_Heap.from_comparator(...) instead."))}))))
+        target-type)
 
-      (throw (ex-info (str "Constructor not found: Process." constructor)
-                      {:error (type-error (str "Constructor not found: Process." constructor))})))
-    ;; Handle built-in Min_Heap type
-    (= class-name "Min_Heap")
-    (let [target-type (if (seq generic-args)
-                        (do
-                          (validate-generic-args env class-name generic-args)
-                          {:base-type "Min_Heap" :type-args generic-args})
-                        "Min_Heap")]
-      (case constructor
-        nil
-        (do
-          (when (seq args)
-            (throw (ex-info "create Min_Heap expects no arguments"
-                            {:error (type-error "create Min_Heap expects no arguments")})))
-          (when-let [elem-type (first generic-args)]
-            (when-not (sortable-array-element-type? env elem-type)
-              (throw (ex-info "Min_Heap.empty requires Comparable element type"
-                              {:error (type-error
-                                       (str "Min_Heap.empty requires a built-in sortable type or Comparable element type, got "
-                                            (display-type elem-type)
-                                            ". Use Min_Heap.from_comparator(...) instead."))}))))
-          target-type)
+      "from_comparator"
+      (do
+        (when-not (= 1 (count args))
+          (throw (ex-info "Min_Heap.from_comparator expects 1 argument"
+                          {:error (type-error "Min_Heap.from_comparator expects exactly 1 Function argument")})))
+        (let [compare-type (check-expression env (first args))]
+          (when-not (types-compatible? env compare-type "Function")
+            (throw (ex-info "Min_Heap.from_comparator requires a Function"
+                            {:error (type-error
+                                     (str "Min_Heap.from_comparator expects Function, got "
+                                          (display-type compare-type)))}))))
+        target-type)
 
-        "empty"
-        (do
-          (when (seq args)
-            (throw (ex-info "Min_Heap.empty expects no arguments"
-                            {:error (type-error "Min_Heap.empty expects no arguments")})))
-          (when-let [elem-type (first generic-args)]
-            (when-not (sortable-array-element-type? env elem-type)
-              (throw (ex-info "Min_Heap.empty requires Comparable element type"
-                              {:error (type-error
-                                       (str "Min_Heap.empty requires a built-in sortable type or Comparable element type, got "
-                                            (display-type elem-type)
-                                            ". Use Min_Heap.from_comparator(...) instead."))}))))
-          target-type)
+      (throw (ex-info (str "Constructor not found: Min_Heap." constructor)
+                      {:error (type-error (str "Constructor not found: Min_Heap." constructor))})))))
 
-        "from_comparator"
-        (do
-          (when-not (= 1 (count args))
-            (throw (ex-info "Min_Heap.from_comparator expects 1 argument"
-                            {:error (type-error "Min_Heap.from_comparator expects exactly 1 Function argument")})))
-          (let [compare-type (check-expression env (first args))]
-            (when-not (types-compatible? env compare-type "Function")
-              (throw (ex-info "Min_Heap.from_comparator requires a Function"
-                              {:error (type-error
-                                       (str "Min_Heap.from_comparator expects Function, got "
-                                            (display-type compare-type)))}))))
-          target-type)
+(defn- check-create-single-arg-atomic
+  "Builds a `create <Class>.make(value)` checker for the non-generic atomic
+   builtins (Atomic_Integer, Atomic_Integer64, Atomic_Boolean): all three
+   share this one-arg-named-'make' shape, differing only in the class name
+   (for error messages) and the expected argument type. Atomic_Reference is
+   the odd one out (generic, detachable) and keeps its own checker below."
+  [class-name expected-type]
+  (fn [env {:keys [constructor args]}]
+    (when-not (= constructor "make")
+      (throw (ex-info (str "Constructor not found: " class-name "." constructor)
+                      {:error (type-error (str "Constructor not found: " class-name "." constructor))})))
+    (when-not (= 1 (count args))
+      (throw (ex-info (str class-name ".make expects 1 argument")
+                      {:error (type-error (str class-name ".make expects exactly 1 " expected-type " argument"))})))
+    (let [arg-type (check-expression env (first args))]
+      (when-not (types-compatible? env arg-type expected-type)
+        (throw (ex-info (str class-name ".make requires " expected-type " initial value")
+                        {:error (type-error
+                                 (str class-name ".make expects " expected-type ", got "
+                                      (display-type arg-type)))}))))
+    class-name))
 
-        (throw (ex-info (str "Constructor not found: Min_Heap." constructor)
-                        {:error (type-error (str "Constructor not found: Min_Heap." constructor))}))))
+(defn- check-create-atomic-reference
+  [env {:keys [generic-args constructor args]}]
+  (let [target-type (if (seq generic-args)
+                      (do
+                        (validate-generic-args env "Atomic_Reference" generic-args)
+                        {:base-type "Atomic_Reference" :type-args generic-args})
+                      nil)]
+    (when-not (= constructor "make")
+      (throw (ex-info (str "Constructor not found: Atomic_Reference." constructor)
+                      {:error (type-error (str "Constructor not found: Atomic_Reference." constructor))})))
+    (when-not (= 1 (count args))
+      (throw (ex-info "Atomic_Reference.make expects 1 argument"
+                      {:error (type-error "Atomic_Reference.make expects exactly 1 argument")})))
+    (let [arg-type (check-expression env (first args))
+          elem-type (or (first generic-args)
+                        (if (= (attachable-type arg-type) "Nil")
+                          "Any"
+                          (attachable-type arg-type)))
+          maybe-elem (detachable-version elem-type)]
+      (when-not (types-compatible? env arg-type maybe-elem)
+        (throw (ex-info "Atomic_Reference.make initial value type mismatch"
+                        {:error (type-error
+                                 (str "Atomic_Reference.make expects "
+                                      (display-type maybe-elem)
+                                      ", got "
+                                      (display-type arg-type)))})))
+      (or target-type
+          {:base-type "Atomic_Reference" :type-args [elem-type]}))))
 
-    (= class-name "Atomic_Integer")
+(defn- check-create-channel
+  [env {:keys [generic-args constructor args]}]
+  (cond
+    (nil? constructor)
+    nil
+
+    (= constructor "with_capacity")
     (do
-      (when-not (= constructor "make")
-        (throw (ex-info (str "Constructor not found: Atomic_Integer." constructor)
-                        {:error (type-error (str "Constructor not found: Atomic_Integer." constructor))})))
       (when-not (= 1 (count args))
-        (throw (ex-info "Atomic_Integer.make expects 1 argument"
-                        {:error (type-error "Atomic_Integer.make expects exactly 1 Integer argument")})))
+        (throw (ex-info "Channel.with_capacity expects 1 argument"
+                        {:error (type-error "Channel.with_capacity expects exactly 1 Integer argument")})))
       (let [arg-type (check-expression env (first args))]
         (when-not (types-compatible? env arg-type "Integer")
-          (throw (ex-info "Atomic_Integer.make requires Integer initial value"
+          (throw (ex-info "Channel.with_capacity requires Integer capacity"
                           {:error (type-error
-                                   (str "Atomic_Integer.make expects Integer, got "
-                                        (display-type arg-type)))}))))
-      "Atomic_Integer")
+                                   (str "Channel.with_capacity expects Integer, got "
+                                        (display-type arg-type)))})))))
 
-    (= class-name "Atomic_Integer64")
-    (do
-      (when-not (= constructor "make")
-        (throw (ex-info (str "Constructor not found: Atomic_Integer64." constructor)
-                        {:error (type-error (str "Constructor not found: Atomic_Integer64." constructor))})))
-      (when-not (= 1 (count args))
-        (throw (ex-info "Atomic_Integer64.make expects 1 argument"
-                        {:error (type-error "Atomic_Integer64.make expects exactly 1 Integer argument")})))
-      (let [arg-type (check-expression env (first args))]
-        (when-not (types-compatible? env arg-type "Integer")
-          (throw (ex-info "Atomic_Integer64.make requires Integer initial value"
-                          {:error (type-error
-                                   (str "Atomic_Integer64.make expects Integer, got "
-                                        (display-type arg-type)))}))))
-      "Atomic_Integer64")
-
-    (= class-name "Atomic_Boolean")
-    (do
-      (when-not (= constructor "make")
-        (throw (ex-info (str "Constructor not found: Atomic_Boolean." constructor)
-                        {:error (type-error (str "Constructor not found: Atomic_Boolean." constructor))})))
-      (when-not (= 1 (count args))
-        (throw (ex-info "Atomic_Boolean.make expects 1 argument"
-                        {:error (type-error "Atomic_Boolean.make expects exactly 1 Boolean argument")})))
-      (let [arg-type (check-expression env (first args))]
-        (when-not (types-compatible? env arg-type "Boolean")
-          (throw (ex-info "Atomic_Boolean.make requires Boolean initial value"
-                          {:error (type-error
-                                   (str "Atomic_Boolean.make expects Boolean, got "
-                                        (display-type arg-type)))}))))
-      "Atomic_Boolean")
-
-    (= class-name "Atomic_Reference")
-    (let [target-type (if (seq generic-args)
-                        (do
-                          (validate-generic-args env class-name generic-args)
-                          {:base-type "Atomic_Reference" :type-args generic-args})
-                        nil)]
-      (when-not (= constructor "make")
-        (throw (ex-info (str "Constructor not found: Atomic_Reference." constructor)
-                        {:error (type-error (str "Constructor not found: Atomic_Reference." constructor))})))
-      (when-not (= 1 (count args))
-        (throw (ex-info "Atomic_Reference.make expects 1 argument"
-                        {:error (type-error "Atomic_Reference.make expects exactly 1 argument")})))
-      (let [arg-type (check-expression env (first args))
-            elem-type (or (first generic-args)
-                          (if (= (attachable-type arg-type) "Nil")
-                            "Any"
-                            (attachable-type arg-type)))
-            maybe-elem (detachable-version elem-type)]
-        (when-not (types-compatible? env arg-type maybe-elem)
-          (throw (ex-info "Atomic_Reference.make initial value type mismatch"
-                          {:error (type-error
-                                   (str "Atomic_Reference.make expects "
-                                        (display-type maybe-elem)
-                                        ", got "
-                                        (display-type arg-type)))})))
-        (or target-type
-            {:base-type "Atomic_Reference" :type-args [elem-type]})))
-
-    ;; Handle built-in Channel type
-    (= class-name "Channel")
-    (do
-      (cond
-        (nil? constructor)
-        nil
-
-        (= constructor "with_capacity")
-        (do
-          (when-not (= 1 (count args))
-            (throw (ex-info "Channel.with_capacity expects 1 argument"
-                            {:error (type-error "Channel.with_capacity expects exactly 1 Integer argument")})))
-          (let [arg-type (check-expression env (first args))]
-            (when-not (types-compatible? env arg-type "Integer")
-              (throw (ex-info "Channel.with_capacity requires Integer capacity"
-                              {:error (type-error
-                                       (str "Channel.with_capacity expects Integer, got "
-                                            (display-type arg-type)))})))))
-
-        :else
-        (throw (ex-info (str "Constructor not found: Channel." constructor)
-                        {:error (type-error (str "Constructor not found: Channel." constructor))})))
-      (if (seq generic-args)
-        {:base-type "Channel" :type-args generic-args}
-        "Channel"))
     :else
-    (do
-      ;; Check if class exists
-      (when-not (or (env-lookup-class env class-name) (builtin-type? class-name))
-        (throw (ex-info (str "Undefined class: " class-name)
-                        {:error (type-error (str "Undefined class: " class-name))})))
-      (let [class-def (env-lookup-class env class-name)]
-        (when (:deferred? class-def)
-          (throw (ex-info (str "Cannot instantiate deferred class: " class-name)
+    (throw (ex-info (str "Constructor not found: Channel." constructor)
+                    {:error (type-error (str "Constructor not found: Channel." constructor))})))
+  (if (seq generic-args)
+    {:base-type "Channel" :type-args generic-args}
+    "Channel"))
+
+(def ^:private check-create-builtin-dispatch
+  "class-name -> (fn [env expr] ...): the built-in-type half of
+   `check-create`. A class name with no entry here falls through to
+   `check-create-user-class`, which also handles Map/Set — registered as
+   ordinary generic classes rather than special-cased here."
+  {"Array"            check-create-array
+   "Console"          check-create-console
+   "Process"          check-create-process
+   "Min_Heap"         check-create-min-heap
+   "Atomic_Integer"   (check-create-single-arg-atomic "Atomic_Integer" "Integer")
+   "Atomic_Integer64" (check-create-single-arg-atomic "Atomic_Integer64" "Integer")
+   "Atomic_Boolean"   (check-create-single-arg-atomic "Atomic_Boolean" "Boolean")
+   "Atomic_Reference" check-create-atomic-reference
+   "Channel"          check-create-channel})
+
+(defn- check-create-user-class
+  [env {:keys [class-name generic-args constructor args]}]
+  ;; Check if class exists
+  (when-not (or (env-lookup-class env class-name) (builtin-type? class-name))
+    (throw (ex-info (str "Undefined class: " class-name)
+                    {:error (type-error (str "Undefined class: " class-name))})))
+  (let [class-def (env-lookup-class env class-name)]
+    (when (:deferred? class-def)
+      (throw (ex-info (str "Cannot instantiate deferred class: " class-name)
+                      {:error (type-error
+                               (str "Cannot instantiate deferred class " class-name
+                                    "; instantiate a concrete child class instead"))})))
+    ;; Imported Java classes have no Nex constructor signatures; skip validation.
+    (if (and class-def (:import class-def))
+      (if (seq generic-args)
+        (do (validate-generic-args env class-name generic-args)
+            {:base-type class-name :type-args generic-args})
+        class-name)
+      (let [constructors (lookup-class-constructors env class-name)
+            has-constructors? (seq constructors)
+            ctor-name (or constructor "make")
+            ctor-sig (lookup-class-method env class-name ctor-name)
+            gparams (:generic-params class-def)
+            arg-types (when (and (or constructor (seq args)) ctor-sig)
+                        (mapv #(check-expression env %) args))
+            ;; When type arguments are not written explicitly, infer them from
+            ;; the constructor's argument types (`create Ok.make(5)` ->
+            ;; Ok[Integer, Any]); parameters not mentioned by the constructor
+            ;; stay `Any`. Explicit `[…]` remains authoritative.
+            inferred-map (when (and (empty? generic-args) (seq gparams) ctor-sig (seq args))
+                           (reduce (fn [acc [arg-type param]]
+                                     (merge-inferred-generic-bindings
+                                      env acc
+                                      (infer-generic-type-map-from-arg
+                                       env (set (map :name gparams)) (:type param) arg-type)))
+                                   {}
+                                   (map vector arg-types (:params ctor-sig))))
+            target-type (cond
+                          (seq generic-args)
+                          (do (validate-generic-args env class-name generic-args)
+                              {:base-type class-name :type-args generic-args})
+                          (and (seq gparams) inferred-map)
+                          {:base-type class-name
+                           :type-args (mapv #(get inferred-map (:name %) "Any") gparams)}
+                          :else class-name)
+            type-map (build-generic-type-map env target-type)]
+        ;; If class defines constructors, disallow implicit default create.
+        (when (and has-constructors?
+                   (nil? constructor)
+                   (empty? args))
+          (throw (ex-info (str "Constructor required for class " class-name)
                           {:error (type-error
-                                   (str "Cannot instantiate deferred class " class-name
-                                        "; instantiate a concrete child class instead"))})))
-        ;; Imported Java classes have no Nex constructor signatures; skip validation.
-        (if (and class-def (:import class-def))
-          (if (seq generic-args)
-            (do (validate-generic-args env class-name generic-args)
-                {:base-type class-name :type-args generic-args})
-            class-name)
-          (let [constructors (lookup-class-constructors env class-name)
-                has-constructors? (seq constructors)
-                ctor-name (or constructor "make")
-                ctor-sig (lookup-class-method env class-name ctor-name)
-                gparams (:generic-params class-def)
-                arg-types (when (and (or constructor (seq args)) ctor-sig)
-                            (mapv #(check-expression env %) args))
-                ;; When type arguments are not written explicitly, infer them from
-                ;; the constructor's argument types (`create Ok.make(5)` ->
-                ;; Ok[Integer, Any]); parameters not mentioned by the constructor
-                ;; stay `Any`. Explicit `[…]` remains authoritative.
-                inferred-map (when (and (empty? generic-args) (seq gparams) ctor-sig (seq args))
-                               (reduce (fn [acc [arg-type param]]
-                                         (merge-inferred-generic-bindings
-                                          env acc
-                                          (infer-generic-type-map-from-arg
-                                           env (set (map :name gparams)) (:type param) arg-type)))
-                                       {}
-                                       (map vector arg-types (:params ctor-sig))))
-                target-type (cond
-                              (seq generic-args)
-                              (do (validate-generic-args env class-name generic-args)
-                                  {:base-type class-name :type-args generic-args})
-                              (and (seq gparams) inferred-map)
-                              {:base-type class-name
-                               :type-args (mapv #(get inferred-map (:name %) "Any") gparams)}
-                              :else class-name)
-                type-map (build-generic-type-map env target-type)]
-            ;; If class defines constructors, disallow implicit default create.
-            (when (and has-constructors?
-                       (nil? constructor)
-                       (empty? args))
-              (throw (ex-info (str "Constructor required for class " class-name)
+                                   (str "Class " class-name
+                                        " defines constructors; use an explicit constructor call, e.g. create "
+                                        class-name ".<ctor>(...)"))})))
+        (when (or constructor (seq args))
+          (when-not ctor-sig
+            (throw (ex-info (str "Constructor not found: " class-name "." ctor-name)
+                            {:error (type-error
+                                     (str "Constructor not found: " class-name "." ctor-name))})))
+          (let [params (:params ctor-sig)]
+            (when (not= (count params) (count args))
+              (throw (ex-info (str "Constructor argument count mismatch for " class-name "." ctor-name)
                               {:error (type-error
-                                       (str "Class " class-name
-                                            " defines constructors; use an explicit constructor call, e.g. create "
-                                            class-name ".<ctor>(...)"))})))
-            (when (or constructor (seq args))
-              (when-not ctor-sig
-                (throw (ex-info (str "Constructor not found: " class-name "." ctor-name)
-                                {:error (type-error
-                                         (str "Constructor not found: " class-name "." ctor-name))})))
-              (let [params (:params ctor-sig)]
-                (when (not= (count params) (count args))
-                  (throw (ex-info (str "Constructor argument count mismatch for " class-name "." ctor-name)
+                                       (str "Expected " (count params) " args, got "
+                                            (count args)))})))
+            (doseq [[arg-type param] (map vector arg-types params)]
+              (let [param-type (resolve-generic-type (:type param) type-map)]
+                (when-not (types-compatible? env arg-type param-type)
+                  (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
                                   {:error (type-error
-                                           (str "Expected " (count params) " args, got "
-                                                (count args)))})))
-                (doseq [[arg-type param] (map vector arg-types params)]
-                  (let [param-type (resolve-generic-type (:type param) type-map)]
-                    (when-not (types-compatible? env arg-type param-type)
-                      (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
-                                      {:error (type-error
-                                               (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))))
-            target-type))))))
+                                           (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))))
+        target-type))))
+
+(defn check-create
+  "Check the type of a create expression"
+  [env {:keys [class-name] :as expr}]
+  (if-let [handler (get check-create-builtin-dispatch class-name)]
+    (handler env expr)
+    (check-create-user-class env expr)))
+
 
 (defn check-array-literal
   "Check the type of an array literal"
@@ -3191,6 +3255,114 @@
                                           (display-type first-type) " and " (display-type elem-type)))})))))
       {:base-type "Set" :type-params [first-type]})))
 
+(defn- check-expr-anonymous-function
+  [env expr]
+  (let [class-def (:class-def expr)
+        ;; Written inside an instance method, this literal's `this`/bare
+        ;; field or method access means the *enclosing* class's, not the
+        ;; synthetic AnonymousFunction_N's own (which has none of those
+        ;; members) — a plain independent check-class scopes
+        ;; __current_class__ to the synthetic class and rejects it as
+        ;; "Method not found". check-method already takes class-name as a
+        ;; parameter distinct from the env it extends, so checking the
+        ;; callN body directly under the enclosing class's name (exactly as
+        ;; check-spawn already does for a spawn body, by simply not
+        ;; overriding __current_class__ at all) resolves this with no new
+        ;; machinery.
+        enclosing-class (env-lookup-var env "__current_class__")]
+    ;; Register the dynamic class definition in the type environment
+    (collect-class-info env class-def)
+    (if enclosing-class
+      (check-method env enclosing-class
+                    (some #(when (= :method (:type %)) %)
+                          (feature-members class-def)))
+      ;; No enclosing class (a top-level anonymous function): check the class
+      ;; as before.
+      (check-class env class-def))
+    ;; Anonymous functions have distinct generated runtime classes, but their
+    ;; stable static type is Function.
+    "Function"))
+
+(defn- check-expr-when
+  [env expr]
+  (let [cond-type (check-expression env (:condition expr))
+        cons-env (doto (make-type-env env)
+                   (apply-condition-branch-refinement! (:condition expr) :then))
+        alt-env (doto (make-type-env env)
+                  (apply-condition-branch-refinement! (:condition expr) :else))
+        cons-type (check-expression cons-env (:consequent expr))
+        alt-type (check-expression alt-env (:alternative expr))
+        cons-nil? (= (normalize-type cons-type) "Nil")
+        alt-nil? (= (normalize-type alt-type) "Nil")
+        result-type (cond
+                      (and cons-nil? alt-nil?) "Nil"
+                      cons-nil? (detachable-version alt-type)
+                      alt-nil? (detachable-version cons-type)
+                      :else cons-type)]
+    (when-not (types-compatible? env cond-type "Boolean")
+      (throw (ex-info "when condition must be Boolean"
+                      {:error (type-error
+                               (str "when condition has type " cond-type ", expected Boolean"))})))
+    (when-not (or cons-nil?
+                  alt-nil?
+                  (types-compatible? env cons-type alt-type)
+                  (types-compatible? env alt-type cons-type))
+      (throw (ex-info "when branches must have compatible types"
+                      {:error (type-error
+                               (str "when branches have incompatible types: "
+                                    (display-type cons-type) " and "
+                                    (display-type alt-type)))})))
+    result-type))
+
+(defn- check-expr-old
+  [env expr]
+  (check-expression env (:expr expr)))
+
+(defn- check-expr-this
+  [env _expr]
+  (or (env-lookup-var env "__current_class__") "Any"))
+
+;; `super`'s type is its resolved parent class, so a call/field access
+;; through it type-checks through the ordinary machinery for a value of a
+;; known class type — the same one `this` uses above. Non-virtual dispatch
+;; to that parent's own implementation (rather than whatever overrides it)
+;; is a lowering/interpreter concern, not a typechecking one; see
+;; `resolve-super-parent-class-name`.
+(defn- check-expr-super
+  [env _expr]
+  (resolve-super-parent-class-name env (env-lookup-var env "__current_class__")))
+
+(def ^:private check-expression-dispatch
+  "AST node `:type` -> `(fn [env expr] -> type)`: the map-shaped half of
+   `check-expression`'s dispatch, consulted once `expr` is known to be a
+   map (see the outer `cond` in `check-expression`, which handles nil/
+   string/number/boolean shapes first). All the delegate functions here are
+   already defined above this point in the file, so — unlike
+   `infer-type-dispatch`'s `:call` entry in lower.clj — none need wrapping
+   to dodge an as-yet-Unbound forward declare. A `:type` with no entry here
+   falls through to \"Any\", matching the case's original trailing default."
+  {:integer            check-literal
+   :real               check-literal
+   :string             check-literal
+   :char               check-literal
+   :boolean            check-literal
+   :nil                check-literal
+   :identifier         check-identifier
+   :binary             check-binary-op
+   :unary              check-unary-op
+   :call               check-call
+   :create             check-create
+   :array-literal      check-array-literal
+   :set-literal        check-set-literal
+   :map-literal        check-map-literal
+   :anonymous-function check-expr-anonymous-function
+   :when               check-expr-when
+   :old                check-expr-old
+   :convert            check-convert
+   :spawn              check-spawn
+   :this               check-expr-this
+   :super              check-expr-super})
+
 (defn check-expression
   "Check the type of an expression"
   [env expr]
@@ -3205,92 +3377,11 @@
         (number? expr) "Integer"
         (boolean? expr) "Boolean"
         (map? expr)
-        (case (:type expr)
-          :integer (check-literal env expr)
-          :real (check-literal env expr)
-          :string (check-literal env expr)
-          :char (check-literal env expr)
-          :boolean (check-literal env expr)
-          :nil (check-literal env expr)
-          :identifier (check-identifier env expr)
-          :binary (check-binary-op env expr)
-          :unary (check-unary-op env expr)
-          :call (check-call env expr)
-          :create (check-create env expr)
-          :array-literal (check-array-literal env expr)
-          :set-literal (check-set-literal env expr)
-          :map-literal (check-map-literal env expr)
-          :anonymous-function (let [class-def (:class-def expr)
-                                    ;; Written inside an instance method, this
-                                    ;; literal's `this`/bare field or method
-                                    ;; access means the *enclosing* class's, not
-                                    ;; the synthetic AnonymousFunction_N's own
-                                    ;; (which has none of those members) — a
-                                    ;; plain independent check-class scopes
-                                    ;; __current_class__ to the synthetic class
-                                    ;; and rejects it as "Method not found".
-                                    ;; check-method already takes class-name as
-                                    ;; a parameter distinct from the env it
-                                    ;; extends, so checking the callN body
-                                    ;; directly under the enclosing class's name
-                                    ;; (exactly as check-spawn already does for
-                                    ;; a spawn body, by simply not overriding
-                                    ;; __current_class__ at all) resolves this
-                                    ;; with no new machinery.
-                                    enclosing-class (env-lookup-var env "__current_class__")]
-                                ;; Register the dynamic class definition in the type environment
-                                (collect-class-info env class-def)
-                                (if enclosing-class
-                                  (check-method env enclosing-class
-                                                (some #(when (= :method (:type %)) %)
-                                                      (feature-members class-def)))
-                                  ;; No enclosing class (a top-level anonymous
-                                  ;; function): check the class as before.
-                                  (check-class env class-def))
-                                ;; Anonymous functions have distinct generated runtime classes,
-                                ;; but their stable static type is Function.
-                                "Function")
-          :when (let [cond-type (check-expression env (:condition expr))
-                       cons-env (doto (make-type-env env)
-                                  (apply-condition-branch-refinement! (:condition expr) :then))
-                       alt-env (doto (make-type-env env)
-                                 (apply-condition-branch-refinement! (:condition expr) :else))
-                       cons-type (check-expression cons-env (:consequent expr))
-                       alt-type (check-expression alt-env (:alternative expr))
-                       cons-nil? (= (normalize-type cons-type) "Nil")
-                       alt-nil? (= (normalize-type alt-type) "Nil")
-                       result-type (cond
-                                     (and cons-nil? alt-nil?) "Nil"
-                                     cons-nil? (detachable-version alt-type)
-                                     alt-nil? (detachable-version cons-type)
-                                     :else cons-type)]
-                   (when-not (types-compatible? env cond-type "Boolean")
-                     (throw (ex-info "when condition must be Boolean"
-                                     {:error (type-error
-                                              (str "when condition has type " cond-type ", expected Boolean"))})))
-                   (when-not (or cons-nil?
-                                 alt-nil?
-                                 (types-compatible? env cons-type alt-type)
-                                 (types-compatible? env alt-type cons-type))
-                     (throw (ex-info "when branches must have compatible types"
-                                     {:error (type-error
-                                              (str "when branches have incompatible types: "
-                                                   (display-type cons-type) " and "
-                                                   (display-type alt-type)))})))
-                   result-type)
-          :old (check-expression env (:expr expr))
-          :convert (check-convert env expr)
-          :spawn (check-spawn env expr)
-          :this (or (env-lookup-var env "__current_class__") "Any")
-          ;; `super`'s type is its resolved parent class, so a call/field
-          ;; access through it type-checks through the ordinary machinery for
-          ;; a value of a known class type — the same one `this` uses above.
-          ;; Non-virtual dispatch to that parent's own implementation (rather
-          ;; than whatever overrides it) is a lowering/interpreter concern,
-          ;; not a typechecking one; see `resolve-super-parent-class-name`.
-          :super (resolve-super-parent-class-name env (env-lookup-var env "__current_class__"))
+        (if-let [handler (get check-expression-dispatch (:type expr))]
+          (handler env expr)
           "Any")
         :else "Any"))))
+
 
 ;;
 ;; Statement Type Checking
@@ -4704,22 +4795,30 @@
 ;; Program Type Checking
 ;;
 
-(defn register-builtin-methods
-  "Register method signatures for built-in types."
+;; A builtin method's static signature (params + return type) lives as
+;; `:signatures` metadata on its implementation in nex.types.builtins'
+;; `builtin-type-methods` — the same place the runtime behaviour and (for
+;; Array/Map/Set/Task/Channel) the JVM bytecode-emission gate live, so the
+;; three no longer drift the way push/at/size/first/last once did. A method
+;; can have more than one signature (Array.sort, Task.await, Channel.send
+;; are each overloaded on arity), hence a vector.
+(defn- register-builtin-type-signatures!
+  [env type-name]
+  (doseq [[method-name fn-val] (get bi/builtin-type-methods (keyword type-name))
+          sig (:signatures (meta fn-val))]
+    (env-add-method env type-name method-name sig)))
+
+(defn- register-any-protocol!
   [env]
-  ;; Built-in deferred protocol classes
   (env-add-class env "Any" {:name "Any"
                             :deferred? false
                             :generic-params nil
                             :parents nil
                             :body []})
-  (doseq [[method-name sig]
-          {"to_string" {:params [] :return-type "String"}
-           "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "hash" {:params [] :return-type "Integer"}
-           "clone" {:params [] :return-type "Any"}}]
-    (env-add-method env "Any" method-name sig))
+  (register-builtin-type-signatures! env "Any"))
 
+(defn- register-comparable-protocol!
+  [env]
   (env-add-class env "Comparable" {:name "Comparable"
                                    :deferred? true
                                    :generic-params nil
@@ -4727,8 +4826,10 @@
                                    :body []})
   (env-add-method env "Comparable" "compare"
                   {:params [{:name "a" :type "Any"}]
-                   :return-type "Integer"})
+                   :return-type "Integer"}))
 
+(defn- register-hashable-protocol!
+  [env]
   (env-add-class env "Hashable" {:name "Hashable"
                                  :deferred? true
                                  :generic-params nil
@@ -4736,9 +4837,11 @@
                                  :body []})
   (env-add-method env "Hashable" "hash"
                   {:params []
-                   :return-type "Integer"})
+                   :return-type "Integer"}))
 
-  ;; Built-in scalar classes implement Comparable + Hashable
+;; Built-in scalar classes implement Comparable + Hashable
+(defn- register-scalar-classes!
+  [env]
   (doseq [scalar ["String" "Integer" "Real" "Boolean" "Char"]]
     (env-add-class env scalar {:name scalar
                                :deferred? false
@@ -4750,263 +4853,70 @@
                      :return-type "Integer"})
     (env-add-method env scalar "hash"
                     {:params []
-                     :return-type "Integer"}))
+                     :return-type "Integer"})))
 
-  (doseq [[method-name sig]
-          {"to_string" {:params [] :return-type "String"}
-           "to_integer" {:params [] :return-type "Integer"}
-           "to_integer64" {:params [] :return-type "Integer"}
-           "to_real" {:params [] :return-type "Real"}
-           "abs" {:params [] :return-type "Integer"}
-           "min" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
-           "max" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
-           "pick" {:params [] :return-type "Integer"}
-           "plus" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
-           "minus" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
-           "times" {:params [{:name "other" :type "Integer"}] :return-type "Integer"}
-           "divided_by" {:params [{:name "other" :type "Integer"}] :return-type "Real"}
-           "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "not_equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "less_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "less_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "greater_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "greater_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}}]
-    (env-add-method env "Integer" method-name sig))
+(defn- register-integer-methods!
+  [env]
+  (register-builtin-type-signatures! env "Integer"))
 
-  (doseq [[method-name sig]
-          {"to_string" {:params [] :return-type "String"}
-           "to_integer" {:params [] :return-type "Integer"}
-           "to_integer64" {:params [] :return-type "Integer"}
-           "to_real" {:params [] :return-type "Real"}
-           "abs" {:params [] :return-type "Real"}
-           "min" {:params [{:name "other" :type "Real"}] :return-type "Real"}
-           "max" {:params [{:name "other" :type "Real"}] :return-type "Real"}
-           "round"    {:params [] :return-type "Integer"}
-           "to_fixed" {:params [{:name "places" :type "Integer"}] :return-type "Real"}
-           "is_nan" {:params [] :return-type "Boolean"}
-           "is_infinite" {:params [] :return-type "Boolean"}
-           "is_finite" {:params [] :return-type "Boolean"}
-           "plus" {:params [{:name "other" :type "Real"}] :return-type "Real"}
-           "minus" {:params [{:name "other" :type "Real"}] :return-type "Real"}
-           "times" {:params [{:name "other" :type "Real"}] :return-type "Real"}
-           "divided_by" {:params [{:name "other" :type "Real"}] :return-type "Real"}
-           "equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "not_equals" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "less_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "less_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "greater_than" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}
-           "greater_than_or_equal" {:params [{:name "other" :type "Any"}] :return-type "Boolean"}}]
-    (env-add-method env "Real" method-name sig))
+(defn- register-real-methods!
+  [env]
+  (register-builtin-type-signatures! env "Real"))
 
-  (env-add-method env "Integer" "to_char" {:params [] :return-type "Char"})
+(defn- register-char-methods!
+  [env]
+  (register-builtin-type-signatures! env "Char"))
 
-  (doseq [[method-name sig]
-          {"to_string"   {:params [] :return-type "String"}
-           "to_upper"    {:params [] :return-type "String"}
-           "to_lower"    {:params [] :return-type "String"}
-           "to_integer"  {:params [] :return-type "Integer"}}]
-    (env-add-method env "Char" method-name sig))
+(defn- register-string-methods!
+  [env]
+  (register-builtin-type-signatures! env "String"))
 
-  (doseq [[method-name sig]
-          {"bitwise_left_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_right_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_logical_right_shift" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_rotate_left" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_rotate_right" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_is_set" {:params [{:name "n" :type "Integer"}] :return-type "Boolean"}
-           "bitwise_set" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_unset" {:params [{:name "n" :type "Integer"}] :return-type "Integer"}
-           "bitwise_and" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
-           "bitwise_or" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
-           "bitwise_xor" {:params [{:name "x" :type "Integer"}] :return-type "Integer"}
-           "bitwise_not" {:params [] :return-type "Integer"}}]
-    (env-add-method env "Integer" method-name sig))
+(defn- register-console-methods!
+  [env]
+  (env-add-class env "Console" {:name "Console"
+                                :generic-params nil})
+  (register-builtin-type-signatures! env "Console"))
 
-  (doseq [[method-name sig]
-          {"length"      {:params [] :return-type "Integer"}
-           "index_of"    {:params [{:name "substr" :type "String"}] :return-type "Integer"}
-           "substring"   {:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}] :return-type "String"}
-           "to_upper"    {:params [] :return-type "String"}
-           "to_lower"    {:params [] :return-type "String"}
-           "to_integer"  {:params [] :return-type "Integer"}
-           "to_integer64" {:params [] :return-type "Integer"}
-           "to_real"     {:params [] :return-type "Real"}
-           "contains"    {:params [{:name "substr" :type "String"}] :return-type "Boolean"}
-           "starts_with" {:params [{:name "prefix" :type "String"}] :return-type "Boolean"}
-           "ends_with"   {:params [{:name "suffix" :type "String"}] :return-type "Boolean"}
-           "trim"        {:params [] :return-type "String"}
-           "replace"     {:params [{:name "old" :type "String"} {:name "new" :type "String"}] :return-type "String"}
-           "pad_end"     {:params [{:name "pad" :type "String"} {:name "count" :type "Integer"}] :return-type "String"}
-           "pad_start"   {:params [{:name "pad" :type "String"} {:name "count" :type "Integer"}] :return-type "String"}
-           "replicate"   {:params [{:name "n" :type "Integer"}] :return-type "String"}
-           "char_at"     {:params [{:name "index" :type "Integer"}] :return-type "Char"}
-           "chars"       {:params [] :return-type {:base-type "Array" :type-params ["Char"]}}
-           "to_bytes"    {:params [] :return-type {:base-type "Array" :type-params ["Integer"]}}
-           "compare"     {:params [{:name "a" :type "Any"}] :return-type "Integer"}
-           "hash"        {:params [] :return-type "Integer"}
-           "split"       {:params [{:name "delimiter" :type "String"}]
-                          :return-type {:base-type "Array" :type-params ["String"]}}
-           "join"        {:params [{:name "parts" :type {:base-type "Array" :type-params ["String"]}}]
-                          :return-type "String"}
-           ;; A String iterates over its Chars, exactly as Array/Map/Set iterate
-           ;; over their elements. It reached this through the universal "Any"
-           ;; fallback until that stopped promising the cursor protocol on every
-           ;; value; the capability is real, so it is declared where the other
-           ;; cursor-bearing builtins declare theirs.
-           "cursor"      {:params [] :return-type "Cursor"}}]
-    (env-add-method env "String" method-name sig))
-  (doseq [[method-name sig]
-          {"print" {:params [{:name "msg" :type "String"}] :return-type "Void"}
-           "print_line" {:params [{:name "msg" :type "String"}] :return-type "Void"}
-           "error" {:params [{:name "msg" :type "String"}] :return-type "Void"}
-           "new_line" {:params [] :return-type "Void"}
-           "flush" {:params [] :return-type "Void"}
-           "read_integer" {:params [] :return-type "Integer"}
-           "read_real" {:params [] :return-type "Real"}}]
-    (env-add-class env "Console" {:name "Console"
-                                  :generic-params nil})
-    (env-add-method env "Console" method-name sig))
-  (env-add-method env "Console" "read_line"
-                  {:params [] :return-type "String"})
-  (env-add-method env "Console" "read_line"
-                  {:params [{:name "prompt" :type "String"}] :return-type "String"})
+(defn- register-task-methods!
+  [env]
   (env-add-class env "Task" {:name "Task"
                              :generic-params [{:name "T"}]})
-  (doseq [[method-name sig]
-          {"await"   {:params [] :return-type "T"}
-           "cancel"  {:params [] :return-type "Boolean"}
-           "is_done" {:params [] :return-type "Boolean"}
-           "is_cancelled" {:params [] :return-type "Boolean"}}]
-    (env-add-method env "Task" method-name sig))
+  (register-builtin-type-signatures! env "Task"))
+
+(defn- register-process-methods!
+  [env]
   (env-add-class env "Process" {:name "Process"
                                 :generic-params nil})
-  (doseq [[method-name sig]
-          {"getenv" {:params [{:name "name" :type "String"}] :return-type "String"}
-           "setenv" {:params [{:name "name" :type "String"} {:name "value" :type "String"}] :return-type "Void"}
-           "command_line" {:params [] :return-type {:base-type "Array" :type-params ["String"]}}
+  (register-builtin-type-signatures! env "Process"))
 
-           "is_self" {:params [] :return-type "Boolean"}
-           "is_child" {:params [] :return-type "Boolean"}
-
-           "set_working_directory" {:params [{:name "dir" :type "String"}] :return-type "Void"}
-           "set_redirect_error_to_output" {:params [{:name "flag" :type "Boolean"}] :return-type "Void"}
-
-           "start" {:params [] :return-type "Void"}
-           "is_started" {:params [] :return-type "Boolean"}
-           "is_alive" {:params [] :return-type "Boolean"}
-           "pid" {:params [] :return-type "Integer"}
-
-           "exit_code" {:params [] :return-type {:base-type "Integer" :detachable true}}
-
-           "terminate" {:params [] :return-type "Void"}
-           "kill" {:params [] :return-type "Void"}
-
-           "write" {:params [{:name "text" :type "String"}] :return-type "Void"}
-           "write_line" {:params [{:name "text" :type "String"}] :return-type "Void"}
-           "close_stdin" {:params [] :return-type "Void"}
-           "read_line" {:params [] :return-type {:base-type "String" :detachable true}}
-           "read_all" {:params [] :return-type "String"}
-           "read_error_line" {:params [] :return-type {:base-type "String" :detachable true}}
-           "read_error_all" {:params [] :return-type "String"}
-
-           "to_string" {:params [] :return-type "String"}}]
-    (env-add-method env "Process" method-name sig))
-  (env-add-method env "Process" "wait" {:params [] :return-type "Integer"})
-  (env-add-method env "Process" "wait"
-                  {:params [{:name "timeout_ms" :type "Integer"}]
-                   :return-type {:base-type "Integer" :detachable true}})
-  ;; Register Array[T] class and methods
+(defn- register-array-methods!
+  [env]
   (env-add-class env "Array" {:name "Array"
                                :generic-params [{:name "T"}]})
   (env-add-method env "Array" "filled"
                   {:params [{:name "size" :type "Integer"}
                             {:name "value" :type "T"}]
                    :return-type {:base-type "Array" :type-params ["T"]}})
-  (doseq [[method-name sig]
-          {"get"         {:params [{:name "index" :type "Integer"}] :return-type "T"}
-           "add"         {:params [{:name "value" :type "T"}] :return-type "Void"}
-           "push"        {:params [{:name "value" :type "T"}] :return-type "Void"}
-           "add_at"      {:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}
-           "at"          {:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}
-           "set"         {:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}
-           "length"      {:params [] :return-type "Integer"}
-           "size"        {:params [] :return-type "Integer"}
-           "is_empty"    {:params [] :return-type "Boolean"}
-           "contains"    {:params [{:name "elem" :type "T"}] :return-type "Boolean"}
-           "index_of"    {:params [{:name "elem" :type "T"}] :return-type "Integer"}
-           "remove"      {:params [{:name "index" :type "Integer"}] :return-type "Void"}
-           "reverse"     {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
-           "sort"        {0 {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
-                          1 {:params [{:name "compareFn" :type "Function"}]
-                             :return-type {:base-type "Array" :type-params ["T"]}}}
-           "slice"       {:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}]
-                          :return-type {:base-type "Array" :type-params ["T"]}}
-           "take"        {:params [{:name "n" :type "Integer"}]
-                          :return-type {:base-type "Array" :type-params ["T"]}}
-           "drop"        {:params [{:name "n" :type "Integer"}]
-                          :return-type {:base-type "Array" :type-params ["T"]}}
-           "take_last"   {:params [{:name "n" :type "Integer"}]
-                          :return-type {:base-type "Array" :type-params ["T"]}}
-           "drop_last"   {:params [{:name "n" :type "Integer"}]
-                          :return-type {:base-type "Array" :type-params ["T"]}}
-           "concat"      {:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}]
-                          :return-type {:base-type "Array" :type-params ["T"]}}
-           "first"       {:params [] :return-type "T"}
-           "last"        {:params [] :return-type "T"}
-           "to_string"   {:params [] :return-type "String"}
-           "equals"      {:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}] :return-type "Boolean"}
-           "clone"       {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
-           "cursor"      {:params [] :return-type "Cursor"}}]
-    (env-add-method env "Array" method-name sig))
+  (register-builtin-type-signatures! env "Array"))
 
-  ;; Register Map[K, V] class and methods
+(defn- register-map-methods!
+  [env]
   (env-add-class env "Map" {:name "Map"
                              :generic-params [{:name "K"} {:name "V"}]})
-  (doseq [[method-name sig]
-          {"get"          {:params [{:name "key" :type "K"}] :return-type "V"}
-           "try_get"      {:params [{:name "key" :type "K"} {:name "default" :type "V"}] :return-type "V"}
-           "put"          {:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}
-           "at"           {:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}
-           "set"          {:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}
-           "size"         {:params [] :return-type "Integer"}
-           "is_empty"     {:params [] :return-type "Boolean"}
-           "contains_key" {:params [{:name "key" :type "K"}] :return-type "Boolean"}
-           "keys"         {:params [] :return-type {:base-type "Array" :type-params ["K"]}}
-           "values"       {:params [] :return-type {:base-type "Array" :type-params ["V"]}}
-           "remove"       {:params [{:name "key" :type "K"}] :return-type "Void"}
-           "to_string"    {:params [] :return-type "String"}
-           "equals"       {:params [{:name "other" :type {:base-type "Map" :type-params ["K" "V"]}}] :return-type "Boolean"}
-           "clone"        {:params [] :return-type {:base-type "Map" :type-params ["K" "V"]}}
-           "cursor"       {:params [] :return-type "Cursor"}}]
-    (env-add-method env "Map" method-name sig))
+  (register-builtin-type-signatures! env "Map"))
 
-  ;; Register Set[T] class and methods
+(defn- register-set-methods!
+  [env]
   (env-add-class env "Set" {:name "Set"
                             :generic-params [{:name "T"}]})
   (env-add-method env "Set" "from_array"
                   {:params [{:name "values"
                              :type {:base-type "Array" :type-params ["T"]}}]
                    :return-type {:base-type "Set" :type-params ["T"]}})
-  (doseq [[method-name sig]
-          {"contains"             {:params [{:name "value" :type "T"}] :return-type "Boolean"}
-           "union"                {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
-                                   :return-type {:base-type "Set" :type-params ["T"]}}
-           "difference"           {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
-                                   :return-type {:base-type "Set" :type-params ["T"]}}
-           "intersection"         {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
-                                   :return-type {:base-type "Set" :type-params ["T"]}}
-           "symmetric_difference" {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
-                                   :return-type {:base-type "Set" :type-params ["T"]}}
-           "size"                 {:params [] :return-type "Integer"}
-           "is_empty"             {:params [] :return-type "Boolean"}
-           "to_array"             {:params [] :return-type {:base-type "Array" :type-params ["T"]}}
-           "to_string"            {:params [] :return-type "String"}
-           "equals"               {:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}] :return-type "Boolean"}
-           "clone"                {:params [] :return-type {:base-type "Set" :type-params ["T"]}}
-           "cursor"               {:params [] :return-type "Cursor"}}]
-    (env-add-method env "Set" method-name sig))
+  (register-builtin-type-signatures! env "Set"))
 
-  ;; Register Min_Heap[T] class and methods
+(defn- register-min-heap-methods!
+  [env]
   (env-add-class env "Min_Heap" {:name "Min_Heap"
                                  :generic-params [{:name "T"}]})
   (env-add-method env "Min_Heap" "empty"
@@ -5015,95 +4925,77 @@
   (env-add-method env "Min_Heap" "from_comparator"
                   {:params [{:name "compare" :type "Function"}]
                    :return-type {:base-type "Min_Heap" :type-params ["T"]}})
-  (doseq [[method-name sig]
-          {"insert"          {:params [{:name "value" :type "T"}] :return-type "Void"}
-           "extract_min"     {:params [] :return-type "T"}
-           "try_extract_min" {:params [] :return-type {:base-type "T" :detachable true}}
-           "peek"            {:params [] :return-type "T"}
-           "try_peek"        {:params [] :return-type {:base-type "T" :detachable true}}
-           "size"            {:params [] :return-type "Integer"}
-           "is_empty"        {:params [] :return-type "Boolean"}}]
-    (env-add-method env "Min_Heap" method-name sig))
+  (register-builtin-type-signatures! env "Min_Heap"))
 
-  ;; Register atomic built-ins
-  (env-add-class env "Atomic_Integer" {:name "Atomic_Integer"})
-  (env-add-method env "Atomic_Integer" "make"
+;; Atomic_Integer and Atomic_Integer64 are both 64-bit atomics on the JVM
+;; (see nex.types.builtins) and share this exact method set — differing
+;; only in the class name.
+(defn- register-atomic-integer-like-methods!
+  [env class-name]
+  (env-add-class env class-name {:name class-name})
+  (env-add-method env class-name "make"
                   {:params [{:name "initial" :type "Integer"}]
-                   :return-type "Atomic_Integer"})
-  (doseq [[method-name sig]
-          {"load" {:params [] :return-type "Integer"}
-           "store" {:params [{:name "value" :type "Integer"}] :return-type "Void"}
-           "compare_and_set" {:params [{:name "expected" :type "Integer"}
-                                       {:name "update" :type "Integer"}]
-                              :return-type "Boolean"}
-           "get_and_add" {:params [{:name "delta" :type "Integer"}] :return-type "Integer"}
-           "add_and_get" {:params [{:name "delta" :type "Integer"}] :return-type "Integer"}
-           "increment" {:params [] :return-type "Integer"}
-           "decrement" {:params [] :return-type "Integer"}}]
-    (env-add-method env "Atomic_Integer" method-name sig))
+                   :return-type class-name})
+  (register-builtin-type-signatures! env class-name))
 
-  (env-add-class env "Atomic_Integer64" {:name "Atomic_Integer64"})
-  (env-add-method env "Atomic_Integer64" "make"
-                  {:params [{:name "initial" :type "Integer"}]
-                   :return-type "Atomic_Integer64"})
-  (doseq [[method-name sig]
-          {"load" {:params [] :return-type "Integer"}
-           "store" {:params [{:name "value" :type "Integer"}] :return-type "Void"}
-           "compare_and_set" {:params [{:name "expected" :type "Integer"}
-                                       {:name "update" :type "Integer"}]
-                              :return-type "Boolean"}
-           "get_and_add" {:params [{:name "delta" :type "Integer"}] :return-type "Integer"}
-           "add_and_get" {:params [{:name "delta" :type "Integer"}] :return-type "Integer"}
-           "increment" {:params [] :return-type "Integer"}
-           "decrement" {:params [] :return-type "Integer"}}]
-    (env-add-method env "Atomic_Integer64" method-name sig))
-
+(defn- register-atomic-boolean-methods!
+  [env]
   (env-add-class env "Atomic_Boolean" {:name "Atomic_Boolean"})
   (env-add-method env "Atomic_Boolean" "make"
                   {:params [{:name "initial" :type "Boolean"}]
                    :return-type "Atomic_Boolean"})
-  (doseq [[method-name sig]
-          {"load" {:params [] :return-type "Boolean"}
-           "store" {:params [{:name "value" :type "Boolean"}] :return-type "Void"}
-           "compare_and_set" {:params [{:name "expected" :type "Boolean"}
-                                       {:name "update" :type "Boolean"}]
-                              :return-type "Boolean"}}]
-    (env-add-method env "Atomic_Boolean" method-name sig))
+  (register-builtin-type-signatures! env "Atomic_Boolean"))
 
+(defn- register-atomic-reference-methods!
+  [env]
   (env-add-class env "Atomic_Reference" {:name "Atomic_Reference"
                                          :generic-params [{:name "T"}]})
   (env-add-method env "Atomic_Reference" "make"
                   {:params [{:name "initial" :type {:base-type "T" :detachable true}}]
                    :return-type {:base-type "Atomic_Reference" :type-params ["T"]}})
-  (doseq [[method-name sig]
-          {"load" {:params [] :return-type {:base-type "T" :detachable true}}
-           "store" {:params [{:name "value" :type {:base-type "T" :detachable true}}] :return-type "Void"}
-           "compare_and_set" {:params [{:name "expected" :type {:base-type "T" :detachable true}}
-                                       {:name "update" :type {:base-type "T" :detachable true}}]
-                              :return-type "Boolean"}}]
-    (env-add-method env "Atomic_Reference" method-name sig))
+  (register-builtin-type-signatures! env "Atomic_Reference"))
 
-  ;; Register Channel[T] class and methods
+(defn- register-channel-methods!
+  [env]
   (env-add-class env "Channel" {:name "Channel"
                                 :generic-params [{:name "T"}]})
-  (doseq [[method-name sig]
-          {"send"        {:params [{:name "value" :type "T"}] :return-type "Void"}
-           "try_send"    {:params [{:name "value" :type "T"}] :return-type "Boolean"}
-           "receive"     {:params [] :return-type "T"}
-           "try_receive" {:params [] :return-type {:base-type "T" :detachable true}}
-           "close"       {:params [] :return-type "Void"}
-           "is_closed"   {:params [] :return-type "Boolean"}
-           "capacity"    {:params [] :return-type "Integer"}
-           "size"        {:params [] :return-type "Integer"}}]
-    (env-add-method env "Channel" method-name sig))
+  (register-builtin-type-signatures! env "Channel"))
 
-  ;; Built-in Function methods: call0..call32
+;; Built-in Function methods: call0..call32
+(defn- register-function-call-methods!
+  [env]
   (doseq [n (range 0 33)]
     (env-add-method env "Function"
                     (str "call" n)
                     {:params (mapv (fn [i] {:name (str "arg" i) :type "Any"})
                                    (range 1 (inc n)))
                      :return-type "Any"})))
+
+(defn register-builtin-methods
+  "Register method signatures for built-in types."
+  [env]
+  (register-any-protocol! env)
+  (register-comparable-protocol! env)
+  (register-hashable-protocol! env)
+  (register-scalar-classes! env)
+  (register-integer-methods! env)
+  (register-real-methods! env)
+  (register-char-methods! env)
+  (register-string-methods! env)
+  (register-console-methods! env)
+  (register-task-methods! env)
+  (register-process-methods! env)
+  (register-array-methods! env)
+  (register-map-methods! env)
+  (register-set-methods! env)
+  (register-min-heap-methods! env)
+  (register-atomic-integer-like-methods! env "Atomic_Integer")
+  (register-atomic-integer-like-methods! env "Atomic_Integer64")
+  (register-atomic-boolean-methods! env)
+  (register-atomic-reference-methods! env)
+  (register-channel-methods! env)
+  (register-function-call-methods! env))
+
 
 ;;
 ;; Undefined-type validation

@@ -156,115 +156,120 @@
       (println "Error reading input:" (.getMessage e))
       nil)))
 
+(defn- sanitize-repl-line
+  "Blank out string/char contents and comments in `line`, preserving its
+   length and every other character's position, so the delimiter-balance
+   and keyword-counting passes below aren't confused by a bracket or
+   keyword that only appears inside a string literal or a comment."
+  [line]
+  (let [n (count line)]
+    (loop [i 0
+           in-string? false
+           escaped? false
+           out (StringBuilder.)]
+      (if (>= i n)
+        (str out)
+        (let [ch (.charAt ^String line i)
+              next-ch (when (< (inc i) n) (.charAt ^String line (inc i)))]
+          (cond
+            in-string?
+            (cond
+              escaped? (do (.append out \space)
+                           (recur (inc i) true false out))
+              (= ch \\) (do (.append out \space)
+                            (recur (inc i) true true out))
+              (= ch \") (do (.append out \space)
+                            (recur (inc i) false false out))
+              :else (do (.append out \space)
+                        (recur (inc i) true false out)))
+
+            (and (= ch \-) (= next-ch \-))
+            ;; Rest of the line is a comment.
+            (str out)
+
+            (= ch \")
+            (do (.append out \space)
+                (recur (inc i) true false out))
+
+            (and (= ch \#) next-ch (not= next-ch \{))
+            ;; Character literals like #), #], or #} should not affect
+            ;; delimiter balancing. Set literals start with #{, so keep
+            ;; those characters visible to the delimiter pass.
+            (let [j (cond
+                      (Character/isLetterOrDigit next-ch)
+                      (loop [j (inc i)]
+                        (if (and (< j n)
+                                 (Character/isLetterOrDigit (.charAt ^String line j)))
+                          (recur (inc j))
+                          j))
+
+                      :else
+                      (+ i 2))]
+              (.append out (apply str (repeat (- j i) \space)))
+              (recur j false false out))
+
+            :else
+            (do (.append out ch)
+                (recur (inc i) false false out))))))))
+
+;; A `when` is either a value-producing when-expression (`when c then x else
+;; y end`, which opens its own `end`-terminated block) or a clause of
+;; `match`/`select` (`when p then block`, which does not). Since both now
+;; share the `then` keyword, they are told apart by context: a `when` is a
+;; clause when its innermost enclosing construct is a `match`/`select`
+;; guard. Only when-expressions count toward the open-block balance.
+(defn- count-when-expressions
+  [text]
+  (let [tokens (re-seq #"\bclass\b|\bdo\b|\bfrom\b|\brepeat\b|\bacross\b|\bif\b|\bcase\b|\bmatch\b|\bselect\b|\bwhen\b|\bthen\b|\belse\b|\bend\b" text)]
+    (loop [tokens tokens
+           stack '()
+           count 0]
+      (if-let [token (first tokens)]
+        (let [top (peek stack)]
+          (case token
+            ("class" "do" "from" "repeat" "across" "if" "case")
+            (recur (rest tokens) (conj stack :block) count)
+
+            ("match" "select")
+            (recur (rest tokens) (conj stack :guard) count)
+
+            "when"
+            ;; A sibling clause closes the previous clause body first.
+            (let [stack (if (= top :clausebody) (pop stack) stack)]
+              (if (= (peek stack) :guard)
+                (recur (rest tokens) (conj stack :clause) count)
+                (recur (rest tokens) (conj stack :when) (inc count))))
+
+            "then"
+            ;; `then` after a clause's pattern opens that clause's body.
+            (recur (rest tokens)
+                   (if (= top :clause) (conj (pop stack) :clausebody) stack)
+                   count)
+
+            "else"
+            ;; A trailing `else` closes the guard's last clause body.
+            (recur (rest tokens)
+                   (if (= top :clausebody) (pop stack) stack)
+                   count)
+
+            "end"
+            (recur (rest tokens)
+                   (cond
+                     (= top :clausebody) (pop (pop stack)) ;; clause body + its guard
+                     (seq stack) (pop stack)
+                     :else stack)
+                   count)
+
+            (recur (rest tokens) stack count)))
+        count))))
+
 (defn continue-reading?
   "Check if we need to continue reading (unclosed block)"
   [lines]
-  (let [sanitize-line
-        (fn [line]
-          (let [n (count line)]
-            (loop [i 0
-                   in-string? false
-                   escaped? false
-                   out (StringBuilder.)]
-              (if (>= i n)
-                (str out)
-                (let [ch (.charAt ^String line i)
-                      next-ch (when (< (inc i) n) (.charAt ^String line (inc i)))]
-                  (cond
-                    in-string?
-                    (cond
-                      escaped? (do (.append out \space)
-                                   (recur (inc i) true false out))
-                      (= ch \\) (do (.append out \space)
-                                    (recur (inc i) true true out))
-                      (= ch \") (do (.append out \space)
-                                    (recur (inc i) false false out))
-                      :else (do (.append out \space)
-                                (recur (inc i) true false out)))
-
-                    (and (= ch \-) (= next-ch \-))
-                    ;; Rest of the line is a comment.
-                    (str out)
-
-                    (= ch \")
-                    (do (.append out \space)
-                        (recur (inc i) true false out))
-
-                    (and (= ch \#) next-ch (not= next-ch \{))
-                    ;; Character literals like #), #], or #} should not affect
-                    ;; delimiter balancing. Set literals start with #{, so keep
-                    ;; those characters visible to the delimiter pass.
-                    (let [j (cond
-                              (Character/isLetterOrDigit next-ch)
-                              (loop [j (inc i)]
-                                (if (and (< j n)
-                                         (Character/isLetterOrDigit (.charAt ^String line j)))
-                                  (recur (inc j))
-                                  j))
-
-                              :else
-                              (+ i 2))]
-                      (.append out (apply str (repeat (- j i) \space)))
-                      (recur j false false out))
-
-                    :else
-                    (do (.append out ch)
-                        (recur (inc i) false false out))))))))
-        raw-text (str/join "\n" lines)
+  (let [raw-text (str/join "\n" lines)
         text (->> lines
-                  (map sanitize-line)
+                  (map sanitize-repl-line)
                   (str/join "\n"))
-        ;; A `when` is either a value-producing when-expression
-        ;; (`when c then x else y end`, which opens its own `end`-terminated
-        ;; block) or a clause of `match`/`select` (`when p then block`, which
-        ;; does not). Since both now share the `then` keyword, they are told
-        ;; apart by context: a `when` is a clause when its innermost enclosing
-        ;; construct is a `match`/`select` guard. Only when-expressions count
-        ;; toward the open-block balance.
-        count-when-expressions
-        (fn [text]
-          (let [tokens (re-seq #"\bclass\b|\bdo\b|\bfrom\b|\brepeat\b|\bacross\b|\bif\b|\bcase\b|\bmatch\b|\bselect\b|\bwhen\b|\bthen\b|\belse\b|\bend\b" text)]
-            (loop [tokens tokens
-                   stack '()
-                   count 0]
-              (if-let [token (first tokens)]
-                (let [top (peek stack)]
-                  (case token
-                    ("class" "do" "from" "repeat" "across" "if" "case")
-                    (recur (rest tokens) (conj stack :block) count)
-
-                    ("match" "select")
-                    (recur (rest tokens) (conj stack :guard) count)
-
-                    "when"
-                    ;; A sibling clause closes the previous clause body first.
-                    (let [stack (if (= top :clausebody) (pop stack) stack)]
-                      (if (= (peek stack) :guard)
-                        (recur (rest tokens) (conj stack :clause) count)
-                        (recur (rest tokens) (conj stack :when) (inc count))))
-
-                    "then"
-                    ;; `then` after a clause's pattern opens that clause's body.
-                    (recur (rest tokens)
-                           (if (= top :clause) (conj (pop stack) :clausebody) stack)
-                           count)
-
-                    "else"
-                    ;; A trailing `else` closes the guard's last clause body.
-                    (recur (rest tokens)
-                           (if (= top :clausebody) (pop stack) stack)
-                           count)
-
-                    "end"
-                    (recur (rest tokens)
-                           (cond
-                             (= top :clausebody) (pop (pop stack)) ;; clause body + its guard
-                             (seq stack) (pop stack)
-                             :else stack)
-                           count)
-
-                    (recur (rest tokens) stack count)))
-                count))))
         delimiter-balance
         (reduce (fn [balance ch]
                   (case ch
@@ -324,6 +329,7 @@
         open-delimiters?
         trailing-operator?
         (> open-blocks end-count))))
+
 
 (defn read-input
   "Read potentially multi-line input from the user"
@@ -1374,416 +1380,445 @@
             walker/inject-refinement-checks
             (assoc :type-aliases orig-aliases))))))
 
+(defn- build-exec-ctx
+  "The context this input actually evaluates against: `ctx` plus debug-source/
+   debug-stack bookkeeping, and (only when the debugger is enabled) a debug
+   hook wired up to read-line-safe/wrap-expression."
+  [ctx source-id]
+  (let [base-ctx (assoc ctx
+                        :debug-source source-id
+                        :debug-stack [{:class "<repl>"
+                                       :method "<top>"
+                                       :env (:current-env ctx)
+                                       :source source-id}])]
+    (if (dbg/enabled?)
+      (assoc base-ctx
+             :debug-hook (dbg/make-debug-hook {:read-line-fn read-line-safe
+                                               :wrap-expression-fn wrap-expression})
+             :debug-depth 0)
+      base-ctx)))
+
+(defn- parse-repl-input
+  "Parse one REPL input string into an AST, choosing how to parse it along
+   the way. Returns `[ast was-wrapped? is-expression?]`:
+   - `was-wrapped?` is true when `input` had to be wrapped in a synthetic
+     method (see `wrap-as-method`/`wrap-expression`) to parse/evaluate at
+     all — `eval-wrapped-input!` unwraps its body before running it.
+   - `is-expression?` is true only when the wrap was `wrap-expression`
+     (input's value, not just its side effects, is wanted).
+
+   In compiled REPL mode, a top-level let/assignment gets a raw parse +
+   compiled-eligibility attempt first, ahead of the wrapper-based fallback
+   chain below."
+  [input]
+  (let [compiled-raw-candidate? (and (= :compiled @*repl-backend*)
+                                     (not (dbg/enabled?))
+                                     (looks-like-raw-compiled-statement? input))
+        raw-compiled-attempt (when compiled-raw-candidate?
+                               (try
+                                 (let [raw-ast (p/ast input)]
+                                   [raw-ast false false])
+                                 (catch Exception _
+                                   nil)))]
+    (or raw-compiled-attempt
+        (let [code-to-parse (cond
+                              ;; Class definition - parse as is
+                              (looks-like-class? input)
+                              input
+
+                              ;; Statement that needs wrapping
+                              (looks-like-statement? input)
+                              (wrap-as-method input)
+
+                              ;; Try as a method call first, if it fails, wrap it
+                              :else
+                              input)]
+          (try
+            ;; Bare identifiers parse as methodCall but should
+            ;; evaluate as expressions (return their value)
+            (if (and (= code-to-parse input)
+                     (looks-like-identifier? input))
+              [(p/ast (wrap-expression input)) true true]
+              (let [parsed (p/ast code-to-parse)]
+                [(if (= code-to-parse input)
+                   (top-level-safe-call-when-expr parsed)
+                   parsed)
+                 (not= code-to-parse input) false]))
+            (catch Exception e
+              ;; If parsing failed and we haven't wrapped yet, try wrapping
+              (if (= code-to-parse input)
+                (try
+                  [(p/ast (wrap-expression input)) true true]
+                  (catch Exception _e2
+                    ;; If expression wrapping fails, try as statement
+                    (try
+                      [(p/ast (wrap-as-method input)) true false]
+                      (catch Exception _e3
+                        ;; All attempts failed - throw the ORIGINAL error
+                        ;; so line numbers reference the user's actual code
+                        (throw e)))))
+                (throw e))))))))
+
+(defn- sync-and-remember-type-aliases!
+  "Sync the compiled session's state into the interpreter context, then
+   record any type aliases this input declares — directly, or via an
+   `intern` it brings into scope — so later REPL lines (and the type
+   checker) can resolve them by name. Without the interned half, a
+   refinement type declared in an interned file (rather than typed
+   directly at the REPL) type-checked as an outright \"Undefined type\"
+   everywhere it was used, since `*repl-type-aliases*` is the only source
+   `type-check-repl-input!` draws `:type-aliases` from, and it was never
+   populated from it."
+  [exec-ctx source-id ast]
+  (sync-compiled-session-into-interpreter! exec-ctx)
+  (doseq [alias (concat (interp/resolve-interned-type-aliases source-id ast)
+                        (:type-aliases ast))]
+    (swap! *repl-type-aliases* assoc (:name alias) alias)))
+
+(defn- type-check-repl-input!
+  "Type-check `ast` against the session so far (`ctx`'s previously defined
+   classes/functions/imports plus everything interned), when type checking
+   is on and there's actually something in `ast` worth checking. Throws
+   `ex-info` (after printing each error) on failure; otherwise returns nil."
+  [ctx ast source-id]
+  (when (and @*type-checking-enabled*
+           (= (:type ast) :program)
+           (or (seq (:classes ast)) (seq (:functions ast))
+               (seq (:statements ast)) (seq (:calls ast))))
+    ;; Create an augmented AST that includes previously defined classes
+    ;; so the type checker knows about them
+    (let [prev-functions (vals @(:function-asts @*compiled-repl-session*))
+          synthetic-function-class-names (set (map :class-name prev-functions))
+          referenced-anonymous-class-names (->> (vals @*repl-var-types*)
+                                                (filter string?)
+                                                (filter synthetic-anonymous-class-name?)
+                                                set)
+          prev-classes (remove #(or (= "__ReplTemp__" (:name %))
+                                    (contains? synthetic-function-class-names (:name %))
+                                    (and (synthetic-anonymous-class-name? (str (:name %)))
+                                         (not (contains? referenced-anonymous-class-names (:name %)))))
+                               (vals @(:classes ctx)))
+          intern-classes (interp/resolve-interned-classes source-id ast)
+          intern-functions (interp/resolve-interned-functions source-id ast)
+          prev-imports @(:imports ctx)
+          augmented-ast (cond
+                          (and (seq prev-classes) (seq prev-imports) (seq intern-classes))
+                          (assoc ast
+                                 :classes (concat prev-classes intern-classes (:classes ast))
+                                 :imports (concat prev-imports (:imports ast)))
+
+                          (and (seq prev-classes) (seq prev-imports))
+                          (assoc ast
+                                 :classes (concat prev-classes (:classes ast))
+                                 :imports (concat prev-imports (:imports ast)))
+
+                          (and (seq prev-classes) (seq intern-classes))
+                          (assoc ast :classes (concat prev-classes intern-classes (:classes ast)))
+
+                          (and (seq prev-imports) (seq intern-classes))
+                          (assoc ast
+                                 :classes (concat intern-classes (:classes ast))
+                                 :imports (concat prev-imports (:imports ast)))
+
+                          (seq intern-classes)
+                          (assoc ast :classes (concat intern-classes (:classes ast)))
+
+                          (seq prev-classes)
+                          (assoc ast :classes (concat prev-classes (:classes ast)))
+
+                          (seq prev-imports)
+                          (assoc ast :imports (concat prev-imports (:imports ast)))
+
+                          :else
+                          ast)
+          augmented-ast (if (or (seq prev-functions) (seq intern-functions))
+                          (update augmented-ast :functions
+                                 #(vec (concat prev-functions intern-functions %)))
+                          augmented-ast)
+          ;; Make every type alias declared so far in the session visible to
+          ;; the checker, not just any declared in the current input.
+          augmented-ast (assoc augmented-ast
+                               :type-aliases (vec (vals @*repl-type-aliases*)))
+          ;; Previously defined classes/functions are included above only so the
+          ;; type checker can resolve references from the *current* input. Their
+          ;; bodies must not be re-validated: redefining one class can legitimately
+          ;; invalidate an older, unrelated definition (e.g. a subclass that calls a
+          ;; method this redefinition removed), and that stale code should not block
+          ;; the new input. Skip body-checking for previously defined names that are
+          ;; not part of the current input.
+          current-class-names (set (concat (map :name (filter map? (:classes ast)))
+                                           (keep :class-name (filter map? (:functions ast)))))
+          skip-class-body-names (->> (concat (map :name prev-classes)
+                                             (keep :class-name prev-functions))
+                                     (remove current-class-names)
+                                     set)
+          result (tc/type-check augmented-ast
+                                {:var-types @*repl-var-types*
+                                 :skip-class-body-names skip-class-body-names})]
+      (when-not (:success result)
+        (doseq [error (:errors result)]
+          (println (tc/format-type-error error)))
+        (throw (ex-info "Type checking failed" {:errors (:errors result)}))))))
+
+(defn- print-compiled-fallback-warning!
+  "Tell the user this input is running on the tree-walking interpreter
+   instead of the compiled backend, and why — printed to *err* so it
+   doesn't get mixed into the cell's own output."
+  [ast]
+  (let [reason @(:last-decline-reason @*compiled-repl-session*)
+        declaring? (ast-declares-class-or-function? ast)]
+    (binding [*out* *err*]
+      (println (str "Warning: falling back to the tree-walking interpreter for this input"
+                    (when reason (str " (" reason ")"))
+                    "."))
+      (when declaring?
+        (println (str "         Any class/function defined here runs on the interpreter for the"
+                      " rest of this session — behavior can differ from the compiled backend"
+                      " (see docs/md/BACKEND_ALIGNMENT.md) even though this definition itself"
+                      " succeeded."))))))
+
+(defn- eval-registered-program!
+  "Run a `:program` AST on the interpreter: register any imports/interns/
+   classes/functions and run its top-level statements, print a rendered
+   result when the cell didn't already print anything itself, sync back
+   into the compiled session, and return the context to continue the REPL
+   with. Shared by the plain `:program` path and the compiled path's
+   fallback.
+
+   `eval-node` on a whole `:program` AST registers imports/interns/classes/
+   functions AND executes its top-level statements/calls in one pass (see
+   `interpreter.clj`'s `:program` method) — so when `registered?` is true,
+   the statements have already run once; replaying them here would run any
+   side effects (e.g. `print`) a second time."
+  [exec-ctx ast source-id]
+  (let [classes (:classes ast)
+        functions (:functions ast)
+        interns (:interns ast)
+        imports (:imports ast)
+        statements (:statements ast)
+        calls (:calls ast)
+        real-class-names (filter #(not= % "__ReplTemp__")
+                                 (map :name (filter map? classes)))
+        function-names (map :name (filter map? functions))
+        registered? (boolean (or (seq imports) (seq interns) (seq real-class-names) (seq function-names)))]
+    (when registered?
+      (interp/eval-node exec-ctx ast)
+      (when @*type-checking-enabled*
+        (doseq [fn-def (filter map? functions)]
+          (swap! *repl-var-types* assoc (:name fn-def) (:class-name fn-def)))))
+    (let [top-nodes (if (seq statements) statements calls)
+          result (when (and (not registered?) (seq top-nodes))
+                   (last (map #(interp/eval-node exec-ctx %) top-nodes)))
+          ;; Already written as the statements ran; `output` is read
+          ;; only to tell whether the cell printed anything.
+          output @(:output exec-ctx)]
+      (when (and (some? result) (empty? output) (not registered?))
+        (if-let [type-str (when (seq calls)
+                            (infer-result-type exec-ctx (last calls)))]
+          (println (str type-str " " (format-value result)))
+          (println (format-value result)))))
+    (sync-interpreter-back-into-compiled-session! exec-ctx ast source-id)
+    exec-ctx))
+
+(defn- eval-compiled-candidate!
+  "Try the experimental compiled path for a narrow expression-shaped
+   `:program` input. On success, print its output/result and return.
+   Otherwise fall back to the tree-walking interpreter via
+   `eval-registered-program!`, after warning the user why."
+  [exec-ctx ast source-id]
+  (if-let [{:keys [session result output]}
+           (let [declaring? (ast-declares-class-or-function? ast)]
+             (try
+               (compiled-repl/compile-and-eval! @*compiled-repl-session*
+                                                ast
+                                                source-id)
+               (catch clojure.lang.ExceptionInfo e
+                 (if (fallback-eligible-compiled-error? e declaring?)
+                   nil
+                   (throw e)))))]
+    (do
+      (reset! *compiled-repl-session* session)
+      (let [{:keys [var-types]} (compiled-repl/sync-session->interpreter! session exec-ctx)]
+        (reset! *repl-var-types* var-types))
+      (when (seq output)
+        (doseq [line output]
+          (println line)))
+      (when (some? result)
+        (if-let [type-str (and (empty? output)
+                               (infer-result-type exec-ctx (first (:statements ast))))]
+          (println (str type-str " " (format-value result)))
+          (println (format-value result))))
+      exec-ctx)
+    (do
+      (print-compiled-fallback-warning! ast)
+      (eval-registered-program! exec-ctx ast source-id))))
+
+(defn- eval-wrapped-input!
+  "Run the synthetic wrapper method `parse-repl-input` built around `input`
+   (a class/statement it had to wrap to parse), directly in `exec-ctx` so
+   global vars are preserved. A wrapped *expression* is a synthetic
+   `print(expr)` this REPL built to render a value, so its line is
+   displayed below rather than echoed as it runs; a wrapped *statement* is
+   the user's own code and streams normally."
+  [exec-ctx ast source-id is-expression?]
+  (let [class-def (first (:classes ast))
+        method-def (-> class-def :body first :members first)
+        result (binding [interp/*echo-output* (not is-expression?)]
+                 (last (map #(interp/eval-node exec-ctx %) (:body method-def))))
+        output @(:output exec-ctx)]
+    ;; Persist variable types from let statements (for future type checking)
+    (when @*type-checking-enabled*
+      (doseq [stmt (:body method-def)]
+        (when (and (map? stmt) (= (:type stmt) :let))
+          (let [remembered-type (or (:var-type stmt)
+                                    (tc/infer-expression-type
+                                     (:value stmt)
+                                     {:classes (vals @(:classes exec-ctx))
+                                      :imports @(:imports exec-ctx)
+                                      :var-types @*repl-var-types*}))]
+            (when remembered-type
+              (swap! *repl-var-types* assoc (:name stmt) remembered-type))))))
+    ;; Infer type of the result expression when typechecking is on
+    (let [type-str (when is-expression?
+                     (infer-result-type exec-ctx (-> method-def :body first :args first)))]
+      ;; The rendered value of a wrapped expression, which was withheld
+      ;; from the stream above. A wrapped statement's own output has
+      ;; already been written, so there is nothing to show for it.
+      (when (and is-expression? (seq output))
+        (if type-str
+          (println (str type-str " " (first output)))
+          (doseq [line output]
+            (println line))))
+      ;; Show result if it's not nil and not from a print
+      ;; Always show false/0 results too.
+      (when (and (some? result) (empty? output))
+        (if type-str
+          (println (str type-str " " (format-value result)))
+          (println (format-value result)))))
+    (sync-interpreter-back-into-compiled-session!
+     exec-ctx
+     {:type :program
+      :imports []
+      :interns []
+      :classes []
+      :functions []
+      :statements (:body method-def)
+      :calls []}
+     source-id)
+    exec-ctx))
+
+(defn- eval-single-node!
+  "Run a plain single expression/statement AST — not a `:program`, and not
+   wrapped."
+  [exec-ctx ast source-id]
+  (let [result (interp/eval-node exec-ctx ast)
+        ;; Already written as the expression ran; `output` is read only
+        ;; to tell whether it printed anything.
+        output @(:output exec-ctx)]
+    ;; Show result if it's not nil and not from a print
+    ;; Always show false/0 results too.
+    (when (and (some? result) (empty? output))
+      (if-let [type-str (infer-result-type exec-ctx ast)]
+        (println (str type-str " " (format-value result)))
+        (println (format-value result))))
+    (sync-interpreter-back-into-compiled-session!
+     exec-ctx
+     {:type :program
+      :imports []
+      :interns []
+      :classes []
+      :functions []
+      :statements [ast]
+      :calls []}
+     source-id)
+    exec-ctx))
+
+(defn- unwrap-and-flush-error!
+  "Common preamble for the exception catches below: unwrap to the
+   user-visible cause and flush any output the compiled path had buffered,
+   so it isn't lost ahead of the error message."
+  [e]
+  (let [e (unwrap-user-visible-exception e)]
+    (flush-compiled-output-on-error!)
+    e))
+
 (defn eval-code
   ([ctx input]
    (eval-code ctx input "<repl>"))
   ([ctx input source-id]
-  (let [exec-ctx* (atom ctx)]
-    (try
-    ;; Clear output from previous evaluation
-    (reset! (:output ctx) [])
-    (dbg/reset-run-state!)
-	    (let [base-ctx (assoc ctx
-	                          :debug-source source-id
-	                          :debug-stack [{:class "<repl>"
-	                                         :method "<top>"
-	                                         :env (:current-env ctx)
-	                                         :source source-id}])
-          exec-ctx (if (dbg/enabled?)
-                     (assoc base-ctx
-                            :debug-hook (dbg/make-debug-hook {:read-line-fn read-line-safe
-                                                              :wrap-expression-fn wrap-expression})
-                            :debug-depth 0)
-                     base-ctx)]
-      (reset! exec-ctx* exec-ctx)
+   (let [exec-ctx* (atom ctx)]
+     (try
+       ;; Clear output from previous evaluation
+       (reset! (:output ctx) [])
+       (dbg/reset-run-state!)
+       (let [exec-ctx (build-exec-ctx ctx source-id)]
+         (reset! exec-ctx* exec-ctx)
+         ;; Determine if we need to wrap the input, then evaluate the result.
+         (let [[ast was-wrapped? is-expression?] (parse-repl-input input)
+               ;; Inject refinement checks for types declared on earlier lines, so a
+               ;; `let x: R := v` is checked even when `declare type R ... where` ran
+               ;; in a previous cell. *repl-type-aliases* here holds only prior cells'
+               ;; aliases; the current cell's are recorded further below.
+               ast (inject-session-refinements ast @*repl-type-aliases*)]
+           (sync-and-remember-type-aliases! exec-ctx source-id ast)
+           (type-check-repl-input! ctx ast source-id)
+           (cond
+             ;; Experimental compiled path for narrow expression-shaped program inputs.
+             (and (= (:type ast) :program)
+                  (not was-wrapped?)
+                  (not (dbg/enabled?))
+                  (= :compiled @*repl-backend*)
+                  (not (ast-needs-interpreter-fallback? exec-ctx ast)))
+             (eval-compiled-candidate! exec-ctx ast source-id)
 
-      ;; Determine if we need to wrap the input. In compiled REPL mode, give
-      ;; top-level let/assignment inputs a raw parse + compiled-eligibility
-      ;; attempt before falling back to wrapper-based execution.
-      (let [compiled-raw-candidate? (and (= :compiled @*repl-backend*)
-                                         (not (dbg/enabled?))
-                                         (looks-like-raw-compiled-statement? input))
-            raw-compiled-attempt (when compiled-raw-candidate?
-                                   (try
-                                     (let [raw-ast (p/ast input)]
-                                       [raw-ast false false])
-                                     (catch Exception _
-                                       nil)))
-            [ast was-wrapped? is-expression?]
-            (or raw-compiled-attempt
-                (let [code-to-parse (cond
-                                      ;; Class definition - parse as is
-                                      (looks-like-class? input)
-                                      input
+             ;; If we wrapped the code, execute the temp method in GLOBAL context
+             was-wrapped?
+             (eval-wrapped-input! exec-ctx ast source-id is-expression?)
 
-                                      ;; Statement that needs wrapping
-                                      (looks-like-statement? input)
-                                      (wrap-as-method input)
+             ;; If it's a program, handle it based on content
+             (= (:type ast) :program)
+             (eval-registered-program! exec-ctx ast source-id)
 
-                                      ;; Try as a method call first, if it fails, wrap it
-                                      :else
-                                      input)]
-                  (try
-                    ;; Bare identifiers parse as methodCall but should
-                    ;; evaluate as expressions (return their value)
-                    (if (and (= code-to-parse input)
-                             (looks-like-identifier? input))
-                      [(p/ast (wrap-expression input)) true true]
-                      (let [parsed (p/ast code-to-parse)]
-                        [(if (= code-to-parse input)
-                           (top-level-safe-call-when-expr parsed)
-                           parsed)
-                         (not= code-to-parse input) false]))
-                    (catch Exception e
-                      ;; If parsing failed and we haven't wrapped yet, try wrapping
-                      (if (= code-to-parse input)
-                        (try
-                          [(p/ast (wrap-expression input)) true true]
-                          (catch Exception _e2
-                            ;; If expression wrapping fails, try as statement
-                            (try
-                              [(p/ast (wrap-as-method input)) true false]
-                              (catch Exception _e3
-                                ;; All attempts failed - throw the ORIGINAL error
-                                ;; so line numbers reference the user's actual code
-                                (throw e)))))
-                        (throw e))))))
-            ;; Inject refinement checks for types declared on earlier lines, so a
-            ;; `let x: R := v` is checked even when `declare type R ... where` ran
-            ;; in a previous cell. *repl-type-aliases* here holds only prior cells'
-            ;; aliases; the current cell's are recorded further below.
-            ast (inject-session-refinements ast @*repl-type-aliases*)]
-        (sync-compiled-session-into-interpreter! exec-ctx)
-        ;; Persist any type aliases declared in this input — directly, or via
-        ;; an `intern` this input brings into scope — so later REPL lines (and
-        ;; the type checker) can resolve them by name. Without the interned
-        ;; half, a refinement type declared in an interned file (rather than
-        ;; typed directly at the REPL) type-checked as an outright "Undefined
-        ;; type" everywhere it was used, since *repl-type-aliases* — the only
-        ;; thing augmented-ast's own :type-aliases is built from, further
-        ;; below — was never populated from it.
-        (doseq [alias (concat (interp/resolve-interned-type-aliases source-id ast)
-                              (:type-aliases ast))]
-          (swap! *repl-type-aliases* assoc (:name alias) alias))
-        ;; Type check if enabled
-        (when (and @*type-checking-enabled*
-                 (= (:type ast) :program)
-                 (or (seq (:classes ast)) (seq (:functions ast))
-                     (seq (:statements ast)) (seq (:calls ast))))
-        ;; Create an augmented AST that includes previously defined classes
-        ;; so the type checker knows about them
-        (let [prev-functions (vals @(:function-asts @*compiled-repl-session*))
-              synthetic-function-class-names (set (map :class-name prev-functions))
-              referenced-anonymous-class-names (->> (vals @*repl-var-types*)
-                                                    (filter string?)
-                                                    (filter synthetic-anonymous-class-name?)
-                                                    set)
-              prev-classes (remove #(or (= "__ReplTemp__" (:name %))
-                                        (contains? synthetic-function-class-names (:name %))
-                                        (and (synthetic-anonymous-class-name? (str (:name %)))
-                                             (not (contains? referenced-anonymous-class-names (:name %)))))
-                                   (vals @(:classes ctx)))
-              intern-classes (interp/resolve-interned-classes source-id ast)
-              intern-functions (interp/resolve-interned-functions source-id ast)
-              prev-imports @(:imports ctx)
-              augmented-ast (cond
-                              (and (seq prev-classes) (seq prev-imports) (seq intern-classes))
-                              (assoc ast
-                                     :classes (concat prev-classes intern-classes (:classes ast))
-                                     :imports (concat prev-imports (:imports ast)))
+             ;; Single expression or statement
+             :else
+             (eval-single-node! exec-ctx ast source-id))))
 
-                              (and (seq prev-classes) (seq prev-imports))
-                              (assoc ast
-                                     :classes (concat prev-classes (:classes ast))
-                                     :imports (concat prev-imports (:imports ast)))
+       (catch ParseError e
+         (println "Syntax error:")
+         ;; When input was pre-wrapped as a statement, errors reference the wrapper
+         ;; code (offset by 3 lines). Adjust accordingly.
+         (let [pre-wrapped? (looks-like-statement? input)
+               line-offset (if pre-wrapped? 3 0)]
+           (p/format-parse-errors e input line-offset))
+         ctx)
 
-                              (and (seq prev-classes) (seq intern-classes))
-                              (assoc ast :classes (concat prev-classes intern-classes (:classes ast)))
+       (catch clojure.lang.ExceptionInfo e
+         (let [e (unwrap-and-flush-error! e)]
+           (println "Error:" (interp/nex-error-message e))
+           (when-let [data (ex-data e)]
+             (when (contains? data :line)
+               (println "  at line" (:line data))))
+           (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
+                                                    :wrap-expression-fn wrap-expression})
+           ctx))
 
-                              (and (seq prev-imports) (seq intern-classes))
-                              (assoc ast
-                                     :classes (concat intern-classes (:classes ast))
-                                     :imports (concat prev-imports (:imports ast)))
+       (catch Exception e
+         (let [e (unwrap-and-flush-error! e)]
+           (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
+                                                    :wrap-expression-fn wrap-expression})
+           (println "Error:" (interp/nex-error-message e))
+           ctx))
 
-                              (seq intern-classes)
-                              (assoc ast :classes (concat intern-classes (:classes ast)))
-
-                              (seq prev-classes)
-                              (assoc ast :classes (concat prev-classes (:classes ast)))
-
-                              (seq prev-imports)
-                              (assoc ast :imports (concat prev-imports (:imports ast)))
-
-                              :else
-                              ast)
-              augmented-ast (if (or (seq prev-functions) (seq intern-functions))
-                              (update augmented-ast :functions
-                                     #(vec (concat prev-functions intern-functions %)))
-                              augmented-ast)
-              ;; Make every type alias declared so far in the session visible to
-              ;; the checker, not just any declared in the current input.
-              augmented-ast (assoc augmented-ast
-                                   :type-aliases (vec (vals @*repl-type-aliases*)))
-              ;; Previously defined classes/functions are included above only so the
-              ;; type checker can resolve references from the *current* input. Their
-              ;; bodies must not be re-validated: redefining one class can legitimately
-              ;; invalidate an older, unrelated definition (e.g. a subclass that calls a
-              ;; method this redefinition removed), and that stale code should not block
-              ;; the new input. Skip body-checking for previously defined names that are
-              ;; not part of the current input.
-              current-class-names (set (concat (map :name (filter map? (:classes ast)))
-                                               (keep :class-name (filter map? (:functions ast)))))
-              skip-class-body-names (->> (concat (map :name prev-classes)
-                                                 (keep :class-name prev-functions))
-                                         (remove current-class-names)
-                                         set)
-              result (tc/type-check augmented-ast
-                                    {:var-types @*repl-var-types*
-                                     :skip-class-body-names skip-class-body-names})]
-          (when-not (:success result)
-            (doseq [error (:errors result)]
-              (println (tc/format-type-error error)))
-            (throw (ex-info "Type checking failed" {:errors (:errors result)})))))
-
-        ;; Evaluate based on type
-        (cond
-        ;; Experimental compiled path for narrow expression-shaped program inputs.
-        (and (= (:type ast) :program)
-             (not was-wrapped?)
-             (not (dbg/enabled?))
-             (= :compiled @*repl-backend*)
-             (not (ast-needs-interpreter-fallback? exec-ctx ast)))
-        (if-let [{:keys [session result output]}
-                 (let [declaring? (ast-declares-class-or-function? ast)]
-                   (try
-                     (compiled-repl/compile-and-eval! @*compiled-repl-session*
-                                                      ast
-                                                      source-id)
-                     (catch clojure.lang.ExceptionInfo e
-                       (if (fallback-eligible-compiled-error? e declaring?)
-                         nil
-                         (throw e)))))]
-          (do
-            (reset! *compiled-repl-session* session)
-            (let [{:keys [var-types]} (compiled-repl/sync-session->interpreter! session exec-ctx)]
-              (reset! *repl-var-types* var-types))
-            (when (seq output)
-              (doseq [line output]
-                (println line)))
-            (when (some? result)
-              (if-let [type-str (and (empty? output)
-                                     (infer-result-type exec-ctx (first (:statements ast))))]
-                (println (str type-str " " (format-value result)))
-                (println (format-value result))))
-            exec-ctx)
-          (let [_ (let [reason @(:last-decline-reason @*compiled-repl-session*)
-                        declaring? (ast-declares-class-or-function? ast)]
-                    (binding [*out* *err*]
-                      (println (str "Warning: falling back to the tree-walking interpreter for this input"
-                                    (when reason (str " (" reason ")"))
-                                    "."))
-                      (when declaring?
-                        (println (str "         Any class/function defined here runs on the interpreter for the"
-                                      " rest of this session — behavior can differ from the compiled backend"
-                                      " (see docs/md/BACKEND_ALIGNMENT.md) even though this definition itself"
-                                      " succeeded.")))))
-                classes (:classes ast)
-                functions (:functions ast)
-                interns (:interns ast)
-                imports (:imports ast)
-                statements (:statements ast)
-                calls (:calls ast)
-                real-class-names (filter #(not= % "__ReplTemp__")
-                                         (map :name (filter map? classes)))
-                function-names (map :name (filter map? functions))
-                ;; `eval-node` on a whole `:program` AST registers imports/
-                ;; interns/classes/functions AND executes its top-level
-                ;; statements/calls in one pass (see `interpreter.clj`'s
-                ;; `:program` method). So whenever this branch runs, the
-                ;; statements below have already executed once — replaying
-                ;; them again (as the plain-statements path below does) would
-                ;; run any side effects (e.g. `print`) a second time.
-                registered? (boolean (or (seq imports) (seq interns) (seq real-class-names) (seq function-names)))]
-            (when registered?
-              (interp/eval-node exec-ctx ast)
-              (when @*type-checking-enabled*
-                (doseq [fn-def (filter map? functions)]
-                  (swap! *repl-var-types* assoc (:name fn-def) (:class-name fn-def)))))
-            (let [top-nodes (if (seq statements) statements calls)
-                  result (when (and (not registered?) (seq top-nodes))
-                           (last (map #(interp/eval-node exec-ctx %) top-nodes)))
-                  ;; Already written as the statements ran; `output` is read
-                  ;; only to tell whether the cell printed anything.
-                  output @(:output exec-ctx)]
-              (when (and (some? result) (empty? output) (not registered?))
-                (if-let [type-str (when (seq calls)
-                                    (infer-result-type exec-ctx (last calls)))]
-                  (println (str type-str " " (format-value result)))
-                  (println (format-value result)))))
-            (sync-interpreter-back-into-compiled-session! exec-ctx ast source-id)
-            exec-ctx))
-
-        ;; If we wrapped the code, execute the temp method in GLOBAL context
-        was-wrapped?
-        (let [class-def (first (:classes ast))
-              method-def (-> class-def :body first :members first)
-              ;; Execute directly in the current context (preserves global vars).
-              ;; A wrapped *expression* is a synthetic `print(expr)` this REPL
-              ;; built to render a value, so its line is displayed below rather
-              ;; than echoed as it runs; a wrapped *statement* is the user's own
-              ;; code and streams normally.
-              result (binding [interp/*echo-output* (not is-expression?)]
-                       (last (map #(interp/eval-node exec-ctx %) (:body method-def))))
-              output @(:output exec-ctx)]
-          ;; Persist variable types from let statements (for future type checking)
-          (when @*type-checking-enabled*
-            (doseq [stmt (:body method-def)]
-              (when (and (map? stmt) (= (:type stmt) :let))
-                (let [remembered-type (or (:var-type stmt)
-                                          (tc/infer-expression-type
-                                           (:value stmt)
-                                           {:classes (vals @(:classes exec-ctx))
-                                            :imports @(:imports exec-ctx)
-                                            :var-types @*repl-var-types*}))]
-                  (when remembered-type
-                    (swap! *repl-var-types* assoc (:name stmt) remembered-type))))))
-          ;; Infer type of the result expression when typechecking is on
-          (let [type-str (when is-expression?
-                           (infer-result-type exec-ctx (-> method-def :body first :args first)))]
-            ;; The rendered value of a wrapped expression, which was withheld
-            ;; from the stream above. A wrapped statement's own output has
-            ;; already been written, so there is nothing to show for it.
-            (when (and is-expression? (seq output))
-              (if type-str
-                (println (str type-str " " (first output)))
-                (doseq [line output]
-                  (println line))))
-            ;; Show result if it's not nil and not from a print
-            ;; Always show false/0 results too.
-            (when (and (some? result) (empty? output))
-              (if type-str
-                (println (str type-str " " (format-value result)))
-                (println (format-value result)))))
-          (sync-interpreter-back-into-compiled-session!
-           exec-ctx
-           {:type :program
-            :imports []
-            :interns []
-            :classes []
-            :functions []
-            :statements (:body method-def)
-            :calls []}
-           source-id)
-          exec-ctx)
-
-        ;; If it's a program, handle it based on content
-        (= (:type ast) :program)
-        (let [classes (:classes ast)
-              functions (:functions ast)
-              interns (:interns ast)
-              imports (:imports ast)
-              statements (:statements ast)
-              calls (:calls ast)
-              real-class-names (filter #(not= % "__ReplTemp__")
-                                      (map :name (filter map? classes)))
-              function-names (map :name (filter map? functions))
-              ;; `eval-node` on a whole `:program` AST registers imports/
-              ;; interns/classes/functions AND executes its top-level
-              ;; statements/calls in one pass (see `interpreter.clj`'s
-              ;; `:program` method). So whenever this branch runs, the
-              ;; statements below have already executed once — replaying
-              ;; them again (as the plain-statements path below does) would
-              ;; run any side effects (e.g. `print`) a second time.
-              registered? (boolean (or (seq imports) (seq interns) (seq real-class-names) (seq function-names)))]
-          ;; If there are imports/interns/classes/functions, evaluate the program
-          ;; as a whole so registration side effects happen.
-          (when registered?
-            (interp/eval-node exec-ctx ast)
-            (when @*type-checking-enabled*
-              (doseq [fn-def (filter map? functions)]
-                (swap! *repl-var-types* assoc (:name fn-def) (:class-name fn-def)))))
-          ;; If there are top-level statements and no classes/functions/imports/interns
-          ;; (i.e. the branch above did not already run them), evaluate them in order.
-          ;; Fall back to legacy :calls-only programs when :statements is absent.
-          (let [top-nodes (if (seq statements) statements calls)
-                result (when (and (not registered?) (seq top-nodes))
-                         (last (map #(interp/eval-node exec-ctx %) top-nodes)))
-                ;; Already written as the statements ran; `output` is read
-                ;; only to tell whether the cell printed anything.
-                output @(:output exec-ctx)]
-            ;; Show result if it's not nil, not from a print, and no classes were defined
-            ;; Always show false/0 results too.
-            (when (and (some? result) (empty? output) (not registered?))
-              (if-let [type-str (when (seq calls)
-                                  (infer-result-type exec-ctx (last calls)))]
-                (println (str type-str " " (format-value result)))
-                (println (format-value result)))))
-          (sync-interpreter-back-into-compiled-session! exec-ctx ast source-id)
-          exec-ctx)
-
-        ;; Single expression or statement
-        :else
-        (let [result (interp/eval-node exec-ctx ast)
-              ;; Already written as the expression ran; `output` is read only
-              ;; to tell whether it printed anything.
-              output @(:output exec-ctx)]
-          ;; Show result if it's not nil and not from a print
-          ;; Always show false/0 results too.
-          (when (and (some? result) (empty? output))
-            (if-let [type-str (infer-result-type exec-ctx ast)]
-              (println (str type-str " " (format-value result)))
-              (println (format-value result))))
-          (sync-interpreter-back-into-compiled-session!
-           exec-ctx
-           {:type :program
-            :imports []
-            :interns []
-            :classes []
-            :functions []
-            :statements [ast]
-            :calls []}
-           source-id)
-          exec-ctx))))
-
-    (catch ParseError e
-      (println "Syntax error:")
-      ;; When input was pre-wrapped as a statement, errors reference the wrapper
-      ;; code (offset by 3 lines). Adjust accordingly.
-      (let [pre-wrapped? (looks-like-statement? input)
-            line-offset (if pre-wrapped? 3 0)]
-        (p/format-parse-errors e input line-offset))
-      ctx)
-
-    (catch clojure.lang.ExceptionInfo e
-      (let [e (unwrap-user-visible-exception e)]
-        (flush-compiled-output-on-error!)
-        (println "Error:" (interp/nex-error-message e))
-        (when-let [data (ex-data e)]
-          (when (contains? data :line)
-            (println "  at line" (:line data))))
-        (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
-                                                 :wrap-expression-fn wrap-expression})
-        ctx))
-
-    (catch Exception e
-      (let [e (unwrap-user-visible-exception e)]
-        (flush-compiled-output-on-error!)
-        (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
-                                                 :wrap-expression-fn wrap-expression})
-        (println "Error:" (interp/nex-error-message e))
-        ctx))
-
-    ;; Final safety net: the REPL must survive any evaluation failure, including
-    ;; JVM `Error`s that are not `Exception`s — e.g. a `ClassFormatError` from
-    ;; bytecode generation, a `StackOverflowError` from runaway recursion, or an
-    ;; `AssertionError`. Report it and keep the session alive rather than letting
-    ;; it unwind and kill the loop. (Read-side control flow — EOF / Ctrl-C — is
-    ;; handled separately in `read-input`, so it is unaffected.)
-    (catch Throwable e
-      (let [e (unwrap-user-visible-exception e)]
-        (flush-compiled-output-on-error!)
-        (println "Internal error:" (interp/nex-error-message e))
-        ctx))))))
+       ;; Final safety net: the REPL must survive any evaluation failure, including
+       ;; JVM `Error`s that are not `Exception`s — e.g. a `ClassFormatError` from
+       ;; bytecode generation, a `StackOverflowError` from runaway recursion, or an
+       ;; `AssertionError`. Report it and keep the session alive rather than letting
+       ;; it unwind and kill the loop. (Read-side control flow — EOF / Ctrl-C — is
+       ;; handled separately in `read-input`, so it is unaffected.)
+       (catch Throwable e
+         (let [e (unwrap-and-flush-error! e)]
+           (println "Internal error:" (interp/nex-error-message e))
+           ctx))))))
 
 ;;
 ;; Main REPL Loop
