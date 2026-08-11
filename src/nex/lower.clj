@@ -495,185 +495,217 @@
     (infer-type env expr)
     (catch clojure.lang.ExceptionInfo _ "Any")))
 
+(defn- convert-branch-env
+  "`env` narrowed by a `convert x to name: T` condition: `name` reads as `T`
+   for the rest of the branch it guards. A no-op for any other condition
+   shape."
+  [env' condition]
+  (if (= :convert (:type condition))
+    (assoc-in env' [:var-types (:var-name condition)] (:target-type condition))
+    env'))
+
+(defn- infer-type-identifier
+  [env expr]
+  (or (get-in (:locals env) [(:name expr) :nex-type])
+      (get-in (:fields env) [(:name expr) :nex-type])
+      (some-> (current-class-def env)
+              (class-field-def (:name expr))
+              :field-type)
+      (some-> (current-class-def env)
+              ((fn [class-def]
+                 (or (class-method-def class-def (:name expr) 0)
+                     (inherited-method-def env class-def (:name expr) 0))))
+              function-return-type)
+      (some-> (and (:current-class env)
+                   (lookup-class-constant env (:current-class env) (:name expr)))
+              (#(constant-nex-type env %)))
+      (get (:var-types env) (:name expr))
+      ;; A readable top-level global (§7).
+      (get (:globals env) (:name expr))))
+
+(defn- infer-type-create
+  [_env expr]
+  (if (seq (:generic-args expr))
+    {:base-type (:class-name expr) :type-args (:generic-args expr)}
+    (:class-name expr)))
+
+(defn- infer-type-this
+  [env _expr]
+  (:this-type env))
+
+;; Falling through to the generic tc/infer-expression-type fallback below (as
+;; this used to) builds a fresh env with no current-class context (same gap
+;; :when's own handler works around) — a `this`/bare field or method
+;; reference inside the body fails to resolve there. It also has no notion of
+;; the spawn body's *own* top-level `let` bindings, so a `result := total`
+;; closing over an earlier `let total := ...` in the same body fails to
+;; resolve either way. Track those bindings here instead, against *this* env
+;; (so :this-type/:fields context carries through), and infer result's type
+;; directly from its `result := ...` assignment — the same "Any" when there
+;; is none matches make-synthetic-anonymous-function-expr's declared return
+;; type for a spawn with no result.
+(defn- infer-type-spawn
+  [env expr]
+  (let [local-var-types
+        (reduce (fn [acc stmt]
+                  (if (= :let (:type stmt))
+                    (assoc acc (:name stmt)
+                           (or (:var-type stmt)
+                               (infer-type (update env :var-types merge acc) (:value stmt))))
+                    acc))
+                {}
+                (:body expr))
+        result-env (update env :var-types merge local-var-types)]
+    (if-let [result-assign (some #(when (and (= :assign (:type %))
+                                              (= "result" (:target %)))
+                                    %)
+                                  (:body expr))]
+      {:base-type "Task" :type-params [(infer-type result-env (:value result-assign))]}
+      "Task")))
+
+(defn- infer-type-binary
+  [env expr]
+  (let [op (:operator expr)]
+    (cond
+      (#{"-" "*" "/" "%"} op) (let [left-type (infer-type env (:left expr))
+                                    right-type (infer-type env (:right expr))]
+                                (if (and (tc/is-numeric-type? left-type)
+                                         (tc/is-numeric-type? right-type))
+                                  (tc/numeric-result-type left-type right-type)
+                                  left-type))
+      (= "+" op) (let [left-type (infer-type env (:left expr))
+                       right-type (infer-type env (:right expr))]
+                   (if (or (= "String" (base-type-name left-type))
+                           (= "String" (base-type-name right-type)))
+                     "String"
+                     (if (and (tc/is-numeric-type? left-type)
+                              (tc/is-numeric-type? right-type))
+                       (tc/numeric-result-type left-type right-type)
+                       left-type)))
+      (= "^" op) (tc/power-result-type (infer-type env (:left expr))
+                                       (infer-type env (:right expr)))
+      (#{"and" "or" "=" "/=" "==" "!=" "<" "<=" ">" ">="} op) "Boolean"
+      :else nil)))
+
+(defn- infer-type-unary
+  [env expr]
+  (case (:operator expr)
+    "-" (infer-type env (:expr expr))
+    "not" "Boolean"
+    nil))
+
+;; `old e` is e's value on entry, so it is e's type. Without this the fallback
+;; below had to infer `old balance` from an env with no class context, and
+;; only resolved the field because collect-class-info leaked every field name
+;; into it as a global.
+(defn- infer-type-old
+  [env expr]
+  (infer-type env (:expr expr)))
+
+(defn- infer-type-array-literal
+  [env expr]
+  (let [elements (:elements expr)
+        elem-type (or (some->> elements first (infer-type env))
+                      "Any")]
+    (array-type-of elem-type)))
+
+;; A map literal's value type is the entries' common type, widening to Any as
+;; soon as two disagree — the rule check-map-literal enforces. Taking the
+;; first entry's type instead lowered `{"label": "Total", "amount": 0}` as a
+;; Map[String, String], and every later read of it was typed as though the
+;; value were a String.
+;;
+;; Array and Set literals need no such widening: the typechecker rejects a
+;; mixed one outright, so the first element speaks for all.
+(defn- infer-type-map-literal
+  [env expr]
+  (let [entries (:entries expr)
+        key-type (or (some->> entries first :key (infer-type env))
+                     "Any")
+        value-type (or (reduce (fn [acc entry]
+                                 (let [t (infer-type-or-any env (:value entry))]
+                                   (if (= (tc/normalize-type acc) (tc/normalize-type t))
+                                     acc
+                                     (reduced "Any"))))
+                               (some->> entries first :value (infer-type-or-any env))
+                               (rest entries))
+                       "Any")]
+    (map-type-of key-type value-type)))
+
+(defn- infer-type-set-literal
+  [env expr]
+  (let [elements (:elements expr)
+        elem-type (or (some->> elements first (infer-type env))
+                      "Any")]
+    (set-type-of elem-type)))
+
+(defn- infer-type-if
+  [env expr]
+  (let [then-env (refine-condition-branch-env (convert-branch-env env (:condition expr))
+                                              (:condition expr)
+                                              :then)
+        else-env (refine-condition-branch-env env (:condition expr) :else)]
+    (or (some-> (:then expr) (if-branch-expression then-env) (infer-type then-env))
+        (some-> (:else expr) (if-branch-expression else-env) (infer-type else-env)))))
+
+;; A `when ... then ... else ... end` expression's branches are plain
+;; expressions (not blocks), unlike `:if`'s `:then`/`:else` — no
+;; `if-branch-expression` unwrapping needed. Falling through to the generic
+;; `tc/infer-expression-type` fallback below used to be the only path here,
+;; but that fallback builds a fresh env with no current-class context, so a
+;; bare field reference in the condition or either branch (`total_seconds`
+;; meaning `this.total_seconds`) couldn't resolve and the whole inference
+;; silently failed.
+(defn- infer-type-when
+  [env expr]
+  (let [then-env (refine-condition-branch-env (convert-branch-env env (:condition expr))
+                                               (:condition expr)
+                                               :then)
+        else-env (refine-condition-branch-env env (:condition expr) :else)
+        cons-type (infer-type-or-any then-env (:consequent expr))
+        alt-type (infer-type-or-any else-env (:alternative expr))]
+    (cond
+      (= alt-type "Nil") cons-type
+      (= cons-type "Nil") alt-type
+      :else cons-type)))
+
+(def ^:private infer-type-dispatch
+  "AST node `:type` -> `(fn [env expr] ...)`: the primary (non-fallback) half
+   of `infer-type`. A literal's type is context-free — resolved directly
+   here rather than through tc/infer-expression-type, whose best-effort env
+   can throw (and silently yield nil) on unrelated classes, e.g. a sibling
+   constant that forward-references a not-yet-collected class. A node type
+   with no entry here (or whose handler returns nil) falls through to the
+   generic fallback in `infer-type`."
+  {:integer            (constantly "Integer")
+   :real               (constantly "Real")
+   :string             (constantly "String")
+   :boolean            (constantly "Boolean")
+   :char               (constantly "Char")
+   :identifier         infer-type-identifier
+   :create             infer-type-create
+   :this               infer-type-this
+   :anonymous-function (constantly "Function")
+   :spawn              infer-type-spawn
+   :binary             infer-type-binary
+   :unary              infer-type-unary
+   :old                infer-type-old
+   :array-literal      infer-type-array-literal
+   :map-literal        infer-type-map-literal
+   :set-literal        infer-type-set-literal
+   :if                 infer-type-if
+   :when               infer-type-when
+   ;; infer-call-type is only forward-declared this early in the file (its
+   ;; own defn comes later) — a bare reference here would capture the
+   ;; declare's Unbound placeholder instead of the real function, since a
+   ;; map literal's values are dereferenced immediately. Wrapping it defers
+   ;; that lookup to call time, by which point the whole file has loaded.
+   :call               (fn [env expr] (infer-call-type env expr))})
+
 (defn- infer-type
   [env expr]
-  (let [convert-branch-env (fn [env' condition]
-                             (if (= :convert (:type condition))
-                               (assoc-in env' [:var-types (:var-name condition)] (:target-type condition))
-                               env'))
-        direct-type
-        (case (:type expr)
-          ;; A literal's type is context-free — resolve it directly rather than
-          ;; through tc/infer-expression-type, whose best-effort env can throw
-          ;; (and silently yield nil) on unrelated classes, e.g. a sibling
-          ;; constant that forward-references a not-yet-collected class.
-          :integer "Integer"
-          :real    "Real"
-          :string  "String"
-          :boolean "Boolean"
-          :char    "Char"
-
-          :identifier
-          (or (get-in (:locals env) [(:name expr) :nex-type])
-              (get-in (:fields env) [(:name expr) :nex-type])
-              (some-> (current-class-def env)
-                      (class-field-def (:name expr))
-                      :field-type)
-              (some-> (current-class-def env)
-                      ((fn [class-def]
-                         (or (class-method-def class-def (:name expr) 0)
-                             (inherited-method-def env class-def (:name expr) 0))))
-                      function-return-type)
-              (some-> (and (:current-class env)
-                           (lookup-class-constant env (:current-class env) (:name expr)))
-                      (#(constant-nex-type env %)))
-              (get (:var-types env) (:name expr))
-              ;; A readable top-level global (§7).
-              (get (:globals env) (:name expr)))
-
-          :create
-          (if (seq (:generic-args expr))
-            {:base-type (:class-name expr) :type-args (:generic-args expr)}
-            (:class-name expr))
-
-          :this
-          (:this-type env)
-
-          :anonymous-function
-          "Function"
-
-          ;; Falling through to the generic tc/infer-expression-type fallback
-          ;; below (as this used to) builds a fresh env with no current-class
-          ;; context (same gap :when's own case above works around) — a
-          ;; `this`/bare field or method reference inside the body fails to
-          ;; resolve there. It also has no notion of the spawn body's *own*
-          ;; top-level `let` bindings, so a `result := total` closing over an
-          ;; earlier `let total := ...` in the same body fails to resolve
-          ;; either way. Track those bindings here instead, against *this*
-          ;; env (so :this-type/:fields context carries through), and infer
-          ;; result's type directly from its `result := ...` assignment — the
-          ;; same "Any" when there is none matches make-synthetic-anonymous-
-          ;; function-expr's declared return type for a spawn with no result.
-          :spawn
-          (let [local-var-types
-                (reduce (fn [acc stmt]
-                          (if (= :let (:type stmt))
-                            (assoc acc (:name stmt)
-                                   (or (:var-type stmt)
-                                       (infer-type (update env :var-types merge acc) (:value stmt))))
-                            acc))
-                        {}
-                        (:body expr))
-                result-env (update env :var-types merge local-var-types)]
-            (if-let [result-assign (some #(when (and (= :assign (:type %))
-                                                      (= "result" (:target %)))
-                                            %)
-                                          (:body expr))]
-              {:base-type "Task" :type-params [(infer-type result-env (:value result-assign))]}
-              "Task"))
-
-          :binary
-          (let [op (:operator expr)]
-            (cond
-              (#{"-" "*" "/" "%"} op) (let [left-type (infer-type env (:left expr))
-                                            right-type (infer-type env (:right expr))]
-                                        (if (and (tc/is-numeric-type? left-type)
-                                                 (tc/is-numeric-type? right-type))
-                                          (tc/numeric-result-type left-type right-type)
-                                          left-type))
-              (= "+" op) (let [left-type (infer-type env (:left expr))
-                               right-type (infer-type env (:right expr))]
-                           (if (or (= "String" (base-type-name left-type))
-                                   (= "String" (base-type-name right-type)))
-                             "String"
-                             (if (and (tc/is-numeric-type? left-type)
-                                      (tc/is-numeric-type? right-type))
-                               (tc/numeric-result-type left-type right-type)
-                               left-type)))
-              (= "^" op) (tc/power-result-type (infer-type env (:left expr))
-                                               (infer-type env (:right expr)))
-              (#{"and" "or" "=" "/=" "==" "!=" "<" "<=" ">" ">="} op) "Boolean"
-              :else nil))
-
-          :unary
-          (case (:operator expr)
-            "-" (infer-type env (:expr expr))
-            "not" "Boolean"
-            nil)
-
-          ;; `old e` is e's value on entry, so it is e's type. Without this the
-          ;; fallback below had to infer `old balance` from an env with no class
-          ;; context, and only resolved the field because collect-class-info
-          ;; leaked every field name into it as a global.
-          :old
-          (infer-type env (:expr expr))
-
-          :array-literal
-          (let [elements (:elements expr)
-                elem-type (or (some->> elements first (infer-type env))
-                              "Any")]
-            (array-type-of elem-type))
-
-          :map-literal
-          ;; A map literal's value type is the entries' common type, widening to
-          ;; Any as soon as two disagree — the rule check-map-literal enforces.
-          ;; Taking the first entry's type instead lowered `{"label": "Total",
-          ;; "amount": 0}` as a Map[String, String], and every later read of it
-          ;; was typed as though the value were a String.
-          ;;
-          ;; Array and Set literals need no such widening: the typechecker
-          ;; rejects a mixed one outright, so the first element speaks for all.
-          (let [entries (:entries expr)
-                key-type (or (some->> entries first :key (infer-type env))
-                             "Any")
-                value-type (or (reduce (fn [acc entry]
-                                         (let [t (infer-type-or-any env (:value entry))]
-                                           (if (= (tc/normalize-type acc) (tc/normalize-type t))
-                                             acc
-                                             (reduced "Any"))))
-                                       (some->> entries first :value (infer-type-or-any env))
-                                       (rest entries))
-                               "Any")]
-            (map-type-of key-type value-type))
-
-          :set-literal
-          (let [elements (:elements expr)
-                elem-type (or (some->> elements first (infer-type env))
-                              "Any")]
-            (set-type-of elem-type))
-
-          :if
-          (let [then-env (refine-condition-branch-env (convert-branch-env env (:condition expr))
-                                                      (:condition expr)
-                                                      :then)
-                else-env (refine-condition-branch-env env (:condition expr) :else)]
-            (or (some-> (:then expr) (if-branch-expression then-env) (infer-type then-env))
-                (some-> (:else expr) (if-branch-expression else-env) (infer-type else-env))))
-
-          ;; A `when ... then ... else ... end` expression's branches are plain
-          ;; expressions (not blocks), unlike `:if`'s `:then`/`:else` — no
-          ;; `if-branch-expression` unwrapping needed. Falling through to the
-          ;; generic `tc/infer-expression-type` fallback below used to be the
-          ;; only path here, but that fallback builds a fresh env with no
-          ;; current-class context, so a bare field reference in the condition
-          ;; or either branch (`total_seconds` meaning `this.total_seconds`)
-          ;; couldn't resolve and the whole inference silently failed.
-          :when
-          (let [then-env (refine-condition-branch-env (convert-branch-env env (:condition expr))
-                                                       (:condition expr)
-                                                       :then)
-                else-env (refine-condition-branch-env env (:condition expr) :else)
-                cons-type (infer-type-or-any then-env (:consequent expr))
-                alt-type (infer-type-or-any else-env (:alternative expr))]
-            (cond
-              (= alt-type "Nil") cons-type
-              (= cons-type "Nil") alt-type
-              :else cons-type))
-
-          :call
-          (infer-call-type env expr)
-
-          nil)]
+  (let [handler (get infer-type-dispatch (:type expr))
+        direct-type (when handler (handler env expr))]
     (or direct-type
         (tc/infer-expression-type expr {:classes (:classes env)
                                         :functions (:functions env)
@@ -711,6 +743,7 @@
                   {:expr expr}))
           (throw (ex-info "Unable to infer expression type during lowering"
                           {:expr expr}))))))
+
 
 (defn- infer-target-call-type
   [env expr class-target-name across-item-type target-expr]
