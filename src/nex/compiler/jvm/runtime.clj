@@ -2175,157 +2175,172 @@
   [s]
   (rt/nex-array-from s))
 
+(def ^:private invoke-builtin-dispatch
+  "Exact-name -> `(fn [state args] ...)`: the primary dispatch table for
+   `invoke-builtin`, covering every helper name checked with `=` in the
+   original `cond`. A name with no entry here falls through to the
+   \"user-method:\"/\"user-field-get:\"/\"user-field-set:\"/\"method:\"
+   prefix checks, then the top-level `bi/builtins` lookup — both still
+   handled directly in `invoke-builtin` below, since prefix matching and a
+   final catch-all fallback don't fit a plain equality-keyed map. Every
+   handler here is already defined above this point in the file (this is
+   the last form in it), so none need the deferred-`fn` wrapping
+   `infer-type-dispatch`'s `:call` entry needed in lower.clj."
+  {"validate-object-state"
+   (fn [state args] (validate-object-state state (first args) (second args)))
+
+   "shallow-copy-collection"
+   (fn [_state args] (shallow-copy-collection (first args)))
+
+   "make-captured-function-object"
+   (fn [state args] (make-captured-function-object state (first args) (vec (rest args))))
+
+   "create-console"
+   (fn [_state _args] {:nex-builtin-type :Console})
+
+   "create-process"
+   (fn [_state _args] (rt/nex-process-self))
+
+   "create-process-command"
+   (fn [_state args]
+     (if (= 2 (count args))
+       (rt/nex-process-command (first args) (second args))
+       (rt/nex-process-command (first args))))
+
+   "create-channel"
+   (fn [_state args]
+     (if (seq args)
+       (create-channel (first args))
+       (create-channel)))
+
+   "create-array"
+   (fn [_state _args] (create-array))
+
+   "create-array-filled"
+   (fn [_state args] (create-array-filled (first args) (second args)))
+
+   "create-min-heap-empty"
+   (fn [_state _args] (create-min-heap-empty))
+
+   "create-set-from-array"
+   (fn [_state args] (create-set-from-array (first args)))
+
+   "create-min-heap-from-comparator"
+   (fn [_state args] (create-min-heap-from-comparator (first args)))
+
+   "create-atomic-integer"
+   (fn [_state args] (create-atomic-integer (first args)))
+
+   "create-atomic-integer64"
+   (fn [_state args] (create-atomic-integer64 (first args)))
+
+   "create-atomic-boolean"
+   (fn [_state args] (create-atomic-boolean (first args)))
+
+   "create-atomic-reference"
+   (fn [_state args] (create-atomic-reference (first args)))
+
+   "java-create-object"
+   (fn [state args] (java-create-object state (first args) (vec (rest args))))
+
+   "java-call-method"
+   (fn [state args] (java-call-method state (first args) (second args) (vec (drop 2 args))))
+
+   "java-get-field"
+   (fn [_state args] (java-get-field (first args) (second args)))
+
+   "java-set-field"
+   (fn [_state args] (java-set-field! (first args) (second args) (nth args 2)))
+
+   "spawn-function-object"
+   (fn [state args] (spawn-function-object state (first args)))
+
+   "op:await-all"
+   (fn [_state args] (task-await-all (first args)))
+
+   "op:await-any"
+   (fn [_state args] (task-await-any (first args)))
+
+   "select-deadline"
+   (fn [_state args] (select-deadline (first args)))
+
+   "deadline-expired?"
+   (fn [_state args] (deadline-expired? (first args)))
+
+   "select-sleep-step"
+   (fn [_state _args] (select-sleep-step!))
+
+   "op:string-concat"
+   (fn [state args] (apply str (map #(concat-string-value state %) args)))
+
+   "op:div-int"
+   (fn [_state args] (div-int (first args) (second args)))
+
+   "op:div-long"
+   (fn [_state args] (div-long (first args) (second args)))
+
+   "op:mod-int"
+   (fn [_state args] (mod-int (first args) (second args)))
+
+   "op:mod-long"
+   (fn [_state args] (mod-long (first args) (second args)))
+
+   "op:pow-int"
+   (fn [_state args] (int (rt/nex-int-pow (int (first args)) (int (second args)))))
+
+   "op:pow-long"
+   (fn [_state args] (long (rt/nex-int-pow (long (first args)) (long (second args)))))
+
+   "op:pow-double"
+   (fn [_state args] (Math/pow (double (first args)) (double (second args))))
+
+   ;; The Any protocol on a receiver whose static type declares no such method.
+   ;; Kept apart from the "method:" helper below: that one routes to
+   ;; `bi/call-builtin-method`, whose :Any defaults are written against the
+   ;; interpreter's object maps and silently misread a compiled object (an
+   ;; instance of a generated class) — `equals` on two equal objects returns
+   ;; false, `to_string` renders `#object[...]`. These two understand both
+   ;; object models.
+   "any:to_string"
+   (fn [state args] (any-to-string state (first args)))
+
+   "any:equals"
+   (fn [state args] (any-equals state (first args) (second args)))})
+
 (defn invoke-builtin
   [state name args]
-  (cond
-    (= name "validate-object-state")
-    (validate-object-state state (first args) (second args))
+  (if-let [handler (get invoke-builtin-dispatch name)]
+    (handler state args)
+    (cond
+      ;; The native dispatch fallbacks — user method calls and field get/set — work
+      ;; off `state` directly (invoke-user-method/get-user-field/set-user-field!),
+      ;; so they need no interpreter context. `obj.method()` and `obj.field` on a
+      ;; non-`this` target lower to these, making them among the hottest runtime
+      ;; calls; rebuilding a context for them was pure waste. The rebuild is
+      ;; deferred into the two branches that actually use it (builtin methods and
+      ;; top-level builtins).
+      (str/starts-with? name "user-method:")
+      (invoke-user-method state (first args) (subs name (count "user-method:")) (rest args))
 
-    (= name "shallow-copy-collection")
-    (shallow-copy-collection (first args))
+      (str/starts-with? name "user-field-get:")
+      (get-user-field (first args) (subs name (count "user-field-get:")))
 
-    (= name "make-captured-function-object")
-    (make-captured-function-object state (first args) (vec (rest args)))
+      (str/starts-with? name "user-field-set:")
+      (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
 
-    (= name "create-console")
-    {:nex-builtin-type :Console}
-
-    (= name "create-process")
-    (rt/nex-process-self)
-
-    (= name "create-process-command")
-    (if (= 2 (count args))
-      (rt/nex-process-command (first args) (second args))
-      (rt/nex-process-command (first args)))
-
-    (= name "create-channel")
-    (if (seq args)
-      (create-channel (first args))
-      (create-channel))
-
-    (= name "create-array")
-    (create-array)
-
-    (= name "create-array-filled")
-    (create-array-filled (first args) (second args))
-
-    (= name "create-min-heap-empty")
-    (create-min-heap-empty)
-
-    (= name "create-set-from-array")
-    (create-set-from-array (first args))
-
-    (= name "create-min-heap-from-comparator")
-    (create-min-heap-from-comparator (first args))
-
-    (= name "create-atomic-integer")
-    (create-atomic-integer (first args))
-
-    (= name "create-atomic-integer64")
-    (create-atomic-integer64 (first args))
-
-    (= name "create-atomic-boolean")
-    (create-atomic-boolean (first args))
-
-    (= name "create-atomic-reference")
-    (create-atomic-reference (first args))
-
-    (= name "java-create-object")
-    (java-create-object state (first args) (vec (rest args)))
-
-    (= name "java-call-method")
-    (java-call-method state (first args) (second args) (vec (drop 2 args)))
-
-    (= name "java-get-field")
-    (java-get-field (first args) (second args))
-
-    (= name "java-set-field")
-    (java-set-field! (first args) (second args) (nth args 2))
-
-    (= name "spawn-function-object")
-    (spawn-function-object state (first args))
-
-    (= name "op:await-all")
-    (task-await-all (first args))
-
-    (= name "op:await-any")
-    (task-await-any (first args))
-
-    (= name "select-deadline")
-    (select-deadline (first args))
-
-    (= name "deadline-expired?")
-    (deadline-expired? (first args))
-
-    (= name "select-sleep-step")
-    (select-sleep-step!)
-
-    (= name "op:string-concat")
-    (apply str (map #(concat-string-value state %) args))
-
-    (= name "op:div-int")
-    (div-int (first args) (second args))
-
-    (= name "op:div-long")
-    (div-long (first args) (second args))
-
-    (= name "op:mod-int")
-    (mod-int (first args) (second args))
-
-    (= name "op:mod-long")
-    (mod-long (first args) (second args))
-
-    (= name "op:pow-int")
-    (int (rt/nex-int-pow (int (first args)) (int (second args))))
-
-    (= name "op:pow-long")
-    (long (rt/nex-int-pow (long (first args)) (long (second args))))
-
-    (= name "op:pow-double")
-    (Math/pow (double (first args)) (double (second args)))
-
-    ;; The native dispatch fallbacks — user method calls and field get/set — work
-    ;; off `state` directly (invoke-user-method/get-user-field/set-user-field!),
-    ;; so they need no interpreter context. `obj.method()` and `obj.field` on a
-    ;; non-`this` target lower to these, making them among the hottest runtime
-    ;; calls; rebuilding a context for them was pure waste. The rebuild is
-    ;; deferred into the two branches that actually use it (builtin methods and
-    ;; top-level builtins).
-    (str/starts-with? name "user-method:")
-    (invoke-user-method state (first args) (subs name (count "user-method:")) (rest args))
-
-    (str/starts-with? name "user-field-get:")
-    (get-user-field (first args) (subs name (count "user-field-get:")))
-
-    (str/starts-with? name "user-field-set:")
-    (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
-
-    ;; The Any protocol on a receiver whose static type declares no such method.
-    ;; Kept apart from the "method:" helper below: that one routes to
-    ;; `bi/call-builtin-method`, whose :Any defaults are written against the
-    ;; interpreter's object maps and silently misread a compiled object (an
-    ;; instance of a generated class) — `equals` on two equal objects returns
-    ;; false, `to_string` renders `#object[...]`. These two understand both
-    ;; object models.
-    (= name "any:to_string")
-    (any-to-string state (first args))
-
-    (= name "any:equals")
-    (any-equals state (first args) (second args))
-
-    (str/starts-with? name "method:")
-    (let [ctx (rebuild-interpreter-ctx state)
-          method-name (subs name (count "method:"))
-          target (first args)
-          result (bi/call-builtin-method ctx target target method-name (rest args))]
-      (reset! (:output state) @(:output ctx))
-      result)
-
-    :else
-    (let [ctx (rebuild-interpreter-ctx state)
-          builtin-fn (get bi/builtins name)]
-      (when-not builtin-fn
-        (throw (ex-info (str "Undefined compiled builtin: " name) {:name name})))
-      (let [result (apply builtin-fn ctx args)]
+      (str/starts-with? name "method:")
+      (let [ctx (rebuild-interpreter-ctx state)
+            method-name (subs name (count "method:"))
+            target (first args)
+            result (bi/call-builtin-method ctx target target method-name (rest args))]
         (reset! (:output state) @(:output ctx))
-        result))))
+        result)
+
+      :else
+      (let [ctx (rebuild-interpreter-ctx state)
+            builtin-fn (get bi/builtins name)]
+        (when-not builtin-fn
+          (throw (ex-info (str "Undefined compiled builtin: " name) {:name name})))
+        (let [result (apply builtin-fn ctx args)]
+          (reset! (:output state) @(:output ctx))
+          result)))))
