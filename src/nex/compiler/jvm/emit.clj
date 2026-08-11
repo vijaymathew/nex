@@ -1234,226 +1234,248 @@
 
 (declare emit-collection-method!)
 
+(defn- emit-array-method-get!
+  [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+  (emit-as-int! mv (first args) state-slot)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "get" "(I)Ljava/lang/Object;" false)
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
+(defn- emit-array-method-add!
+  [^MethodVisitor mv {:keys [target args]} state-slot]
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+  (emit-boxed-expr-for-storage! mv (first args) state-slot)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "add" "(Ljava/lang/Object;)Z" false)
+  (.visitInsn mv Opcodes/POP)
+  :void)
+
+(defn- emit-array-method-add-at!
+  [^MethodVisitor mv {:keys [target args]} state-slot]
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+  (emit-as-int! mv (first args) state-slot)
+  (emit-boxed-expr-for-storage! mv (second args) state-slot)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "add" "(ILjava/lang/Object;)V" false)
+  :void)
+
+(defn- emit-array-method-put!
+  [^MethodVisitor mv {:keys [target args]} state-slot]
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+  (emit-as-int! mv (first args) state-slot)
+  (emit-boxed-expr-for-storage! mv (second args) state-slot)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "set" "(ILjava/lang/Object;)Ljava/lang/Object;" false)
+  (.visitInsn mv Opcodes/POP)
+  :void)
+
+(defn- emit-array-method-length!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "size" "()I" false)
+  ;; size() is a 32-bit int; widen to the Nex Integer (:long) result.
+  (emit-stack-coerce! mv :int jvm-type)
+  jvm-type)
+
+(defn- emit-array-method-is-empty!
+  [^MethodVisitor mv {:keys [target]} state-slot]
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "isEmpty" "()Z" false)
+  :boolean)
+
+(defn- emit-array-method-contains!
+  [^MethodVisitor mv {:keys [target args]} state-slot]
+  (emit-runtime-call! mv "array-contains"
+                      [(fn [] (emit-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+  (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
+  :boolean)
+
+(defn- emit-array-method-index-of!
+  [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+  (emit-runtime-call! mv "array-index-of"
+                      [(fn [] (emit-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+  (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Number")
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Number" "intValue" "()I" false)
+  (emit-stack-coerce! mv :int jvm-type)
+  jvm-type)
+
+(defn- emit-array-method-remove!
+  [^MethodVisitor mv {:keys [target args]} state-slot]
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+  (emit-as-int! mv (first args) state-slot)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "remove" "(I)Ljava/lang/Object;" false)
+  (.visitInsn mv Opcodes/POP)
+  :void)
+
+(defn- emit-array-method-reverse!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
+  (.visitInsn mv Opcodes/DUP)
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "reversed" "()Ljava/util/List;" false)
+  (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
+  jvm-type)
+
+(defn- emit-array-method-slice!
+  [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+  (emit-runtime-call! mv "array-slice"
+                      [(fn [] (emit-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))
+                       (fn [] (emit-boxed-expr! mv (second args) state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
+(defn- emit-array-method-take!
+  [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+  (emit-runtime-call! mv "array-take"
+                      [(fn [] (emit-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
+(defn- emit-array-method-drop!
+  [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+  (emit-runtime-call! mv "array-drop"
+                      [(fn [] (emit-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
+(defn- emit-array-method-take-last!
+  [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+  (emit-runtime-call! mv "array-take-last"
+                      [(fn [] (emit-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
+(defn- emit-array-method-drop-last!
+  [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+  (emit-runtime-call! mv "array-drop-last"
+                      [(fn [] (emit-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
+(defn- emit-array-method-concat!
+  [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
+  (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
+  (.visitInsn mv Opcodes/DUP)
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+  (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
+  (.visitInsn mv Opcodes/DUP)
+  (emit-expr! mv (first args) state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST "java/util/Collection")
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "addAll" "(Ljava/util/Collection;)Z" false)
+  (.visitInsn mv Opcodes/POP)
+  jvm-type)
+
+(defn- emit-array-method-last!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-expr! mv target state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
+  (.visitInsn mv Opcodes/DUP)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "size" "()I" false)
+  (.visitInsn mv Opcodes/ICONST_1)
+  (.visitInsn mv Opcodes/ISUB)
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "get" "(I)Ljava/lang/Object;" false)
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
+(defn- emit-array-method-sort!
+  [^MethodVisitor mv {:keys [target jvm-type] :as expr} state-slot]
+  (let [arg-emitters (cond-> [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                              (fn [] (emit-expr! mv target state-slot))]
+                       (first (:args expr))
+                       (conj (fn [] (emit-boxed-expr! mv (first (:args expr)) state-slot))))]
+    (emit-runtime-call! mv "array-sort" arg-emitters)
+    (emit-unbox-or-cast! mv jvm-type)
+    jvm-type))
+
+(defn- emit-array-method-to-string!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-runtime-call! mv "array-to-string"
+                      [(fn [] (emit-expr! mv target state-slot))])
+  (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
+  jvm-type)
+
+(defn- emit-array-method-equals!
+  [^MethodVisitor mv {:keys [target args]} state-slot]
+  (emit-runtime-call! mv "deep-equals"
+                      [(fn [] (emit-boxed-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+  (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
+  (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
+  :boolean)
+
+(defn- emit-array-method-clone!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-runtime-call! mv "clone-value"
+                      [(fn [] (emit-boxed-expr! mv target state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
+(defn- emit-array-method-cursor!
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-runtime-call! mv "collection-cursor"
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (.visitLdcInsn mv "Array"))
+                       (fn [] (emit-boxed-expr! mv target state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
+(def ^:private emit-array-method-dispatch
+  "Array method name -> `(fn [mv expr state-slot] -> jvm-type)`: the primary
+   dispatch table for `emit-array-method!`. \"push\"/\"at\"/\"set\"/\"size\"/
+   \"first\" are pure aliases (bytecode-identical to another entry once the
+   method name — and, for \"first\", the args — is rewritten), so they're
+   inline lambdas rather than named functions of their own."
+  {"get"       emit-array-method-get!
+   "add"       emit-array-method-add!
+   "push"      (fn [mv expr state-slot] (emit-collection-method! mv (assoc expr :method "add") state-slot))
+   "add_at"    emit-array-method-add-at!
+   "at"        (fn [mv expr state-slot] (emit-collection-method! mv (assoc expr :method "add_at") state-slot))
+   "put"       emit-array-method-put!
+   "set"       (fn [mv expr state-slot] (emit-collection-method! mv (assoc expr :method "put") state-slot))
+   "length"    emit-array-method-length!
+   "size"      (fn [mv expr state-slot] (emit-collection-method! mv (assoc expr :method "length") state-slot))
+   "is_empty"  emit-array-method-is-empty!
+   "contains"  emit-array-method-contains!
+   "index_of"  emit-array-method-index-of!
+   "remove"    emit-array-method-remove!
+   "reverse"   emit-array-method-reverse!
+   "slice"     emit-array-method-slice!
+   "take"      emit-array-method-take!
+   "drop"      emit-array-method-drop!
+   "take_last" emit-array-method-take-last!
+   "drop_last" emit-array-method-drop-last!
+   "concat"    emit-array-method-concat!
+   "first"     (fn [mv expr state-slot]
+                 (emit-collection-method! mv (assoc expr :method "get" :args [(ir/const-node 0 "Integer" :int)]) state-slot))
+   "last"      emit-array-method-last!
+   "sort"      emit-array-method-sort!
+   "to_string" emit-array-method-to-string!
+   "equals"    emit-array-method-equals!
+   "clone"     emit-array-method-clone!
+   "cursor"    emit-array-method-cursor!})
+
 (defn- emit-array-method!
   [^MethodVisitor mv expr state-slot]
-  (let [{:keys [collection-kind method target args jvm-type]} expr]
-    (case method
-      "get"
-      (do
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (emit-as-int! mv (first args) state-slot)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "get" "(I)Ljava/lang/Object;" false)
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
+  (if-let [handler (get emit-array-method-dispatch (:method expr))]
+    (handler mv expr state-slot)
+    (throw (ex-info "Unsupported collection method emission"
+                    {:expr expr}))))
 
-      "add"
-      (do
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (emit-boxed-expr-for-storage! mv (first args) state-slot)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "add" "(Ljava/lang/Object;)Z" false)
-        (.visitInsn mv Opcodes/POP)
-        :void)
-
-      "push"
-      (emit-collection-method! mv (assoc expr :method "add") state-slot)
-
-      "add_at"
-      (do
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (emit-as-int! mv (first args) state-slot)
-        (emit-boxed-expr-for-storage! mv (second args) state-slot)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "add" "(ILjava/lang/Object;)V" false)
-        :void)
-
-      "at"
-      (emit-collection-method! mv (assoc expr :method "add_at") state-slot)
-
-      "put"
-      (do
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (emit-as-int! mv (first args) state-slot)
-        (emit-boxed-expr-for-storage! mv (second args) state-slot)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "set" "(ILjava/lang/Object;)Ljava/lang/Object;" false)
-        (.visitInsn mv Opcodes/POP)
-        :void)
-
-      "set"
-      (emit-collection-method! mv (assoc expr :method "put") state-slot)
-
-      "length"
-      (do
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "size" "()I" false)
-        ;; size() is a 32-bit int; widen to the Nex Integer (:long) result.
-        (emit-stack-coerce! mv :int jvm-type)
-        jvm-type)
-
-      "size"
-      (emit-collection-method! mv (assoc expr :method "length") state-slot)
-
-      "is_empty"
-      (do
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "isEmpty" "()Z" false)
-        :boolean)
-
-      "contains"
-      (do
-        (emit-runtime-call! mv "array-contains"
-                            [(fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
-        :boolean)
-
-      "index_of"
-      (do
-        (emit-runtime-call! mv "array-index-of"
-                            [(fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Number")
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Number" "intValue" "()I" false)
-        (emit-stack-coerce! mv :int jvm-type)
-        jvm-type)
-
-      "remove"
-      (do
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (emit-as-int! mv (first args) state-slot)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "remove" "(I)Ljava/lang/Object;" false)
-        (.visitInsn mv Opcodes/POP)
-        :void)
-
-      "reverse"
-      (do
-        (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
-        (.visitInsn mv Opcodes/DUP)
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "reversed" "()Ljava/util/List;" false)
-        (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
-        jvm-type)
-
-      "slice"
-      (do
-        (emit-runtime-call! mv "array-slice"
-                            [(fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))
-                             (fn [] (emit-boxed-expr! mv (second args) state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "take"
-      (do
-        (emit-runtime-call! mv "array-take"
-                            [(fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "drop"
-      (do
-        (emit-runtime-call! mv "array-drop"
-                            [(fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "take_last"
-      (do
-        (emit-runtime-call! mv "array-take-last"
-                            [(fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "drop_last"
-      (do
-        (emit-runtime-call! mv "array-drop-last"
-                            [(fn [] (emit-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "concat"
-      (do
-        (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)
-        (.visitInsn mv Opcodes/DUP)
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (.visitMethodInsn mv Opcodes/INVOKESPECIAL arraylist-internal-name "<init>" "(Ljava/util/Collection;)V" false)
-        (.visitInsn mv Opcodes/DUP)
-        (emit-expr! mv (first args) state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST "java/util/Collection")
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "addAll" "(Ljava/util/Collection;)Z" false)
-        (.visitInsn mv Opcodes/POP)
-        jvm-type)
-
-      "first"
-      (emit-collection-method! mv (assoc expr :method "get" :args [(ir/const-node 0 "Integer" :int)]) state-slot)
-
-      "last"
-      (do
-        (emit-expr! mv target state-slot)
-        (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
-        (.visitInsn mv Opcodes/DUP)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "size" "()I" false)
-        (.visitInsn mv Opcodes/ICONST_1)
-        (.visitInsn mv Opcodes/ISUB)
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "get" "(I)Ljava/lang/Object;" false)
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "sort"
-      (let [arg-emitters (cond-> [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                                  (fn [] (emit-expr! mv target state-slot))]
-                           (first (:args expr))
-                           (conj (fn [] (emit-boxed-expr! mv (first (:args expr)) state-slot))))]
-        (emit-runtime-call! mv "array-sort" arg-emitters)
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "to_string"
-      (do
-        (emit-runtime-call! mv "array-to-string"
-                            [(fn [] (emit-expr! mv target state-slot))])
-        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
-        jvm-type)
-
-      "equals"
-      (do
-        (emit-runtime-call! mv "deep-equals"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))
-                             (fn [] (emit-boxed-expr! mv (first args) state-slot))])
-        (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Boolean")
-        (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
-        :boolean)
-
-      "clone"
-      (do
-        (emit-runtime-call! mv "clone-value"
-                            [(fn [] (emit-boxed-expr! mv target state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      "cursor"
-      (do
-        (emit-runtime-call! mv "collection-cursor"
-                            [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
-                             (fn [] (.visitLdcInsn mv "Array"))
-                             (fn [] (emit-boxed-expr! mv target state-slot))])
-        (emit-unbox-or-cast! mv jvm-type)
-        jvm-type)
-
-      (throw (ex-info "Unsupported collection method emission"
-                      {:expr expr})))))
 
 (defn- emit-map-method!
   [^MethodVisitor mv expr state-slot]
@@ -1782,273 +1804,284 @@
       (throw (ex-info "Unsupported concurrency method emission"
                       {:expr expr})))))
 
+(defn- emit-expr-const!
+  [^MethodVisitor mv expr _state-slot]
+  (emit-const! mv expr)
+  (:jvm-type expr))
+
+(defn- emit-expr-local!
+  [^MethodVisitor mv expr _state-slot]
+  (mark-local-debug-before! mv (:slot expr))
+  (.visitVarInsn mv (local-load-op (:jvm-type expr)) (:slot expr))
+  (mark-local-debug-after! mv (:slot expr))
+  (:jvm-type expr))
+
+(defn- emit-expr-this!
+  [^MethodVisitor mv expr _state-slot]
+  (.visitVarInsn mv Opcodes/ALOAD 0)
+  (:jvm-type expr))
+
+(defn- emit-expr-new!
+  [^MethodVisitor mv expr state-slot]
+  (.visitTypeInsn mv Opcodes/NEW (:class expr))
+  (.visitInsn mv Opcodes/DUP)
+  (.visitMethodInsn mv Opcodes/INVOKESPECIAL (:class expr) "<init>" "()V" false)
+  ;; Hand the object the state that made it (see the __state__ field): the
+  ;; emitted equals/hashCode need it and Java gives them no way to obtain it.
+  (.visitInsn mv Opcodes/DUP)
+  (.visitVarInsn mv Opcodes/ALOAD state-slot)
+  (.visitFieldInsn mv Opcodes/PUTFIELD (:class expr) "__state__"
+                   (str "L" repl-state-internal-name ";"))
+  (:jvm-type expr))
+
+(defn- emit-expr-top-get!
+  [^MethodVisitor mv expr state-slot]
+  (emit-load-values-map! mv state-slot)
+  (.visitLdcInsn mv ^String (:name expr))
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    hashmap-internal-name
+                    "get"
+                    "(Ljava/lang/Object;)Ljava/lang/Object;"
+                    false)
+  (emit-unbox-or-cast! mv (:jvm-type expr))
+  (:jvm-type expr))
+
+(defn- emit-expr-field-get!
+  [^MethodVisitor mv expr state-slot]
+  (emit-expr! mv (:target expr) state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST (:owner expr))
+  (.visitFieldInsn mv
+                   Opcodes/GETFIELD
+                   (:owner expr)
+                   (:field expr)
+                   (desc/jvm-type->descriptor (:jvm-type expr)))
+  (:jvm-type expr))
+
+(defn- emit-expr-static-field-get!
+  [^MethodVisitor mv expr _state-slot]
+  (.visitFieldInsn mv
+                   Opcodes/GETSTATIC
+                   (:owner expr)
+                   (:field expr)
+                   (desc/jvm-type->descriptor (:jvm-type expr)))
+  (:jvm-type expr))
+
+(defn- emit-expr-call-repl-fn!
+  [^MethodVisitor mv expr state-slot]
+  (emit-state-load-functions-map! mv state-slot)
+  (.visitLdcInsn mv ^String (:name expr))
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    hashmap-internal-name
+                    "get"
+                    "(Ljava/lang/Object;)Ljava/lang/Object;"
+                    false)
+  (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/reflect/Method")
+  (.visitInsn mv Opcodes/ACONST_NULL)
+  (.visitInsn mv Opcodes/ICONST_2)
+  (.visitTypeInsn mv Opcodes/ANEWARRAY "java/lang/Object")
+  (.visitInsn mv Opcodes/DUP)
+  (.visitInsn mv Opcodes/ICONST_0)
+  (.visitVarInsn mv Opcodes/ALOAD state-slot)
+  (.visitInsn mv Opcodes/AASTORE)
+  (.visitInsn mv Opcodes/DUP)
+  (.visitInsn mv Opcodes/ICONST_1)
+  (emit-boxed-arg-array! mv (:args expr) state-slot)
+  (.visitInsn mv Opcodes/AASTORE)
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    "java/lang/reflect/Method"
+                    "invoke"
+                    "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;"
+                    false)
+  (emit-unbox-or-cast! mv (:jvm-type expr))
+  (:jvm-type expr))
+
+(defn- emit-expr-call-function!
+  [^MethodVisitor mv expr state-slot]
+  (emit-runtime-var! mv "invoke-function-object")
+  (.visitVarInsn mv Opcodes/ALOAD state-slot)
+  (emit-boxed-expr! mv (:target expr) state-slot)
+  (emit-boxed-arg-array! mv (:args expr) state-slot)
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    var-internal-name
+                    "invoke"
+                    "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                    false)
+  (if (= :void (:jvm-type expr))
+    (do (.visitInsn mv Opcodes/POP) :void)
+    (do
+      (emit-unbox-or-cast! mv (:jvm-type expr))
+      (:jvm-type expr))))
+
+(defn- emit-expr-call-virtual!
+  [^MethodVisitor mv expr state-slot]
+  (emit-expr! mv (:target expr) state-slot)
+  (.visitTypeInsn mv Opcodes/CHECKCAST (:owner expr))
+  (.visitVarInsn mv Opcodes/ALOAD state-slot)
+  (emit-boxed-arg-array! mv (:args expr) state-slot)
+  (.visitMethodInsn mv
+                    Opcodes/INVOKEVIRTUAL
+                    (:owner expr)
+                    (:method expr)
+                    (:descriptor expr)
+                    false)
+  (emit-unbox-or-cast! mv (:jvm-type expr))
+  (:jvm-type expr))
+
+(defn- emit-expr-call-super-java!
+  [^MethodVisitor mv expr state-slot]
+  (emit-expr! mv (:target expr) state-slot)
+  (.visitMethodInsn mv Opcodes/INVOKESPECIAL (:owner expr) (:method expr) (:descriptor expr) false)
+  (let [java-kind (get primitive-class->jvm-type (:java-return-class expr))]
+    (cond
+      (= java-kind :void)
+      ;; The internal calling convention represents Void as a null Object; a
+      ;; bare call statement pops it, an expression context sees the same
+      ;; nil any other Void-returning Nex call would.
+      (.visitInsn mv Opcodes/ACONST_NULL)
+
+      java-kind
+      (let [{:keys [box-owner box-desc]} (get primitive-box-info java-kind)]
+        (.visitMethodInsn mv Opcodes/INVOKESTATIC box-owner "valueOf" box-desc false))
+
+      ;; A reference return is already Object-shaped on the stack — no
+      ;; conversion needed, matching Nex's own boxed-everything internal
+      ;; representation.
+      :else nil))
+  (:jvm-type expr))
+
+(defn- emit-expr-call-runtime!
+  [^MethodVisitor mv expr state-slot]
+  (or (emit-direct-runtime-helper-call! mv expr state-slot)
+      (do
+        (.visitLdcInsn mv "nex.compiler.jvm.runtime")
+        (.visitLdcInsn mv "invoke-builtin")
+        (.visitMethodInsn mv
+                          Opcodes/INVOKESTATIC
+                          rt-internal-name
+                          "var"
+                          "(Ljava/lang/String;Ljava/lang/String;)Lclojure/lang/Var;"
+                          false)
+        (.visitVarInsn mv Opcodes/ALOAD state-slot)
+        (.visitLdcInsn mv ^String (:helper expr))
+        (emit-boxed-arg-array! mv (:args expr) state-slot)
+        (.visitMethodInsn mv
+                          Opcodes/INVOKEVIRTUAL
+                          var-internal-name
+                          "invoke"
+                          "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                          false)
+        (if (= :void (:jvm-type expr))
+          (do (.visitInsn mv Opcodes/POP) :void)
+          (do (emit-unbox-or-cast! mv (:jvm-type expr))
+              (:jvm-type expr))))))
+
+(defn- emit-expr-unary!
+  [^MethodVisitor mv expr state-slot]
+  (let [operand-type (emit-expr! mv (:expr expr) state-slot)]
+    (case (:operator expr)
+      :not
+      (do
+        (when-not (= :boolean operand-type)
+          (throw (ex-info "Boolean not requires boolean operand"
+                          {:expr expr :jvm-type operand-type})))
+        (.visitInsn mv Opcodes/ICONST_1)
+        (.visitInsn mv Opcodes/IXOR)
+        (:jvm-type expr))
+
+      :bit-not
+      (do
+        ;; 32-bit bitwise island (see emit-binary!): narrow the operand to int,
+        ;; complement, then widen the result back to Nex Integer (:long).
+        (emit-stack-coerce! mv operand-type :int)
+        (.visitInsn mv Opcodes/ICONST_M1)
+        (.visitInsn mv Opcodes/IXOR)
+        (emit-stack-coerce! mv :int (:jvm-type expr))
+        (:jvm-type expr))
+
+      (do
+        (when-not (= operand-type (:jvm-type expr))
+          (throw (ex-info "Unary operand lowered to unexpected JVM type"
+                          {:expr expr
+                           :operand-jvm-type operand-type
+                           :expr-jvm-type (:jvm-type expr)})))
+        ;; Checked negation matches the interpreter: -Long.MIN_VALUE overflows
+        ;; and must raise rather than wrap back to Long.MIN_VALUE (LNEG).
+        (if (and (= :neg (:operator expr)) (= :long (:jvm-type expr)))
+          (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Math" "negateExact" "(J)J" false)
+          (.visitInsn mv (or (unary-opcode (:operator expr) (:jvm-type expr))
+                             (throw (ex-info "Unsupported unary opcode emission"
+                                             {:operator (:operator expr)
+                                              :jvm-type (:jvm-type expr)})))))
+        (:jvm-type expr)))))
+
+(defn- emit-expr-if!
+  [^MethodVisitor mv expr state-slot]
+  (let [else-label (Label.)
+        end-label (Label.)
+        test-type (emit-expr! mv (:test expr) state-slot)
+        then-exprs (:then expr)
+        else-exprs (:else expr)]
+    (when-not (= :boolean test-type)
+      (throw (ex-info "If test did not lower to boolean"
+                      {:expr expr :test-jvm-type test-type})))
+    (when (or (not= 1 (count then-exprs))
+              (not= 1 (count else-exprs)))
+      (throw (ex-info "If emission expects one expression per branch"
+                      {:expr expr})))
+    (.visitJumpInsn mv Opcodes/IFEQ else-label)
+    (let [result-type (:jvm-type expr)
+          then-type (emit-expr! mv (first then-exprs) state-slot)
+          else-type (do
+                      (emit-stack-coerce! mv then-type result-type)
+                      (.visitJumpInsn mv Opcodes/GOTO end-label)
+                      (.visitLabel mv else-label)
+                      (let [emitted-else-type (emit-expr! mv (first else-exprs) state-slot)]
+                        (emit-stack-coerce! mv emitted-else-type result-type)
+                        emitted-else-type))]
+      (.visitLabel mv end-label)
+      result-type)))
+
+(def ^:private emit-expr-dispatch
+  "IR node `:op` -> `(fn [mv expr state-slot] -> jvm-type)`: the primary
+   dispatch table for `emit-expr!`. `emit-binary!`/`emit-compare!` are only
+   forward-declared this early in the file (their own defns come later) —
+   wrapped for the same reason `infer-type-dispatch`'s `:call` entry in
+   lower.clj is; every other entry here is already defined above this
+   point, so it's referenced bare."
+  {:const              emit-expr-const!
+   :array-literal      emit-array-literal!
+   :map-literal        emit-map-literal!
+   :set-literal        emit-set-literal!
+   :local              emit-expr-local!
+   :this               emit-expr-this!
+   :new                emit-expr-new!
+   :top-get            emit-expr-top-get!
+   :field-get          emit-expr-field-get!
+   :static-field-get   emit-expr-static-field-get!
+   :call-repl-fn       emit-expr-call-repl-fn!
+   :call-function      emit-expr-call-function!
+   :call-virtual       emit-expr-call-virtual!
+   :call-super-java    emit-expr-call-super-java!
+   :call-runtime       emit-expr-call-runtime!
+   :collection-method  emit-collection-method!
+   :concurrency-method emit-concurrency-method!
+   :convert            emit-convert!
+   :unary              emit-expr-unary!
+   :binary             (fn [mv expr state-slot] (emit-binary! mv expr state-slot))
+   :compare            (fn [mv expr state-slot] (emit-compare! mv expr state-slot))
+   :if                 emit-expr-if!})
+
 (defn- emit-expr!
   [^MethodVisitor mv expr state-slot]
-  (case (:op expr)
-    :const
-    (do
-      (emit-const! mv expr)
-      (:jvm-type expr))
-
-    :array-literal
-    (emit-array-literal! mv expr state-slot)
-
-    :map-literal
-    (emit-map-literal! mv expr state-slot)
-
-    :set-literal
-    (emit-set-literal! mv expr state-slot)
-
-    :local
-    (do
-      (mark-local-debug-before! mv (:slot expr))
-      (.visitVarInsn mv (local-load-op (:jvm-type expr)) (:slot expr))
-      (mark-local-debug-after! mv (:slot expr))
-      (:jvm-type expr))
-
-    :this
-    (do
-      (.visitVarInsn mv Opcodes/ALOAD 0)
-      (:jvm-type expr))
-
-    :new
-    (do
-      (.visitTypeInsn mv Opcodes/NEW (:class expr))
-      (.visitInsn mv Opcodes/DUP)
-      (.visitMethodInsn mv Opcodes/INVOKESPECIAL (:class expr) "<init>" "()V" false)
-      ;; Hand the object the state that made it (see the __state__ field): the
-      ;; emitted equals/hashCode need it and Java gives them no way to obtain it.
-      (.visitInsn mv Opcodes/DUP)
-      (.visitVarInsn mv Opcodes/ALOAD state-slot)
-      (.visitFieldInsn mv Opcodes/PUTFIELD (:class expr) "__state__"
-                       (str "L" repl-state-internal-name ";"))
-      (:jvm-type expr))
-
-    :top-get
-    (do
-      (emit-load-values-map! mv state-slot)
-      (.visitLdcInsn mv ^String (:name expr))
-      (.visitMethodInsn mv
-                        Opcodes/INVOKEVIRTUAL
-                        hashmap-internal-name
-                        "get"
-                        "(Ljava/lang/Object;)Ljava/lang/Object;"
-                        false)
-      (emit-unbox-or-cast! mv (:jvm-type expr))
-      (:jvm-type expr))
-
-    :field-get
-    (do
-      (emit-expr! mv (:target expr) state-slot)
-      (.visitTypeInsn mv Opcodes/CHECKCAST (:owner expr))
-      (.visitFieldInsn mv
-                       Opcodes/GETFIELD
-                       (:owner expr)
-                       (:field expr)
-                       (desc/jvm-type->descriptor (:jvm-type expr)))
-      (:jvm-type expr))
-
-    :static-field-get
-    (do
-      (.visitFieldInsn mv
-                       Opcodes/GETSTATIC
-                       (:owner expr)
-                       (:field expr)
-                       (desc/jvm-type->descriptor (:jvm-type expr)))
-      (:jvm-type expr))
-
-    :call-repl-fn
-    (do
-      (emit-state-load-functions-map! mv state-slot)
-      (.visitLdcInsn mv ^String (:name expr))
-      (.visitMethodInsn mv
-                        Opcodes/INVOKEVIRTUAL
-                        hashmap-internal-name
-                        "get"
-                        "(Ljava/lang/Object;)Ljava/lang/Object;"
-                        false)
-      (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/reflect/Method")
-      (.visitInsn mv Opcodes/ACONST_NULL)
-      (.visitInsn mv Opcodes/ICONST_2)
-      (.visitTypeInsn mv Opcodes/ANEWARRAY "java/lang/Object")
-      (.visitInsn mv Opcodes/DUP)
-      (.visitInsn mv Opcodes/ICONST_0)
-      (.visitVarInsn mv Opcodes/ALOAD state-slot)
-      (.visitInsn mv Opcodes/AASTORE)
-      (.visitInsn mv Opcodes/DUP)
-      (.visitInsn mv Opcodes/ICONST_1)
-      (emit-boxed-arg-array! mv (:args expr) state-slot)
-      (.visitInsn mv Opcodes/AASTORE)
-      (.visitMethodInsn mv
-                        Opcodes/INVOKEVIRTUAL
-                        "java/lang/reflect/Method"
-                        "invoke"
-                        "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;"
-                        false)
-      (emit-unbox-or-cast! mv (:jvm-type expr))
-      (:jvm-type expr))
-
-    :call-function
-    (do
-      (emit-runtime-var! mv "invoke-function-object")
-      (.visitVarInsn mv Opcodes/ALOAD state-slot)
-      (emit-boxed-expr! mv (:target expr) state-slot)
-      (emit-boxed-arg-array! mv (:args expr) state-slot)
-      (.visitMethodInsn mv
-                        Opcodes/INVOKEVIRTUAL
-                        var-internal-name
-                        "invoke"
-                        "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
-                        false)
-      (if (= :void (:jvm-type expr))
-        (do (.visitInsn mv Opcodes/POP) :void)
-        (do
-          (emit-unbox-or-cast! mv (:jvm-type expr))
-          (:jvm-type expr))))
-
-    :call-virtual
-    (do
-      (emit-expr! mv (:target expr) state-slot)
-      (.visitTypeInsn mv Opcodes/CHECKCAST (:owner expr))
-      (.visitVarInsn mv Opcodes/ALOAD state-slot)
-      (emit-boxed-arg-array! mv (:args expr) state-slot)
-      (.visitMethodInsn mv
-                        Opcodes/INVOKEVIRTUAL
-                        (:owner expr)
-                        (:method expr)
-                        (:descriptor expr)
-                        false)
-      (emit-unbox-or-cast! mv (:jvm-type expr))
-      (:jvm-type expr))
-
-    :call-super-java
-    (do
-      (emit-expr! mv (:target expr) state-slot)
-      (.visitMethodInsn mv Opcodes/INVOKESPECIAL (:owner expr) (:method expr) (:descriptor expr) false)
-      (let [java-kind (get primitive-class->jvm-type (:java-return-class expr))]
-        (cond
-          (= java-kind :void)
-          ;; The internal calling convention represents Void as a null
-          ;; Object; a bare call statement pops it, an expression context
-          ;; sees the same nil any other Void-returning Nex call would.
-          (.visitInsn mv Opcodes/ACONST_NULL)
-
-          java-kind
-          (let [{:keys [box-owner box-desc]} (get primitive-box-info java-kind)]
-            (.visitMethodInsn mv Opcodes/INVOKESTATIC box-owner "valueOf" box-desc false))
-
-          ;; A reference return is already Object-shaped on the stack — no
-          ;; conversion needed, matching Nex's own boxed-everything internal
-          ;; representation.
-          :else nil))
-      (:jvm-type expr))
-
-    :call-runtime
-    (or (emit-direct-runtime-helper-call! mv expr state-slot)
-        (do
-          (.visitLdcInsn mv "nex.compiler.jvm.runtime")
-          (.visitLdcInsn mv "invoke-builtin")
-          (.visitMethodInsn mv
-                            Opcodes/INVOKESTATIC
-                            rt-internal-name
-                            "var"
-                            "(Ljava/lang/String;Ljava/lang/String;)Lclojure/lang/Var;"
-                            false)
-          (.visitVarInsn mv Opcodes/ALOAD state-slot)
-          (.visitLdcInsn mv ^String (:helper expr))
-          (emit-boxed-arg-array! mv (:args expr) state-slot)
-          (.visitMethodInsn mv
-                            Opcodes/INVOKEVIRTUAL
-                            var-internal-name
-                            "invoke"
-                            "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
-                            false)
-          (if (= :void (:jvm-type expr))
-            (do (.visitInsn mv Opcodes/POP) :void)
-            (do (emit-unbox-or-cast! mv (:jvm-type expr))
-                (:jvm-type expr)))))
-
-    :collection-method
-    (emit-collection-method! mv expr state-slot)
-
-    :concurrency-method
-    (emit-concurrency-method! mv expr state-slot)
-
-    :convert
-    (emit-convert! mv expr state-slot)
-
-    :unary
-    (let [operand-type (emit-expr! mv (:expr expr) state-slot)]
-      (case (:operator expr)
-        :not
-        (do
-          (when-not (= :boolean operand-type)
-            (throw (ex-info "Boolean not requires boolean operand"
-                            {:expr expr :jvm-type operand-type})))
-          (.visitInsn mv Opcodes/ICONST_1)
-          (.visitInsn mv Opcodes/IXOR)
-          (:jvm-type expr))
-
-        :bit-not
-        (do
-          ;; 32-bit bitwise island (see emit-binary!): narrow the operand to int,
-          ;; complement, then widen the result back to Nex Integer (:long).
-          (emit-stack-coerce! mv operand-type :int)
-          (.visitInsn mv Opcodes/ICONST_M1)
-          (.visitInsn mv Opcodes/IXOR)
-          (emit-stack-coerce! mv :int (:jvm-type expr))
-          (:jvm-type expr))
-
-        (do
-          (when-not (= operand-type (:jvm-type expr))
-            (throw (ex-info "Unary operand lowered to unexpected JVM type"
-                            {:expr expr
-                             :operand-jvm-type operand-type
-                             :expr-jvm-type (:jvm-type expr)})))
-          ;; Checked negation matches the interpreter: -Long.MIN_VALUE overflows
-          ;; and must raise rather than wrap back to Long.MIN_VALUE (LNEG).
-          (if (and (= :neg (:operator expr)) (= :long (:jvm-type expr)))
-            (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Math" "negateExact" "(J)J" false)
-            (.visitInsn mv (or (unary-opcode (:operator expr) (:jvm-type expr))
-                               (throw (ex-info "Unsupported unary opcode emission"
-                                               {:operator (:operator expr)
-                                                :jvm-type (:jvm-type expr)})))))
-          (:jvm-type expr))))
-
-    :binary
-    (emit-binary! mv expr state-slot)
-
-    :compare
-    (emit-compare! mv expr state-slot)
-
-    :if
-    (let [else-label (Label.)
-          end-label (Label.)
-          test-type (emit-expr! mv (:test expr) state-slot)
-          then-exprs (:then expr)
-          else-exprs (:else expr)]
-      (when-not (= :boolean test-type)
-        (throw (ex-info "If test did not lower to boolean"
-                        {:expr expr :test-jvm-type test-type})))
-      (when (or (not= 1 (count then-exprs))
-                (not= 1 (count else-exprs)))
-        (throw (ex-info "If emission expects one expression per branch"
-                        {:expr expr})))
-      (.visitJumpInsn mv Opcodes/IFEQ else-label)
-      (let [result-type (:jvm-type expr)
-            then-type (emit-expr! mv (first then-exprs) state-slot)
-            else-type (do
-                        (emit-stack-coerce! mv then-type result-type)
-                        (.visitJumpInsn mv Opcodes/GOTO end-label)
-                        (.visitLabel mv else-label)
-                        (let [emitted-else-type (emit-expr! mv (first else-exprs) state-slot)]
-                          (emit-stack-coerce! mv emitted-else-type result-type)
-                          emitted-else-type))]
-        (.visitLabel mv end-label)
-        result-type))
-
+  (if-let [handler (get emit-expr-dispatch (:op expr))]
+    (handler mv expr state-slot)
     (throw (ex-info "Unsupported IR expression emission"
                     {:expr expr :op (:op expr)}))))
+
 
 (defn- emit-binary!
   [^MethodVisitor mv expr state-slot]
