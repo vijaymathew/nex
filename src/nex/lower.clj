@@ -2494,6 +2494,19 @@
                            (map (fn [[name type]] {:name name :type type}))
                            (sort-by :name)
                            vec)
+          ;; A name this nested closure captures is free from *this* scope's
+          ;; point of view too, unless `local-types` (this level's own
+          ;; params/lets) already supplies it. When it isn't, the enclosing
+          ;; closure must also capture it — it has to hold the value in a
+          ;; field of its own so it can hand it to the nested closure's
+          ;; constructor at the point it builds it. Without this, only
+          ;; directly-referenced names ever reach `captures` here, so a
+          ;; capture two (or more) closures deep never propagates outward:
+          ;; the enclosing closure compiles as if it captured nothing, and
+          ;; lowering the nested closure's construction inside it then can't
+          ;; resolve the name at all.
+          _ (doseq [{:keys [name]} capture-vec]
+              (capture-reference! captures local-types (:var-types ctx) name))
           runtime-object? (seq capture-vec)
           ;; (:class-def expr) still holds the call<N> method's *original*
           ;; body — attach-capture-fields only adds capture fields, it never
