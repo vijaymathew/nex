@@ -806,14 +806,16 @@
     (reset! (:imports ctx) (vec @(:imports state)))
     (when-let [compiled-state-slot (:compiled-state ctx)]
       (reset! compiled-state-slot state))
+    ;; A plain Clojure map, not a java.util.HashMap: register-class (called
+    ;; whenever this rebuilt ctx's own interpreted code registers a further
+    ;; nested closure's class-def, e.g. a closure inside a closure) does
+    ;; `(swap! (:classes ctx) assoc ...)`, which needs a real Associative —
+    ;; the mutable HashMap this used to build let reads through `get` work
+    ;; (Clojure's `get` accepts any java.util.Map) but broke that swap! with
+    ;; a ClassCastException the first time it actually fired.
     (swap! (:classes ctx)
            (fn [builtins]
-             (let [copy (HashMap.)]
-               (doseq [[k v] builtins]
-                 (.put copy k v))
-               (doseq [[k v] @(:classes state)]
-                 (.put copy k v))
-               copy)))
+             (into builtins @(:classes state))))
     (doseq [[k v] @(:values state)]
       (interp/env-define (:globals ctx) k v))
     ;; Make top-level functions resolvable by name from interpreted (deoptimized)
