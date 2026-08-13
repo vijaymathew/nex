@@ -3770,11 +3770,15 @@
 
 (defn- lower-implicit-self-call
   [env expr arg-irs]
-  (let [method-def (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+  (let [own-method-def (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+        method-def (or own-method-def
                        (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr))))
         nex-type (function-return-type method-def)
         jvm-type (resolve-jvm-type env nex-type)]
-    (if (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
+    (cond
+      ;; Declared with a real body on this exact class: INVOKEVIRTUAL against
+      ;; it links fine, since the bytecode for it lives right here.
+      (and own-method-def (not (lowered-deferred-method? (current-class-def env) own-method-def)))
       (ir/call-virtual-node (:internal-name (class-jvm-meta env (:this-type env)))
                             (lowered-instance-method-name method-def)
                             (desc/repl-instance-method-descriptor)
@@ -3783,6 +3787,25 @@
                             arg-irs
                             nex-type
                             jvm-type)
+
+      ;; Declared on this class but deferred (no body compiled here) — e.g. a
+      ;; deferred class's own routine calling one of its sibling deferred
+      ;; features without `this.`. INVOKEVIRTUAL against this class has no
+      ;; method to link to, so dispatch through __outer__/reflection instead,
+      ;; the same way an explicit `this.` call resolves an overridden method.
+      own-method-def
+      (let [outer-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                        "__outer__"
+                                        (ir/this-node (:this-type env)
+                                                      (exact-class-jvm-type env (:this-type env)))
+                                        "Any"
+                                        (ir/object-jvm-type "java/lang/Object"))]
+        (ir/call-runtime-node (str "user-method:" (:method expr))
+                              (into [outer-ir] arg-irs)
+                              nex-type
+                              jvm-type))
+
+      :else
       (let [{:keys [owner-internal-name carrier-owner carrier-field carrier-jvm-type]}
             (get (direct-parent-method-map env (current-class-def env))
                  [(:method expr) (count (:args expr))])]
