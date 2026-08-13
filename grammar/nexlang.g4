@@ -411,9 +411,10 @@ multiplication
     ;
 
 unary
-    : MINUS unary          # unaryMinus
-    | NOT unary            # unaryNot
-    | postfix              # postfixExpr
+    : MINUS unary               # unaryMinus
+    | NOT unary                 # unaryNot
+    | QMARK postfix AS IDENTIFIER # attachedTest
+    | postfix                   # postfixExpr
     ;
 
 postfix

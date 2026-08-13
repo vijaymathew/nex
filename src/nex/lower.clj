@@ -2197,6 +2197,20 @@
                       :boolean
                       temp-slot)]))
 
+(defn- lower-attached-test-expression
+  [env {:keys [value var-name] :as expr}]
+  (let [binding (or (lookup-convert-binding env var-name)
+                    (throw (ex-info "attached-test binding must exist before lowering expression"
+                                    {:expr expr
+                                     :var-name var-name})))
+        [env' temp-slot] (alloc-temp-slot env)]
+    [(assoc env :next-slot (:next-slot env'))
+     (ir/attached-test-node (lower-expression env value)
+                            binding
+                            "Boolean"
+                            :boolean
+                            temp-slot)]))
+
 (declare lower-expression)
 
 (defn- ensure-convert-bindings
@@ -2207,6 +2221,23 @@
               [env'' (conj bindings lowered-binding)]))
           [env []]
           (tc/convert-guard-bindings condition)))
+
+;; Attached-test bindings reuse ensure-convert-binding's slot-allocation (a
+;; detachable/reference slot the JVM verifier accepts a nil store into,
+;; narrowed by refine-condition-branch-env once inside the guarded branch —
+;; same VerifyError concern refine-var-non-nil documents for convert): unlike
+;; a `convert` guard, there's no user-written target type in the AST, so it's
+;; inferred here from <value> with lower's own infer-type-or-any.
+(defn- ensure-attached-test-bindings
+  [env condition]
+  (reduce (fn [[env' bindings] {:keys [name value]}]
+            (let [[env'' lowered-binding] (ensure-convert-binding
+                                            env'
+                                            {:var-name name
+                                             :type (tc/attachable-type (infer-type-or-any env' value))})]
+              [env'' (conj bindings lowered-binding)]))
+          [env []]
+          (tc/attached-test-guards condition)))
 
 (defn- lower-boolean-condition
   [env expr]
@@ -2226,14 +2257,17 @@
         [right-env
          (ir/binary-node :or left-ir right-ir "Boolean" :boolean)])
 
-      (let [[env' _] (ensure-convert-bindings (scoped-child-env env) expr)]
-        [env' (lower-expression env' expr)]))
-    (let [[env' _] (ensure-convert-bindings (scoped-child-env env) expr)]
-      [env' (lower-expression env' expr)])))
+      (let [[env' _] (ensure-convert-bindings (scoped-child-env env) expr)
+            [env'' _] (ensure-attached-test-bindings env' expr)]
+        [env'' (lower-expression env'' expr)]))
+    (let [[env' _] (ensure-convert-bindings (scoped-child-env env) expr)
+          [env'' _] (ensure-attached-test-bindings env' expr)]
+      [env'' (lower-expression env'' expr)])))
 
 (defn- convert-binding-init-stmts
   [env condition]
-  (->> (tc/convert-guard-bindings condition)
+  (->> (concat (tc/convert-guard-bindings condition)
+               (tc/attached-test-guards condition))
        (keep (fn [{:keys [name]}]
                (when-let [{:keys [kind slot nex-type jvm-type]} (lookup-convert-binding env name)]
                  (when (= kind :local)
@@ -2286,7 +2320,17 @@
                    :else acc)
                  name))
               env'
-              (tc/convert-guard-bindings condition)))
+              ;; convert-guard-bindings' :type comes straight from the AST
+              ;; (the user-written target type); an attached-test guard has
+              ;; none, so its current (pre-refinement) type is looked up from
+              ;; the binding ensure-attached-test-bindings already allocated
+              ;; in `env'` — see lower-boolean-condition.
+              (concat (tc/convert-guard-bindings condition)
+                      (keep (fn [{:keys [name]}]
+                              (when-let [t (or (get-in env' [:locals name :nex-type])
+                                               (get (:var-types env') name))]
+                                {:name name :type t}))
+                            (tc/attached-test-guards condition)))))
 
     :else
     (if-let [var-name (tc/guarded-else-non-nil-var condition)]
@@ -2623,6 +2667,9 @@
     (assoc expr :expr (rewrite-expression-for-closures ctx local-types captures (:expr expr)))
 
     (= :convert (:type expr))
+    (assoc expr :value (rewrite-expression-for-closures ctx local-types captures (:value expr)))
+
+    (= :attached-test (:type expr))
     (assoc expr :value (rewrite-expression-for-closures ctx local-types captures (:value expr)))
 
     (= :create (:type expr))
@@ -3307,6 +3354,10 @@
   [env expr]
   (second (lower-convert-expression env expr)))
 
+(defn- lower-expr-attached-test
+  [env expr]
+  (second (lower-attached-test-expression env expr)))
+
 (defn- lower-expr-anonymous-function
   [env expr]
   (let [class-name (:class-name expr)
@@ -3379,6 +3430,7 @@
    :when               lower-expr-when
    :old                lower-expr-old
    :convert            lower-expr-convert
+   :attached-test      lower-expr-attached-test
    :create             (fn [env expr] (lower-create-expr env expr))
    :anonymous-function lower-expr-anonymous-function
    :spawn              lower-expr-spawn
@@ -4217,6 +4269,16 @@
                           (let [[env' _] (ensure-convert-binding env (:value stmt))
                                 [env'' convert-ir] (lower-convert-expression env' (:value stmt))]
                             [env'' convert-ir])
+
+                          (= :attached-test (:type (:value stmt)))
+                          (let [attached-node (:value stmt)
+                                [env' _] (ensure-convert-binding
+                                          env
+                                          {:var-name (:var-name attached-node)
+                                           :type (tc/attachable-type
+                                                  (infer-type-or-any env (:value attached-node)))})
+                                [env'' attached-ir] (lower-attached-test-expression env' attached-node)]
+                            [env'' attached-ir])
 
                           :else
                           [env (lower-expression env (:value stmt))])

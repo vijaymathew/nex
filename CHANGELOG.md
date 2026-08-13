@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **New: object-test syntax `?<expr> as <name>` for narrowing detachable
+  (`?T`) values.** `if ?age as a then ... end` binds `a` to `age`'s attached
+  value when `age` isn't `nil`. Unlike `x /= nil`, `<expr>` isn't limited to
+  a bare identifier — `?p.age as a` and `?p?.age as a` narrow a dotted or
+  safe-navigated chain directly — and `and`-chains of these guards narrow
+  each conjunct in turn (`?p.age as a and ?q.age as b`). Supported on both
+  the tree-walking interpreter and the JVM backend (the REPL falls back to
+  the interpreter for it, with a warning). See `docs/md/SYNTAX.md`. Also
+  fixes a related pre-existing bug: arithmetic on a value narrowed by the
+  older `x /= nil` check (e.g. `age + 1` inside `if age /= nil then`) could
+  fail typechecking even though comparisons on the same narrowed value
+  worked — both now behave consistently.
+
 - **New: `Process` can spawn and control child OS processes.**
   `create Process.command("ls -lat")` (shell-word split) or
   `create Process.command("ls", ["-lat"])` (explicit argv) build a child

@@ -230,6 +230,18 @@
    :nex-type nex-type
    :jvm-type jvm-type})
 
+;; `?<expr> as <name>` (object test) — simpler than :convert above: the
+;; typechecker already proved <expr>'s static type is detachable, so all
+;; that's left at runtime is a nil test, no runtime type-compatibility check.
+(defn attached-test-node
+  [value binding nex-type jvm-type temp-slot]
+  {:op :attached-test
+   :value value
+   :binding binding
+   :temp-slot temp-slot
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
 (defn field-set-node [owner field target expr nex-type jvm-type]
   {:op :field-set
    :owner owner

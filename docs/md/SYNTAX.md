@@ -963,6 +963,28 @@ if convert vehicle_1 to my_car:Car then
 end
 ```
 
+## Object Test: `?<expr> as <name>`
+
+```nex
+?<expr> as <name>
+```
+
+- `<expr>` must have a detachable (`?T`) type. Returns `true` if `<expr>` is
+  non-`nil`, else `false`.
+- On success, `<name>` is bound to `<expr>`'s attached (non-detachable) value
+  for the branch this guards.
+- Unlike `x /= nil`, `<expr>` can be any expression, not just a bare
+  identifier — a dotted chain (`?p.age as a`) or a safe-navigation read
+  (`?p?.age as a`) narrows directly, no intermediate `let` needed.
+- Chains of `and` are each narrowed in turn, so a later conjunct can use an
+  earlier one's binding:
+
+```nex
+if ?p.age as a and ?q.age as b then
+  result := if a < b then -1 elseif a > b then 1 else 0 end
+end
+```
+
 ## Anonymous Functions
 
 ```nex

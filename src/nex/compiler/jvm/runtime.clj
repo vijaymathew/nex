@@ -1138,6 +1138,8 @@
   (when-let [class-name (compiled-runtime-class-name state value)]
     (str "#<" class-name " object>")))
 
+(declare format-value-with-state)
+
 (defn- concat-string-value
   [state value]
   (cond
@@ -1149,6 +1151,13 @@
     (bi/concat-string-value (rebuild-interpreter-ctx state) value)
 
     (nil? value) "nil"
+
+    ;; A collection falls through to format-value-with-state (mutually
+    ;; recursive with this function — see its own docstring) rather than the
+    ;; generic to_string dispatch below, which has no state to invoke a
+    ;; nested element's to_string with.
+    (or (rt/nex-array? value) (rt/nex-map? value) (rt/nex-set? value))
+    (format-value-with-state state value)
 
     :else
     (let [string-value
@@ -1174,13 +1183,32 @@
    (and value
         (find-user-method value (lowered-instance-method-name "to_string" 0)))))
 
-(defn- print-value
+(defn- format-value-with-state
+  "Like format-value, but recurses into Array/Map/Set elements with state so a
+   nested object's to_string override is honored (compiled or, via
+   concat-string-value's interpreter bridge, an interpreter-native object from
+   a deoptimized closure) instead of falling through to Clojure's raw
+   `#object[...]` rendering — format-value alone has no state to invoke a user
+   method with. Mirrors print-value's own top-level logic, generalized so it
+   can also run on each element; also used directly by array-to-string/
+   map-to-string/set-to-string for the explicit `.to_string()` method call."
   [state value]
-  (if (or (interp/nex-object? value)
-          (has-user-to-string? value))
+  (cond
+    (rt/nex-set? value) (rt/nex-set-str (partial format-value-with-state state) value)
+    (rt/nex-map? value) (rt/nex-map-str (partial format-value-with-state state) value)
+    (rt/nex-array? value) (rt/nex-array-str (partial format-value-with-state state) value)
+
+    (or (interp/nex-object? value)
+        (has-user-to-string? value))
     (concat-string-value state value)
+
+    :else
     (or (nex-object-render state value)
         (format-value value))))
+
+(defn- print-value
+  [state value]
+  (format-value-with-state state value))
 
 (defn any-to-string
   "The `to_string` that the Any protocol gives every value, for a receiver whose
@@ -2127,17 +2155,24 @@
   (bi/call-builtin-method nil value value "cursor" []))
 
 (defn array-to-string
-  [values]
-  (rt/nex-array-str format-value values))
+  "state is threaded through so a nested object's to_string override is
+   honored (format-value-with-state), matching print's behavior — see that
+   function's docstring. Called with just `values` from any spot that has no
+   state at hand, e.g. array-to-string's own use as a REPL/debug helper;
+   falls back to the plain, non-recursing format-value there."
+  ([values] (rt/nex-array-str format-value values))
+  ([state values] (rt/nex-array-str (partial format-value-with-state state) values)))
 
 (defn map-to-string
-  [values]
-  (if (rt/nex-map? values)
-    (rt/nex-map-str format-value values)
-    (str "{"
-         (str/join ", " (for [^java.util.Map$Entry e (.entrySet ^java.util.Map values)]
-                          (str (format-value (.getKey e)) ": " (format-value (.getValue e)))))
-         "}")))
+  ([values] (map-to-string nil values))
+  ([state values]
+   (let [fmt (if state (partial format-value-with-state state) format-value)]
+     (if (rt/nex-map? values)
+       (rt/nex-map-str fmt values)
+       (str "{"
+            (str/join ", " (for [^java.util.Map$Entry e (.entrySet ^java.util.Map values)]
+                             (str (fmt (.getKey e)) ": " (fmt (.getValue e)))))
+            "}")))))
 
 ;; The compiled JVM path represents Set as a java.util.LinkedHashSet (see
 ;; emit-set-literal!), so these helpers operate on it directly rather than via the
@@ -2145,8 +2180,9 @@
 ;; with the interpreter's value-semantics set is a separate (Phase 4) step.
 
 (defn set-to-string
-  [values]
-  (str "#{" (str/join ", " (map format-value values)) "}"))
+  ([values] (set-to-string nil values))
+  ([state values]
+   (str "#{" (str/join ", " (map (if state (partial format-value-with-state state) format-value) values)) "}")))
 
 (defn set-union
   [a b]

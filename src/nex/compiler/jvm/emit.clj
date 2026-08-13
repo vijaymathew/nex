@@ -1234,6 +1234,64 @@
                     false)
   :boolean)
 
+(defn- emit-non-null-check!
+  "Consume the reference on top of stack, pushing 1/0 for non-null/null."
+  [^MethodVisitor mv]
+  (let [true-label (Label.)
+        end-label (Label.)]
+    (.visitJumpInsn mv Opcodes/IFNONNULL true-label)
+    (.visitInsn mv Opcodes/ICONST_0)
+    (.visitJumpInsn mv Opcodes/GOTO end-label)
+    (.visitLabel mv true-label)
+    (.visitInsn mv Opcodes/ICONST_1)
+    (.visitLabel mv end-label)))
+
+;; `?<expr> as <name>`: unlike emit-convert! above, no runtime type-compatibility
+;; check is needed — the typechecker already proved <expr>'s static type is
+;; detachable, so the only question left at runtime is whether it's nil. <value>
+;; is stashed in temp-slot (so it can be read twice — once to store into
+;; <binding>'s slot, once for the null test — without stack-order juggling
+;; around the two different binding :kind stores), evaluated exactly once.
+(defn- emit-attached-test!
+  [^MethodVisitor mv {:keys [value binding temp-slot]} state-slot]
+  (let [value-type (emit-expr! mv value state-slot)]
+    (when (contains? ir/primitive-jvm-types value-type)
+      (emit-box! mv value-type)))
+  (.visitVarInsn mv Opcodes/ASTORE temp-slot)
+
+  ;; Each branch below loads its own copy from temp-slot rather than sharing
+  ;; one pre-loaded value: :top's own sequence (map, key, value) needs the
+  ;; value last, so a shared load-before-case (as emit-convert! above uses,
+  ;; where both branches start from the same freshly-AALOAD'd array element)
+  ;; would leave :local's leftover copy stranded under :top's [map key value],
+  ;; corrupting the stack (VerifyError) once :top's own load re-pushes it.
+  (case (:kind binding)
+    :local
+    (do
+      (.visitVarInsn mv Opcodes/ALOAD temp-slot)
+      (emit-unbox-or-cast! mv (:jvm-type binding))
+      (.visitVarInsn mv (local-store-op (:jvm-type binding)) (:slot binding)))
+
+    :top
+    (do
+      (emit-load-values-map! mv state-slot)
+      (.visitLdcInsn mv ^String (:name binding))
+      (.visitVarInsn mv Opcodes/ALOAD temp-slot)
+      (.visitMethodInsn mv
+                        Opcodes/INVOKEVIRTUAL
+                        hashmap-internal-name
+                        "put"
+                        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                        false)
+      (.visitInsn mv Opcodes/POP))
+
+    (throw (ex-info "Unsupported attached-test binding kind"
+                    {:binding binding})))
+
+  (.visitVarInsn mv Opcodes/ALOAD temp-slot)
+  (emit-non-null-check! mv)
+  :boolean)
+
 (declare emit-collection-method!)
 
 (defn- emit-array-method-get!
@@ -1396,7 +1454,8 @@
 (defn- emit-array-method-to-string!
   [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
   (emit-runtime-call! mv "array-to-string"
-                      [(fn [] (emit-expr! mv target state-slot))])
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (emit-expr! mv target state-slot))])
   (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
   jvm-type)
 
@@ -1568,7 +1627,8 @@
 (defn- emit-map-method-to-string!
   [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
   (emit-runtime-call! mv "map-to-string"
-                      [(fn [] (emit-expr! mv target state-slot))])
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (emit-expr! mv target state-slot))])
   (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
   jvm-type)
 
@@ -1673,7 +1733,8 @@
 (defn- emit-set-method-to-string!
   [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
   (emit-runtime-call! mv "set-to-string"
-                      [(fn [] (emit-expr! mv target state-slot))])
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (emit-expr! mv target state-slot))])
   (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
   jvm-type)
 
@@ -2083,6 +2144,7 @@
    :collection-method  emit-collection-method!
    :concurrency-method emit-concurrency-method!
    :convert            emit-convert!
+   :attached-test      emit-attached-test!
    :unary              emit-expr-unary!
    :binary             (fn [mv expr state-slot] (emit-binary! mv expr state-slot))
    :compare            (fn [mv expr state-slot] (emit-compare! mv expr state-slot))

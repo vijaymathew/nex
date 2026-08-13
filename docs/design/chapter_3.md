@@ -68,6 +68,8 @@ The same explicit treatment applies to channels and `select`. The checker regist
 
 The checker tracks proven non-`nil` facts in the type environment. This gives it limited but useful flow-sensitive behaviour: after certain checks, a variable may be treated as safely non-detachable within a particular branch. The implementation records locally justified facts in the environment and uses them where appropriate. It does not attempt global dataflow analysis or theorem proving — the goal is precision where it is achievable without obscurity.
 
+The plain `x /= nil` form only ever proves a fact about a bare identifier, and only one fact per guard — `and`-ing two of them together does not compose. `?<expr> as <name>` (documented in [`docs/md/SYNTAX.md`](https://github.com/vijaymathew/nex/blob/main/docs/md/SYNTAX.md)) exists to cover the cases that leaves out: `<expr>` can be any expression, including a dotted chain the identifier-only check can't name at all, and a chain of `and`s narrows each conjunct as the checker walks left to right. It still follows this section's own rule — no dataflow analysis, just a locally justified fact recorded in the environment at the point the guard is proven.
+
 
 
 ## 3.3 Conservative by Design
