@@ -29,6 +29,8 @@ The present typechecker is intentionally conservative. A type system that cannot
 
 That choice has a cost. There is genuine room for more precise reasoning in several areas: flow-sensitive narrowing of detachable types, stronger generic constraints, better interaction between contract clauses and static analysis, and more rigorous checking of inheritance obligations. Each of these would catch real errors that the current checker misses.
 
+The narrowing gap is partly closed, deliberately not automatically: `?<expr> as <name>` (see "Nil and Detachability" in Chapter 3) lets a programmer name the fact they want proven — including for a dotted expression the plain `x /= nil` check can't reach — rather than asking the checker to infer it. That keeps that section's "no dataflow analysis" commitment intact; a value narrowed this way is still explained by a fact the programmer wrote down, not one the checker derived.
+
 The implementation pressure falls almost entirely on [`src/nex/typechecker.clj`](https://github.com/vijaymathew/nex/blob/main/src/nex/typechecker.clj) — specifically on environment refinement, generic substitution and method lookup, and the interaction between static analysis and the contract representation in the AST. These are not independent changes. A contributor should expect them to interact, and should test each addition against the principle that the resulting rules remain explainable to a reader without a background in type theory.
 
 The danger is real: a type system can become substantially more powerful while becoming much less useful as a teaching tool. Expansion here should be slow and deliberate.

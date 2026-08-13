@@ -2554,6 +2554,19 @@
     (env-define (:current-env ctx) var-name (if ok? v nil))
     ok?))
 
+;; `?<expr> as <name>` (object test): simpler than :convert above — no
+;; runtime type-compatibility check needed, since the typechecker already
+;; proved <expr>'s static type is detachable, so all that's left at runtime
+;; is a nil test. <expr> is evaluated once and <name> bound to its value
+;; (nil or not) in the current dynamic scope, same as :convert does, so the
+;; binding is visible to the rest of the `if`/`elseif`/`until` block sharing
+;; this ctx.
+(defmethod eval-node :attached-test
+  [ctx {:keys [value var-name]}]
+  (let [v (eval-node ctx value)]
+    (env-define (:current-env ctx) var-name v)
+    (some? v)))
+
 (defmethod eval-node :if
   [ctx {:keys [condition then elseif else]}]
   (maybe-debug-pause ctx {:type :if :condition condition :then then :elseif elseif :else else})

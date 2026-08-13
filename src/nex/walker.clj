@@ -1853,6 +1853,13 @@
        {:type :unary
         :operator "not"
         :expr (transform-node (first rest-children))}
+       ;; `?<expr> as <name>` (object test): true iff <expr> is non-nil, in
+       ;; which case <name> is bound to <expr>'s attached (non-detachable)
+       ;; value for the guarded branch.
+       (= first-child "?")
+       {:type :attached-test
+        :value (transform-node (first rest-children))
+        :var-name (token-text (nth rest-children 2))}
        :else
        (transform-node first-child)))
 
@@ -1871,6 +1878,15 @@
      {:type :unary
       :operator "not"
       :expr (transform-node expr)})
+
+   ;; `?<expr> as <name>` (object test): true iff <expr> is non-nil, in which
+   ;; case <name> is bound to <expr>'s attached (non-detachable) value for the
+   ;; guarded branch. See tc/attached-test-guards and lower's mirror of it.
+   :attachedTest
+   (fn [[_ _qmark value-node _as var-name]]
+     {:type :attached-test
+      :value (transform-node value-node)
+      :var-name (token-text var-name)})
 
    :postfixExpr
    (fn [[_ postfix]]

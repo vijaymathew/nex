@@ -62,6 +62,7 @@
                     (:var-name expr)
                     ":"
                     (format-type (:target-type expr)))
+      :attached-test (str "?" (format-expression (:value expr)) " as " (:var-name expr))
       :binary (str (format-expression (:left expr))
                    " " (:operator expr) " "
                    (format-expression (:right expr)))

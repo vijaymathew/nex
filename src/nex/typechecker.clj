@@ -445,14 +445,23 @@
   (and (map? t) (true? (:detachable t))))
 
 (defn attachable-type
-  "Return type with detachable marker removed (normalized)."
+  "Return type with detachable marker removed (normalized). A simple named
+   type (no type-params/param-types/return-type) collapses back to a bare
+   string, matching how the walker represents a non-detachable, non-generic
+   type — e.g. attachable-type of ?Integer's {:base-type \"Integer\"
+   :detachable true} is the string \"Integer\", not {:base-type \"Integer\"},
+   which is-numeric-type?/is-comparable-type? (plain string equality checks)
+   would not recognize as numeric/comparable."
   [t]
   (let [n (normalize-type t)]
     (if (map? n)
-      (cond-> (dissoc n :detachable)
-        (:type-params n) (update :type-params #(mapv attachable-type %))
-        (:param-types n) (update :param-types #(mapv (fn [p] (update p :type attachable-type)) %))
-        (:return-type n) (update :return-type attachable-type))
+      (let [m (cond-> (dissoc n :detachable)
+                (:type-params n) (update :type-params #(mapv attachable-type %))
+                (:param-types n) (update :param-types #(mapv (fn [p] (update p :type attachable-type)) %))
+                (:return-type n) (update :return-type attachable-type))]
+        (if (and (= (keys m) [:base-type]) (string? (:base-type m)))
+          (:base-type m)
+          m))
       n)))
 
 (defn expand-type-aliases
@@ -942,6 +951,7 @@
 (declare check-method)
 (declare convert-guard-binding)
 (declare convert-guard-bindings)
+(declare attached-test-guards)
 (declare resolve-generic-type)
 (declare build-generic-type-map)
 (declare lookup-class-field-member)
@@ -1791,6 +1801,9 @@
       (doseq [{:keys [name type]} (convert-guard-bindings condition)]
         (env-add-var env name type)
         (env-mark-non-nil env name))
+      (doseq [{:keys [name value]} (attached-test-guards condition)]
+        (env-add-var env name (attachable-type (check-expression env value)))
+        (env-mark-non-nil env name))
       env)
 
     :else
@@ -1825,6 +1838,29 @@
          (= "and" (:operator condition)))
     (vec (concat (convert-guard-bindings (:left condition))
                  (convert-guard-bindings (:right condition))))
+
+    :else []))
+
+(defn attached-test-guards
+  "Extract {:name :value} pairs for `?<expr> as <name>` guards that are
+   guaranteed true in a true condition, decomposing `and` conjunctions the
+   same way convert-guard-bindings does. Pure/syntactic like
+   guarded-non-nil-var — unlike a `convert` guard, an attached-test's bound
+   type isn't in the AST (no user-written target type), so it is left for
+   the caller to resolve via its own type inference (check-expression here;
+   lower.clj's infer-type for the compiled backend)."
+  [condition]
+  (cond
+    (nil? condition) []
+
+    (and (map? condition) (= :attached-test (:type condition)))
+    [{:name (:var-name condition) :value (:value condition)}]
+
+    (and (map? condition)
+         (= :binary (:type condition))
+         (= "and" (:operator condition)))
+    (vec (concat (attached-test-guards (:left condition))
+                 (attached-test-guards (:right condition))))
 
     :else []))
 
@@ -1904,6 +1940,21 @@
                                     (display-type target-type)))})))
     ;; convert may fail at runtime, so variable is detachable in this scope.
     (env-add-var env var-name (detachable-version target-type))
+    "Boolean"))
+
+(defn check-attached-test
+  "Type-check `?<expr> as <name>` (object test): <expr> must be a detachable
+   type. The expression itself is Boolean; <name>'s binding to <expr>'s
+   attached value happens separately, in apply-condition-branch-refinement!
+   via attached-test-guards, mirroring how a `convert` guard's binding is
+   handled apart from its own Boolean type here."
+  [env {:keys [value]}]
+  (let [value-type (check-expression env value)]
+    (when-not (detachable-type? (normalize-type value-type))
+      (throw (ex-info "'?' test requires a detachable type"
+                      {:error (type-error
+                               (str "'?' test requires a detachable type, got "
+                                    (display-type value-type)))})))
     "Boolean"))
 
 (declare check-create)
@@ -3359,6 +3410,7 @@
    :when               check-expr-when
    :old                check-expr-old
    :convert            check-convert
+   :attached-test      check-attached-test
    :spawn              check-spawn
    :this               check-expr-this
    :super              check-expr-super})
