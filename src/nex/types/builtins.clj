@@ -199,6 +199,7 @@
 
 (declare nex-format-value)
 (declare call-builtin-method)
+(declare format-value-with-ctx)
 
 (def Precondition "Precondition")
 (def Postcondition "Postcondition")
@@ -511,6 +512,7 @@
   [ctx value]
   (cond
     (string? value) value
+    (or (nex-array? value) (nex-map? value) (nex-set? value)) (format-value-with-ctx ctx value)
     :else (or (user-to-string ctx value)
               (call-builtin-method nil nil value "to_string" []))))
 
@@ -817,7 +819,7 @@
                                   :return-type {:base-type "Array" :type-params ["T"]}}]}
                   (fn [arr other & _] (nex-array-concat arr other))
     "to_string"   ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
-                  (fn [arr & _] (nex-array-str arr))
+                  (fn [arr & rest] (if-let [ctx (first rest)] (format-value-with-ctx ctx arr) (nex-array-str arr)))
     "equals"      ^{:returns "Boolean"
                     :signatures [{:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}] :return-type "Boolean"}]}
                   (fn [arr other & _] (nex-deep-equals? arr other))
@@ -862,7 +864,7 @@
     "remove"       ^{:returns "Void" :signatures [{:params [{:name "key" :type "K"}] :return-type "Void"}]}
                    (fn [m key & _] (nex-map-remove m key))
     "to_string"    ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
-                   (fn [m & _] (nex-map-str m))
+                   (fn [m & rest] (if-let [ctx (first rest)] (format-value-with-ctx ctx m) (nex-map-str m)))
     "equals"       ^{:returns "Boolean"
                      :signatures [{:params [{:name "other" :type {:base-type "Map" :type-params ["K" "V"]}}] :return-type "Boolean"}]}
                    (fn [m other & _] (nex-deep-equals? m other))
@@ -902,7 +904,7 @@
                              :signatures [{:params [] :return-type {:base-type "Array" :type-params ["T"]}}]}
                            (fn [s & _] (nex-set-to-array s))
     "to_string"            ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
-                           (fn [s & _] (nex-set-str s))
+                           (fn [s & rest] (if-let [ctx (first rest)] (format-value-with-ctx ctx s) (nex-set-str s)))
     "equals"               ^{:returns "Boolean"
                              :signatures [{:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}] :return-type "Boolean"}]}
                            (fn [s other & _] (nex-deep-equals? s other))
@@ -1254,6 +1256,8 @@
               (let [type-name (get-type-name value)]
                 (or (and (= type-name :Array)
                          (contains? #{"sort" "contains" "index_of"} method-name))
+                    (and (contains? #{:Array :Map :Set} type-name)
+                         (= method-name "to_string"))
                     (= type-name :Min_Heap))))
        (apply method-fn value (concat args [ctx]))
        (apply method-fn value args))
@@ -1277,14 +1281,27 @@
   [ctx class-name parent-name]
   ((:is-parent? @engine-hooks) ctx class-name parent-name))
 
-(defn print-output-value
-  "Convert a value for built-in print/println output.
-   Preserve existing formatting for non-objects, but respect user-defined
-   to_string implementations on Nex objects."
+(defn format-value-with-ctx
+  "Like nex-format-value, but recurses into Array/Map/Set elements with a
+   context so a nested Nex object's to_string override is honoured instead of
+   falling straight to the generic \"#<ClassName object>\" placeholder —
+   nex-format-value itself takes no ctx and can't call a user method at all.
+   Top-level object formatting reuses concat-string-value, the already-correct
+   to_string-or-placeholder logic print-output-value used to call directly."
   [ctx value]
-  (if (nex-object? value)
-    (concat-string-value ctx value)
-    (nex-format-value value)))
+  (cond
+    (nex-object? value) (concat-string-value ctx value)
+    (nex-set? value) (rt/nex-set-str (partial format-value-with-ctx ctx) value)
+    (nex-map? value) (rt/nex-map-str (partial format-value-with-ctx ctx) value)
+    (nex-array? value) (rt/nex-array-str (partial format-value-with-ctx ctx) value)
+    :else (nex-format-value value)))
+
+(defn print-output-value
+  "Convert a value for built-in print/println output. Respects user-defined
+   to_string implementations on Nex objects, including ones nested inside an
+   Array/Map/Set being printed."
+  [ctx value]
+  (format-value-with-ctx ctx value))
 
 (defn runtime-type-name [value]
   (typeinfo/runtime-type-name nex-object? get-type-name value))

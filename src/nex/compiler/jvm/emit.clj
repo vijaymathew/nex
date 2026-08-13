@@ -1454,7 +1454,8 @@
 (defn- emit-array-method-to-string!
   [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
   (emit-runtime-call! mv "array-to-string"
-                      [(fn [] (emit-expr! mv target state-slot))])
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (emit-expr! mv target state-slot))])
   (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
   jvm-type)
 
@@ -1626,7 +1627,8 @@
 (defn- emit-map-method-to-string!
   [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
   (emit-runtime-call! mv "map-to-string"
-                      [(fn [] (emit-expr! mv target state-slot))])
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (emit-expr! mv target state-slot))])
   (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
   jvm-type)
 
@@ -1731,7 +1733,8 @@
 (defn- emit-set-method-to-string!
   [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
   (emit-runtime-call! mv "set-to-string"
-                      [(fn [] (emit-expr! mv target state-slot))])
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (emit-expr! mv target state-slot))])
   (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/String")
   jvm-type)
 
