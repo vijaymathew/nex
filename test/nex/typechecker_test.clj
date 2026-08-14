@@ -1411,6 +1411,59 @@ end"
       (is (some #(re-find #"must initialize attachable fields: a" %)
                 (map tc/format-type-error (:errors result)))))))
 
+(deftest test-attachable-field-initialized-via-this-constructor-delegation
+  (testing "A constructor that only initializes a field by delegating to a
+sibling constructor via this.ctor(...) counts as initializing it"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+
+class B
+  feature
+    a: A
+  create
+    make() do
+      a := create A
+    end
+    make_via_delegation() do
+      this.make()
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-attachable-field-not-initialized-through-delegation-cycle
+  (testing "A pure this.ctor(...) delegation cycle initializes nothing, and is
+still rejected rather than looping forever"
+    (let [code "class A
+  feature
+    show() do
+      print(\"A\")
+    end
+end
+
+class B
+  feature
+    a: A
+  create
+    x() do
+      this.y()
+    end
+    y() do
+      this.x()
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"must initialize attachable fields: a" %)
+                (map tc/format-type-error (:errors result)))))))
+
 (deftest test-detachable-cannot-assign-to-attachable
   (testing "A detachable value cannot be assigned to attachable variable"
     (let [code "class A
