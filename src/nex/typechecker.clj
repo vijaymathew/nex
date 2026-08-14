@@ -2497,7 +2497,14 @@
       (and (= (:base-type call-info) "Function")
            (map? (:target-type call-info))
            (:return-type (:target-type call-info))
-           (re-matches #"call\d+" (str method)))
+           ;; A nil method is the walker's shape for calling an expression's
+           ;; result directly — `a(1)(2)(3)`: each call past the first has no
+           ;; identifier to attach as `:method`, only a `:target` that is
+           ;; itself the previous call (see :postfix's "Call on expression
+           ;; result: (expr)(...)" case). That's exactly a callN invocation
+           ;; on a Function-typed target, same as the explicit `f.call1(x)`
+           ;; spelling below — just without the name.
+           (or (nil? method) (re-matches #"call\d+" (str method))))
       (check-typed-function-call env expr call-info)
 
       :else
@@ -3517,7 +3524,7 @@
   "Check an expression against an expected type when contextual typing matters,
    especially for collection literals with annotated target types."
   [env expr expected-type]
-  (let [expected-type (normalize-type expected-type)]
+  (let [expected-type (normalize-type (expand-type-aliases env expected-type))]
     (cond
       (and (map? expr)
            (= :array-literal (:type expr))
@@ -3598,11 +3605,27 @@
                                    (str "Expected a Function with " (count expected-params)
                                         " parameter" (if (= 1 (count expected-params)) "" "s")
                                         ", got one with " (count own-params) "."))})))
-        (check-expr-anonymous-function
-         env
-         (patch-anonymous-function-types expr
-                                         (mapv :type expected-params)
-                                         (:return-type expected-type)))
+        (let [patched (patch-anonymous-function-types expr
+                                                       (mapv :type expected-params)
+                                                       (:return-type expected-type))
+              ;; A param/return already declared on the literal itself is left
+              ;; untouched by patch-anonymous-function-types (only nil slots
+              ;; are filled from EXPECTED-TYPE) — so a fully- or partially-
+              ;; typed `fn` can still disagree with the context it's being
+              ;; checked against (e.g. a nested `Function(...)` return type
+              ;; that doesn't match a scalar expected return). Comparing the
+              ;; patched signature back against EXPECTED-TYPE here catches
+              ;; that instead of silently trusting the arity check above.
+              actual-type {:base-type "Function"
+                          :param-types (mapv (fn [p] {:name (:name p) :type (:type p)})
+                                             (:params patched))
+                          :return-type (:return-type patched)}]
+          (when-not (types-compatible? env actual-type expected-type)
+            (throw (ex-info "Anonymous function type does not match expected Function type"
+                            {:error (type-error
+                                     (str "Expected " (display-type expected-type)
+                                          ", got " (display-type actual-type)))})))
+          (check-expr-anonymous-function env patched))
         expected-type)
 
       :else

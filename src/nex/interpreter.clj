@@ -2222,6 +2222,22 @@
       this-own-ctor?
       (dispatch-parent-call ctx (:current-object ctx) (:current-class-name ctx) method arg-values)
 
+      ;; `a(1)(2)(3)` — invoking the result of a call/expression directly, no
+      ;; member name to dispatch on (see :postfix's "Call on expression
+      ;; result: (expr)(...)" case in the walker, and the matching lowering
+      ;; branch in `lower-general-receiver-call`). `obj` is already the
+      ;; evaluated callable (an anonymous-function object, a compiled
+      ;; Function instance, or a plain Clojure fn); route it through the
+      ;; ordinary callN dispatch on that value, same as a Function-valued
+      ;; field invoked with parens does just below in
+      ;; `resolve-nex-object-field-or-any-protocol`.
+      (and (nil? method) (some? obj))
+      (eval-call-with-target ctx
+                             {:target {:type :literal :value obj}
+                              :method (str "call" (count arg-values))
+                              :has-parens true}
+                             arg-values)
+
       (nex-object? obj)
       (invoke-nex-object-call ctx target target-name method obj has-parens arg-values)
 

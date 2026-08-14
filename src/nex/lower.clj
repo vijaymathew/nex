@@ -2960,9 +2960,14 @@
    `:anonymous-function` node with a nil param or return type and VAR-TYPE is
    a matching-arity structural `Function(...)` (arity mismatches are left for
    the typechecker's own, already-correct error — this pass only fills gaps,
-   it does not validate)."
+   it does not validate). VAR-TYPE is resolved through `resolve-type-alias`
+   first so a `declare type Pred = Function(...)` alias used as the `let`'s
+   annotation is seen through to its underlying structural shape, the same
+   way the typechecker's own `check-expression-with-expected` now does via
+   `expand-type-aliases`."
   [var-type value]
-  (let [needs-patch? (and (map? var-type) (= (:base-type var-type) "Function")
+  (let [var-type (resolve-type-alias var-type)
+        needs-patch? (and (map? var-type) (= (:base-type var-type) "Function")
                           (:param-types var-type)
                           (map? value) (= :anonymous-function (:type value))
                           (= (count (:params value)) (count (:param-types var-type)))
@@ -3045,7 +3050,10 @@
 
 (defn prepare-program-for-closures
   [program opts]
-  (let [program (resolve-anonymous-function-context-types program)
+  (let [program (binding [*type-aliases* (merge *type-aliases*
+                                                 (into {} (map (juxt :name :type-expr)
+                                                               (:type-aliases program))))]
+                  (resolve-anonymous-function-context-types program))
         visible-functions (vec (concat (:functions program) (:functions opts)))
         visible-classes (merge-visible-classes (builtin-class-defs)
                                                (:classes program)
@@ -4321,6 +4329,21 @@
         target-type (when-not java-static-owner
                       (resolve-type-alias (infer-type env target-expr)))]
     (cond
+      ;; `a(1)(2)(3)` — invoking the result of a call/expression directly,
+      ;; no member name to dispatch on. The walker gives every call past the
+      ;; first a nil `:method` and a `:target` that is itself the previous
+      ;; call (see :postfix's "Call on expression result: (expr)(...)"
+      ;; case); the typechecker's matching branch in `check-target-call`
+      ;; treats this exactly like the named `f.call1(x)` spelling. Lower it
+      ;; the same way the no-target `f(...)` case already does for a
+      ;; Function-valued identifier (`lower-call-without-target`'s
+      ;; `function-object-call?` branch) — just with TARGET-EXPR's own IR in
+      ;; place of an identifier lookup.
+      (and (nil? (:method expr)) (= "Function" (base-type-name target-type)))
+      (let [nex-type (or (:return-type target-type) "Any")
+            jvm-type (resolve-jvm-type env nex-type)]
+        (ir/call-function-node (lower-expression env target-expr) arg-irs nex-type jvm-type))
+
       java-static-owner
       (lower-java-static-owner-call env expr java-static-owner arg-irs)
 
