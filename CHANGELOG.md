@@ -2,6 +2,91 @@
 
 ## Unreleased
 
+## 0.3.5 - 2026-08-14
+
+- **New: a constructor may delegate to another constructor of the same class
+  with `this.ctor(...)`**, so shared initialization lives in one place
+  instead of being duplicated across every constructor:
+  `default do this.make(0) end`. Reaches only a constructor declared
+  directly on the same class (never an inherited one — use `super.ctor(...)`
+  or `ParentClass.ctor(...)` for that, as before). Implemented on both
+  backends: the compiled backend invokes the target constructor directly on
+  `this` (no `_parent_X` composition field to step through, and no generic
+  type-argument translation, since the callee is the exact same — possibly
+  generic — class as the caller); the interpreter reuses its existing
+  parent-constructor dispatch machinery with the current class standing in
+  for "parent". The existing void-safety check (every constructor must
+  initialize all attachable fields) now recognizes that a constructor whose
+  only initialization is a `this.ctor(...)` delegation still definitely
+  initializes those fields, resolved transitively through chained
+  delegations. See `docs/md/SYNTAX.md`.
+
+- **New: an anonymous function's parameter and return types can be inferred
+  from a target `Function(...)` type**, instead of always being spelled out
+  on `fn` itself: `let is_big: Function(Box): Boolean := fn(b) do result :=
+  b.v > 10 end`. Types are filled in positionally from the target wherever
+  one is available at the point the literal appears — currently a typed
+  `let`'s own declared type. Individual parameters may still be annotated
+  explicitly and mixed with inferred ones. With no target type available,
+  omitted parameter types are a clear compile-time error rather than a
+  silent fallback (see the related fix below) — the same applies to a
+  return type an inferred body needs (e.g. one that assigns `result`).
+  Function-type parameter names have always been optional
+  (`Function(Box): Boolean` needs no `b:`); this pairs with that. See
+  `docs/md/SYNTAX.md`.
+
+- **Fixed: an omitted parameter type on a method, constructor, or free
+  function silently defaulted to `Any` instead of being rejected.** This was
+  dead, untested legacy behavior — every real declaration in the language
+  always specifies its parameter types — that also stood in the way of the
+  anonymous-function inference above (an unannotated `fn` parameter needs to
+  mean "infer this", not "this is Any"). An omitted type is now a
+  compile-time error everywhere except an anonymous function with an
+  inferrable target type.
+
+- **Fixed: passing a free function by name where a `Function(...)`-typed
+  value was expected** (e.g. `filter_items(is_rare_or_legendary)`, passing
+  a `function`-declared routine rather than an `fn(...)` literal) failed
+  typechecking with a confusing "Expected Function(...), got
+  X_Function" — the typechecker never recognized a free function's
+  generated wrapper class as compatible with a structural `Function(...)`
+  target. Fixing that surfaced a second, deeper bug on the compiled
+  backend: even once accepted by the typechecker, lowering had no code path
+  to produce an actual value for a bare free-function-name reference, and
+  silently lowered it to a null read — passing typechecking, then crashing
+  at the first call with "Cannot invoke Void as a function". Fixed by
+  teaching the compiled backend to resolve such a reference through the
+  runtime's existing function-by-name registry (already used to let
+  deoptimized closures call back into compiled top-level functions),
+  instead of leaving the reference unresolved.
+
+- **Fixed: a builtin scalar method (e.g. `.round`) called directly on a
+  parenthesized expression that itself calls another method implicitly on
+  `this`** (e.g. `(stats.value * rarity_multiplier).round` inside a method
+  that reads `rarity_multiplier` as a bare identifier) failed lowering with
+  an opaque "Unable to infer expression type during lowering", even though
+  the equivalent `let r := (...); r.round` worked. Root cause: resolving a
+  builtin scalar method's return type falls back to a self-contained
+  typecheck of just that sub-expression, which wasn't seeded with the
+  enclosing class context a bare implicit-`this` call needs to resolve.
+
+- **Fixed: an undefined type named only in an anonymous function's parameter
+  or return-type annotation** (`fn(item: Typo): Boolean do ... end`) wasn't
+  caught by the dedicated undefined-type check that covers every other
+  declaration position (fields, method/constructor parameters, return
+  types, typed `let`s). It silently resolved as `Any` instead, and the
+  first field access it enabled failed later with a confusing "Undefined
+  field ... on Any" pointing at the wrong place instead of naming the real
+  typo.
+
+- **Fixed (Emacs mode): `ensure` was indented one level too deep when the
+  method body's last statement before it was shaped like a bare,
+  receiverless call** (e.g. `print()`), which the indentation logic
+  couldn't distinguish from a parameterless method signature — both match
+  the same regexp. The backward scan now also checks that a candidate
+  signature line is genuinely followed by `do`/`require`, which a body
+  statement never is.
+
 ## 0.3.4 - 2026-08-14
 
 - **New: object-test syntax `?<expr> as <name>` for narrowing detachable
