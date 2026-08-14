@@ -566,6 +566,28 @@ Returns 0 if at top level or inside a class."
       (looking-back nex-method-signature-re
                     (line-beginning-position)))))
 
+(defun nex-signature-line-p ()
+  "Return t if the line at point (after leading whitespace) is a genuine
+method/feature/constructor signature, not a same-shaped body statement.
+`nex-method-signature-re' alone cannot tell them apart: a bare, receiverless
+call statement ending a line -- `print()' -- has exactly the shape of a
+parameterless feature declaration.  The two are told apart by what follows:
+a real signature is always directly followed (skipping blank and `note'
+lines) by its `require' or `do' clause, whereas a body statement's next line
+is more of the body, `ensure', or `end'."
+  (and (looking-at nex-method-signature-re)
+       (save-excursion
+         (forward-line 1)
+         (while (and (not (eobp))
+                     (progn (beginning-of-line)
+                            (skip-chars-forward " \t")
+                            (or (looking-at "^\\s-*$")
+                                (looking-at "\\bnote\\b"))))
+           (forward-line 1))
+         (beginning-of-line)
+         (skip-chars-forward " \t")
+         (looking-at "\\b\\(do\\|require\\)\\b"))))
+
 (defun nex-is-contract-after-method ()
   "Return t if current line is require/ensure/do after a method name."
   (save-excursion
@@ -599,12 +621,12 @@ CUR-KW is the contract keyword on the current line."
                       ;; Skip body statements (assignments, calls, etc) when looking for method
                       ;; Stop at loop-starting keywords that own their own do..end
                       (and (not (looking-at "\\b\\(do\\|require\\|ensure\\|feature\\|create\\|class\\|end\\|across\\|from\\|repeat\\|with\\)\\b"))
-                           (not (looking-at nex-method-signature-re))))))
+                           (not (nex-signature-line-p))))))
       (forward-line -1))
     ;; Check if we found a method/constructor name or another contract keyword
     (beginning-of-line)
     (skip-chars-forward " \t")
-    (or (and (looking-at nex-method-signature-re)
+    (or (and (nex-signature-line-p)
              (not (looking-at nex-section-keyword-re)))
         (looking-at "\\brequire\\b")
         ;; Landing on a 'do' anchors a method body: it lines up an 'ensure'
@@ -632,7 +654,7 @@ CUR-KW is the contract keyword on the current line."
                       ;; whatever precedes the definition.
                       (and (not (looking-at nex-free-function-re))
                            (or (looking-at nex-section-keyword-re)
-                               (and (not (looking-at nex-method-signature-re))
+                               (and (not (nex-signature-line-p))
                                     (not (looking-at "\\b\\(do\\|require\\|ensure\\)\\b"))))))))
       (forward-line -1))
     ;; Should be at method name or contract keyword line now
