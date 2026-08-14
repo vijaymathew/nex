@@ -973,6 +973,7 @@
 ;;
 
 (declare check-expression)
+(declare check-expression-with-expected)
 (declare collect-class-info)
 (declare check-class)
 (declare check-method)
@@ -1493,6 +1494,21 @@
 
 (defn- check-call-signature
   [env method args method-sig type-map & {:keys [arg-types]}]
+  ;; Deliberately does NOT check each argument with its positional parameter's
+  ;; type as an expected-type hint (the way check-let does for a typed `let`).
+  ;; That would let an unannotated `fn(item) do ... end` call argument
+  ;; typecheck via the same inference `check-expression-with-expected`'s
+  ;; `:anonymous-function` case supports — but the compiled backend's
+  ;; anonymous-function class compilation runs as a whole-program pass before
+  ;; any individual call site is lowered, and resolving a call argument's
+  ;; expected type requires the call's *receiver* type (scope-aware: locals,
+  ;; fields, `this`), not just a literal annotation sitting right there like a
+  ;; `let`'s. Teaching lowering to do that is a much bigger, scope-tracking
+  ;; rewrite (on the order of the existing closure-capture pass) that hasn't
+  ;; been built yet. Supporting it here without lowering support would
+  ;; typecheck fine and then crash with an opaque lowering error — so for now
+  ;; the shorthand is `let`-context only; a call argument still needs an
+  ;; explicit `fn(item: T): R do ... end`.
   (let [arg-types (or arg-types (mapv #(check-expression env %) args))
         params (:params method-sig)]
     (when (not= (count args) (count params))
@@ -3361,6 +3377,34 @@
     ;; stable static type is Function.
     "Function"))
 
+(defn- patch-anonymous-function-types
+  "Return EXPR (an `:anonymous-function` node) with every param whose `:type`
+   is nil filled in from PARAM-TYPES (positional), and a nil `:return-type`
+   filled in from RETURN-TYPE. An already-declared type is left untouched, so
+   this is a no-op for a fully-annotated `fn(...)`. Patches both the node's
+   own `:params`/`:return-type` and the mirrored copies inside its embedded
+   `:class-def`'s single method member — `check-expr-anonymous-function`
+   reads only the latter (via `collect-class-info`/`check-method`), so both
+   must agree or the check would run against the stale, unpatched signature."
+  [expr param-types return-type]
+  (let [patched-params (mapv (fn [p t] (if (:type p) p (assoc p :type t)))
+                             (:params expr) param-types)
+        patched-return (or (:return-type expr) return-type)
+        patch-method (fn [m] (assoc m :params patched-params :return-type patched-return))
+        patch-class-def
+        (fn [class-def]
+          (update class-def :body
+                  (fn [sections]
+                    (mapv (fn [section]
+                            (if (= :feature-section (:type section))
+                              (update section :members
+                                      #(mapv (fn [m] (cond-> m (= :method (:type m)) patch-method)) %))
+                              section))
+                          sections))))]
+    (-> expr
+        (assoc :params patched-params :return-type patched-return)
+        (update :class-def patch-class-def))))
+
 (defn- check-expr-when
   [env expr]
   (let [cond-type (check-expression env (:condition expr))
@@ -3524,6 +3568,41 @@
                               {:error (type-error
                                        (str "Set elements must have same type, got "
                                             (display-type elem-type) " and " (display-type actual-elem-type)))})))))
+        expected-type)
+
+      ;; `fn(item) do ... end` — an anonymous function with some or all of its
+      ;; parameter types (and/or its return type) omitted, checked against a
+      ;; structural `Function(...)` target. This is the only place such an
+      ;; omission can be resolved: `fn`'s params/return-type are fixed once,
+      ;; at the source-level literal, so the *first* (and, in practice, only)
+      ;; context that ever sees this literal alongside a concrete expected
+      ;; type is here — a typed `let` (`check-let` already calls this
+      ;; function with the declared type) or a call argument (see
+      ;; `check-call-signature`, updated to do the same per-argument). Once
+      ;; checked, this returns EXPECTED-TYPE itself (matching the
+      ;; array/map/set-literal branches above) rather than the generic bare
+      ;; "Function" `check-expr-anonymous-function` would otherwise report,
+      ;; both because that's already known compatible and because it carries
+      ;; the concrete signature a caller further up (e.g. another `let` that
+      ;; copies this one without its own annotation) might still need.
+      (and (map? expr)
+           (= :anonymous-function (:type expr))
+           (map? expected-type)
+           (= (:base-type expected-type) "Function")
+           (:param-types expected-type))
+      (let [expected-params (:param-types expected-type)
+            own-params (:params expr)]
+        (when (not= (count own-params) (count expected-params))
+          (throw (ex-info "Anonymous function parameter count does not match expected Function type"
+                          {:error (type-error
+                                   (str "Expected a Function with " (count expected-params)
+                                        " parameter" (if (= 1 (count expected-params)) "" "s")
+                                        ", got one with " (count own-params) "."))})))
+        (check-expr-anonymous-function
+         env
+         (patch-anonymous-function-types expr
+                                         (mapv :type expected-params)
+                                         (:return-type expected-type)))
         expected-type)
 
       :else
@@ -4208,11 +4287,43 @@
      (str "'retry' may appear only inside a rescue block; found it elsewhere in "
           kind " '" routine-name "'."))))
 
+(defn- require-declared-param-types!
+  "Throw unless every param has a non-nil `:type`. A param's type is nil only
+   when the source omitted it (`nexlang.g4`'s `param` production allows a
+   bare identifier everywhere a typed param is legal, and the walker no
+   longer defaults the missing type to \"Any\" — see `nex.walker`'s `:param`
+   transform). For an ordinary method/constructor/free-function this is
+   always a real error: there is exactly one declaration site, so there is
+   nothing to infer a type *from*. For an anonymous function (`fn(...)`)
+   omitting a type is meaningful — its class-def reaches `check-method` here
+   only after `check-expression-with-expected` has already tried to fill
+   every nil in from a surrounding `Function(...)`-typed context (a typed
+   `let`, or the matching parameter of a call target) and patched the
+   class-def accordingly; a nil that survives to here means no such context
+   was available, so this is the single place that failure surfaces, for
+   every caller of `check-method`."
+  [class-name owner-kind owner-name params]
+  (doseq [{:keys [name type]} params]
+    (when (nil? type)
+      (let [anonymous? (.startsWith ^String class-name "AnonymousFunction_")]
+        (throw (ex-info (str "Parameter '" name "' of " owner-kind " '" owner-name "' has no declared type")
+                        {:error (type-error
+                                 (if anonymous?
+                                   (str "Cannot infer the type of parameter '" name
+                                        "' for this anonymous function. Either declare it explicitly "
+                                        "(`fn(" name ": SomeType) ...`), or use the function where a "
+                                        "concrete `Function(...)` type can be inferred from context "
+                                        "(a typed `let`, or a call argument whose parameter is "
+                                        "`Function(...)`-typed).")
+                                   (str "Parameter '" name "' of " owner-kind " '" owner-name
+                                        "' must declare a type.")))}))))))
+
 (defn check-method
   "Check a method definition"
   [env class-name {:keys [name params return-type require body ensure rescue] :as method}]
   (check-distinct-parameters! params "routine" name)
   (check-old-and-retry! "routine" name params require body ensure)
+  (require-declared-param-types! class-name "method" name params)
   ;; Validate parameter and return type annotations (generic constraints)
   (doseq [param params]
     (when (:type param)
@@ -4292,6 +4403,7 @@
   [env class-name {:keys [name params require body ensure rescue] :as constructor}]
   (check-distinct-parameters! params "constructor" name)
   (check-old-and-retry! "constructor" name params require body ensure)
+  (require-declared-param-types! class-name "constructor" name params)
   (let [ctor-env (make-type-env env)]
     ;; Track current class for this/super resolution
     (env-add-var ctor-env "__current_class__" class-name)

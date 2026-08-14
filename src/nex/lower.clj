@@ -2931,9 +2931,122 @@
                         section))
                     sections)))))
 
+(defn- patch-anonymous-function-class-def
+  "Rebuild CLASS-DEF's single method member with PATCHED-PARAMS/PATCHED-RETURN
+   — the mirrored copy of an :anonymous-function node's own :params/
+   :return-type that `nex.lower`'s class-compilation actually reads."
+  [class-def patched-params patched-return]
+  (let [patch-section
+        (fn [section]
+          (if (= :feature-section (:type section))
+            (let [patch-member (fn [m]
+                                  (if (= :method (:type m))
+                                    (assoc m :params patched-params :return-type patched-return)
+                                    m))]
+              (update section :members #(mapv patch-member %)))
+            section))]
+    (update class-def :body #(mapv patch-section %))))
+
+(defn- patch-anonymous-function-types-for-let
+  "Infer an untyped `fn(...)`'s params/return-type from a typed `let`'s
+   declared `Function(...)` type — the same shorthand
+   `nex.typechecker/patch-anonymous-function-types` resolves for typechecking
+   — but resolved *here* too, structurally, because the compiled backend
+   compiles every anonymous-function class as a whole-program pass
+   (`collect-anonymous-class-defs`) before any individual statement is
+   lowered: by the time expression-lowering would otherwise see this literal,
+   its (still nil-typed) class-def has already been compiled into bytecode
+   with the wrong descriptor. Returns VALUE unchanged unless it is an
+   `:anonymous-function` node with a nil param or return type and VAR-TYPE is
+   a matching-arity structural `Function(...)` (arity mismatches are left for
+   the typechecker's own, already-correct error — this pass only fills gaps,
+   it does not validate)."
+  [var-type value]
+  (let [needs-patch? (and (map? var-type) (= (:base-type var-type) "Function")
+                          (:param-types var-type)
+                          (map? value) (= :anonymous-function (:type value))
+                          (= (count (:params value)) (count (:param-types var-type)))
+                          (or (some (comp nil? :type) (:params value))
+                              (nil? (:return-type value))))]
+    (if-not needs-patch?
+      value
+      (let [patched-params (mapv (fn [p t] (if (:type p) p (assoc p :type (:type t))))
+                                 (:params value) (:param-types var-type))
+            patched-return (or (:return-type value) (:return-type var-type))]
+        (-> value
+            (assoc :params patched-params :return-type patched-return)
+            (update :class-def #(patch-anonymous-function-class-def % patched-params patched-return)))))))
+
+(defn- resolve-let-anonymous-function-types-in-stmt
+  "Walk STMT (and every nested statement inside if/loop/scoped-block/with/
+   case/match bodies — the same shape `constructor-statements` above walks)
+   applying `patch-anonymous-function-types-for-let` to every `:let`."
+  [stmt]
+  (let [stmt (if (and (map? stmt) (= :let (:type stmt)) (:var-type stmt))
+               (update stmt :value #(patch-anonymous-function-types-for-let (:var-type stmt) %))
+               stmt)
+        walk #(mapv resolve-let-anonymous-function-types-in-stmt %)]
+    (if-not (map? stmt)
+      stmt
+      (case (:type stmt)
+        :if (let [stmt (assoc stmt
+                              :then (walk (:then stmt))
+                              :elseif (mapv (fn [c] (assoc c :then (walk (:then c)))) (:elseif stmt)))]
+              (if (:else stmt) (assoc stmt :else (walk (:else stmt))) stmt))
+        :loop (assoc stmt :init (walk (:init stmt)) :body (walk (:body stmt)))
+        :scoped-block (let [stmt (assoc stmt :body (walk (:body stmt)))]
+                        (if (:rescue stmt) (assoc stmt :rescue (walk (:rescue stmt))) stmt))
+        :with (assoc stmt :body (walk (:body stmt)))
+        :case (let [stmt (assoc stmt :clauses
+                                (mapv (fn [c] (update c :body resolve-let-anonymous-function-types-in-stmt))
+                                      (:clauses stmt)))]
+                (if (:else stmt)
+                  (assoc stmt :else (resolve-let-anonymous-function-types-in-stmt (:else stmt)))
+                  stmt))
+        :match (let [stmt (assoc stmt :clauses
+                                 (mapv (fn [c] (update c :body walk)) (:clauses stmt)))]
+                 (if (:else stmt) (assoc stmt :else (walk (:else stmt))) stmt))
+        stmt))))
+
+(defn- resolve-functions-anonymous-function-context-types
+  [fns]
+  (mapv (fn [f] (update f :body #(mapv resolve-let-anonymous-function-types-in-stmt %))) fns))
+
+(defn- resolve-class-anonymous-function-context-types
+  [class-def]
+  (let [patch-section
+        (fn [section]
+          (case (:type section)
+            :feature-section
+            (update section :members
+                    (fn [members]
+                      (mapv (fn [m]
+                              (if (= :method (:type m))
+                                (update m :body #(mapv resolve-let-anonymous-function-types-in-stmt %))
+                                m))
+                            members)))
+            :constructors
+            (update section :constructors
+                    (fn [ctors]
+                      (mapv (fn [c] (update c :body #(mapv resolve-let-anonymous-function-types-in-stmt %)))
+                            ctors)))
+            section))]
+    (update class-def :body #(mapv patch-section %))))
+
+(defn- resolve-anonymous-function-context-types
+  "Apply `resolve-let-anonymous-function-types-in-stmt` across the whole
+   program: top-level statements, every free function's body, and every
+   class's every method/constructor body."
+  [program]
+  (-> program
+      (update :statements #(mapv resolve-let-anonymous-function-types-in-stmt %))
+      (update :functions resolve-functions-anonymous-function-context-types)
+      (update :classes #(mapv resolve-class-anonymous-function-context-types %))))
+
 (defn prepare-program-for-closures
   [program opts]
-  (let [visible-functions (vec (concat (:functions program) (:functions opts)))
+  (let [program (resolve-anonymous-function-context-types program)
+        visible-functions (vec (concat (:functions program) (:functions opts)))
         visible-classes (merge-visible-classes (builtin-class-defs)
                                                (:classes program)
                                                (:classes opts)

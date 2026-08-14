@@ -1188,7 +1188,15 @@
    (fn [[_ & parts]]
      ;; Parts can be: name1 "," name2 ":" type
      ;; or just: name ":" type
-     ;; or just: name1 "," name2 (no type, defaults to Any)
+     ;; or just: name1 "," name2 (no type — nil, not defaulted here. A bare
+     ;; `nil` type is only meaningful on an `fn(...)` param, where the
+     ;; typechecker/lowering infer it from the surrounding expected-type
+     ;; context (a typed `let`, or the matching parameter of a call target);
+     ;; every other param list (method/constructor/free-function) requires an
+     ;; explicit type and the typechecker rejects a nil one outright. This
+     ;; used to default to "Any" right here, silently — which is a different,
+     ;; wrong thing for `fn`: it discarded the inference opportunity and
+     ;; masked a missing type everywhere else with no error at all.)
      (let [;; Find type node (it's a sequential node)
            type-node (first (filter sequential? parts))
            ;; Everything before the colon is identifiers (filter out commas)
@@ -1196,7 +1204,7 @@
                            (take-while #(not= ":" %))
                            (filter string?)
                            (remove #(= "," %)))
-           param-type (if type-node (transform-node type-node) "Any")]
+           param-type (when type-node (transform-node type-node))]
        ;; Return a vector of parameter maps, one for each identifier
        (mapv (fn [name]
                {:name (token-text name)
