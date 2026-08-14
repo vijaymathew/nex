@@ -3217,17 +3217,43 @@
                                  :method (:name expr)
                                  :args []
                                  :has-parens true})
-          (let [global? (contains? (:globals env) (:name expr))
-                nex-type (or (get (:var-types env) (:name expr))
-                             (get (:globals env) (:name expr))
-                             (infer-type env expr))
-                jvm-type (resolve-jvm-type env nex-type)]
-            ;; A readable top-level global (§7) lowers to a `top-get` against
-            ;; the live session state even inside a method/function body.
-            (if (or (:top-level? env) global?)
-              (ir/top-get-node (:name expr) nex-type jvm-type)
-              (throw (ex-info "Unknown local in non-top-level lowering"
-                              {:name (:name expr)})))))))))
+          ;; A bare reference to a free function's own name (no call parens) —
+          ;; passing it as a `Function(...)`-typed value, e.g.
+          ;; `filter_items(is_rare_or_legendary)`. The `<name>_Function` class
+          ;; every `function` decl is hoisted into (`nex.walker/build-function-
+          ;; node`; matched structurally against a `Function(...)` target by
+          ;; `nex.typechecker/types-compatible?`) exists only for the
+          ;; typechecker's bookkeeping — the standalone/REPL compilers
+          ;; (`nex.compiler.jvm.file`/`repl`) deliberately never emit it as a
+          ;; real class, since the ordinary "call it directly" path needs no
+          ;; wrapper object. So this can't `new` an instance of it (no such
+          ;; class exists to load). Without this branch at all the name fell
+          ;; through to the global/top-get case below, which finds no such
+          ;; global and silently lowers to a null read — type-checks fine,
+          ;; then crashes at the first call with "Cannot invoke Void as a
+          ;; function". Fixed instead by reusing the runtime's existing
+          ;; function-by-name registry (`function-value-for-name`, backed by
+          ;; the same registration every top-level function already gets for
+          ;; deoptimized-closure callbacks) rather than inventing a new
+          ;; compiled-class path.
+          (if (some #(= (:name %) (:name expr)) (:functions env))
+            (ir/call-runtime-node "function-value-for-name"
+                                  [(ir/const-node (:name expr)
+                                                  "String"
+                                                  (ir/object-jvm-type "java/lang/String"))]
+                                  "Function"
+                                  (ir/object-jvm-type "java/lang/Object"))
+            (let [global? (contains? (:globals env) (:name expr))
+                  nex-type (or (get (:var-types env) (:name expr))
+                               (get (:globals env) (:name expr))
+                               (infer-type env expr))
+                  jvm-type (resolve-jvm-type env nex-type)]
+              ;; A readable top-level global (§7) lowers to a `top-get` against
+              ;; the live session state even inside a method/function body.
+              (if (or (:top-level? env) global?)
+                (ir/top-get-node (:name expr) nex-type jvm-type)
+                (throw (ex-info "Unknown local in non-top-level lowering"
+                                {:name (:name expr)}))))))))))
 
 (defn- lower-expr-this
   [env expr]

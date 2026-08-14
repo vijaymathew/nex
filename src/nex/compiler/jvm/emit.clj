@@ -907,6 +907,7 @@
    "op:pow-long"                             ["pow-long" [:b0 :b1]]
    "op:pow-double"                           ["pow-double" [:b0 :b1]]
    "spawn-function-object"                   ["spawn-function-object" [:state :b0]]
+   "function-value-for-name"                 ["function-value-for-name" [:state :b0]]
    "create-channel"                          ["create-channel" [:bvar]]
    "create-array"                            ["create-array" []]
    "create-array-filled"                     ["create-array-filled" [:bvar]]

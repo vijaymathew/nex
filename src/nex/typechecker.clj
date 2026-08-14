@@ -646,6 +646,7 @@
           (sub? sub #{}))))))
 
 (declare types-compatible?)
+(declare lookup-class-method)
 
 (defn- substitute-type-params
   "Replace generic parameter names in `t` using `subst` (param name -> type)."
@@ -744,6 +745,32 @@
                (or (= (:type-params a1) ["__EmptySetElement"])
                    (= (:type-params a2) ["__EmptySetElement"])))
           (types-equal? env a1 a2)
+          ;; A named class that implements the Function protocol — a free
+          ;; function's generated `<name>_Function` wrapper (`inherit
+          ;; Function`, a single `callN` method; see
+          ;; `nex.walker/build-function-node`), or any user class declared
+          ;; the same way — is compatible with a structural `Function(...)`
+          ;; target when its own `callN` signature conforms. Passing a free
+          ;; function by name (`filter_items(is_rare_or_legendary)`) resolves
+          ;; to this generated class name as a bare string (`env-add-var`
+          ;; binds a function's identifier to `(:class-name fn-def)`), which
+          ;; none of the other branches here recognize: the string/string
+          ;; branch below only accepts a bare "Function" target, and the
+          ;; map/map branch only compares two already-structural types.
+          ;; Reuses that map/map branch by building the same shape of
+          ;; structural type for a1 from the class's callN method and
+          ;; recursing, rather than duplicating the contravariant-params/
+          ;; covariant-return comparison here.
+          (and (string? a1) (map? a2) (= (:base-type a2) "Function") (:param-types a2)
+               (class-subtype? env a1 "Function")
+               (when-let [method-sig (lookup-class-method env a1 (str "call" (count (:param-types a2)))
+                                                           (count (:param-types a2)))]
+                 (types-compatible? env
+                                    {:base-type "Function"
+                                     :param-types (mapv (fn [p] {:name (:name p) :type (:type p)})
+                                                        (:params method-sig))
+                                     :return-type (:return-type method-sig)}
+                                    a2)))
           ;; Function type with signature is compatible with bare Function
           (and (map? a1) (= (:base-type a1) "Function") (:param-types a1) (= a2 "Function"))
           ;; Two function signatures: parameters CONTRAVARIANT, return COVARIANT.
@@ -4714,6 +4741,55 @@
        (map :name)
        set))
 
+(defn- constructor-delegation-calls
+  "Every `this.ctor(...)` call statement anywhere in CTOR-BODY, as
+   [method-name arg-count] pairs — the same-class constructor delegation
+   feature (see [[nex.lower/lower-call-stmt]])."
+  [ctor-body]
+  (->> (mapcat constructor-statements ctor-body)
+       (keep (fn [stmt]
+               (when (and (= :call (:type stmt))
+                          (map? (:target stmt))
+                          (= :this (:type (:target stmt))))
+                 [(:method stmt) (count (:args stmt))])))))
+
+(defn- constructor-initialized-fields
+  "Attachable fields CTOR-NAME/CTOR-BODY is guaranteed to initialize: its own
+   direct `field := v` / `this.field := v` assignments, plus — transitively —
+   whatever a `this.ctor(...)` delegation call reaches. Without this, a
+   constructor that only initializes its fields by delegating to a sibling
+   constructor (`rare(...) do this.with_stats(...) ... end`) is wrongly
+   flagged as never initializing them at all, even though every field ends up
+   set on every path.
+
+   ALL-CTORS is every constructor declared on this class, for resolving what
+   a delegation call names (matched by name *and* arity, since two
+   constructors may share a name). VISITED guards a delegation cycle
+   (`this.a` calls `this.b` calls `this.a`) from recursing forever; a cycle
+   is a user bug the checker need not chase further, so it just stops
+   contributing there rather than looping."
+  [ctor-name ctor-body all-ctors visited]
+  (if (contains? visited ctor-name)
+    #{}
+    (let [own (->> (mapcat constructor-statements ctor-body)
+                   (keep (fn [stmt]
+                           (case (:type stmt)
+                             :assign (:target stmt)
+                             :member-assign (:field stmt)
+                             nil)))
+                   set)
+          visited' (conj visited ctor-name)]
+      (reduce (fn [acc [delegated-name arg-count]]
+                (if-let [delegated-ctor (some #(when (and (= (:name %) delegated-name)
+                                                          (= (count (or (:params %) [])) arg-count))
+                                                %)
+                                              all-ctors)]
+                  (into acc (constructor-initialized-fields delegated-name (:body delegated-ctor)
+                                                            all-ctors visited'))
+                  acc))
+              own
+              (constructor-delegation-calls ctor-body)))))
+
 (defn- needs-constructor-init?
   "True when CLASS-NAME declares an attachable field, or inherits one. Used to
    decide whether a subclass constructor has to chain to a parent's."
@@ -4811,13 +4887,7 @@
       ;; which already initialize the inherited fields — nothing to check.
       (doseq [{ctor-name :name ctor-body :body} constructors]
         (let [statements (mapcat constructor-statements ctor-body)
-              assigned (->> statements
-                            (keep (fn [stmt]
-                                    (case (:type stmt)
-                                      :assign (:target stmt)
-                                      :member-assign (:field stmt)
-                                      nil)))
-                            set)
+              assigned (constructor-initialized-fields ctor-name ctor-body constructors #{})
               missing (sort (seq (set/difference required-fields assigned)))
               called-parents (->> statements
                                   (keep (fn [stmt]
