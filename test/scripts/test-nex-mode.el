@@ -417,6 +417,30 @@ so its closing 'end' lines up with the routine 'do'."
               "end")
             "\n"))))
 
+(ert-deftest nex-indent-ensure-after-bare-call-statement ()
+  "A body statement shaped like a receiverless call with no arguments --
+`print()' -- must not be mistaken for the method's own signature line when
+scanning backward to align a following 'ensure'.  Regression: both share the
+shape matched by `nex-method-signature-re' (identifier, optional parens,
+optional return type, end of line), which used to stop the backward scan at
+`print()' and indent 'ensure' one level too deep."
+  (should (string=
+           (nex-test--reindent
+            "class A\nfeature\nsome_method(a: Integer): Integer\ndo\nresult := a + 1\na := 100\nprint()\nensure\nincrement: result = a + 1\nend\nend")
+           (string-join
+            '("class A"
+              "feature"
+              "  some_method(a: Integer): Integer"
+              "  do"
+              "    result := a + 1"
+              "    a := 100"
+              "    print()"
+              "  ensure"
+              "    increment: result = a + 1"
+              "  end"
+              "end")
+            "\n"))))
+
 (ert-deftest nex-comment-quotes-are-not-strings ()
   "A \" or ' inside a -- comment must be parsed as comment text, not as the
 start of a string.  Regression: re-setting ?- to plain punctuation stripped the

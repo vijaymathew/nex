@@ -2185,7 +2185,23 @@
 (defn- eval-call-with-target
   [ctx {:keys [target method has-parens]} arg-values]
   (let [{:keys [target-name super-parent-name class-target parent-class java-class? obj]}
-        (resolve-interp-call-target ctx target)]
+        (resolve-interp-call-target ctx target)
+        ;; `this.ctor(...)`: delegate to another of *this same class's* own
+        ;; constructors (never an inherited one — `lookup-constructor`, unlike
+        ;; `-with-inheritance`, only looks at the class's own body). Gated on
+        ;; `method` actually naming a constructor so ordinary `this.field`/
+        ;; `this.method()` calls are untouched and keep falling through to
+        ;; `invoke-nex-object-call` below. `(:current-class-name ctx)` (the
+        ;; class whose body is lexically executing) rather than
+        ;; `(:class-name (:current-object ctx))` (the object's own concrete
+        ;; class) — mirrors `resolve-super-parent-name` — so this still
+        ;; resolves correctly when the executing constructor was itself
+        ;; inherited and is now running on a further-subclassed instance.
+        this-own-ctor? (and (map? target)
+                            (= :this (:type target))
+                            (:current-class-name ctx)
+                            (lookup-constructor (lookup-class-if-exists ctx (:current-class-name ctx))
+                                                method))]
     (cond
       ;; Java static method or field access inside with "java" block
       java-class?
@@ -2202,6 +2218,9 @@
       ;; the current class rather than named at the call site.
       parent-class
       (dispatch-parent-call ctx (:current-object ctx) (or super-parent-name target-name) method arg-values)
+
+      this-own-ctor?
+      (dispatch-parent-call ctx (:current-object ctx) (:current-class-name ctx) method arg-values)
 
       (nex-object? obj)
       (invoke-nex-object-call ctx target target-name method obj has-parens arg-values)

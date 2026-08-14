@@ -460,6 +460,18 @@
     (mapv #(runtime-type-token-ir env %)
           (or (:generic-args parent-ref) []))))
 
+(defn- own-class-generic-runtime-args
+  "Runtime type-witness args for a call that stays on `this`'s own class (a
+   sibling-constructor delegation, `this.ctor(...)`) — as opposed to
+   `parent-generic-runtime-args`, which translates through an `inherit
+   Parent[...]` clause's generic-args mapping into the *parent's* params.
+   There is no such mapping to walk here: the callee is the exact same
+   (possibly generic) class as the caller, so each of its own params' runtime
+   token is simply whatever `this` is already carrying for that name in
+   `(:generic-runtime-values env)`, looked up via `runtime-type-token-ir`."
+  [env class-def]
+  (mapv #(runtime-type-token-ir env (:name %)) (:generic-params class-def)))
+
 (defn- java-host-class-root-name
   [env expr]
   (when (and (:with-java? env)
@@ -721,7 +733,17 @@
                                         ;; (`let t: Tid := ...`; `Tid = String`)
                                         ;; infers as nil here and lowering fails
                                         ;; with "Unable to infer expression type".
-                                        :type-aliases *type-aliases*})
+                                        :type-aliases *type-aliases*
+                                        ;; Without this, a bare implicit-`this`
+                                        ;; call nested inside an expression that
+                                        ;; reaches this fallback (e.g. the target
+                                        ;; of a builtin scalar method this
+                                        ;; namespace's own primary path doesn't
+                                        ;; know, like `(a * mult).round`) can't
+                                        ;; resolve `mult` and the whole inference
+                                        ;; fails with "Unable to infer expression
+                                        ;; type during lowering".
+                                        :current-class (:this-type env)})
         ;; A bare identifier that names an imported Java class resolves fine
         ;; as a call target inside `with "java"` (java-host-class-root-name
         ;; requires :with-java?, by design — see docs/proposals/java-interop.md
@@ -2909,9 +2931,122 @@
                         section))
                     sections)))))
 
+(defn- patch-anonymous-function-class-def
+  "Rebuild CLASS-DEF's single method member with PATCHED-PARAMS/PATCHED-RETURN
+   — the mirrored copy of an :anonymous-function node's own :params/
+   :return-type that `nex.lower`'s class-compilation actually reads."
+  [class-def patched-params patched-return]
+  (let [patch-section
+        (fn [section]
+          (if (= :feature-section (:type section))
+            (let [patch-member (fn [m]
+                                  (if (= :method (:type m))
+                                    (assoc m :params patched-params :return-type patched-return)
+                                    m))]
+              (update section :members #(mapv patch-member %)))
+            section))]
+    (update class-def :body #(mapv patch-section %))))
+
+(defn- patch-anonymous-function-types-for-let
+  "Infer an untyped `fn(...)`'s params/return-type from a typed `let`'s
+   declared `Function(...)` type — the same shorthand
+   `nex.typechecker/patch-anonymous-function-types` resolves for typechecking
+   — but resolved *here* too, structurally, because the compiled backend
+   compiles every anonymous-function class as a whole-program pass
+   (`collect-anonymous-class-defs`) before any individual statement is
+   lowered: by the time expression-lowering would otherwise see this literal,
+   its (still nil-typed) class-def has already been compiled into bytecode
+   with the wrong descriptor. Returns VALUE unchanged unless it is an
+   `:anonymous-function` node with a nil param or return type and VAR-TYPE is
+   a matching-arity structural `Function(...)` (arity mismatches are left for
+   the typechecker's own, already-correct error — this pass only fills gaps,
+   it does not validate)."
+  [var-type value]
+  (let [needs-patch? (and (map? var-type) (= (:base-type var-type) "Function")
+                          (:param-types var-type)
+                          (map? value) (= :anonymous-function (:type value))
+                          (= (count (:params value)) (count (:param-types var-type)))
+                          (or (some (comp nil? :type) (:params value))
+                              (nil? (:return-type value))))]
+    (if-not needs-patch?
+      value
+      (let [patched-params (mapv (fn [p t] (if (:type p) p (assoc p :type (:type t))))
+                                 (:params value) (:param-types var-type))
+            patched-return (or (:return-type value) (:return-type var-type))]
+        (-> value
+            (assoc :params patched-params :return-type patched-return)
+            (update :class-def #(patch-anonymous-function-class-def % patched-params patched-return)))))))
+
+(defn- resolve-let-anonymous-function-types-in-stmt
+  "Walk STMT (and every nested statement inside if/loop/scoped-block/with/
+   case/match bodies — the same shape `constructor-statements` above walks)
+   applying `patch-anonymous-function-types-for-let` to every `:let`."
+  [stmt]
+  (let [stmt (if (and (map? stmt) (= :let (:type stmt)) (:var-type stmt))
+               (update stmt :value #(patch-anonymous-function-types-for-let (:var-type stmt) %))
+               stmt)
+        walk #(mapv resolve-let-anonymous-function-types-in-stmt %)]
+    (if-not (map? stmt)
+      stmt
+      (case (:type stmt)
+        :if (let [stmt (assoc stmt
+                              :then (walk (:then stmt))
+                              :elseif (mapv (fn [c] (assoc c :then (walk (:then c)))) (:elseif stmt)))]
+              (if (:else stmt) (assoc stmt :else (walk (:else stmt))) stmt))
+        :loop (assoc stmt :init (walk (:init stmt)) :body (walk (:body stmt)))
+        :scoped-block (let [stmt (assoc stmt :body (walk (:body stmt)))]
+                        (if (:rescue stmt) (assoc stmt :rescue (walk (:rescue stmt))) stmt))
+        :with (assoc stmt :body (walk (:body stmt)))
+        :case (let [stmt (assoc stmt :clauses
+                                (mapv (fn [c] (update c :body resolve-let-anonymous-function-types-in-stmt))
+                                      (:clauses stmt)))]
+                (if (:else stmt)
+                  (assoc stmt :else (resolve-let-anonymous-function-types-in-stmt (:else stmt)))
+                  stmt))
+        :match (let [stmt (assoc stmt :clauses
+                                 (mapv (fn [c] (update c :body walk)) (:clauses stmt)))]
+                 (if (:else stmt) (assoc stmt :else (walk (:else stmt))) stmt))
+        stmt))))
+
+(defn- resolve-functions-anonymous-function-context-types
+  [fns]
+  (mapv (fn [f] (update f :body #(mapv resolve-let-anonymous-function-types-in-stmt %))) fns))
+
+(defn- resolve-class-anonymous-function-context-types
+  [class-def]
+  (let [patch-section
+        (fn [section]
+          (case (:type section)
+            :feature-section
+            (update section :members
+                    (fn [members]
+                      (mapv (fn [m]
+                              (if (= :method (:type m))
+                                (update m :body #(mapv resolve-let-anonymous-function-types-in-stmt %))
+                                m))
+                            members)))
+            :constructors
+            (update section :constructors
+                    (fn [ctors]
+                      (mapv (fn [c] (update c :body #(mapv resolve-let-anonymous-function-types-in-stmt %)))
+                            ctors)))
+            section))]
+    (update class-def :body #(mapv patch-section %))))
+
+(defn- resolve-anonymous-function-context-types
+  "Apply `resolve-let-anonymous-function-types-in-stmt` across the whole
+   program: top-level statements, every free function's body, and every
+   class's every method/constructor body."
+  [program]
+  (-> program
+      (update :statements #(mapv resolve-let-anonymous-function-types-in-stmt %))
+      (update :functions resolve-functions-anonymous-function-context-types)
+      (update :classes #(mapv resolve-class-anonymous-function-context-types %))))
+
 (defn prepare-program-for-closures
   [program opts]
-  (let [visible-functions (vec (concat (:functions program) (:functions opts)))
+  (let [program (resolve-anonymous-function-context-types program)
+        visible-functions (vec (concat (:functions program) (:functions opts)))
         visible-classes (merge-visible-classes (builtin-class-defs)
                                                (:classes program)
                                                (:classes opts)
@@ -3195,17 +3330,43 @@
                                  :method (:name expr)
                                  :args []
                                  :has-parens true})
-          (let [global? (contains? (:globals env) (:name expr))
-                nex-type (or (get (:var-types env) (:name expr))
-                             (get (:globals env) (:name expr))
-                             (infer-type env expr))
-                jvm-type (resolve-jvm-type env nex-type)]
-            ;; A readable top-level global (§7) lowers to a `top-get` against
-            ;; the live session state even inside a method/function body.
-            (if (or (:top-level? env) global?)
-              (ir/top-get-node (:name expr) nex-type jvm-type)
-              (throw (ex-info "Unknown local in non-top-level lowering"
-                              {:name (:name expr)})))))))))
+          ;; A bare reference to a free function's own name (no call parens) —
+          ;; passing it as a `Function(...)`-typed value, e.g.
+          ;; `filter_items(is_rare_or_legendary)`. The `<name>_Function` class
+          ;; every `function` decl is hoisted into (`nex.walker/build-function-
+          ;; node`; matched structurally against a `Function(...)` target by
+          ;; `nex.typechecker/types-compatible?`) exists only for the
+          ;; typechecker's bookkeeping — the standalone/REPL compilers
+          ;; (`nex.compiler.jvm.file`/`repl`) deliberately never emit it as a
+          ;; real class, since the ordinary "call it directly" path needs no
+          ;; wrapper object. So this can't `new` an instance of it (no such
+          ;; class exists to load). Without this branch at all the name fell
+          ;; through to the global/top-get case below, which finds no such
+          ;; global and silently lowers to a null read — type-checks fine,
+          ;; then crashes at the first call with "Cannot invoke Void as a
+          ;; function". Fixed instead by reusing the runtime's existing
+          ;; function-by-name registry (`function-value-for-name`, backed by
+          ;; the same registration every top-level function already gets for
+          ;; deoptimized-closure callbacks) rather than inventing a new
+          ;; compiled-class path.
+          (if (some #(= (:name %) (:name expr)) (:functions env))
+            (ir/call-runtime-node "function-value-for-name"
+                                  [(ir/const-node (:name expr)
+                                                  "String"
+                                                  (ir/object-jvm-type "java/lang/String"))]
+                                  "Function"
+                                  (ir/object-jvm-type "java/lang/Object"))
+            (let [global? (contains? (:globals env) (:name expr))
+                  nex-type (or (get (:var-types env) (:name expr))
+                               (get (:globals env) (:name expr))
+                               (infer-type env expr))
+                  jvm-type (resolve-jvm-type env nex-type)]
+              ;; A readable top-level global (§7) lowers to a `top-get` against
+              ;; the live session state even inside a method/function body.
+              (if (or (:top-level? env) global?)
+                (ir/top-get-node (:name expr) nex-type jvm-type)
+                (throw (ex-info "Unknown local in non-top-level lowering"
+                                {:name (:name expr)}))))))))))
 
 (defn- lower-expr-this
   [env expr]
@@ -4621,7 +4782,14 @@
                        :target-type target-type})))))
 
 (defn- lower-call-stmt [env stmt]
-  (if-let [parent-name (cond
+  ;; `own-class?` distinguishes the third case below (`this.ctor(...)`,
+  ;; delegating to a sibling constructor of the *same* class) from the first
+  ;; two (delegating to a parent's constructor, by name or via `super`): a
+  ;; sibling constructor runs directly on `this` — no `_parent_X` field to
+  ;; step through, and no generic-argument translation, since the callee is
+  ;; the exact same (possibly generic) class as the caller.
+  (if-let [{:keys [owner own-class?]}
+           (cond
                    (and (:this-type env)
                         (string? (:target stmt))
                         (some #(= (:target stmt) (:parent %))
@@ -4629,7 +4797,7 @@
                         (class-constructor-def (get (visible-class-map env) (:target stmt))
                                                (:method stmt)
                                                (count (:args stmt))))
-                   (:target stmt)
+                   {:owner (:target stmt) :own-class? false}
 
                    (and (:this-type env)
                         (map? (:target stmt))
@@ -4637,27 +4805,40 @@
                         (class-constructor-def (get (visible-class-map env) (single-super-parent-name env))
                                                (:method stmt)
                                                (count (:args stmt))))
-                   (single-super-parent-name env)
+                   {:owner (single-super-parent-name env) :own-class? false}
+
+                   (and (:this-type env)
+                        (map? (:target stmt))
+                        (= :this (:type (:target stmt)))
+                        (class-constructor-def (current-class-def env)
+                                               (:method stmt)
+                                               (count (:args stmt))))
+                   {:owner (:this-type env) :own-class? true}
 
                    :else nil)]
-    (let [ctor-def (class-constructor-def (get (visible-class-map env) parent-name)
+    (let [ctor-def (class-constructor-def (get (visible-class-map env) owner)
                                           (:method stmt)
                                           (count (:args stmt)))
-          parent-meta (class-jvm-meta env parent-name)
-          parent-runtime-args (parent-generic-runtime-args env (current-class-def env) parent-name)
-          call-ir (ir/call-virtual-node (:internal-name parent-meta)
+          owner-meta (class-jvm-meta env owner)
+          runtime-args (if own-class?
+                         (own-class-generic-runtime-args env (current-class-def env))
+                         (parent-generic-runtime-args env (current-class-def env) owner))
+          receiver-ir (if own-class?
+                        (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
+                        (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                           (str "_parent_" owner)
+                                           (ir/this-node (:this-type env)
+                                                         (exact-class-jvm-type env (:this-type env)))
+                                           owner
+                                           (exact-class-jvm-type env owner)))
+          call-ir (ir/call-virtual-node (:internal-name owner-meta)
                                         (lowered-constructor-method-name ctor-def)
                                         (desc/repl-instance-method-descriptor)
-                                        (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                                           (str "_parent_" parent-name)
-                                                           (ir/this-node (:this-type env)
-                                                                         (exact-class-jvm-type env (:this-type env)))
-                                                           parent-name
-                                                           (exact-class-jvm-type env parent-name))
+                                        receiver-ir
                                         (into (mapv #(lower-expression env %) (:args stmt))
-                                              parent-runtime-args)
-                                        parent-name
-                                        (resolve-jvm-type env parent-name))]
+                                              runtime-args)
+                                        owner
+                                        (resolve-jvm-type env owner))]
       [env (ir/pop-node call-ir)])
     [env (ir/pop-node (lower-expression env stmt))]))
 

@@ -152,13 +152,28 @@
 
     :else nil))
 
+(defn function-value-for-name
+  "The value a bare reference to a top-level `function`'s own name (no call
+   parens) lowers to — passing it where a `Function(...)`-typed value is
+   expected, e.g. `filter_items(is_rare_or_legendary)`. Reuses the same
+   registry (`state`'s `:functions` map, populated by `emit-register-repl-fn!`
+   for every top-level function) and wrapping (`registered-fn-callable`)
+   already used to make a compiled top-level function callable by name from a
+   deoptimized closure running on the interpreter — see
+   `rebuild-interpreter-ctx`. Returns a plain Clojure fn; `invoke-function-object`
+   below knows to just call one of those directly."
+  [state name]
+  (when-let [entry (state-get-fn state name)]
+    (registered-fn-callable state entry)))
+
 (defn invoke-function-object
   [state target args]
   (when-not target
     (throw (ex-info "Cannot invoke Void as a function"
                     {:target target
                      :args args})))
-  (if (interp/nex-object? target)
+  (cond
+    (interp/nex-object? target)
     (let [ctx (rebuild-interpreter-ctx state)
           call-method (str "call" (count args))
           literal-args (mapv (fn [v] {:type :literal :value v}) args)]
@@ -166,6 +181,12 @@
                              :target {:type :literal :value target}
                              :method call-method
                              :args literal-args}))
+
+    ;; A top-level function passed by name (`function-value-for-name` above).
+    (ifn? target)
+    (apply target args)
+
+    :else
     (let [^Class cls (.getClass target)
           lowered-name (lowered-instance-method-name (str "call" (count args)) (count args))
           ^Method method (.getDeclaredMethod cls

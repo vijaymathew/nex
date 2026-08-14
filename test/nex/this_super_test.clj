@@ -314,6 +314,71 @@ bs.push(3)
 print(bs.size)
 print(bs.is_full)")))))
 
+(deftest this-constructor-delegation-test
+  (testing "this.ctor(...) delegates to another constructor of the same class"
+    (is (= ["0" "42"]
+           (both "class Box
+feature
+  value: Integer
+create
+  make(v: Integer) do
+    value := v
+  end
+  default do
+    this.make(0)
+  end
+end
+let b1 := create Box.default
+let b2 := create Box.make(42)
+print(b1.value)
+print(b2.value)")))))
+
+(deftest this-constructor-delegation-chain-test
+  (testing "this.ctor(...) chains across more than one hop"
+    (is (= ["1" "2" "5" "5" "0" "0"]
+           (both "class Point
+feature
+  x: Integer
+  y: Integer
+create
+  init_1(a: Integer, b: Integer) do
+    x := a
+    y := b
+  end
+  init_2(a: Integer) do
+    this.init_1(a, a)
+  end
+  origin do
+    this.init_2(0)
+  end
+end
+let p1 := create Point.init_1(1, 2)
+let p2 := create Point.init_2(5)
+let p3 := create Point.origin
+print(p1.x)
+print(p1.y)
+print(p2.x)
+print(p2.y)
+print(p3.x)
+print(p3.y)")))))
+
+(deftest this-constructor-delegation-generic-test
+  (testing "this.ctor(...) works on a generic class, carrying this's own runtime type args"
+    (is (= ["\"hi\""]
+           (both "class Wrapper [G]
+feature
+  value: G
+create
+  make(v: G) do
+    value := v
+  end
+  from_int(v: G) do
+    this.make(v)
+  end
+end
+let w := create Wrapper[String].from_int(\"hi\")
+print(w.value)")))))
+
 (deftest super-field-assignment-test
   (testing "super.field := v assigns a field declared on the parent"
     (is (= ["10" "20"]
