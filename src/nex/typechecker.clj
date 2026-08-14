@@ -5468,7 +5468,12 @@
 (defn infer-expression-type
   "Infer the type of an expression AST node.
    opts: :classes - seq of class defs, :functions - seq of function defs,
-   :var-types - {name type} map, :type-aliases - {name type-expr} map.
+   :var-types - {name type} map, :type-aliases - {name type-expr} map,
+   :current-class - name of the class whose method/feature body `expr` sits
+   in, if any. Without it, a bare implicit-`this` call (a zero-arg feature
+   invoked with no receiver and no parens, e.g. `rarity_multiplier` inside
+   its own class) can't resolve, even though a bare *field* reference
+   happens to work via the field-name-as-global leak in collect-class-info.
    Returns the type (string or map) or nil on failure."
   [expr opts]
   (try
@@ -5513,5 +5518,7 @@
         (env-add-var env (:name fn-def) (:class-name fn-def)))
       (doseq [[var-name var-type] visible-var-types]
         (env-add-var env var-name var-type))
+      (when-let [current-class (:current-class opts)]
+        (env-add-var env "__current_class__" current-class))
       (check-expression env expr))
     (catch Exception _ nil)))

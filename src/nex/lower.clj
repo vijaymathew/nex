@@ -721,7 +721,17 @@
                                         ;; (`let t: Tid := ...`; `Tid = String`)
                                         ;; infers as nil here and lowering fails
                                         ;; with "Unable to infer expression type".
-                                        :type-aliases *type-aliases*})
+                                        :type-aliases *type-aliases*
+                                        ;; Without this, a bare implicit-`this`
+                                        ;; call nested inside an expression that
+                                        ;; reaches this fallback (e.g. the target
+                                        ;; of a builtin scalar method this
+                                        ;; namespace's own primary path doesn't
+                                        ;; know, like `(a * mult).round`) can't
+                                        ;; resolve `mult` and the whole inference
+                                        ;; fails with "Unable to infer expression
+                                        ;; type during lowering".
+                                        :current-class (:this-type env)})
         ;; A bare identifier that names an imported Java class resolves fine
         ;; as a call target inside `with "java"` (java-host-class-root-name
         ;; requires :with-java?, by design — see docs/proposals/java-interop.md
