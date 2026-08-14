@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.4 - 2026-08-14
+
 - **New: object-test syntax `?<expr> as <name>` for narrowing detachable
   (`?T`) values.** `if ?age as a then ... end` binds `a` to `age`'s attached
   value when `age` isn't `nil`. Unlike `x /= nil`, `<expr>` isn't limited to
@@ -30,6 +32,36 @@
   a child (its own configured environment and launch argv). Every
   child-only method raises if called on the self process or before/after
   the wrong point in the child's lifecycle. See `docs/ref/system-classes.md`.
+
+- **Fixed: `print`, `.to_string()`, and string concatenation (`"..." +
+  collection`) ignored a class's `to_string` override for objects nested
+  inside an `Array`/`Map`/`Set`.** A top-level object already honored the
+  override; the same object nested inside a collection fell back to the
+  generic `#<ClassName object>` placeholder on the interpreter, or leaked
+  raw JVM identity (`#object[nex.file.x.Pt 0x14b620e5 "...@d79011a6"]`) on
+  the compiled backend. All three entry points, on both backends, now
+  recurse into nested collections and call the element's own `to_string`.
+
+- **Fixed: a capture two or more closures deep never reached the
+  innermost one on the compiled backend.** Only names a closure referenced
+  directly were treated as captures; a name only needed by a closure
+  nested inside *it* wasn't propagated outward, so the enclosing closure
+  compiled as if it captured nothing and constructing the nested closure
+  crashed with an unresolved name. Capture lists now propagate
+  transitively through every enclosing scope. Fixes a related crash: a
+  rebuilt deopt context merged its class table into a plain Java
+  `HashMap`, which isn't a Clojure `Associative` — the first nested
+  closure registered against it after a deopt threw a
+  `ClassCastException`; it's now merged into the existing (Clojure) map
+  instead.
+
+- **Fixed: a `deferred` class's own routine calling a sibling deferred
+  feature without `this.` (e.g. `helper()` instead of `this.helper()`)
+  crashed at runtime on the compiled backend**, because such a call still
+  tried to link directly against a method body that doesn't exist on that
+  class. It now dispatches the same way an explicit `this.` call to an
+  overridden method already did — through the object's outer/reflection
+  bridge — so both call spellings behave identically.
 
 ## 0.3.3 - 2026-08-07
 
