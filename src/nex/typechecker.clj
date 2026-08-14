@@ -5096,6 +5096,19 @@
   (->> (tree-seq coll? seq form)
        (filter #(and (map? %) (some? (:var-type %))))))
 
+(defn- anonymous-function-nodes
+  "Every `fn(...) ... end` node anywhere within a body form, including ones
+   nested inside if/from/across blocks, let initializers, and other anonymous
+   functions. A param or return-type annotation here (`fn(item: Item): ...`)
+   is not a `let`, so it is invisible to `typed-let-nodes` — without this, an
+   undefined type named only in a lambda's signature isn't reported as such;
+   it silently resolves to Any during expression checking, and the first
+   member access it enables (or the first past one Any already tolerates)
+   surfaces instead as a confusing downstream \"Undefined field ... on Any\"."
+  [form]
+  (->> (tree-seq coll? seq form)
+       (filter #(and (map? %) (= :anonymous-function (:type %))))))
+
 (defn collect-undefined-type-errors
   "Collect type annotations that name an undefined type, across every
    declaration position (generic constraints, parent type arguments, fields,
@@ -5134,7 +5147,11 @@
                           (check! (str "parameter '" pname "' of " owner) line ptype)))
         check-body-lets! (fn [body owner]
                            (doseq [{:keys [name var-type] line :dbg/line} (typed-let-nodes body)]
-                             (check! (str "local variable '" name "' in " owner) line var-type)))]
+                             (check! (str "local variable '" name "' in " owner) line var-type))
+                           (doseq [{:keys [params return-type] line :dbg/line} (anonymous-function-nodes body)]
+                             (check-params! params (str "anonymous function in " owner) line)
+                             (check! (str "return type of anonymous function in " owner)
+                                     line return-type)))]
     ;; Free functions.
     (doseq [{:keys [name params return-type generic-params body] line :dbg/line} functions
             :while (not (full?))]
@@ -5182,6 +5199,13 @@
     (doseq [{:keys [name var-type] line :dbg/line} (typed-let-nodes statements)
             :while (not (full?))]
       (check! (str "variable '" name "'") line var-type))
+    ;; Top-level anonymous functions (`fn(...) ... end` used directly in a
+    ;; top-level statement, e.g. as an argument, not bound through a typed
+    ;; `let` above).
+    (doseq [{:keys [params return-type] line :dbg/line} (anonymous-function-nodes statements)
+            :while (not (full?))]
+      (check-params! params "a top-level anonymous function" line)
+      (check! "return type of a top-level anonymous function" line return-type))
     @errs))
 
 (defn- collect-top-level-globals!
