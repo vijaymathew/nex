@@ -415,6 +415,29 @@ let c: Circle := create Circle.make(5.0)
 print(c.area)                    -- 78.53975
 ```
 
+A constructor can delegate to another constructor of the same class with
+`this.<ctor-name>(...)`, so shared setup lives in one place:
+
+```nex
+class Box
+  feature
+    value: Integer
+  create
+    make(v: Integer) do
+      value := v
+    end
+    default do
+      this.make(0)              -- delegates to make
+    end
+end
+
+let b: Box := create Box.default
+print(b.value)                   -- 0
+```
+
+(To call a *parent* class's constructor instead, see
+[Inheritance](#inheritance).)
+
 ## Optional arguments via method overloading
 
 Nex has no default parameter values, but a class may define several methods
@@ -997,6 +1020,26 @@ Bare `Function` is still valid and compatible with any typed function value:
 
 ```nex
 let f: Function := fn (n: Integer): Integer do result := n * 2 end
+```
+
+When the target already carries a concrete `Function(...)` type, `fn`'s own
+parameter and return types can be left out — they're inferred from that
+target:
+
+```nex
+let add: Function(a: Integer, b: Integer): Integer := fn(a, b) do result := a + b end
+print(add(3, 4))                -- 7
+```
+
+Inference only works where a target type is actually available (here, the
+`let`'s own annotation). With no such context, every parameter needs its own
+explicit type, or it's a compile error.
+
+A `Function(...)` type's parameter names are for documentation only — they
+can be dropped, leaving just the types:
+
+```nex
+let is_positive: Function(Integer): Boolean := fn(n: Integer): Boolean do result := n > 0 end
 ```
 
 ## Type Aliases
