@@ -460,6 +460,18 @@
     (mapv #(runtime-type-token-ir env %)
           (or (:generic-args parent-ref) []))))
 
+(defn- own-class-generic-runtime-args
+  "Runtime type-witness args for a call that stays on `this`'s own class (a
+   sibling-constructor delegation, `this.ctor(...)`) — as opposed to
+   `parent-generic-runtime-args`, which translates through an `inherit
+   Parent[...]` clause's generic-args mapping into the *parent's* params.
+   There is no such mapping to walk here: the callee is the exact same
+   (possibly generic) class as the caller, so each of its own params' runtime
+   token is simply whatever `this` is already carrying for that name in
+   `(:generic-runtime-values env)`, looked up via `runtime-type-token-ir`."
+  [env class-def]
+  (mapv #(runtime-type-token-ir env (:name %)) (:generic-params class-def)))
+
 (defn- java-host-class-root-name
   [env expr]
   (when (and (:with-java? env)
@@ -4631,7 +4643,14 @@
                        :target-type target-type})))))
 
 (defn- lower-call-stmt [env stmt]
-  (if-let [parent-name (cond
+  ;; `own-class?` distinguishes the third case below (`this.ctor(...)`,
+  ;; delegating to a sibling constructor of the *same* class) from the first
+  ;; two (delegating to a parent's constructor, by name or via `super`): a
+  ;; sibling constructor runs directly on `this` — no `_parent_X` field to
+  ;; step through, and no generic-argument translation, since the callee is
+  ;; the exact same (possibly generic) class as the caller.
+  (if-let [{:keys [owner own-class?]}
+           (cond
                    (and (:this-type env)
                         (string? (:target stmt))
                         (some #(= (:target stmt) (:parent %))
@@ -4639,7 +4658,7 @@
                         (class-constructor-def (get (visible-class-map env) (:target stmt))
                                                (:method stmt)
                                                (count (:args stmt))))
-                   (:target stmt)
+                   {:owner (:target stmt) :own-class? false}
 
                    (and (:this-type env)
                         (map? (:target stmt))
@@ -4647,27 +4666,40 @@
                         (class-constructor-def (get (visible-class-map env) (single-super-parent-name env))
                                                (:method stmt)
                                                (count (:args stmt))))
-                   (single-super-parent-name env)
+                   {:owner (single-super-parent-name env) :own-class? false}
+
+                   (and (:this-type env)
+                        (map? (:target stmt))
+                        (= :this (:type (:target stmt)))
+                        (class-constructor-def (current-class-def env)
+                                               (:method stmt)
+                                               (count (:args stmt))))
+                   {:owner (:this-type env) :own-class? true}
 
                    :else nil)]
-    (let [ctor-def (class-constructor-def (get (visible-class-map env) parent-name)
+    (let [ctor-def (class-constructor-def (get (visible-class-map env) owner)
                                           (:method stmt)
                                           (count (:args stmt)))
-          parent-meta (class-jvm-meta env parent-name)
-          parent-runtime-args (parent-generic-runtime-args env (current-class-def env) parent-name)
-          call-ir (ir/call-virtual-node (:internal-name parent-meta)
+          owner-meta (class-jvm-meta env owner)
+          runtime-args (if own-class?
+                         (own-class-generic-runtime-args env (current-class-def env))
+                         (parent-generic-runtime-args env (current-class-def env) owner))
+          receiver-ir (if own-class?
+                        (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
+                        (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                           (str "_parent_" owner)
+                                           (ir/this-node (:this-type env)
+                                                         (exact-class-jvm-type env (:this-type env)))
+                                           owner
+                                           (exact-class-jvm-type env owner)))
+          call-ir (ir/call-virtual-node (:internal-name owner-meta)
                                         (lowered-constructor-method-name ctor-def)
                                         (desc/repl-instance-method-descriptor)
-                                        (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                                           (str "_parent_" parent-name)
-                                                           (ir/this-node (:this-type env)
-                                                                         (exact-class-jvm-type env (:this-type env)))
-                                                           parent-name
-                                                           (exact-class-jvm-type env parent-name))
+                                        receiver-ir
                                         (into (mapv #(lower-expression env %) (:args stmt))
-                                              parent-runtime-args)
-                                        parent-name
-                                        (resolve-jvm-type env parent-name))]
+                                              runtime-args)
+                                        owner
+                                        (resolve-jvm-type env owner))]
       [env (ir/pop-node call-ir)])
     [env (ir/pop-node (lower-expression env stmt))]))
 
