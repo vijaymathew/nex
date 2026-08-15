@@ -1030,7 +1030,7 @@
 
 (defn- function-return-type
   [fn-def]
-  (or (:return-type fn-def) "Any"))
+  (or (:return-type fn-def) "Void"))
 
 (defn- top-level-function-callable
   [fn-def]
@@ -5035,6 +5035,27 @@
     :else
     false))
 
+(defn- body-assigns-result?
+  "Whether any statement anywhere in `stmts` — however deeply nested inside
+   if/match/case/loop/etc. bodies — is an explicit `result := ...` (or
+   `let result := ...`) assignment. Used to suppress the implicit-tail-
+   expression-as-result sugar in `lower-function`: once a function's body
+   has already committed to an explicit assignment somewhere earlier, a
+   later statement kept purely for its side effect (most commonly a bare
+   call) must never be reinterpreted as the function's return value."
+  [stmts]
+  (letfn [(walk [node]
+            (cond
+              (and (map? node)
+                   (or (and (= :assign (:type node)) (#{"result" "Result"} (:target node)))
+                       (and (= :let (:type node)) (#{"result" "Result"} (:name node)))))
+              true
+
+              (map? node) (some walk (vals node))
+              (sequential? node) (some walk node)
+              :else false))]
+    (boolean (walk stmts))))
+
 (defn lower-function
   [unit-name visible-functions visible-imports fn-def]
   (let [fn-def (normalized-function-def fn-def)
@@ -5121,13 +5142,14 @@
                 [env-with-old []]
                 (let [leading-statements (butlast body)
                       final-stmt (last body)]
-                  (if (or (and (= :assign (:type final-stmt))
-                               (= "result" (:target final-stmt)))
-                          (and (contains? expression-node-types (:type final-stmt))
-                               (or (not= :if (:type final-stmt))
-                                   (implicit-if-expression? env-with-old final-stmt)))
-                          (= :call (:type final-stmt))
-                          (= :convert (:type final-stmt)))
+                  (if (and (not (body-assigns-result? leading-statements))
+                           (or (and (= :assign (:type final-stmt))
+                                    (= "result" (:target final-stmt)))
+                               (and (contains? expression-node-types (:type final-stmt))
+                                    (or (not= :if (:type final-stmt))
+                                        (implicit-if-expression? env-with-old final-stmt)))
+                               (= :call (:type final-stmt))
+                               (= :convert (:type final-stmt))))
                     (let [[env' lowered-leading] (lower-statements env-with-old leading-statements)
                           implicit-result-expr? (and (not (and (= :assign (:type final-stmt))
                                                                (= "result" (:target final-stmt))))
