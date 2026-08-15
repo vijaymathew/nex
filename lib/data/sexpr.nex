@@ -1,0 +1,259 @@
+-- Sexpr: a minimal s-expression parser producing a `union Sexpr` AST — the
+-- classic Lisp-style grammar of atoms and parenthesized lists, written in
+-- pure Nex (no runtime primitives, no regex — a hand-rolled character
+-- cursor). Import with `intern data/Sexpr`, which also brings the `Symbol`,
+-- `Int`, `Float`, `Str`, `List` variants, `Sexpr_Parser`, and the
+-- `parse_sexpr_text` / `sexpr_to_string` functions into scope.
+--
+-- Grammar:
+--   sexpr  := atom | list
+--   list   := '(' sexpr* ')'
+--   atom   := symbol | integer | float | string
+--   symbol := any run of non-whitespace, non-paren, non-quote characters
+--   string := '"' ... '"', with \\ and \" escapes (plus \n, \t, \r)
+--
+-- Deliberately out of scope: comments, quote/quasiquote shorthand, dotted
+-- pairs, vectors. A caller who needs those can build on this AST.
+--
+-- Example:
+--   intern data/Sexpr
+--   let e: Sexpr := parse_sexpr_text("(+ 1 (foo \"bar\" 2.5))")
+--   print(sexpr_to_string(e))
+
+union Sexpr
+  Symbol(name: String)
+  Int(value: Integer)
+  Float(value: Real)
+  Str(value: String)
+  List(items: Array[Sexpr])
+end
+
+class Sexpr_Parser
+  note "Character-cursor recursive-descent parser for s-expression text."
+create
+  make(text: String) do
+    this.text := text
+    this.pos := 0
+    this.len := text.length()
+  end
+feature
+  text: String
+  pos: Integer
+  len: Integer
+
+  at_end(): Boolean do
+    result := pos >= len
+  end
+
+  peek(): String do
+    if at_end() then
+      result := ""
+    else
+      result := text.substring(pos, pos + 1)
+    end
+  end
+
+  advance(): String do
+    result := peek()
+    pos := pos + 1
+  end
+
+  is_whitespace(ch: String): Boolean do
+    result := ch /= "" and " \t\n\r".contains(ch)
+  end
+
+  is_delimiter(ch: String): Boolean do
+    result := ch = "" or is_whitespace(ch) or ch = "(" or ch = ")" or ch = "\""
+  end
+
+  is_digit(ch: String): Boolean do
+    result := ch /= "" and "0123456789".contains(ch)
+  end
+
+  skip_whitespace() do
+    from
+    until
+      at_end() or not is_whitespace(peek())
+    do
+      advance()
+    end
+  end
+
+  is_integer_token(tok: String): Boolean do
+    let n: Integer := tok.length()
+    if n = 0 then
+      result := false
+    else
+      let start: Integer := 0
+      if tok.substring(0, 1) = "-" or tok.substring(0, 1) = "+" then
+        start := 1
+      end
+      if start >= n then
+        result := false
+      else
+        let ok: Boolean := true
+        let i: Integer := start
+        from
+        until
+          i >= n
+        do
+          if not is_digit(tok.substring(i, i + 1)) then
+            ok := false
+          end
+          i := i + 1
+        end
+        result := ok
+      end
+    end
+  end
+
+  is_real_token(tok: String): Boolean do
+    let dot: Integer := tok.index_of(".")
+    if dot < 0 then
+      result := false
+    else
+      let left: String := tok.substring(0, dot)
+      let right: String := tok.substring(dot + 1, tok.length())
+      let right_signed: Boolean := right.length() > 0 and (right.substring(0, 1) = "-" or right.substring(0, 1) = "+")
+      result := is_integer_token(left) and is_integer_token(right) and not right_signed
+    end
+  end
+
+  parse(): Sexpr
+    do
+      result := parse_sexpr()
+      skip_whitespace()
+    ensure
+      consumed_everything: at_end()
+    end
+
+  parse_sexpr(): Sexpr do
+    skip_whitespace()
+    if at_end() then
+      raise "unexpected end of input"
+    elseif peek() = "(" then
+      result := parse_list()
+    elseif peek() = ")" then
+      raise "unexpected ')'"
+    elseif peek() = "\"" then
+      result := parse_string()
+    else
+      result := parse_atom()
+    end
+  end
+
+  parse_list(): Sexpr do
+    advance() -- consume '('
+    let items: Array[Sexpr] := []
+    skip_whitespace()
+    from
+    until
+      at_end() or peek() = ")"
+    do
+      items.add(parse_sexpr())
+      skip_whitespace()
+    end
+    if at_end() then
+      raise "unterminated list: missing ')'"
+    end
+    advance() -- consume ')'
+    result := create List.make(items)
+  end
+
+  parse_string(): Sexpr do
+    advance() -- consume opening quote
+    let value: String := ""
+    from
+    until
+      at_end() or peek() = "\""
+    do
+      let ch: String := advance()
+      if ch = "\\" and not at_end() then
+        let esc: String := advance()
+        if esc = "n" then
+          value := value + "\n"
+        elseif esc = "t" then
+          value := value + "\t"
+        elseif esc = "r" then
+          value := value + "\r"
+        elseif esc = "\\" then
+          value := value + "\\"
+        elseif esc = "\"" then
+          value := value + "\""
+        else
+          value := value + esc
+        end
+      else
+        value := value + ch
+      end
+    end
+    if at_end() then
+      raise "unterminated string literal"
+    end
+    advance() -- consume closing quote
+    result := create Str.make(value)
+  end
+
+  parse_atom(): Sexpr do
+    let start: Integer := pos
+    from
+    until
+      at_end() or is_delimiter(peek())
+    do
+      advance()
+    end
+    let tok: String := text.substring(start, pos)
+    if tok.length() = 0 then
+      raise "unexpected character: '" + peek() + "'"
+    elseif is_integer_token(tok) then
+      result := create Int.make(tok.to_integer())
+    elseif is_real_token(tok) then
+      result := create Float.make(tok.to_real())
+    else
+      result := create Symbol.make(tok)
+    end
+  end
+end
+
+-- Parse `text` as a single s-expression. Trailing whitespace is allowed;
+-- any other trailing content is a contract violation (the parser is meant
+-- to consume exactly one form).
+function parse_sexpr_text(text: String): Sexpr do
+  let p: Sexpr_Parser := create Sexpr_Parser.make(text)
+  result := p.parse()
+end
+
+-- Escape `\` and `"` so a string atom's value can be embedded back into
+-- s-expression text.
+function sexpr_escape_string(value: String): String do
+  result := value.replace("\\", "\\\\").replace("\"", "\\\"")
+end
+
+-- Render a Sexpr back into s-expression text (round-trips parse_sexpr_text
+-- for any input that used only the constructs this parser understands).
+function sexpr_to_string(e: Sexpr): String do
+  match e of
+    when Symbol(name) then
+      result := name
+    when Int(value) then
+      result := value.to_string()
+    when Float(value) then
+      result := value.to_string()
+    when Str(value) then
+      result := "\"" + sexpr_escape_string(value) + "\""
+    when List(items) then
+      let text: String := "("
+      let i: Integer := 0
+      from
+      until
+        i >= items.length
+      do
+        if i > 0 then
+          text := text + " "
+        end
+        text := text + sexpr_to_string(items.get(i))
+        i := i + 1
+      end
+      result := text + ")"
+  end
+end

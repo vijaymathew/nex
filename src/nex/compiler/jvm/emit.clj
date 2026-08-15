@@ -1971,7 +1971,14 @@
                     "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;"
                     false)
   (emit-unbox-or-cast! mv (:jvm-type expr))
-  (:jvm-type expr))
+  ;; Same stack-effect vs. reported-type mismatch as emit-expr-call-virtual!
+  ;; (see its comment): `Method.invoke` always returns a real
+  ;; `Ljava/lang/Object;` — a boxed null for a genuinely Void-returning Nex
+  ;; function — so a `:void` jvm-type here would make a statement-position
+  ;; `emit-pop!` skip popping a value that is, in fact, on the stack.
+  (if (= :void (:jvm-type expr))
+    (ir/object-jvm-type "java/lang/Object")
+    (:jvm-type expr)))
 
 (defn- emit-expr-call-function!
   [^MethodVisitor mv expr state-slot]
@@ -2004,7 +2011,23 @@
                     (:descriptor expr)
                     false)
   (emit-unbox-or-cast! mv (:jvm-type expr))
-  (:jvm-type expr))
+  ;; `:descriptor` here is always the uniform REPL-style
+  ;; `(...)Ljava/lang/Object;` shape (see `desc/repl-instance-method-
+  ;; descriptor`), regardless of the callee's Nex-level return type — a Void
+  ;; Nex method still compiles to a real JVM method that pushes a boxed
+  ;; `null` (see `emit-instance-fn-method!`'s unconditional
+  ;; ACONST_NULL/ARETURN epilogue). So INVOKEVIRTUAL always leaves exactly
+  ;; one value on the stack here, even when `(:jvm-type expr)` is `:void` —
+  ;; reporting `:void` upward would make a statement-position `emit-pop!`
+  ;; skip popping that very real value, leaking it (a `Frame.merge`
+  ;; ArrayIndexOutOfBoundsException from ASM's stack-map-frame computation
+  ;; once enough leak accumulates across a loop). Report the true stack
+  ;; effect instead; `:void` stays accurate for definite-assignment/type
+  ;; purposes everywhere else in the compiler, which reason about the IR
+  ;; node's `:jvm-type` field directly, not this function's return value.
+  (if (= :void (:jvm-type expr))
+    (ir/object-jvm-type "java/lang/Object")
+    (:jvm-type expr)))
 
 (defn- emit-expr-call-super-java!
   [^MethodVisitor mv expr state-slot]
@@ -2026,7 +2049,17 @@
       ;; conversion needed, matching Nex's own boxed-everything internal
       ;; representation.
       :else nil))
-  (:jvm-type expr))
+  ;; Same stack-effect vs. reported-type mismatch as emit-expr-call-virtual!/
+  ;; emit-expr-call-repl-fn! — the cond above guarantees a real value is on
+  ;; the stack in every case, including the compensating ACONST_NULL for a
+  ;; genuinely void Java method, so reporting `:void` upward would still let
+  ;; a statement-position `emit-pop!` skip popping it. Currently dead
+  ;; (`lower-java-super-call` hardcodes `:jvm-type` to Any's Object type,
+  ;; never :void), but keep this in step with the other two call sites so a
+  ;; future void-aware Java-return mapping doesn't silently reopen the leak.
+  (if (= :void (:jvm-type expr))
+    (ir/object-jvm-type "java/lang/Object")
+    (:jvm-type expr)))
 
 (defn- emit-expr-call-runtime!
   [^MethodVisitor mv expr state-slot]
