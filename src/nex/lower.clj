@@ -5454,7 +5454,7 @@
                  :return-type return-type
                  :return-jvm-type (ir/object-jvm-type "java/lang/Object")
                  :locals (vec params)
-                 :body (if return-type
+                 :body (if (:return-type method-def)
                          [(ir/set-local-node result-slot
                                              call-ir
                                              return-type

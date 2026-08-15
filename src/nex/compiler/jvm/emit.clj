@@ -1971,7 +1971,14 @@
                     "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;"
                     false)
   (emit-unbox-or-cast! mv (:jvm-type expr))
-  (:jvm-type expr))
+  ;; Same stack-effect vs. reported-type mismatch as emit-expr-call-virtual!
+  ;; (see its comment): `Method.invoke` always returns a real
+  ;; `Ljava/lang/Object;` — a boxed null for a genuinely Void-returning Nex
+  ;; function — so a `:void` jvm-type here would make a statement-position
+  ;; `emit-pop!` skip popping a value that is, in fact, on the stack.
+  (if (= :void (:jvm-type expr))
+    (ir/object-jvm-type "java/lang/Object")
+    (:jvm-type expr)))
 
 (defn- emit-expr-call-function!
   [^MethodVisitor mv expr state-slot]
