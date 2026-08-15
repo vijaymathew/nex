@@ -2,6 +2,73 @@
 
 ## Unreleased
 
+## 0.3.6 - 2026-08-15
+
+- **New: `data/Sexpr`, a minimal s-expression parser and serializer,
+  written in pure Nex.** `intern data/Sexpr` brings a `union Sexpr` AST
+  (`Symbol`, `Int`, `Float`, `Str`, `List(items: Array[Sexpr])`) and
+  `parse_sexpr_text(text): Sexpr` / `sexpr_to_string(e): String` into scope.
+  The parser is a hand-rolled character-cursor recursive descent over the
+  input string — no runtime parsing primitive, and no `text/Regex` either,
+  unlike the tokenizer in `examples/contracts_at_work/04_expr_interpreter`.
+  See `docs/ref/data.md`.
+
+- **Fixed: a compiled function or method with no declared return type
+  (`Void`) was internally typed as `Any` instead of `Void`, with two
+  compounding consequences.** First, when such a call was the last
+  statement of a *different*, value-returning routine that had already
+  assigned `result` earlier in its body, the lowerer's "a bare trailing
+  expression implicitly becomes `result`" sugar — which never checked
+  whether `result` was already assigned — reinterpreted the call as the
+  real return value, silently discarding the correct one:
+
+  ```nex
+  function p(): Any do
+    result := 100
+    print("done")
+  end
+
+  function ff(x: Integer): Integer do
+    result := x + 1
+    p()
+  end
+
+  print(ff(10))   -- was 100, now 11
+  ```
+
+  Second, once `Void` was correctly inferred, the same unguarded sugar
+  meant a *bare* `Void` call in that trailing position compiled to a
+  corrupted return (`nil`) instead of leaving the real `result` alone. The
+  sugar now checks whether `result` was already assigned anywhere earlier
+  in the body before treating a trailing statement as an implicit return.
+
+- **Fixed: three JVM-backend call-emission paths — instance/self method
+  calls, top-level free-function calls, and Java-superclass calls — could
+  leak an extra value onto the operand stack whenever a genuinely
+  `Void`-returning call was used as a bare statement**, eventually
+  crashing bytecode verification (`ArrayIndexOutOfBoundsException` in
+  ASM's `Frame.merge`) on any function whose control flow (typically a
+  loop) accumulated enough of the leak. Root cause: these calling
+  conventions always push a boxed value onto the stack (`null` for a
+  `Void` call, per Nex's own internal representation), but the emitter
+  reported the Nex-level `:void` type upward regardless — so a
+  statement-position pop, seeing `:void`, skipped popping a value that was
+  in fact sitting on the stack. All three now report the real stack
+  effect; only the Java-superclass path was purely a latent risk (its Nex
+  type is currently always `Any`, never `Void`) rather than a live bug.
+
+- **Fixed: an inherited-but-not-overridden method whose declared return
+  type is `Void` crashed with "Unsupported local store type" the first
+  time a subclass compiled a forwarding call to it.** The compiler's
+  auto-generated delegation method (the shim a subclass gets for a parent
+  method it doesn't override) branched on an always-truthy defaulted
+  return type instead of the method's actual declared one, so it always
+  tried to capture the call's result into a local and return it — which
+  cannot work for a genuinely `Void` method once `Void` is correctly
+  inferred (see above). It now checks the method's real declared return
+  type, matching the same check `lower-function` already used for
+  ordinary (non-delegated) methods.
+
 ## 0.3.5 - 2026-08-14
 
 - **New: a constructor may delegate to another constructor of the same class
