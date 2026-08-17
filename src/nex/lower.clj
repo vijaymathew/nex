@@ -3606,9 +3606,20 @@
    :call               (fn [env expr] (lower-call-expr env expr))})
 
 (defn lower-expression
+  "The primary entry point for lowering an AST expression node to IR — every
+   recursive descent into a sub-expression goes through here, so tagging the
+   result with EXPR's source position here (rather than at each of the ~20
+   `lower-expr-*`/`lower-*-call` producers individually) gives every
+   expression-level IR node a `:dbg/line`/`:dbg/col` for free, the same way
+   `lower-statement` already does for statement-level nodes via
+   `with-stmt-debug`. Without this, an emit-time failure deep in a sub-
+   expression (e.g. `binary-opcode`'s \"Unsupported binary opcode emission\")
+   had no source location to report — see `format-exception-diagnostics` in
+   `nex.compiler.jvm.file`, which already knew how to turn a `:dbg/line`-
+   bearing node into \"At line N, column C\" but had nothing to find it on."
   [env expr]
   (if-let [handler (get lower-expression-dispatch (:type expr))]
-    (handler env expr)
+    (ir/with-debug (handler env expr) expr)
     (throw (unsupported "Unsupported expression node for lowering"
                     {:expr expr :node-type (:type expr)}))))
 

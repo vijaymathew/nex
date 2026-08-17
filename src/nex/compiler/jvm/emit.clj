@@ -613,34 +613,35 @@
                           {:jvm-type jvm-type}))))
 
 (defn- binary-opcode
-  [operator jvm-type]
-  (case [operator jvm-type]
-    [:add :int] Opcodes/IADD
-    [:sub :int] Opcodes/ISUB
-    [:mul :int] Opcodes/IMUL
-    [:div :int] Opcodes/IDIV
-    [:mod :int] Opcodes/IREM
-    [:bit-shl :int] Opcodes/ISHL
-    [:bit-shr :int] Opcodes/ISHR
-    [:bit-ushr :int] Opcodes/IUSHR
-    [:bit-and :int] Opcodes/IAND
-    [:bit-or :int] Opcodes/IOR
-    [:bit-xor :int] Opcodes/IXOR
+  ([operator jvm-type] (binary-opcode operator jvm-type nil))
+  ([operator jvm-type expr]
+   (case [operator jvm-type]
+     [:add :int] Opcodes/IADD
+     [:sub :int] Opcodes/ISUB
+     [:mul :int] Opcodes/IMUL
+     [:div :int] Opcodes/IDIV
+     [:mod :int] Opcodes/IREM
+     [:bit-shl :int] Opcodes/ISHL
+     [:bit-shr :int] Opcodes/ISHR
+     [:bit-ushr :int] Opcodes/IUSHR
+     [:bit-and :int] Opcodes/IAND
+     [:bit-or :int] Opcodes/IOR
+     [:bit-xor :int] Opcodes/IXOR
 
-    [:add :long] Opcodes/LADD
-    [:sub :long] Opcodes/LSUB
-    [:mul :long] Opcodes/LMUL
-    [:div :long] Opcodes/LDIV
-    [:mod :long] Opcodes/LREM
+     [:add :long] Opcodes/LADD
+     [:sub :long] Opcodes/LSUB
+     [:mul :long] Opcodes/LMUL
+     [:div :long] Opcodes/LDIV
+     [:mod :long] Opcodes/LREM
 
-    [:add :double] Opcodes/DADD
-    [:sub :double] Opcodes/DSUB
-    [:mul :double] Opcodes/DMUL
-    [:div :double] Opcodes/DDIV
-    [:mod :double] Opcodes/DREM
+     [:add :double] Opcodes/DADD
+     [:sub :double] Opcodes/DSUB
+     [:mul :double] Opcodes/DMUL
+     [:div :double] Opcodes/DDIV
+     [:mod :double] Opcodes/DREM
 
-    (throw (ex-info "Unsupported binary opcode emission"
-                    {:operator operator :jvm-type jvm-type}))))
+     (throw (ex-info "Unsupported binary opcode emission"
+                     {:operator operator :jvm-type jvm-type :expr expr})))))
 
 (defn- unary-opcode
   [operator jvm-type]
@@ -2123,7 +2124,8 @@
           (.visitInsn mv (or (unary-opcode (:operator expr) (:jvm-type expr))
                              (throw (ex-info "Unsupported unary opcode emission"
                                              {:operator (:operator expr)
-                                              :jvm-type (:jvm-type expr)})))))
+                                              :jvm-type (:jvm-type expr)
+                                              :expr expr})))))
         (:jvm-type expr)))))
 
 (defn- emit-expr-if!
@@ -2244,7 +2246,7 @@
     (do
       (emit-as-int! mv (:left expr) state-slot)
       (emit-as-int! mv (:right expr) state-slot)
-      (.visitInsn mv (binary-opcode (:operator expr) :int))
+      (.visitInsn mv (binary-opcode (:operator expr) :int expr))
       (emit-stack-coerce! mv :int (:jvm-type expr))
       (:jvm-type expr))
 
@@ -2263,7 +2265,7 @@
                            :left-jvm-type left-type
                            :right-jvm-type right-type})))
         (or (emit-checked-long-binary! mv (:operator expr) operand-type)
-            (.visitInsn mv (binary-opcode (:operator expr) operand-type))))
+            (.visitInsn mv (binary-opcode (:operator expr) operand-type expr))))
       (:jvm-type expr))))
 
 (defn- emit-compare!
