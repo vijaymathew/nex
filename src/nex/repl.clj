@@ -1662,9 +1662,23 @@
           (println (str type-str " " (format-value result)))
           (println (format-value result))))
       exec-ctx)
-    (do
-      (print-compiled-fallback-warning! ast)
-      (eval-registered-program! exec-ctx ast source-id))))
+    (let [declaring? (ast-declares-class-or-function? ast)]
+      (try
+        (let [result (eval-registered-program! exec-ctx ast source-id)]
+          (print-compiled-fallback-warning! ast)
+          result)
+        (catch Throwable e
+          ;; A cell that just throws (e.g. an undefined variable) never
+          ;; ran on a different backend with different semantics -- it's
+          ;; the program's own error, on any backend, so warning "falling
+          ;; back" ahead of it is misleading noise, not a real divergence.
+          ;; A class/function definition is the one exception: it can
+          ;; partially register on the interpreter before throwing, which
+          ;; still taints later cells for the rest of the session, so that
+          ;; warning is worth keeping even when this cell itself errored.
+          (when declaring?
+            (print-compiled-fallback-warning! ast))
+          (throw e))))))
 
 (defn- eval-wrapped-input!
   "Run the synthetic wrapper method `parse-repl-input` built around `input`
