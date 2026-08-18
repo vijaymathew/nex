@@ -1578,15 +1578,37 @@
   []
   (io/file (System/getProperty "user.home") ".nex" "repl.log"))
 
+(defn- print-compiled-fallback-warning!
+  "Tell the user this input is running on the tree-walking interpreter
+   instead of the compiled backend, and why — printed to *err* so it doesn't
+   get mixed into the cell's own output. Reserved for class/function-
+   declaring cells: unlike a routine narrow-subset decline, a definition
+   falling back has lasting, session-wide consequences (see
+   `log-compiled-fallback!`'s docstring), so it's worth interrupting the
+   session for."
+  [ast]
+  (let [reason @(:last-decline-reason @*compiled-repl-session*)]
+    (binding [*out* *err*]
+      (println (str "Warning: falling back to the tree-walking interpreter for this input"
+                    (when reason (str " (" reason ")"))
+                    "."))
+      (println (str "         Any class/function defined here runs on the interpreter for the"
+                    " rest of this session — behavior can differ from the compiled backend"
+                    " (see docs/md/BACKEND_ALIGNMENT.md) even though this definition itself"
+                    " succeeded.")))))
+
 (defn- log-compiled-fallback!
   "Record that this input fell back to the tree-walking interpreter, and why.
-   This used to print a \"Warning: ...\" straight into the session, but that
-   reads as alarming even when the fallback is harmless (a narrow compiled-
-   backend gap, not a bug in the user's program) — so the detail goes to
-   ~/.nex/repl.log instead, there to inspect without interrupting the
-   session. Logs the input itself, the decline reason (when one was
-   recorded), and — for a class/function definition — the note that it now
-   runs on the interpreter for the rest of this session."
+   A plain expression/statement declining used to print a \"Warning: ...\"
+   straight into the session, but that reads as alarming even when the
+   fallback is harmless (a narrow compiled-backend gap, not a bug in the
+   user's program) — so the detail goes to ~/.nex/repl.log instead, there to
+   inspect without interrupting the session. A class/function-declaring cell
+   still also gets `print-compiled-fallback-warning!` on top of this, since
+   that case has lasting consequences worth surfacing immediately. Logs the
+   input itself, the decline reason (when one was recorded), and — for a
+   class/function definition — the note that it now runs on the interpreter
+   for the rest of this session."
   [ast input]
   (let [reason @(:last-decline-reason @*compiled-repl-session*)
         declaring? (ast-declares-class-or-function? ast)
@@ -1682,18 +1704,21 @@
       (try
         (let [result (eval-registered-program! exec-ctx ast source-id)]
           (log-compiled-fallback! ast input)
+          (when declaring?
+            (print-compiled-fallback-warning! ast))
           result)
         (catch Throwable e
           ;; A cell that just throws (e.g. an undefined variable) never
           ;; ran on a different backend with different semantics -- it's
-          ;; the program's own error, on any backend, so logging a "fell
-          ;; back" note ahead of it is misleading noise, not a real
+          ;; the program's own error, on any backend, so logging/warning a
+          ;; "fell back" note ahead of it is misleading noise, not a real
           ;; divergence. A class/function definition is the one exception:
           ;; it can partially register on the interpreter before throwing,
           ;; which still taints later cells for the rest of the session, so
           ;; that note is worth keeping even when this cell itself errored.
           (when declaring?
-            (log-compiled-fallback! ast input))
+            (log-compiled-fallback! ast input)
+            (print-compiled-fallback-warning! ast))
           (throw e))))))
 
 (defn- eval-wrapped-input!
