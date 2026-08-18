@@ -271,7 +271,7 @@ A `match` on a sealed type must cover every variant or supply an `else` branch â
 
 ```nex
 match r of
-  when Ok as ok then print(ok.value)
-  when Err as err then print(err.msg)
+  Ok as ok then print(ok.value)
+  Err as err then print(err.msg)
 end
 ```

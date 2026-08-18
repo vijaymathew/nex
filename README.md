@@ -175,9 +175,9 @@ end
 
 function area(s: Shape): Real do
   match s of
-    when Circle(radius)           then result := 3.14159 * radius * radius
-    when Rectangle(width, height) then result := width * height
-    when Empty                    then result := 0.0
+    Circle(radius)           then result := 3.14159 * radius * radius
+    Rectangle(width, height) then result := width * height
+    Empty                    then result := 0.0
   end
 end
 
@@ -416,7 +416,7 @@ See [examples/README.md](examples/README.md) for the full list.
 
 - Conditionals: `if ... then ... elseif ... then ... else ... end`
 - Loops: `from ... invariant ... variant ... until ... do ... end`
-- Pattern matching: `match ... of when ... then ... end`, with field destructuring and `if` guards; `case` for literal-value dispatch
+- Pattern matching: `match ... of ... then ... end`, with field destructuring and `if` guards; `case` for literal-value dispatch
 - Scoped blocks: `do ... end` with lexical scoping and variable shadowing
 - Exceptions: `raise`, `rescue`, `retry`
 - Mid-body assertions: `assert label: condition`, or `assert condition`

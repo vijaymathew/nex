@@ -73,9 +73,9 @@ across Color.values as c do print(c.ordinal) end"))]
     (let [prog (str color-enum
                     "let a: Color := Color.Green
 match a of
-  when Red then print(\"red\")
-  when Green then print(\"green\")
-  when Blue then print(\"blue\")
+  Red then print(\"red\")
+  Green then print(\"green\")
+  Blue then print(\"blue\")
 end")]
       (is (= ["\"green\""] (run-compiled prog)))
       (is (= ["\"green\""] (run-interpreted prog))))))
@@ -89,8 +89,8 @@ end")]
 end
 let s: Shape := create Circle.make(2.0)
 match s of
-  when Circle as c then print(c.radius)
-  when Unit then print(\"unit\")
+  Circle as c then print(c.radius)
+  Unit then print(\"unit\")
 end"]
       (is (= ["2.0"] (run-compiled prog)))
       (is (= ["2.0"] (run-interpreted prog)))))
@@ -110,8 +110,8 @@ print(Shape.values.length())")))))
 end
 let a: Box[Integer] := create Full[Integer].make(3)
 match a of
-  when Full as f then print(f.v)
-  when Empty then print(\"empty\")
+  Full as f then print(f.v)
+  Empty then print(\"empty\")
 end"]
       (is (= ["3"] (run-compiled prog)))
       (is (= ["3"] (run-interpreted prog))))))

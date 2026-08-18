@@ -136,23 +136,25 @@ function lookup(env: Map[String, Real], name: String): Real
 
 function eval_expr(e: Expr, env: Map[String, Real]): Real do
   match e of
-    when Num(value) then
+    Num(value) then
       result := value
-    when Var(name) then
+    Var(name) then
       result := lookup(env, name)
-    when Neg(operand) then
+    Neg(operand) then
       result := 0.0 - eval_expr(operand, env)
-    when Bin_Op(op, left, right) then
-      let l: Real := eval_expr(left, env)
-      let r: Real := eval_expr(right, env)
-      if op = "+" then
-        result := l + r
-      elseif op = "-" then
-        result := l - r
-      elseif op = "*" then
-        result := l * r
-      else
-        result := divide(l, r)
+    Bin_Op(op, left, right) then
+      do
+        let l: Real := eval_expr(left, env)
+        let r: Real := eval_expr(right, env)
+        if op = "+" then
+          result := l + r
+        elseif op = "-" then
+          result := l - r
+        elseif op = "*" then
+          result := l * r
+        else
+          result := divide(l, r)
+        end
       end
   end
 end

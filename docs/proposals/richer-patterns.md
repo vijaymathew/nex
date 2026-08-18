@@ -9,7 +9,7 @@ Addresses **Deficiency #4** in `docs/language-notes-from-book.md`:
 > (destructuring, nested, literals, `when`-guards).
 
 > **Implementation status.** Phase 1 (field destructuring, rename/skip, optional
-> `as`, and the `when _` catch-all) is pure walker sugar. Phase 2 (`if` guards)
+> `as`, and the `_` catch-all) is pure walker sugar. Phase 2 (`if` guards)
 > is implemented on the JVM and interpreter backends: a clause carries `:bindings`
 > and `:guard`; the interpreter and JVM lowering bind → run bindings → test guard
 > → body-or-fall-through; the type checker requires a Boolean guard and excludes
@@ -17,7 +17,7 @@ Addresses **Deficiency #4** in `docs/language-notes-from-book.md`:
 > (out of scope). Phase 3 **literal** field patterns (`field: 0`) shipped as
 > equality guards and were then **removed**: the sugar gave `:` a second meaning
 > in a position where the type reading is the obvious one, and it did not bind
-> the field it named (`when Ok(value: 10) then print(value)` printed nil). The
+> the field it named (`Ok(value: 10) then print(value)` printed nil). The
 > guard it desugared to is now the only spelling, and it binds. Phase 3 **nested** patterns
 > (`field: Some[Integer](value as x)`) are now **implemented** too, after landing
 > Finding 2 of `generic-inference.md` (match binding carries the subject's type
@@ -26,13 +26,20 @@ Addresses **Deficiency #4** in `docs/language-notes-from-book.md`:
 > `convert … to __nest: T` guard with the sub-pattern's binds moved into the body;
 > sub-patterns are by-name and nest arbitrarily. Give the nested type its
 > arguments for typed sub-fields (construction inference / Finding 1 would remove
-> that need).
+> that need). Phase 4: the leading `WHEN` keyword was **removed** from clause
+> headers. It was never load-bearing — unlike `select`'s clauses, a match
+> clause's header (`typeName`) can't be confused with an ordinary statement, so
+> the parser doesn't need a keyword to see where a block-bodied clause ends and
+> the next begins. What *was* load-bearing was the clause body being an open
+> `block` (`statement*`), which has no self-terminator; the fix pairs the keyword
+> removal with narrowing a clause body to a single `statement` (as `caseClause`
+> already was), recovering multi-statement arms with `do ... end`.
 
 ## Where things stand today
 
 Two separate constructs exist:
 
-- `match <e> of when <Type> as <v> then <block> … [else <block>] end` — dispatches
+- `match <e> of <Type> as <v> then <block> … [else <block>] end` — dispatches
   on the runtime class and binds the *whole* value to `v`
   (`grammar/nexlang.g4` `matchClause`; `interpreter.clj` `eval-node :match`;
   lowered to a chain of `convert`-based instanceof checks in
@@ -47,18 +54,18 @@ a value: to read a variant's payload you bind the whole object and then write
 
 ## Proposed surface
 
-Extend a match clause to `WHEN pattern (AS id)? (IF guard)? THEN block`, where a
+Extend a match clause to `pattern (AS id)? (IF guard)? THEN statement`, where a
 `pattern` can destructure a variant, match a literal, nest, or wildcard:
 
 ```nex
 match order of
-  when Draft                     then note_draft()
-  when Placed(id, total)         then charge(id, total)      -- destructure by field name
-  when Placed(id, total) if total > 1000 then flag(id)       -- guard
-  when Shipped(tracking as t)    then track(t)               -- rename a field
-  when Shipped(at: Integer)      then noop()                 -- require a field's type
-  when Cancelled(_)              then noop()                 -- ignore a field
-  when _                         then reject()               -- wildcard (catch-all)
+  Draft                     then note_draft()
+  Placed(id, total)         then charge(id, total)      -- destructure by field name
+  Placed(id, total) if total > 1000 then flag(id)       -- guard
+  Shipped(tracking as t)    then track(t)               -- rename a field
+  Shipped(at: Integer)      then noop()                 -- require a field's type
+  Cancelled(_)              then noop()                 -- ignore a field
+  _                         then reject()               -- wildcard (catch-all)
 end
 ```
 
@@ -76,20 +83,20 @@ end
   means "bind under this name" at clause level. The colon's third job — matching
   a literal — is gone too (write the guard), leaving it a single meaning.
 - **`as`** still binds the whole matched value and composes with destructuring
-  (`when Placed(id, total) as p then …`), keeping every existing `match` valid.
+  (`Placed(id, total) as p then …`), keeping every existing `match` valid.
 - **Guards** `if <bool>` run after a structural match; a false guard falls through
   to the next clause.
 - **Literal patterns** in a field position were proposed and shipped, then
-  removed — write the guard (`when Line(qty) if qty = 0`), which is what they
+  removed — write the guard (`Line(qty) if qty = 0`), which is what they
   desugared to. See the status note above. (Whole-value literal dispatch stays the job of
   `case`; literals in `match` are for field and nested positions.)
-- **Nested patterns** `when Ok(Some(x))` apply a pattern to a field's value.
+- **Nested patterns** `Ok(Some(x))` apply a pattern to a field's value.
 - **Wildcard** `_` as a top-level pattern is a catch-all (a spelling of `else`).
 
 Grammar sketch:
 
 ```antlr
-matchClause : WHEN pattern (AS IDENTIFIER)? (IF expression)? THEN block ;
+matchClause : pattern (AS IDENTIFIER)? (IF expression)? THEN statement ;
 
 pattern
     : '_'
@@ -115,12 +122,12 @@ dispatch and exhaustiveness.
 ### Phase 1 — destructuring + wildcard (walker-only, no backend changes)
 
 Simple destructuring never fails: if the type matches, the bindings always
-succeed. So `when Placed(id, total) then <body>` desugars in the walker
+succeed. So `Placed(id, total) then <body>` desugars in the walker
 (`:matchClause`, `walker.clj:1102`) to the existing whole-value form plus
 leading `let`s:
 
 ```nex
-when Placed as __m0 then
+Placed as __m0 then
   let id: <inferred> := __m0.id
   let total: <inferred> := __m0.total
   <body>

@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- **Breaking: a `match`/`case` clause drops its leading keyword, and a
+  `match` clause body is now exactly one statement.** `when` was never load-
+  bearing for `match` the way it is for `select`: a `select` clause's header
+  is an arbitrary `expression`, indistinguishable from an ordinary statement
+  without a keyword to mark where it starts, but a `match` clause's header is
+  a `typeName` pattern (a bare `Ok`, `Placed(id, total)`, ...), which cannot
+  be confused with a statement — exactly like `case`'s literal clause headers,
+  which have never carried a keyword. What *was* load-bearing was the clause
+  body being an open `block` (zero or more statements) with no
+  self-terminator, so the parser needed `when` to see where one clause's body
+  ended and the next began. The fix pairs dropping `when` with narrowing a
+  `match` clause's body to a single `statement` — matching `caseClause`,
+  which has always been `stmt`-bodied — recovering multi-statement arms with
+  `do ... end`:
+
+  ```nex
+  match r of
+    Ok as ok then print(ok.value)
+    Err as err then
+      do
+        log(err.msg)
+        raise err
+      end
+  end
+  ```
+
+  `select`'s clauses are unaffected and still require `when`. See
+  `docs/proposals/richer-patterns.md` and `grammar/nexlang.g4`
+  `matchClause`/`caseClause`.
+
 ## 0.3.6 - 2026-08-15
 
 - **New: `data/Sexpr`, a minimal s-expression parser and serializer,

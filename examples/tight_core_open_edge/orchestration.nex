@@ -13,16 +13,18 @@ function place_order(request: Order_Request, rule: Price_Expr,
                      routes: Array[Term], now: Instant): Result[Placement, String]
   do
     match parse_order(request) of                        -- 1. boundary (Ch 4)
-      when Err as bad then
+      Err as bad then
         result := create Err[Placement, String].make(bad.error)
-      when Ok as parsed then
-        let draft: Draft := parsed.value
-        let quote: Money := rule.eval(draft)              -- 2. open edge (Ch 10)
-        match admit_quote(draft, quote) of                -- 3. membrane (Ch 2, 9)
-          when Err as rejected then
-            result := create Err[Placement, String].make(rejected.error)
-          when Ok as ok then
-            result := plan_fulfillment(ok.value, routes, now)   -- 4. core decides
+      Ok as parsed then
+        do
+          let draft: Draft := parsed.value
+          let quote: Money := rule.eval(draft)              -- 2. open edge (Ch 10)
+          match admit_quote(draft, quote) of                -- 3. membrane (Ch 2, 9)
+            Err as rejected then
+              result := create Err[Placement, String].make(rejected.error)
+            Ok as ok then
+              result := plan_fulfillment(ok.value, routes, now)   -- 4. core decides
+          end
         end
     end
   end
@@ -31,14 +33,16 @@ function plan_fulfillment(placed: Placed, routes: Array[Term],
                           now: Instant): Result[Placement, String]
   do
     match route(routing_query(placed), routes) of         -- 4a. routing (Ch 13)
-      when Err as e then
+      Err as e then
         result := create Err[Placement, String].make("unfulfillable: " + e.error)
-      when Ok as sol then
-        let fx: Array[Effect] := []                        -- 4b. effects as data (Ch 6)
-        fx.add(create Charge_Payment.make(placed.total))
-        fx.add(create Reserve_Stock.make(warehouse_of(sol.value), placed.items))
-        fx.add(create Send_Confirmation.make(placed.customer_email))
-        fx.add(create Record_Order.make(placed))
-        result := create Ok[Placement, String].make(create Placement.make(placed, fx))
+      Ok as sol then
+        do
+          let fx: Array[Effect] := []                        -- 4b. effects as data (Ch 6)
+          fx.add(create Charge_Payment.make(placed.total))
+          fx.add(create Reserve_Stock.make(warehouse_of(sol.value), placed.items))
+          fx.add(create Send_Confirmation.make(placed.customer_email))
+          fx.add(create Record_Order.make(placed))
+          result := create Ok[Placement, String].make(create Placement.make(placed, fx))
+        end
     end
   end

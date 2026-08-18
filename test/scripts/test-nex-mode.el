@@ -238,41 +238,48 @@ class level.  Bare-'from' init statements still indent one level under 'from'."
             "\n"))))
 
 (ert-deftest nex-indent-match-clauses ()
-  "'when' clauses indent one level inside their 'match', and the closing 'end'
-aligns with the 'match' (regression: 'when' was treated as a plain de-dent
-measured from the previous line — the preceding clause's body — which flattened
-every clause to the 'match' column and dragged the 'end' with it)."
+  "Bare match clauses (no leading keyword — see `nexlang.g4' `matchClause')
+indent one level inside their 'match', and the closing 'end' aligns with the
+'match' (regression: without special handling, a clause header was treated as
+a plain continuation of the previous line — the preceding clause's body —
+which flattened every clause to the 'match' column and dragged the 'end' with
+it; this is the same flattening bug the old 'when' keyword used to guard
+against before match clauses lost it)."
   (should (string=
            (nex-test--reindent
-            "function describe(o: Order): String\ndo\nmatch o of\nwhen Draft as d then\nresult := \"draft\"\nwhen Placed as p then\nresult := p.total.to_string\nend\nend")
+            "function describe(o: Order): String\ndo\nmatch o of\nDraft as d then\nresult := \"draft\"\nPlaced as p then\nresult := p.total.to_string\nend\nend")
            (string-join
             '("function describe(o: Order): String"
               "do"
               "  match o of"
-              "    when Draft as d then"
+              "    Draft as d then"
               "      result := \"draft\""
-              "    when Placed as p then"
+              "    Placed as p then"
               "      result := p.total.to_string"
               "  end"
               "end")
             "\n"))))
 
 (ert-deftest nex-indent-match-else-and-nested-block ()
-  "A match 'else' aligns with the 'when' clauses, and an 'if' nested in a clause
-body keeps its own 'end' — the clause that follows still anchors to the 'match',
-not to the nested block."
+  "A match 'else' aligns with the bare clauses, and a clause body wrapped in
+'do ... end' (required once it is more than one statement — a match clause's
+body is exactly one statement, see `nexlang.g4' `matchClause') keeps its own
+'end' — the clause that follows still anchors to the 'match', not to the
+nested block."
   (should (string=
            (nex-test--reindent
-            "function f(r: Result): Integer\ndo\nmatch r of\nwhen Ok as ok then\nif ok.value > 0 then\nprint(ok.value)\nend\nprint(\"done\")\nelse\nprint(\"not ok\")\nend\nend")
+            "function f(r: Result): Integer\ndo\nmatch r of\nOk as ok then\ndo\nif ok.value > 0 then\nprint(ok.value)\nend\nprint(\"done\")\nend\nelse\nprint(\"not ok\")\nend\nend")
            (string-join
             '("function f(r: Result): Integer"
               "do"
               "  match r of"
-              "    when Ok as ok then"
-              "      if ok.value > 0 then"
-              "        print(ok.value)"
+              "    Ok as ok then"
+              "      do"
+              "        if ok.value > 0 then"
+              "          print(ok.value)"
+              "        end"
+              "        print(\"done\")"
               "      end"
-              "      print(\"done\")"
               "    else"
               "      print(\"not ok\")"
               "  end"
@@ -280,22 +287,26 @@ not to the nested block."
             "\n"))))
 
 (ert-deftest nex-indent-nested-match ()
-  "A 'match' inside a clause body owns its own clauses and 'end'; the outer
-clause list resumes at the outer 'match' level afterwards."
+  "A 'match' inside a clause body (wrapped in 'do ... end' alongside the
+statement that follows it, since a clause holds exactly one statement) owns
+its own clauses and 'end'; the outer clause list resumes at the outer
+'match' level afterwards."
   (should (string=
            (nex-test--reindent
-            "function outer(o: Order): String\ndo\nmatch o of\nwhen Ok as k then\nmatch k.v of\nwhen Draft as d then\nprint(\"d\")\nend\nprint(\"after\")\nwhen Err as e then\nprint(\"e\")\nend\nend")
+            "function outer(o: Order): String\ndo\nmatch o of\nOk as k then\ndo\nmatch k.v of\nDraft as d then\nprint(\"d\")\nend\nprint(\"after\")\nend\nErr as e then\nprint(\"e\")\nend\nend")
            (string-join
             '("function outer(o: Order): String"
               "do"
               "  match o of"
-              "    when Ok as k then"
-              "      match k.v of"
-              "        when Draft as d then"
-              "          print(\"d\")"
+              "    Ok as k then"
+              "      do"
+              "        match k.v of"
+              "          Draft as d then"
+              "            print(\"d\")"
+              "        end"
+              "        print(\"after\")"
               "      end"
-              "      print(\"after\")"
-              "    when Err as e then"
+              "    Err as e then"
               "      print(\"e\")"
               "  end"
               "end")

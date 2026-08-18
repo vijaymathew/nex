@@ -572,9 +572,9 @@ end")
 (deftest lower-match-statement-lowers-to-block-with-if-chain-test
   (testing "match statement lowers to block: set-local for temp + if-stmt chain"
     (let [program (p/ast "match r of
-  when Ok as ok then
+  Ok as ok then
     print(1)
-  when Err as err then
+  Err as err then
     print(2)
 end")
           env (lower/make-lowering-env {:top-level? true
@@ -588,9 +588,9 @@ end")
 (deftest lower-match-convert-test-uses-clause-class-and-var-test
   (testing "match clause lowers to :convert test with correct target-type and binding name"
     (let [program (p/ast "match r of
-  when Ok as ok then
+  Ok as ok then
     print(1)
-  when Err as err then
+  Err as err then
     print(2)
 end")
           env (lower/make-lowering-env {:top-level? true
@@ -607,9 +607,9 @@ end")
 (deftest lower-match-second-clause-nested-in-else-test
   (testing "second match clause becomes a nested if-stmt in the else of the first"
     (let [program (p/ast "match r of
-  when Ok as ok then
+  Ok as ok then
     print(1)
-  when Err as err then
+  Err as err then
     print(2)
 end")
           env (lower/make-lowering-env {:top-level? true
@@ -626,9 +626,9 @@ end")
 (deftest lower-match-no-else-synthesizes-raise-test
   (testing "match without else branch synthesizes a raise in the innermost else"
     (let [program (p/ast "match r of
-  when Ok as ok then
+  Ok as ok then
     print(1)
-  when Err as err then
+  Err as err then
     print(2)
 end")
           env (lower/make-lowering-env {:top-level? true
@@ -644,7 +644,7 @@ end")
 (deftest lower-match-with-else-branch-lowers-else-body-test
   (testing "match with else branch lowers the else body instead of synthesizing a raise"
     (let [program (p/ast "match r of
-  when Ok as ok then
+  Ok as ok then
     print(1)
   else
     print(0)
@@ -661,7 +661,7 @@ end")
 (deftest lower-match-temp-var-is-local-slot-test
   (testing "match evaluates its expression into a fresh local slot"
     (let [program (p/ast "match r of
-  when Ok as ok then
+  Ok as ok then
     print(1)
 end")
           env (lower/make-lowering-env {:top-level? true

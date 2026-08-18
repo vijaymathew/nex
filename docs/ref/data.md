@@ -115,7 +115,7 @@ let e: Sexpr := parse_sexpr_text("(+ 1 (foo \"bar\" 2.5) -3)")
 print(sexpr_to_string(e))
 
 match e of
-  when List(items) then print(items.length)  -- 4
+  List(items) then print(items.length)  -- 4
   else print("not a list")
 end
 ```

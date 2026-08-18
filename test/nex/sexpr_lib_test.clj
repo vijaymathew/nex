@@ -13,7 +13,7 @@
                    (repl/eval-code ctx "print(sexpr_to_string(parse_sexpr_text(\"hello\")))")
                    (repl/eval-code ctx "print(sexpr_to_string(parse_sexpr_text(\"(+ 1 (foo \\\"bar\\\" 2.5) -3)\")))")
                    (repl/eval-code ctx "let e: Sexpr := parse_sexpr_text(\"(a b c)\")")
-                   (repl/eval-code ctx "match e of when List(items) then print(items.length) else print(-1) end"))]
+                   (repl/eval-code ctx "match e of List(items) then print(items.length) else print(-1) end"))]
       (is (str/includes? output "\"42\""))
       (is (str/includes? output "\"-3.14\""))
       (is (str/includes? output "\"hello\""))
@@ -24,8 +24,8 @@
     (let [ctx (repl/init-repl-context)
           output (with-out-str
                    (repl/eval-code ctx "intern data/Sexpr")
-                   (repl/eval-code ctx "match parse_sexpr_text(\"42\") of when Int then print(\"int\") when Float then print(\"float\") else print(\"other\") end")
-                   (repl/eval-code ctx "match parse_sexpr_text(\"3.14\") of when Int then print(\"int\") when Float then print(\"float\") else print(\"other\") end"))]
+                   (repl/eval-code ctx "match parse_sexpr_text(\"42\") of Int then print(\"int\") Float then print(\"float\") else print(\"other\") end")
+                   (repl/eval-code ctx "match parse_sexpr_text(\"3.14\") of Int then print(\"int\") Float then print(\"float\") else print(\"other\") end"))]
       (is (str/includes? output "\"int\""))
       (is (str/includes? output "\"float\""))))
 

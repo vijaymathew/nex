@@ -1416,7 +1416,7 @@
   "Compute a match clause's binding type, carrying the subject's generic
   arguments onto the bound variable (so `s.value` resolves with the real
   element type). Mirrors the typechecker so the compiled backend agrees with
-  --interpret; an explicit `when C[...]` on the clause wins over inference."
+  --interpret; an explicit `C[...]` on the clause wins over inference."
   [env subject-type class-name generic-args]
   (if (seq generic-args)
     {:base-type class-name :type-args generic-args}

@@ -3919,7 +3919,7 @@
       (let [clause-env (make-type-env env)
             ;; Carry the subject's type arguments onto the bound variable so
             ;; `o.field` resolves with the real element types. An explicit
-            ;; `when C[...]` on the clause wins over inference.
+            ;; `C[...]` on the clause wins over inference.
             binding-type (if (seq generic-args)
                            {:base-type class-name :type-args generic-args}
                            (match-clause-binding-type env expr-type class-name))]
@@ -4847,7 +4847,9 @@
           :scoped-block (mapcat constructor-statements
                                 (concat (:body stmt) (:rescue stmt)))
           :with (mapcat constructor-statements (:body stmt))
-          ;; A case clause's body is a single statement; a match clause's is a block.
+          ;; A case clause's body is a single statement (:body is one node); a
+          ;; match clause's is also one statement, but its :body is wrapped in
+          ;; a vector (see :matchClause in walker.clj).
           :case (mapcat constructor-statements
                         (concat (keep :body (:clauses stmt))
                                 (when-let [e (:else stmt)] [e])))

@@ -233,27 +233,29 @@ end
 -- for any input that used only the constructs this parser understands).
 function sexpr_to_string(e: Sexpr): String do
   match e of
-    when Symbol(name) then
+    Symbol(name) then
       result := name
-    when Int(value) then
+    Int(value) then
       result := value.to_string()
-    when Float(value) then
+    Float(value) then
       result := value.to_string()
-    when Str(value) then
+    Str(value) then
       result := "\"" + sexpr_escape_string(value) + "\""
-    when List(items) then
-      let text: String := "("
-      let i: Integer := 0
-      from
-      until
-        i >= items.length
+    List(items) then
       do
-        if i > 0 then
-          text := text + " "
+        let text: String := "("
+        let i: Integer := 0
+        from
+        until
+          i >= items.length
+        do
+          if i > 0 then
+            text := text + " "
+          end
+          text := text + sexpr_to_string(items.get(i))
+          i := i + 1
         end
-        text := text + sexpr_to_string(items.get(i))
-        i := i + 1
+        result := text + ")"
       end
-      result := text + ")"
   end
 end

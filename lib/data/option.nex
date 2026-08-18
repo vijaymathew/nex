@@ -41,8 +41,8 @@ end
 -- Apply `f` to the contained value, leaving None untouched.
 function option_map[T, U](o: Option[T], f: Function(x: T): U): Option[U] do
   match o of
-    when Some as s then result := create Some[U].make(f(s.value))
-    when None as n then result := create None[U].make()
+    Some as s then result := create Some[U].make(f(s.value))
+    None as n then result := create None[U].make()
   end
 end
 
@@ -50,20 +50,20 @@ end
 -- Option), short-circuiting on None.
 function option_and_then[T, U](o: Option[T], f: Function(x: T): Option[U]): Option[U] do
   match o of
-    when Some as s then result := f(s.value)
-    when None as n then result := create None[U].make()
+    Some as s then result := f(s.value)
+    None as n then result := create None[U].make()
   end
 end
 
 -- Keep a Some only when it satisfies `pred`; otherwise yield None.
 function option_filter[T](o: Option[T], pred: Function(x: T): Boolean): Option[T] do
   match o of
-    when Some as s then
+    Some as s then
       if pred(s.value) then
         result := o
       else
         result := create None[T].make()
       end
-    when None as n then result := create None[T].make()
+    None as n then result := create None[T].make()
   end
 end
