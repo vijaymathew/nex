@@ -440,11 +440,23 @@
 (defn- augment-ast-with-modules
   [session source-id ast]
   (let [ast' (normalize-program-ast ast)
-        intern-classes (interp/resolve-interned-classes source-id ast')
+        ;; A module's classes/functions never change within a session, and
+        ;; `intern` is idempotent — re-running it (directly, or transitively
+        ;; because a different module also interns it) just brings the same
+        ;; definitions back into scope. Drop any that a prior cell already
+        ;; compiled+registered so they don't reach the class/function-defs
+        ;; below: leaving them in makes `eligible-ast?` see a name collision
+        ;; against the session's own compiled classes and decline the cell as
+        ;; if it were a real redefinition, when nothing has actually changed.
+        ;; They stay visible for typechecking/lowering regardless, via
+        ;; `@(:class-asts session)`/`@(:function-asts session)`.
+        intern-classes (remove #(contains? @(:class-asts session) (:name %))
+                               (interp/resolve-interned-classes source-id ast'))
         ;; A module's free functions come into scope alongside its classes; the
         ;; cell that runs the `intern` must carry them so remember-top-level-ast!
         ;; records them for later cells (the file path does the same).
-        intern-functions (interp/resolve-interned-functions source-id ast')
+        intern-functions (remove #(contains? @(:function-asts session) (:name %))
+                                 (interp/resolve-interned-functions source-id ast'))
         intern-imports (interp/resolve-interned-imports source-id ast')
         merged-imports (merge-import-like-nodes
                         (merge-import-like-nodes @(:import-asts session) intern-imports)
