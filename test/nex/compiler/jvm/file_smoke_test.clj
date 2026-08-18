@@ -968,14 +968,14 @@ end
 
 let w: Wrap[Box] := create Some[Box].make(create Box.make())
 match w of
-  when Some as s then
+  Some as s then
     match s.value.pick() of
-      when Blue as b then
+      Blue as b then
         print(\"blue \" + b.shade)
       else
         print(\"other\")
     end
-  when None then
+  None then
     print(\"none\")
 end")
         (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})

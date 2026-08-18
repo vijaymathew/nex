@@ -40,9 +40,9 @@ end
     (let [src (str result-hierarchy "
 let r: Result := create Ok.make(42)
 match r of
-  when Ok as ok then
+  Ok as ok then
     print(ok.value)
-  when Err as err then
+  Err as err then
     print(err.msg)
 end
 ")]
@@ -53,9 +53,9 @@ end
     (let [src (str result-hierarchy "
 let r: Result := create Err.make(\"oops\")
 match r of
-  when Ok as ok then
+  Ok as ok then
     print(ok.value)
-  when Err as err then
+  Err as err then
     print(err.msg)
 end
 ")]
@@ -66,7 +66,7 @@ end
     (let [src (str result-hierarchy "
 let r: Result := create Err.make(\"nope\")
 match r of
-  when Ok as ok then
+  Ok as ok then
     print(ok.value)
   else
     print(\"fallback\")
@@ -79,10 +79,12 @@ end
     (let [src (str result-hierarchy "
 let r: Result := create Ok.make(7)
 match r of
-  when Ok as ok then
-    let doubled: Integer := ok.value + ok.value
-    print(doubled)
-  when Err as err then
+  Ok as ok then
+    do
+      let doubled: Integer := ok.value + ok.value
+      print(doubled)
+    end
+  Err as err then
     print(err.msg)
 end
 ")]
@@ -93,9 +95,9 @@ end
     (let [src (str result-hierarchy "
 let r: Result := create Ok.make(1)
 match r of
-  when Ok as ok then
+  Ok as ok then
     print(ok.value)
-  when Err as err then
+  Err as err then
     print(err.msg)
 end
 ")]
@@ -106,9 +108,9 @@ end
     (let [src (str result-hierarchy "
 let r: Result := create Ok.make(1)
 match r of
-  when Ok as ok then
+  Ok as ok then
     print(ok.value)
-  when Err as err then
+  Err as err then
     print(err.msg)
 end
 ")
@@ -121,7 +123,7 @@ end
     (let [src (str result-hierarchy "
 let r: Result := create Ok.make(1)
 match r of
-  when Ok as ok then
+  Ok as ok then
     print(ok.value)
 end
 ")
@@ -134,7 +136,7 @@ end
     (let [src (str result-hierarchy "
 let r: Result := create Ok.make(1)
 match r of
-  when Ok as ok then
+  Ok as ok then
     print(ok.value)
   else
     print(\"other\")
@@ -152,11 +154,11 @@ end
 
 let r: Result := create Ok.make(1)
 match r of
-  when Unrelated as u then
+  Unrelated as u then
     print(\"bad\")
-  when Ok as ok then
+  Ok as ok then
     print(ok.value)
-  when Err as err then
+  Err as err then
     print(err.msg)
 end
 ")
@@ -214,13 +216,13 @@ class Substitution
   end
   feature resolve(t: Term): Term do
     match t of
-      when Var as v then
+      Var as v then
         if bindings.contains_key(v.name) then
           result := resolve(bindings.get(v.name))
         else
           result := t
         end
-      when Const as c then
+      Const as c then
         result := t
     end
   end
@@ -233,14 +235,14 @@ function go(): Result do
 end
 
 match go() of
-  when Ok as ok then
+  Ok as ok then
     match ok.value.resolve(create Var.make(\"W\")) of
-      when Const as c then
+      Const as c then
         print(\"const \" + c.val)
       else
         print(\"other\")
     end
-  when Err as e then
+  Err as e then
     print(\"err \" + e.msg)
 end
 "]

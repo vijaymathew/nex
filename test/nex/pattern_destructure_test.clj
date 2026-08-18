@@ -33,9 +33,9 @@ end
            (run (str order-decl
                      "function d(o: Order): String do
   match o of
-    when Draft             then result := \"draft\"
-    when Placed(id, total) then result := \"placed \" + id
-    when Shipped(tracking) then result := \"shipped \" + tracking
+    Draft             then result := \"draft\"
+    Placed(id, total) then result := \"placed \" + id
+    Shipped(tracking) then result := \"shipped \" + tracking
   end
 end
 print(d(create Placed.make(\"A-100\", 42.0)))
@@ -49,8 +49,8 @@ print(d(create Shipped.make(\"Z9\", 3)))"))))))
                      "function d(o: Order): String do
   result := \"?\"
   match o of
-    when Shipped(tracking as t) then result := t
-    when _                           then result := \"?\"
+    Shipped(tracking as t) then result := t
+    _                           then result := \"?\"
   end
 end
 print(d(create Shipped.make(\"Z9\", 3)))"))))))
@@ -62,8 +62,8 @@ print(d(create Shipped.make(\"Z9\", 3)))"))))))
                      "function d(o: Order): String do
   result := \"?\"
   match o of
-    when Placed(id, total) as p then result := id + \" / \" + p.id
-    when _                      then result := \"?\"
+    Placed(id, total) as p then result := id + \" / \" + p.id
+    _                      then result := \"?\"
   end
 end
 print(d(create Placed.make(\"A-100\", 42.0)))"))))))
@@ -74,8 +74,8 @@ print(d(create Placed.make(\"A-100\", 42.0)))"))))))
            (run (str order-decl
                      "function d(o: Order): String do
   match o of
-    when Placed(id) then result := \"P\"
-    when _          then result := \"other\"
+    Placed(id) then result := \"P\"
+    _          then result := \"other\"
   end
 end
 print(d(create Draft.make()))
@@ -87,8 +87,8 @@ print(d(create Placed.make(\"x\", 1.0)))"))))))
          (str order-decl
               "function d(o: Order): String do
   match o of
-    when Draft      then result := \"d\"
-    when Placed(id) then result := id
+    Draft      then result := \"d\"
+    Placed(id) then result := id
   end
 end
 print(d(create Draft.make()))")))))
@@ -101,7 +101,7 @@ print(d(create Draft.make()))")))))
 end
 function f(b: Box): Integer do
   match b of
-    when Full(nope) then result := nope
+    Full(nope) then result := nope
   end
 end
 print(f(create Full.make(1)))"))))
@@ -114,10 +114,10 @@ print(f(create Full.make(1)))"))))
            (run (str order-decl
                      "function c(o: Order): String do
   match o of
-    when Placed(id, total) if total > 1000.0 then result := \"big \" + id
-    when Placed(id, total) if total > 0.0    then result := \"small \" + id
-    when Placed(id, total)                   then result := \"zero \" + id
-    when Draft                               then result := \"draft\"
+    Placed(id, total) if total > 1000.0 then result := \"big \" + id
+    Placed(id, total) if total > 0.0    then result := \"small \" + id
+    Placed(id, total)                   then result := \"zero \" + id
+    Draft                               then result := \"draft\"
   end
 end
 print(c(create Placed.make(\"A\", 5000.0)))
@@ -132,8 +132,8 @@ print(c(create Draft.make()))"))))))
                      "function c(o: Order): String do
   result := \"?\"
   match o of
-    when Placed(id, total) if total > 10.0 then result := \"hi\"
-    when _                                 then result := \"lo\"
+    Placed(id, total) if total > 10.0 then result := \"hi\"
+    _                                 then result := \"lo\"
   end
 end
 print(c(create Placed.make(\"x\", 99.0)))
@@ -145,8 +145,8 @@ print(c(create Placed.make(\"y\", 1.0)))"))))))
          (str order-decl
               "function c(o: Order): String do
   match o of
-    when Draft                             then result := \"d\"
-    when Placed(id, total) if total > 0.0  then result := id
+    Draft                             then result := \"d\"
+    Placed(id, total) if total > 0.0  then result := id
   end
 end
 print(c(create Draft.make()))")))))
@@ -157,7 +157,7 @@ print(c(create Draft.make()))")))))
            (run (str order-decl
                      "function c(o: Order): String do
   match o of
-    when Placed(id, total) if total > 0.0 then result := id
+    Placed(id, total) if total > 0.0 then result := id
     else result := \"other\"
   end
 end
@@ -170,8 +170,8 @@ print(c(create Draft.make()))"))))))
          (str order-decl
               "function c(o: Order): String do
   match o of
-    when Placed(id, total) if total then result := id
-    when _                          then result := \"x\"
+    Placed(id, total) if total then result := id
+    _                          then result := \"x\"
   end
 end
 print(c(create Placed.make(\"a\", 1.0)))")))))
@@ -181,7 +181,7 @@ print(c(create Placed.make(\"a\", 1.0)))")))))
 ;; `Move(dx: 0)` was sugar for `Move(dx) if dx == 0`. The sugar cost more than it
 ;; saved. It gave `:` a second meaning in a position where the type reading is
 ;; the obvious one, and — unlike every other way of naming a field in a pattern —
-;; it did not *bind* the field it named, so `when Ok(value: 10) then print(value)`
+;; it did not *bind* the field it named, so `Ok(value: 10) then print(value)`
 ;; printed nil instead of 10. The guard form binds, reads the same, and is the
 ;; only spelling now.
 
@@ -201,8 +201,8 @@ end
     ;; make it an opaque "no viable alternative" parse error.
     (let [msg (walker-error (str cmd-decl
                                  "match create Move.make(0, 0) of
-  when Move(dx: 0, dy) then print(dy)
-  when _               then print(1)
+  Move(dx: 0, dy) then print(dy)
+  _               then print(1)
 end"))]
       (is (some? msg) "`dx: 0` must be rejected")
       (is (re-find #"Literal field patterns were removed" msg) msg)
@@ -217,10 +217,10 @@ end"))]
            (run (str cmd-decl
                      "function r(c: Cmd): String do
   match c of
-    when Move(dx, dy) if dx = 0 and dy = 0 then result := \"stay \" + dx.to_string
-    when Move(dx, dy)                      then result := \"move \" + dx.to_string
-    when Say(text) if text = \"quit\"        then result := \"bye \" + text
-    when Say(text)                         then result := \"say \" + text
+    Move(dx, dy) if dx = 0 and dy = 0 then result := \"stay \" + dx.to_string
+    Move(dx, dy)                      then result := \"move \" + dx.to_string
+    Say(text) if text = \"quit\"        then result := \"bye \" + text
+    Say(text)                         then result := \"say \" + text
   end
 end
 print(r(create Move.make(0, 0)))
@@ -254,8 +254,8 @@ function inc_it(n: Integer): Integer do result := n + 1 end
 function f(b: Box[Integer]): Integer do
   result := 0
   match b of
-    when Full(value) then result := inc_it(value)
-    when Empty       then result := -1
+    Full(value) then result := inc_it(value)
+    Empty       then result := -1
   end
 end
 print(f(create Full[Integer].make(42)))")))))
@@ -267,8 +267,8 @@ print(f(create Full[Integer].make(42)))")))))
                      "function f(r: Result[Integer]): Integer do
   result := -1
   match r of
-    when Ok(inner: Some[Integer](value as x)) then result := x
-    when _                                  then result := -1
+    Ok(inner: Some[Integer](value as x)) then result := x
+    _                                  then result := -1
   end
 end
 let s: Option[Integer] := create Some[Integer].make(42)
@@ -283,8 +283,8 @@ print(f(create Bad[Integer].make()))"))))))
          (str opt-result-decl
               "function f(r: Result[Integer]): Integer do
   match r of
-    when Ok(inner: Some[Integer](value as x)) then result := x
-    when Bad                                then result := 0
+    Ok(inner: Some[Integer](value as x)) then result := x
+    Bad                                then result := 0
   end
 end
 print(f(create Bad[Integer].make()))")))))
@@ -296,8 +296,8 @@ print(f(create Bad[Integer].make()))")))))
                      "function d(o: Order): String do
   result := \"no\"
   match o of
-    when Draft then result := \"yes\"
-    when _     then result := \"no\"
+    Draft then result := \"yes\"
+    _     then result := \"no\"
   end
 end
 print(d(create Draft.make()))"))))))
@@ -311,7 +311,7 @@ print(d(create Draft.make()))"))))))
 ;; opposite, and it collided with the type form: dropping the parens from a
 ;; working nested pattern silently flipped "test the type" into "rename to a
 ;; local". Worse, a builtin type name there was a *parse* error (`String` is a
-;; keyword token, not an IDENTIFIER), so `when Err(s: String)` — the annotation a
+;; keyword token, not an IDENTIFIER), so `Err(s: String)` — the annotation a
 ;; reader would most expect to work — could not even be spelled.
 ;;
 ;; Now `:` always constrains the named field and `as` always renames it.
@@ -340,9 +340,9 @@ end
                      "function d(s: Shape): String do
   result := \"?\"
   match s of
-    when Box(content: Circle) then result := \"circle \" + content.radius.to_string
-    when Box(content)         then result := \"other\"
-    when Empty                then result := \"empty\"
+    Box(content: Circle) then result := \"circle \" + content.radius.to_string
+    Box(content)         then result := \"other\"
+    Empty                then result := \"empty\"
   end
 end
 print(d(create Box.make(create Circle.make(7))))
@@ -357,10 +357,10 @@ print(d(create Box.make(\"hello\")))"))))))
                      "function d(s: Shape): String do
   result := \"?\"
   match s of
-    when Box(content: String)  then result := \"str \" + content
-    when Box(content: Integer) then result := \"int \" + content.to_string
-    when Box(content)          then result := \"other\"
-    when Empty                 then result := \"empty\"
+    Box(content: String)  then result := \"str \" + content
+    Box(content: Integer) then result := \"int \" + content.to_string
+    Box(content)          then result := \"other\"
+    Empty                 then result := \"empty\"
   end
 end
 print(d(create Box.make(\"hi\")))
@@ -372,8 +372,8 @@ print(d(create Box.make(3)))"))))))
          (str box-decl
               "function d(s: Shape): String do
   match s of
-    when Box(content: Circle) then result := \"circle\"
-    when Empty                then result := \"empty\"
+    Box(content: Circle) then result := \"circle\"
+    Empty                then result := \"empty\"
   end
 end
 print(d(create Empty.make()))")))))
@@ -385,8 +385,8 @@ print(d(create Empty.make()))")))))
                      "function d(o: Order): String do
   result := \"?\"
   match o of
-    when Shipped(tracking as t) then result := t
-    when _                      then result := \"?\"
+    Shipped(tracking as t) then result := t
+    _                      then result := \"?\"
   end
 end
 print(d(create Shipped.make(\"Z9\", 3)))"))))))
@@ -398,8 +398,8 @@ print(d(create Shipped.make(\"Z9\", 3)))"))))))
                      "function d(o: Order): String do
   result := \"?\"
   match o of
-    when Placed(id) then result := id
-    when _          then result := \"?\"
+    Placed(id) then result := id
+    _          then result := \"?\"
   end
 end
 print(d(create Placed.make(\"A-100\", 42.0)))"))))))
@@ -413,8 +413,8 @@ print(d(create Placed.make(\"A-100\", 42.0)))"))))))
                      "function d(o: Order): String do
   result := \"?\"
   match o of
-    when Shipped(tracking: t) then result := t
-    when _                    then result := \"?\"
+    Shipped(tracking: t) then result := t
+    _                    then result := \"?\"
   end
 end
 print(d(create Shipped.make(\"Z9\", 3)))"))]
@@ -430,8 +430,8 @@ print(d(create Shipped.make(\"Z9\", 3)))"))]
                      "function d(o: Order): String do
   result := \"?\"
   match o of
-    when Shipped(tracking, at: _) then result := tracking
-    when _                        then result := \"?\"
+    Shipped(tracking, at: _) then result := tracking
+    _                        then result := \"?\"
   end
 end
 print(d(create Shipped.make(\"Z9\", 3)))"))]
@@ -447,10 +447,10 @@ print(d(create Shipped.make(\"Z9\", 3)))"))]
                      "function d(s: Shape): String do
   result := \"?\"
   match s of
-    when Box(content: Integer) then result := \"int \" + content.to_string
-    when Box(content: String)  then result := \"str \" + content
-    when Box(content)          then result := \"other\"
-    when Empty                 then result := \"empty\"
+    Box(content: Integer) then result := \"int \" + content.to_string
+    Box(content: String)  then result := \"str \" + content
+    Box(content)          then result := \"other\"
+    Empty                 then result := \"empty\"
   end
 end
 print(d(create Box.make(3)))
@@ -465,8 +465,8 @@ print(d(create Box.make(\"hi\")))"))))))
                      "function d(o: Order): String do
   result := \"?\"
   match o of
-    when Shipped(q: Integer) then result := \"?\"
-    when _                   then result := \"?\"
+    Shipped(q: Integer) then result := \"?\"
+    _                   then result := \"?\"
   end
 end
 print(d(create Draft.make()))"))]

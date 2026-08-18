@@ -17,7 +17,7 @@
    place the language makes its strongest promise, and it silently absorbed
    typos: any misspelling that collided with some field name anywhere in the
    program became nil instead of a compile error. It is also what hid an unbound
-   `match` binding — `when Ok(value: 10) then print(value)` printed nil rather
+   `match` binding — `Ok(value: 10) then print(value)` printed nil rather
    than being rejected, because `value` is a field of `Ok`.
 
    The scope is now local to the pass, seeded with inherited *constants* only."

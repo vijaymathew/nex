@@ -72,10 +72,12 @@ let good_req: Order_Request := create Order_Request.make(
   [raw("SKU-1", 2, 1000, "USD"), raw("SKU-2", 1, 500, "USD")],
   "USD", 100, "buyer@example.com", "zone-a")
 match parse_order(good_req) of
-  when Ok as ok then
-    chk.check("parse_order: item count", "2", "" + ok.value.items.length)
-    chk.check("parse_order: currency", "USD", ok.value.currency)
-  when Err as e then
+  Ok as ok then
+    do
+      chk.check("parse_order: item count", "2", "" + ok.value.items.length)
+      chk.check("parse_order: currency", "USD", ok.value.currency)
+    end
+  Err as e then
     chk.check("parse_order should have succeeded", "Ok", "Err: " + e.error)
 end
 
@@ -176,8 +178,8 @@ let membrane_draft: Draft := create Draft.make(
   two_items, "USD", create Money.make(500, "USD"), "buyer@example.com", "zone-a")
 
 match admit_quote(membrane_draft, create Money.make(3000, "USD")) of
-  when Ok as ok then chk.check("admit_quote: within terms", "3000 USD", "" + ok.value.total)
-  when Err as e then chk.check("admit_quote should have admitted", "Ok", "Err: " + e.error)
+  Ok as ok then chk.check("admit_quote: within terms", "3000 USD", "" + ok.value.total)
+  Err as e then chk.check("admit_quote should have admitted", "Ok", "Err: " + e.error)
 end
 
 chk.check("admit_quote: below floor rejected", "true",
@@ -199,20 +201,20 @@ chk.check("admit_quote require: same_currency", "true", "" + admit_currency_mism
 
 let s0: Substitution := create Substitution.make()
 match unify(create Atom.make("zone-a"), create Atom.make("zone-a"), s0) of
-  when Ok then chk.check("unify: matching atoms", "true", "true")
-  when Err then chk.check("unify: matching atoms", "true", "false")
+  Ok then chk.check("unify: matching atoms", "true", "true")
+  Err then chk.check("unify: matching atoms", "true", "false")
 end
 match unify(create Atom.make("zone-a"), create Atom.make("zone-b"), s0) of
-  when Ok then chk.check("unify: clashing atoms", "false", "true")
-  when Err then chk.check("unify: clashing atoms", "false", "false")
+  Ok then chk.check("unify: clashing atoms", "false", "true")
+  Err then chk.check("unify: clashing atoms", "false", "false")
 end
 match unify(create Var.make("X"), create Atom.make("zone-a"), create Substitution.make()) of
-  when Ok as ok then
+  Ok as ok then
     match ok.value.resolve(create Var.make("X")) of
-      when Atom as a then chk.check("unify: var binds", "zone-a", a.value)
+      Atom as a then chk.check("unify: var binds", "zone-a", a.value)
       else chk.check("unify: var binds", "zone-a", "not-atom")
     end
-  when Err then chk.check("unify: var binds", "zone-a", "unbound")
+  Err then chk.check("unify: var binds", "zone-a", "unbound")
 end
 
 let route_table: Array[Term] := []
@@ -221,8 +223,8 @@ route_table.add(route_fact("zone-b", "wh-2", "fedex", "650"))
 
 let placed_a: Placed := create Placed.make(two_items, sum_of(two_items), "a@b.com", "zone-a")
 match route(routing_query(placed_a), route_table) of
-  when Ok as sol then chk.check("route: zone-a resolves", "wh-1", warehouse_of(sol.value))
-  when Err as e then chk.check("route: zone-a resolves", "wh-1", "Err: " + e.error)
+  Ok as sol then chk.check("route: zone-a resolves", "wh-1", warehouse_of(sol.value))
+  Err as e then chk.check("route: zone-a resolves", "wh-1", "Err: " + e.error)
 end
 
 let placed_c: Placed := create Placed.make(two_items, sum_of(two_items), "a@b.com", "zone-c")
@@ -247,8 +249,8 @@ do
   let req: Order_Request := create Order_Request.make(
     [raw("SKU-1", 5, 1000, "USD")], "USD", 100, "buyer@example.com", "zone-a")
   match handle_request(req, rule, route_table, 0, gateway, mailer, store, warehouse) of
-    when Ok as ok then chk.check("scenario 1: total after discount", "4500 USD", "" + ok.value.total)
-    when Err as e then chk.check("scenario 1: total after discount", "4500 USD", "Err: " + e.error)
+    Ok as ok then chk.check("scenario 1: total after discount", "4500 USD", "" + ok.value.total)
+    Err as e then chk.check("scenario 1: total after discount", "4500 USD", "Err: " + e.error)
   end
   chk.check("scenario 1: payment charged", "1", "" + gateway.charged.length)
   chk.check("scenario 1: payment amount", "4500 USD", "" + gateway.charged.get(0))
@@ -266,8 +268,8 @@ do
   let req: Order_Request := create Order_Request.make(
     [raw("SKU-1", 1, 1000, "USD")], "USD", 100, "buyer@example.com", "zone-a")
   match handle_request(req, rule, route_table, 0, gateway, mailer, store, warehouse) of
-    when Ok as ok then chk.check("scenario 2: no discount below threshold", "1000 USD", "" + ok.value.total)
-    when Err as e then chk.check("scenario 2: no discount below threshold", "1000 USD", "Err: " + e.error)
+    Ok as ok then chk.check("scenario 2: no discount below threshold", "1000 USD", "" + ok.value.total)
+    Err as e then chk.check("scenario 2: no discount below threshold", "1000 USD", "Err: " + e.error)
   end
 end
 

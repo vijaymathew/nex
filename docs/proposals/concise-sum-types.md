@@ -71,9 +71,9 @@ Both compile to the **same** program. Construction and matching are unchanged:
 let o: Order := create Placed.make("A-100", 42.0)
 
 match o of
-  when Draft   as d then print("draft")
-  when Placed  as p then print(p.id)          -- payloads are ordinary fields
-  when Shipped as s then print(s.tracking)
+  Draft   as d then print("draft")
+  Placed  as p then print(p.id)          -- payloads are ordinary fields
+  Shipped as s then print(s.tracking)
 end
 ```
 

@@ -40,10 +40,10 @@ function perform(e: Effect, gateway: Payment_Gateway, mailer: Mailer,
         store: Order_Store, warehouse: Warehouse_Api)
   do
     match e of
-      when Charge_Payment as c then gateway.charge(c.amount)
-      when Reserve_Stock as r then warehouse.reserve(r.warehouse, r.items)
-      when Send_Confirmation as s then mailer.send(s.recipient)
-      when Record_Order as rec then store.save(rec.order)
+      Charge_Payment as c then gateway.charge(c.amount)
+      Reserve_Stock as r then warehouse.reserve(r.warehouse, r.items)
+      Send_Confirmation as s then mailer.send(s.recipient)
+      Record_Order as rec then store.save(rec.order)
     end
   end
 
@@ -53,12 +53,14 @@ function handle_request(request: Order_Request, rule: Price_Expr, routes: Array[
                         store: Order_Store, warehouse: Warehouse_Api): Result[Placed, String]
   do
     match place_order(request, rule, routes, now) of
-      when Err as e then
+      Err as e then
         result := create Err[Placed, String].make(e.error)
-      when Ok as placement then
-        across placement.value.effects as fx do
-          perform(fx, gateway, mailer, store, warehouse)
+      Ok as placement then
+        do
+          across placement.value.effects as fx do
+            perform(fx, gateway, mailer, store, warehouse)
+          end
+          result := create Ok[Placed, String].make(placement.value.order)
         end
-        result := create Ok[Placed, String].make(placement.value.order)
     end
   end

@@ -728,9 +728,9 @@ This desugars to a `sealed deferred class Order` parent and one ordinary class p
 let o: Order := create Placed.make("A-100", 42.0)
 
 match o of
-  when Draft   as d then print("draft")
-  when Placed  as p then print(p.id)       -- payloads are ordinary fields
-  when Shipped as s then print(s.tracking)
+  Draft   as d then print("draft")
+  Placed  as p then print(p.id)       -- payloads are ordinary fields
+  Shipped as s then print(s.tracking)
 end
 ```
 
@@ -805,20 +805,20 @@ print(o.get_or(0))                   -- 7
 
 ```nex
 match r of
-  when Ok as ok then
+  Ok as ok then
     print(ok.value)
-  when Err as err then
+  Err as err then
     print(err.msg)
 end
 ```
 
-- Each `when ClassName as var then` clause binds `var` to the matched object, typed as `ClassName`.
+- Each `ClassName as var then` clause binds `var` to the matched object, typed as `ClassName`. A clause's body is a single statement — use `do ... end` for more than one.
 - The typechecker verifies all sealed subclasses are covered. A missing variant is a compile-time error.
 - An `else` branch covers remaining cases and suppresses the exhaustiveness check:
 
 ```nex
 match r of
-  when Ok as ok then
+  Ok as ok then
     print(ok.value)
   else
     print("not ok")
@@ -832,13 +832,13 @@ binding the whole object and reading `.field`:
 
 ```nex
 match order of
-  when Draft                   then print("draft")
-  when Placed(id, total)       then print(id)        -- bind fields id, total
-  when Shipped(tracking as t)  then print(t)         -- rename tracking→t, ignore at
+  Draft                   then print("draft")
+  Placed(id, total)       then print(id)        -- bind fields id, total
+  Shipped(tracking as t)  then print(t)         -- rename tracking→t, ignore at
 end
 ```
 
-- `when Variant(a, b)` binds the payload fields named `a` and `b` to locals of the
+- `Variant(a, b)` binds the payload fields named `a` and `b` to locals of the
   same name; `Variant(a as x)` binds field `a` to a local `x`. Order does not
   matter — fields are matched by name, and a field you do not name is ignored.
 - In a field pattern the name **before** the colon is always a field of the
@@ -847,8 +847,8 @@ end
   requires field `a` to be an `x`, and is an error unless `x` names a type.
   To compare a field to a value, use a guard.
 - `as` still binds the whole value and composes with destructuring
-  (`when Placed(id, total) as p then …`). A clause may bind neither (`when Draft`).
-- `when _` is a catch-all, equivalent to `else`, and likewise suppresses the
+  (`Placed(id, total) as p then …`). A clause may bind neither (`Draft`).
+- `_` is a catch-all, equivalent to `else`, and likewise suppresses the
   exhaustiveness check.
 
 Destructuring and `_` are pure sugar over the type-dispatch form above, so
@@ -862,9 +862,9 @@ destructuring. A false guard falls through to the next clause:
 
 ```nex
 match order of
-  when Placed(id, total) if total > 1000 then flag(id)
-  when Placed(id, total)                 then charge(id, total)
-  when Draft                             then note_draft()
+  Placed(id, total) if total > 1000 then flag(id)
+  Placed(id, total)                 then charge(id, total)
+  Draft                             then note_draft()
 end
 ```
 
@@ -872,7 +872,7 @@ end
 - A guard must be `Boolean`.
 - A guarded clause does **not** count toward exhaustiveness (it might not fire),
   so a variant handled only by guarded clauses still needs an unguarded clause,
-  a `when _`, or `else`.
+  a `_`, or `else`.
 
 Guards run on the JVM (compiled) and interpreter backends.
 
@@ -884,10 +884,10 @@ write.
 
 ```nex
 match cmd of
-  when Move(dx, dy) if dx = 0 and dy = 0 then stay()
-  when Move(dx, dy)                      then move(dx, dy)
-  when Say(text) if text = "quit"        then bye()
-  when Say(text)                         then say(text)
+  Move(dx, dy) if dx = 0 and dy = 0 then stay()
+  Move(dx, dy)                      then move(dx, dy)
+  Say(text) if text = "quit"        then bye()
+  Say(text)                         then say(text)
 end
 ```
 
@@ -904,8 +904,8 @@ under its own name:
 
 ```nex
 match shape of
-  when Box(content: Circle) then print(content.radius)   -- content is a Circle here
-  when Box(content)         then print("not a circle")
+  Box(content: Circle) then print(content.radius)   -- content is a Circle here
+  Box(content)         then print("not a circle")
 end
 ```
 
@@ -929,8 +929,8 @@ A type pattern may go on to match the narrowed field's payload —
 
 ```nex
 match result of
-  when Ok(inner: Some[Integer](value as x)) then use(x)   -- Ok whose inner is a Some
-  when _                                    then fallback()
+  Ok(inner: Some[Integer](value as x)) then use(x)   -- Ok whose inner is a Some
+  _                                    then fallback()
 end
 ```
 

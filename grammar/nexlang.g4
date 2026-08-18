@@ -238,11 +238,19 @@ matchStatement
     ;
 
 // A match clause may destructure the matched variant's payload fields by name
-// (`when Placed(id, total)`), bind the whole value (`as v`), both, or neither
-// (`when Draft`). `when _` is a catch-all. Destructuring/wildcard desugar in the
-// walker to the plain type-dispatch form, so the backends are unchanged.
+// (`Placed(id, total)`), bind the whole value (`as v`), both, or neither
+// (`Draft`). `_` is a catch-all. Destructuring/wildcard desugar in the walker
+// to the plain type-dispatch form, so the backends are unchanged.
+//
+// No leading keyword, unlike `caseClause` below (which has none either) and
+// `selectClause` (which needs `WHEN` since its header is a full `expression`,
+// indistinguishable from a plain statement). Here the header is a `typeName`
+// and the body is a single `statement` rather than an open `block`: a clause
+// is exactly one production wide, so the parser never needs a keyword to see
+// where it ends and the next one begins — the same reason `caseClause` needs
+// none. A multi-statement arm is written with `do ... end`.
 matchClause
-    : WHEN typeName typeArgs? ('(' fieldPattern (',' fieldPattern)* ')')? (AS IDENTIFIER)? (IF expression)? THEN block
+    : typeName typeArgs? ('(' fieldPattern (',' fieldPattern)* ')')? (AS IDENTIFIER)? (IF expression)? THEN statement
     ;
 
 // The identifier *before* the colon always names a field of the variant; `:`
@@ -251,7 +259,7 @@ matchClause
 // `IDENTIFIER ':' literal` is kept only to diagnose it: literal field patterns
 // were removed in favour of the guard they desugared to, and the walker rejects
 // this alternative with the guard spelling. Deleting it here instead would make
-// `when Move(dx: 0)` an opaque "no viable alternative" parse error.
+// `Move(dx: 0)` an opaque "no viable alternative" parse error.
 fieldPattern
     : IDENTIFIER ':' literal          // removed — rejected in the walker
     | IDENTIFIER ':' patternType ('(' (fieldPattern (',' fieldPattern)*)? ')')?   // field must be a patternType, optionally matching its payload

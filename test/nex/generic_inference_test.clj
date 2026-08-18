@@ -31,8 +31,8 @@ end
            (run (str opt-decl
                      "let a: Option[Integer] := create Some.make(42)
 match a of
-  when Some(value) then print(value + 1)
-  when None        then print(-1)
+  Some(value) then print(value + 1)
+  None        then print(-1)
 end"))))))
 
 (deftest unmentioned-param-becomes-any-wildcard
@@ -82,6 +82,6 @@ print(0)")))))
            (run (str opt-decl
                      "let a: Option[Integer] := create Some[Integer].make(5)
 match a of
-  when Some(value) then print(value)
-  when None        then print(-1)
+  Some(value) then print(value)
+  None        then print(-1)
 end"))))))

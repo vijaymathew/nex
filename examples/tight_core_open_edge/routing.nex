@@ -24,7 +24,7 @@ class Substitution
     resolve(t: Term): Term
       do
         match t of
-          when Var(name) then
+          Var(name) then
             if bindings.contains_key(name) then result := resolve(bindings.get(name))
             else result := t end
           else
@@ -38,28 +38,28 @@ function unify(a: Term, b: Term, s: Substitution): Result[Substitution, String]
     let x: Term := s.resolve(a)
     let y: Term := s.resolve(b)
     match x of
-      when Var(name) then result := create Ok[Substitution, String].make(s.bind(name, y))
-      when Atom as ax then result := unify_atom(ax, y, s)
-      when Compound as cx then result := unify_compound(cx, y, s)
+      Var(name) then result := create Ok[Substitution, String].make(s.bind(name, y))
+      Atom as ax then result := unify_atom(ax, y, s)
+      Compound as cx then result := unify_compound(cx, y, s)
     end
   end
 
 function unify_atom(ax: Atom, y: Term, s: Substitution): Result[Substitution, String]
   do
     match y of
-      when Var(name) then result := create Ok[Substitution, String].make(s.bind(name, ax))
-      when Atom(value as v) if v = ax.value then result := create Ok[Substitution, String].make(s)
-      when Atom(value as v) then result := create Err[Substitution, String].make("clash: " + ax.value + " vs " + v)
-      when Compound then result := create Err[Substitution, String].make("atom vs structure")
+      Var(name) then result := create Ok[Substitution, String].make(s.bind(name, ax))
+      Atom(value as v) if v = ax.value then result := create Ok[Substitution, String].make(s)
+      Atom(value as v) then result := create Err[Substitution, String].make("clash: " + ax.value + " vs " + v)
+      Compound then result := create Err[Substitution, String].make("atom vs structure")
     end
   end
 
 function unify_compound(cx: Compound, y: Term, s: Substitution): Result[Substitution, String]
   do
     match y of
-      when Var(name) then result := create Ok[Substitution, String].make(s.bind(name, cx))
-      when Atom then result := create Err[Substitution, String].make("structure vs atom")
-      when Compound as cy then
+      Var(name) then result := create Ok[Substitution, String].make(s.bind(name, cx))
+      Atom then result := create Err[Substitution, String].make("structure vs atom")
+      Compound as cy then
         if cx.functor = cy.functor and cx.args.length = cy.args.length then
           result := unify_args(cx.args, cy.args, s, 0)
         else
@@ -74,8 +74,8 @@ function unify_args(xs: Array[Term], ys: Array[Term], s: Substitution, i: Intege
       result := create Ok[Substitution, String].make(s)
     else
       match unify(xs.get(i), ys.get(i), s) of
-        when Ok as ok then result := unify_args(xs, ys, ok.value, i + 1)
-        when Err as e then result := create Err[Substitution, String].make(e.error)
+        Ok as ok then result := unify_args(xs, ys, ok.value, i + 1)
+        Err as e then result := create Err[Substitution, String].make(e.error)
       end
     end
   end
@@ -98,7 +98,7 @@ function satisfies_constraints(s: Substitution): Boolean
 function warehouse_of(s: Substitution): String
   do
     match s.resolve(create Var.make("Warehouse")) of
-      when Atom as a then result := a.value
+      Atom as a then result := a.value
       else result := "unknown"
     end
   end
@@ -129,13 +129,13 @@ function route(query: Term, routes: Array[Term]): Result[Substitution, String]
       i >= routes.length or found
     do
       match unify(query, routes.get(i), create Substitution.make()) of
-        when Ok as s then
+        Ok as s then
           if satisfies_constraints(s.value) then
             result := create Ok[Substitution, String].make(s.value)
             found := true
           end
-        when Err then
-          -- structural mismatch: backtrack, try the next route
+        Err then
+          do end -- structural mismatch: backtrack, try the next route
       end
       i := i + 1
     end

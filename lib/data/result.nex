@@ -45,8 +45,8 @@ end
 -- Apply `f` to the success value, leaving an Err untouched.
 function result_map[T, E, U](r: Result[T, E], f: Function(x: T): U): Result[U, E] do
   match r of
-    when Ok  as ok then result := create Ok[U, E].make(f(ok.value))
-    when Err as er then result := create Err[U, E].make(er.error)
+    Ok  as ok then result := create Ok[U, E].make(f(ok.value))
+    Err as er then result := create Err[U, E].make(er.error)
   end
 end
 
@@ -55,8 +55,8 @@ end
 -- collapses manual match-and-rewrap to one call.
 function result_and_then[T, E, U](r: Result[T, E], f: Function(x: T): Result[U, E]): Result[U, E] do
   match r of
-    when Ok  as ok then result := f(ok.value)
-    when Err as er then result := create Err[U, E].make(er.error)
+    Ok  as ok then result := f(ok.value)
+    Err as er then result := create Err[U, E].make(er.error)
   end
 end
 
@@ -64,7 +64,7 @@ end
 -- lower-level error type into its own (so `Err[E1]` composes into `Err[E2]`).
 function result_map_err[T, E, F](r: Result[T, E], f: Function(x: E): F): Result[T, F] do
   match r of
-    when Ok  as ok then result := create Ok[T, F].make(ok.value)
-    when Err as er then result := create Err[T, F].make(f(er.error))
+    Ok  as ok then result := create Ok[T, F].make(ok.value)
+    Err as er then result := create Err[T, F].make(f(er.error))
   end
 end

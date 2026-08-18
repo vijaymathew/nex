@@ -48,11 +48,13 @@ function parse_quantity(n: Integer): Result[Quantity, String]
 function parse_line_item(raw: Raw_Line_Item): Result[Line_Item, String]
   do
     match parse_quantity(raw.quantity) of
-      when Err as e then
+      Err as e then
         result := create Err[Line_Item, String].make("bad quantity for " + raw.sku + ": " + e.error)
-      when Ok as ok then
-        let unit: Money := create Money.make(raw.unit_amount, raw.currency)
-        result := create Ok[Line_Item, String].make(create Line_Item.make(raw.sku, ok.value, unit))
+      Ok as ok then
+        do
+          let unit: Money := create Money.make(raw.unit_amount, raw.currency)
+          result := create Ok[Line_Item, String].make(create Line_Item.make(raw.sku, ok.value, unit))
+        end
     end
   end
 
@@ -69,8 +71,8 @@ function parse_line_items(raws: Array[Raw_Line_Item]): Result[Array[Line_Item], 
       i >= raws.length or failure /= nil
     do
       match parse_line_item(raws.get(i)) of
-        when Ok as ok then items.add(ok.value)
-        when Err as e then failure := e.error
+        Ok as ok then items.add(ok.value)
+        Err as e then failure := e.error
       end
       i := i + 1
     end
@@ -89,13 +91,15 @@ function parse_order(request: Order_Request): Result[Draft, String]
       result := create Err[Draft, String].make("floor price cannot be negative")
     else
       match parse_line_items(request.items) of
-        when Err as e then
+        Err as e then
           result := create Err[Draft, String].make(e.error)
-        when Ok as ok then
-          let floor: Money := create Money.make(request.floor_amount, request.currency)
-          result := create Ok[Draft, String].make(
-            create Draft.make(ok.value, request.currency, floor,
-                               request.customer_email, request.zone))
+        Ok as ok then
+          do
+            let floor: Money := create Money.make(request.floor_amount, request.currency)
+            result := create Ok[Draft, String].make(
+              create Draft.make(ok.value, request.currency, floor,
+                                 request.customer_email, request.zone))
+          end
       end
     end
   end

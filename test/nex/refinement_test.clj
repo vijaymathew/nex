@@ -194,7 +194,7 @@ print(n + 1)")))))
 ;; `convert` — and the `field: Type` patterns that desugar to it — tests a
 ;; *runtime* type. A `declare type` alias names no runtime type, so the test
 ;; silently never matched: `convert x to y: Count` took the else branch for
-;; x = 5, and `when Holds(content: Count)` fell straight through. Nothing warned,
+;; x = 5, and `Holds(content: Count)` fell straight through. Nothing warned,
 ;; because the checker sees Count as related to the value's type and accepts it.
 ;; Aliases are now resolved to their base before either backend sees the convert.
 ;;
@@ -228,9 +228,9 @@ end
 function d(b: Box): String do
   result := \"?\"
   match b of
-    when Holds(content: Count) then result := \"a Count\"
-    when Holds(content)        then result := \"other\"
-    when Empty                 then result := \"empty\"
+    Holds(content: Count) then result := \"a Count\"
+    Holds(content)        then result := \"other\"
+    Empty                 then result := \"empty\"
   end
 end
 print(d(create Holds.make(5)))
@@ -255,8 +255,8 @@ union Box
   Empty
 end
 match create Holds.make(5) of
-  when Holds(content: Quantity) then print(content)
-  when _                        then print(0)
+  Holds(content: Quantity) then print(content)
+  _                        then print(0)
 end")]
       (is (some? msg) "a refinement type pattern must be rejected")
       (is (re-find #"`Quantity` is a refinement type" msg) msg))))

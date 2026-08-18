@@ -53,8 +53,8 @@ code.
    instead they nest `match` and use `convert`. **Proposal:** richer patterns
    (destructuring, nested, literals, `when`-guards). See
    `docs/proposals/richer-patterns.md`. **Phases 1–2 implemented:** field
-   destructuring (`when Placed(id, total)`), rename (`id: x`)/skip (`_`), optional
-   `as`, `when _` catch-all, `if` guards (fall-through, Boolean check, excluded
+   destructuring (`Placed(id, total)`), rename (`id: x`)/skip (`_`), optional
+   `as`, `_` catch-all, `if` guards (fall-through, Boolean check, excluded
    from exhaustiveness), literal field patterns (`field: 0`), and **nested
    patterns** (`field: Some[Integer](value: x)`) — on the JVM and interpreter
    backends. Nested patterns were unblocked by implementing **Finding 2 of

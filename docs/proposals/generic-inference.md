@@ -20,7 +20,7 @@
 Investigation of the generics limitation that keeps surfacing:
 
 - `create Ok.make(5)` is rejected; you must write `create Ok[Integer, String].make(5)`.
-- `match r of when Ok as o` binds `o` as a *raw* `Ok`, so `o.value` is `Option[Any]`,
+- `match r of Ok as o` binds `o` as a *raw* `Ok`, so `o.value` is `Option[Any]`,
   not `Option[Integer]` — which blocks nested patterns (`Ok(Some(x))`) and loses
   the element type of destructured fields.
 
@@ -90,7 +90,7 @@ clause class name:
 (env-add-var clause-env var-name class-name)   ; e.g. "Ok", losing [Integer, String]
 ```
 
-So inside `when Ok as o`, `o : Ok` (raw), and a field access `o.value` resolves
+So inside `Ok as o`, `o : Ok` (raw), and a field access `o.value` resolves
 `value : T` with an empty type-map → `T` unresolved → `Option[Any]`. Simple
 scalar uses tolerate this because `Any` is assignment-compatible, but strict
 positions do not: `convert o.value to s: Some[Integer]` reports *"convert requires
@@ -120,7 +120,7 @@ Then `o : Ok[Integer, String]`, `o.value : Option[Integer]`, and
 patterns** and giving destructured fields their real element types.
 
 The same reconstruction should apply to the destructuring `:bindings` the
-pattern work introduced (they read `o.field`), so `when Placed(items)` gives
+pattern work introduced (they read `o.field`), so `Placed(items)` gives
 `items` its parameterized type rather than `Array[Any]`.
 
 ## Impact

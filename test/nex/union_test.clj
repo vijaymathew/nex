@@ -48,12 +48,12 @@ end
 let a: Box[Integer] := create Full[Integer].make(3)
 let b: Box[Integer] := create Empty[Integer].make()
 match a of
-  when Full  as f then print(\"full\")
-  when Empty as e then print(\"empty\")
+  Full  as f then print(\"full\")
+  Empty as e then print(\"empty\")
 end
 match b of
-  when Full  as f then print(\"full\")
-  when Empty as e then print(\"empty\")
+  Full  as f then print(\"full\")
+  Empty as e then print(\"empty\")
 end")))))
 
 (deftest exhaustive-match-satisfies-definite-assignment
@@ -64,8 +64,8 @@ end")))))
 end
 function area(sh: Shape): Integer do
   match sh of
-    when Circle as c then result := 3 * c.r * c.r
-    when Square as s then result := s.s * s.s
+    Circle as c then result := 3 * c.r * c.r
+    Square as s then result := s.s * s.s
   end
 end
 print(area(create Square.make(4)))"
@@ -126,19 +126,19 @@ let a: Order := create Draft.make()
 let b: Order := create Placed.make(\"A-100\", 42.0)
 let c: Order := create Shipped.make(\"Z9\", 3)
 match a of
-  when Draft   as d then print(\"draft\")
-  when Placed  as p then print(p.id)
-  when Shipped as s then print(s.tracking)
+  Draft   as d then print(\"draft\")
+  Placed  as p then print(p.id)
+  Shipped as s then print(s.tracking)
 end
 match b of
-  when Draft   as d then print(\"draft\")
-  when Placed  as p then print(p.id)
-  when Shipped as s then print(s.tracking)
+  Draft   as d then print(\"draft\")
+  Placed  as p then print(p.id)
+  Shipped as s then print(s.tracking)
 end
 match c of
-  when Draft   as d then print(\"draft\")
-  when Placed  as p then print(p.id)
-  when Shipped as s then print(s.tracking)
+  Draft   as d then print(\"draft\")
+  Placed  as p then print(p.id)
+  Shipped as s then print(s.tracking)
 end"
           out (run-output code)]
       ;; the interpreter's print buffer keeps String values quoted
@@ -151,7 +151,7 @@ end"
 end
 let c: Money := create Cash.make(99)
 match c of
-  when Cash as k then print(k.amount)
+  Cash as k then print(k.amount)
 end"
           out (run-output code)]
       (is (= ["99"] out)))))
@@ -167,8 +167,8 @@ end
 function describe(o: Order): String do
   result := \"?\"
   match o of
-    when Draft  as d then result := \"draft\"
-    when Placed as p then result := \"placed\"
+    Draft  as d then result := \"draft\"
+    Placed as p then result := \"placed\"
   end
 end
 print(describe(create Draft.make()))"
@@ -188,8 +188,8 @@ let u: Set[Integer] := s.union(t)
 print(u.size())
 let x: Tag := create A.make()
 match x of
-  when A as a then print(\"a\")
-  when B as b then print(\"b\")
+  A as a then print(\"a\")
+  B as b then print(\"b\")
 end"
           out (run-output code)]
       (is (= ["3" "\"a\""] out)))))
@@ -204,8 +204,8 @@ end
 function describe(o: Order): String do
   result := \"?\"
   match o of
-    when Draft  as d then result := \"draft\"
-    when Placed as p then result := \"placed\"
+    Draft  as d then result := \"draft\"
+    Placed as p then result := \"placed\"
   end
 end
 print(describe(create Draft.make()))"

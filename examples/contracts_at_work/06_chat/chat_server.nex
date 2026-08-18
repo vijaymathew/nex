@@ -38,27 +38,31 @@ class Chat_Hub
       do
         let ev: Hub_Event := events.receive()
         match ev of
-          when Client_Joined(sock) then
+          Client_Joined(sock) then
             clients.add(sock)
-          when Client_Left(sock) then
-            let idx: Integer := clients.index_of(sock)
-            if idx >= 0 then
-              clients.remove(idx)
-            end
-          when Broadcast(sender, text) then
-            let i: Integer := 0
-            from
-              i := 0
-            until
-              i = clients.length
+          Client_Left(sock) then
             do
-              let member: Tcp_Socket := clients.get(i)
-              if member /= sender then
-                member.send_line(text)
+              let idx: Integer := clients.index_of(sock)
+              if idx >= 0 then
+                clients.remove(idx)
               end
-              i := i + 1
             end
-          when Shutdown then
+          Broadcast(sender, text) then
+            do
+              let i: Integer := 0
+              from
+                i := 0
+              until
+                i = clients.length
+              do
+                let member: Tcp_Socket := clients.get(i)
+                if member /= sender then
+                  member.send_line(text)
+                end
+                i := i + 1
+              end
+            end
+          Shutdown then
             running := false
         end
       end

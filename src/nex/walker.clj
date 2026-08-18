@@ -631,7 +631,7 @@
 ;; `convert` (and the type patterns that desugar to it) tests a *runtime* type.
 ;; A `declare type` alias names no runtime type, so the test could never match:
 ;; `convert x to y: Count` with `declare type Count = Integer` took the else
-;; branch for x = 5, and `when Holds(content: Count)` fell straight through —
+;; branch for x = 5, and `Holds(content: Count)` fell straight through —
 ;; silently, since the checker sees Count as related to the value's type and
 ;; accepts it. Resolve the alias to what it actually is before either backend
 ;; sees it, so the test is against Integer.
@@ -1380,7 +1380,7 @@
      (let [tokens (vec rest)
            clause-nodes (filterv #(and (sequential? %) (= :matchClause (first %))) tokens)
            transformed (mapv transform-node clause-nodes)
-           ;; A `when _` clause is a catch-all; fold its body into `else`.
+           ;; A `_` clause is a catch-all; fold its body into `else`.
            wildcard (first (filter :wildcard? transformed))
            clauses (filterv #(not (:wildcard? %)) transformed)
            has-else? (some #(= "else" %) tokens)
@@ -1425,12 +1425,12 @@
 
          ;; Literal field patterns were sugar for an equality guard, and the
          ;; sugar cost more than it saved: it gave `:` a second meaning, and it
-         ;; did not bind the field it named, so `when Ok(value: 10) then
+         ;; did not bind the field it named, so `Ok(value: 10) then
          ;; print(value)` printed nil. Say what to write instead.
          lit
          (let [msg (str "Literal field patterns were removed: `" field ": <literal>`"
                         " no longer matches a value. Write the comparison as a guard —"
-                        " `when <Variant>(" field ") if " field " = <literal> then …` —"
+                        " `<Variant>(" field ") if " field " = <literal> then …` —"
                         " which is what this desugared to. In a field pattern `:` now"
                         " means only \"this field has this type\".")]
            (throw (ex-info msg {:error msg})))
@@ -1442,7 +1442,7 @@
          {:kind :bind :field field :bind field})))
 
    :matchClause
-   (fn [[_ _when-kw class-name & rest]]
+   (fn [[_ class-name & rest]]
      (let [tokens (vec rest)
            type-args-node (first (filter #(and (sequential? %) (= :typeArgs (first %))) tokens))
            generic-args (when type-args-node (transform-node type-args-node))
@@ -1452,8 +1452,12 @@
            explicit-var (when as-idx (token-text (nth tokens (inc as-idx))))
            if-idx (first (keep-indexed (fn [i v] (when (= "if" v) i)) tokens))
            explicit-guard (when if-idx (transform-node (nth tokens (inc if-idx))))
-           body-node (first (filter #(and (sequential? %) (= :block (first %))) tokens))
-           body (transform-node body-node)
+           body-node (first (filter #(and (sequential? %) (= :statement (first %))) tokens))
+           ;; A clause's body is exactly one `statement` (multi-statement arms
+           ;; use `do ... end`), but downstream (typechecker/lower/interpreter)
+           ;; expects `:body` as a seq of statements, same as the `bindings`
+           ;; and `body-binds` it's concatenated with below.
+           body [(transform-node body-node)]
            resolved-class-name (if (sequential? class-name)
                                  (transform-node class-name)
                                  (token-text class-name))]

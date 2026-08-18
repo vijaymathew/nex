@@ -228,30 +228,47 @@ grammar/nexlang.g4).  Compound headers contribute only their `do': a loop is
 `do' is what pairs with the `end'.  Likewise for repeat/across/with/spawn/fn and
 routine bodies.  A `deferred' method has no `end' and so opens nothing.")
 
+(defconst nex-block-delimiter-or-else-re
+  (regexp-opt '("do" "if" "match" "select" "case" "class" "union" "end" "else")
+              'words)
+  "Like `nex-block-delimiter-re', but also matches `else'.
+Used only by `nex-match-opener-indent', which needs to notice an `else'
+belonging to the enclosing match/select/case without it opening or closing
+anything of its own (it shares the construct's `end').")
+
 (defun nex-match-opener-indent ()
-  "Return the indentation of the match/select/case whose clause list encloses
-point, or nil when point is not directly inside one.
-Scans backward over `nex-block-delimiter-re' balancing `end' against openers, so
-the first opener still unclosed at point is the block point sits in.  If that
-block is a match/select/case its indentation is returned; any other opener (a
+  "Return (INDENT . PAST-ELSE) for the match/select/case whose clause list
+encloses point, or nil when point is not directly inside one.
+Scans backward over `nex-block-delimiter-or-else-re' balancing `end' against
+openers, so the first opener still unclosed at point is the block point sits
+in.  If that block is a match/select/case, INDENT is its indentation and
+PAST-ELSE is non-nil when an `else' belonging to it was crossed along the way
+— meaning point is inside the `else' block's body (one level deeper than the
+clause list) rather than directly among the clauses.  Any other opener (a
 routine body `do', an `if', ...) means point is nested inside a clause rather
 than between clauses, and yields nil.  Matches inside strings and comments are
-ignored.  Clause bodies need no balancing of their own: a `when ... then block'
-has no `end', so the enclosing match is reached directly."
+ignored.  A clause body needs no balancing of its own beyond what its single
+statement already carries (see `nexlang.g4' `matchClause'/`caseClause'), so
+the enclosing match/select/case is always reached directly."
   (save-excursion
     (beginning-of-line)
-    (let ((depth 0))
+    (let ((depth 0) (past-else nil))
       (catch 'found
-        (while (re-search-backward nex-block-delimiter-re nil t)
+        (while (re-search-backward nex-block-delimiter-or-else-re nil t)
           (unless (nth 8 (syntax-ppss))  ; skip keywords in strings or comments
             (let ((kw (match-string 1)))
               (cond
                ((string= kw "end")
                 (setq depth (1+ depth)))
+               ((string= kw "else")
+                ;; Only the target construct's own `else' (depth 0) counts;
+                ;; one belonging to an already-balanced nested block (depth >
+                ;; 0) is not a boundary here and changes nothing.
+                (when (= depth 0) (setq past-else t)))
                ((> depth 0)
                 (setq depth (1- depth)))
                ((member kw '("match" "select" "case"))
-                (throw 'found (current-indentation)))
+                (throw 'found (cons (current-indentation) past-else)))
                ;; An unclosed opener that is not a match/select/case encloses
                ;; point: whatever is on this line belongs to that block.
                (t (throw 'found nil))))))
@@ -259,22 +276,44 @@ has no `end', so the enclosing match is reached directly."
 
 (defun nex-match-clause-indent ()
   "Indentation column for a line that belongs to a match/select/case skeleton.
-The clause keywords \\='when\\=', \\='timeout\\=' and \\='else\\=' indent one
-level inside their opener; the \\='end\\=' that closes the construct aligns with
-it.  Return nil when the current line is neither, or when the construct
-enclosing it is not a match/select/case (an `else' of an `if', say).  Anchoring
-to the opener rather than to the previous line is what keeps sibling clauses
-aligned: the previous line is usually the last statement of the preceding
-clause's body, one level too deep."
+The clause keywords \\='when\\=' and \\='timeout\\=' (select only — a match/case
+clause carries no leading keyword, see `nexlang.g4' `matchClause'/`caseClause')
+and \\='else\\=' indent one level inside their opener; the \\='end\\=' that
+closes the construct aligns with it.  A bare clause header — a match pattern
+or a case literal list, with no keyword to spot it by — gets the same
+one-level indent, detected structurally: it is whatever is left when point is
+directly in an enclosing match/select/case's clause list (not nested inside a
+clause's own body, and not inside that construct's `else' body, which is a
+further level of nesting the default rule already handles correctly on its
+own, the same way it always has for a second statement following any other
+block opener) — and is not itself the first line of the *preceding* clause's
+body, which `nex-should-increase-indent' already grows from that clause's
+`then' and must be left alone (a clause's body is exactly one statement, so
+its first line is the only place this ambiguity with a fresh clause header
+can arise; there is never a second body line to confuse with one).  Return
+nil when none of this applies — the current line is plain body content, or
+belongs to some other construct entirely (the `else' of an `if', say).
+Anchoring to the opener rather than to the previous line is what keeps
+sibling clauses aligned: the previous line is usually the last (or only)
+statement of the preceding clause's body, one level too deep."
   (save-excursion
     (beginning-of-line)
     (skip-chars-forward " \t")
     (let ((clause (looking-at (regexp-opt '("when" "timeout" "else") 'words)))
           (closer (looking-at "\\bend\\b")))
-      (when (or clause closer)
-        (let ((opener (nex-match-opener-indent)))
-          (when opener
-            (if clause (+ opener nex-indent-offset) opener)))))))
+      (cond
+       (closer
+        (let ((info (nex-match-opener-indent)))
+          (when info (car info))))
+       (clause
+        (let ((info (nex-match-opener-indent)))
+          (when info (+ (car info) nex-indent-offset))))
+       ((nex-should-increase-indent)
+        nil)
+       (t
+        (let ((info (nex-match-opener-indent)))
+          (when (and info (not (cdr info)))
+            (+ (car info) nex-indent-offset))))))))
 
 (defun nex-bracket-continuation-indent ()
   "Indentation column when point's line continues a multi-line bracket literal.
@@ -339,8 +378,9 @@ are correctly ignored."
                    ;; (block form) or inline ("until cond", "variant expr").
                    ((or is-loop-clause is-loop-do)
                     (or (nex-loop-from-indent) prev-indent))
-                   ;; Clause keywords of a match/select/case ('when'/'timeout'/
-                   ;; 'else') and the 'end' that closes it anchor to their
+                   ;; A match/select/case clause — 'when'/'timeout' for
+                   ;; select, a bare pattern or literal list for match/case —
+                   ;; and its 'else' and closing 'end' all anchor to their
                    ;; opener.  Must precede the `should-decrease' rule, which
                    ;; also matches 'when'/'else'/'end' but measures from the
                    ;; previous line — the preceding clause's body — and so lands
