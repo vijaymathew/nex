@@ -1193,6 +1193,19 @@
                      (uncompiled-user-function-call? node)))
                nodes)))))
 
+(defn- ast-empty?
+  "True when the AST carries nothing to run or declare — e.g. a comment-only
+   or blank input. Such input never reaches the compiled backend, so it
+   should be a silent no-op rather than a declined-and-fell-back-to-the-
+   interpreter warning."
+  [ast]
+  (not (or (seq (:functions ast))
+           (seq (:statements ast))
+           (seq (:classes ast))
+           (seq (:imports ast))
+           (seq (:interns ast))
+           (seq (:calls ast)))))
+
 (defn- ast-declares-class-or-function?
   "True when AST introduces a real class or function definition, as opposed to
    a plain statement/expression cell (`__ReplTemp__` is the internal wrapper
@@ -1768,6 +1781,7 @@
                   (not was-wrapped?)
                   (not (dbg/enabled?))
                   (= :compiled @*repl-backend*)
+                  (not (ast-empty? ast))
                   (not (ast-needs-interpreter-fallback? exec-ctx ast)))
              (eval-compiled-candidate! exec-ctx ast source-id)
 
