@@ -58,6 +58,33 @@
                    let b: Function(x: Integer): Integer := a"))))
 
 ;; ---------------------------------------------------------------------------
+;; Calling through a Function(...)-typed variable: check-call must check
+;; call-site arguments against the variable's own declared signature, not
+;; against the generic builtin call<N> signature (every param typed Any) it
+;; resolves to find *some* callN method for an arbitrary arity. Distinct from
+;; the value-conformance checks above: this is about invoking, not assigning,
+;; a Function(...)-typed value.
+;; ---------------------------------------------------------------------------
+
+(deftest fn-var-call-argument-checked-against-declared-param-type-rejected
+  (testing "calling a Function(Dog)-typed variable with an unrelated sibling class (Cat) is rejected"
+    (is (rejects? (str animals
+                       "let dog_handler: Function(d: Dog): String := fn (d: Dog): String do result := d.fetch end\n"
+                       "print(dog_handler(create Cat.make))\n")))))
+
+(deftest fn-var-call-argument-matching-declared-param-type-accepted
+  (testing "calling a Function(Dog)-typed variable with a Dog is accepted"
+    (is (accepts? (str animals
+                       "let dog_handler: Function(d: Dog): String := fn (d: Dog): String do result := d.fetch end\n"
+                       "print(dog_handler(create Dog.make))\n")))))
+
+(deftest fn-var-call-arity-checked-against-declared-signature-rejected
+  (testing "calling a Function(Dog)-typed (single-parameter) variable with the wrong number of arguments is rejected"
+    (is (rejects? (str animals
+                       "let dog_handler: Function(d: Dog): String := fn (d: Dog): String do result := d.fetch end\n"
+                       "print(dog_handler(create Dog.make, create Dog.make))\n")))))
+
+;; ---------------------------------------------------------------------------
 ;; Class-method override conformance: widen parameter, narrow return.
 ;; ---------------------------------------------------------------------------
 

@@ -1147,6 +1147,48 @@ end")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-reassigned-function-param-across-branches-smoke-test
+  (testing "reassigning a Function(...)-typed parameter to a *different* anonymous-function
+            literal in each branch of an if/else, then calling it, must compile and run.
+
+            Previously failed with 'internal error in the compiled backend: Type
+            .../AnonymousFunction_2 not present' -- ASM's COMPUTE_FRAMES needs the common
+            superclass of the two distinct anonymous-function classes merging into one local
+            at the join point after the if/else, and its default algorithm resolves that via
+            Class.forName, which cannot find a class this very compile is still emitting
+            bytecode for (neither class is loaded on any classloader yet). Regression guard
+            for the fix: `nex.compiler.jvm.emit/make-class-writer` resolves the common
+            superclass locally (via `known-supers`, built in `nex.compiler.jvm.file/compile-ast`
+            from the program's own class metadata) before falling back to ASM's default."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-reassigned-fn-branches")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "declare type Transformer = Function(Integer): Integer
+
+function apply(t: Transformer, cond: Boolean): Integer
+do
+  if cond then
+    t := fn(x): Integer do result := x + 1 end
+  else
+    t := fn(x): Integer do result := x - 1 end
+  end
+  result := t(10)
+end
+
+let t0: Transformer := fn(x): Integer do result := x * 2 end
+print(apply(t0, true))
+print(apply(t0, false))")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["11" "9"] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-json-parse-declared-map-let-test
   (testing "a `let root: Map[...] := json.parse(...)` binding (no explicit convert) works on the compiled backend, including a nested Map[...]-typed field read"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-json-let")
