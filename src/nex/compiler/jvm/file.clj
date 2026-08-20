@@ -250,8 +250,24 @@
            ;; constant!) split whatever is still over the 65535-byte LDC cap.
            classes-edn (pr-str (maybe-trim-class-table class-asts))
            imports-edn (pr-str (:imports prepared-ast))
+           ;; Every class this compilation itself emits, mapped to its super
+           ;; internal name — consulted by the emitted ClassWriters'
+           ;; COMPUTE_FRAMES common-superclass resolution instead of ASM's
+           ;; default `Class/forName` lookup, which cannot find a class this
+           ;; same compile is still emitting bytecode for (none of these
+           ;; classes are loaded anywhere yet). Without this, two distinct
+           ;; freshly-compiled classes (e.g. two anonymous-function classes,
+           ;; or two Nex subclasses of a common Nex parent) merging into one
+           ;; local at a control-flow join point crashes with
+           ;; TypeNotPresentException ("Type ... not present") — a compiler
+           ;; defect, not a program error. See `nex.compiler.jvm.emit/
+           ;; make-class-writer`.
+           known-supers (into {program-internal-name "java/lang/Object"
+                               launcher-internal-name "java/lang/Object"}
+                              (map (fn [c] [(:internal-name c) (or (:java-super-class c) "java/lang/Object")]))
+                              (:classes unit))
            class-bytes (into {(desc/binary-class-name program-internal-name)
-                              (emit/compile-unit->bytes unit)
+                              (emit/compile-unit->bytes unit {:known-supers known-supers})
                               (desc/binary-class-name launcher-internal-name)
                               (emit/compile-launcher->bytes
                                {:internal-name launcher-internal-name
@@ -259,7 +275,8 @@
                                 :source-file source-id
                                 :program-internal-name program-internal-name
                                 :classes-edn classes-edn
-                                :imports-edn imports-edn})}
+                                :imports-edn imports-edn}
+                               {:known-supers known-supers})}
                              (map (fn [lowered-class]
                                     ;; A class's <clinit> bootstraps a session state
                                     ;; to build object-valued constants, so it needs
@@ -268,7 +285,8 @@
                                      (emit/compile-user-class->bytes
                                       lowered-class
                                       {:classes-edn classes-edn
-                                       :imports-edn imports-edn})])
+                                       :imports-edn imports-edn}
+                                      {:known-supers known-supers})])
                                   (:classes unit)))]
        {:program-class (desc/binary-class-name program-internal-name)
         :main-class (desc/binary-class-name launcher-internal-name)

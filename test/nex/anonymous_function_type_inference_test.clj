@@ -88,6 +88,26 @@ feature
 end")]
       (is (re-find #"Parameter 'x' of method 'foo' must declare a type" msg)))))
 
+(deftest fn-param-types-inferred-on-plain-reassignment-test
+  (testing "a plain `t := fn(x) do ... end` reassignment (not just the original `let`) infers
+            param/return types from t's own declared Function(...) type"
+    (is (= ["20" "100"]
+           (both "declare type Transformer = Function(Integer): Integer
+let t: Transformer := fn(x): Integer do result := x * 2 end
+print(t(10))
+t := fn(x): Integer do result := x * x end
+print(t(10))")))))
+
+(deftest fn-param-types-inferred-on-reassignment-inside-nested-block-test
+  (testing "the same reassignment inference works inside a nested if block"
+    (is (= ["11"]
+           (both "declare type Transformer = Function(Integer): Integer
+let t: Transformer := fn(x): Integer do result := x * 2 end
+if true then
+  t := fn(x): Integer do result := x + 1 end
+end
+print(t(10))")))))
+
 (deftest fully-typed-fn-still-works-test
   (testing "a fully-annotated fn(...) literal is unaffected by inference support"
     (is (= ["true"]

@@ -2982,15 +2982,38 @@
             (assoc :params patched-params :return-type patched-return)
             (update :class-def #(patch-anonymous-function-class-def % patched-params patched-return)))))))
 
-(defn- resolve-let-anonymous-function-types-in-stmt
+(defn- record-let-type
+  "Extend VAR-TYPES with STMT's own binding if STMT is a typed `:let` — used
+   to track declared-`let` types across a statement sequence so a later plain
+   `x := fn(...)` reassignment can still recover x's declared signature."
+  [var-types stmt]
+  (if (and (map? stmt) (= :let (:type stmt)) (:var-type stmt) (string? (:name stmt)))
+    (assoc var-types (:name stmt) (:var-type stmt))
+    var-types))
+
+(declare resolve-anonymous-function-types-in-stmts)
+
+(defn- resolve-anonymous-function-types-in-stmt
   "Walk STMT (and every nested statement inside if/loop/scoped-block/with/
    case/match bodies — the same shape `constructor-statements` above walks)
-   applying `patch-anonymous-function-types-for-let` to every `:let`."
-  [stmt]
-  (let [stmt (if (and (map? stmt) (= :let (:type stmt)) (:var-type stmt))
-               (update stmt :value #(patch-anonymous-function-types-for-let (:var-type stmt) %))
-               stmt)
-        walk #(mapv resolve-let-anonymous-function-types-in-stmt %)]
+   applying `patch-anonymous-function-types-for-let`, both to a `:let`'s own
+   value (via its own :var-type, as before) and to a later plain `x :=
+   fn(...)` reassignment of a variable whose declared type is already known
+   — looked up in VAR-TYPES (local variable name -> declared `let`/parameter
+   type accumulated so far in this scope), since a bare `:assign` carries no
+   type annotation of its own to patch from."
+  [stmt var-types]
+  (let [stmt (cond
+              (and (map? stmt) (= :let (:type stmt)) (:var-type stmt))
+              (update stmt :value #(patch-anonymous-function-types-for-let (:var-type stmt) %))
+
+              (and (map? stmt) (= :assign (:type stmt)) (string? (:target stmt))
+                   (contains? var-types (:target stmt)))
+              (update stmt :value #(patch-anonymous-function-types-for-let
+                                     (get var-types (:target stmt)) %))
+
+              :else stmt)
+        walk (fn [stmts] (first (resolve-anonymous-function-types-in-stmts stmts var-types)))]
     (if-not (map? stmt)
       stmt
       (case (:type stmt)
@@ -3003,19 +3026,39 @@
                         (if (:rescue stmt) (assoc stmt :rescue (walk (:rescue stmt))) stmt))
         :with (assoc stmt :body (walk (:body stmt)))
         :case (let [stmt (assoc stmt :clauses
-                                (mapv (fn [c] (update c :body resolve-let-anonymous-function-types-in-stmt))
+                                (mapv (fn [c] (update c :body #(resolve-anonymous-function-types-in-stmt % var-types)))
                                       (:clauses stmt)))]
                 (if (:else stmt)
-                  (assoc stmt :else (resolve-let-anonymous-function-types-in-stmt (:else stmt)))
+                  (assoc stmt :else (resolve-anonymous-function-types-in-stmt (:else stmt) var-types))
                   stmt))
         :match (let [stmt (assoc stmt :clauses
                                  (mapv (fn [c] (update c :body walk)) (:clauses stmt)))]
                  (if (:else stmt) (assoc stmt :else (walk (:else stmt))) stmt))
         stmt))))
 
+(defn- resolve-anonymous-function-types-in-stmts
+  "Walk STMTS in source order, threading VAR-TYPES (see
+   `resolve-anonymous-function-types-in-stmt`) forward as each `:let` with a
+   declared type is reached. Returns [patched-stmts final-var-types]."
+  [stmts var-types]
+  (reduce (fn [[patched var-types] stmt]
+            (let [stmt (resolve-anonymous-function-types-in-stmt stmt var-types)]
+              [(conj patched stmt) (record-let-type var-types stmt)]))
+          [[] var-types]
+          stmts))
+
+(defn- initial-var-types
+  "Seed a var-types map from PARAMS ({:name :type} entries, as on a function
+   or method) so a parameter reassigned with a bare `fn(...)` can also have
+   its type inferred from the parameter's own declared type."
+  [params]
+  (into {} (map (juxt :name :type)) (or params [])))
+
 (defn- resolve-functions-anonymous-function-context-types
   [fns]
-  (mapv (fn [f] (update f :body #(mapv resolve-let-anonymous-function-types-in-stmt %))) fns))
+  (mapv (fn [f] (update f :body #(first (resolve-anonymous-function-types-in-stmts
+                                          % (initial-var-types (:params f))))))
+        fns))
 
 (defn- resolve-class-anonymous-function-context-types
   [class-def]
@@ -3027,24 +3070,26 @@
                     (fn [members]
                       (mapv (fn [m]
                               (if (= :method (:type m))
-                                (update m :body #(mapv resolve-let-anonymous-function-types-in-stmt %))
+                                (update m :body #(first (resolve-anonymous-function-types-in-stmts
+                                                          % (initial-var-types (:params m)))))
                                 m))
                             members)))
             :constructors
             (update section :constructors
                     (fn [ctors]
-                      (mapv (fn [c] (update c :body #(mapv resolve-let-anonymous-function-types-in-stmt %)))
+                      (mapv (fn [c] (update c :body #(first (resolve-anonymous-function-types-in-stmts
+                                                              % (initial-var-types (:params c))))))
                             ctors)))
             section))]
     (update class-def :body #(mapv patch-section %))))
 
 (defn- resolve-anonymous-function-context-types
-  "Apply `resolve-let-anonymous-function-types-in-stmt` across the whole
-   program: top-level statements, every free function's body, and every
-   class's every method/constructor body."
+  "Apply `resolve-anonymous-function-types-in-stmt` across the whole program:
+   top-level statements, every free function's body, and every class's every
+   method/constructor body."
   [program]
   (-> program
-      (update :statements #(mapv resolve-let-anonymous-function-types-in-stmt %))
+      (update :statements #(first (resolve-anonymous-function-types-in-stmts % {})))
       (update :functions resolve-functions-anonymous-function-context-types)
       (update :classes #(mapv resolve-class-anonymous-function-context-types %))))
 
