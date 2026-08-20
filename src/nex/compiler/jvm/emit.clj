@@ -2942,39 +2942,84 @@
     (throw (ex-info "Unsupported method emission kind"
                     {:method-spec method-spec}))))
 
+(defn- resolve-super-chain
+  "Walk KNOWN-SUPERS (internal class name -> super internal class name) from
+   NAME up to java/lang/Object, stopping (without necessarily reaching
+   Object) at the first ancestor KNOWN-SUPERS doesn't have an entry for —
+   that ancestor is assumed to be a real, already-loadable JVM class the
+   default reflection-based algorithm can resolve from there."
+  [known-supers name]
+  (loop [name name acc [name]]
+    (if (= name "java/lang/Object")
+      acc
+      (if-let [super (get known-supers name)]
+        (recur super (conj acc super))
+        acc))))
+
+(defn- local-common-super-class
+  "Resolve the common ancestor of TYPE1/TYPE2 using KNOWN-SUPERS, without
+   touching `Class/forName` (ASM's `ClassWriter/getCommonSuperClass` default,
+   which requires the class to already be loadable on some classloader —
+   impossible for a class this very compilation is still emitting bytecode
+   for, e.g. two different anonymous-function classes merging into one
+   `Function`-typed local at a control-flow join). Returns nil (defer to the
+   caller's reflection fallback) unless at least one of TYPE1/TYPE2 is a
+   class this compilation unit itself generates."
+  [known-supers type1 type2]
+  (when (and known-supers (or (contains? known-supers type1) (contains? known-supers type2)))
+    (let [chain2 (set (resolve-super-chain known-supers type2))]
+      (some chain2 (resolve-super-chain known-supers type1)))))
+
+(defn- make-class-writer
+  "A ClassWriter whose COMPUTE_FRAMES common-superclass resolution consults
+   KNOWN-SUPERS (internal name -> super internal name, for every class this
+   compilation unit itself emits) before falling back to ASM's default
+   reflection-based lookup — see `local-common-super-class`."
+  ^ClassWriter [known-supers]
+  (proxy [ClassWriter] [(+ ClassWriter/COMPUTE_FRAMES ClassWriter/COMPUTE_MAXS)]
+    (getCommonSuperClass [type1 type2]
+      (or (local-common-super-class known-supers type1 type2)
+          (proxy-super getCommonSuperClass type1 type2)))))
+
 (defn emit-class
-  "Emit one minimal JVM class from a class spec and return bytecode."
-  [{:keys [internal-name super-name interfaces flags methods fields static-fields source-file]}]
-  (let [cw (ClassWriter. (+ ClassWriter/COMPUTE_FRAMES
-                            ClassWriter/COMPUTE_MAXS))]
-    (.visit cw
-            class-version
-            flags
-            internal-name
-            nil
-            super-name
-            (when (seq interfaces) (into-array String interfaces)))
-    (when-let [sf (source-file-name source-file)]
-      (.visitSource cw sf nil))
-    (doseq [field fields]
-      (emit-field! cw field))
-    (doseq [field static-fields]
-      (emit-field! cw field))
-    (doseq [method methods]
-      (emit-method! cw method))
-    (.visitEnd cw)
-    (.toByteArray cw)))
+  "Emit one minimal JVM class from a class spec and return bytecode. OPTS may
+   include :known-supers (see `make-class-writer`)."
+  ([class-spec] (emit-class class-spec {}))
+  ([{:keys [internal-name super-name interfaces flags methods fields static-fields source-file]}
+    {:keys [known-supers]}]
+   (let [cw (make-class-writer known-supers)]
+     (.visit cw
+             class-version
+             flags
+             internal-name
+             nil
+             super-name
+             (when (seq interfaces) (into-array String interfaces)))
+     (when-let [sf (source-file-name source-file)]
+       (.visitSource cw sf nil))
+     (doseq [field fields]
+       (emit-field! cw field))
+     (doseq [field static-fields]
+       (emit-field! cw field))
+     (doseq [method methods]
+       (emit-method! cw method))
+     (.visitEnd cw)
+     (.toByteArray cw))))
 
 (defn compile-unit->bytes
-  "Compile the first minimal IR unit to JVM bytecode."
-  [unit]
-  (emit-class (minimal-class-spec unit)))
+  "Compile the first minimal IR unit to JVM bytecode. OPTS may include
+   :known-supers (see `make-class-writer`)."
+  ([unit] (compile-unit->bytes unit {}))
+  ([unit opts]
+   (emit-class (minimal-class-spec unit) opts)))
 
 (defn compile-user-class->bytes
-  ([class-spec] (compile-user-class->bytes class-spec {}))
-  ([class-spec bootstrap-edn]
-   (emit-class (user-class-spec class-spec bootstrap-edn))))
+  ([class-spec] (compile-user-class->bytes class-spec {} {}))
+  ([class-spec bootstrap-edn] (compile-user-class->bytes class-spec bootstrap-edn {}))
+  ([class-spec bootstrap-edn opts]
+   (emit-class (user-class-spec class-spec bootstrap-edn) opts)))
 
 (defn compile-launcher->bytes
-  [launcher-spec]
-  (emit-class (launcher-class-spec launcher-spec)))
+  ([launcher-spec] (compile-launcher->bytes launcher-spec {}))
+  ([launcher-spec opts]
+   (emit-class (launcher-class-spec launcher-spec) opts)))
