@@ -2925,6 +2925,18 @@
                                        (str "Method not found: " call-name))})))))
         (let [generic-names (set (map :name (:generic-params class-def)))
               arg-types (mapv #(check-expression env %) args)
+              ;; A Function-typed variable carries its own declared signature
+              ;; (e.g. `Function(Dog): String`), which is more specific than
+              ;; the generic call<N> method registered by
+              ;; register-function-call-methods! (Any-typed params, used only
+              ;; so *some* callN resolves for arbitrary arity). Prefer the
+              ;; variable's own param types here so call-site arguments are
+              ;; checked against the declared signature instead of Any.
+              effective-params (if (and (map? var-type)
+                                        (= "Function" (:base-type var-type))
+                                        (:param-types var-type))
+                                 (:param-types var-type)
+                                 (:params method-sig))
               inferred-type-map (reduce (fn [acc [arg-type param]]
                                           (merge-inferred-generic-bindings
                                            env
@@ -2932,16 +2944,16 @@
                                            (infer-generic-type-map-from-arg
                                             env generic-names (:type param) arg-type)))
                                         {}
-                                        (map vector arg-types (:params method-sig)))
+                                        (map vector arg-types effective-params))
               type-map (merge (build-generic-type-map env var-type)
                               inferred-type-map)]
-          (when (not= (count args) (count (:params method-sig)))
-            (throw (ex-info (str "Method " call-name " expects " (count (:params method-sig))
+          (when (not= (count args) (count effective-params))
+            (throw (ex-info (str "Method " call-name " expects " (count effective-params)
                                  " arguments, got " (count args))
                             {:error (type-error
-                                     (str "Method " call-name " expects " (count (:params method-sig))
+                                     (str "Method " call-name " expects " (count effective-params)
                                           " arguments, got " (count args)))})))
-          (doseq [[arg-type param] (map vector arg-types (:params method-sig))]
+          (doseq [[arg-type param] (map vector arg-types effective-params)]
             (let [param-type (resolve-generic-type (:type param) type-map)]
             (when (and (is-generic-type-param? env param-type)
                        (not (contains? type-map param-type)))
