@@ -1508,7 +1508,12 @@
                           {:error (type-error
                                    (str "Expected " (display-type param-type)
                                         ", got " (display-type arg-type)))})))))
-    (resolve-generic-type (:return-type method-sig) type-map)))
+    ;; A method with no return-type annotation stores :return-type as nil, not
+    ;; the string "Void" — coalesce it here (same convention as other
+    ;; return-type call sites) so a Void-returning user method's call
+    ;; expression is recognizably Void to check-expression's Void-as-value
+    ;; guard, not a bare nil that guard doesn't match.
+    (or (resolve-generic-type (:return-type method-sig) type-map) "Void")))
 
 (defn lookup-operator-alias
   "The feature on `class-name` (or an ancestor) bound to `operator` by an `alias`
@@ -2967,7 +2972,10 @@
                    (= "Function" (:base-type var-type))
                    (:return-type var-type))
             (:return-type var-type)
-            (resolve-generic-type (:return-type method-sig) type-map))))
+            ;; Coalesce a missing :return-type to "Void" — see
+            ;; check-call-signature's identical fix for why a bare nil here
+            ;; would slip past check-expression's Void-as-value guard.
+            (or (resolve-generic-type (:return-type method-sig) type-map) "Void"))))
         (if-let [current-class (env-lookup-var env "__current_class__")]
           (if-let [method-sig (lookup-class-method env current-class method (count args) current-class)]
             (do
@@ -3498,8 +3506,13 @@
    :this               check-expr-this
    :super              check-expr-super})
 
-(defn check-expression
-  "Check the type of an expression"
+(defn- check-expression-value
+  "The raw dispatch behind check-expression, with no Void guard. Used only by
+   check-statement's :call case: a Void-returning method/function call used
+   as a bare statement is the one legitimate way to produce Void in
+   Nex — its result is deliberately discarded, never consumed as a value —
+   so that case routes through this function directly instead of the
+   Void-rejecting check-expression below."
   [env expr]
   (with-type-error-location
     expr
@@ -3516,6 +3529,36 @@
           (handler env expr)
           "Any")
         :else "Any"))))
+
+(defn check-expression
+  "Check the type of an expression used as a value. Rejects Void: a
+   Void-returning call has nothing meaningful to hand back, and using one as
+   a value (a print/call argument, a let/assignment source, an operand, ...)
+   used to reach the compiled backend and crash it outright (a builtin or
+   concurrency Void method reports a real stack value only when its
+   Nex-level type isn't Void; see emit-array-method-remove! and
+   emit-concurrency-return! in compiler/jvm/emit.clj) instead of failing
+   here with a clear message. Every recursive call site inside the
+   check-expression-dispatch handlers refers to this function by name, so
+   the guard applies uniformly to every sub-expression, not just top-level
+   ones. The sole exception is check-statement's :call case, which calls
+   check-expression-value directly.
+
+   The guard only fires for a real (non-nil) expr: check-expression-value's
+   own `(nil? expr) \"Void\"` clause isn't reporting a Void-typed value at
+   all — it's a sentinel for \"no expression here\" (e.g. a free function
+   call's absent :target), and infer-expression-type/lower.clj's infer-type
+   fallback depends on getting that \"Void\" back without an exception to
+   keep inferring the rest of the expression. Rejecting it here turned that
+   harmless absent-expression signal into a hard 'Unable to infer expression
+   type during lowering' failure for perfectly valid programs (e.g. a safe
+   call whose argument chains through a free function call)."
+  [env expr]
+  (let [t (check-expression-value env expr)]
+    (when (and (some? expr) (= t "Void"))
+      (throw (ex-info "Cannot use a Void expression as a value"
+                      {:error (type-error "Cannot use a Void expression as a value")})))
+    t))
 
 
 ;;
@@ -3970,7 +4013,11 @@
         (case (:type stmt)
           :assign (check-assignment env stmt)
           :let (check-let env stmt)
-          :call (check-expression env stmt)
+          ;; A bare-statement call is the one place a Void-returning call is
+          ;; legitimate — its result is discarded, not used as a value — so
+          ;; this goes through check-expression-value directly rather than
+          ;; the Void-rejecting check-expression.
+          :call (check-expression-value env stmt)
           :convert (check-expression env stmt)
           :spawn (check-expression env stmt)
           :if (check-if env stmt)
@@ -5756,5 +5803,20 @@
         (env-add-var env var-name var-type))
       (when-let [current-class (:current-class opts)]
         (env-add-var env "__current_class__" current-class))
-      (check-expression env expr))
+      ;; check-expression-value, not check-expression: this function is
+      ;; lowering's best-effort "what type is this" utility (see lower.clj's
+      ;; infer-type, which falls back to it for a call/target its own
+      ;; primary dispatch doesn't resolve), not the typechecker's own
+      ;; top-down pass over user code — a Void-returning call reached here
+      ;; is very often exactly the right, expected answer (a concurrency
+      ;; send/statement-position call lowering needs to type for its own
+      ;; bookkeeping), not a user using Void as a value. That rejection
+      ;; belongs solely to check-expression's ordinary recursive use during
+      ;; check-statement/check-let/argument-checking, where "value needed"
+      ;; is actually true; routing it through here as well turned a
+      ;; legitimate Void inference into a swallowed exception (this function
+      ;; catches everything and returns nil on failure) and then a
+      ;; "Unable to infer expression type during lowering" crash once every
+      ;; fallback was exhausted.
+      (check-expression-value env expr))
     (catch Exception _ nil)))
