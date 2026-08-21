@@ -1058,7 +1058,13 @@
     (.visitLdcInsn mv (int idx))
     (let [emitted-type (emit-expr! mv arg state-slot)
           declared-type (:jvm-type arg)]
+      ;; A Void-declared arg legitimately emits as Object: the low-level
+      ;; builtin/concurrency call it lowers to reports a real Object jvm-type
+      ;; rather than bare :void specifically so it leaves a genuine value on
+      ;; the stack here (see emit-array-method-remove!, emit-concurrency-
+      ;; return!, etc.) — not a mismatch.
       (when (and declared-type
+                 (not= declared-type :void)
                  (not= emitted-type declared-type))
         (throw (ex-info "Argument emission type did not match IR declaration"
                         {:arg arg
@@ -1305,14 +1311,26 @@
   (emit-unbox-or-cast! mv jvm-type)
   jvm-type)
 
+;; add/add_at/put/remove report a real Object jvm-type rather than :void, even
+;; though their Nex-level return type is Void — same reasoning as
+;; emit-expr-call-virtual!'s comment: a statement-position `emit-pop!` must
+;; still pop the value these leave on the stack (ArrayList.add/set/remove's own
+;; return, or a compensating ACONST_NULL for add_at, whose underlying
+;; ArrayList.add(int,Object) is genuinely void), and an expression-position
+;; caller (print/let/args needing a value) must have something real to read —
+;; reporting bare :void here left the stack short by one value in exactly
+;; that case (ASM's Frame.merge then throws NegativeArraySizeException at
+;; compile time). The IR node's own `:jvm-type` field stays "Void" for
+;; definite-assignment purposes elsewhere; only these functions' return value
+;; lies.
 (defn- emit-array-method-add!
   [^MethodVisitor mv {:keys [target args]} state-slot]
   (emit-expr! mv target state-slot)
   (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
   (emit-boxed-expr-for-storage! mv (first args) state-slot)
   (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "add" "(Ljava/lang/Object;)Z" false)
-  (.visitInsn mv Opcodes/POP)
-  :void)
+  (emit-box! mv :boolean)
+  (ir/object-jvm-type "java/lang/Object"))
 
 (defn- emit-array-method-add-at!
   [^MethodVisitor mv {:keys [target args]} state-slot]
@@ -1321,7 +1339,8 @@
   (emit-as-int! mv (first args) state-slot)
   (emit-boxed-expr-for-storage! mv (second args) state-slot)
   (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "add" "(ILjava/lang/Object;)V" false)
-  :void)
+  (.visitInsn mv Opcodes/ACONST_NULL)
+  (ir/object-jvm-type "java/lang/Object"))
 
 (defn- emit-array-method-put!
   [^MethodVisitor mv {:keys [target args]} state-slot]
@@ -1330,8 +1349,7 @@
   (emit-as-int! mv (first args) state-slot)
   (emit-boxed-expr-for-storage! mv (second args) state-slot)
   (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "set" "(ILjava/lang/Object;)Ljava/lang/Object;" false)
-  (.visitInsn mv Opcodes/POP)
-  :void)
+  (ir/object-jvm-type "java/lang/Object"))
 
 (defn- emit-array-method-length!
   [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
@@ -1374,8 +1392,7 @@
   (.visitTypeInsn mv Opcodes/CHECKCAST arraylist-internal-name)
   (emit-as-int! mv (first args) state-slot)
   (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL arraylist-internal-name "remove" "(I)Ljava/lang/Object;" false)
-  (.visitInsn mv Opcodes/POP)
-  :void)
+  (ir/object-jvm-type "java/lang/Object"))
 
 (defn- emit-array-method-reverse!
   [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
@@ -1570,8 +1587,7 @@
   (emit-boxed-expr-for-storage! mv (first args) state-slot)
   (emit-boxed-expr-for-storage! mv (second args) state-slot)
   (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "put" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;" false)
-  (.visitInsn mv Opcodes/POP)
-  :void)
+  (ir/object-jvm-type "java/lang/Object"))
 
 (defn- emit-map-method-size!
   [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
@@ -1623,8 +1639,7 @@
   (.visitTypeInsn mv Opcodes/CHECKCAST hashmap-internal-name)
   (emit-boxed-expr! mv (first args) state-slot)
   (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL hashmap-internal-name "remove" "(Ljava/lang/Object;)Ljava/lang/Object;" false)
-  (.visitInsn mv Opcodes/POP)
-  :void)
+  (ir/object-jvm-type "java/lang/Object"))
 
 (defn- emit-map-method-to-string!
   [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
@@ -1801,9 +1816,18 @@
                     {:expr expr}))))
 
 (defn- emit-concurrency-return!
+  "The runtime helper call always leaves exactly one boxed value on the stack
+   (Var.invoke's descriptor always returns Object) even when the Nex-level
+   return type is Void. Reporting bare :void here — as this used to — made a
+   statement-position `emit-pop!` correctly discard that value, but left
+   expression-position callers (print/let/args needing a value) with nothing
+   to read once the emitted call was actually used as a value: the value was
+   there but the tag lied, so downstream code assumed the stack was one short.
+   Report the real Object jvm-type instead, same fix as
+   emit-array-method-add!/-put!/-remove! and emit-map-method-put!/-remove!."
   [^MethodVisitor mv jvm-type]
   (if (= :void jvm-type)
-    (do (.visitInsn mv Opcodes/POP) :void)
+    (ir/object-jvm-type "java/lang/Object")
     (do (emit-unbox-or-cast! mv jvm-type)
         jvm-type)))
 
