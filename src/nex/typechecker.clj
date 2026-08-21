@@ -726,25 +726,7 @@
       false
 
       :else
-      (or ;; Empty-collection element sentinel is compatible with any concrete type
-          (contains? #{"__EmptyArrayElement" "__EmptyMapKey" "__EmptyMapValue" "__EmptySetElement"} (str a1))
-          (contains? #{"__EmptyArrayElement" "__EmptyMapKey" "__EmptyMapValue" "__EmptySetElement"} (str a2))
-          (and (map? a1) (map? a2)
-               (= (:base-type a1) "Array")
-               (= (:base-type a2) "Array")
-               (or (= (:type-params a1) ["__EmptyArrayElement"])
-                   (= (:type-params a2) ["__EmptyArrayElement"])))
-          (and (map? a1) (map? a2)
-               (= (:base-type a1) "Map")
-               (= (:base-type a2) "Map")
-               (or (= (:type-params a1) ["__EmptyMapKey" "__EmptyMapValue"])
-                   (= (:type-params a2) ["__EmptyMapKey" "__EmptyMapValue"])))
-          (and (map? a1) (map? a2)
-               (= (:base-type a1) "Set")
-               (= (:base-type a2) "Set")
-               (or (= (:type-params a1) ["__EmptySetElement"])
-                   (= (:type-params a2) ["__EmptySetElement"])))
-          (types-equal? env a1 a2)
+      (or (types-equal? env a1 a2)
           ;; A named class that implements the Function protocol — a free
           ;; function's generated `<name>_Function` wrapper (`inherit
           ;; Function`, a single `callN` method; see
@@ -3317,7 +3299,7 @@
   "Check the type of an array literal"
   [env {:keys [elements] :as expr}]
   (if (empty? elements)
-    {:base-type "Array" :type-params ["__EmptyArrayElement"]}
+    {:base-type "Array" :type-params ["Any"]}
     (let [first-type (check-expression env (first elements))]
       ;; Check all elements have same type
       (doseq [elem (rest elements)]
@@ -3333,7 +3315,7 @@
   "Check the type of a map literal"
   [env {:keys [entries] :as expr}]
   (if (empty? entries)
-    {:base-type "Map" :type-params ["__EmptyMapKey" "__EmptyMapValue"]}
+    {:base-type "Map" :type-params ["Any" "Any"]}
     (let [entry-types (mapv (fn [{:keys [key value]}]
                               {:key-type (check-expression env key)
                                :value-type (check-expression env value)})
@@ -3357,7 +3339,7 @@
   "Check the type of a set literal"
   [env {:keys [elements] :as expr}]
   (if (empty? elements)
-    {:base-type "Set" :type-params ["__EmptySetElement"]}
+    {:base-type "Set" :type-params ["Any"]}
     (let [first-type (check-expression env (first elements))]
       (doseq [elem (rest elements)]
         (let [elem-type (check-expression env elem)]
