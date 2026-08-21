@@ -2101,9 +2101,12 @@
 
 (defn map-get
   [state m key]
-  (if (rt/nex-map? m)
-    (rt/nex-map-get m key)
-    (hashmap-deep-get m key nil)))
+  (let [v (if (rt/nex-map? m)
+            (rt/nex-map-get m key)
+            (hashmap-deep-get m key nil))]
+    (if (nil? v)
+      (bi/report-contract-violation bi/Precondition "key_must_exist" "has_key")
+      v)))
 
 (defn map-try-get
   [state m key default]

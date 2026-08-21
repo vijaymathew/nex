@@ -1030,17 +1030,19 @@
             (when (and cn (not (contains? visited cn)))
               (let [class-def (env-lookup-class env cn)
                     visited' (conj visited cn)
+                    method-sig (env-lookup-method env cn method-name)
                     feature-member (when class-def
                                      (some (fn [member]
                                              (when (and (= (:type member) :method)
                                                         (= (:name member) method-name))
                                                member))
                                            (feature-members class-def)))
-                    method-sig (when (and feature-member
-                                          (or (= caller-class-name cn)
+                    own-method (when (and method-sig
+                                          (or (nil? feature-member)
+                                              (= caller-class-name cn)
                                               (public-member? feature-member)))
-                                 (env-lookup-method env cn method-name))]
-                (or method-sig
+                                 method-sig)]
+                (or own-method
                     (when class-def
                       (some (fn [{:keys [parent]}]
                               (lookup-method parent visited'))
@@ -2449,11 +2451,20 @@
                   "Any")))
             (if with-java?
               "Any"
-              (let [msg (if (and from-across (= "cursor" method))
-                          (across-target-message base-type)
-                          (str "Method not found: " method))]
-                (if (and class-def (not (:import class-def)))
-                  (throw (ex-info msg {:error (type-error msg)}))
+              (if (and class-def (not (:import class-def)))
+                (if-let [method-sig (and (not (and from-across (= "cursor" method)))
+                                         (lookup-class-method-any-arity env base-type method current-class))]
+                  (let [msg (str "Method " method " on " base-type
+                                 " expects " (count (:params method-sig))
+                                 " argument(s), got " (count args))]
+                    (throw (ex-info msg {:error (type-error msg)})))
+                  (let [msg (if (and from-across (= "cursor" method))
+                              (across-target-message base-type)
+                              (str "Method not found: " method))]
+                    (throw (ex-info msg {:error (type-error msg)}))))
+                (let [msg (if (and from-across (= "cursor" method))
+                            (across-target-message base-type)
+                            (str "Method not found: " method))]
                   (if (and from-across (= "cursor" method))
                     (throw (ex-info msg {:error (type-error msg)}))
                     "Any"))))))))))
