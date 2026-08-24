@@ -1,0 +1,15 @@
+-- Companion module for chapter 23's `intern math/Counter` narrative example.
+class Counter
+  create
+    make() do
+      count := 0
+    end
+  feature
+    count: Integer
+    increment() do
+      count := count + 1
+    end
+    value(): Integer do
+      result := count
+    end
+end

@@ -53,11 +53,13 @@ function main() do
   t.assign("R7")
   let console: Console := create Console
   console.print_line("assigned to " + t.robot_id + " (" + t.status + ")")
+  assert t.robot_id = "R7" and t.status = "IN_TRANSIT"
 
   -- Reassignment = two state transitions driven by the caller.
   t.fail("reassigning")        -- IN_TRANSIT -> FAILED  (reason is transient)
   t.assign("R9")               -- FAILED -> IN_TRANSIT
   console.print_line("now carried by " + t.robot_id + " (" + t.status + ")")
+  assert t.robot_id = "R9" and t.status = "IN_TRANSIT"
 
   -- What the model cannot answer afterwards:
   --   * who carried it before R9?        (overwritten)

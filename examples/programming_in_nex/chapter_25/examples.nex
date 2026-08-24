@@ -1,0 +1,128 @@
+-- Narrative examples from Chapter 25 (Testing), collected into one
+-- self-checking, non-interactive program. test_empty_stack_pop and
+-- test_account assume a Stack[G] and an Account class "you already have"
+-- from earlier chapters; minimal versions (matching Chapter 15's Stack and
+-- Chapter 16's Account) are defined here so the tests are runnable.
+
+function square(x: Integer): Integer
+do
+  result := x * x
+end
+assert square(0) = 0
+assert square(5) = 25
+assert square(-3) = 9
+
+function test_square()
+do
+  assert square_zero: square(0) = 0
+  assert square_positive: square(5) = 25
+  assert square_negative: square(-3) = 9
+  print("square tests passed")
+end
+test_square()
+
+function assert_equal_integer(actual, expected: Integer, label: String)
+do
+  if actual /= expected then
+    raise "test failed: " + label
+  end
+end
+
+function test_square_values()
+do
+  assert_equal_integer(square(0), 0, "square zero")
+  assert_equal_integer(square(5), 25, "square positive")
+  assert_equal_integer(square(-3), 9, "square negative")
+  print("square tests passed")
+end
+test_square_values()
+
+class Stack [G]
+  create
+    make() do
+      items := []
+    end
+  feature
+    items: Array[G]
+    push(value: G) do
+      items.add(value)
+    end
+    pop(): G
+      require
+        not_empty: items.length > 0
+      do
+        result := items.get(items.length - 1)
+        items.remove(items.length - 1)
+      end
+end
+
+function test_empty_stack_pop()
+do
+  let s := create Stack[Integer].make
+  let reached_unexpected_success: Boolean := false
+  s.pop()
+  reached_unexpected_success := true
+  raise "test failed: empty pop should fail"
+rescue
+  if reached_unexpected_success then
+    raise "test failed: empty pop should fail"
+  else
+    print("empty-pop test passed")
+  end
+end
+test_empty_stack_pop()
+
+class Account
+  create
+    make(initial: Real) do
+      balance := initial
+    end
+  feature
+    balance: Real
+    deposit(amount: Real) do
+      balance := balance + amount
+    end
+    withdraw(amount: Real) do
+      balance := balance - amount
+    end
+end
+
+function test_account()
+do
+  let a := create Account.make(100.0)
+  a.deposit(25.0)
+  a.withdraw(40.0)
+  if a.balance /= 85.0 then
+    raise "test failed: account sequence"
+  end
+  print("account tests passed")
+end
+test_account()
+
+function word_frequencies(text: String): Map[String, Integer]
+do
+  result := {}
+  let words := text.to_lower.split(" ")
+  across words as w do
+    if w /= "" then
+      let count := result.try_get(w, 0)
+      result.set(w, count + 1)
+    end
+  end
+end
+
+function test_word_frequencies()
+do
+  let freq := word_frequencies("To be or not to be")
+  assert_equal_integer(freq.get("to"), 2, "count of to")
+  assert_equal_integer(freq.get("be"), 2, "count of be")
+  assert_equal_integer(freq.get("or"), 1, "count of or")
+
+  let spaced := word_frequencies("to  be")
+  assert_equal_integer(spaced.get("to"), 1, "count of to with repeated spaces")
+  assert_equal_integer(spaced.get("be"), 1, "count of be with repeated spaces")
+  assert_equal_integer(spaced.try_get("", 0), 0, "no empty token from repeated spaces")
+
+  print("word frequency tests passed")
+end
+test_word_frequencies()

@@ -1,0 +1,113 @@
+-- Narrative examples from Chapter 17 (Postconditions), collected into one
+-- self-checking, non-interactive program. Counter is shown twice -- a
+-- correct increment() and a buggy one that violates its own postcondition,
+-- to demonstrate the failure -- only the correct version is kept here.
+
+class Counter
+  create
+    make() do
+      count := 0
+    end
+  feature
+    count: Integer
+    increment()
+      do
+        count := count + 1
+      ensure
+        advanced: count = old count + 1
+      end
+end
+
+let counter := create Counter.make
+counter.increment
+assert counter.count = 1
+-- A buggy increment() that did `count := count + 2` here would raise
+-- "Postcondition violation: advanced" on this same call.
+
+function max(a, b: Integer): Integer
+do
+  if a >= b then
+    result := a
+  else
+    result := b
+  end
+ensure
+  result_is_one_argument: result = a or result = b
+  result_is_at_least_a: result >= a
+  result_is_at_least_b: result >= b
+end
+assert max(3, 7) = 7
+
+class Account
+  create
+    make(initial: Real) do
+      balance := initial
+    end
+  feature
+    balance: Real
+    deposit(amount: Real)
+      require
+        positive_amount: amount > 0.0
+      do
+        balance := balance + amount
+      ensure
+        increased: balance = old balance + amount
+      end
+    withdraw(amount: Real)
+      require
+        positive_amount: amount > 0.0
+        enough: amount <= balance
+      do
+        balance := balance - amount
+      ensure
+        decreased: balance = old balance - amount
+      end
+    transfer_to(other: Account, amount: Real)
+      require
+        positive_amount: amount > 0.0
+        enough: amount <= balance
+        different_account: other /= this
+      do
+        withdraw(amount)
+        other.deposit(amount)
+      ensure
+        sender_lost_amount: balance = old balance - amount
+      end
+end
+
+let checking := create Account.make(150.0)
+let savings  := create Account.make(80.0)
+checking.transfer_to(savings, 50.0)
+assert checking.balance = 100.0
+assert savings.balance = 130.0
+
+class Stack [G]
+  create
+    make() do
+      items := []
+    end
+  feature
+    items: Array[G]
+    push(value: G)
+      do
+        items.add(value)
+      ensure
+        last_is_value: items.get(items.length - 1) = value
+      end
+    pop(): G
+      require
+        not_empty: items.length > 0
+      do
+        result := items.get(items.length - 1)
+        let old_len := items.length
+        items.remove(items.length - 1)
+      ensure
+        length_decreased_by_one: items.length = old_len-1
+      end
+end
+
+let stack := create Stack[Integer].make
+stack.push(10)
+stack.push(20)
+assert stack.pop = 20
+assert stack.items.length = 1

@@ -24,6 +24,7 @@ function main() do
   let t: Temperature := create Temperature.make(25.0)
   c.print_line("1. Temperature (from temperature.nex): 25C = " +
                t.fahrenheit.to_string + "F")                               -- 77.0F
+  assert t.fahrenheit = 77.0
 
   -- 2. The over-broad "contact manager" split across three files: Contact (data),
   --    Address_Book (collection), Csv_Exporter (format). Each is interned above.
@@ -31,7 +32,10 @@ function main() do
   book.add(create Contact.make("Ada", "ada@example.com"))
   book.add(create Contact.make("Alan", "alan@example.com"))
   c.print_line("2. Address_Book size = " + book.size.to_string)           -- 2
+  assert book.size = 2
   c.print_line("2. find('Ada') = " + book.find("Ada"))                    -- Ada <...>
+  assert book.find("Ada") = "Ada <ada@example.com>"
+  assert book.find("Nobody") = "NOT FOUND"
   let exporter: Csv_Exporter := create Csv_Exporter.make()
   c.print_line("2. CSV export:")
   c.print_line(exporter.export(book.contacts))
@@ -42,6 +46,7 @@ function main() do
   --    client code (or when two interned modules would otherwise clash on a name).
   let s: Shorty := create Shorty.make()
   c.print_line("3. aliased class: Shorty.shout('hi') = " + s.shout("hi"))  -- HI!
+  assert s.shout("hi") = "HI!"
 
   -- 4. Directory layout for a small address-book program:
   --      address_book/

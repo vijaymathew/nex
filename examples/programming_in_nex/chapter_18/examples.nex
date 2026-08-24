@@ -1,0 +1,120 @@
+-- Narrative examples from Chapter 18 (Invariants), collected into one
+-- self-checking, non-interactive program.
+
+class Bank_Account
+  create
+    make(initial: Real) do
+      balance := initial
+    end
+  feature
+    balance: Real
+    deposit(amount: Real)
+      require
+        positive_amount: amount > 0.0
+      do
+        balance := balance + amount
+      end
+    withdraw(amount: Real)
+      require
+        positive_amount: amount > 0.0
+        enough: amount <= balance
+      do
+        balance := balance - amount
+      end
+  invariant
+    never_negative: balance >= 0.0
+end
+
+let account := create Bank_Account.make(10.0)
+account.deposit(5.0)
+assert account.balance = 15.0
+-- create Bank_Account.make(-10.0) would raise
+-- "Class invariant violation: never_negative"
+
+class Inventory_Split
+  create
+    make(units: Integer) do
+      total := units
+      on_hand := units
+      reserved := 0
+    end
+  feature
+    total: Integer
+    on_hand: Integer
+    reserved: Integer
+    reserve(n: Integer)
+      require
+        available: n <= on_hand
+      do
+        on_hand := on_hand - n
+        reserved := reserved + n
+      end
+  invariant
+    conserved: on_hand + reserved = total
+end
+
+let inv := create Inventory_Split.make(10)
+inv.reserve(3)
+assert inv.on_hand = 7
+assert inv.reserved = 3
+assert inv.on_hand + inv.reserved = inv.total
+
+class Loan
+  create
+    make(book_title, borrower_name: String) do
+      title := book_title
+      borrower := borrower_name
+      returned := false
+    end
+  feature
+    title: String
+    borrower: String
+    returned: Boolean
+    mark_returned()
+      do
+        returned := true
+      end
+  invariant
+    title_not_empty: title.length > 0
+    borrower_not_empty: borrower.length > 0
+end
+
+let loan := create Loan.make("Dune", "Ada")
+loan.mark_returned()
+assert loan.returned
+
+class Bounded_Counter
+  create
+    make(max: Integer) do
+      limit := max
+      count := 0
+    end
+  feature
+    limit: Integer
+    count: Integer
+    increment()
+      require
+        below_limit: count < limit
+      do
+        count := count + 1
+      ensure
+        advanced: count = old count + 1
+      end
+    reset()
+      do
+        count := 0
+      ensure
+        cleared: count = 0
+      end
+  invariant
+    limit_non_negative: limit >= 0
+    count_non_negative: count >= 0
+    count_within_limit: count <= limit
+end
+
+let bc := create Bounded_Counter.make(3)
+bc.increment()
+bc.increment()
+assert bc.count = 2
+bc.reset()
+assert bc.count = 0

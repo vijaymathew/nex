@@ -84,9 +84,13 @@ function main() do
   rep.line("(1) DFS depth cap on the deep chain A->N1->...->N5->G (needs 6 hops):")
   let g_deep: Graph := lab.deep_graph()
   rep.line("    cap=3 (too shallow):")
-  rep.row(dfs.run_capped(g_deep, "A", "G", 3))
+  let capped3: Path_Run_Result := dfs.run_capped(g_deep, "A", "G", 3)
+  rep.row(capped3)
   rep.line("    cap=6 (just enough):")
-  rep.row(dfs.run_capped(g_deep, "A", "G", 6))
+  let capped6: Path_Run_Result := dfs.run_capped(g_deep, "A", "G", 6)
+  rep.row(capped6)
+  assert capped3.status = "DEPTH_CAPPED"
+  assert capped6.status = "FOUND"
   rep.line("    A DEPTH_CAPPED status means a path may exist beyond the bound —")
   rep.line("    an explicit signal, not a silent 'unreachable'.")
   rep.line("(2) BFS frontier growth on a wide tree (A->B1..B3, each Bi->2 C's->G):")
@@ -117,6 +121,7 @@ function main() do
   else
     rep.line("  VIOLATIONS: " + fails)
   end
+  assert fails = 0
 end
 
 -- One compact comparison line per graph variant.

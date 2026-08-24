@@ -1,0 +1,50 @@
+-- Narrative examples from Chapter 20 (Contracts and Inheritance), collected
+-- into one self-checking, non-interactive program. Most of this chapter is
+-- a design discussion of contract inheritance rules, illustrated with
+-- signature-only sketches rather than complete runnable code; the two full
+-- examples are kept here.
+
+function without_last(s: String): String
+  require
+    not_empty: s.length > 0
+  do
+    result := s.substring(0, s.length - 1)
+  ensure
+    one_shorter: result.length = s.length - 1
+    keeps_prefix: result = s.substring(0, s.length - 1)
+  end
+assert without_last("hello") = "hell"
+
+class Word_Set
+  create
+    make() do
+      items := []
+    end
+  feature
+    items: Array[String]
+    has(word: String): Boolean do
+      result := items.contains(word)
+    end
+    add(word: String)
+      require
+        not_empty: word.length > 0
+      do
+        if not has(word) then
+          items.add(word)
+        end
+      ensure
+        word_present: has(word)
+      end
+    size(): Integer do
+      result := items.length
+    end
+  invariant
+    storage_exists: items /= nil
+end
+
+let words := create Word_Set.make
+words.add("hello")
+words.add("world")
+words.add("hello")
+assert words.size = 2
+assert words.has("world")

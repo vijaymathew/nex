@@ -1,0 +1,132 @@
+-- Narrative examples from Chapter 21 (Exceptions), collected into one
+-- self-checking, non-interactive program. parse_positive is shown three
+-- times, returning a different shape each time (raising, a hand-rolled
+-- sealed union, the built-in Result); each version gets a distinct name
+-- since a compiled program can't redefine a function's return type.
+
+do
+  print("before")
+  raise "something went wrong"
+  print("after")
+rescue
+  print("rescued: " + exception.to_string)
+end
+
+let attempts := 0
+do
+  attempts := attempts + 1
+  if attempts < 3 then
+    raise "not ready yet"
+  end
+  print("done on attempt " + attempts.to_string)
+rescue
+  print("failed: " + exception.to_string)
+  retry
+end
+assert attempts = 3
+
+function read_config(path: String): String
+do
+  raise "file not found"
+rescue
+  result := "default-config"
+end
+assert read_config("missing.cfg") = "default-config"
+
+function connect_with_retry(): String
+do
+  let attempts := 0
+  do
+    attempts := attempts + 1
+    if attempts < 3 then
+      raise "temporary connection error"
+    end
+    result := "connected"
+  rescue
+    if attempts < 3 then
+      retry
+    else
+      raise exception
+    end
+  end
+end
+assert connect_with_retry() = "connected"
+
+function parse_positive_v1(text: String): Integer
+  require
+    not_empty: text.length > 0
+  do
+    let value := text.to_integer
+    if value <= 0 then
+      raise "number must be positive"
+    end
+    result := value
+  rescue
+    raise "invalid positive integer: " + text
+  end
+assert parse_positive_v1("42") = 42
+
+sealed deferred class Parse_Result
+end
+
+class Parse_Ok
+  inherit Parse_Result
+  feature value: Integer
+  create make(v: Integer) do value := v end
+end
+
+class Parse_Error
+  inherit Parse_Result
+  feature reason: String
+  create make(r: String) do reason := r end
+end
+
+function parse_positive_v2(text: String): Parse_Result
+do
+  let n := text.to_integer
+  if n > 0 then
+    result := create Parse_Ok.make(n)
+  else
+    result := create Parse_Error.make("must be positive")
+  end
+end
+
+let outcome: Parse_Result := parse_positive_v2("42")
+match outcome of
+  Parse_Ok as ok then
+    assert ok.value = 42
+  Parse_Error as err then
+    print("failed: " + err.reason)
+end
+
+intern data/Result
+
+function parse_positive_v3(text: String): Result[Integer, String]
+do
+  let n := text.to_integer
+  if n > 0 then
+    result := create Ok[Integer, String].make(n)
+  else
+    result := create Err[Integer, String].make("must be positive")
+  end
+end
+
+match parse_positive_v3("42") of
+  Ok(value)  then assert value = 42
+  Err(error) then print(error)
+end
+
+let doubled: Result[Integer, String] :=
+  result_map(parse_positive_v3("21"), fn (x: Integer): Integer do result := x * 2 end)
+match doubled of
+  Ok(value)  then assert value = 42
+  Err(error) then print(error)
+end
+
+intern data/Option
+
+let found: Option[Integer] := create Some[Integer].make(10)
+match found of
+  Some(value) then assert value = 10
+  None        then print("absent")
+end

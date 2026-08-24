@@ -167,6 +167,7 @@ function main() do
   else
     c.print_line("TEST SUMMARY: FAIL (" + t.passed.to_string + "/" + t.total.to_string + ")")
   end
+  assert t.passed = t.total
 end
 
 main()

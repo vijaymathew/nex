@@ -23,6 +23,7 @@ function main() do
   --      boundary. intern composes your program; import reaches outside it.
   let g: Pure_Greeter := create Pure_Greeter.make()
   c.print_line("1. interned Nex module says: " + g.greet("Ada"))
+  assert g.greet("Ada").length > 0
   with "java" do
     c.print_line("1. imported host library says: java.version = " +
                  System.getProperty("java.version"))
@@ -44,6 +45,7 @@ function main() do
   --    host-specific code. Everything else stays platform-independent.
   let host: Host_System := create Host_System.make()
   c.print_line("3. Host_System.property('os.name') = " + host.property("os.name"))
+  assert host.property("os.name").length > 0
   c.print_line("5. only host_system.nex contains the with-'java' block; the rest" +
                " of the program is portable Nex behind its contract.")
 

@@ -19,6 +19,7 @@ function main() do
   let seconds_per_week: Integer :=
     seconds_per_minute * minutes_per_hour * hours_per_day * days_per_week
   c.print_line("1. Seconds in a week: " + seconds_per_week.to_string)   -- 604800
+  assert seconds_per_week = 604800
 
   -- --------------------------------------------------------------------------
   -- 2. Area of a circle, radius 5.0.
@@ -27,6 +28,7 @@ function main() do
   let pi: Real := 3.14159
   let area: Real := pi * radius * radius
   c.print_line("2. Area of circle (r=5.0): " + area.to_string)          -- 78.53975
+  assert area = 78.53975
 
   -- --------------------------------------------------------------------------
   -- 3. Greeting from two string variables.
@@ -49,22 +51,26 @@ function main() do
   c.print_line("4. first let -> " + x_first.to_string +
                ", second let -> " + x_second.to_string +
                "  (the second `let` introduces a new variable)")
+  assert x_first = 10
+  assert x_second = 20
   let counter: Integer := 10
   counter := 20                     -- THIS is an update of the same variable
   c.print_line("   plain `:=` updates in place -> " + counter.to_string)
+  assert counter = 20
 
   -- --------------------------------------------------------------------------
   -- 5.* Fahrenheit -> Celsius:  C = (F - 32) * 5 / 9
   --     Verified at the two reference temperatures.
   -- --------------------------------------------------------------------------
-  report_f_to_c(c, 32.0)            -- freezing point of water  -> 0.0 C
-  report_f_to_c(c, 98.6)            -- body temperature         -> 37.0 C
+  assert report_f_to_c(c, 32.0) = 0.0     -- freezing point of water  -> 0.0 C
+  assert report_f_to_c(c, 98.6) = 37.0    -- body temperature         -> 37.0 C
 end
 
--- Convert one Fahrenheit reading to Celsius and print both, readably.
-function report_f_to_c(c: Console, f: Real) do
+-- Convert one Fahrenheit reading to Celsius, print it readably, and return it.
+function report_f_to_c(c: Console, f: Real): Real do
   let celsius: Real := (f - 32.0) * 5.0 / 9.0
   c.print_line("5. " + f.to_string + " deg F = " + celsius.to_string + " deg C")
+  result := celsius
 end
 
 main()

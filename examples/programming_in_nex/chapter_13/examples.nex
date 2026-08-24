@@ -1,0 +1,170 @@
+-- Narrative examples from Chapter 13 (Designing Classes Well), collected
+-- into one self-checking, non-interactive program. This chapter is mostly a
+-- design discussion contrasting "before" and "after" versions of the same
+-- class (Student, Counter); only the refactored ("after", single-
+-- responsibility) version of each is kept here. Product/Stock_Record and
+-- Library_Book are shown only as field/method listings in the book, with no
+-- usage demonstrated, so they're declared here (to keep them parsing and
+-- type-checking) with a small instantiation of each.
+
+-- Student: focused on academic record-keeping only (send_report/
+-- export_to_csv, shown in the "doing too much" version, are dropped).
+class Student
+  create
+    make(n, e: String) do
+      name := n
+      email := e
+      scores := []
+    end
+  private feature
+    name: String
+    email: String
+    scores: Array[Integer]
+  feature
+    add_score(s: Integer) do
+      scores.add(s)
+    end
+    average(): Real do
+      result := 0.0
+      across scores as s do
+        result := result + s
+      end
+      result := result / scores.length
+    end
+end
+
+let student := create Student.make("Ada", "ada@example.com")
+student.add_score(80)
+student.add_score(90)
+assert student.average = 85.0
+
+class Bank_Account
+  create
+    make(name: String, initial: Real) do
+      owner := name
+      balance := initial
+      overdraft_limit := 0.0
+    end
+  feature
+    owner: String
+    balance: Real
+    overdraft_limit: Real
+    deposit(amount: Real) do
+      balance := balance + amount
+    end
+    withdraw(amount: Real): Boolean do
+      if balance - amount >= -overdraft_limit then
+        balance := balance - amount
+        result := true
+      else
+        result := false
+      end
+    end
+    get_balance(): Real do
+      result := balance
+    end
+end
+
+let account := create Bank_Account.make("Alice", 100.0)
+assert account.withdraw(150.0) = false
+account.deposit(50.0)
+assert account.withdraw(150.0) = true
+assert account.get_balance = 0.0
+
+class Counter
+  private feature
+    value: Integer
+  feature
+    increment() do
+      value := value + 1
+    end
+    current(): Integer do
+      result := value
+    end
+end
+
+let counter := create Counter
+counter.increment()
+counter.increment()
+assert counter.current = 2
+
+class Card
+  create
+    make(r: Integer, s: String) do
+      rank := r
+      suit := s
+    end
+  feature
+    rank: Integer
+    suit: String
+    name(): String do
+      let rank_names := ["2","3","4","5","6","7","8","9","10","J","Q","K","Ace"]
+      result := rank_names.get(rank - 2) + " of " + suit
+    end
+    beats(other: Card): Boolean do
+      result := rank > other.rank
+    end
+end
+
+let ace   := create Card.make(14, "Spades")
+let seven := create Card.make(7, "Hearts")
+assert ace.name = "Ace of Spades"
+assert ace.beats(seven)
+
+-- Product/Stock_Record: separating "what a product is" from "how much of it
+-- we have," the design point this section makes.
+class Product
+  create
+    make(i: Integer, n, cat, desc: String, price: Real) do
+      id := i
+      name := n
+      category := cat
+      description := desc
+      base_price := price
+    end
+  feature
+    id: Integer
+    name: String
+    category: String
+    description: String
+    base_price: Real
+    discounted_price(percent: Real): Real do
+      result := base_price * (1.0 - percent / 100.0)
+    end
+end
+
+class Stock_Record
+  create
+    make(pid, qty, threshold: Integer) do
+      product_id := pid
+      quantity := qty
+      reorder_threshold := threshold
+    end
+  feature
+    product_id: Integer
+    quantity: Integer
+    reorder_threshold: Integer
+    needs_reorder(): Boolean do
+      result := quantity <= reorder_threshold
+    end
+end
+
+let widget := create Product.make(1, "Widget", "Hardware", "A widget", 20.0)
+assert widget.discounted_price(25.0) = 15.0
+let stock := create Stock_Record.make(1, 3, 5)
+assert stock.needs_reorder
+
+class Library_Book
+  feature
+    isbn: String
+    title: String
+    author: String
+    is_checked_out: Boolean
+    borrower_name: ?String
+    borrower_email: ?String
+    due_date: ?String
+    late_fee_per_day: Real
+end
+
+let book := create Library_Book
+assert not book.is_checked_out

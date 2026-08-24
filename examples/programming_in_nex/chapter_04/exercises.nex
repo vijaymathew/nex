@@ -12,12 +12,17 @@ function main() do
   c.print_line("1. sign(5)  = " + sign_word(5))     -- positive
   c.print_line("1. sign(-3) = " + sign_word(-3))    -- negative
   c.print_line("1. sign(0)  = " + sign_word(0))     -- zero
+  assert sign_word(5) = "positive"
+  assert sign_word(-3) = "negative"
+  assert sign_word(0) = "zero"
 
   -- --------------------------------------------------------------------------
   -- 2. The weekday/weekend if-chain rewritten as a `case`.
   -- --------------------------------------------------------------------------
   c.print_line("2. Mon -> " + day_kind("Mon"))      -- weekday
   c.print_line("2. Sun -> " + day_kind("Sun"))      -- weekend
+  assert day_kind("Mon") = "weekday"
+  assert day_kind("Sun") = "weekend"
 
   -- --------------------------------------------------------------------------
   -- 3. `when` expression assigning "even"/"odd".
@@ -25,6 +30,7 @@ function main() do
   let n3: Integer := 7
   let parity: String := when n3 % 2 = 0 then "even" else "odd" end
   c.print_line("3. parity of " + n3.to_string + " = " + parity)   -- odd
+  assert parity = "odd"
 
   -- --------------------------------------------------------------------------
   -- 4. Fizz-Buzz.
@@ -33,6 +39,10 @@ function main() do
   c.print_line("4. 9  -> " + fizzbuzz(9))    -- Fizz
   c.print_line("4. 10 -> " + fizzbuzz(10))   -- Buzz
   c.print_line("4. 7  -> " + fizzbuzz(7))    -- 7
+  assert fizzbuzz(15) = "FizzBuzz"
+  assert fizzbuzz(9) = "Fizz"
+  assert fizzbuzz(10) = "Buzz"
+  assert fizzbuzz(7) = "7"
 
   -- --------------------------------------------------------------------------
   -- 5.* Shipping cost. The book reads a weight from the console; the rule is a
@@ -44,6 +54,9 @@ function main() do
   shipping_report(c, 5.0)    -- 25.0
   shipping_report(c, 25.0)   -- 100.0
   shipping_report(c, 75.0)   -- 225.0
+  assert shipping_cost(5.0) = 25.0
+  assert shipping_cost(25.0) = 100.0
+  assert shipping_cost(75.0) = 225.0
 end
 
 function sign_word(n: Integer): String do

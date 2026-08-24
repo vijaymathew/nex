@@ -101,18 +101,21 @@ function main() do
     c.print_line("   too small (counter=" + counter.to_string + "), retrying")
     retry
   end
+  assert counter = 5
 
   -- 2.
+  c.print_line("2. safe_reciprocal(4.0) = " + safe_reciprocal(4.0).to_string)   -- 0.25
+  assert safe_reciprocal(4.0) = 0.25
   do
-    c.print_line("2. safe_reciprocal(4.0) = " + safe_reciprocal(4.0).to_string)   -- 0.25
     c.print_line("2. safe_reciprocal(0.0) = " + safe_reciprocal(0.0).to_string)   -- raises
   rescue
     c.print_line("2. fallback: " + exception.to_string)
   end
 
   -- 3.
+  c.print_line("3. parse_positive('42') = " + parse_positive("42").to_string)   -- 42
+  assert parse_positive("42") = 42
   do
-    c.print_line("3. parse_positive('42') = " + parse_positive("42").to_string)   -- 42
     c.print_line("3. parse_positive('-5') = " + parse_positive("-5").to_string)   -- raises
   rescue
     c.print_line("3. handled runtime failure: " + exception.to_string)
@@ -121,13 +124,21 @@ function main() do
                " contract — a caller bug, not a handled exception.)")
 
   -- 4.
-  c.print_line("4. result: " + connect_with_retry(c))   -- connected on attempt 3
+  let connect_result: String := connect_with_retry(c)
+  c.print_line("4. result: " + connect_result)   -- connected on attempt 3
+  assert connect_result = "connected"
 
   -- 5.*
   let cache: File_Cache := create File_Cache.make()
-  c.print_line("5. load('known.txt')   = " + cache.load("known.txt"))     -- disk contents
-  c.print_line("5. load('missing.txt') = " + cache.load("missing.txt"))   -- DEFAULT-CONTENT
-  c.print_line("5. load('known.txt')   = " + cache.load("known.txt") + " (now from memory)")
+  let known1: String := cache.load("known.txt")
+  c.print_line("5. load('known.txt')   = " + known1)     -- disk contents
+  assert known1 = "disk-contents-of-known"
+  let missing: String := cache.load("missing.txt")
+  c.print_line("5. load('missing.txt') = " + missing)   -- DEFAULT-CONTENT
+  assert missing = "DEFAULT-CONTENT"
+  let known2: String := cache.load("known.txt")
+  c.print_line("5. load('known.txt')   = " + known2 + " (now from memory)")
+  assert known2 = "disk-contents-of-known"
 end
 
 main()

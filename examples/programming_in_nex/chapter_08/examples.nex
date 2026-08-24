@@ -1,0 +1,111 @@
+-- Narrative examples from Chapter 8 (Recursion), collected into one
+-- self-checking, non-interactive program.
+
+function sum_to(n: Integer): Integer
+do
+  if n = 0 then
+    result := 0
+  else
+    result := n + sum_to(n - 1)
+  end
+end
+assert sum_to(5) = 15
+
+function factorial(n: Integer): Integer
+do
+  if n = 0 then
+    result := 1
+  else
+    result := n * factorial(n - 1)
+  end
+end
+assert factorial(5) = 120
+
+function count_down(n: Integer) do
+  if n = 0 then
+    print("Go!")
+  else
+    print(n)
+    count_down(n - 1)
+  end
+end
+count_down(3)
+
+let c: Char := #s
+let newline: Char := #newline
+let tab: Char := #tab
+
+function count_char(s: String, ch: Char): Integer
+do
+  if s.length = 0 then
+    result := 0
+  else
+    let head := s.substring(0, 1)
+    let tail := s.substring(1, s.length)
+    let rest := count_char(tail, ch)
+    if head = ch.to_string then
+      result := 1 + rest
+    else
+      result := rest
+    end
+  end
+end
+assert count_char("mississippi", #s) = 4
+
+declare function is_even(n: Integer): Boolean
+declare function is_odd(n: Integer): Boolean
+
+function is_even(n: Integer): Boolean
+do
+  if n = 0 then
+    result := true
+  else
+    result := is_odd(n - 1)
+  end
+end
+
+function is_odd(n: Integer): Boolean
+do
+  if n = 0 then
+    result := false
+  else
+    result := is_even(n - 1)
+  end
+end
+assert is_even(4)
+assert is_odd(7)
+
+function fibonacci(n: Integer): Integer
+do
+  if n <= 1 then
+    result := n
+  else
+    result := fibonacci(n - 1) + fibonacci(n - 2)
+  end
+end
+assert fibonacci(10) = 55
+
+-- loop: immediately clear
+from let i := 1 until i > 10 do print(i) i := i + 1 end
+
+-- recursion: more thought required
+function print_to(n, limit: Integer)
+do
+  if n <= limit then
+    print(n)
+    print_to(n + 1, limit)
+  end
+end
+print_to(1, 10)
+
+-- this handles any n safely (unlike a naive recursive sum_to for large n)
+let total := 0
+from
+  let i := 1
+until
+  i > 10000
+do
+  total := total + i
+  i := i + 1
+end
+assert total = 50005000

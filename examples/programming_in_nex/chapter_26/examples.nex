@@ -1,0 +1,122 @@
+-- Narrative examples from Chapter 26 (A Complete Program), collected into
+-- one self-checking, non-interactive program. Task_List is shown three
+-- times, each adding a method; only the final, complete version is kept.
+
+class Todo_Item
+  create
+    make(t: String) do
+      title := t
+      done := false
+    end
+  feature
+    title: String
+    done: Boolean
+    mark_done()
+      do
+        done := true
+      ensure
+        now_done: done
+      end
+    is_done(): Boolean do
+      result := done
+    end
+  invariant
+    title_not_empty: title.length > 0
+end
+
+class Task_List
+  create
+    make() do
+      tasks := []
+    end
+  feature
+    tasks: Array[Todo_Item]
+    add_task(title: String)
+      require
+        title_not_empty: title.length > 0
+      do
+        tasks.add(create Todo_Item.make(title))
+      ensure
+        added_title_visible: tasks.get(tasks.length - 1).title = title
+      end
+    task_at(index: Integer): Todo_Item
+      require
+        index_in_range: index >= 0 and index < tasks.length
+      do
+        result := tasks.get(index)
+      end
+    mark_task_done(index: Integer)
+      require
+        index_in_range: index >= 0 and index < tasks.length
+      do
+        task_at(index).mark_done()
+      ensure
+        selected_done: tasks.get(index).done
+      end
+    completed_count(): Integer
+      do
+        result := 0
+        across tasks as task do
+          if task.is_done() then
+            result := result + 1
+          end
+        end
+      ensure
+        count_in_range: result >= 0 and result <= tasks.length
+      end
+    all_done(): Boolean do
+      result := completed_count = tasks.length
+    end
+    size(): Integer do
+      result := tasks.length
+    end
+  invariant
+    storage_exists: tasks /= nil
+end
+
+let todo := create Task_List.make
+todo.add_task("write chapter draft")
+todo.add_task("check examples")
+todo.add_task("revise wording")
+assert todo.size = 3
+assert todo.completed_count = 0
+todo.task_at(0).mark_done()
+todo.task_at(1).mark_done()
+assert todo.completed_count = 2
+assert not todo.all_done
+
+function test_task_list()
+do
+  let todo := create Task_List.make
+  todo.add_task("one")
+  todo.add_task("two")
+  todo.add_task("three")
+
+  if todo.size /= 3 then
+    raise "test failed: size after add"
+  end
+
+  if todo.completed_count /= 0 then
+    raise "test failed: initial completed count"
+  end
+
+  todo.mark_task_done(1)
+
+  if todo.completed_count /= 1 then
+    raise "test failed: completed count after mark"
+  end
+
+  if todo.all_done then
+    raise "test failed: all_done too early"
+  end
+
+  todo.mark_task_done(0)
+  todo.mark_task_done(2)
+
+  if not todo.all_done then
+    raise "test failed: all_done should be true"
+  end
+
+  print("task list tests passed")
+end
+test_task_list()

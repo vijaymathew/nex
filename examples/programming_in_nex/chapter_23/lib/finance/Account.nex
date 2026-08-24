@@ -1,0 +1,23 @@
+-- Companion module for chapter 23's `intern finance/Account` narrative
+-- example.
+intern finance/Transaction
+
+class Account
+  create
+    make(name: String) do
+      owner := name
+      entries := []
+    end
+  feature
+    owner: String
+    entries: Array[Transaction]
+    add_entry(t: Transaction) do
+      entries.add(t)
+    end
+    balance(): Real do
+      result := 0.0
+      across entries as entry do
+        result := result + entry.amount
+      end
+    end
+end

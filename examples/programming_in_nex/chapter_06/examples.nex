@@ -1,0 +1,181 @@
+-- Narrative examples from Chapter 6 (Functions), collected into one
+-- self-checking, non-interactive program. Names that the chapter reuses
+-- across separate REPL demos (double, add, square, apply_twice) are
+-- disambiguated with suffixes since this is one compiled program rather
+-- than a sequence of independent REPL inputs.
+
+function greet(name: String)
+do
+  print("Hello, " + name)
+end
+greet("Ada")
+greet("Alan")
+
+function add(a: Integer, b: Integer)
+do
+  print(a + b)
+end
+add(3, 7)
+-- Grouped parameter syntax is equivalent: function add(a, b: Integer) ...
+
+function double(n: Integer): Integer
+do
+  result := n * 2
+end
+assert double(5) = 10
+let x := double(8)
+assert double(x) = 32
+
+function rectangle_area(width, height: Real): Real
+do
+  result := width * height
+end
+assert rectangle_area(4.0, 5.0) = 20.0
+
+function max(a, b: Integer): Integer
+do
+  if a >= b then
+    result := a
+  else
+    result := b
+  end
+end
+assert max(3, 7) = 7
+assert max(10, 4) = 10
+
+function describe(n: Integer): String
+do
+  result := "other"
+  if n < 0 then
+    result := "negative"
+  elseif n = 0 then
+    result := "zero"
+  elseif n > 0 then
+    result := "positive"
+  end
+end
+assert describe(-3) = "negative"
+assert describe(0) = "zero"
+assert describe(42) = "positive"
+
+function clamp(value, low, high: Integer): Integer
+do
+  if value < low then
+    result := low
+  elseif value > high then
+    result := high
+  else
+    result := value
+  end
+end
+assert clamp(15, 0, 10) = 10
+assert clamp(-3, 0, 10) = 0
+assert clamp(7, 0, 10) = 7
+
+function square(n: Integer): Integer
+do
+  result := n * n
+end
+function sum_of_squares(a, b: Integer): Integer
+do
+  result := square(a) + square(b)
+end
+assert sum_of_squares(3, 4) = 25
+
+-- Forward declaration: normalize_name is declared before greet_user (which
+-- calls it), then defined afterward.
+declare function normalize_name(name: String): String
+
+function greet_user(name: String): String
+do
+  result := "Hello, " + normalize_name(name)
+end
+
+function normalize_name(name: String): String
+do
+  result := name.trim()
+end
+assert greet_user("  Vijay  ") = "Hello, Vijay"
+
+-- Anonymous functions.
+let double_anon := fn (n: Integer): Integer do
+  result := n * 2
+end
+assert double_anon(5) = 10
+
+function apply_twice(f: Function(n: Integer): Integer, n: Integer): Integer
+do
+  result := f(f(n))
+end
+assert apply_twice(fn (n: Integer): Integer do result := n + 3 end, 10) = 16
+
+-- Function type signatures.
+let double_sig: Function(n: Integer): Integer :=
+  fn (n: Integer): Integer do result := n * 2 end
+assert double_sig(5) = 10
+
+let add_sig: Function(Integer, Integer): Integer :=
+  fn (a, b: Integer): Integer do result := a + b end
+assert add_sig(3, 7) = 10
+
+-- Contravariant parameters / covariant return (see the chapter's own
+-- Animal/Dog discussion for why the direction matters) is a variance point
+-- illustrated with a hypothetical Animal/Dog hierarchy in the book text
+-- itself, not a standalone runnable snippet.
+
+-- Letting fn's parameter types come from context.
+let double2: Function(n: Integer): Integer := fn(n) do result := n * 2 end
+assert double2(5) = 10
+
+-- Naming function types with declare type.
+declare type Transformer = Function(n: Integer): Integer
+
+let double_via_alias: Transformer := fn (n: Integer): Integer do result := n * 2 end
+let square_via_alias: Transformer := fn (n: Integer): Integer do result := n * n end
+
+function apply_twice_via_alias(f: Transformer, n: Integer): Integer do
+  result := f(f(n))
+end
+assert apply_twice_via_alias(double_via_alias, 3) = 12
+assert apply_twice_via_alias(square_via_alias, 2) = 16
+
+declare type IntList = Array[Integer]
+let scores: IntList := [10, 20, 30]
+assert scores.length = 3
+
+declare type Quantity = Integer where n: n > 0
+let q: Quantity := 5           -- checked: 5 > 0, so this is allowed
+let doubled: Integer := q * 2  -- free: a Quantity is an Integer
+assert doubled = 10
+
+-- A Worked Example: Temperature Converter
+function celsius_to_fahrenheit(c: Real): Real
+do
+  result := c * 9.0 / 5.0 + 32.0
+end
+
+function fahrenheit_to_celsius(f: Real): Real
+do
+  result := (f - 32.0) * 5.0 / 9.0
+end
+
+function describe_temperature(c: Real): String
+do
+  if c < 0.0 then
+    result := "freezing"
+  elseif c < 15.0 then
+    result := "cold"
+  elseif c < 25.0 then
+    result := "mild"
+  else
+    result := "warm"
+  end
+end
+
+let boiling := 100.0
+assert celsius_to_fahrenheit(boiling) = 212.0
+assert describe_temperature(boiling) = "warm"
+
+let body_temp_f := 98.6
+let body_temp_c := fahrenheit_to_celsius(body_temp_f)
+assert describe_temperature(body_temp_c) = "warm"

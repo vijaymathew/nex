@@ -54,6 +54,8 @@ function main() do
   let dwf: Delivery_Workflow := dmod.wire(tasks)          -- after  (via port)
   rep.line("after:  dispatch_view(T-2) = " + dwf.dispatch_view("T-2"))   -- TASK_STATUS:IN_TRANSIT
   rep.line("after:  dispatch_view(T-9) = " + dwf.dispatch_view("T-9"))   -- UNKNOWN_TASK
+  assert dwf.dispatch_view("T-2") = "TASK_STATUS:IN_TRANSIT"
+  assert dwf.dispatch_view("T-9") = "UNKNOWN_TASK"
   -- Parity: the workflow's view is exactly the store's status, dressed up.
   rep.parity("status T-2", "TASK_STATUS:" + dstore.find_status("T-2").value, dwf.dispatch_view("T-2"))
   rep.parity("missing T-9", "UNKNOWN_TASK",
@@ -107,6 +109,7 @@ function main() do
   else
     rep.line("  PARITY FAILURES: " + rep.failures)
   end
+  assert rep.failures = 0
   rep.line("Dependency direction now: use case -> port <- adapter -> V3 store.")
   rep.line("No workflow/service names a concrete storage class.")
 end

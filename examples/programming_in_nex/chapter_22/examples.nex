@@ -1,0 +1,51 @@
+-- Narrative examples from Chapter 22 (Contracts, Exceptions, and Recovery),
+-- collected into one self-checking, non-interactive program.
+
+class Result [V]
+  create
+    success(v: V) do
+      value := v
+      error := nil
+      ok := true
+    end
+    failure(msg: String) do
+      value := nil
+      error := msg
+      ok := false
+    end
+  feature
+    value: ?V
+    error: ?String
+    ok: Boolean
+    is_ok(): Boolean do
+      result := ok
+    end
+end
+
+function safe_divide(a, b: Real): Result[Real]
+do
+  if b = 0.0 then
+    result := create Result[Real].failure("division by zero")
+  else
+    result := create Result[Real].success(a / b)
+  end
+end
+assert safe_divide(10.0, 2.0).is_ok
+assert not safe_divide(10.0, 0.0).is_ok
+
+function load_configuration(path: String, available: Boolean): String
+  require
+    path_not_empty: path.length > 0
+  do
+    if not available then
+      raise "file missing"
+    end
+    result := "theme=dark\ntimeout=60"
+  rescue
+    print("using built-in defaults: " + exception.to_string)
+    result := "theme=light\ntimeout=30"
+  end
+
+print(load_configuration("config.txt", true))
+assert load_configuration("config.txt", true) = "theme=dark\ntimeout=60"
+assert load_configuration("config.txt", false) = "theme=light\ntimeout=30"

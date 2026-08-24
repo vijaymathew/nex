@@ -95,6 +95,7 @@ function main() do
   else
     c.print_line("EVOLUTION_CHECK:FAIL")
   end
+  assert ok
 end
 
 main()

@@ -1,0 +1,143 @@
+-- Narrative examples from Chapter 28 (Concurrency), collected into one
+-- self-checking, non-interactive program. Each example is wrapped in its
+-- own `do...end` block so names like `t`/`ch`, reused across many small,
+-- independent demos in the book, don't collide as top-level declarations.
+-- Sleep durations are shortened from the book's illustrative values (5-20
+-- seconds) so the example runs quickly; the behaviour demonstrated doesn't
+-- depend on the exact durations.
+
+do
+  let t: Task[Integer] := spawn do
+    result := 40 + 2
+  end
+  assert t.await = 42
+end
+
+do
+  let t: Task := spawn do
+    print("background work")
+  end
+  t.await
+end
+
+do
+  let t: Task[String] := spawn do
+    result := "report ready"
+  end
+  assert t.await = "report ready"
+end
+
+do
+  let t: Task[Integer] := spawn do
+    result := 10 * 10
+  end
+  print(t.is_done)
+  assert t.await = 100
+  assert t.is_done
+end
+
+do
+  let t: Task := spawn do
+    sleep(2000)
+  end
+  print(t.cancel)
+  print(t.is_cancelled)
+end
+
+do
+  let t: Task[Integer] := spawn do
+    sleep(300)
+    result := 7
+  end
+  print(t.await(10))
+  print(t.await(1000))
+end
+
+do
+  let ch: Channel[Integer] := create Channel[Integer]
+  let producer: Task := spawn do
+    ch.send(42)
+  end
+  assert ch.receive = 42
+  producer.await
+end
+
+do
+  let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
+  ch.send(10)
+  ch.send(20)
+  assert ch.size = 2
+  assert ch.capacity = 2
+end
+
+do
+  let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+  assert ch.try_send(5)
+  assert not ch.try_send(6)
+  print(ch.try_receive)
+  print(ch.try_receive)
+end
+
+do
+  let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
+  ch.send(1)
+  ch.close
+  assert ch.is_closed
+  assert ch.receive = 1
+end
+
+do
+  let slow: Task[Integer] := spawn do
+    sleep(2000)
+    result := 10
+  end
+  let fast: Task[Integer] := spawn do
+    result := 20
+  end
+  assert await_any([slow, fast]) = 20
+end
+
+do
+  let a: Task[Integer] := spawn do
+    result := 1
+  end
+  let b: Task[Integer] := spawn do
+    result := 2
+  end
+  let results: Array[Integer] := await_all([a, b])
+  assert results.get(0) = 1
+  assert results.get(1) = 2
+end
+
+do
+  let ch: Channel[String] := create Channel[String].with_capacity(1)
+  ch.send("done")
+  select
+    when ch.receive as msg then
+      assert msg = "done"
+    else
+      print("nothing ready")
+  end
+end
+
+do
+  let ch: Channel[String] := create Channel[String]
+  select
+    when ch.receive as msg then
+      print(msg)
+    timeout 5 then
+      print("timed out")
+  end
+end
+
+do
+  let input: Channel[Integer] := create Channel[Integer].with_capacity(4)
+  let output: Channel[Integer] := create Channel[Integer].with_capacity(4)
+  let worker: Task := spawn do
+    let v: Integer := input.receive
+    output.send(v * v)
+  end
+  input.send(9)
+  assert output.receive = 81
+  worker.await
+end

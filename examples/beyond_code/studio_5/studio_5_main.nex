@@ -103,6 +103,7 @@ function main() do
   else
     c.print_line("RELIABILITY_CHECK:FAIL")
   end
+  assert ok
 end
 
 main()

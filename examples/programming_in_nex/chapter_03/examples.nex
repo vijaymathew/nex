@@ -1,0 +1,57 @@
+-- Narrative examples from Chapter 3 (Expressions and Operators), collected
+-- into one self-checking, non-interactive program.
+
+assert 2 + 3 * 4 = 14
+assert (2 + 3) * 4 = 20
+assert 2 ^ 10 = 1024
+assert -5 + 3 = -2
+assert 10 - 2 - 3 = 5
+assert 2 ^ 3 ^ 2 = 64
+
+assert 10 = 10
+assert not (10 = 11)
+assert 10 /= 11
+assert 3 < 5
+assert 5 <= 5
+assert 2 + 3 = 5
+assert 2 + 3 > 4
+
+assert "apple" < "banana"
+assert "zebra" > "ant"
+assert "cat" = "cat"
+
+assert true and true
+assert not (true and false)
+assert not (false and false)
+assert true or false
+assert not (false or false)
+assert not true = false
+assert not false = true
+
+let age := 17
+assert age >= 13 and age <= 17
+assert not (age < 13 or age > 17)
+assert true or false and false
+
+let first := "Hello"
+let second := "Nex"
+assert first + ", " + second + "!" = "Hello, Nex!"
+
+let count: Integer := 3
+assert "Found " + count + " results" = "Found 3 results"
+
+let n := -5
+assert n.abs * 2 = 10
+assert n.abs = 5
+
+assert "  hello  ".trim.to_upper.length = 5
+
+let weight: Real := 70.0
+let height: Real := 1.75
+let bmi: Real := weight / (height * height)
+assert "BMI: " + bmi.round.to_string = "BMI: 23"
+print("BMI: " + bmi.round.to_string)
+
+if age >= 18 then
+  print("adult")
+end

@@ -79,19 +79,26 @@ function main() do
   -- 1.
   c.print_line("1. average([2.0,4.0,9.0]) = " + average([2.0, 4.0, 9.0]).to_string +
                " (within [2.0, 9.0])")                                   -- 5.0
+  assert average([2.0, 4.0, 9.0]) = 5.0
 
   -- 2.
   let lamp: Lamp := create Lamp.make()
   c.print_line("2. fresh lamp is_on=" + lamp.is_on.to_string)            -- false
+  assert not lamp.is_on
   lamp.switch_on()
   c.print_line("2. after switch_on is_on=" + lamp.is_on.to_string)       -- true
+  assert lamp.is_on
   lamp.switch_off()
   c.print_line("2. after switch_off is_on=" + lamp.is_on.to_string)      -- false
+  assert not lamp.is_on
 
   -- 3.
   c.print_line("3. absolute_value(-7)=" + absolute_value(-7).to_string +
                " absolute_value(7)=" + absolute_value(7).to_string +
                " absolute_value(0)=" + absolute_value(0).to_string)      -- 7 7 0
+  assert absolute_value(-7) = 7
+  assert absolute_value(7) = 7
+  assert absolute_value(0) = 0
 
   -- 4.
   let q: Queue[Integer] := create Queue[Integer].make()
@@ -99,6 +106,8 @@ function main() do
   q.enqueue(20)
   c.print_line("4. after two enqueues size=" + q.size.to_string +
                " back=" + q.items.get(q.size - 1).to_string)             -- 2, 20
+  assert q.size = 2
+  assert q.items.get(q.size - 1) = 20
 
   -- 5.* Specifying sort(items): Array[Integer]: Array[Integer] (no body needed).
   --     Three postconditions:

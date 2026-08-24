@@ -14,6 +14,7 @@ function main() do
   let h: Integer := 5
   let is_right: Boolean := a * a + b * b = h * h
   c.print_line("1. 3,4,5 is a right triangle? " + is_right.to_string)   -- true
+  assert is_right
 
   -- --------------------------------------------------------------------------
   -- 2. Integer.pick: random integer in [0, n). A random integer in [1, 10]
@@ -21,9 +22,15 @@ function main() do
   --    (We print a few sample draws; values vary run to run, but each is 1..10.)
   -- --------------------------------------------------------------------------
   c.print("2. three draws of 10.pick + 1 in [1,10]: ")
-  c.print((10.pick + 1).to_string + " ")
-  c.print((10.pick + 1).to_string + " ")
-  c.print_line((10.pick + 1).to_string)
+  let draw1 := 10.pick + 1
+  let draw2 := 10.pick + 1
+  let draw3 := 10.pick + 1
+  c.print(draw1.to_string + " ")
+  c.print(draw2.to_string + " ")
+  c.print_line(draw3.to_string)
+  assert draw1 >= 1 and draw1 <= 10
+  assert draw2 >= 1 and draw2 <= 10
+  assert draw3 >= 1 and draw3 <= 10
 
   -- --------------------------------------------------------------------------
   -- 3. Celsius -> Fahrenheit from console input:  F = C * 9.0 / 5.0 + 32.0
@@ -35,6 +42,9 @@ function main() do
   c.print_line("3. " + celsius_string_to_fahrenheit("100") + " (boiling)")  -- 212.0
   c.print_line("3. " + celsius_string_to_fahrenheit("37"))                  -- 98.6
   c.print_line("3. " + celsius_string_to_fahrenheit("0"))                   -- 32.0
+  assert celsius_string_to_fahrenheit("100") = "100.0 deg C = 212.0 deg F"
+  assert celsius_string_to_fahrenheit("37") = "37.0 deg C = 98.6 deg F"
+  assert celsius_string_to_fahrenheit("0") = "0.0 deg C = 32.0 deg F"
 
   -- --------------------------------------------------------------------------
   -- 4. Worked out by hand:  "  Hello, Nex  ".trim  -> "Hello, Nex" (length 10),
@@ -42,6 +52,7 @@ function main() do
   -- --------------------------------------------------------------------------
   let len: Integer := "  Hello, Nex  ".trim.to_lower.length
   c.print_line("4. length of trimmed-lowered string: " + len.to_string)     -- 10
+  assert len = 10
 end
 
 -- Mimics: read a Celsius line from the console, convert, return the message.

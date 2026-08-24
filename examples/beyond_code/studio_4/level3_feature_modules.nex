@@ -97,11 +97,13 @@ function main() do
     a_wf.dispatch_view("T-2") = b_mod.dispatch_view("T-2") and
     a_wf.dispatch_view("T-9") = b_mod.dispatch_view("T-9")
   c.print_line("behavior parity A vs B: " + bool_str(parity_ok))
+  assert parity_ok
 
   -- 2. Testability: Style A's workflow runs over a STUB port, no real storage.
   let stub: Stub_Task_Port := create Stub_Task_Port
   let a_wf_stub: Delivery_Workflow := create Delivery_Workflow.make(stub)
   c.print_line("A over STUB port, dispatch_view(T-2) = " + a_wf_stub.dispatch_view("T-2"))
+  assert a_wf_stub.dispatch_view("T-2") = "TASK_STATUS:IN_TRANSIT"
   c.print_line("  ^ Style A: the use case is tested with zero storage, via the seam.")
   c.print_line("  Style B cannot do this: its store is internal, no port to substitute.")
 

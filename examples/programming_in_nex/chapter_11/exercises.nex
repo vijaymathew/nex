@@ -137,22 +137,30 @@ function main() do
   -- 1.
   let herbert: Array[Map[String, Any]] := books_by_author(books, "Frank Herbert")
   c.print_line("1. Frank Herbert wrote " + herbert.length.to_string + " of the listed books")  -- 2
+  assert herbert.length = 2
 
   -- 2.
   let idx: Map[String, Array[String]] := invert_index(books)
   c.print_line("2. Frank Herbert titles -> " + show(idx.get("Frank Herbert")))
   c.print_line("2. Isaac Asimov titles  -> " + show(idx.get("Isaac Asimov")))
+  assert show(idx.get("Frank Herbert")) = "[Dune, Dune Messiah]"
+  assert show(idx.get("Isaac Asimov")) = "[Foundation]"
 
   -- 3.
   c.print_line("3. count_files(filesystem) = " + count_files(filesystem).to_string)   -- 3
+  assert count_files(filesystem) = 3
 
   -- 4.
   c.print_line("4. tree_depth(filesystem) = " + tree_depth(filesystem).to_string +
                ", tree_depth(single) = " + tree_depth(single).to_string)              -- 2, 0
+  assert tree_depth(filesystem) = 2
+  assert tree_depth(single) = 0
 
   -- 5.*
   c.print_line("5. flatten        = " + show(flatten(filesystem)))
   c.print_line("5. flatten_leaves = " + show(flatten_leaves(filesystem)))
+  assert show(flatten(filesystem)) = "[root, documents, report.txt, notes.txt, pictures, photo.jpg]"
+  assert show(flatten_leaves(filesystem)) = "[report.txt, notes.txt, photo.jpg]"
 end
 
 main()

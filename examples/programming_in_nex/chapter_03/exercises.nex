@@ -17,14 +17,18 @@ function main() do
   c.print_line("1b. (2+3) * (4-1)     = " + ((2 + 3) * (4 - 1)).to_string)   -- 15
   c.print_line("1c. 10 / 3 + 10 % 3   = " + (10 / 3 + 10 % 3).to_string)     -- 4
   c.print_line("1d. 2 ^ 2 ^ 3         = " + (2 ^ 2 ^ 3).to_string)           -- 64.0
+  assert 2 + 3 * 4 - 1 = 13
+  assert (2 + 3) * (4 - 1) = 15
+  assert 10 / 3 + 10 % 3 = 4
+  assert 2 ^ 2 ^ 3 = 64
 
   -- --------------------------------------------------------------------------
   -- 2. One boolean: n is positive AND even.
   -- --------------------------------------------------------------------------
-  show_pos_even(c, 4)     -- true
-  show_pos_even(c, 7)     -- false (odd)
-  show_pos_even(c, -2)    -- false (not positive)
-  show_pos_even(c, 0)     -- false (not positive)
+  assert show_pos_even(c, 4) = true      -- true
+  assert show_pos_even(c, 7) = false     -- false (odd)
+  assert show_pos_even(c, -2) = false    -- false (not positive)
+  assert show_pos_even(c, 0) = false     -- false (not positive)
 
   -- --------------------------------------------------------------------------
   -- 3. Quadratic roots for a=1, b=-5, c=6  ->  3.0 and 2.0
@@ -36,12 +40,15 @@ function main() do
   let root1: Real := (-qb + disc) / (2.0 * qa)
   let root2: Real := (-qb - disc) / (2.0 * qa)
   c.print_line("3. roots: " + root1.to_string + " and " + root2.to_string)  -- 3.0, 2.0
+  assert root1 = 3.0
+  assert root2 = 2.0
 
   -- --------------------------------------------------------------------------
   -- 4. Capitalize:  trim, first char upper, rest lower.
   -- --------------------------------------------------------------------------
   c.print_line("4. capitalize('  hELLO wORLD  ') = '" +
                capitalize("  hELLO wORLD  ") + "'")                          -- 'Hello world'
+  assert capitalize("  hELLO wORLD  ") = "Hello world"
 
   -- --------------------------------------------------------------------------
   -- 5.* Exclusive or:  a and not b or not a and b, over all four inputs.
@@ -49,15 +56,16 @@ function main() do
   --       (a and not b) or (not a and b)  -- parenthesized form below agrees.
   -- --------------------------------------------------------------------------
   c.print_line("5. xor truth table (bare vs parenthesized):")
-  check_xor(c, false, false)   -- false
-  check_xor(c, false, true)    -- true
-  check_xor(c, true,  false)   -- true
-  check_xor(c, true,  true)    -- false
+  assert check_xor(c, false, false) = false   -- false
+  assert check_xor(c, false, true) = true     -- true
+  assert check_xor(c, true,  false) = true    -- true
+  assert check_xor(c, true,  true) = false    -- false
 end
 
-function show_pos_even(c: Console, n: Integer) do
+function show_pos_even(c: Console, n: Integer): Boolean do
   let ok: Boolean := n > 0 and n % 2 = 0
   c.print_line("2. " + n.to_string + " is positive and even? " + ok.to_string)
+  result := ok
 end
 
 -- Trim, uppercase the first character, lowercase the remainder, recombine.
@@ -72,13 +80,16 @@ function capitalize(s: String): String do
   end
 end
 
--- Confirm the bare-precedence form equals the explicitly parenthesized form.
-function check_xor(c: Console, a: Boolean, b: Boolean) do
+-- Confirm the bare-precedence form equals the explicitly parenthesized form,
+-- and return the (agreed) value.
+function check_xor(c: Console, a: Boolean, b: Boolean): Boolean do
   let bare: Boolean := a and not b or not a and b
   let paren: Boolean := (a and not b) or (not a and b)
   c.print_line("5. a=" + a.to_string + " b=" + b.to_string +
                " -> " + bare.to_string + " (paren agrees: " +
                (bare = paren).to_string + ")")
+  assert bare = paren
+  result := bare
 end
 
 main()

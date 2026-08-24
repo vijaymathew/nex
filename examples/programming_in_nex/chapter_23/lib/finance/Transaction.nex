@@ -1,0 +1,12 @@
+-- Companion module for chapter 23's `intern finance/Transaction` narrative
+-- example.
+class Transaction
+  create
+    make(d: String, a: Real) do
+      description := d
+      amount := a
+    end
+  feature
+    description: String
+    amount: Real
+end

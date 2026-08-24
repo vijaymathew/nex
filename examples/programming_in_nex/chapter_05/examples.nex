@@ -1,0 +1,108 @@
+-- Narrative examples from Chapter 5 (Loops), collected into one
+-- self-checking, non-interactive program.
+
+from
+  let i := 1
+until
+  i > 5
+do
+  print(i)
+  i := i + 1
+end
+
+let total := 0
+from
+  let i := 1
+until
+  i > 4
+do
+  total := total + i
+  i := i + 1
+end
+assert total = 10
+
+let product := 1
+from
+  let i := 1
+until
+  i > 5
+do
+  product := product * i
+  i := i + 1
+end
+assert product = 120
+
+let target := 7
+let found := false
+from
+  let i := 1
+until
+  i > 10 or found
+do
+  if i = target then
+    found := true
+  end
+  i := i + 1
+end
+assert found
+
+repeat 3 do
+  print("hello")
+end
+
+across [10, 20, 30] as x do
+  print(x)
+end
+
+across "hello" as ch do
+  print(ch)
+end
+
+-- correct: prints 1, 2, 3, 4, 5
+from let i := 1 until i > 5 do print(i) i := i + 1 end
+-- one too few: prints 1, 2, 3, 4
+from let i := 1 until i >= 5 do print(i) i := i + 1 end
+-- one too many: prints 1, 2, 3, 4, 5, 6
+from let i := 1 until i > 6 do print(i) i := i + 1 end
+
+from
+  let i := 1
+until
+  i > 3
+do
+  from
+    let j := 1
+  until
+    j > 3
+  do
+    print(i.to_string + "," + j.to_string)
+    j := j + 1
+  end
+  i := i + 1
+end
+
+-- The number-guessing game reads con.read_line in a loop; the guessing logic
+-- is factored into a function that takes a pre-recorded sequence of guesses
+-- (the same idiom this chapter's exercises.nex uses for console input), so
+-- the program runs non-interactively while still exercising the loop.
+function play(target: Integer, guesses: Array[Integer]): Integer
+do
+  let guess := 0
+  let attempts := 0
+  from
+    -- nothing to initialise here
+  until
+    guess = target
+  do
+    guess := guesses.get(attempts)
+    attempts := attempts + 1
+    if guess < target then
+      print("Too low")
+    elseif guess > target then
+      print("Too high")
+    end
+  end
+  result := attempts
+end
+
+assert play(7, [3, 9, 7]) = 3

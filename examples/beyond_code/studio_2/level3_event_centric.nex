@@ -92,27 +92,34 @@ function main() do
   t.assign("R7")
   let console: Console := create Console
   console.print_line("assigned to " + t.robot_id + " (" + t.status + ")")
+  assert t.robot_id = "R7" and t.status = "IN_TRANSIT"
 
   -- A legitimate reassignment, applied as an event.
   let ev1: Reassign_Event := create Reassign_Event.make("T001", "R7", "R9", "battery_low")
   t.apply_reassign(ev1)
   console.print_line("now carried by " + t.robot_id + ", reassigned " + t.reassign_count
         + " time(s), last reason: " + t.last_reason)
+  assert t.robot_id = "R9" and t.reassign_count = 1 and t.last_reason = "battery_low"
 
   -- Auditable + testable: the event stands alone as an assertable value.
   console.print_line("event record: task " + ev1.task_id + " " + ev1.from_robot + "->" + ev1.to_robot)
+  assert ev1.task_id = "T001" and ev1.from_robot = "R7" and ev1.to_robot = "R9"
 
   -- Failure-mode clarity: a STALE reassignment (a dispatcher who still thinks
   -- the task is on R7) is rejected by `from_matches` — the lost update that the
   -- state-centric variant cannot even detect.
   let stale: Reassign_Event := create Reassign_Event.make("T001", "R7", "R5", "manual")
+  let stale_blocked: Boolean := false
   do
     t.apply_reassign(stale)
     console.print_line("BUG: applied a stale reassignment")
   rescue
     console.print_line("blocked stale reassignment: " + exception
           + " (task is on " + t.robot_id + ", event assumed R7)")
+    stale_blocked := true
   end
+  assert stale_blocked
+  assert t.robot_id = "R9" and t.reassign_count = 1
 end
 
 main()

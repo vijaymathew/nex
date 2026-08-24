@@ -1,0 +1,309 @@
+-- Narrative examples from Chapter 14 (Inheritance), collected into one
+-- self-checking, non-interactive program. Shape/Circle/Rectangle are shown
+-- three times with growing features (plain inheritance, a template-method
+-- describe(), then a deferred/abstract base); each stage gets a distinct
+-- name (Shape/Shape2/Shape3) since a compiled program can't redeclare a
+-- class. Likewise the union-sugar Shape example uses UCircle/URectangle to
+-- avoid colliding with the class-based Circle/Rectangle used earlier.
+
+class Shape
+  create
+    make(c: String) do
+      colour := c
+    end
+  feature
+    colour: String
+    area: Real do result := 0.0 end
+    describe(): String do
+      result := "A " + colour + " shape"
+    end
+end
+
+class Circle inherit Shape
+  create
+    make(c: String, r: Real) do
+      Shape.make(c)
+      radius := r
+    end
+  feature
+    radius: Real
+    area(): Real do
+      result := 3.14159 * radius * radius
+    end
+    describe(): String do
+      result := "A " + colour + " circle with radius " + radius.to_string
+    end
+end
+
+class Rectangle inherit Shape
+  create
+    make(c: String, w, h: Real) do
+      Shape.make(c)
+      width := w
+      height := h
+    end
+  feature
+    width: Real
+    height: Real
+    area(): Real do
+      result := width * height
+    end
+    describe(): String do
+      result := "A " + colour + " rectangle (" + width.to_string + " x " + height.to_string + ")"
+    end
+end
+
+let c := create Circle.make("red", 5.0)
+assert c.describe = "A red circle with radius 5.0"
+let r := create Rectangle.make("blue", 4.0, 3.0)
+assert r.describe = "A blue rectangle (4.0 x 3.0)"
+
+let shapes: Array[Shape] := []
+shapes.add(create Circle.make("red", 5.0))
+shapes.add(create Rectangle.make("blue", 4.0, 3.0))
+shapes.add(create Circle.make("green", 2.0))
+across shapes as s do
+  print(s.describe)
+end
+
+-- describe() implemented once on the base, in terms of a deferred area() --
+-- the template method pattern -- rather than overridden by every subclass.
+class Shape2
+  create
+    make(c: String) do
+      colour := c
+    end
+  feature
+    colour: String
+    area(): Real do result := 0.0 end
+    describe(): String do
+      result := "A " + colour + " shape with area " + area.to_string
+    end
+end
+
+class Circle2 inherit Shape2
+  create
+    make(c: String, r: Real) do
+      Shape2.make(c)
+      radius := r
+    end
+  feature
+    radius: Real
+    area(): Real do
+      result := 3.14159 * radius * radius
+    end
+end
+
+let c2 := create Circle2.make("red", 5.0)
+assert c2.describe = "A red shape with area 78.53975"
+
+class Account
+  create
+    make(name: String, initial: Real) do
+      owner := name
+      balance := initial
+    end
+  feature
+    owner: String
+    balance: Real
+    deposit(amount: Real) do
+      balance := balance + amount
+    end
+    withdraw(amount: Real): Boolean do
+      if amount <= balance then
+        balance := balance - amount
+        result := true
+      else
+        result := false
+      end
+    end
+    set_balance(new_balance: Real) do
+      balance := new_balance
+    end
+    get_balance(): Real do
+      result := balance
+    end
+    describe(): String do
+      result := owner + ": " + balance.to_string
+    end
+end
+
+class Savings_Account inherit Account
+  create
+    make(name: String, initial, rate: Real) do
+      Account.make(name, initial)
+      interest_rate := rate
+    end
+  feature
+    interest_rate: Real
+    apply_interest() do
+      Account.set_balance(balance + balance * interest_rate)
+    end
+    describe(): String do
+      result := Account.describe + " (savings, rate: " + interest_rate.to_string + ")"
+    end
+end
+
+class Overdraft_Account inherit Account
+  create
+    make(name: String, initial, limit: Real) do
+      Account.make(name, initial)
+      overdraft_limit := limit
+    end
+  feature
+    overdraft_limit: Real
+    withdraw(amount: Real): Boolean do
+      if balance - amount >= -overdraft_limit then
+        Account.set_balance(balance - amount)
+        result := true
+      else
+        result := false
+      end
+    end
+    describe(): String do
+      result := Account.describe + " (overdraft limit: " + overdraft_limit.to_string + ")"
+    end
+end
+
+let accounts: Array[Account] := []
+accounts.add(create Account.make("Alice", 500.0))
+accounts.add(create Savings_Account.make("Bob", 1000.0, 0.02))
+accounts.add(create Overdraft_Account.make("Carol", 200.0, 500.0))
+across accounts as acc do
+  print(acc.describe)
+end
+assert accounts.get(0).describe = "Alice: 500.0"
+assert accounts.get(1).describe = "Bob: 1000.0 (savings, rate: 0.02)"
+assert accounts.get(2).describe = "Carol: 200.0 (overdraft limit: 500.0)"
+
+-- A deferred (abstract) base: area/perimeter have no implementation here,
+-- only in concrete subclasses; describe() still works in terms of them.
+deferred class Shape3
+  feature
+    colour: String
+    area(): Real deferred
+    perimeter(): Real deferred
+    describe(): String do
+      result := "A " + colour + " shape with area " + area.to_string
+    end
+end
+
+class Circle3
+  inherit Shape3
+  create
+    make(c: String, r: Real) do
+      colour := c
+      radius := r
+    end
+  feature
+    radius: Real
+    area(): Real do
+      result := 3.14159 * radius * radius
+    end
+    perimeter(): Real do
+      result := 2.0 * 3.14159 * radius
+    end
+end
+
+let c3 := create Circle3.make("red", 5.0)
+assert c3.describe = "A red shape with area 78.53975"
+-- create Shape3.make(...) would be a compile-time error: a deferred class
+-- cannot be instantiated directly.
+
+-- A sealed union, via the `union` shorthand (equivalent to a sealed deferred
+-- class plus one subclass per variant).
+union Result
+  Ok(value: Integer)
+  Err(msg: String)
+end
+
+let ok_result: Result := create Ok.make(42)
+match ok_result of
+  Ok as ok then
+    assert ok.value = 42
+  Err as err then
+    print(err.msg)
+end
+
+match ok_result of
+  Ok(value) then assert value = 42
+  Err(msg) then print(msg)
+end
+
+let err_result: Result := create Err.make("boom")
+match err_result of
+  Ok as ok then
+    print(ok.value)
+  else
+    print("not ok")
+end
+
+-- Another union, for the guard-clause / constructor-pattern examples.
+union Shape_Union
+  UCircle(radius: Real)
+  URectangle(width: Real, height: Real)
+  UEmpty
+end
+
+function describe_shape(shape: Shape_Union): String
+do
+  match shape of
+    UCircle(radius) if radius > 100.0 then result := "huge circle"
+    UCircle(radius)                    then result := "circle"
+    URectangle(width, height)          then result := (width * height).to_string
+    UEmpty                             then result := "nothing"
+  end
+end
+assert describe_shape(create UCircle.make(200.0)) = "huge circle"
+assert describe_shape(create UCircle.make(5.0)) = "circle"
+assert describe_shape(create URectangle.make(3.0, 4.0)) = "12.0"
+assert describe_shape(create UEmpty.make) = "nothing"
+
+enum union Color
+  Red
+  Green
+  Blue
+end
+
+assert Color.Red == Color.Red        -- true: Color.Red is one canonical value
+assert Color.Red < Color.Green       -- true: members order by how they are written
+assert Color.values.length() = 3     -- an array of every member, in order
+across Color.values as col do
+  print(col.ordinal)                 -- 0, then 1, then 2
+end
+
+-- once fields: initialised exactly once, in a constructor.
+class Point
+  feature
+    once x: Integer
+    once y: Integer
+  create
+    make(px: Integer, py: Integer) do
+      x := px
+      y := py
+    end
+  feature
+    show do
+      print(x)
+      print(y)
+    end
+end
+
+let p: Point := create Point.make(3, 7)
+p.show   -- 3, then 7
+assert p.x = 3
+assert p.y = 7
+
+-- A once field may be set from more than one constructor.
+class Box
+  feature
+    once value: Integer
+  create
+    make(v: Integer) do value := v end
+    empty do value := 0 end
+end
+
+assert (create Box.make(5)).value = 5
+assert (create Box.empty).value = 0
+-- Assigning `value` again from an ordinary method (not a constructor) --
+-- overwrite(v: Integer) do value := v end -- is a compile-time error.

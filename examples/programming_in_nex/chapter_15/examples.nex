@@ -1,0 +1,240 @@
+-- Narrative examples from Chapter 15 (Generics), collected into one
+-- self-checking, non-interactive program.
+
+class Stack [G]
+  create
+    make() do
+      items := []
+    end
+  feature
+    items: Array[G]
+    push(value: G) do
+      items.add(value)
+    end
+    pop(): G do
+      result := items.get(items.length - 1)
+      items.remove(items.length - 1)
+    end
+    peek(): G do
+      result := items.get(items.length - 1)
+    end
+    is_empty(): Boolean do
+      result := items.is_empty
+    end
+    size(): Integer do
+      result := items.length
+    end
+end
+
+let int_stack := create Stack[Integer].make
+int_stack.push(10)
+int_stack.push(20)
+int_stack.push(30)
+assert int_stack.pop = 30
+
+let str_stack := create Stack[String].make
+str_stack.push("hello")
+str_stack.push("world")
+assert str_stack.peek = "world"
+
+class Pair [F, S]
+  create
+    make(first_val: F, second_val: S) do
+      first := first_val
+      second := second_val
+    end
+  feature
+    first: F
+    second: S
+    head: F do
+      result := first
+    end
+    tail: S do
+      result := second
+    end
+    describe(): String do
+      result := "(" + first.to_string + ", " + second.to_string + ")"
+    end
+end
+
+let p1 := create Pair[String, Integer].make("age", 30)
+assert p1.head = "age"
+assert p1.tail = 30
+let p2 := create Pair[Real, Boolean].make(3.14, true)
+assert p2.describe = "(3.14, true)"
+
+class Sorted_List [G -> Comparable]
+  create
+    make() do
+      items := []
+    end
+  feature
+    items: Array[G]
+    insert(value: G) do
+      items.add(value)
+      items := items.sort
+    end
+    max(): G do
+      result := items.get(items.length - 1)
+    end
+    min(): G do
+      result := items.get(0)
+    end
+    size(): Integer do
+      result := items.length
+    end
+end
+
+let nums := create Sorted_List[Integer].make
+nums.insert(5)
+nums.insert(2)
+nums.insert(8)
+nums.insert(1)
+assert nums.min = 1
+assert nums.max = 8
+
+class Dictionary [K -> Hashable, V]
+  create
+    make() do
+      entries := {}
+    end
+  feature
+    entries: Map[K, V]
+    set(key: K, value: V) do
+      entries.set(key, value)
+    end
+    get(key: K): V do
+      result := entries.get(key)
+    end
+    try_get(key: K, default: V): V do
+      result := entries.try_get(key, default)
+    end
+    contains_key(key: K): Boolean do
+      result := entries.contains_key(key)
+    end
+    size(): Integer do
+      result := entries.size
+    end
+end
+
+let dict := create Dictionary[String, Integer].make
+dict.set("apples", 5)
+dict.set("oranges", 3)
+assert dict.get("apples") = 5
+assert dict.try_get("bananas", 0) = 0
+
+class Bounded_Stack [G] inherit Stack[G]
+  create
+    make(max: Integer) do
+      super.make
+      max_size := max
+    end
+  feature
+    max_size: Integer
+    is_full(): Boolean do
+      result := size = max_size
+    end
+    push(value: G) do
+      if not is_full then
+        super.push(value)
+      end
+    end
+end
+
+let bs := create Bounded_Stack[Integer].make(3)
+bs.push(1)
+bs.push(2)
+bs.push(3)
+bs.push(4)     -- ignored: stack is full
+assert bs.size = 3
+
+let seen: Set[Integer] := #{1, 2, 3}
+assert seen.contains(2)
+assert seen.union(#{3, 4}) = #{1, 2, 3, 4}
+let empty_names: Set[String] := #{}
+assert empty_names.is_empty
+
+across seen as n do
+  print(n + 10)
+end
+
+class Interval_Cursor
+  create
+    make(lo, hi: Integer) do current := lo  last := hi end
+  feature
+    current: Integer
+    last: Integer
+    start()           do end
+    item(): Integer   do result := current end
+    next()            do current := current + 1 end
+    at_end(): Boolean do result := current > last end
+end
+
+class Interval
+  create
+    make(lo, hi: Integer) do low := lo  high := hi end
+  feature
+    low: Integer
+    high: Integer
+    cursor(): Interval_Cursor
+      do result := create Interval_Cursor.make(low, high) end
+end
+
+let week := create Interval.make(1, 7)
+across week as day do
+  print(day)
+end
+
+let total := 0
+across (create Interval.make(1, 100)) as n do
+  if convert n to value: Integer then
+    total := total + value
+  end
+end
+assert total = 5050
+
+class Result [V]
+  create
+    success(val: V) do
+      value := val
+      error := nil
+      ok := true
+    end
+    failure(msg: String) do
+      value := nil
+      error := msg
+      ok := false
+    end
+  feature
+    value: ?V
+    error: ?String
+    ok: Boolean
+    is_ok(): Boolean do
+      result := ok
+    end
+    describe(): String do
+      if ok then
+        if value /= nil then
+          result := "Success: " + value.to_string
+        else
+          result := "Error"
+        end
+      elseif error /= nil then
+        result := "Error: " + error
+      else
+        result := "Error"
+      end
+    end
+end
+
+function safe_divide(a, b: Real): Result[Real]
+do
+  if b = 0.0 then
+    result := create Result[Real].failure("division by zero")
+  else
+    result := create Result[Real].success(a / b)
+  end
+end
+
+assert safe_divide(10.0, 2.0).describe = "Success: 5.0"
+assert safe_divide(10.0, 0.0).describe = "Error: division by zero"

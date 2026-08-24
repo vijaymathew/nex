@@ -1,0 +1,81 @@
+-- Narrative examples from Chapter 24 (Interoperability), collected into one
+-- self-checking, non-interactive program.
+
+import java.lang.StringBuilder
+
+class Line_Buffer
+create
+  make() do
+    with "java" do
+      this.builder := create StringBuilder
+    end
+  end
+feature
+  builder: Any
+
+  append_line(s: String) do
+    with "java" do
+      builder.append(s)
+      builder.append("\n")
+    end
+  end
+
+  text(): String do
+    with "java" do
+      result := builder.toString()
+    end
+  end
+end
+
+let b := create Line_Buffer.make
+b.append_line("alpha")
+b.append_line("beta")
+print(b.text())
+assert b.text() = "alpha\nbeta\n"
+
+import java.lang.System
+
+function line(label, value: String): String
+do
+  result := label + ": " + value
+end
+
+function render_runtime_report(version, vendor, home: String): String
+do
+  result := line("Java version", version) + "\n"
+  result := result + line("Java vendor", vendor) + "\n"
+  result := result + line("Java home", home)
+end
+
+class Java_Runtime_Info
+  feature
+    property(name: String): String
+      require
+        valid_name: name /= ""
+      do
+        let value: ?String := nil
+        with "java" do
+          value := System.getProperty(name)
+        end
+
+        if value = nil then
+          result := "<missing>"
+        else
+          result := value
+        end
+      end
+end
+
+class Runtime_Report_App
+  feature
+    run(): String do
+      let info := create Java_Runtime_Info
+      let version := info.property("java.version")
+      let vendor := info.property("java.vendor")
+      let home := info.property("java.home")
+      result := render_runtime_report(version, vendor, home)
+    end
+end
+
+let app := create Runtime_Report_App
+print(app.run())

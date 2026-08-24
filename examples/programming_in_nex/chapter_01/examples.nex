@@ -1,0 +1,51 @@
+-- Narrative examples from Chapter 1 (Getting Started), collected into one
+-- self-checking, non-interactive program. The REPL transcripts in the
+-- chapter are reproduced here as ordinary top-level code with `assert`s
+-- standing in for what the reader would see echoed back.
+
+print("Hello, Nex")
+print("Hello, world")
+print(42)
+print(3.14)
+
+assert 0b1010 = 10
+assert 0o10 = 8
+assert 0xFF = 255
+
+assert 10 + 3 = 13
+assert 10 - 3 = 7
+assert 10 * 3 = 30
+assert 10 / 3 = 3
+assert 10.0 / 3.0 = 3.3333333333333335
+assert 10 % 3 = 1
+assert 2 ^ 8 = 256
+assert 2 + 3 * 4 = 14
+assert (2 + 3) * 4 = 20
+
+let x := 10
+assert x = 10
+
+let y := x + 5
+assert y = 15
+assert x + y = 25
+
+x := 20
+assert x = 20
+
+let name: String := "Ada"
+let age: Integer := 12
+let height: Real := 1.52
+let enrolled: Boolean := true
+let initial: Char := #65
+assert initial = #65
+
+let greeting := "Hello, " + name
+assert greeting = "Hello, Ada"
+assert "Age: " + age = "Age: 12"
+assert "Age: " + age.to_string = "Age: 12"
+
+-- The temperature converter that closes the chapter, run as a script:
+let celsius: Real := 100.0
+let fahrenheit: Real := celsius * 9.0 / 5.0 + 32.0
+print(celsius + " degrees Celsius is " + fahrenheit + " degrees Fahrenheit")
+assert fahrenheit = 212.0
