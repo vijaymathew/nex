@@ -1713,6 +1713,24 @@
   (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
   :boolean)
 
+;; Mutating, so -- unlike contains! above -- the value being stored gets the
+;; same emit-boxed-expr-for-storage! treatment as Array.add/Map.put: it may
+;; reach here with a static type of Any while still being a portable
+;; NexMap/NexSet at runtime (see that function's docstring).
+(defn- emit-set-method-add!
+  [^MethodVisitor mv {:keys [target args]} state-slot]
+  (emit-runtime-call! mv "set-add!"
+                      [(fn [] (emit-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr-for-storage! mv (first args) state-slot))])
+  (ir/object-jvm-type "java/lang/Object"))
+
+(defn- emit-set-method-remove!
+  [^MethodVisitor mv {:keys [target args]} state-slot]
+  (emit-runtime-call! mv "set-remove!"
+                      [(fn [] (emit-expr! mv target state-slot))
+                       (fn [] (emit-boxed-expr! mv (first args) state-slot))])
+  (ir/object-jvm-type "java/lang/Object"))
+
 ;; union/difference/intersection/symmetric_difference are the same shape —
 ;; a two-arg runtime helper call, then unbox — differing only in which
 ;; helper they call.
@@ -1783,6 +1801,8 @@
 (def ^:private emit-set-method-dispatch
   "Set method name -> `(fn [mv expr state-slot] -> jvm-type)`."
   {"contains"             emit-set-method-contains!
+   "add"                  emit-set-method-add!
+   "remove"               emit-set-method-remove!
    "union"                (emit-set-binary-op! "set-union")
    "difference"           (emit-set-binary-op! "set-difference")
    "intersection"         (emit-set-binary-op! "set-intersection")
@@ -2551,7 +2571,18 @@
       ;; "java"` global sourced from a raw Java call whose static Nex type
       ;; is Any/Object, e.g. `let n: Integer :=
       ;; System.getProperty(...).length()`).
-      (and (ir/object-jvm-type? (:jvm-type stmt))
+      ;;
+      ;; Still requires expr-jvm-type to actually differ from the declared
+      ;; type, same as emit-stack-coerce!'s own equal-type short-circuit for
+      ;; a local: without it, `let alias := existing_map` (both sides
+      ;; already Map[...]/Set[...]) ran portable-value->compiled on an
+      ;; already-native HashMap/LinkedHashSet anyway, rebuilding a fresh copy
+      ;; on every top-level assignment and silently severing `alias` from
+      ;; `existing_map` -- a `.put`/`.add`/`add`/`remove` on one was invisible
+      ;; through the other, even though the same code inside a function (a
+      ;; local, not a global) aliased correctly.
+      (and (not= expr-jvm-type (:jvm-type stmt))
+           (ir/object-jvm-type? (:jvm-type stmt))
            (#{hashmap-internal-name linkedhashset-internal-name} (second (:jvm-type stmt))))
       (emit-unbox-or-cast-to-collection! mv (:jvm-type stmt))
 

@@ -40,11 +40,10 @@ class Calc_Service
     -- JSON integers parse as Integer, JSON decimals as Real; evaluate wants
     -- Real either way.
     to_real_any(v: Any): Real do
-      if type_is("Integer", v) then
-        let n: Integer := v
+      if convert v to n: Integer then
         result := n.to_real()
-      else
-        result := v
+      elseif convert v to r: Real then
+        result := r
       end
     end
 
@@ -69,12 +68,17 @@ class Calc_Service
     handle_evaluate(req: Http_Request): Http_Server_Response do
       do
         let body: Map[String, Any] := json.parse(req.body())
-        let expr_text: String := body.get("expr")
-        let vars: Map[String, Real] := parse_vars(body)
-        let value: Real := evaluate(expr_text, vars)
-        let payload: Map[String, Any] := {}
-        payload.set("result", value)
-        result := json_response(200, payload)
+        if convert body.get("expr") to expr_text: String then
+          let vars: Map[String, Real] := parse_vars(body)
+          let value: Real := evaluate(expr_text, vars)
+          let payload: Map[String, Any] := {}
+          payload.set("result", value)
+          result := json_response(200, payload)
+        else
+          let payload: Map[String, Any] := {}
+          payload.set("error", "missing or invalid 'expr'")
+          result := json_response(400, payload)
+        end
       rescue
         let payload: Map[String, Any] := {}
         payload.set("error", "" + exception)

@@ -183,14 +183,27 @@ class Task_Store
         i = rows.length
       do
         let m: Map[String, Any] := rows.get(i)
-        let id: Integer := m.get("id")
-        let item_text: String := m.get("text")
-        let priority: Integer := m.try_get("priority", 3)
+        let id: Integer := 0
+        if convert m.get("id") to raw_id: Integer then
+          id := raw_id
+        end
+        let item_text: String := ""
+        if convert m.get("text") to raw_text: String then
+          item_text := raw_text
+        end
+        let priority: Integer := 3
+        if convert m.try_get("priority", 3) to raw_priority: Integer then
+          priority := raw_priority
+        end
         let done: Boolean := false
         if m.contains_key("status") then
-          done := (m.get("status") = "done")
+          if convert m.get("status") to status_text: String then
+            done := (status_text = "done")
+          end
         elseif m.contains_key("done") then
-          done := m.get("done")
+          if convert m.get("done") to raw_done: Boolean then
+            done := raw_done
+          end
         end
 
         let t: Task := create Task.make(id, item_text, priority)

@@ -1720,7 +1720,13 @@ end"))
                               (repl/eval-code ctx "transform := fn(x: Integer): Integer do result := x * x end"))
             second-call-output (with-out-str
                                  (repl/eval-code ctx "transform(5)"))]
-        (is (= "Function" (get @repl/*repl-var-types* "transform")))
+        ;; The checker now records an anonymous function's own signature
+        ;; instead of erasing it to the bare "Function" string, so calling it
+        ;; back (`transform(5)`) can report a real return type instead of Any.
+        (is (= {:base-type "Function"
+                :param-types [{:name "x" :type "Integer"}]
+                :return-type "Integer"}
+               (get @repl/*repl-var-types* "transform")))
         (is (str/includes? let-output "AnonymousFunction_"))
         (is (str/includes? first-call-output "4"))
         (is (not (str/includes? reassign-output "Type error")) reassign-output)

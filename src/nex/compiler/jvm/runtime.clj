@@ -2099,6 +2099,21 @@
     (rt/nex-set-contains values needle)
     (boolean (some #(deep-equals % needle) values))))
 
+;; add!/remove! mutate the LinkedHashSet in place, so -- unlike contains above,
+;; which tolerates a bare host java.util.Set with no rt/nex-set? tag -- they
+;; delegate straight to nex.types.runtime, whose nex-set-add!/nex-set-remove!
+;; already know how to mutate either representation (portable or
+;; java.util.LinkedHashSet) via Nex value-equality rather than the host's
+;; hashCode/equals, keeping a set built at runtime free of Nex-equal
+;; duplicates the same way contains already promises.
+(defn set-add!
+  [s v]
+  (rt/nex-set-add! s v))
+
+(defn set-remove!
+  [s v]
+  (rt/nex-set-remove! s v))
+
 (defn map-get
   [state m key]
   (let [v (if (rt/nex-map? m)

@@ -91,6 +91,8 @@
 (def nex-set-symmetric-difference rt/nex-set-symmetric-difference)
 (def nex-set-to-array rt/nex-set-to-array)
 (def nex-set-seq rt/nex-set-seq)
+(def nex-set-add! rt/nex-set-add!)
+(def nex-set-remove! rt/nex-set-remove!)
 (defn nex-set-str [s] (rt/nex-set-str nex-format-value s))
 (def nex-bitwise-left-shift rt/nex-bitwise-left-shift)
 (def nex-bitwise-right-shift rt/nex-bitwise-right-shift)
@@ -880,6 +882,10 @@
    :Set
    {"contains"             ^{:returns "Boolean" :signatures [{:params [{:name "value" :type "T"}] :return-type "Boolean"}]}
                            (fn [s value & _] (nex-set-contains-value? s value))
+    "add"                  ^{:returns "Void" :signatures [{:params [{:name "value" :type "T"}] :return-type "Void"}]}
+                           (fn [s value & _] (nex-set-add! s value))
+    "remove"               ^{:returns "Void" :signatures [{:params [{:name "value" :type "T"}] :return-type "Void"}]}
+                           (fn [s value & _] (nex-set-remove! s value))
     "union"                ^{:returns :self
                              :signatures [{:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
                                            :return-type {:base-type "Set" :type-params ["T"]}}]}
