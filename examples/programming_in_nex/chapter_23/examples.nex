@@ -1,0 +1,38 @@
+-- Narrative examples from Chapter 23 (Modules and Files), collected into
+-- one self-checking, non-interactive program. `intern math/Calculator` and
+-- `intern geometry/Long_Polygon_Name as Polygon` are shown in the book only
+-- as bare intern-syntax illustrations, with no module content given, so
+-- they aren't reproduced here; math/Counter and finance/Transaction and
+-- Account are shown with real content ("Suppose math/Counter.nex
+-- contains..."), so this directory has real lib/math/Counter.nex and
+-- lib/finance/{Transaction,Account}.nex companion files backing them,
+-- exactly the way a real multi-file Nex project would.
+
+intern math/Counter
+
+class Main
+  create
+    make() do
+      let c := create Counter.make
+      c.increment
+      c.increment
+      print(c.value)
+    end
+end
+let m := create Main.make
+
+intern finance/Account
+
+class Ledger_Report
+  feature
+    print_balance(a: Account) do
+      print(a.owner + ": " + a.balance.to_string)
+    end
+end
+
+let account := create Account.make("Alice")
+account.add_entry(create Transaction.make("Coffee", -4.5))
+account.add_entry(create Transaction.make("Paycheck", 2000.0))
+let report := create Ledger_Report
+report.print_balance(account)
+assert account.balance = 1995.5

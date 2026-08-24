@@ -90,6 +90,7 @@ function main() do
   else
     chk.line("STUDIO_1_CHECK:FAIL (" + chk.passed + "/" + chk.total + ")")
   end
+  assert chk.passed = chk.total
 end
 
 main()

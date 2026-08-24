@@ -130,22 +130,26 @@ function main() do
   st.push(1)  st.push(2)
   c.print_line("1. stack size=" + st.size.to_string +
                " (invariant items/=nil holds; see comment on why it is weak)")
+  assert st.size = 2
 
   -- 2.
   let r: Rectangle := create Rectangle.make(3.0, 4.0)
   c.print_line("2. rectangle 3x4 area=" + r.area.to_string +
                " (make(0,..) would violate positive_sides)")
+  assert r.area = 12.0
 
   -- 3.
   let sr: Student_Record := create Student_Record.make("Ada")
   sr.add_score(80)
   sr.add_score(90)
   c.print_line("3. " + sr.name + " average=" + sr.average.to_string)   -- 85.0
+  assert sr.average = 85.0
 
   -- 4.
   let t: Time_Of_Day := create Time_Of_Day.make(9, 30, 0)
   t.set_hour(14)
   c.print_line("4. time = " + t.label + " (set_hour(24) would violate hour_ok)")
+  assert t.label = "14:30:0"
 
   -- 5.*
   let i1: Interval := create Interval.make(2, 5)
@@ -153,6 +157,9 @@ function main() do
   let m: Interval := i1.merge(i2)
   c.print_line("5. [2,5] merge [4,9] = [" + m.low.to_string + "," +
                m.high.to_string + "], length " + m.length.to_string)   -- [2,9], 7
+  assert m.low = 2
+  assert m.high = 9
+  assert m.length = 7
 end
 
 main()

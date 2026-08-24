@@ -75,18 +75,24 @@ function main() do
   rep.line("### Task B — constraint violation on UNSORTED input ###")
   let bad: Array [Integer] := [3, 30, 10, 14, 7, 21, 25, 19]
   rep.line("unsorted input: [3, 30, 10, 14, 7, 21, 25, 19]")
+  let binary_blocked: Boolean := false
   do
     let r: Search_Result := bin.find(bad, 14)
     rep.line("  binary: BUG — returned a result on unsorted input")
   rescue
     rep.line("  binary:        blocked -> " + exception)
+    binary_blocked := true
   end
+  assert binary_blocked
+  let interpolation_blocked: Boolean := false
   do
     let r: Search_Result := itp.find(bad, 14)
     rep.line("  interpolation: BUG — returned a result on unsorted input")
   rescue
     rep.line("  interpolation: blocked -> " + exception)
+    interpolation_blocked := true
   end
+  assert interpolation_blocked
   rep.line("  linear:        runs (no order assumption) -> found="
     + rep.bool_str(lin.find(bad, 14).found))
   rep.line("  Failure signal is a precondition violation at the CALL, naming the")
@@ -119,6 +125,7 @@ function main() do
   else
     rep.line("  MISMATCHES: " + fails)
   end
+  assert fails = 0
 end
 
 -- Run all four strategies on one target and print a labeled block.

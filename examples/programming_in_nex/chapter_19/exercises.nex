@@ -112,18 +112,24 @@ function main() do
   -- 1.
   c.print_line("1. product_to(5) = " + product_to(5).to_string +
                ", product_to(0) = " + product_to(0).to_string)   -- 120, 1
+  assert product_to(5) = 120
+  assert product_to(0) = 1
 
   -- 2 & 3.
   let words: Array[String] := ["a", "b", "c", "b", "d"]
   c.print_line("2/3. index_of(...,'b') = " + index_of(words, "b").to_string +
                ", index_of(...,'z') = " + index_of(words, "z").to_string)   -- 1, -1
+  assert index_of(words, "b") = 1
+  assert index_of(words, "z") = -1
 
   -- 4.
   c.print_line("4. last_index_of(...,'b') = " + last_index_of(words, "b").to_string)  -- 3
+  assert last_index_of(words, "b") = 3
 
   -- 5.*
   c.print_line("5. dedup_sorted([1,1,2,3,3,3,5]) = " +
                show(dedup_sorted([1, 1, 2, 3, 3, 3, 5])))   -- [1, 2, 3, 5]
+  assert dedup_sorted([1, 1, 2, 3, 3, 3, 5]) = [1, 2, 3, 5]
 end
 
 main()

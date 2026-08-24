@@ -71,6 +71,9 @@ function main() do
   c.print_line("2. status_message(200)=" + status_message(200) +
                " (404)=" + status_message(404) +
                " (999)=" + status_message(999))   -- OK, Not Found, Unknown
+  assert status_message(200) = "OK"
+  assert status_message(404) = "Not Found"
+  assert status_message(999) = "Unknown"
 
   -- 3.
   let counter: Bounded_Counter := create Bounded_Counter.make(2)
@@ -79,14 +82,17 @@ function main() do
   c.print_line("3. counter at max=" + counter.value.to_string +
                " (further increment would violate room_to_grow, protecting" +
                " the 0<=value<=max invariant)")   -- 2
+  assert counter.value = 2
   counter.decrement()
   c.print_line("3. after decrement=" + counter.value.to_string)   -- 1
+  assert counter.value = 1
 
   -- 4.
   let names: Array[String] := ["apple", "apricot", "banana", "avocado", "app"]
   c.print_line("4. count_with_prefix(..., 'ap') = " +
                count_with_prefix(names, "ap").to_string +
                " (pattern: accumulator loop with a search test)")   -- 3 (apple, apricot, app)
+  assert count_with_prefix(names, "ap") = 3
 
   -- 5.* A larger problem — a grade book / inventory report — would COMBINE:
   --     * Build a Class Around an Invariant: an Inventory whose item counts can

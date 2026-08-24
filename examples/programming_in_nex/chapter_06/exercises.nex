@@ -49,21 +49,32 @@ function main() do
   -- 1.
   c.print_line("1. 32F  in K = " + fahrenheit_to_kelvin(32.0).to_string)    -- 273.15
   c.print_line("1. 212F in K = " + fahrenheit_to_kelvin(212.0).to_string)   -- 373.15
+  assert fahrenheit_to_kelvin(32.0) = 273.15
+  assert fahrenheit_to_kelvin(212.0) = 373.15
 
   -- 2.
   c.print_line("2. 2000 leap? " + is_leap_year(2000).to_string)   -- true
   c.print_line("2. 1900 leap? " + is_leap_year(1900).to_string)   -- false
   c.print_line("2. 2024 leap? " + is_leap_year(2024).to_string)   -- true
   c.print_line("2. 2023 leap? " + is_leap_year(2023).to_string)   -- false
+  assert is_leap_year(2000)
+  assert not is_leap_year(1900)
+  assert is_leap_year(2024)
+  assert not is_leap_year(2023)
 
   -- 3.
   c.print_line("3. digit_sum(123) = " + digit_sum(123).to_string)   -- 6
   c.print_line("3. digit_sum(0)   = " + digit_sum(0).to_string)     -- 0
+  assert digit_sum(123) = 6
+  assert digit_sum(0) = 0
 
   -- 4.
   c.print_line("4. min3(4,2,7)=" + min3(4, 2, 7).to_string +
                " max3(4,2,7)=" + max3(4, 2, 7).to_string +
                " range3(4,2,7)=" + range3(4, 2, 7).to_string)       -- 2 7 5
+  assert min3(4, 2, 7) = 2
+  assert max3(4, 2, 7) = 7
+  assert range3(4, 2, 7) = 5
 
   -- --------------------------------------------------------------------------
   -- 5.* A variable holding an anonymous function, reassigned to a different
@@ -74,9 +85,15 @@ function main() do
   let transform: Function(n: Integer): Integer := fn (n: Integer): Integer do result := n * 2 end
   c.print_line("5. doubling: " + transform(3).to_string + " " +
                transform(5).to_string + " " + transform(8).to_string)   -- 6 10 16
+  assert transform(3) = 6
+  assert transform(5) = 10
+  assert transform(8) = 16
   transform := fn (n: Integer): Integer do result := n * n end
   c.print_line("5. squaring: " + transform(3).to_string + " " +
                transform(5).to_string + " " + transform(8).to_string)   -- 9 25 64
+  assert transform(3) = 9
+  assert transform(5) = 25
+  assert transform(8) = 64
   c.print_line("5. -> a function is a value; the variable selects the behaviour.")
 end
 

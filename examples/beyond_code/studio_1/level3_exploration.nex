@@ -67,10 +67,16 @@ function main() do
   row(c, "B->C", tiny.next_stop("B", "C"), mapd.next_stop("B", "C"))
   row(c, "C->C", tiny.next_stop("C", "C"), mapd.next_stop("C", "C"))
   row(c, "X->C", tiny.next_stop("X", "C"), mapd.next_stop("X", "C"))
+  assert tiny.next_stop("A", "C") = mapd.next_stop("A", "C")
+  assert tiny.next_stop("B", "C") = mapd.next_stop("B", "C")
+  assert tiny.next_stop("C", "C") = mapd.next_stop("C", "C")
+  assert tiny.next_stop("X", "C") = mapd.next_stop("X", "C")
   -- The revealing cases: goals the hardcoded version never enumerated.
   row(c, "A->B", tiny.next_stop("A", "B"), mapd.next_stop("A", "B"))  -- diverge
   row(c, "B->A", tiny.next_stop("B", "A"), mapd.next_stop("B", "A"))  -- both unreachable
   c.print_line("")
+  assert tiny.next_stop("A", "B") = "UNREACHABLE" and mapd.next_stop("A", "B") = "B"
+  assert tiny.next_stop("B", "A") = "UNREACHABLE" and mapd.next_stop("B", "A") = "UNREACHABLE"
 
   c.print_line("### what changed ###")
   c.print_line("COMPLEXITY:")

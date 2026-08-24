@@ -21,36 +21,47 @@ function main() do
   console.print_line("== nominal: pending -> assign -> advance -> advance -> complete ==")
   let t: Delivery_Task := create Delivery_Task.pending("T001", r)
   console.print_line(t.status + " @ " + t.current)        -- PENDING @ A
+  assert t.status = "PENDING" and t.current = "A"
   t.assign("R7")
   t.advance()                                 -- A -> B
   t.advance()                                 -- B -> C
   console.print_line(t.status + " @ " + t.current)         -- IN_TRANSIT @ C
+  assert t.status = "IN_TRANSIT" and t.current = "C"
   t.complete()
   console.print_line(t.status + " @ " + t.current)         -- DELIVERED @ C
+  assert t.status = "DELIVERED" and t.current = "C"
 
   -- ---------- EDGE 1: deliver before arriving (flat model could not catch) ----
   console.print_line("== edge 1: complete() while still en route — must be blocked ==")
   let e1: Delivery_Task := create Delivery_Task.pending("T002", r)
   e1.assign("R8")
   e1.advance()                                -- at B, not yet at destination C
+  let e1_blocked: Boolean := false
   do
     e1.complete()
     console.print_line("BUG: delivered without reaching destination")
   rescue
     console.print_line("blocked: " + exception)
     console.print_line("status stayed " + e1.status + " @ " + e1.current)
+    e1_blocked := true
   end
+  assert e1_blocked
+  assert e1.status /= "DELIVERED" and e1.current = "B"
 
   -- ---------- EDGE 2: move an unassigned delivery (no robot) — must be blocked -
   console.print_line("== edge 2: advance() a PENDING (unassigned) task — must be blocked ==")
   let e2: Delivery_Task := create Delivery_Task.pending("T003", r)
+  let e2_blocked: Boolean := false
   do
     e2.advance()
     console.print_line("BUG: package moved with no robot carrying it")
   rescue
     console.print_line("blocked: " + exception)
     console.print_line("status stayed " + e2.status + " @ " + e2.current)
+    e2_blocked := true
   end
+  assert e2_blocked
+  assert e2.status = "PENDING" and e2.current = "A"
 end
 
 main()

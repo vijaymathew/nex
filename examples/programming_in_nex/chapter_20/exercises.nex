@@ -129,12 +129,15 @@ function main() do
   q.enqueue("first")
   q.enqueue("second")
   c.print_line("2. front = " + front(q) + " (queue still size " + q.size.to_string + ")")  -- first, 2
+  assert front(q) = "first"
+  assert q.size = 2
 
   -- 3.
   let timer: Timer := create Timer.make()
   timer.start(100)
   timer.stop(175)
   c.print_line("3. elapsed = " + timer.elapsed.to_string + " ticks")   -- 75
+  assert timer.elapsed = 75
 
   -- 4.
   let ws: Word_Set := create Word_Set.make()
@@ -142,10 +145,12 @@ function main() do
   ws.add("beta")
   ws.add("alpha")          -- duplicate: size must NOT grow
   c.print_line("4. Word_Set size after add(alpha,beta,alpha) = " + ws.size.to_string)  -- 2
+  assert ws.size = 2
 
   -- 5.*
   c.print_line("5. percentage(50, 200) = " + percentage(50.0, 200.0).to_string +
                " (the contract makes total>0 the caller's stated obligation)")   -- 25.0
+  assert percentage(50.0, 200.0) = 25.0
 end
 
 main()

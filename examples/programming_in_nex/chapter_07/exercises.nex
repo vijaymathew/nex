@@ -89,6 +89,9 @@ function main() do
   c.print_line("1. safe_percentage(50,200) = " + safe_percentage(50.0, 200.0).to_string)  -- 25.0
   c.print_line("1. safe_percentage(0,100)  = " + safe_percentage(0.0, 100.0).to_string)   -- 0.0
   c.print_line("1. safe_percentage(10,0)   = " + safe_percentage(10.0, 0.0).to_string)    -- 0.0
+  assert safe_percentage(50.0, 200.0) = 25.0
+  assert safe_percentage(0.0, 100.0) = 0.0
+  assert safe_percentage(10.0, 0.0) = 0.0
 
   -- 2.
   c.print("2. ")
@@ -98,22 +101,35 @@ function main() do
   c.print("2. ")
   greet_by_time(c, 20)
   c.print_line("2. pure: greeting_for_hour(9)='" + greeting_for_hour(9) + "'")
+  assert greeting_for_hour(9) = "Good morning!"
+  assert greeting_for_hour(14) = "Good afternoon!"
+  assert greeting_for_hour(20) = "Good evening!"
 
   -- 3.
   c.print_line("3. is_prime(2)=" + is_prime(2).to_string +
                " is_prime(9)=" + is_prime(9).to_string +
                " is_prime(17)=" + is_prime(17).to_string +
                " is_prime(1)=" + is_prime(1).to_string)   -- true false true false
+  assert is_prime(2)
+  assert not is_prime(9)
+  assert is_prime(17)
+  assert not is_prime(1)
 
   -- 4.
   c.print_line("4. count_vowels('Hello')=" + count_vowels("Hello").to_string +
                " 'rhythm'=" + count_vowels("rhythm").to_string +
                " 'aeiou'=" + count_vowels("aeiou").to_string)   -- 2 0 5
+  assert count_vowels("Hello") = 2
+  assert count_vowels("rhythm") = 0
+  assert count_vowels("aeiou") = 5
 
   -- 5.*
   c.print_line("5. collatz_length(6)=" + collatz_length(6).to_string +
                " (27)=" + collatz_length(27).to_string +
                " (1)=" + collatz_length(1).to_string)   -- 8 111 0
+  assert collatz_length(6) = 8
+  assert collatz_length(27) = 111
+  assert collatz_length(1) = 0
 end
 
 main()

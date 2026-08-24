@@ -71,8 +71,16 @@ function main() do
   let d2: Delivery_Store_V2 := delivery.baseline(tasks)
   let d3: Delivery_Store_V3 := delivery.indexed(tasks)
   -- HIT near the end (worst-ish for the scan); MISS (scan's true worst case).
-  r.compare("hit  T-12", d2.find_status("T-12"), d3.find_status("T-12"))
-  r.compare("miss T-99", d2.find_status("T-99"), d3.find_status("T-99"))
+  let d_hit_v2: Measure_Result := d2.find_status("T-12")
+  let d_hit_v3: Measure_Result := d3.find_status("T-12")
+  r.compare("hit  T-12", d_hit_v2, d_hit_v3)
+  assert d_hit_v2.value = d_hit_v3.value
+  assert d_hit_v3.steps < d_hit_v2.steps
+  let d_miss_v2: Measure_Result := d2.find_status("T-99")
+  let d_miss_v3: Measure_Result := d3.find_status("T-99")
+  r.compare("miss T-99", d_miss_v2, d_miss_v3)
+  assert d_miss_v2.value = d_miss_v3.value
+  assert d_miss_v3.steps < d_miss_v2.steps
 
   -- ========================================================================
   -- KNOWLEDGE: validate a Doc_Link's two endpoints against the document set.
@@ -95,10 +103,18 @@ function main() do
   let k3: Knowledge_Model_V3 := knowledge.indexed(docs)
   -- VALID: both endpoints exist but the to-endpoint is late in the list.
   let good: Doc_Link := create Doc_Link.make("D-1", "D-8", "references")
-  r.compare("valid  D-1->D-8", k2.validate_link(good), k3.validate_link(good))
+  let k_good_v2: Measure_Result := k2.validate_link(good)
+  let k_good_v3: Measure_Result := k3.validate_link(good)
+  r.compare("valid  D-1->D-8", k_good_v2, k_good_v3)
+  assert k_good_v2.value = k_good_v3.value
+  assert k_good_v3.steps < k_good_v2.steps
   -- MISSING_TO: from exists, to does not — the scan still pays for two passes.
   let dangling: Doc_Link := create Doc_Link.make("D-1", "D-99", "references")
-  r.compare("dangling D-1->D-99", k2.validate_link(dangling), k3.validate_link(dangling))
+  let k_bad_v2: Measure_Result := k2.validate_link(dangling)
+  let k_bad_v3: Measure_Result := k3.validate_link(dangling)
+  r.compare("dangling D-1->D-99", k_bad_v2, k_bad_v3)
+  assert k_bad_v2.value = k_bad_v3.value
+  assert k_bad_v3.steps < k_bad_v2.steps
 
   -- ========================================================================
   -- WORLD: move the object with a given id by delta (targeted update).
@@ -114,9 +130,17 @@ function main() do
   let w2: World_Model_V2 := world.baseline(v2_objs)
   let w3: World_Model_V3 := world.indexed(v3_objs)
   -- HIT: the LAST object, +5 — the scan walks the whole array to reach it.
-  r.compare("move E-10 +5", w2.move_by_id("E-10", 5), w3.move_by_id("E-10", 5))
+  let w_hit_v2: Measure_Result := w2.move_by_id("E-10", 5)
+  let w_hit_v3: Measure_Result := w3.move_by_id("E-10", 5)
+  r.compare("move E-10 +5", w_hit_v2, w_hit_v3)
+  assert w_hit_v2.value = w_hit_v3.value
+  assert w_hit_v3.steps < w_hit_v2.steps
   -- MISS: unknown id — scan touches every object only to report NOT_FOUND.
-  r.compare("move E-99 +5", w2.move_by_id("E-99", 5), w3.move_by_id("E-99", 5))
+  let w_miss_v2: Measure_Result := w2.move_by_id("E-99", 5)
+  let w_miss_v3: Measure_Result := w3.move_by_id("E-99", 5)
+  r.compare("move E-99 +5", w_miss_v2, w_miss_v3)
+  assert w_miss_v2.value = w_miss_v3.value
+  assert w_miss_v3.steps < w_miss_v2.steps
 
   -- ========================================================================
   -- Takeaway: identical answers (and identical update semantics in WORLD),

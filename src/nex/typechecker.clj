@@ -969,6 +969,8 @@
 
 (declare check-expression)
 (declare check-expression-with-expected)
+(declare any-into-concrete-without-convert?)
+(declare throw-any-narrowing-error!)
 (declare collect-class-info)
 (declare check-class)
 (declare check-method)
@@ -1516,6 +1518,8 @@
                                     " arguments, got " (count args)))})))
     (doseq [[arg-type param] (map vector arg-types params)]
       (let [param-type (resolve-generic-type (:type param) type-map)]
+        (when (any-into-concrete-without-convert? env param-type arg-type)
+          (throw-any-narrowing-error! (str "parameter '" (:name param) "' of " method) param-type))
         (when-not (types-compatible? env arg-type param-type)
           (throw (ex-info (str "Argument type mismatch for method " method)
                           {:error (type-error
@@ -2395,6 +2399,8 @@
 
       1
       (let [compare-type (check-expression env (first args))]
+        (when (any-into-concrete-without-convert? env "Function" compare-type)
+          (throw-any-narrowing-error! "the Array.sort comparator argument" "Function"))
         (when-not (types-compatible? env compare-type "Function")
           (throw (ex-info "Array.sort(compareFn) expects a Function argument"
                           {:error (type-error
@@ -2616,6 +2622,8 @@
 (defn- check-builtin-sleep [env args]
   (assert-builtin-arity! "sleep" 1 args)
   (let [arg-type (check-expression env (first args))]
+    (when (any-into-concrete-without-convert? env "Integer" arg-type)
+      (throw-any-narrowing-error! "the sleep argument" "Integer"))
     (when-not (types-compatible? env arg-type "Integer")
       (throw (ex-info "sleep argument must be Integer"
                       {:error (type-error
@@ -2779,6 +2787,8 @@
                         {:error (type-error
                                  (str name " path argument must be String, got "
                                       (display-type path-type)))})))
+      (when (any-into-concrete-without-convert? env "Function" handler-type)
+        (throw-any-narrowing-error! (str "the " name " handler argument") "Function"))
       (when-not (types-compatible? env handler-type "Function")
         (throw (ex-info (str name " handler argument must be Function")
                         {:error (type-error
@@ -2996,6 +3006,8 @@
                                             param-type
                                             " for function "
                                             method))})))
+              (when (any-into-concrete-without-convert? env param-type arg-type)
+                (throw-any-narrowing-error! (str "parameter of " method) param-type))
               (when-not (types-compatible? env arg-type param-type)
                 (throw (ex-info (str "Argument type mismatch for method " call-name)
                                 {:error (type-error
@@ -3021,6 +3033,8 @@
                                               " arguments, got " (count args)))})))
               (doseq [[arg param] (map vector args (:params method-sig))]
                 (let [arg-type (check-expression env arg)]
+                  (when (any-into-concrete-without-convert? env (:type param) arg-type)
+                    (throw-any-narrowing-error! (str "parameter '" (:name param) "' of " method) (:type param)))
                   (when-not (types-compatible? env arg-type (:type param))
                     (throw (ex-info (str "Argument type mismatch for method " method)
                                     {:error (type-error
@@ -3060,11 +3074,15 @@
         (let [size-type (check-expression env (first args))
               value-type (check-expression env (second args))
               elem-type (or (first generic-args) value-type)]
+          (when (any-into-concrete-without-convert? env "Integer" size-type)
+            (throw-any-narrowing-error! "the Array.filled size argument" "Integer"))
           (when-not (types-compatible? env size-type "Integer")
             (throw (ex-info "Array.filled requires Integer size"
                             {:error (type-error
                                      (str "Array.filled expects Integer size, got "
                                           (display-type size-type)))})))
+          (when (any-into-concrete-without-convert? env elem-type value-type)
+            (throw-any-narrowing-error! "the Array.filled value argument" elem-type))
           (when-not (types-compatible? env value-type elem-type)
             (throw (ex-info "Array.filled value type mismatch"
                             {:error (type-error
@@ -3105,6 +3123,8 @@
         (throw (ex-info "Process.command expects 1 or 2 arguments"
                         {:error (type-error "Process.command expects (String) or (String, Array[String])")})))
       (let [command-type (check-expression env (first args))]
+        (when (any-into-concrete-without-convert? env "String" command-type)
+          (throw-any-narrowing-error! "the Process.command command argument" "String"))
         (when-not (types-compatible? env command-type "String")
           (throw (ex-info "Process.command requires a String command"
                           {:error (type-error
@@ -3113,6 +3133,8 @@
         (when (= 2 (count args))
           (let [args-type (check-expression env (second args))
                 expected {:base-type "Array" :type-params ["String"]}]
+            (when (any-into-concrete-without-convert? env expected args-type)
+              (throw-any-narrowing-error! "the Process.command args argument" expected))
             (when-not (types-compatible? env args-type expected)
               (throw (ex-info "Process.command requires Array[String] arguments"
                               {:error (type-error
@@ -3165,6 +3187,8 @@
           (throw (ex-info "Min_Heap.from_comparator expects 1 argument"
                           {:error (type-error "Min_Heap.from_comparator expects exactly 1 Function argument")})))
         (let [compare-type (check-expression env (first args))]
+          (when (any-into-concrete-without-convert? env "Function" compare-type)
+            (throw-any-narrowing-error! "the Min_Heap.from_comparator argument" "Function"))
           (when-not (types-compatible? env compare-type "Function")
             (throw (ex-info "Min_Heap.from_comparator requires a Function"
                             {:error (type-error
@@ -3190,6 +3214,8 @@
       (throw (ex-info (str class-name ".make expects 1 argument")
                       {:error (type-error (str class-name ".make expects exactly 1 " expected-type " argument"))})))
     (let [arg-type (check-expression env (first args))]
+      (when (any-into-concrete-without-convert? env expected-type arg-type)
+        (throw-any-narrowing-error! (str "the " class-name ".make argument") expected-type))
       (when-not (types-compatible? env arg-type expected-type)
         (throw (ex-info (str class-name ".make requires " expected-type " initial value")
                         {:error (type-error
@@ -3216,6 +3242,8 @@
                           "Any"
                           (attachable-type arg-type)))
           maybe-elem (detachable-version elem-type)]
+      (when (any-into-concrete-without-convert? env maybe-elem arg-type)
+        (throw-any-narrowing-error! "the Atomic_Reference.make argument" maybe-elem))
       (when-not (types-compatible? env arg-type maybe-elem)
         (throw (ex-info "Atomic_Reference.make initial value type mismatch"
                         {:error (type-error
@@ -3238,6 +3266,8 @@
         (throw (ex-info "Channel.with_capacity expects 1 argument"
                         {:error (type-error "Channel.with_capacity expects exactly 1 Integer argument")})))
       (let [arg-type (check-expression env (first args))]
+        (when (any-into-concrete-without-convert? env "Integer" arg-type)
+          (throw-any-narrowing-error! "the Channel.with_capacity argument" "Integer"))
         (when-not (types-compatible? env arg-type "Integer")
           (throw (ex-info "Channel.with_capacity requires Integer capacity"
                           {:error (type-error
@@ -3334,6 +3364,10 @@
                                             (count args)))})))
             (doseq [[arg-type param] (map vector arg-types params)]
               (let [param-type (resolve-generic-type (:type param) type-map)]
+                (when (any-into-concrete-without-convert? env param-type arg-type)
+                  (throw-any-narrowing-error! (str "parameter '" (:name param) "' of constructor "
+                                                    class-name "." ctor-name)
+                                              param-type))
                 (when-not (types-compatible? env arg-type param-type)
                   (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
                                   {:error (type-error
@@ -3627,6 +3661,8 @@
       (let [elem-type (first (:type-params expected-type))]
         (doseq [elem (:elements expr)]
           (let [actual-elem-type (check-expression-with-expected env elem elem-type)]
+            (when (any-into-concrete-without-convert? env elem-type actual-elem-type)
+              (throw-any-narrowing-error! "an array element" elem-type))
             (when-not (types-compatible? env actual-elem-type elem-type)
               (throw (ex-info "Array elements must have same type"
                               {:error (type-error
@@ -3643,11 +3679,15 @@
         (doseq [{:keys [key value]} (:entries expr)]
           (let [actual-key-type (check-expression-with-expected env key expected-key-type)
                 actual-val-type (check-expression-with-expected env value expected-val-type)]
+            (when (any-into-concrete-without-convert? env expected-key-type actual-key-type)
+              (throw-any-narrowing-error! "a map key" expected-key-type))
             (when-not (types-compatible? env actual-key-type expected-key-type)
               (throw (ex-info "Map keys must have consistent types"
                               {:error (type-error
                                        (str "Cannot assign " (display-type actual-key-type)
                                             " to map key type " (display-type expected-key-type)))})))
+            (when (any-into-concrete-without-convert? env expected-val-type actual-val-type)
+              (throw-any-narrowing-error! "a map value" expected-val-type))
             (when-not (types-compatible? env actual-val-type expected-val-type)
               (throw (ex-info "Map values must have consistent types"
                               {:error (type-error
@@ -3663,6 +3703,8 @@
       (let [elem-type (first (:type-params expected-type))]
         (doseq [elem (:elements expr)]
           (let [actual-elem-type (check-expression-with-expected env elem elem-type)]
+            (when (any-into-concrete-without-convert? env elem-type actual-elem-type)
+              (throw-any-narrowing-error! "a set element" elem-type))
             (when-not (types-compatible? env actual-elem-type elem-type)
               (throw (ex-info "Set elements must have same type"
                               {:error (type-error
@@ -3965,6 +4007,8 @@
                           {:error (type-error "send clauses cannot use 'as <name>'")})))
         (let [arg-type (check-expression env (first args))
               elem-type (or (first type-args) "Any")]
+          (when (any-into-concrete-without-convert? env elem-type arg-type)
+            (throw-any-narrowing-error! (str "the Channel." method " argument") elem-type))
           (when-not (types-compatible? env arg-type elem-type)
             (throw (ex-info (str "Channel." method " argument type mismatch")
                             {:error (type-error

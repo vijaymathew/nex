@@ -152,6 +152,7 @@ function main() do
 
   c.print_line("### incident regression summary ###")
   c.print_line("  " + pass + "/" + total + " incident regressions pass")
+  assert pass = total
 end
 
 main()

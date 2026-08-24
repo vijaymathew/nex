@@ -200,25 +200,39 @@ function main() do
   let ln: Loan := create Loan.make(bk, me, "2026-07-01", 0.25)
   c.print_line("1. Loan: '" + ln.book.label + "' to " + ln.borrower.name +
                ", due " + ln.due_date)
+  assert ln.book.label = "Dune by Frank Herbert"
+  assert ln.borrower.name = "Ada"
+  assert ln.due_date = "2026-07-01"
 
   -- 2.
   let a: Money := create Money.make(10.0, "USD")
   let b: Money := create Money.make(5.5, "USD")
   c.print_line("2. add: " + a.add(b).label)                          -- 15.5 USD
   c.print_line("2. exchange: " + a.exchange(0.92, "EUR").label)      -- 9.2 EUR
+  assert a.add(b).label = "15.5 USD"
+  let converted: Money := a.exchange(0.92, "EUR")
+  assert converted.currency = "EUR"
+  assert converted.amount > 9.19 and converted.amount < 9.21
 
   -- 3.
   let deck: Deck := create Deck.make()
   c.print_line("3. fresh deck size = " + deck.size.to_string)        -- 52
+  assert deck.size = 52
   let drawn: Card := deck.draw
   c.print_line("3. drew " + drawn.name + ", now size = " + deck.size.to_string)  -- 51
+  assert drawn.name = "A of Spades"
+  assert deck.size = 51
 
   -- 4.
   let basic: Account := create Account.make("Basic", 100.0)
   let over: Overdraft_Account := create Overdraft_Account.make("Over", 100.0, 50.0)
-  c.print_line("4. basic.withdraw(120)=" + basic.withdraw(120.0).to_string +
-               " (no overdraft), over.withdraw(120)=" + over.withdraw(120.0).to_string +
+  let basic_ok: Boolean := basic.withdraw(120.0)
+  let over_ok: Boolean := over.withdraw(120.0)
+  c.print_line("4. basic.withdraw(120)=" + basic_ok.to_string +
+               " (no overdraft), over.withdraw(120)=" + over_ok.to_string +
                " (within -50 limit)")                                -- false, true
+  assert not basic_ok
+  assert over_ok
 
   -- 5.*
   let s1: Int_Stack := create Int_Stack.make()
@@ -228,6 +242,9 @@ function main() do
   c.print_line("5. three near-identical stacks (sizes " + s1.size.to_string +
                "," + s2.size.to_string + "," + s3.size.to_string +
                "); only the element type differs -> motivates Stack[G].")
+  assert s1.size = 1
+  assert s2.size = 1
+  assert s3.size = 1
 end
 
 main()

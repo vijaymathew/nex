@@ -1,0 +1,132 @@
+-- Narrative examples from Chapter 4 (Conditionals), collected into one
+-- self-checking, non-interactive program.
+
+let temperature := 35
+if temperature > 30 then
+  print("hot")
+end
+
+let score := 45
+if score >= 50 then
+  print("pass")
+else
+  print("fail")
+end
+
+score := 72
+if score >= 90 then
+  print("A")
+elseif score >= 80 then
+  print("B")
+elseif score >= 70 then
+  print("C")
+elseif score >= 60 then
+  print("D")
+else
+  print("F")
+end
+
+let age := 22
+let has_licence := true
+let can_drive := age >= 17 and has_licence
+if can_drive then
+  print("You may drive")
+end
+
+-- prefer this
+if score >= 50 then print("pass") end
+-- over this
+if not (score < 50) then print("pass") end
+
+-- awkward
+if score < 50 then
+  -- nothing
+else
+  print("pass")
+end
+-- clearer
+if score >= 50 then
+  print("pass")
+end
+
+let age2 := 20
+let has_ticket := true
+if age2 >= 18 then
+  if has_ticket then
+    print("Welcome")
+  else
+    print("No ticket")
+  end
+else
+  print("Under age")
+end
+
+if age2 >= 18 and has_ticket then
+  print("Welcome")
+elseif age2 < 18 then
+  print("Under age")
+else
+  print("No ticket")
+end
+
+let category := when age2 >= 18 then "adult" else "minor" end
+assert category = "adult"
+
+let label: String := ""
+if score >= 50 then
+  label := "pass"
+else
+  label := "fail"
+end
+assert label = "pass"
+
+let label2 := when score >= 50 then "pass" else "fail" end
+assert label2 = "pass"
+
+let day := "Monday"
+if day = "Saturday" or day = "Sunday" then
+  print("weekend")
+elseif day = "Monday" or day = "Friday" then
+  print("edge of week")
+else
+  print("midweek")
+end
+
+case day of
+  "Saturday", "Sunday" then print("weekend")
+  "Monday", "Friday" then print("edge of week")
+  else print("midweek")
+end
+
+let code: Integer := 2
+case code of
+  0, 1 then print("low")
+  2, 3 then print("medium")
+  4, 5 then print("high")
+  else print("out of range")
+end
+
+case code of
+  0, 1 then do
+    print("low")
+    print("consider increasing")
+  end
+  else print("not low")
+end
+
+let income: Real := 35000.0
+let tax: Real := 0.0
+if income <= 10000.0 then
+  tax := income * 0.10
+elseif income <= 50000.0 then
+  tax := income * 0.20
+else
+  tax := income * 0.30
+end
+assert "Tax: " + tax.to_string = "Tax: 7000.0"
+
+if day = "Mon" or day = "Tue" or day = "Wed" or day = "Thu" or day = "Fri" then
+  print("weekday")
+else
+  print("weekend")
+end

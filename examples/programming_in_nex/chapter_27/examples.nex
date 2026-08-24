@@ -1,0 +1,129 @@
+-- Narrative examples from Chapter 27 (Working with Data), collected into
+-- one self-checking, non-interactive program.
+
+function sum(items: Array[Integer]): Integer
+do
+  result := 0
+  across items as item do
+    result := result + item
+  end
+end
+assert sum([1, 2, 3, 4]) = 10
+
+function contains(items: Array[String], target: String): Boolean
+do
+  result := false
+  from
+    let i := 0
+  until
+    i = items.length or result
+  do
+    if items.get(i) = target then
+      result := true
+    end
+    i := i + 1
+  end
+end
+assert contains(["a", "b", "c"], "b")
+assert not contains(["a", "b", "c"], "z")
+
+function count_nodes(node: Map[String, Any]): Integer
+do
+  result := 1
+  if convert node.get("children") to children: Array[Any] then
+    across children as child do
+      result := result + count_nodes(child)
+    end
+  end
+end
+let tree := {"name": "root", "children": [{"name": "a", "children": []}, {"name": "b", "children": [{"name": "c", "children": []}]}]}
+assert count_nodes(tree) = 4
+
+let prices := {"apple": 3, "orange": 4, "pear": 5}
+assert prices.get("orange") = 4
+
+-- Table-driven lookup (via a map) instead of a long if/elseif chain:
+-- if item = "apple" then price := 3 elseif item = "orange" then price := 4 ... end
+
+class Result [V]
+  create
+    success(v: V) do
+      value := v
+      error := nil
+      ok := true
+    end
+    failure(msg: String) do
+      value := nil
+      error := msg
+      ok := false
+    end
+  feature
+    value: ?V
+    error: ?String
+    ok: Boolean
+    is_ok(): Boolean do
+      result := ok
+    end
+end
+
+function safe_divide(a, b: Real): Result[Real]
+do
+  if b = 0.0 then
+    result := create Result[Real].failure("division by zero")
+  else
+    result := create Result[Real].success(a / b)
+  end
+end
+assert safe_divide(10.0, 2.0).is_ok
+assert not safe_divide(10.0, 0.0).is_ok
+
+function word_count(text: String): Integer
+do
+  result := 0
+  across text.split(" ") as word do
+    if word /= "" then
+      result := result + 1
+    end
+  end
+end
+assert word_count("to be or not to be") = 6
+
+class File_Word_Counter
+  feature
+    count_words_in(path: String): Integer
+      require
+        path_not_empty: path.length > 0
+      do
+        result := word_count(path_read_text(path))
+      end
+end
+
+-- count_words_in reads from disk via a path relative to the process's
+-- working directory, which isn't stable across how this file gets run
+-- (`nex examples.nex` from this directory vs. an in-process smoke test from
+-- the repo root); word_count itself is already verified above, so
+-- File_Word_Counter is exercised only far enough to confirm it type-checks.
+let counter := create File_Word_Counter
+
+function most_frequent_word(text: String): String
+  require
+    not_blank: text.trim().length > 0
+  do
+    let freq: Map[String, Integer] := {}
+    let words := text.to_lower.split(" ")
+
+    across words as word do
+      if word /= "" then
+        let count := freq.try_get(word, 0)
+        freq.set(word, count + 1)
+      end
+    end
+
+    result := freq.keys.get(0)
+    across freq.keys as word do
+      if freq.get(word) > freq.get(result) then
+        result := word
+      end
+    end
+  end
+assert most_frequent_word("to be or not to be to") = "to"

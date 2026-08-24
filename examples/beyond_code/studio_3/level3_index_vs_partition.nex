@@ -192,6 +192,8 @@ function main() do
   console.print_line("point find_status(T-12):")
   console.print_line("  index     -> " + qi.value + " in " + qi.steps + " step(s)")
   console.print_line("  partition -> " + qp.value + " in " + qp.steps + " step(s)   <- pays to locate the bucket")
+  assert qi.value = qp.value
+  assert qi.steps < qp.steps
 
   -- Workload 2 — GROUP tally by status.
   let ci: Measure_Result := idx.count_status("PENDING")
@@ -199,6 +201,9 @@ function main() do
   console.print_line("group count_status(PENDING):")
   console.print_line("  index     -> " + ci.value + " in " + ci.steps + " step(s)   <- must visit every task")
   console.print_line("  partition -> " + cp.value + " in " + cp.steps + " step(s)")
+  assert ci.value = cp.value
+  assert ci.value = "count=4"
+  assert cp.steps < ci.steps
 
   console.print_line("")
   console.print_line("Verdict:")

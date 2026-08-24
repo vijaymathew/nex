@@ -1,0 +1,84 @@
+-- Narrative examples from Chapter 2 (Values, Types, and Variables), collected
+-- into one self-checking, non-interactive program.
+
+assert 10 + 3 = 13
+assert 10 - 3 = 7
+assert 10 * 3 = 30
+assert 10 / 3 = 3
+assert 7 / 2 = 3
+assert 10 % 3 = 1
+assert 7 % 2 = 1
+assert -7.abs = 7
+assert 3.max(8) = 8
+assert 3.min(8) = 3
+assert 5.bitwise_left_shift(1) = 10
+assert 6.bitwise_and(3) = 2
+assert 5.bitwise_is_set(0) = true
+assert 6.pick >= 0 and 6.pick < 6
+
+let pi := 3.14159
+assert pi * 2.0 = 6.28318
+assert 10.0 / 3.0 = 3.3333333333333335
+assert 7.0 / 2.0 = 3.5
+assert 3.6.round = 4
+assert 3.2.round = 3
+assert -3.5.abs = 3.5
+assert 1.2.max(4.7) = 4.7
+
+let x := 10
+assert x > 5
+assert not (x = 5)
+assert x /= 5
+assert true and false = false
+assert true or false = true
+assert not true = false
+assert x > 5 and x < 20
+
+let greeting := "Hello, Nex"
+assert greeting.length = 10
+assert greeting.contains("Nex")
+assert greeting.starts_with("Hello")
+assert greeting.index_of("N") = 7
+assert greeting.substring(0, 5) = "Hello"
+assert greeting.substring(7, 10) = "Nex"
+assert greeting.to_upper = "HELLO, NEX"
+assert greeting.to_lower = "hello, nex"
+
+let padded := "  hello  "
+assert padded.trim = "hello"
+
+let csv := "one,two,three"
+assert csv.split(",") = ["one", "two", "three"]
+
+assert 7 + 5 = 12
+assert 7.plus(5) = 12
+assert 10 > 3
+assert 10.greater_than(3)
+
+let name: String := "Ada"
+let height: Real := 1.52
+let enrolled: Boolean := true
+let age: Integer := 25
+assert "Age: " + age = "Age: 25"
+
+let s: String := "42"
+let n: Integer := s.to_integer
+assert n + 8 = 50
+assert "3.14".to_real * 10 * 10 = 314.0
+
+let maybe_name: ?String := nil
+assert maybe_name = nil
+if maybe_name /= nil then
+  print(maybe_name.length)
+end
+
+-- Interactive input (con.read_line) is factored into a function taking the
+-- line already read, and called with a test value -- the same idiom this
+-- chapter's exercises.nex uses -- so the program runs non-interactively.
+function born_around(age_line: String): Integer
+do
+  let age: Integer := age_line.to_integer
+  result := 2026 - age
+end
+
+assert born_around("26") = 2000

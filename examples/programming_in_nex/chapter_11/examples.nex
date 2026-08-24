@@ -1,0 +1,174 @@
+-- Narrative examples from Chapter 11 (Nested and Composite Structures),
+-- collected into one self-checking, non-interactive program.
+
+let books: Array[Map[String, Any]] := [
+  {"title": "Dune", "author": "Frank Herbert", "year": 1965},
+  {"title": "Neuromancer", "author": "William Gibson", "year": 1984},
+  {"title": "Foundation", "author": "Isaac Asimov", "year": 1951}
+]
+assert books.length = 3
+assert books.get(0).get("title") = "Dune"
+assert books.get(1).get("author") = "William Gibson"
+
+across books as book do
+  print(book.get("title") + " (" + book.get("year").to_string + ")")
+end
+
+if convert books.get(0).get("year") to year: Integer then
+  assert year + 1 = 1966
+end
+
+across books as book do
+  if convert book.get("year") to year: Integer then
+    if year < 1970 then
+      print(book.get("title"))
+    end
+  end
+end
+
+let timetable: Map[String, Array[String]] := {
+  "Monday":    ["Maths", "Physics", "History"],
+  "Tuesday":   ["English", "Chemistry"],
+  "Wednesday": ["Maths", "Biology", "PE"]
+}
+assert timetable.get("Monday") = ["Maths", "Physics", "History"]
+assert timetable.get("Monday").length = 3
+assert timetable.get("Tuesday").get(0) = "English"
+
+across timetable.keys as day do
+  print(day + ":")
+  across timetable.get(day) as cls do
+    print("  " + cls)
+  end
+end
+
+function build_gradebook(entries: Array[Map[String, Any]]): Map[String, Array[Integer]]
+do
+  result := {}
+  across entries as entry do
+    if convert entry.get("name") to name: String then
+      let current := result.try_get(name, [])
+      if convert entry.get("score") to score: Integer then
+        current.add(score)
+        result.set(name, current)
+      end
+    end
+  end
+end
+
+let entries: Array[Map[String, Any]] := [
+  {"name": "Alice", "score": 85},
+  {"name": "Bob",   "score": 72},
+  {"name": "Alice", "score": 91},
+  {"name": "Bob",   "score": 68},
+  {"name": "Alice", "score": 88}
+]
+let gradebook := build_gradebook(entries)
+assert gradebook.get("Alice") = [85, 91, 88]
+assert gradebook.get("Bob") = [72, 68]
+
+let filesystem: Map[String, Any] := {
+  "name": "root",
+  "type": "dir",
+  "children": [
+    {
+      "name": "documents",
+      "type": "dir",
+      "children": [
+        {"name": "report.txt", "type": "file", "children": []},
+        {"name": "notes.txt", "type": "file", "children": []}
+      ]
+    },
+    {
+      "name": "pictures",
+      "type": "dir",
+      "children": [
+        {"name": "photo.jpg", "type": "file", "children": []}
+      ]
+    }
+  ]
+}
+
+function print_tree(node: Map[String, Any], indent: Integer)
+do
+  let padding: String := ""
+  from let i := 0 until i >= indent do
+    padding := padding + "  "
+    i := i + 1
+  end
+  if convert node.get("name") to name: String then
+    print(padding + name)
+  end
+  if convert node.get("children") to children: Array[Map[String, Any]] then
+    across children as child do
+      print_tree(child, indent + 1)
+    end
+  end
+end
+print_tree(filesystem, 0)
+
+function find_node(node: Map[String, Any], target: String): ?Map[String, Any]
+do
+  if node.get("name") = target then
+    result := node
+  else
+    result := nil
+    if convert node.get("children") to children: Array[Map[String, Any]] then
+      across children as child do
+        let found := find_node(child, target)
+        if found /= nil then
+          result := found
+        end
+      end
+    end
+  end
+end
+
+let found := find_node(filesystem, "notes.txt")
+if found /= nil then
+  assert found.get("name") = "notes.txt"
+end
+let missing := find_node(filesystem, "missing.txt")
+assert missing = nil
+
+let expenses := {
+  "label": "Total",
+  "amount": 0,
+  "children": [
+    {
+      "label": "Housing",
+      "amount": 1200,
+      "children": [
+        {"label": "Rent",       "amount": 900,  "children": []},
+        {"label": "Utilities", "amount": 300, "children": []}
+      ]
+    },
+    {
+      "label": "Food",
+      "amount": 150,
+      "children": [
+        {"label": "Groceries",  "amount": 400,  "children": []},
+        {"label": "Dining out", "amount": 200, "children": []}
+      ]
+    }
+  ]
+}
+
+function total_amount(node: Map[String, Any]): Integer
+do
+  if convert node.get("amount") to amt: Integer then
+    result := amt
+  end
+  if convert node.get("children") to children: Array[Any] then
+    across children as child do
+      result := result + total_amount(child)
+    end
+  end
+end
+assert total_amount(expenses) = 3150
+
+assert (when convert expenses.get("children") to children: Array[Map[String, Any]] then
+  total_amount(children.get(0))
+else
+  0
+end) = 2400

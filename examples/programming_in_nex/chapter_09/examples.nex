@@ -1,0 +1,134 @@
+-- Narrative examples from Chapter 9 (Arrays), collected into one
+-- self-checking, non-interactive program.
+
+let empty: Array[Integer] := []
+assert empty.length = 0
+
+let scores := [85, 92, 78, 95, 60]
+assert scores.length = 5
+assert scores.get(0) = 85
+assert scores.get(1) = 92
+assert scores.get(4) = 60
+-- scores.get(5) would raise "index out of bounds" -- the book shows this as
+-- an example of the error, not something to run here.
+assert scores.get(scores.length - 1) = 60
+
+let mutable_scores := [85, 92, 78, 95, 60]
+mutable_scores.set(2, 80)
+assert mutable_scores = [85, 92, 80, 95, 60]
+
+across scores as s do
+  print(s)
+end
+
+from
+  let i := 0
+until
+  i >= scores.length
+do
+  print("Score " + (i + 1).to_string + ": " + scores.get(i).to_string)
+  i := i + 1
+end
+
+let names: Array[String] := ["Alice", "Bob"]
+names.add("Carol")
+assert names = ["Alice", "Bob", "Carol"]
+names.add("David")
+assert names = ["Alice", "Bob", "Carol", "David"]
+assert names.length = 4
+
+let first: Array[String] := ["Alice", "Bob"]
+let second: Array[String] := ["Carol", "David"]
+let everyone := first.concat(second)
+assert everyone = ["Alice", "Bob", "Carol", "David"]
+assert first = ["Alice", "Bob"]
+
+names.remove(names.length - 1)
+assert names = ["Alice", "Bob", "Carol"]
+names.remove(1)
+assert names = ["Alice", "Carol"]
+names.add_at(1, "Bob")
+assert names = ["Alice", "Bob", "Carol"]
+
+let primes := [2, 3, 5, 7, 11]
+assert primes.contains(5)
+assert not primes.contains(4)
+assert primes.index_of(7) = 3
+assert primes.index_of(9) = -1
+
+assert scores.slice(1, 4) = [92, 78, 95]
+assert scores.reverse = [60, 95, 78, 92, 85]
+assert scores.sort = [60, 78, 85, 92, 95]
+
+let squares: Array[Integer] := []
+from
+  let i := 1
+until
+  i > 10
+do
+  squares.add(i * i)
+  i := i + 1
+end
+assert squares = [1, 4, 9, 16, 25, 36, 49, 64, 81, 100]
+
+function sum(arr: Array[Integer]): Integer
+do
+  result := 0
+  across arr as x do
+    result := result + x
+  end
+end
+assert sum([10, 20, 30, 40]) = 100
+assert sum([]) = 0
+
+function maximum(arr: Array[Integer]): Integer
+do
+  result := arr.get(0)
+  across arr as x do
+    if x > result then
+      result := x
+    end
+  end
+end
+assert maximum([3, 7, 1, 9, 4]) = 9
+
+function filter_above(arr: Array[Integer], threshold: Integer): Array[Integer]
+do
+  result := []
+  across arr as x do
+    if x > threshold then
+      result.add(x)
+    end
+  end
+end
+assert filter_above([85, 92, 78, 95, 60], 80) = [85, 92, 95]
+
+function mean(arr: Array[Real]): Real
+do
+  result := 0.0
+  across arr as x do
+    result := result + x
+  end
+  result := result / arr.length
+end
+
+function variance(arr: Array[Real]): Real
+do
+  let m := mean(arr)
+  result := 0.0
+  across arr as x do
+    let diff := x - m
+    result := result + diff * diff
+  end
+  result := result / arr.length
+end
+
+function std_dev(arr: Array[Real]): Real
+do
+  result := variance(arr) ^ 0.5
+end
+
+let data := [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]
+assert mean(data) = 5.0
+assert variance(data) = 4.0
+assert std_dev(data) = 2.0

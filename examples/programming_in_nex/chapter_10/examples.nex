@@ -1,0 +1,110 @@
+-- Narrative examples from Chapter 10 (Maps), collected into one
+-- self-checking, non-interactive program.
+
+let capitals := {"France": "Paris", "Japan": "Tokyo", "Brazil": "Brasília"}
+assert capitals.get("France") = "Paris"
+assert capitals.get("Japan") = "Tokyo"
+
+let prices: Map[String, Real] := {}
+assert prices.is_empty
+
+let scores: Map[String, Integer] := {}
+scores.set("Alice", 92)
+scores.set("Bob", 78)
+scores.set("Carol", 85)
+assert scores = {"Alice": 92, "Bob": 78, "Carol": 85}
+scores.set("Alice", 95)
+assert scores = {"Alice": 95, "Bob": 78, "Carol": 85}
+
+assert scores.get("Bob") = 78
+assert scores.contains_key("Bob")
+assert not scores.contains_key("David")
+if scores.contains_key("David") then
+  print(scores.get("David"))
+else
+  print("David not found")
+end
+
+assert scores.try_get("David", 0) = 0
+assert scores.try_get("Alice", 0) = 95
+
+scores.remove("Bob")
+assert scores = {"Alice": 95, "Carol": 85}
+assert scores.size = 2
+assert not scores.is_empty
+
+assert scores.keys = ["Alice", "Carol"]
+assert scores.values = [95, 85]
+
+let sorted_keys := scores.keys.sort
+across sorted_keys as k do
+  print(k + ": " + scores.get(k).to_string)
+end
+
+across capitals as entry do
+  if convert entry.get(0) to country: String then
+    if convert entry.get(1) to capital: String then
+      print(country + " -> " + capital)
+    end
+  end
+end
+
+across capitals.keys as country do
+  print(country)
+end
+
+let word_lengths: Map[String, Integer] := {}
+let words := ["apple", "fig", "banana", "kiwi"]
+across words as w do
+  word_lengths.set(w, w.length)
+end
+assert word_lengths = {"apple": 5, "fig": 3, "banana": 6, "kiwi": 4}
+
+function invert(m: Map[String, String]): Map[String, String]
+do
+  result := {}
+  across m as entry do
+    if convert entry.get(0) to key: String then
+      if convert entry.get(1) to value: String then
+        result.set(value, key)
+      end
+    end
+  end
+end
+let by_capital := invert(capitals)
+assert by_capital.get("Tokyo") = "Japan"
+
+function word_frequencies(text: String): Map[String, Integer]
+do
+  result := {}
+  let words := text.to_lower.split(" ")
+  across words as w do
+    let count := result.try_get(w, 0)
+    result.set(w, count + 1)
+  end
+end
+
+let text := "to be or not to be that is the question to be to"
+let freq := word_frequencies(text)
+assert freq.get("to") = 4
+assert freq.get("be") = 3
+assert freq.get("question") = 1
+
+function most_frequent(freq: Map[String, Integer]): String
+do
+  result := ""
+  let started := false
+  across freq as entry do
+    if convert entry.get(0) to key: String then
+      if not started then
+        result := key
+        started := true
+      else
+        if freq.get(key) > freq.get(result) then
+          result := key
+        end
+      end
+    end
+  end
+end
+assert most_frequent(freq) = "to"

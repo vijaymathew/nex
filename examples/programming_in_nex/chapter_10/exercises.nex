@@ -100,27 +100,40 @@ function main() do
                " i=" + mf.get(#i).to_string +
                " s=" + mf.get(#s).to_string +
                " p=" + mf.get(#p).to_string)   -- 1 4 4 2
+  assert mf.get(#m) = 1
+  assert mf.get(#i) = 4
+  assert mf.get(#s) = 4
+  assert mf.get(#p) = 2
 
   -- 2. (Verified by iterating the map's own keys. NB: a literal lookup such as
   --     g.get(3) currently MISSES keys produced by String.length — they box as
   --     a wider integer type than an int literal — so we read via g.keys, which
   --     is the idiomatic way to walk a map anyway.)
   let g: Map[Integer, Array[String]] := group_by_length(["cat", "dog", "elephant", "ox", "ant"])
+  let summary: String := ""
   across g.keys.sort as len do
     c.print_line("2. length " + len.to_string + " -> " +
                  g.get(len).length.to_string + " words " + show(g.get(len)))
+    summary := summary + len.to_string + ":" + g.get(len).length.to_string + ";"
   end                                              -- 2->1, 3->3, 8->1
+  assert summary = "2:1;3:3;8:1;"
 
   -- 3.
   c.print_line("3. histogram of {a:3, b:1, c:2}:")
   let h: Map[String, Integer] := {"a": 3, "b": 1, "c": 2}
   histogram(c, h)
+  assert h.get("a") = 3
+  assert h.get("b") = 1
+  assert h.get("c") = 2
 
   -- 4.
   let m: Map[String, Integer] := merge_maps({"a": 1, "b": 2}, {"b": 3, "c": 4})
   c.print_line("4. merge_maps: a=" + m.get("a").to_string +
                " b=" + m.get("b").to_string +
                " c=" + m.get("c").to_string)   -- 1 5 4
+  assert m.get("a") = 1
+  assert m.get("b") = 5
+  assert m.get("c") = 4
 
   -- 5.*
   c.print_line("5. is_anagram('listen','silent') = " +
@@ -129,6 +142,9 @@ function main() do
                is_anagram("hello", "world").to_string)              -- false
   c.print_line("5. is_anagram('Astronomer','Moon starer') = " +
                is_anagram("Astronomer", "Moon starer").to_string)   -- true
+  assert is_anagram("listen", "silent")
+  assert not is_anagram("hello", "world")
+  assert is_anagram("Astronomer", "Moon starer")
 end
 
 main()

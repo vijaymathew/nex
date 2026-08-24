@@ -1,0 +1,119 @@
+-- Narrative examples from Chapter 7 (Thinking with Functions), collected
+-- into one self-checking, non-interactive program. Several functions are
+-- shown twice in the book -- a "before" version and a refactored "after" --
+-- to make a design point; only the final (refactored) version is kept here,
+-- since a compiled program can't redefine the same function twice.
+
+function average(a, b: Real): Real
+do
+  result := (a + b) / 2.0
+end
+assert average(4.0, 6.0) = 5.0
+
+function percentage(part, total: Real): Real
+do
+  result := (part / total) * 100.0
+end
+assert percentage(1.0, 4.0) = 25.0
+
+-- celsius_to_fahrenheit carries over from Chapter 6's worked example.
+function celsius_to_fahrenheit(c: Real): Real
+do
+  result := c * 9.0 / 5.0 + 32.0
+end
+assert celsius_to_fahrenheit(0.0) = 32.0
+assert celsius_to_fahrenheit(100.0) = 212.0
+assert celsius_to_fahrenheit(-40.0) = -40.0
+
+function greet(name: String)
+do
+  print("Hello, " + name)
+end
+greet("Ada")
+
+-- pure core, thin effect: easier to test
+function temperature_label(c: Real): String
+do
+  if c < 0.0 then
+    result := "Freezing"
+  elseif c < 15.0 then
+    result := "Cold"
+  else
+    result := "Mild or warm"
+  end
+end
+
+function report_temperature(c: Real)
+do
+  print(temperature_label(c) + ": " + c.to_string + " deg C")
+end
+report_temperature(-5.0)
+
+assert temperature_label(-5.0) = "Freezing"
+assert temperature_label(10.0) = "Cold"
+assert temperature_label(20.0) = "Mild or warm"
+
+-- easier to test: all inputs are parameters (vs. reading an external
+-- tax_rate variable)
+function compute_tax(price, rate: Real): Real
+do
+  result := price * rate
+end
+assert compute_tax(100.0, 0.20) = 20.0
+assert compute_tax(0.0, 0.20) = 0.0
+assert compute_tax(100.0, 0.0) = 0.0
+assert compute_tax(99.99, 0.10) = 9.999
+
+function temperature_label2(c: Real): String
+do
+  if c < 0.0 then
+    result := "Freezing"
+  elseif c < 15.0 then
+    result := "Cold"
+  elseif c < 25.0 then
+    result := "Mild"
+  else
+    result := "Warm"
+  end
+end
+
+function temperature_report(c: Real): String
+do
+  let f := celsius_to_fahrenheit(c)
+  let label := temperature_label2(c)
+  result := label + ": " + c.to_string + " deg C / " + f.to_string + " deg F"
+end
+assert temperature_report(22.0) = "Mild: 22.0 deg C / 71.6 deg F"
+
+-- after: inner check extracted
+function is_divisor(n, i: Integer): Boolean
+do
+  result := n % i = 0
+end
+
+function count_divisors(n: Integer): Integer
+do
+  result := 0
+  from
+    let i := 1
+  until
+    i > n
+  do
+    if is_divisor(n, i) then
+      result := result + 1
+    end
+    i := i + 1
+  end
+end
+assert count_divisors(12) = 6
+
+function greet_by_time(hour: Integer) do
+  if hour < 12 then
+    print("Good morning!")
+  elseif hour < 18 then
+    print("Good afternoon!")
+  else
+    print("Good evening!")
+  end
+end
+greet_by_time(9)

@@ -79,23 +79,31 @@ function main() do
   -- 1.
   c.print_line("1. average([2.0,4.0,9.0]) = " + average([2.0, 4.0, 9.0]).to_string)  -- 5.0
   c.print_line("1. (average([]) would violate not_empty and halt the program.)")
+  assert average([2.0, 4.0, 9.0]) = 5.0
 
   -- 2.
   let log: Temperature_Log := create Temperature_Log.make()
   log.record(19.5)
   log.record(21.0)
   c.print_line("2. latest reading = " + log.latest.to_string)   -- 21.0
+  assert log.latest = 21.0
 
   -- 3.
   let q: Queue[String] := create Queue[String].make()
   q.enqueue("a")
   q.enqueue("b")
-  c.print_line("3. front=" + q.front + " dequeue=" + q.dequeue +
+  let front_val: String := q.front
+  let dequeued: String := q.dequeue
+  c.print_line("3. front=" + front_val + " dequeue=" + dequeued +
                " size now " + q.size.to_string)                  -- a, a, 1
+  assert front_val = "a"
+  assert dequeued = "a"
+  assert q.size = 1
 
   -- 4.
   c.print_line("4. my_substring('contracts', 0, 4) = '" +
                my_substring("contracts", 0, 4) + "'")            -- 'cont'
+  assert my_substring("contracts", 0, 4) = "cont"
 
   -- 5. transfer_to: is `other /= this` a necessary precondition? (discussion)
   --    AGAINST: a self-transfer is harmless — subtract amount, add it straight

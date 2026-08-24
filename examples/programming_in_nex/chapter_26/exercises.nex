@@ -35,17 +35,23 @@ function main() do
   -- 1. description field on Todo_Item.
   let item: Todo_Item := create Todo_Item.make("buy milk")
   c.print_line("1. new item has_description=" + item.has_description.to_string)   -- false
+  assert not item.has_description
   item.set_description("2 litres, semi-skimmed")
   c.print_line("1. after set_description has_description=" + item.has_description.to_string)  -- true
+  assert item.has_description
 
   -- 3. remaining_count.
   c.print_line("3. completed=" + list.completed_count.to_string +
                " remaining=" + list.remaining_count.to_string)   -- 2 remaining, 1
+  assert list.completed_count = 2
+  assert list.remaining_count = 1
 
   -- 4. all_done on an empty list is vacuously true.
   let empty: Task_List := create Task_List.make()
   c.print_line("4. empty list all_done=" + empty.all_done.to_string +
                " (vacuously true; size=" + empty.size.to_string + ")")   -- true, 0
+  assert empty.all_done
+  assert empty.size = 0
 
   -- 5. Contract-failure tests: add_task("") and mark_task_done(bad index).
   c.print_line("5. contract-failure tests:")
@@ -87,6 +93,8 @@ function main() do
   gb.add_score("Alan", 70)
   c.print_line("9. Ada average = " + gb.average("Ada").to_string +
                ", Alan average = " + gb.average("Alan").to_string)   -- 85.0, 70.0
+  assert gb.average("Ada") = 85.0
+  assert gb.average("Alan") = 70.0
   total := total + 1
   let invalid_score_refused: Boolean := false
   do
@@ -103,6 +111,7 @@ function main() do
   else
     c.print_line("CHAPTER_26_TESTS: FAIL (" + passed.to_string + "/" + total.to_string + ")")
   end
+  assert passed = total
 end
 
 main()

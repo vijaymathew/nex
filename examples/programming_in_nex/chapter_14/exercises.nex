@@ -143,6 +143,9 @@ function main() do
   across zoo as a do
     c.print_line("1. " + a.name + " says " + a.sound)
   end
+  assert zoo.get(0).sound = "Woof"
+  assert zoo.get(1).sound = "Meow"
+  assert zoo.get(2).sound = "Moo"
 
   -- 2.
   let shapes: Array[Shape] := []
@@ -151,6 +154,8 @@ function main() do
   across shapes as s do
     c.print_line("2. " + s.describe)
   end
+  assert shapes.get(0).area > 78.5 and shapes.get(0).area < 78.54
+  assert shapes.get(1).area = 24.0
 
   -- 3. LSP for Overdraft_Account.withdraw (discussion):
   --    An Overdraft_Account CAN stand in for an Account. It accepts the same
@@ -171,17 +176,21 @@ function main() do
                p.can_reach(250.0, 30.0).to_string)                    -- true (range 300)
   c.print_line("4. electric(" + e.fuel_type + "): 250km on 40kWh? " +
                e.can_reach(250.0, 40.0).to_string)                    -- false (range 200)
+  assert p.can_reach(250.0, 30.0)
+  assert not e.can_reach(250.0, 40.0)
 
   -- 5.* One loop, three behaviours.
+  let fl: File_Logger := create File_Logger.make()
   let loggers: Array[Logger] := []
   loggers.add(create Logger.make())
-  loggers.add(create File_Logger.make())
+  loggers.add(fl)
   loggers.add(create Silent_Logger.make())
   across loggers as lg do
     lg.log("test")
   end
   c.print_line("5. -> the same log('test') call dispatches to three different" +
                " implementations; the loop never names a concrete logger.")
+  assert fl.log_history = "test; "
 end
 
 main()

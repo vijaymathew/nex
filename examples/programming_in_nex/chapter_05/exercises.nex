@@ -33,6 +33,7 @@ function main() do
     k := k + 2
   end
   c.print_line("2. sum of evens 2..100 = " + sum.to_string)   -- 2550
+  assert sum = 2550
 
   -- --------------------------------------------------------------------------
   -- 3. Count positives / negatives until a 0 sentinel. The book reads from the
@@ -40,7 +41,9 @@ function main() do
   --    sequence, so it is run here over a fixed test array ending in 0.
   -- --------------------------------------------------------------------------
   let input: Array[Integer] := [4, -1, 7, -3, -8, 9, 0]
-  count_signs(c, input)        -- positives: 3, negatives: 3
+  let signs := count_signs(c, input)        -- positives: 3, negatives: 3
+  assert signs.get(0) = 3
+  assert signs.get(1) = 3
 
   -- --------------------------------------------------------------------------
   -- 4. First 15 Fibonacci terms (1, 1, 2, 3, ...).
@@ -61,6 +64,7 @@ function main() do
     n := n + 1
   end
   c.new_line
+  assert curr = 610   -- 15th Fibonacci term
 
   -- --------------------------------------------------------------------------
   -- 5.* Multiplication table 1..5, tab-separated, via nested loops.
@@ -89,7 +93,7 @@ end
 
 -- Scan a sentinel-terminated sequence, counting positives and negatives,
 -- stopping at (and not counting) the first 0.
-function count_signs(c: Console, xs: Array[Integer]) do
+function count_signs(c: Console, xs: Array[Integer]): Array[Integer] do
   let positives: Integer := 0
   let negatives: Integer := 0
   from
@@ -106,6 +110,7 @@ function count_signs(c: Console, xs: Array[Integer]) do
   end
   c.print_line("3. positives: " + positives.to_string +
                ", negatives: " + negatives.to_string)
+  result := [positives, negatives]
 end
 
 main()

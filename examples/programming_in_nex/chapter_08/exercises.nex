@@ -73,19 +73,28 @@ function main() do
   -- 1.
   c.print_line("1. power(2,10)=" + power(2, 10).to_string +
                " power(5,0)=" + power(5, 0).to_string)   -- 1024 1
+  assert power(2, 10) = 1024
+  assert power(5, 0) = 1
 
   -- 2.
   c.print_line("2. reverse_string('hello')='" + reverse_string("hello") +
                "' reverse_string('')='" + reverse_string("") + "'")   -- olleh, (empty)
+  assert reverse_string("hello") = "olleh"
+  assert reverse_string("") = ""
 
   -- 3.
   c.print_line("3. gcd(48,18)=" + gcd(48, 18).to_string +
                " gcd(100,75)=" + gcd(100, 75).to_string)   -- 6 25
+  assert gcd(48, 18) = 6
+  assert gcd(100, 75) = 25
 
   -- 4.
   c.print_line("4. count_digits(1)=" + count_digits(1).to_string +
                " (42)=" + count_digits(42).to_string +
                " (10000)=" + count_digits(10000).to_string)   -- 1 2 5
+  assert count_digits(1) = 1
+  assert count_digits(42) = 2
+  assert count_digits(10000) = 5
 
   -- 5.* Same results as the recursive version for n = 0..10.
   c.print("5. fibonacci_fast vs recursive agree for n=0..10: ")
@@ -101,6 +110,7 @@ function main() do
     n := n + 1
   end
   c.print_line(agree.to_string)   -- true
+  assert agree
   c.print_line("5. fibonacci_fast(35) = " + fibonacci_fast(35).to_string +
                "  (the iterative form returns instantly; the naive recursive")
   c.print_line("   version recomputes sub-problems and is exponentially slower).")

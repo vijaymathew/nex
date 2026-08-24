@@ -85,16 +85,20 @@ function main() do
   -- 1.
   c.print_line("1. average([3.0,4.0,5.0]) = " + average([3.0, 4.0, 5.0]).to_string +
                "  (empty array = caller mistake -> precondition)")          -- 4.0
+  assert average([3.0, 4.0, 5.0]) = 4.0
 
   -- 2.
   c.print_line("2a. safe_divide_pre(10,2) = " + safe_divide_pre(10.0, 2.0).to_string)  -- 5.0
+  assert safe_divide_pre(10.0, 2.0) = 5.0
   let dr: Div_Result := safe_divide_result(10.0, 0.0)
   c.print_line("2b. safe_divide_result(10,0): ok=" + dr.ok.to_string +
                " (a reportable outcome, not a crash)")                       -- false
+  assert not dr.ok
 
   -- 3.
+  c.print_line("3. load_score('87') = " + load_score("87").to_string)     -- 87
+  assert load_score("87") = 87
   do
-    c.print_line("3. load_score('87') = " + load_score("87").to_string)     -- 87
     c.print_line("3. load_score('abc') = " + load_score("abc").to_string)   -- raises
   rescue
     c.print_line("3. validation caught: " + exception.to_string)

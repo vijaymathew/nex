@@ -1,0 +1,116 @@
+-- Narrative examples from Chapter 16 (Preconditions), collected into one
+-- self-checking, non-interactive program. Wallet is shown twice (without,
+-- then with, a precondition); only the contracted version is kept.
+
+class Wallet
+  create
+    make(initial: Real) do
+      money := initial
+    end
+  feature
+    money: Real
+    spend(amount: Real)
+      require
+        non_negative_amount: amount >= 0.0
+        enough: amount <= money
+      do
+        money := money - amount
+      end
+end
+
+let wallet := create Wallet.make(50.0)
+wallet.spend(20.0)
+assert wallet.money = 30.0
+
+function max_of(items: Array[Integer]): Integer
+  require
+    not_empty: items.length > 0
+  do
+    result := items.get(0)
+    across items as item do
+      if item > result then
+        result := item
+      end
+    end
+  end
+assert max_of([4, 8, 2, 9, 1]) = 9
+-- max_of([]) would raise "Precondition violation: not_empty"
+
+function positive_root(x: Real): Real
+  require
+    non_negative: x >= 0.0
+  do
+    result := x ^ 0.5
+  end
+assert positive_root(9.0) = 3.0
+
+class Bounded_Stack [G]
+  create
+    make(limit: Integer) do
+      max_size := limit
+      items := []
+    end
+  feature
+    max_size: Integer
+    items: Array[G]
+    push(value: G)
+      require
+        not_full: items.length < max_size
+      do
+        items.add(value)
+      end
+    pop(): G
+      require
+        not_empty: items.length > 0
+      do
+        result := items.get(items.length - 1)
+        items.remove(items.length - 1)
+      end
+    size(): Integer do
+      result := items.length
+    end
+end
+
+let bs := create Bounded_Stack[Integer].make(3)
+bs.push(1)
+bs.push(2)
+assert bs.size = 2
+
+class Account
+  create
+    make(name: String, initial: Real) do
+      owner := name
+      balance := initial
+    end
+  feature
+    owner: String
+    balance: Real
+    deposit(amount: Real)
+      require
+        positive_amount: amount > 0.0
+      do
+        balance := balance + amount
+      end
+    withdraw(amount: Real)
+      require
+        positive_amount: amount > 0.0
+        enough: amount <= balance
+      do
+        balance := balance - amount
+      end
+    transfer_to(other: Account, amount: Real)
+      require
+        positive_amount: amount > 0.0
+        enough: amount <= balance
+        different_account: other /= this
+      do
+        withdraw(amount)
+        other.deposit(amount)
+      end
+end
+
+let checking := create Account.make("Checking", 150.0)
+let savings  := create Account.make("Savings", 80.0)
+checking.transfer_to(savings, 50.0)
+assert checking.balance = 100.0
+assert savings.balance = 130.0

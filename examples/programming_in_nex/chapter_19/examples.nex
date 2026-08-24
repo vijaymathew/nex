@@ -1,0 +1,112 @@
+-- Narrative examples from Chapter 19 (Loop Invariants), collected into one
+-- self-checking, non-interactive program.
+
+let sum := 0
+from
+  let i := 0
+invariant
+  index_in_range: i >= 0
+  sum_non_negative: sum >= 0
+variant
+  10 - i
+until
+  i = 10
+do
+  i := i + 1
+  sum := sum + i
+end
+assert sum = 55
+
+function sum_to(n: Integer): Integer
+require
+  non_negative: n >= 0
+do
+  from
+    let i := 0
+    result := 0
+  invariant
+    index_in_range: 0 <= i and i <= n
+  variant
+    n - i
+  until
+    i = n
+  do
+    result := result + i
+    i := i + 1
+  end
+end
+assert sum_to(5) = 10
+
+from
+  let i := 10
+variant
+  i
+until
+  i = 0
+do
+  print(i)
+  i := i - 1
+end
+
+function contains(items: Array[Integer], target: Integer): Boolean
+do
+  from
+    let i := 0
+    result := false
+  invariant
+    index_in_range: 0 <= i and i <= items.length
+  variant
+    items.length - i
+  until
+    i = items.length or result
+  do
+    if items.get(i) = target then
+      result := true
+    end
+    i := i + 1
+  end
+end
+assert contains([1, 2, 3], 2)
+assert not contains([1, 2, 3], 9)
+
+function max_of(items: Array[Integer]): Integer
+require
+  not_empty: items.length > 0
+do
+  from
+    let i := 1
+    result := items.get(0)
+  invariant
+    scanned_prefix: 1 <= i and i <= items.length
+  variant
+    items.length - i
+  until
+    i = items.length
+  do
+    if items.get(i) > result then
+      result := items.get(i)
+    end
+    i := i + 1
+  end
+end
+assert max_of([4, 8, 2, 9, 1]) = 9
+
+function count_occurrences(items: Array[String], target: String): Integer
+do
+  from
+    let i := 0
+    result := 0
+  invariant
+    index_in_range: 0 <= i and i <= items.length
+  variant
+    items.length - i
+  until
+    i = items.length
+  do
+    if items.get(i) = target then
+      result := result + 1
+    end
+    i := i + 1
+  end
+end
+assert count_occurrences(["a", "b", "a", "c", "a"], "a") = 3

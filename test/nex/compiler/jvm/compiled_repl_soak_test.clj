@@ -295,7 +295,7 @@ end"
              (is (contains? @(:class-asts session) "Counter"))
              (is (contains? @(:function-asts session) "loaded_add")))}
    {:label "captured closure over loaded function"
-    :code "let add_base: Function := fn (n: Integer): Integer do
+    :code "let add_base: Function(n: Integer): Integer := fn (n: Integer): Integer do
   result := loaded_add(n) + 5
 end"}
    {:label "captured closure call before deopt"
