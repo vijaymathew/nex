@@ -109,8 +109,9 @@ feature
       until
         c.at_end()
       do
-        let item_path: String := c.item()
-        results.add(create Path.make(item_path))
+        if convert c.item() to item_path: String then
+          results.add(create Path.make(item_path))
+        end
         c.next()
       end
       result := results

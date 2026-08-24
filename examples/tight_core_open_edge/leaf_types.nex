@@ -49,15 +49,21 @@ class Money
     end
 
     compare(other: Any): Integer do
-      let m: Money := other
-      if amount < m.amount then result := -1
-      elseif amount > m.amount then result := 1
-      else result := 0 end
+      if convert other to m: Money then
+        if amount < m.amount then result := -1
+        elseif amount > m.amount then result := 1
+        else result := 0 end
+      else
+        result := 0
+      end
     end
 
     equals(other: Any): Boolean do
-      let m: Money := other
-      result := amount = m.amount and currency = m.currency
+      if convert other to m: Money then
+        result := amount = m.amount and currency = m.currency
+      else
+        result := false
+      end
     end
 
     hash(): Integer do result := amount end

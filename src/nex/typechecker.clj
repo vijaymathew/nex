@@ -525,7 +525,19 @@
    (let [t (normalize-type type)]
      (and (string? t)
           (re-matches #"[A-Z][A-Za-z0-9_]*" t)
-          (not (env-lookup-class env t))
+          ;; A generic param bound in scope (a class's own `[T]`, or a
+          ;; `function reduce[T](...)`/`fn[T](...)`'s own) is registered as a
+          ;; synthetic placeholder class by register-generic-param-classes!
+          ;; so constraint/subtype checks have something to look up -- that
+          ;; must NOT make it stop looking like a generic param here. Without
+          ;; this, "T" reads as generic everywhere EXCEPT from inside the very
+          ;; scope that declares it, which is backwards: comparing two
+          ;; `Function(T, T): T`-shaped signatures from inside a generic
+          ;; function's own body (e.g. an anonymous-function argument checked
+          ;; against another generic function's unsubstituted parameter type)
+          ;; is exactly where this predicate needs to say yes.
+          (or (not (env-lookup-class env t))
+              (:generic-param? (env-lookup-class env t)))
           (not (builtin-type? t))
           ;; A declared type alias names a concrete type, not a generic param.
           (not (env-lookup-type-alias env t))))))
@@ -895,6 +907,7 @@
         (env-add-class env name
                        (cond-> {:name name
                                 :deferred? true
+                                :generic-param? true
                                 :generic-params nil
                                 :parents [{:parent "Any"}]
                                 :body []}
@@ -2921,7 +2934,18 @@
               (throw (ex-info (str "Method not found: " call-name)
                               {:error (type-error
                                        (str "Method not found: " call-name))})))))
-        (let [generic-names (set (map :name (:generic-params class-def)))
+        (let [generic-names (set (concat (map :name (:generic-params class-def))
+                                         ;; A Function-typed variable holding an
+                                         ;; anonymous function declared with its own
+                                         ;; type params (`fn[T](x: T): T`) carries
+                                         ;; those directly (see
+                                         ;; check-expr-anonymous-function) rather
+                                         ;; than through base-type's class-def --
+                                         ;; "Function" itself has none -- so they
+                                         ;; must be unioned in here too, or T below
+                                         ;; is never recognized as inferable and
+                                         ;; every call reports it as unresolved.
+                                         (map :name (:generic-params var-type))))
               arg-types (mapv #(check-expression env %) args)
               ;; A Function-typed variable carries its own declared signature
               ;; (e.g. `Function(Dog): String`), which is more specific than
@@ -2954,7 +2978,17 @@
           (doseq [[arg-type param] (map vector arg-types effective-params)]
             (let [param-type (resolve-generic-type (:type param) type-map)]
             (when (and (is-generic-type-param? env param-type)
-                       (not (contains? type-map param-type)))
+                       (not (contains? type-map param-type))
+                       ;; Calling a Function(T)-typed *parameter* from inside
+                       ;; the very generic scope that binds T (`each[T](a:
+                       ;; Array[T], f: Function(T): T) do ... f(elem) ... end`,
+                       ;; elem: T) needs no instantiation at all -- the
+                       ;; argument already IS that scope's T, not some
+                       ;; concrete type standing in for it. Only an argument
+                       ;; whose type actually differs from the declared
+                       ;; (still-unresolved) param type represents a real,
+                       ;; failed inference.
+                       (not= arg-type param-type))
               (throw (ex-info (str "Could not infer generic type parameter " param-type
                                    " for function " method)
                               {:error (type-error
@@ -3394,8 +3428,19 @@
       ;; as before.
       (check-class env class-def))
     ;; Anonymous functions have distinct generated runtime classes, but their
-    ;; stable static type is Function.
-    "Function"))
+    ;; stable static type is structural Function -- carrying the literal's own
+    ;; param/return types (falling back to Any for anything left unannotated
+    ;; and not patched in by an expected-type context) rather than collapsing
+    ;; to the bare "Function" string. Erasing to bare "Function" here made
+    ;; calling the value back (`transform(5)`, or a generic `id(10)`) type as
+    ;; Any regardless of how fully-typed the literal actually was --
+    ;; check-typed-function-call reads :return-type straight off this map, so
+    ;; losing it here was strictly a precision gap, not a soundness escape
+    ;; hatch: the signature was always known at the literal itself.
+    (cond-> {:base-type "Function"
+             :param-types (mapv (fn [p] {:name (:name p) :type (or (:type p) "Any")}) (:params expr))
+             :return-type (or (:return-type expr) "Any")}
+      (seq (:generic-params expr)) (assoc :generic-params (:generic-params expr)))))
 
 (defn- patch-anonymous-function-types
   "Return EXPR (an `:anonymous-function` node) with every param whose `:type`
@@ -3679,6 +3724,49 @@
       :else
       (check-expression env expr))))
 
+(defn any-into-concrete-without-convert?
+  "True when narrowing an `Any`-typed VAL-TYPE directly into a concrete
+   scalar/class TARGET-TYPE would happen implicitly. `Any` is deliberately a
+   wildcard everywhere else in the checker (TYPES-EQUAL?'s Any-matches-
+   anything rule, generic partial inference like `Ok[Integer, Any]` matching
+   `Ok[Integer, String]`, and the `Map[String, Any]`/`Array[Any]` container
+   idiom used throughout JSON-shaped code) -- but at the point a value is
+   actually bound to a *named* scalar or class type, accepting an Any value
+   implicitly would silently defeat that type the same way an unchecked class
+   downcast would (`let b: B := an_instance_of_a` is already rejected).
+   Narrowing must go through the same explicit mechanism a class downcast
+   already requires: `convert ... to ...: T` (or `?attached-test`).
+   Compound/parameterized targets (Array[...], Map[...], a generic class) are
+   deliberately left alone here -- they keep today's permissive Any-element
+   behavior, since a read out of them still needs its own convert to reach a
+   concrete type (this is exactly what makes `result := node.get(\"amount\")`
+   unsound but `let m: Map[String, Any] := json.parse(text)` fine).
+   A `with \"java\" do ... end` block is also exempt: everything unresolved
+   inside one is deliberately typed Any (the java-interop dynamic escape
+   hatch -- see `__with_java__` in check-statement's :with case), and its
+   whole documented idiom is recovering a concrete type right there, e.g.
+   `let t: Thread := Thread.new(task)`. That's a different kind of Any than
+   `Map[String, Any].get(...)` -- an interop boundary standing in for a type
+   the checker simply doesn't track, not a genuinely-unknown runtime shape --
+   so narrowing it implicitly doesn't defeat anything the checker could have
+   caught anyway."
+  [env target-type val-type]
+  (and (not (env-lookup-var env "__with_java__"))
+       (= (normalize-type (expand-type-aliases env val-type)) "Any")
+       (let [tt (normalize-type (expand-type-aliases env target-type))]
+         (and (string? tt)
+              (not= tt "Any")
+              (not (is-generic-type-param? env tt))))))
+
+(defn- throw-any-narrowing-error!
+  [what target-type]
+  (throw (ex-info (str "Cannot implicitly narrow Any to " what)
+                  {:error (type-error
+                           (str "Cannot assign Any to " what " of type "
+                                (display-type target-type)
+                                " without narrowing it first. Use `convert ... to "
+                                "<name>: " (display-type target-type) " then ... end`."))})))
+
 (defn check-assignment
   "Check an assignment statement"
   [env {:keys [target value] :as stmt}]
@@ -3703,6 +3791,8 @@
                                       "inside a function or class body."))}))
         (throw (ex-info (str "Undefined variable: " target)
                         {:error (type-error (str "Undefined variable: " target))}))))
+    (when (any-into-concrete-without-convert? env var-type val-type)
+      (throw-any-narrowing-error! (str "variable '" target "'") var-type))
     (when-not (types-compatible? env val-type var-type)
       (throw (ex-info (str "Type mismatch in assignment to " target)
                       {:error (type-error
@@ -3735,6 +3825,8 @@
                                     "'. Use: let " name ": <Type> := ..."))})))
     (when var-type
       (validate-type-annotation env var-type))
+    (when (any-into-concrete-without-convert? env inferred-type val-type)
+      (throw-any-narrowing-error! (str "variable '" name "'") inferred-type))
     (when-not (types-compatible? env val-type inferred-type)
       (throw (ex-info (str "Type mismatch in let binding for " name)
                       {:error (type-error
@@ -4103,6 +4195,8 @@
             (when-not (= caller-class (:declaring-class field-member))
               (throw (ex-info (str "Cannot assign to field " field-name)
                               {:error (field-write-error field-name (:declaring-class field-member))})))
+            (when (any-into-concrete-without-convert? env field-type val-type)
+              (throw-any-narrowing-error! (str "field '" field-name "'") field-type))
             (when-not (types-compatible? env val-type field-type)
               (throw (ex-info (str "Type mismatch in assignment to " field-name)
                               {:error (type-error
@@ -4582,6 +4676,8 @@
                                                 final-type (or (:field-type member) inferred-type)]
                                             (when (:field-type member)
                                               (validate-type-annotation const-env (:field-type member))
+                                              (when (any-into-concrete-without-convert? const-env (:field-type member) inferred-type)
+                                                (throw-any-narrowing-error! (str "constant '" (:name member) "'") (:field-type member)))
                                               (when-not (types-compatible? const-env inferred-type (:field-type member))
                                                 (throw (ex-info (str "Type mismatch in constant " (:name member))
                                                                 {:error (type-error
