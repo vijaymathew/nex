@@ -2,6 +2,139 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-08-24
+
+- **Breaking: `Any` now requires an explicit `convert` to narrow into a
+  concrete type, everywhere a class downcast already did.** Assigning an
+  `Any`-typed value to a concrete-typed `let`/variable/field, passing one as
+  a concrete-typed argument (to a user method, constructor, or free
+  function — and to the concrete-typed builtins that check their own
+  arguments outside the central call-signature path, e.g. `Array.sort`'s
+  comparator, `sleep`, `Process.command`, `Channel.send`/`receive`,
+  `Min_Heap.from_comparator`, the `Atomic_*.make`/`Atomic_Reference.make`
+  family, the HTTP handler-registration builtins), and placing one as an
+  element/key/value inside an array/map/set literal with a concrete element
+  type, are all now a compile-time error unless the value has first been
+  narrowed with `convert ... to name: Type then ... end`:
+
+  ```nex
+  function total_amount(node: Map[String, Any]): Real do
+    result := node.get("amount")   -- error: Cannot assign Any to result of
+                                    -- type Real without narrowing it first.
+  end
+  ```
+
+  Previously only a class downcast (`let b: B := an_instance_of_a`) was
+  held to this discipline — `Any` was silently exempted everywhere else,
+  so a value that started as `Any` (typically from a `Map[String, Any]` or
+  similar loosely-typed boundary) could flow into a concrete-typed slot
+  with no narrowing and no compile-time signal, only a runtime `ClassCastException`
+  or silently wrong behavior much later. `convert`, generic type parameters,
+  and code inside a `with "java" do ... end` block remain exempt, since a
+  generic parameter isn't really `Any` and the Java-interop escape hatch is
+  documented as dynamically typed by design. Fixing several real,
+  previously-unnoticed instances of this gap in the standard library and
+  example programs (`lib/io/directory.nex`, `lib/io/path.nex`, and two
+  `contracts_at_work`/`tight_core_open_edge` example projects) surfaced two
+  independent typechecker bugs along the way: an anonymous function's type
+  erased to a bare `"Function"` (losing its own parameter/return types and
+  any generic parameters it carried) instead of a structural type, and a
+  spurious "Could not infer generic type parameter" when a value's type was
+  already the very generic name a parameter was trying to resolve.
+
+- **Breaking: an empty array/map/set literal (`[]`, `{}`, `set{}`) is now
+  typed `Array[Any]`/`Map[Any, Any]`/`Set[Any]`, not a special wildcard
+  sentinel type compatible with any concrete element type.** The old
+  sentinel types (`__EmptyArrayElement` and friends) let an empty literal
+  silently unify with whatever concrete element type the context expected,
+  which is no longer how `Any` behaves now that assigning it into a
+  concrete slot requires `convert` (see above) — so an empty literal now
+  needs the same explicit type annotation any other `Any`-typed value would
+  (`let xs: Array[Integer] := []`), or a `convert`.
+
+- **New: `Set[T]` gained mutating `add`/`remove` methods**, alongside the
+  set operations (`union`, `intersection`, `difference`, ...) it already
+  had. Implemented on both backends. See `docs/ref/collection-types.md`.
+
+- **Fixed: a `Void`-returning call used as a value** (a print/call
+  argument, a `let`/assignment source, an operand — anywhere but a bare
+  statement) **used to pass typechecking and then crash the compiled
+  backend outright** instead of failing with a clear message, because
+  several JVM emission paths for builtin mutators (`Array.add`/`add_at`/
+  `put`/`remove`, `Map.put`/`remove`) and for task/channel calls reported
+  their Nex-level `Void` return type as the literal JVM stack effect, even
+  though the underlying bytecode always leaves a real value on the stack.
+  `check-expression` now uniformly rejects a genuine `Void` sub-expression
+  used as a value (`"Cannot use a Void expression as a value"`), and the
+  affected emission paths now report the real `Object` stack type instead
+  of a lying `:void` — closing off both the false-negative compile and the
+  underlying stack-imbalance bug (`ArrayIndexOutOfBoundsException`/
+  `NegativeArraySizeException` from ASM's `Frame.merge`) that a `Void` call
+  in expression position could otherwise trigger.
+
+- **Fixed: `Map.get` on a missing key returned `nil` on the compiled
+  backend instead of raising, unlike the interpreter.** It now raises the
+  same `has_key` precondition violation both backends use for a missing-key
+  read; use `try_get(key, default)` for a non-raising lookup.
+
+- **Fixed: `let alias := existing_map_or_set` didn't share the underlying
+  Map/Set on the compiled backend for a top-level (global) binding** —
+  mutating through `alias` left the original untouched, even though the
+  same code worked correctly for a local variable, a field, or a function
+  parameter. The top-level write path always rebuilt a fresh native
+  collection from the portable representation regardless of whether the
+  source was already the right type; it now skips that rebuild when the
+  types already match, mirroring the guard local writes already had.
+
+- **Fixed: a variable declared with an explicit `Function(...)` signature**
+  (e.g. `let f: Function(Dog): String := ...`) **had its call-site
+  arguments checked against a generic, all-`Any` builtin dispatch
+  signature instead of its own declared parameter types**, so a
+  type-mismatched or wrong-arity call through such a variable went
+  unnoticed at compile time. Call sites now check against the variable's
+  own declared signature when one is available.
+
+- **Fixed: an anonymous function reassigned to an already-declared variable
+  with a plain `x := fn(...)` (rather than declared with `let x: Type :=
+  fn(...)`) didn't have its parameter/return types inferred from `x`'s
+  declared type**, unlike the `let`-declared case. Declared types are now
+  tracked across a statement sequence (seeded from a function/method/
+  constructor's own parameters too) so a later bare reassignment can still
+  recover them.
+
+- **Fixed: an ASM bytecode-verification crash when two different
+  compiler-generated anonymous-function classes merged into one
+  `Function`-typed local at a control-flow join** (e.g. an `if`/`else`
+  assigning different `fn(...)` literals to the same variable). ASM's
+  default common-superclass resolution for `COMPUTE_FRAMES` reflects on
+  `Class/forName`, which cannot resolve a class this same compilation is
+  still emitting bytecode for. The class writer now first consults a table
+  of the classes this compilation unit itself generates before falling
+  back to ASM's reflection-based default.
+
+- **Fixed: a compile-time failure inside a sub-expression (not a whole
+  statement) reported no source location**, unlike a statement-level
+  failure, because only statement-level IR nodes were tagged with
+  `:dbg/line`/`:dbg/col`. Every expression-level IR node is now tagged the
+  same way, so an emit-time failure anywhere inside an expression (e.g.
+  "Unsupported binary opcode emission") can report "At line N, column C"
+  like other diagnostics.
+
+- **REPL: three fixes.** A comment-only or otherwise empty input cell no
+  longer prints a "falling back to the interpreter" warning — it's a
+  silent no-op, since there's nothing there to run on either backend.
+  Re-`intern`ing a module already brought into scope earlier in the
+  session (directly, or transitively through a different `intern`) no
+  longer looks like a name collision against the session's own compiled
+  classes and wrongly declines the cell — a module's classes/functions
+  never change within a session, so re-interning it is just an idempotent
+  no-op. And routine compiled-backend fallback detail (which construct
+  wasn't supported, and why) is now logged to `~/.nex/repl.log` instead of
+  printing a "Warning: ..." into the session on every occurrence; a cell
+  that *defines* a class or function still prints the warning immediately
+  in addition to logging, since that has lasting, session-wide
+  consequences a quieter log entry could too easily be missed.
+
 - **Breaking: a `match`/`case` clause drops its leading keyword, and a
   `match` clause body is now exactly one statement.** `when` was never load-
   bearing for `match` the way it is for `select`: a `select` clause's header
