@@ -101,6 +101,8 @@ Set literals use `#{...}`. The empty map literal remains `{}`.
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
 | `contains` | `value: T` | `Boolean` | Membership test. |
+| `add` | `value: T` | `Void` | Add a value in place. A duplicate (by value equality) is a no-op. |
+| `remove` | `value: T` | `Void` | Remove the element equal to `value` in place, if present. |
 | `union` | `other: Set[T]` | `Set[T]` | Set union. |
 | `difference` | `other: Set[T]` | `Set[T]` | Elements in this set but not in `other`. |
 | `intersection` | `other: Set[T]` | `Set[T]` | Common elements. |

@@ -191,12 +191,16 @@
 ;; Backed by plain immutable Clojure data rather than a host LinkedHashSet/js.Set,
 ;; so element identity is decided by Nex equality on every backend instead of host
 ;; hashing (structural on the JVM, but reference-based on JS). A set is a tagged map
-;; { :items  <deduped vector, insertion order>, :index <hash -> vector of items> }.
+;; { :nex-builtin-type :NexSet
+;;   :state (atom { :items <deduped vector, insertion order>, :index <hash -> vector of items> }) }.
+;; Mirroring nex-map's :state-atom shape lets add!/remove! mutate the cell in
+;; place -- the reference (and its aliases) observe the update, same as put/
+;; remove on a map -- without disturbing nex-deep-equals?/nex-structural-hash,
+;; which already compare Set/Map by dereferenced content rather than raw `=`.
 ;;
 ;; Element equality/hashing use the shared injected *value-equals*/*value-hash*
 ;; defined above (structural by default, override-aware when the interpreter binds
-;; them). Sets are built once (literals, `from`, set algebra) then read, so there
-;; is no incremental add.
+;; them).
 ;; ---------------------------------------------------------------------------
 
 ;; Portable set (the interpreter's representation). As with maps, the compiled
@@ -210,15 +214,25 @@
 (defn- set-bucket-member? [index v]
   (boolean (some #(value-equals? % v) (get index (value-hash v)))))
 
-(defn- set-conj [{:keys [index] :as s} v]
+(defn- set-conj [{:keys [index] :as state} v]
   (if (set-bucket-member? index v)
-    s
-    (-> s
+    state
+    (-> state
         (update :items conj v)
         (update :index update (value-hash v) (fnil conj []) v))))
 
-(defn nex-set [] {:nex-builtin-type :NexSet :items [] :index {}})
-(defn nex-set-from [coll] (reduce set-conj (nex-set) coll))
+(defn- set-disj [{:keys [index] :as state} v]
+  (if-not (set-bucket-member? index v)
+    state
+    (let [h (value-hash v)
+          bucket (filterv #(not (value-equals? % v)) (get index h))]
+      (-> state
+          (update :items (fn [items] (filterv #(not (value-equals? % v)) items)))
+          (assoc :index (if (seq bucket) (assoc index h bucket) (dissoc index h)))))))
+
+(defn nex-set [] {:nex-builtin-type :NexSet :state (atom {:items [] :index {}})})
+(defn nex-set-from [coll]
+  {:nex-builtin-type :NexSet :state (atom (reduce set-conj {:items [] :index {}} coll))})
 (defn nex-host-set-from
   "Build a host-backed set (the representation the compiled backend uses)."
   [coll]
@@ -227,32 +241,53 @@
   "The set's elements as a seq, in insertion order."
   [s]
   (if (portable-set? s)
-    (:items s)
+    (:items @(:state s))
     (seq s)))
 (defn nex-set-contains [s v]
   (if (portable-set? s)
-    (set-bucket-member? (:index s) v)
+    (set-bucket-member? (:index @(:state s)) v)
     (boolean (some #(value-equals? % v) (nex-set-seq s)))))
 (defn nex-set-size [s]
   (if (portable-set? s)
-    (count (:items s))
+    (count (:items @(:state s)))
     (.size ^java.util.Set s)))
 (defn nex-set-empty? [s]
   (if (portable-set? s)
-    (empty? (:items s))
+    (empty? (:items @(:state s)))
     (.isEmpty ^java.util.Set s)))
 (defn nex-set-union [a b]
-  (nex-set-from (concat (:items a) (:items b))))
+  (nex-set-from (concat (nex-set-seq a) (nex-set-seq b))))
 (defn nex-set-difference [a b]
-  (nex-set-from (remove #(nex-set-contains b %) (:items a))))
+  (nex-set-from (remove #(nex-set-contains b %) (nex-set-seq a))))
 (defn nex-set-intersection [a b]
-  (nex-set-from (filter #(nex-set-contains b %) (:items a))))
+  (nex-set-from (filter #(nex-set-contains b %) (nex-set-seq a))))
 (defn nex-set-symmetric-difference [a b]
-  (nex-set-from (concat (remove #(nex-set-contains b %) (:items a))
-                        (remove #(nex-set-contains a %) (:items b)))))
+  (nex-set-from (concat (remove #(nex-set-contains b %) (nex-set-seq a))
+                        (remove #(nex-set-contains a %) (nex-set-seq b)))))
 (defn nex-set-str [formatter s]
   (str "#{" (str/join ", " (map formatter (nex-set-seq s))) "}"))
 (defn nex-set-to-array [s] (nex-array-from (nex-set-seq s)))
+
+(defn nex-set-add!
+  "Add v to s, mutating it in place (like nex-map-put) so the reference and its
+   aliases observe the update. A duplicate per Nex value-equality is a no-op,
+   preserving the set's no-duplicates invariant."
+  [s v]
+  (if (portable-set? s)
+    (swap! (:state s) set-conj v)
+    (when-not (some #(value-equals? % v) (nex-set-seq s))
+      (.add ^java.util.Set s v)))
+  nil)
+
+(defn nex-set-remove!
+  "Remove the element Nex-equal to v from s, mutating it in place. A value
+   with no match is a no-op."
+  [s v]
+  (if (portable-set? s)
+    (swap! (:state s) set-disj v)
+    (doseq [e (filterv #(value-equals? % v) (vec (nex-set-seq s)))]
+      (.remove ^java.util.Set s e)))
+  nil)
 
 ;; Bitwise operators are a 32-bit island: they mask operands to int32 and the
 ;; interpreter/compiler agree on that. On JS a Nex Integer is a BigInt, which
